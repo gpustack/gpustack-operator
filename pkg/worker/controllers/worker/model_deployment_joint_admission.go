@@ -381,7 +381,7 @@ type jointHeld struct {
 func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) (jointHeld, error) {
-	byGroup, err := modelDeploymentReplicaGroups(ctx, r.Client, md)
+	byGroup, liveByGroup, err := modelDeploymentReplicaGroups(ctx, r.Client, md)
 	if err != nil {
 		return jointHeld{}, err
 	}
@@ -396,16 +396,25 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 	// construction -- the reconciler deletes its replicas and creates them again on a later pass --
 	// and while it is short Kueue composes no Workload for it, so the siblings read it as waiting.
 	// The two look identical from the waiting side, and only the count tells them apart.
+	// THE LISTS NAME ROLES, NOT INSTANCE TYPES. A group is one role's, and two roles can name one
+	// instance type: a list of types then names a queue two groups share and identifies neither,
+	// while a role names exactly the group that is waiting. The queue an operator has to free
+	// follows from the named role's own instance type.
 	var waiting, assembling []string
 	for _, group := range modelDeploymentPodGroups(md) {
 		members := byGroup[group.Name]
-		if members.Len() < int(group.TotalCount) {
-			assembling = append(assembling, group.InstanceType)
+		// ASSEMBLING IS MEASURED OVER THE REPLICAS THAT ARE STAYING. A Pod already asked to go is not
+		// a member the group will have, so counting it lets a group in the middle of a rebuild read
+		// as complete -- and a complete-looking group is exactly what lets Settled turn true and park
+		// the healthy rebuild this guard exists to protect. Quota holding below still reads every
+		// replica, terminating ones included, because a Workload holding a leaving Pod is holding it.
+		if liveByGroup[group.Name].Len() < int(group.TotalCount) {
+			assembling = append(assembling, group.Role)
 		}
 		if members != nil && anyWorkloadHoldsQuotaFor(wlList.Items, members) {
 			continue
 		}
-		waiting = append(waiting, group.InstanceType)
+		waiting = append(waiting, group.Role)
 	}
 	if len(waiting) == 0 {
 		return jointHeld{
@@ -417,8 +426,8 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 		return jointHeld{
 			State: kueue.CheckStatePending,
 			Message: fmt.Sprintf(
-				"holding this group while the deployment is still assembling: the groups on instance "+
-					"types %s do not yet have every replica they declare, so Kueue has composed no "+
+				"holding this group while the deployment is still assembling: the groups of roles "+
+					"%s do not yet have every replica they declare, so Kueue has composed no "+
 					"workload for them yet. Nothing is wrong with the cluster; this resolves itself as "+
 					"the replicas appear",
 				strings.Join(assembling, ", ")),
@@ -429,7 +438,7 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 		State: kueue.CheckStatePending,
 		Message: fmt.Sprintf(
 			"holding this group until the whole deployment can run: %d of %d groups have reserved quota, "+
-				"and the ones still waiting are on instance types %s. Every group keeps the quota it has "+
+				"and the ones still waiting are the groups of roles %s. Every group keeps the quota it has "+
 				"reserved while it waits",
 			len(modelDeploymentPodGroups(md))-len(waiting), len(modelDeploymentPodGroups(md)),
 			strings.Join(waiting, ", ")),
@@ -446,32 +455,45 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 //
 // THE LABEL NARROWS THE READ; OWNERSHIP STILL DECIDES MEMBERSHIP. A label is a value anyone can copy
 // onto a Pod, and an owner reference is not.
+//
+// IT RETURNS TWO INDEXES BECAUSE ITS TWO CALLERS ASK DIFFERENT QUESTIONS, and one answer would be
+// wrong for one of them. "Is this group assembled" counts only replicas that are staying, since a
+// Pod already asked to go is not a member the group will have. "Which Workloads own these replicas"
+// counts every one, since a terminating Pod is still owned and the Workload holding it is still the
+// one a sibling's event has to reach. Collapsing the two either reads a rebuilding group as complete
+// or drops a Workload from the mapping while its last Pod is leaving.
 func modelDeploymentReplicaGroups(
 	ctx context.Context, cli ctrlcli.Client, md *workercore.ModelDeployment,
-) (map[string]sets.Set[types.UID], error) {
+) (all, live map[string]sets.Set[types.UID], err error) {
 	podList := new(core.PodList)
-	err := cli.List(ctx, podList,
+	if err = cli.List(ctx, podList,
 		ctrlcli.InNamespace(md.Namespace),
 		ctrlcli.MatchingLabels{modelDeploymentLabelKeyInstance: md.Name},
-		ctrlclix.WithoutQuorum)
-	if err != nil {
-		return nil, fmt.Errorf("list replicas: %w", err)
+		ctrlclix.WithoutQuorum); err != nil {
+		return nil, nil, fmt.Errorf("list replicas: %w", err)
 	}
 
-	byGroup := make(map[string]sets.Set[types.UID])
+	all, live = make(map[string]sets.Set[types.UID]), make(map[string]sets.Set[types.UID])
 	for i := range podList.Items {
 		pod := &podList.Items[i]
 		if !modelDeploymentOwns(pod, md) {
 			continue
 		}
 		group := pod.Labels[kueuepodconst.GroupNameLabel]
-		if byGroup[group] == nil {
-			byGroup[group] = sets.New[types.UID]()
+		if all[group] == nil {
+			all[group] = sets.New[types.UID]()
 		}
-		byGroup[group].Insert(pod.UID)
+		all[group].Insert(pod.UID)
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if live[group] == nil {
+			live[group] = sets.New[types.UID]()
+		}
+		live[group].Insert(pod.UID)
 	}
 
-	return byGroup, nil
+	return all, live, nil
 }
 
 // anyWorkloadHoldsQuotaFor reports whether one of these Workloads owns any of the group's replicas
@@ -637,7 +659,9 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointSiblings(
 		return nil
 	}
 
-	byGroup, err := modelDeploymentReplicaGroups(ctx, r.Client, md)
+	// Every replica, terminating ones included: this maps an event to the siblings that have to see
+	// it, and a Workload still holding a leaving Pod is still one of them.
+	byGroup, _, err := modelDeploymentReplicaGroups(ctx, r.Client, md)
 	if err != nil {
 		logger.Error(err, "index the deployment's replicas for sibling mapping")
 		return nil

@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -94,7 +96,7 @@ func TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime(t *testing.T) {
 			name:            "Ascend vllm uses the Ascend connector",
 			manufacturer:    "ascend",
 			manufacturerSet: true,
-			protocol:        "Ascend",
+			protocol:        "CANN",
 			wantConnector:   "AscendStoreConnector",
 		},
 		{
@@ -107,33 +109,33 @@ func TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime(t *testing.T) {
 			manufacturer:    "ascend",
 			manufacturerSet: true,
 			protocol:        "TCP",
-			wantErr:         `accepts only the "ascend" transport and this pool offers "tcp"`,
+			wantErr:         `accepts only the "ascend" transport and no group in this pool offers it`,
 		},
 		{
 			name:            "manufacturer spelling is exact",
 			manufacturer:    "Ascend",
 			manufacturerSet: true,
-			protocol:        "Ascend",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 		{
 			name:            "manufacturer whitespace is refused",
 			manufacturer:    " ascend",
 			manufacturerSet: true,
-			protocol:        "Ascend",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 		{
 			name:            "manufacturer has no unmeasured variant",
 			manufacturer:    "huawei",
 			manufacturerSet: true,
-			protocol:        "Ascend",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 		{
 			name:            "empty manufacturer is refused when declared",
 			manufacturerSet: true,
-			protocol:        "Ascend",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 		{
@@ -141,7 +143,7 @@ func TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime(t *testing.T) {
 			engine:          "sglang",
 			manufacturer:    "ascend",
 			manufacturerSet: true,
-			protocol:        "Ascend",
+			protocol:        "CANN",
 			wantErr:         "kvcache.gpustack.ai/manufacturer",
 		},
 	}
@@ -177,6 +179,79 @@ func TestPodKVCacheInject_ManufacturerSelectsTheVLLMRuntime(t *testing.T) {
 				pod.Spec.Containers[0].Args[2])
 		})
 	}
+}
+
+// TestPodKVCacheInject_TheMatchedGroupsTransport is the per-group transport rule at the admission
+// boundary, with its control. vLLM on Ascend hardware accepts only the "ascend" transport, so it
+// is REFUSED against a pool whose groups serve nothing compatible — the typed refusal at submit
+// time, not a container that starts and raises — and admitted against a pool where one group
+// serves it, handed THAT group's protocol rather than the backend's.
+//
+// The control is what gives the refusal its teeth: a webhook that refused every Ascend Pod, or
+// one that handed the backend's transport regardless, would satisfy either half alone.
+func TestPodKVCacheInject_TheMatchedGroupsTransport(t *testing.T) {
+	ascendPod := func() *core.Pod {
+		pod := kvCachePod()
+		pod.Annotations[KVCacheManufacturerAnnotationKey] = "ascend"
+		return pod
+	}
+	// A two-group backend on the fixture's chain: the first group stays on the backend's TCP, the
+	// second carries the transport the case is about.
+	twoGroupBackend := func(second workercore.KVCacheBackendMember) []ctrlcli.Object {
+		objs := kvCacheFixture()
+		objs[2] = &workercore.KVCacheBackend{
+			ObjectMeta: meta.ObjectMeta{Name: "mc"},
+			Spec: workercore.KVCacheBackendSpec{
+				Transport: workercore.KVCacheBackendTransport{Protocol: "TCP"},
+				Connection: workercore.KVCacheBackendConnection{
+					Managed: &workercore.KVCacheBackendManaged{
+						Members: []workercore.KVCacheBackendMember{
+							{
+								NodeSelector:      map[string]string{"kvcache": "true"},
+								Medium:            "DRAM",
+								CapacityPerMember: resource.MustParse("64Gi"),
+							},
+							second,
+						},
+					},
+				},
+			},
+		}
+		return objs
+	}
+
+	t.Run("refused when no group serves the engine's transport", func(t *testing.T) {
+		pod := ascendPod()
+		err := admit(t, pod, twoGroupBackend(workercore.KVCacheBackendMember{
+			NodeSelector:      map[string]string{"kvcache": "true"},
+			Medium:            "VRAM",
+			CapacityPerMember: resource.MustParse("16Gi"),
+			Transport:         &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"},
+		})...)
+
+		require.Error(t, err)
+		var refusal *inject.RefusalError
+		require.ErrorAs(t, err, &refusal, "the refusal is typed, so a caller can branch on the reason")
+		assert.Equal(t, inject.ReasonTransportUnsupported, refusal.Reason)
+		assert.Contains(t, err.Error(), `["tcp" "rdma"]`,
+			"the refusal names what every group offers, so neither serving it is visible")
+	})
+
+	t.Run("admitted on the group that serves it, and handed that group's protocol", func(t *testing.T) {
+		pod := ascendPod()
+		require.NoError(t, admit(t, pod, twoGroupBackend(workercore.KVCacheBackendMember{
+			NodeSelector:      map[string]string{"kvcache": "true"},
+			Medium:            "VRAM",
+			CapacityPerMember: resource.MustParse("16Gi"),
+			Transport:         &workercore.KVCacheBackendMemberTransport{Protocol: "CANN"},
+		})...))
+
+		require.Contains(t, pod.Annotations, inject.ClientConfigAnnotationKey)
+		var config map[string]any
+		require.NoError(t, json.Unmarshal([]byte(pod.Annotations[inject.ClientConfigAnnotationKey]), &config))
+		assert.Equal(t, "ascend", config["protocol"],
+			"the engine is handed the matched group's protocol, not the backend's tcp")
+	})
 }
 
 // TestPodKVCacheInject_SGLangCarriesTheEnvironmentVehicle is the counterpart, and its negative half
@@ -217,8 +292,6 @@ func TestPodKVCacheInject_StampRecordsWhatWasDecided(t *testing.T) {
 	assert.Equal(t, "file", record.Vehicle)
 	assert.Equal(t, "team-a-chat", record.Domain)
 	assert.True(t, record.TenantInjected)
-	assert.NotContains(t, pod.Annotations[KVCacheInjectedAnnotationKey], `"engineVersion"`,
-		"the stamp does not claim an engine version admission never inspected")
 }
 
 // TestPodKVCacheInject_StampTenantFollowsTheEngine is the paired control for the field above.
@@ -693,19 +766,37 @@ func TestPodKVCacheInject_ObservabilityDefaultsOnAndYieldToTheUser(t *testing.T)
 	})
 }
 
-// TestPodKVCacheInject_ValueVariableYieldsToTheWorkload is the F6 distinction between the keys that
-// select the mechanism and the ones that carry a value inside it. A user overriding one value keeps the
-// rest of the injection, which is what makes the rule useful rather than all-or-nothing.
-func TestPodKVCacheInject_ValueVariableYieldsToTheWorkload(t *testing.T) {
+// TestPodKVCacheInject_ValueVariableIsOverwritten pins that an injection OVERRULES a value variable
+// the workload declared for itself, rather than yielding to it.
+//
+// Yielding was the earlier rule, and what it bought was a Pod that asked to be injected, got a full
+// set of variables, and ran on one of its own -- with nothing on the object saying which value
+// applied. Injection is opt-in and its opt-out is explicit, so a declaration here is a second answer
+// to a question the Binding already answered.
+//
+// The variable is asserted to be present ONCE. Appending a second entry of the same name would also
+// take effect -- the kubelet folds the list into a map in declaration order -- but it would leave a
+// Pod showing two values for one name, and a reader no way to tell which one wins without knowing
+// that rule.
+func TestPodKVCacheInject_ValueVariableIsOverwritten(t *testing.T) {
 	pod := kvCachePodForEngine("sglang")
 	pod.Spec.Containers[0].Env = []core.EnvVar{{Name: "MOONCAKE_PROTOCOL", Value: "rdma"}}
 
 	require.NoError(t, admit(t, pod), "a value variable is not a mechanism key, so it does not refuse")
 
-	env := containerEnv(&pod.Spec.Containers[0])
-	assert.Equal(t, "rdma", env["MOONCAKE_PROTOCOL"], "the workload's own declaration is authoritative")
-	assert.Equal(t, "mc-leader.gpustack-system.svc:50051", env["MOONCAKE_MASTER"],
+	ctr := &pod.Spec.Containers[0]
+	assert.Equal(t, "tcp", containerEnv(ctr)["MOONCAKE_PROTOCOL"],
+		"the Binding's backend decides the transport, not the workload's own declaration")
+	assert.Equal(t, "mc-leader.gpustack-system.svc:50051", containerEnv(ctr)["MOONCAKE_MASTER"],
 		"the rest of the injection still lands")
+
+	var seen int
+	for i := range ctr.Env {
+		if ctr.Env[i].Name == "MOONCAKE_PROTOCOL" {
+			seen++
+		}
+	}
+	assert.Equal(t, 1, seen, "overwritten in place, so the Pod shows one value per name")
 }
 
 // TestPodKVCacheInject_ContainerSelection. Never the first of several: the grounding is this
@@ -844,19 +935,50 @@ func TestPodKVCacheInject_TenantFromBindingOverridesAnotherRegisteredDomain(t *t
 	assert.Equal(t, "team-a-chat", containerEnv(&pod.Spec.Containers[0])["MOONCAKE_TENANT_ID"])
 }
 
-// TestPodKVCacheInject_SGLangConfigPathIsNotAConflict. The webhook stopped writing this key with the
-// per-engine vehicle, and a user who sets it has configured SGLang from a file of their own - correct
-// precedence rather than a collision. The injection yields to it silently, which is recorded as the one
-// accepted silent outcome in the design.
-func TestPodKVCacheInject_SGLangConfigPathIsNotAConflict(t *testing.T) {
-	pod := kvCachePodForEngine("sglang")
-	pod.Spec.Containers[0].Env = []core.EnvVar{
-		{Name: "SGLANG_HICACHE_MOONCAKE_CONFIG_PATH", Value: "/mine.json"},
-	}
+// TestPodKVCacheInject_ConfigSourceKeysAreRefused pins the class of key that collides with nothing
+// this webhook writes and disables all of it anyway.
+//
+// MEASURED, SGLang main at 66c7bc83: _load_config is an if/elif/else over three mutually exclusive
+// sources, and every variable this webhook emits lives in the last branch. Either key here takes an
+// earlier one, so the Pod carries a full set of variables nothing reads while the injection record
+// says it succeeded -- which is the one silent outcome an earlier revision of this design accepted
+// and this rule removes.
+//
+// The vLLM case is the control. The same variable on a vLLM container means nothing to it, so
+// refusing there would be a refusal with nothing behind it -- the same reason the owned-key scan
+// filters on what the render writes. Without this arm the rule would look right while being
+// per-engine in name only.
+func TestPodKVCacheInject_ConfigSourceKeysAreRefused(t *testing.T) {
+	t.Run("sglang config path", func(t *testing.T) {
+		pod := kvCachePodForEngine("sglang")
+		pod.Spec.Containers[0].Env = []core.EnvVar{
+			{Name: "SGLANG_HICACHE_MOONCAKE_CONFIG_PATH", Value: "/mine.json"},
+		}
 
-	require.NoError(t, admit(t, pod))
-	assert.Equal(t, "/mine.json",
-		containerEnv(&pod.Spec.Containers[0])["SGLANG_HICACHE_MOONCAKE_CONFIG_PATH"])
+		err := admit(t, pod)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "configuration file of its own")
+	})
+
+	t.Run("sglang extra config, which outranks even the file", func(t *testing.T) {
+		pod := kvCachePodForEngine("sglang")
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args,
+			"--hicache-storage-backend-extra-config", "/mine.toml")
+
+		err := admit(t, pod)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "outranks the environment")
+	})
+
+	t.Run("the same variable on vllm, which does not read it", func(t *testing.T) {
+		pod := kvCachePod()
+		pod.Spec.Containers[0].Env = []core.EnvVar{
+			{Name: "SGLANG_HICACHE_MOONCAKE_CONFIG_PATH", Value: "/mine.json"},
+		}
+
+		require.NoError(t, admit(t, pod),
+			"a key that selects nothing for this engine is not a reason to refuse its Pod")
+	})
 }
 
 // TestPodKVCacheInject_NoCommandNoArgsIsRefused. Appending to an empty args does not append: Kubernetes

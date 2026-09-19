@@ -59,7 +59,7 @@ func newAscendTransportBackend() *workercore.KVCacheBackend {
 	return &workercore.KVCacheBackend{
 		ObjectMeta: meta.ObjectMeta{Name: "kvcb"},
 		Spec: workercore.KVCacheBackendSpec{
-			Transport: workercore.KVCacheBackendTransport{Protocol: "Ascend"},
+			Transport: workercore.KVCacheBackendTransport{Protocol: "CANN"},
 		},
 	}
 }
@@ -88,8 +88,8 @@ func asPD(md *workercore.ModelDeployment) {
 // from the hardware instead. A case keeping the shared fixture's template would assert that
 // literal rather than anything the manufacturer decided.
 func synthesizingImages(md *workercore.ModelDeployment) {
-	md.Spec.Roles[0].Template.Image = ""
-	md.Spec.Roles[1].Template.Image = ""
+	md.Spec.Roles[0].Image = ""
+	md.Spec.Roles[1].Image = ""
 }
 
 // crossManufacturerClient converges the deployment against both types, on a pool offering the
@@ -251,8 +251,8 @@ func TestModelDeploymentCrossManufacturer_ThePoolTransportDecidesWhetherItRender
 			// The message has to name the pair, not just report a refusal: the transport is a legal
 			// value and the engine is a legal engine, and it is the combination that raises.
 			assert.Contains(t, err.Error(),
-				`accepts only the "ascend" transport and this pool offers "tcp"`,
-				"the refusal names which transport the engine needs and which one the pool has")
+				`accepts only the "ascend" transport and no group in this pool offers it — the groups offer ["tcp"]`,
+				"the refusal names which transport the engine needs and which ones the pool has")
 			assert.Contains(t, err.Error(), "vllm-ascend",
 				"and names the engine the role's manufacturer selected")
 		})

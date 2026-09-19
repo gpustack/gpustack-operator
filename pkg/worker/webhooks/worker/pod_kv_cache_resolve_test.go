@@ -40,7 +40,7 @@ func kvCacheFixture() []ctrlcli.Object {
 				BlockSize: 16,
 				Dtype:     "bfloat16",
 			},
-			QuotaCeiling: resource.MustParse("20Ti"),
+			Quota: workercore.KVCachePoolBindingQuota{Ceiling: resource.MustParse("20Ti")},
 		},
 	}
 	pool := &workercore.KVCachePool{
@@ -101,7 +101,7 @@ func TestPodKVCacheResolve_HappyPath(t *testing.T) {
 	assert.Equal(t, "mc-leader.gpustack-system.svc:50051", got.Input.Connection.MasterAddress,
 		"the master address is the pool's published CLIENT endpoint, never the backend's admin address")
 	assert.Equal(t, "tcp", got.Input.Connection.Protocol,
-		"the API spelling TCP is mapped to the artifact's own through mooncake.MemberProtocol")
+		"the pool's one offer, mapped to the artifact's spelling and matched to the engine")
 }
 
 // TestPodKVCacheResolve_CarriesTheDomain pins that the Binding is the domain's only source.

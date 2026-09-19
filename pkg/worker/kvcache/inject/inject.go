@@ -59,8 +59,8 @@ type Result struct {
 	// KVEvents is the event stream as a consumer reaches it, absent when publishing is disabled.
 	KVEvents *KVEvents
 
-	// DirectTransfer reports that the rendered transfer document includes the point-to-point arm.
-	DirectTransfer bool
+	// KVTransfer reports that the rendered transfer document includes the point-to-point arm.
+	KVTransfer bool
 }
 
 // KVEvents is the dialable cache-event contract produced alongside the engine's bind configuration.
@@ -131,9 +131,9 @@ func Render(in Input) (*Result, error) {
 			return nil, err
 		}
 	}
-	if !hasStore && !in.DirectTransfer && !in.PublishKVEvents {
+	if !hasStore && !in.KVTransfer && !in.PublishKVEvents {
 		return nil, newRefusal(ReasonConnectionIncomplete,
-			"no shared store, direct transfer, or KV event publisher was requested")
+			"no shared store, point-to-point transfer, or KV event publisher was requested")
 	}
 	if !hasStore && in.Engine != EngineVLLM {
 		return nil, newRefusal(ReasonConnectionIncomplete,
@@ -143,16 +143,17 @@ func Render(in Input) (*Result, error) {
 	// on another engine is refused HERE rather than ignored by that engine's renderer.
 	//
 	// It is refused rather than dropped because dropping it is the failure this package exists to
-	// prevent: renderSGLang reads neither field, so an SGLang role asked for direct transfer would
-	// start normally, serve normally, and move no blocks - with nothing in the Pod to read that says
-	// so. The combination is reachable, not theoretical: the router's metrics contract covers SGLang,
-	// so a managed router over an SGLang pool is a configuration a user can write today.
+	// prevent: renderSGLang reads neither field, so an SGLang role asked for point-to-point
+	// transfer would start normally, serve normally, and move no blocks - with nothing in the Pod
+	// to read that says so. The combination is reachable, not theoretical: the router's metrics
+	// contract covers SGLang, so a managed router over an SGLang pool is a configuration a user
+	// can write today.
 	//
-	// The vLLM renderer refuses direct transfer again, on a condition that also covers the role. That
-	// is not a duplicate of this one: this check is about the ENGINE and runs for every caller, while
-	// that one is about a role that is neither prefill nor decode and can only be reached once the
-	// engine is already vLLM.
-	if (in.DirectTransfer || in.PublishKVEvents) && in.Engine != EngineVLLM {
+	// The vLLM renderer refuses point-to-point transfer again, on a condition that also covers the
+	// role. That is not a duplicate of this one: this check is about the ENGINE and runs for every
+	// caller, while that one is about a role that is neither prefill nor decode and can only be
+	// reached once the engine is already vLLM.
+	if (in.KVTransfer || in.PublishKVEvents) && in.Engine != EngineVLLM {
 		return nil, newRefusal(ReasonRoleUnsupported,
 			"engine %q renders neither point-to-point transfer nor KV event publishing; "+
 				"asking for either would leave a container that starts and moves nothing", in.Engine)

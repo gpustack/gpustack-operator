@@ -256,8 +256,9 @@ metadata:
 spec:
   model:
     name: case68/model
-  engine: vllm
-  engineVersion: "0.25.1"
+  engine:
+    name: vllm
+    version: "0.25.1"
   kvCache:
     poolRef:
       name: $BINDING
@@ -272,9 +273,8 @@ one_role() {
       kind: server
       replicas: 1
       instanceType: $IT
-      template:
-        image: $IMAGE
-        command: ["/pause"]
+      image: $IMAGE
+      command: ["/pause"]
 YAML
 }
 
@@ -284,16 +284,14 @@ two_roles_one_type() {
       kind: server
       replicas: 1
       instanceType: $IT
-      template:
-        image: $IMAGE
-        command: ["/pause"]
+      image: $IMAGE
+      command: ["/pause"]
     - name: beta
       kind: server
       replicas: 1
       instanceType: $IT
-      template:
-        image: $IMAGE
-        command: ["/pause"]
+      image: $IMAGE
+      command: ["/pause"]
 YAML
 }
 
@@ -303,9 +301,8 @@ two_roles_two_types() {
       kind: server
       replicas: 1
       instanceType: $IT
-      template:
-        image: $IMAGE
-        command: ["/pause"]
+      image: $IMAGE
+      command: ["/pause"]
     - name: beta
       kind: server
       replicas: 1
@@ -313,9 +310,8 @@ two_roles_two_types() {
       # NO resources block. The type is not acceleratable, so nothing defaults a card count here --
       # and a card count is what the per-unit ceiling rule reads. Declaring one would put this role
       # back in front of that rule.
-      template:
-        image: $IMAGE
-        command: ["/pause"]
+      image: $IMAGE
+      command: ["/pause"]
 YAML
 }
 
@@ -334,9 +330,9 @@ if [ -z "$before_beta" ]; then
   record SKIP "scale leaves the other group alone" "no replicas to compare; earlier phase failed"
 else
   # A JSON PATCH ON ONE FIELD, NOT A MERGE PATCH ON THE LIST. A merge patch replaces `roles`
-  # wholesale, so a role restated without its `template` sets template.command to null -- and that
-  # is a FROZEN field, so the identity rule refuses the edit. Measured: the refusal named
-  # `spec.roles[0].template.command: Invalid value: null`, and the scale below silently never
+  # wholesale, so a role restated without its `command` sets command to null -- and that
+  # is a FROZEN field, so the identity rule refuses the edit. Measured before the field moved
+  # onto the role: the refusal named the command path, and the scale below silently never
   # happened, which turned this row into a PASS that compared two unchanged samples.
   if ! k -n "$NS" patch modeldeployment "$MD" --type=json \
     -p '[{"op":"replace","path":"/spec/roles/0/replicas","value":2}]' >/dev/null 2>&1; then

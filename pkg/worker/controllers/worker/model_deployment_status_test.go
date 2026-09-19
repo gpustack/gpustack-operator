@@ -25,7 +25,7 @@ import (
 // readyReplica builds a replica of the fixture deployment at the given ordinal, Ready or not.
 func readyReplica(md *workercore.ModelDeployment, ordinal int32, ready bool) *core.Pod {
 	pod := &core.Pod{}
-	pod.Name = modelDeploymentPodName(md, &md.Spec.Roles[0], ordinal)
+	pod.Name = fmt.Sprintf("%s-%s-%d", md.Name, md.Spec.Roles[0].Name, ordinal)
 	pod.Namespace = md.Namespace
 	pod.UID = types.UID(pod.Name + "-uid")
 	// A LITERAL rather than FormatLocalQueueName(role.InstanceType): the entrance a replica carries
@@ -273,7 +273,7 @@ func readyRouterRolePods(md *workercore.ModelDeployment) []core.Pod {
 // condition will ever be True for this role.
 func TestComputeModelDeploymentStatus_Unmanaged(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[0].Template.Command = []string{"/bin/my-server"}
+		md.Spec.Roles[0].Command = []string{"/bin/my-server"}
 	})
 	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
 
@@ -505,11 +505,13 @@ func TestObserveModelDeploymentQuota(t *testing.T) {
 		},
 		{
 			// The same absence, for the opposite reason, and the message carries have/want so a
-			// reader can tell which one they are looking at without counting Pods themselves.
+			// reader can tell which one they are looking at without counting Pods themselves. It
+			// names the ROLE beside the queue, because a queue names the pool two roles can share
+			// and the role names the one group that is short.
 			name: "the group is short of its total", replicas: 4, live: 3,
 			wantStatus: meta.ConditionFalse, wantReason: "PodGroupIncomplete",
-			wantMessage: `3 of 4 of the group's replicas exist, so Kueue composes no workload for ` +
-				`it at all and there is nothing in cluster queue "h20-8x" to hold quota`,
+			wantMessage: `3 of 4 replicas role "server" declares exist, so Kueue composes no workload for ` +
+				`its group at all and there is nothing in cluster queue "h20-8x" to hold quota`,
 		},
 	}
 
@@ -561,8 +563,12 @@ func TestObserveModelDeploymentQuota_TrueCoversEveryRole(t *testing.T) {
 	for i := range md.Spec.Roles {
 		for ordinal := range md.Spec.Roles[i].Replicas {
 			pod := readyReplica(md, ordinal, true)
-			pod.Name = modelDeploymentPodName(md, &md.Spec.Roles[i], ordinal)
+			pod.Name = fmt.Sprintf("%s-%s-%d", md.Name, md.Spec.Roles[i].Name, ordinal)
 			pod.UID = types.UID(pod.Name)
+			// readyReplica stamps the FIRST role's labels on every Pod it builds, and a group is
+			// attributed through the role label: without this override all four Pods would count
+			// against prefill's group and decode's would read as empty.
+			pod.Labels[modelDeploymentLabelKeyComponent] = md.Spec.Roles[i].Name
 			pods = append(pods, *pod)
 		}
 	}
@@ -573,7 +579,8 @@ func TestObserveModelDeploymentQuota_TrueCoversEveryRole(t *testing.T) {
 	observeQuotaOver(md, pods, workloadSlice(wl), holder)
 
 	assert.True(t, ModelDeploymentConditionQuotaReserved.IsTrue(holder))
-	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder), "group of 4")
+	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder),
+		"all 2 of this deployment's groups")
 }
 
 // TestObserveModelDeploymentQuota_NamesTheClusterQueue states where an operator is sent when quota
@@ -850,19 +857,20 @@ func TestObserveModelDeploymentQuota_CountsPerGroup(t *testing.T) {
 	assert.Equal(t, "PodGroupIncomplete",
 		ModelDeploymentConditionQuotaReserved.GetReason(holder))
 	assert.Equal(t,
-		`2 of 3 of the group's replicas exist, so Kueue composes no workload for it at all and `+
-			`there is nothing in cluster queue "a100-8x" to hold quota`,
+		`2 of 3 replicas role "decode" declares exist, so Kueue composes no workload for its group `+
+			`at all and there is nothing in cluster queue "a100-8x" to hold quota`,
 		ModelDeploymentConditionQuotaReserved.GetMessage(holder),
-		"the short group's own numbers and its own queue, not the deployment's 4 of 5 on the other pool")
+		"the short group's own role, own numbers and its own queue, not the deployment's 4 of 5 on the other pool")
 }
 
 // TestObserveModelDeploymentQuota_AdmissionInFlightNamesTheRightGroups covers a message that named
 // one queue for a deployment that has several.
 //
-// A DEPLOYMENT SPANNING TWO instanceTypes HAS NO SINGLE QUEUE TO NAME. The wording here was read off
-// roles[0], which is a statement about one group offered as a statement about the deployment: an
+// A DEPLOYMENT SPANNING SEVERAL GROUPS NAMES THE ROLE, NOT A QUEUE. The wording here was once read
+// off roles[0], which is a statement about one group offered as a statement about the deployment: an
 // operator told to look in the prefiller's queue finds a workload there and nothing wrong, while the
-// group actually missing one is on the other pool and goes unmentioned.
+// group actually missing one is on the other pool and goes unmentioned. The role is what identifies
+// the group now that roles -- not instance types -- are what groups are keyed on.
 func TestObserveModelDeploymentQuota_AdmissionInFlightNamesTheRightGroups(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		decode := md.Spec.Roles[0]
@@ -884,10 +892,10 @@ func TestObserveModelDeploymentQuota_AdmissionInFlightNamesTheRightGroups(t *tes
 	assert.Equal(t, "AdmissionInFlight", ModelDeploymentConditionQuotaReserved.GetReason(holder))
 
 	msg := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
-	assert.Contains(t, msg, "a100-8x",
-		"the group with no workload yet is the decoder's, and it is the one to name")
-	assert.NotContains(t, msg, "h20-8x",
-		"naming the first role's queue sends the operator to the pool where nothing is wrong")
+	assert.Contains(t, msg, "decode",
+		"the group with no workload yet is the decoder's, and the role names it")
+	assert.NotContains(t, msg, "prefill",
+		"and does not name the one that has its workload, which would read as the cause")
 }
 
 // TestObserveModelDeploymentQuota_ParkedIsNotWaiting covers the word the vocabulary did not have.
@@ -916,7 +924,7 @@ func TestObserveModelDeploymentQuota_ParkedIsNotWaiting(t *testing.T) {
 	parked.Status.AdmissionChecks = []kueue.AdmissionCheckState{{
 		Name:  kueue.AdmissionCheckReference(_JointAdmissionCheckName),
 		State: kueue.CheckStatePending,
-		Message: "the groups on instance types a100-8x are waiting. This has not changed for 30m0s, " +
+		Message: "the groups of roles server are waiting. This has not changed for 30m0s, " +
 			"so the deployment is " + _JointAdmissionParkedMarker + ": its workloads are deactivated",
 	}}
 
@@ -1045,9 +1053,48 @@ func TestObserveModelDeploymentQuota_OneGroupReservedIsNotTheDeployment(t *testi
 	assert.Equal(t, "Pending", ModelDeploymentConditionQuotaReserved.GetReason(holder))
 
 	msg := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
-	assert.Contains(t, msg, "a100-8x", "the message names the group that is waiting")
+	assert.Contains(t, msg, "decode", "the message names the group that is waiting")
 	assert.NotContains(t, msg, "prefill",
 		"and does not name the one that is not, which would read as the cause")
+}
+
+// TestObserveModelDeploymentQuota_TwoRolesOnOneInstanceTypeStillNameTheGroup pins what a role key
+// did to the group-count messages: two roles naming ONE instance type are two groups, so a message
+// that identified groups by their type named a queue both share and identified NEITHER -- "on
+// instance types h20-8x" is true of the waiting group and of the holding one alike.
+//
+// THE ROLE IS THE ONLY NAME THAT DISCRIMINATES. One group is one role's, so the waiting role names
+// exactly the group that waits, and the type stays out of the message rather than appearing as a
+// second identifier that cannot tell the two apart.
+func TestObserveModelDeploymentQuota_TwoRolesOnOneInstanceTypeStillNameTheGroup(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		decode := md.Spec.Roles[0]
+		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
+		decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "h20-8x"
+		md.Spec.Roles = append(md.Spec.Roles, decode)
+	})
+
+	prefill, decode := roleReplica(md, "prefill"), roleReplica(md, "decode")
+
+	// Both groups schedule into the one queue their shared type names; the prefiller holds quota
+	// in it and the decoder waits for it.
+	reserved := groupWorkload([]core.Pod{prefill}, true)
+	reserved.Name = "wl-prefill"
+	waiting := groupWorkload([]core.Pod{decode}, false)
+	waiting.Name = "wl-decode"
+
+	holder := new(workercore.ModelDeployment)
+	observeQuotaOver(md, []core.Pod{prefill, decode}, []*kueue.Workload{reserved, waiting}, holder)
+
+	assert.Equal(t, "Pending", ModelDeploymentConditionQuotaReserved.GetReason(holder))
+
+	msg := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
+	assert.Contains(t, msg, "the groups of roles decode",
+		"the waiting group is the decoder's, and the role picks it out of the two that share the type")
+	assert.NotContains(t, msg, "prefill",
+		"the holding group is not named, which would read as the one waiting")
+	assert.NotContains(t, msg, "h20-8x",
+		"the shared type names a queue both groups use, so it cannot say which group is waiting")
 }
 
 // TestObserveModelDeploymentQuota_EveryGroupReservedIsReserved is the other side. Without it the
@@ -1167,7 +1214,7 @@ func TestObserveModelDeploymentQuota_PreemptedInPart(t *testing.T) {
 			name:    "one_group_preempted_while_a_sibling_is_admitted",
 			prefill: "admitted", decode: "preempted",
 			wantReason: "PreemptedInPart",
-			wantIn:     []string{"a100-8x", "h20-8x"},
+			wantIn:     []string{"decode", "prefill"},
 		},
 		{
 			// Kueue writes the two conditions at different moments; a reader of one alone answers
@@ -1175,7 +1222,7 @@ func TestObserveModelDeploymentQuota_PreemptedInPart(t *testing.T) {
 			name:    "the_evicted_form_of_the_same_state",
 			prefill: "admitted", decode: "evicted",
 			wantReason: "PreemptedInPart",
-			wantIn:     []string{"a100-8x"},
+			wantIn:     []string{"decode"},
 		},
 		{
 			// THE CASE THE PREDICATE EXISTS TO NOT MATCH. Everything was preempted, so nothing is
@@ -1297,8 +1344,8 @@ func TestObserveModelDeploymentQuota_PreemptionIsCarriedIntoTheOtherAnswers(t *t
 	assert.Contains(t, msg, "a100-8x", "the branch still says what else is wrong")
 	assert.Contains(t, msg, "higher-priority",
 		"and it carries the preemption, which it used to drop entirely")
-	assert.Contains(t, msg, "h20-8x",
-		"naming the group whose quota was taken, which is not the group this branch is about")
+	assert.Contains(t, msg, "prefill",
+		"naming the role whose group's quota was taken, which is not the group this branch is about")
 }
 
 // TestObserveModelDeploymentQuota_ThePreemptionNoteContract pins the CONTRACT the comment states,

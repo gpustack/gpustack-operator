@@ -34,10 +34,11 @@ package mooncake
 //   - Forbidden: the flag reaches the artifact intact and then costs more than the hatch is worth.
 //     Nothing collides by name, which is exactly why this class needs to exist. Each entry carries
 //     its own reason because they are not one kind of problem: one changes how every OTHER flag is
-//     read, another names a store nothing reads, another refuses to start the process at all, and
-//     another replaces a setting this spec states while leaving the object stating it, and two more
-//     change no value at all because this operator's own rendering always wins over them, which
-//     makes them configure nothing while reading as a setting that moved.
+//     read, another names a store nothing reads, another refuses to start the process at all,
+//     another replaces a setting this spec states while leaving the object stating it, another
+//     decides whether a feature this API renders runs at all under a name that mentions no part of
+//     it, and several change no value because this operator's own rendering always wins over them,
+//     which makes them configure nothing while reading as a setting that moved.
 type ExtraArgsRules struct {
 	Derived   []string
 	Exclusive [][]string
@@ -66,7 +67,9 @@ type ExtraArgsRules struct {
 // address that is not the Pod's own still breaks the probes; that failure stops the rollout rather
 // than passing silently, which is the line this list draws.
 var LeaderExtraArgsRules = ExtraArgsRules{
-	// Keys are the flag's own name without its leading dash, which is how extraArgs is keyed.
+	// Keys are the flag's own name without its leading dashes, and that is NOT how extraArgs
+	// entries arrive: an entry carries its dashes and may carry its value, so admission strips the
+	// dashes and everything from the first "=" on before it compares a key against these tables.
 	Derived: []string{
 		"allocation_strategy",
 		// The four the election renders, reserved as one group because that is how they are
@@ -88,11 +91,27 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		// there.
 		"rpc_address",
 		"rpc_interface",
-		// Both halves of the disk tier's leader switch. They are derived from leader.offload, and
-		// reaching them through the hatch would put the tier's two sides out of step with the
-		// admission rule that keeps them paired — a leader offloading with no member declaring a
-		// tier, or the reverse, with nothing on the object saying so.
+		// Both halves of the disk tier's leader switch. They are derived from members[].localDisks —
+		// a group declaring a tier is what turns the tier on — and reaching them through the hatch
+		// would put the leader's half of that decision out of step with the members' half, with
+		// nothing on the object saying so.
 		"enable_offload",
+		// The snapshot group, derived from leader.highAvailability.snapshot. Reserved
+		// UNCONDITIONALLY, like the election group above, and for a sharper version of the same
+		// reason: the two switches say WHERE nothing, and the directory they write and read is an
+		// environment variable set beside the mounted claim. Reached through the hatch without that
+		// claim, enable_snapshot names a local object store whose path variable is unset, and the
+		// master refuses to start -- which is the good case. The one to keep out is the object
+		// admitted with a claim and a passthrough switch disagreeing about whether to use it.
+		//
+		// The last two are rendered only when their fields are set, and are reserved all the same:
+		// a key accepted here would win over a field left unset, so the object would state a
+		// default it is not running with.
+		"enable_snapshot",
+		"enable_snapshot_restore",
+		"snapshot_interval_seconds",
+		"snapshot_object_store_type",
+		"snapshot_retention_count",
 		"enable_multi_tenants",
 		"metrics_port",
 		"offload_on_evict",
@@ -198,6 +217,59 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		"etcd_endpoints": "it supplies a connection string only when ha_backend_connstring is " +
 			"empty, which this operator never leaves empty, and the etcd leadership backend it " +
 			"names is not compiled into the image this operator runs",
+
+		// The allocator, and the fifth kind of cost: it decides whether a feature this API renders
+		// EXISTS, under a name that says nothing about that feature.
+		//
+		// Measured in the artifact's source: the master builds its snapshot manager inside a
+		// condition that requires the allocator to be the offset one. That is the artifact's own
+		// default, so nothing is wrong today -- and the condition has no else branch and logs
+		// nothing, so an administrator who moves the allocator through the hatch turns snapshot
+		// generation off while every rendered flag, the mounted claim and this object all go on
+		// saying it is on. The standby then restores the last snapshot the leader wrote before the
+		// change, forever, and the object reports the arrangement working.
+		"memory_allocator": "it decides whether the leader generates snapshots at all -- the " +
+			"master builds its snapshot manager only under the default offset allocator, silently " +
+			"and with no log line either way -- so any other value leaves " +
+			"leader.highAvailability.snapshot rendered, mounted and stated while nothing new is " +
+			"ever written to it",
+
+		// The snapshot's SECOND directory, and it is not the one the claim is mounted at: it is a
+		// forensic copy the store writes beside a failed upload, and setting it changes what a
+		// failure DOES.
+		//
+		// Measured in the artifact's source: the snapshot manager returns the upload error to its
+		// caller only while this is empty. Non-empty, each of the four payload uploads that fails
+		// is logged, saved to this directory and then stepped over, and the snapshot round reports
+		// itself finished. The setting reads like extra durability and buys the opposite -- a
+		// standby bootstrapping from a snapshot that is missing the shard it needed.
+		"snapshot_backup_dir": "it turns a failed snapshot upload from an error the store reports " +
+			"into a local copy it writes and steps over, so snapshot rounds go on reporting " +
+			"success while what lands on the claim is incomplete",
+
+		// The two deprecated spellings of snapshot_object_store_type, and INERT rather than
+		// harmful, exactly like the deprecated port above. Measured in the artifact's source: the
+		// canonical flag is tested first and wins whenever it was passed, which this operator does
+		// unconditionally under leader.highAvailability.snapshot. Refused because a key admission
+		// accepted and the process ignores reads as a store type that moved.
+		"snapshot_payload_store_type":   snapshotObjectStoreAliasKeyReason,
+		"snapshot_payload_backend_type": snapshotObjectStoreAliasKeyReason,
+
+		// The catalog, and the counterpart to reserving the object store: this operator never
+		// renders it, because the whole design rests on the artifact's own default being the
+		// embedded catalog -- the index of which snapshots exist, written into the object store
+		// itself, so one claim carries both halves. That omission is exactly what makes the key
+		// reachable from extraArgs. Pointed at a Redis, the payloads stay on the claim while the
+		// index moves to a store nothing here creates, seeds or backs up, and a Redis that is later
+		// wiped leaves the master restoring nothing from a claim that is still full.
+		"snapshot_catalog_store_type":   snapshotCatalogStoreKeyReason,
+		"snapshot_catalog_backend_type": snapshotCatalogStoreKeyReason,
+
+		// Read ONLY where the catalog is the Redis one, which is refused above. Reserved anyway,
+		// for the reason the CXL operands are: a key that is accepted and then configures nothing
+		// is how an operator comes to believe a catalog moved.
+		"snapshot_catalog_store_connstring":   snapshotCatalogConnstringKeyReason,
+		"snapshot_catalog_backend_connstring": snapshotCatalogConnstringKeyReason,
 	},
 }
 
@@ -208,14 +280,37 @@ const cxlCompanionKeyReason = "it is read only when enable_cxl is set, and that 
 	"here because it discards the -allocation_strategy rendered from leader.allocationStrategy, " +
 	"so this key alone configures nothing at all"
 
+// snapshotObjectStoreAliasKeyReason is why the two deprecated spellings of the snapshot object
+// store type are refused. The canonical flag is rendered unconditionally under
+// leader.highAvailability.snapshot and is read first, so these move nothing while reading as a
+// store type that moved. One constant serves both, because two literals saying the same thing
+// drift apart and the field path already names which key was typed.
+const snapshotObjectStoreAliasKeyReason = "it is a deprecated alias of " +
+	"snapshot_object_store_type, which this operator renders from " +
+	"leader.highAvailability.snapshot and which wins over it, so this key moves nothing while " +
+	"reading as a snapshot store that moved"
+
+// snapshotCatalogStoreKeyReason is why the snapshot catalog's type is refused. It is not a setting
+// this API renders, so nothing collides by name -- the embedded catalog is the artifact's own
+// default and that default is what puts the index on the same claim as the payloads.
+const snapshotCatalogStoreKeyReason = "it moves the index of which snapshots exist off the claim " +
+	"leader.highAvailability.snapshot names and into an external store this operator does not " +
+	"create, seed or delete, leaving a leader that restores nothing from a claim that still holds " +
+	"every payload"
+
+// snapshotCatalogConnstringKeyReason is why the catalog's two connection-string spellings are
+// refused on their own: they are read only under a catalog kind that is itself refused.
+const snapshotCatalogConnstringKeyReason = "it is read only when the snapshot catalog is the " +
+	"external one, and that key is refused here, so this key alone configures nothing at all"
+
 // MemberExtraArgsRules governs a member group's passthrough.
 //
-// These are CONFIG keys, not environment-variable names: the member's extraArgs is keyed the way its
-// own entrypoint documents, and the renderer maps each to its MOONCAKE_* variable. Names the client
-// reads from the ENVIRONMENT ONLY are not reachable through this map at all and are not listed here;
-// members[].extraEnvs is the hatch for those, and MemberDerivedEnvs is what it reserves.
+// These are CONFIG keys, not environment-variable names: the member's own entrypoint documents
+// them as its per-key overrides, and the renderer maps each to its MOONCAKE_* variable. Names the
+// client reads from the ENVIRONMENT ONLY are not reachable through this list at all and are not
+// listed here; members[].extraEnv is the hatch for those, and MemberDerivedEnvs is what it reserves.
 //
-// The disk tier's two are NOT reachable any more: they come from members[].localDisk now, so they
+// The disk tier's two are NOT reachable any more: they come from members[].localDisks now, so they
 // are derived.
 //
 // There is no Forbidden entry here, and the rendering shape is the reason: a member's extraArgs
@@ -238,7 +333,7 @@ const cxlCompanionKeyReason = "it is read only when enable_cxl is set, and that 
 // environment and wins over it.
 var MemberExtraArgsRules = ExtraArgsRules{
 	Derived: []string{
-		// The disk tier's member half, rendered from members[].localDisk. Reserving them matters
+		// The disk tier's member half, rendered from members[].localDisks. Reserving them matters
 		// more here than on the leader, because of where a member's extraArgs lands in the
 		// precedence chain: a real flag beats a config key, and a config key beats the environment.
 		// These two are rendered as ENVIRONMENT, and extraArgs renders as a -D config key — so an
@@ -261,7 +356,7 @@ var MemberExtraArgsRules = ExtraArgsRules{
 }
 
 // MemberDerivedEnvs is every environment variable name the member renderer emits, which is what
-// admission refuses in a group's extraEnvs.
+// admission refuses in a group's extraEnv.
 //
 // It is a PLAIN LIST and not an ExtraArgsRules, because the other two kinds that type carries would
 // both be empty and an empty field invites a reader to wonder what belongs in it. No two of these
@@ -275,6 +370,14 @@ var MemberExtraArgsRules = ExtraArgsRules{
 // segment size counted into the Pod's request. The bucket pair protects nothing; it is a value this
 // operator CHOSE, and reserving it is the deliberate decision that a tuner who needs to move it gets
 // a field rather than a hatch that silently doubles a name.
+//
+// The transfer metrics switch is reserved on the same ground, and it is the one entry whose
+// reservation COSTS something a reader should see stated: the engine side treats the same switch as
+// a default a user may turn off, and here it cannot be. The asymmetry is the rendering shape rather
+// than a second opinion about the switch -- a member's extraEnv appends, so a name this renderer
+// emits would arrive twice with the winner left to the runtime, and the engine side has a
+// yields-if-declared step that this one does not. Giving it that step would mean an entry rendered
+// conditionally on the hatch's own contents, which is the shape the list above exists to keep out.
 var MemberDerivedEnvs = []string{
 	memberEnvGlobalSegmentSize,
 	memberEnvLocalBufferSize,
@@ -293,4 +396,27 @@ var MemberDerivedEnvs = []string{
 	memberEnvOffloadWatermarkHigh,
 	memberEnvOffloadWatermarkLow,
 	memberEnvProtocol,
+	memberEnvTransferMetrics,
+	memberEnvVisibleDevicesAMD,
+	memberEnvVisibleDevicesCambricon,
+	memberEnvVisibleDevicesIluvatar,
+	memberEnvVisibleDevicesMThreads,
+	memberEnvVisibleDevicesNVIDIA,
+}
+
+// LeaderDerivedEnvs is every environment variable name the leader renderer emits, which is what
+// admission refuses in the leader's extraEnv.
+//
+// It is a PLAIN LIST for the same reason MemberDerivedEnvs is: the exclusive and forbidden kinds
+// would both be empty here, and nothing in the leader's namespace voids another setting.
+//
+// The last two are rendered only under high availability and under a snapshot declaration, and are
+// reserved UNCONDITIONALLY for the same reason the election flags are: an object must be creatable
+// with the variable already in place and the field turned on afterwards, and a passthrough value
+// would silently win over the reference the rendered argv or the mounted claim arrives with.
+var LeaderDerivedEnvs = []string{
+	LeaderPodIPEnv,
+	LeaderPodNameEnv,
+	LeaderPodNamespaceEnv,
+	LeaderSnapshotLocalPathEnv,
 }

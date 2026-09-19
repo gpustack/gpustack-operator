@@ -212,7 +212,7 @@ type KVCacheBackendScaleIn struct {
 //   - The quota of a shared reuse domain flips and never settles. Uniqueness is enforced only
 //     between Bindings whose pools name the SAME backend object, so two Bindings reaching one leader
 //     through two objects are both admitted on one domain name, and each pool's reconciler writes
-//     its own quotaCeiling back over the other's on every pass.
+//     its own quota.ceiling back over the other's on every pass.
 //   - An undersized quota shows up as a LOW HIT RATE and nothing else. Exceeding it does not refuse
 //     the write: the store frees room by dropping that tenant's own older objects and retries,
 //     irreversibly, without any counter moving.
@@ -293,24 +293,25 @@ type KVCacheBackendLeader struct {
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
 	// HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas
-	// above 1. It carries no settings: the Lease is named after this backend, so there is no
-	// connection target to supply, and the API access the election needs is rendered beside the
-	// workload.
+	// above 1. The election itself needs no settings: the Lease is named after this backend, so
+	// there is no connection target to supply, and the API access it needs is rendered beside the
+	// workload. What the block does carry is what a standby is allowed to start from.
 	//
 	//   - Unset, the leader runs as a single process exactly as before — no election flag, no extra
 	//     object, the command line it ran before this field existed.
-	//   - Set with Replicas at 1, it is INERT: one process has nothing to elect between, so no
-	//     election flag, Lease or API token is rendered until Replicas rises above 1. That makes
-	//     this safe to set up front on a store image built without the k8s-lease backend, whose
-	//     master fails at startup the moment the election flags appear — the flags arrive only
-	//     when there is something for them to elect.
+	//   - Set with Replicas at 1, the ELECTION is INERT: one process has nothing to elect between,
+	//     so no election flag, Lease or API token is rendered until Replicas rises above 1. That
+	//     makes an empty block safe to set up front on a store image built without the k8s-lease
+	//     backend, whose master fails at startup the moment the election flags appear — those flags
+	//     arrive only when there is something for them to elect. Snapshot is the exception and says
+	//     so on itself.
 	//   - With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile
 	//     interval. Each replica seeds its tenant quota policy at its own start, so a standby that
 	//     took over after a quota was raised applies the older, lower ceiling, and an over-quota
 	//     write in this store is not refused — it evicts that tenant's own older objects,
 	//     irreversibly and without moving any counter. The quota itself is not lost: the pool
 	//     reconciler is the authority and writes the difference back on its next pass.
-	HighAvailability *KVCacheBackendLeaderHighAvailability `json:"highAvailability,omitempty" protobuf:"bytes,6,opt,name=highAvailability"`
+	HighAvailability *KVCacheBackendLeaderHighAvailability `json:"highAvailability,omitempty" protobuf:"bytes,2,opt,name=highAvailability"`
 
 	// AllocationStrategy is how the leader picks which member takes a new write. Random spreads
 	// them; FreeRatioFirst biases toward the emptier member.
@@ -322,7 +323,7 @@ type KVCacheBackendLeader struct {
 	//
 	// +k8s:validation:default="FreeRatioFirst"
 	// +k8s:validation:enum=["Random","FreeRatioFirst"]
-	AllocationStrategy string `json:"allocationStrategy,omitempty" protobuf:"bytes,2,opt,name=allocationStrategy"`
+	AllocationStrategy string `json:"allocationStrategy,omitempty" protobuf:"bytes,3,opt,name=allocationStrategy"`
 
 	// MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index
 	// behind it. Off, every request falls into one default tenant and the index degrades to a plain
@@ -338,77 +339,187 @@ type KVCacheBackendLeader struct {
 	MultiTenancy bool `json:"multiTenancy,omitempty" protobuf:"varint,4,opt,name=multiTenancy"`
 
 	// ExtraArgs passes flags this API does not enumerate straight through to the leader, after
-	// the derived ones. A key that collides with a flag rendered from a field above is refused
-	// at admission, because two sources for one flag make the rendered command ambiguous.
+	// the derived ones. Each entry is one flag token of its own, "-flag" or "-flag=value", and the
+	// entries render verbatim in the order written. An entry whose key — what precedes the first
+	// "=" once the leading dashes are off — collides with a flag rendered from a field above is
+	// refused at admission, because two sources for one flag make the rendered command ambiguous.
 	//
 	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
-	// rendered into the leader container's argv as -key=value, readable by anyone who can reach the
-	// Pod or the Deployment, for the life of the object. A credential does not belong here, and
-	// since this operator renders no flag that carries one, this field is the only way one arrives.
-	ExtraArgs map[string]string `json:"extraArgs,omitempty" protobuf:"bytes,3,rep,name=extraArgs"`
+	// rendered into the leader container's argv, readable by anyone who can reach the Pod or the
+	// Deployment, for the life of the object. A credential does not belong here, and since this
+	// operator renders no flag that carries one, this field is the only way one arrives.
+	//
+	// +listType=atomic
+	ExtraArgs []string `json:"extraArgs,omitempty" protobuf:"bytes,5,rep,name=extraArgs"`
 
-	// Offload turns on writing evicted keys to the members' local disk tier. It is the leader's
-	// half of a pair: the other half is members[].localDisk, which says where on each node those
-	// bytes go, and admission refuses either half alone because the store degrades on both
-	// mismatches without reporting either.
-	Offload *KVCacheBackendLeaderOffload `json:"offload,omitempty" protobuf:"bytes,5,opt,name=offload"`
+	// ExtraEnv passes environment variables this API does not enumerate straight through to the
+	// leader container. The leader reads a handful of its settings from the environment rather
+	// than from flags — the store's local snapshot path is one — and this is the hatch for
+	// whichever of those grows a use this API has no field for.
+	//
+	// A name this operator already renders is REFUSED at admission, for the same reason a
+	// colliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and
+	// leaves the winner to the runtime, so the collision would not even be reported.
+	//
+	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
+	// rendered into the leader container's environment, readable by anyone who can reach the Pod
+	// or the Deployment, for the life of the object. A credential does not belong here, and since
+	// this operator renders no variable that carries one, this field is the only way one arrives.
+	//
+	// +listType=map
+	// +listMapKey=name
+	ExtraEnv []InstanceEnvVar `json:"extraEnv,omitempty" protobuf:"bytes,6,rep,name=extraEnv"`
 }
 
-// KVCacheBackendLeaderHighAvailability turns leader election on, and carries nothing.
+// KVCacheBackendLeaderHighAvailability turns leader election on, and carries what a standby is
+// allowed to start from.
 //
 // DECLARING THE BLOCK IS THE SWITCH, and there is no key inside it to turn the feature back off.
 // An `enabled: false` beside `replicas: 3` would be a third state that admission would have to
 // adjudicate and every reader would have to remember, while presence has no such state. Lease
 // tuning — duration, renew deadline — can also be added here later without a breaking change.
-type KVCacheBackendLeaderHighAvailability struct{}
-
-// KVCacheBackendLeaderOffload turns the local disk tier on, leader side.
-//
-// Both settings are the leader's, and Enabled gates the feature outright: every offload entry point
-// returns early without it. A tier configured on the member alone is inert, which is why admission
-// requires the two halves together rather than letting one render on its own.
-type KVCacheBackendLeaderOffload struct {
-	// Enabled turns on offloading to the members' local disks. Unset and false both mean no
-	// offloading, and unset renders NO flag rather than an explicit false.
-	Enabled bool `json:"enabled,omitempty" protobuf:"varint,1,opt,name=enabled"`
-
-	// OnEvict defers the write to disk from the moment a key is stored to the moment it is evicted,
-	// so a key that is never evicted is never written to disk.
+type KVCacheBackendLeaderHighAvailability struct {
+	// Snapshot writes the leader's own metadata to storage both leader Pods can reach, so a standby
+	// that takes over starts from that baseline rather than from nothing.
 	//
-	// It REQUIRES Enabled and Enabled REQUIRES it, and admission refuses both directions. The store
-	// ANDs the two, so this alone is accepted, echoed back in the leader's own startup log, and then
-	// does nothing. Enabled alone selects write-through, which the store leaves unprotected: an
-	// object queued for offload is held in memory only on the deferred branch this field selects, so
-	// evicting without it destroys the sole replica of an object whose bucket has not been flushed.
-	OnEvict bool `json:"onEvict,omitempty" protobuf:"varint,2,opt,name=onEvict"`
+	// Without it a standby REPLICATES NOTHING. The store's operation log is the only other way to
+	// feed one, and it runs on a leadership backend this operator's image cannot carry, so the
+	// snapshot is the whole of what a failover can recover. What it recovers is bounded by
+	// IntervalSeconds: the cache comes back partially cold rather than entirely cold.
+	//
+	//   - The flags this renders arrive AS SOON AS THIS FIELD IS SET, unlike the election's, which
+	//     wait for Replicas to rise above one. A single leader restores its own last snapshot when
+	//     it restarts, which is worth having on its own — and it means a store image too old to
+	//     carry the snapshot subsystem refuses to start here instead of ignoring the field.
+	//   - A snapshot older than the running process is read back without a version check of any
+	//     kind. Moving the image BACKWARDS across a snapshot format change is outside what this API
+	//     makes any promise about.
+	Snapshot *KVCacheBackendLeaderSnapshot `json:"snapshot,omitempty" protobuf:"bytes,1,opt,name=snapshot"`
+
+	// MemberAddressing selects how a member is told to find the master once an election runs. Both
+	// forms reach the leader that is serving, by different routes, and they are rendered into the
+	// same one variable — so changing this rolls every member group.
+	//
+	//   - Lease: the member is handed the Lease's coordinates and reads the current holder itself.
+	//     This needs the member to talk to the API server, which is why the member image has to
+	//     carry the leadership backend at all.
+	//   - Service: the member is handed the leader Service's address, exactly as it is without high
+	//     availability. The Service publishes only READY endpoints and a standby deliberately is not
+	//     ready, so the address resolves to the serving leader — the open part is whether the
+	//     client's reconnect follows that endpoint across an election, and how long it takes.
+	//
+	// NEITHER FORM HAS BEEN MEASURED against the other. The default is Lease because that is what
+	// this operator has always rendered, not because it won a comparison, and the number that would
+	// settle it is how long a member cannot reach a master after the leader pod is deleted. Until
+	// that is measured on a cluster, treat Service as the one to try rather than the one to trust.
+	//
+	// +k8s:validation:default="Lease"
+	// +k8s:validation:enum=["Lease","Service"]
+	MemberAddressing string `json:"memberAddressing,omitempty" protobuf:"bytes,2,opt,name=memberAddressing"`
+}
+
+// KVCacheBackendLeaderSnapshot is where the leader's metadata baseline is kept, and how much of it.
+//
+// ONE STORAGE SHAPE, and it is the narrower one. The store also speaks S3, which would need an
+// endpoint, a bucket and a credential reference — a group of fields plus Secret handling, for a
+// capability a ReadWriteMany claim already covers inside the cluster. Widening to it later adds a
+// field beside this one and breaks nothing.
+//
+// There is no catalog setting either, because the catalog rides in the same storage: the store's
+// embedded catalog is constructed over the object store itself, so one claim carries both the
+// payloads and the index of which ones exist. The alternative it offers is a Redis, which would add
+// an external dependency to a feature whose whole premise is not having one.
+type KVCacheBackendLeaderSnapshot struct {
+	// PersistentVolumeClaimName names the claim the snapshot is written to and read from, resolved
+	// in the namespace this operator runs its workloads in — a KVCacheBackend is cluster-scoped and
+	// has no namespace of its own to resolve it against.
+	//
+	// REQUIRED: the claim must be ReadWriteMany. The serving leader writes the snapshot and a
+	// standby reads it, they are different Pods, and a claim only one of them can mount leaves the
+	// standby reading an empty directory with nothing logging it. Admission does not check this —
+	// the claim may not exist yet when the backend is created — so the reconciler checks it once it
+	// can see the claim and publishes the answer as a condition.
+	//
+	// EVERY KEY THE CACHE HOLDS IS NAMEABLE FROM THIS VOLUME. A snapshot is the master's metadata
+	// written as plain bytes with no encryption, so whoever can mount this claim can enumerate those
+	// keys, including their tenant names under MultiTenancy. The claim also outlives the backend:
+	// nothing here deletes it.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=253
+	PersistentVolumeClaimName string `json:"persistentVolumeClaimName" protobuf:"bytes,1,name=persistentVolumeClaimName"`
+
+	// IntervalSeconds is how long the store waits between snapshots, which is the same thing as HOW
+	// MUCH A FAILOVER LOSES: objects written since the last one are not in the baseline the standby
+	// starts from. Unset renders no flag and leaves the store's own default in place, so a default
+	// that moves upstream shows up as a behavior change to investigate rather than as a value this
+	// API silently re-asserted.
+	//
+	// +k8s:validation:minimum=1
+	IntervalSeconds *int32 `json:"intervalSeconds,omitempty" protobuf:"varint,2,opt,name=intervalSeconds"`
+
+	// RetentionCount is how many recent snapshots are kept, older ones being deleted as newer ones
+	// land. Its floor is one because the store refuses to start when snapshots are on and this is
+	// zero. Unset renders no flag, for the reason above.
+	//
+	// Keeping more than one is not spare capacity: a restore tries the stored snapshots in turn and
+	// falls back to an older one when a payload cannot be read, so the count is how many times that
+	// fallback can happen.
+	//
+	// +k8s:validation:minimum=1
+	RetentionCount *int32 `json:"retentionCount,omitempty" protobuf:"varint,3,opt,name=retentionCount"`
 }
 
 // KVCacheBackendTransport is the data plane the members use.
 type KVCacheBackendTransport struct {
 	// Protocol is the transport the members are ASKED to use. Auto resolves to TCP.
 	//
-	//   - TCP is the universal fallback. RDMA, EFA, HIP and Ascend are peers of one another, each a
-	//     fabric- or vendor-specific fast path rather than a spelling of TCP: EFA in particular is
-	//     reached through libfabric's SRD provider and has no RC queue pairs, so the RDMA transport
-	//     cannot drive it.
+	// THESE VALUES ARE NOT THE STORE'S OWN SPELLINGS. What is written here is translated before it
+	// reaches a member, and two of the eight change word entirely: CANN renders as ascend and ROCM
+	// as hip. So a member's environment, its logs, and status.members[].protocol below all report
+	// the store's lowercase spelling rather than the one written here, and comparing the two as
+	// strings finds a difference that is not one.
+	//
+	//   - TCP is the universal fallback. RDMA, EFA, CANN, ROCM, MUSA and MACA are peers of one
+	//     another, each a fabric- or vendor-specific fast path rather than a spelling of TCP: EFA in
+	//     particular is reached through libfabric's SRD provider and has no RC queue pairs, so the
+	//     RDMA transport cannot drive it. MUSA and MACA are intra-node IPC transports, not host
+	//     fabrics: they take no hostNetwork, no capabilities and no device resource.
 	//   - Whether a member came up on what it asked for is NOT visible through this API.
 	//     status.members[].protocol echoes this request back rather than reporting a result, so a
-	//     member that fell back to TCP still reads as the fabric there, while serving. Only the
-	//     member's own log says which transport the data plane installed.
+	//     member that fell back to the store's tcp still reads as the fabric there, while serving.
+	//     Only the member's own log says which transport the data plane installed.
 	//   - Auto is deliberately NOT a per-node probe that promotes itself to a faster fabric: a member
 	//     group renders one DaemonSet, whose single Pod template cannot carry a different transport
 	//     per node, and promoting to RDMA grants hostNetwork and two capabilities — a privilege is
 	//     requested, never inferred on an operator's behalf.
-	//   - Membership in this enum means MEASURED AS COMPILED into a published artifact, which is what
-	//     excludes the other ten strings that artifact's config parser accepts. It does not mean
-	//     measured to move bytes: only TCP has been exercised end to end.
+	//   - Membership in this enum means MEASURED AS COMPILED into an artifact a member can run, which
+	//     is what excludes the other eight strings that artifact's config parser accepts. It does not
+	//     mean measured to move bytes: only TCP has been exercised end to end. It also does not mean
+	//     this project publishes an image carrying it — MUSA and MACA are deliberately in the enum
+	//     with no variant in pack/mirrored-mooncake, so a group on either names its own image. A
+	//     value here with neither a project variant nor a working self-built image is what the rule
+	//     excludes; an absent variant on its own is not.
 	//   - A host fabric needs two things this API cannot check: the member image must carry the
-	//     runtime its transport links — CANN for Ascend, libfabric for EFA — and the NODE must run a
+	//     runtime its transport links — the CANN toolkit for CANN, libfabric for EFA — and the NODE must run a
 	//     device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.
 	//     Which resource the member asks for is deviceResourceName below.
+	//   - RESPELLING THIS ENUM CARRIES A RESIDUAL RISK, knowingly accepted, on the same terms as
+	//     Medium's. The values were once Auto, TCP, RDMA, EFA, HIP and Ascend; HIP and Ascend are
+	//     gone, replaced by the toolchain names ROCM and CANN, and the rest changed case. An object
+	//     storing one of the old values becomes undeletable, because schema validation runs on the
+	//     write path only: it reads back fine while every update is refused, the controller's
+	//     finalizer removal included. NO RELEASE IS EXPOSED — this type is absent from every tag
+	//     through v0.8.6, checked per tag — but a cluster tracking the default branch is, since that
+	//     branch carried the old spellings. Clearing it is the first shipping release's job: confirm
+	//     no leftover object exists, or write a recovery procedure. A conversion webhook is NOT the
+	//     answer here for the reason an alias map is not: the schema enum is the gate a stored object
+	//     meets first, so widening what admission accepts reaches nothing that the API server has
+	//     already refused.
 	//
 	// +k8s:validation:default="Auto"
-	// +k8s:validation:enum=["Auto","TCP","RDMA","EFA","HIP","Ascend"]
+	// +k8s:validation:enum=["Auto","TCP","RDMA","EFA","CANN","ROCM","MUSA","MACA"]
 	Protocol string `json:"protocol,omitempty" protobuf:"bytes,1,opt,name=protocol"`
 
 	// DeviceResourceName is the extended resource a host-fabric member asks one of, so the device
@@ -423,7 +534,7 @@ type KVCacheBackendTransport struct {
 	//     protocol, and setting the field overrides it.
 	//   - UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A fabric member naming no resource
 	//     mounts the device tree and requests nothing, so the cgroup refuses the open, the store
-	//     installs TCP, and the object still reads as the fabric it asked for. Naming one instead
+	//     installs the store's tcp, and the object still reads as the fabric it asked for. Naming one instead
 	//     keeps the member off a node that advertises none, which is the safer failure but not
 	//     always the wanted one, so both stay reachable.
 	//
@@ -449,14 +560,19 @@ type KVCacheBackendMember struct {
 	// +required
 	NodeSelector map[string]string `json:"nodeSelector" protobuf:"bytes,1,rep,name=nodeSelector"`
 
-	// Medium is what the SEGMENT this member group mounts is made of. One value: host memory.
+	// Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or
+	// device memory (VRAM).
 	//
-	// It is an identity rather than a choice, which is why the field survives with a single value
-	// exactly as spec.type does: a second medium widens this enum instead of being inferred from a
-	// field that is not there.
+	// It is a choice rather than an identity: the renderer splits on it. A DRAM member charges
+	// CapacityPerMember against the Pod's host memory; a VRAM member charges it against nothing,
+	// because its segment is device memory and claiming it is allocating it. What lets a VRAM member
+	// reach its device is declared and never inferred — SecurityContext, HostPaths and
+	// RuntimeClassName below, each on its own. The field stays immutable — a segment already mounted
+	// cannot change kind underneath the data in it — so the choice is made when the group is
+	// declared.
 	//
 	//   - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and
-	//     each is reached elsewhere: the first through localDisk below, NVMe-oF as a target
+	//     each is reached elsewhere: the first through localDisks below, NVMe-oF as a target
 	//     coordinate with no Pod, and the last two on the leader's own process.
 	//   - Narrowing the enum carries a RESIDUAL RISK, knowingly accepted. An object created with one
 	//     of those values, while this CRD was installed but the webhook was not, becomes undeletable:
@@ -466,17 +582,18 @@ type KVCacheBackendMember struct {
 	//     shipping release's job — confirm no leftover object exists, or write a recovery procedure.
 	//
 	// +required
-	// +k8s:validation:enum=["DRAM"]
+	// +k8s:validation:enum=["DRAM","VRAM"]
 	Medium string `json:"medium" protobuf:"bytes,2,name=medium"`
 
 	// CapacityPerMember sizes ONE member, not one node. It becomes the member's global segment size
 	// and is counted into the member Pod's own resource request, so a member that does not fit stays
 	// Pending instead of overcommitting the node.
 	//
-	//   - A group carrying LocalDisk needs at least one BUCKET here, which is the unit that tier is
-	//     written in. A bucket's bytes are held in this segment until the bucket is complete, so a
-	//     smaller segment never holds a bucket's worth at once and the tier stays empty under every
-	//     workload, which nothing else reports. A group with no tier has no such floor.
+	//   - A group declaring a tier in LocalDisks needs at least one BUCKET here, which is the unit
+	//     that tier is written in. A bucket's bytes are held in this segment until the bucket is
+	//     complete, so a smaller segment never holds a bucket's worth at once and the tier stays
+	//     empty under every workload, which nothing else reports. A group with no tier has no such
+	//     floor.
 	//   - The name is "per member" for a shape that is DECIDED AND NOT DONE: several members per
 	//     node, split by NUMA domain. Today one selected node runs one member.
 	//   - What would reopen that is a two-socket node reporting RDMA interfaces on more than one NUMA
@@ -492,18 +609,21 @@ type KVCacheBackendMember struct {
 	// memory request beside CapacityPerMember.
 	LocalBufferSize resource.Quantity `json:"localBufferSize,omitempty" protobuf:"bytes,4,opt,name=localBufferSize"`
 
-	// ExtraArgs passes config keys this API does not enumerate straight through to the member. It
-	// is keyed by CONFIG KEY rather than by environment-variable name — one namespace per side,
-	// each the one its own binary documents. A key that collides with one derived from a field
-	// above is refused at admission.
+	// ExtraArgs passes config keys this API does not enumerate straight through to the member. An
+	// entry is written as its own flag token, "-key=value", and renders as the entrypoint's own
+	// "-D key=value" override with the dashes gone — one namespace per side, each the one its own
+	// binary documents. A key that collides with one derived from a field above is refused at
+	// admission.
 	//
 	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
-	// rendered into the member container's argv as -D key=value, readable by anyone who can reach
-	// the Pod or the DaemonSet, for the life of the object. A credential does not belong here, and
-	// since this operator renders no flag that carries one, this field is the only way one arrives.
-	ExtraArgs map[string]string `json:"extraArgs,omitempty" protobuf:"bytes,5,rep,name=extraArgs"`
+	// rendered into the member container's argv, readable by anyone who can reach the Pod or the
+	// DaemonSet, for the life of the object. A credential does not belong here, and since this
+	// operator renders no flag that carries one, this field is the only way one arrives.
+	//
+	// +listType=atomic
+	ExtraArgs []string `json:"extraArgs,omitempty" protobuf:"bytes,5,rep,name=extraArgs"`
 
-	// ExtraEnvs passes environment variables this API does not enumerate straight through to the
+	// ExtraEnv passes environment variables this API does not enumerate straight through to the
 	// member container.
 	//
 	//   - It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders
@@ -516,45 +636,187 @@ type KVCacheBackendMember struct {
 	//     includes the tier's bucket thresholds, which this operator sizes itself; a tuner who needs
 	//     to move them needs a field, and this hatch is deliberately not it.
 	//
+	// The list is keyed by name, and the schema refuses two entries sharing one.
+	//
 	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
 	// rendered into the member container's environment, readable by anyone who can reach the Pod or
 	// the DaemonSet, for the life of the object. A credential does not belong here, and since this
 	// operator renders no variable that carries one, this field is the only way one arrives.
-	ExtraEnvs map[string]string `json:"extraEnvs,omitempty" protobuf:"bytes,8,rep,name=extraEnvs"`
+	//
+	// +listType=map
+	// +listMapKey=name
+	ExtraEnv []InstanceEnvVar `json:"extraEnv,omitempty" protobuf:"bytes,6,rep,name=extraEnv"`
 
 	// Image overrides the backend's Image for this member group only. Left unset, the group runs
 	// the backend's Image.
 	//
 	// A group's NodeSelector is what makes this necessary: two groups can select nodes of different
 	// accelerator vendors or generations, and the store's client ships as one wheel per vendor, each
-	// carrying the transports it was compiled with and the runtime it links. The transport itself is
-	// backend-wide, so this is NOT a per-group transport — it is the per-group runtime that one
-	// transport needs on differing hardware.
+	// carrying the transports it was compiled with and the runtime it links. The vendor runtime is
+	// also the medium's: a VRAM group needs a build with VRAM segments compiled in, which the stock
+	// CPU default is not.
 	//
 	// +k8s:validation:maxLength=512
-	Image string `json:"image,omitempty" protobuf:"bytes,6,opt,name=image"`
+	Image string `json:"image,omitempty" protobuf:"bytes,7,opt,name=image"`
 
-	// LocalDisk declares a directory on the nodes this group already selects and points the store
-	// client's offload keys at it. Left unset, the group is memory only.
+	// LocalDisks declares the local disk tiers this group's nodes contribute, one entry per host
+	// directory, and an empty list leaves the group memory only. Declaring an entry is what turns
+	// the tier on: the store's leader takes the switch from this list's presence, not from any
+	// field of its own.
 	//
 	//   - What the tier is written in is a BUCKET, and that is why this operator sizes one. The store
 	//     writes nothing until a bucket is full, by bytes or by object count, so under the store's
 	//     own thresholds — sized for a saturated production store — the tier stays empty while every
 	//     other signal looks healthy. The pair this operator renders instead is not in this API, and
-	//     members[].extraEnvs refuses those names.
+	//     members[].extraEnv refuses those names.
 	//   - It is a LAYER on this group rather than a group of its own, which is the store's shape: the
 	//     leader routes an offload task to the client that owns the key's memory replica, so a member
 	//     holding no memory segment is never chosen and would report a cold tier that never fills.
 	//   - To check what the tier actually holds rather than what it declared, read the leader's own
 	//     master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.
-	LocalDisk *KVCacheBackendMemberLocalDisk `json:"localDisk,omitempty" protobuf:"bytes,7,opt,name=localDisk"`
+	//   - At most ONE entry, and the bound is the status contract rather than any one renderer's
+	//     reach: status.capacity is a single pair of figures for the whole backend and cannot
+	//     attribute a tier's bytes to one disk, so two entries would describe neither. The same
+	//     sentence, at the group level, is why admission allows only one group to carry a list at
+	//     all — lift these together with that status shape or not at all.
+	//
+	// The list is keyed by path, and the schema refuses two entries naming one directory.
+	//
+	// +k8s:validation:maxItems=1
+	// +listType=map
+	// +listMapKey=path
+	LocalDisks []KVCacheBackendMemberLocalDisk `json:"localDisks,omitempty" protobuf:"bytes,8,rep,name=localDisks"`
+
+	// Transport declares the data plane this group uses, overriding the backend's
+	// spec.transport.protocol for this group only. Left unset, the group inherits the backend's.
+	//
+	// The override exists for the one thing two media do not agree on: a VRAM group reaching its
+	// peers over a fabric while the DRAM group beside it stays on TCP. Everything else about the
+	// fabric — the device a host-fabric member asks for — stays backend-wide, since it describes
+	// the nodes' fabric rather than one group.
+	Transport *KVCacheBackendMemberTransport `json:"transport,omitempty" protobuf:"bytes,9,opt,name=transport"`
+
+	// There is NO per-group device-resource field. A member's segment is one cudaMalloc on one
+	// device — measured upstream, the splits exist to stay under a transport's registration limit
+	// and nothing on that path selects a device — so asking the scheduler for one of an extended
+	// resource would take a whole accelerator away from inference to account for a fraction of one
+	// device's memory, on a node where the member cannot use the rest of what it took. A group sits
+	// alongside the engine on a device instead, sized against that engine's own memory fraction.
+
+	// SecurityContext is the member container's security context, merged ONTO the one the renderer
+	// derives from the group's effective protocol rather than replacing it.
+	//
+	// The merge is per field: a field set here wins, a field left unset keeps whatever the renderer
+	// put there, and capabilities.add is the UNION of both sides. The union is the part worth
+	// stating, because the alternative is silent: a host-fabric group needs IPC_LOCK to pin the
+	// memory it registers and SYS_RESOURCE to raise the limit that pinning hits, and replacing this
+	// value whole would drop both while leaving a container that starts, runs, and fails only at
+	// registration. Dropping one of the two is therefore not something this field can express; a
+	// group that must not hold them declares a protocol that does not ask for them.
+	//
+	// THIS IS ROOT ON THE NODE, and deliberately so: Privileged, or a RunAsUser of zero paired with
+	// a HostPaths entry, gives the member container what a process on the node has. The grant is
+	// not an escalation of who can make it — this object is cluster-scoped precisely because it is
+	// a privileged physical resource, so whoever can write one already holds the cluster. It is
+	// written here rather than inferred so that reading the object tells you what was granted.
+	SecurityContext *core.SecurityContext `json:"securityContext,omitempty" protobuf:"bytes,10,opt,name=securityContext"`
+
+	// HostPaths mounts directories or files from the selected nodes into the member container.
+	//
+	// It exists because a vendor's USER-SPACE DRIVER is not in the image and is not under /dev, so
+	// no device grant reaches it: an Ascend member needs the driver tree and the DCMI library from
+	// the node, and a container runtime that injects them is the other way to get there. Privileged
+	// alone does NOT cover this — it opens the node's device tree, which is where the device nodes
+	// are and is not where the libraries are.
+	//
+	// Entries are mounted in the order written. The volume backing each one is named from its
+	// POSITION rather than from anything declared here, so an entry can collide with neither
+	// another entry nor a volume the renderer owns.
+	//
+	// LocalDisks above is not this field spelled differently: that list declares tier capacity the
+	// leader routes offload tasks to, with a deregistration hook and a grace period derived from
+	// its presence. A directory mounted here is a mount and nothing more.
+	//
+	// +k8s:validation:maxItems=32
+	HostPaths []KVCacheBackendMemberHostPath `json:"hostPaths,omitempty" protobuf:"bytes,11,rep,name=hostPaths"`
+
+	// RuntimeClassName selects the container runtime the member's Pods run under, which is how a
+	// vendor runtime injects its driver libraries and device nodes without any of them being named
+	// here.
+	//
+	// It is DECLARED rather than looked up from the group's hardware, unlike the equivalent on a
+	// model deployment, and the reason is that a member group has no InstanceType to ask: it selects
+	// nodes by label, and a label does not carry a manufacturer this operator can map. A cluster
+	// whose vendor runtime is the default runtime needs nothing here.
+	//
+	// A name no RuntimeClass on the cluster carries makes the API server REJECT the Pod outright,
+	// so the member group stops at admission of its own Pods rather than starting without the
+	// runtime. That is the loud failure, and it is the one wanted here.
+	//
+	// +k8s:validation:pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+	// +k8s:validation:maxLength=253
+	RuntimeClassName string `json:"runtimeClassName,omitempty" protobuf:"bytes,12,opt,name=runtimeClassName"`
 }
 
-// KVCacheBackendMemberLocalDisk is the local SSD tier this member group's nodes contribute.
+// KVCacheBackendMemberHostPath is one directory or file taken from a selected node into the member
+// container.
 //
-// It is the member's half of a pair; the leader's half is leader.offload, and admission refuses
-// either half alone. Set on its own, the leader never enqueues an offload task and the disk stays
-// empty while the member reports its capacity, which is a tier that reads as present and is not.
+// Only a host path, and none of the other volume sources: what a member group needs from outside
+// its image is the node's own driver tree and device nodes. A ConfigMap, a Secret or a claim has no
+// use here that is known, and a source added without one is a validation surface nobody exercises.
+type KVCacheBackendMemberHostPath struct {
+	// Path is the absolute path on the node.
+	//
+	// +required
+	// +k8s:validation:pattern="^(/[^/]+)+$"
+	// +k8s:validation:maxLength=1024
+	Path string `json:"path" protobuf:"bytes,1,name=path"`
+
+	// MountPath is the absolute path inside the member container. It must duplicate neither another
+	// entry's mount path nor one the renderer owns.
+	//
+	// +required
+	// +k8s:validation:pattern="^(/[^/]+)+$"
+	// +k8s:validation:maxLength=1024
+	MountPath string `json:"mountPath" protobuf:"bytes,2,name=mountPath"`
+
+	// Type is the kubelet's host-path type check, applied before the mount.
+	//
+	// Left unset it is the EMPTY type, for which the kubelet's mounter returns immediately and looks
+	// at the path not at all — so a missing path becomes an empty directory in the container and the
+	// member starts anyway. Naming a type is what turns that into a FailedMount the Pod stops at.
+	//
+	// +k8s:validation:enum=["","DirectoryOrCreate","Directory","FileOrCreate","File","Socket","CharDevice","BlockDevice"]
+	Type *core.HostPathType `json:"type,omitempty" protobuf:"bytes,3,opt,name=type"`
+
+	// ReadOnly mounts it read-only. A driver tree is read by the member and written by nobody, so
+	// this is the right setting for one, and it is not the default because a device node under /dev
+	// is the other thing mounted here and that one is written.
+	ReadOnly bool `json:"readOnly,omitempty" protobuf:"varint,4,opt,name=readOnly"`
+}
+
+// KVCacheBackendMemberTransport is a member group's override of the backend's data plane. It
+// carries a protocol only: the device a host-fabric member asks for describes the nodes' fabric
+// rather than one group, so it stays on the backend.
+type KVCacheBackendMemberTransport struct {
+	// Protocol is the transport this group's members are ASKED to use, with the same values and
+	// the same Auto-resolves-to-TCP rule as the backend's spec.transport.protocol, which this
+	// field replaces for this group when set — including the residual risk that field records for
+	// the respelling, which applies to a stored value here the same way.
+	//
+	// +k8s:validation:default="Auto"
+	// +k8s:validation:enum=["Auto","TCP","RDMA","EFA","CANN","ROCM","MUSA","MACA"]
+	Protocol string `json:"protocol,omitempty" protobuf:"bytes,1,opt,name=protocol"`
+}
+
+// KVCacheBackendMemberLocalDisk is one local disk tier a member group's nodes contribute.
+//
+// An entry in a group's list is what turns the tier on, on both sides at once: the leader renders
+// the flags that send evicted keys to disk from the list's presence alone, and it renders them in
+// the deferred mode — a key's write lands at eviction time and never at storage time — because
+// that is the only mode the store protects. The other mode has no field and none is wanted: it
+// evicts an unflushed bucket's sole replica, so there is nothing to pair this declaration with and
+// nothing to forget.
 type KVCacheBackendMemberLocalDisk struct {
 	// Path is the directory on each selected node that holds this tier, mounted into the member
 	// container from the host at the same location. It is REQUIRED and has no default: choosing a
@@ -616,7 +878,7 @@ type KVCacheBackendMemberLocalDisk struct {
 	//
 	//   - "At that moment" is the whole of the promise. Nothing stores the selector's history and the
 	//     members are gone by the time cleanup runs, so narrowing NodeSelector or removing the
-	//     LocalDisk block before deleting the backend leaves the dropped nodes holding their content
+	//     LocalDisks entry before deleting the backend leaves the dropped nodes holding their content
 	//     with nothing reported about them. Delete the backend first and edit afterwards.
 	//   - WHAT IS REMOVED IS THE CONTENT, NOT THE DIRECTORY, which was made by whoever prepared the
 	//     node, may be a mount point, and carries an owner this operator did not choose.
@@ -717,7 +979,9 @@ type KVCacheBackendStatus struct {
 	PhaseMessage string `json:"phaseMessage,omitempty" protobuf:"bytes,2,opt,name=phaseMessage"`
 
 	// Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,
-	// CapacityObserved, Deletable. Every one is derived from an observed document.
+	// CapacityObserved, Deletable, RolloutComplete, and — each only where it has something to be a
+	// verdict about — SnapshotStorageShared and ElectionObserved. Every one is derived from an
+	// observed document.
 	//
 	// +patchMergeKey=type
 	// +patchStrategy=merge

@@ -38,7 +38,7 @@
 #              when the cluster has no InstanceType.
 #
 # Inputs:      All real, nothing mocked. One single-role ModelDeployment. Its role carries an
-#              explicit template.image because a CPU-only InstanceType has observed no accelerator
+#              explicit image because a CPU-only InstanceType has observed no accelerator
 #              and the operator can synthesize no engine image; nothing here reads what it runs.
 #              Override the image with E2E_MD_IMAGE, the InstanceType with E2E_MD_INSTANCE_TYPE, the
 #              recreate bound with E2E_SVC_RECREATE_BOUND.
@@ -226,8 +226,9 @@ metadata:
   name: ${MD}
   namespace: ${NS}
 spec:
-  engine: vllm
-  engineVersion: "0.11.0"
+  engine:
+    name: vllm
+    version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:
@@ -237,9 +238,8 @@ spec:
     - name: server
       instanceType: ${IT}
       replicas: 1
-      template:
-        image: ${IMAGE}
-        command: ["/pause"]
+      image: ${IMAGE}
+      command: ["/pause"]
 YAML
 )"
 # The gate is that the object is THERE, not that the apply printed one of three words. A substring

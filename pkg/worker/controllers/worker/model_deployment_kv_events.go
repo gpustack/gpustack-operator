@@ -47,7 +47,7 @@ func observeModelDeploymentKVEvents(
 		if ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindDecode {
 			continue
 		}
-		if role.Template != nil && len(role.Template.Command) > 0 {
+		if len(role.Command) > 0 {
 			ModelDeploymentConditionKVEventsPublishing.Unknown(holder,
 				modelDeploymentReasonKVEventsRoleUnmanaged,
 				fmt.Sprintf("role %q replaced the whole command line, so the operator cannot say whether it publishes cache events", role.Name))

@@ -23,10 +23,11 @@ type ModelDeploymentKVCacheApplyConfiguration struct {
 	// namespace — or naming the cluster-scoped pool, or a bare endpoint URL — is unrepresentable
 	// rather than merely rejected.
 	PoolRef *v1.LocalObjectReferenceApplyConfiguration `json:"poolRef,omitempty"`
-	// Connector selects how the engine's transfer configuration is produced. "auto" synthesizes it
-	// from the pool's backend type and the engine. There is no "none" — synthesizing nothing is
-	// reachable through a full command replacement, which also marks the role unmanaged and moves
-	// CacheAttached to Unknown.
+	// Connector names the connector implementation this deployment is configured for. The value is
+	// an identity the deployment carries, not a setting the operator derives: "mooncake" says which
+	// connector this is, and nothing reads the field to produce the configuration. There is no
+	// "none" — synthesizing nothing is reachable through a full command replacement, which also
+	// marks the role unmanaged and moves CacheAttached to Unknown.
 	//
 	// THE KV TRANSFER CONVERGES ON MOONCAKE, and that is why the enum has one value. Mooncake is the
 	// implementation that supports heterogeneous prefill and decode, which is the shape this API

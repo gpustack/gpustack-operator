@@ -136,13 +136,30 @@ locals {
     {
       for name, types in var.gpu_instance_types :
       "gpu-${name}" => {
-        ami_type       = "AL2023_x86_64_NVIDIA"
-        max_size       = 1
-        min_size       = 0
-        instance_types = types
-        key_name       = aws_key_pair.accessor.key_name
-        tags           = local.node_group_tags
-        network_interfaces = [
+        ami_type     = "AL2023_x86_64_NVIDIA"
+        desired_size = var.gpu_node_count
+        # EKS accepts a desired size of zero but refuses a maximum below one, so a
+        # count of zero parks the group at no nodes rather than failing the apply.
+        # That is what lets an idle group cost nothing without being destroyed and
+        # recreated, which would take the placement group and its subnet with it.
+        max_size           = max(var.gpu_node_count, 1)
+        min_size           = 0
+        instance_types     = types
+        key_name           = aws_key_pair.accessor.key_name
+        tags               = local.node_group_tags
+        labels             = var.efa_enabled ? { "gpustack.ai/efa" = "true" } : {}
+        enable_efa_support = var.efa_enabled
+        enable_efa_only    = false
+        # Same rule as the cpu group: a cluster placement group is scoped to one
+        # availability zone, and an EFA interface cannot carry a public address, so
+        # under EFA the group takes a private subnet. It is the same private subnet
+        # the cpu group takes, on purpose: both placement groups must land in one
+        # availability zone for cross-node RDMA, which does not reach across zones.
+        # Not a copy-paste slip.
+        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[0]] : null
+        # Under EFA the module substitutes its own interface set, sized and indexed for
+        # the instance's network cards, so this group declares none of its own.
+        network_interfaces = var.efa_enabled ? [] : [
           {
             associate_public_ip_address = true
           }

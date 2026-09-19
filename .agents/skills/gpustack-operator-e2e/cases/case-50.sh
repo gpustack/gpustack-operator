@@ -149,7 +149,7 @@ role_block() {
   printf '  - name: %s\n' "$1"
   [ -n "$2" ] && printf '    kind: %s\n' "$2"
   printf '    instanceType: %s\n    replicas: %s\n' "$IT" "$3"
-  printf '    template:\n      image: %s\n      command: ["/pause"]\n' "$IMAGE"
+  printf '    image: %s\n    command: ["/pause"]\n' "$IMAGE"
 }
 
 # The apply's output is KEPT, in APPLY_OUT. Discarding it turns a schema or webhook refusal -- a very
@@ -165,8 +165,9 @@ metadata:
   name: ${name}
   namespace: ${NS}
 spec:
-  engine: vllm
-  engineVersion: "0.11.0"
+  engine:
+    name: vllm
+    version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:

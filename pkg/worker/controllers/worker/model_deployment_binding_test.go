@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -45,9 +46,9 @@ func newRenderBinding(mutate ...func(*workercore.KVCachePoolBinding)) *workercor
 	kvcpb := &workercore.KVCachePoolBinding{
 		ObjectMeta: meta.ObjectMeta{Name: "shared-kv", Namespace: "team-a"},
 		Spec: workercore.KVCachePoolBindingSpec{
-			PoolRef:      workercore.KVCachePoolBindingPoolReference{Name: "shared"},
-			Domain:       workercore.KVCachePoolBindingDomain{Name: "chat", BlockSize: 256, Dtype: "bfloat16"},
-			QuotaCeiling: resource.MustParse("100Gi"),
+			PoolRef: workercore.KVCachePoolBindingPoolReference{Name: "shared"},
+			Domain:  workercore.KVCachePoolBindingDomain{Name: "chat", BlockSize: 256, Dtype: "bfloat16"},
+			Quota:   workercore.KVCachePoolBindingQuota{Ceiling: resource.MustParse("100Gi")},
 		},
 		Status: workercore.KVCachePoolBindingStatus{
 			Phase:        KVCachePoolPhaseReady,
@@ -289,8 +290,13 @@ func TestModelDeploymentBinding_ConvergenceIsNotGatedOnTheBinding(t *testing.T) 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"qwen-server-0", "qwen-server-1"}, replicaNames(t, cli),
+	names := replicaNames(t, cli)
+	require.Len(t, names, 2,
 		"the replicas are rendered although no binding could be resolved")
+	for _, name := range names {
+		require.True(t, strings.HasPrefix(name, "qwen-server-"),
+			"a replica carries the rendered prefix and a server-assigned suffix: %s", name)
+	}
 
 	got := getModelDeployment(t, cli)
 	assert.True(t, ModelDeploymentConditionDomainRegistered.IsFalse(got))
@@ -585,10 +591,11 @@ func TestResolveModelDeploymentConnection(t *testing.T) {
 			require.NotNil(t, got)
 			assert.Equal(t, "master:50051", got.MasterServerAddress)
 			assert.Equal(t, tc.wantDomain, got.Domain)
-			// Already in the artifact's own spelling, lowercased and Auto-resolved by the package
-			// that owns the backend. This field is documented as arriving mapped, and nothing here
-			// maps it a second time.
-			assert.Equal(t, tc.wantProt, got.Protocol)
+			// Already in the artifact's own spelling, which is lowercase where the API's is not, with
+			// Auto already resolved by the package that owns the backend. The fixture's backend
+			// declares no member groups, so the one
+			// offer is the backend-wide value; which one an engine is handed is synthesis's call.
+			assert.Equal(t, []string{tc.wantProt}, got.Protocols)
 		})
 	}
 }

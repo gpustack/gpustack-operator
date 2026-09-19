@@ -97,6 +97,15 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 			"address to point %q at; retry once the pool reports one", pool.Name, engine)
 	}
 
+	// The engine is handed the protocol of the FIRST group whose effective transport its store
+	// backend accepts, in declaration order — the match rule inject.MatchTransport documents. A
+	// pool whose groups serve nothing the engine accepts is refused here, at admission, rather
+	// than started on a transport its connector raises on.
+	protocol, err := inject.MatchTransport(engine, mooncake.MemberProtocols(backend))
+	if err != nil {
+		return nil, err
+	}
+
 	return &resolution{
 		// The reuse domain goes to the renderer only while the master can hold it apart: a master
 		// with no tenant ledger collapses every tenant name into its default one, so forwarding the
@@ -108,7 +117,7 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 			Domain: injectableDomain(binding, backend, pool),
 			Connection: inject.Connection{
 				MasterAddress: pool.Status.ClientEndpoint,
-				Protocol:      mooncake.MemberProtocol(backend),
+				Protocol:      protocol,
 			},
 		},
 		Isolation: isolation{

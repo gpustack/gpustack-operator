@@ -25,8 +25,8 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 )
 
-// twoRoleDeployment is the P/D shape: prefill 2 and decode 2 on one instanceType, four Pods in one
-// group.
+// twoRoleDeployment is the P/D shape: prefill 2 and decode 2 on one instanceType, four Pods in two
+// groups of two.
 func twoRoleDeployment(mutate ...func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
 	return newRenderDeployment(append([]func(*workercore.ModelDeployment){
 		func(md *workercore.ModelDeployment) {
@@ -62,6 +62,19 @@ func groupTotals(t *testing.T, cli ctrlcli.Client) map[string]int {
 	return totals
 }
 
+// replicaRoleCounts collects how many live replicas each role attributes to itself, so a case can
+// state the shape it expects without naming server-assigned names.
+func replicaRoleCounts(t *testing.T, cli ctrlcli.Client) map[string]int {
+	t.Helper()
+
+	counts := make(map[string]int)
+	for _, pod := range replicaPods(t, cli) {
+		counts[modelDeploymentPodRole(&pod)]++
+	}
+
+	return counts
+}
+
 // TestModelDeployment_GroupIsCreatedInOnePass is F2's first obligation.
 //
 // Kueue composes NO Workload for a group it has not fully seen: fewer runnable Pods than the
@@ -76,12 +89,11 @@ func TestModelDeployment_GroupIsCreatedInOnePass(t *testing.T) {
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{
-		"qwen-decode-0", "qwen-decode-1", "qwen-prefill-0", "qwen-prefill-1",
-	}, replicaNames(t, cli), "every role's every replica, in the first pass")
+	assert.Equal(t, map[string]int{"decode": 2, "prefill": 2}, replicaRoleCounts(t, cli),
+		"every role's every replica, in the first pass")
 
-	assert.Equal(t, map[string]int{"4": 4}, groupTotals(t, cli),
-		"and all four declare the same total, which is what makes them one group")
+	assert.Equal(t, map[string]int{"2": 4}, groupTotals(t, cli),
+		"each Pod declares its own role's count, and each group's members agree on theirs")
 }
 
 // TestModelDeployment_GroupMembersAgreeAndAreOwned covers the metadata the group is made of, read
@@ -96,11 +108,11 @@ func TestModelDeployment_GroupMembersAgreeAndAreOwned(t *testing.T) {
 	require.Len(t, pods, 4)
 
 	byRole := map[string]int{}
+	byGroup := map[string]int{}
 	for i := range pods {
 		pod := &pods[i]
 
-		assert.Equal(t, "qwen", pod.Labels[kueuepodconst.GroupNameLabel],
-			"%s must be in the deployment's one group", pod.Name)
+		byGroup[pod.Labels[kueuepodconst.GroupNameLabel]]++
 		assert.Equal(t, modelDeploymentPodRole(pod),
 			pod.Annotations[kueuepodconst.RoleHashAnnotation],
 			"%s: the label status reads a Pod's role from and the PodSet identity must name the "+
@@ -114,14 +126,19 @@ func TestModelDeployment_GroupMembersAgreeAndAreOwned(t *testing.T) {
 
 	assert.Equal(t, map[string]int{"prefill": 2, "decode": 2}, byRole,
 		"two PodSets of two, not one of four")
+	require.Len(t, byGroup, 2, "two roles on one instanceType are two groups")
+	for group, n := range byGroup {
+		assert.Equal(t, 2, n, "group %s holds its own role's two and nobody else's", group)
+	}
 }
 
 // TestModelDeployment_ReplicasChangeRebuildsTheGroup is F10, and its middle assertion is the point.
 //
-// A replicas change moves the group's declared total, which every Pod carries and which Kueue
-// requires them all to agree on. So the change cannot be a per-replica rollout: while any Pod still
-// declares the old total, adding one that declares the new one produces a group Kueue refuses to
-// compose -- and refuses SILENTLY, with no Workload and no condition naming the cause.
+// A replicas change moves that role's group's declared total, which every Pod of the group carries
+// and which Kueue requires them all to agree on. So the change cannot be a per-replica rollout:
+// while any Pod still declares the old total, adding one that declares the new one produces a group
+// Kueue refuses to compose -- and refuses SILENTLY, with no Workload and no condition naming the
+// cause.
 //
 // THE INTERMEDIATE STATE IS WHAT IS ASSERTED, not only the end state. The end state is identical
 // whether the rebuild waited or not, so a test that only checked it would pass against exactly the
@@ -131,7 +148,7 @@ func TestModelDeployment_ReplicasChangeRebuildsTheGroup(t *testing.T) {
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	require.Equal(t, map[string]int{"4": 4}, groupTotals(t, cli))
+	require.Equal(t, map[string]int{"2": 4}, groupTotals(t, cli))
 
 	grown := getModelDeployment(t, cli)
 	grown.Spec.Roles[0].Replicas = 3
@@ -139,22 +156,25 @@ func TestModelDeployment_ReplicasChangeRebuildsTheGroup(t *testing.T) {
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Empty(t, replicaNames(t, cli),
-		"the old group goes before the new one arrives; a fifth Pod created here would declare 5 "+
-			"beside four Pods declaring 4")
+	assert.Equal(t, map[string]int{"decode": 2}, replicaRoleCounts(t, cli),
+		"the moved role's group goes before the new one arrives; a new prefill created here would "+
+			"declare 3 beside two declaring 2 -- and the sibling role's Pods are nobody's business")
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Equal(t, map[string]int{"5": 5}, groupTotals(t, cli),
-		"and the rebuilt group agrees on the new total")
-	assert.Equal(t, []string{
-		"qwen-decode-0", "qwen-decode-1",
-		"qwen-prefill-0", "qwen-prefill-1", "qwen-prefill-2",
-	}, replicaNames(t, cli))
+	assert.Equal(t, map[string]int{"3": 3, "2": 2}, groupTotals(t, cli),
+		"the rebuilt group agrees on the new count and the untouched one on its old one")
+	assert.Equal(t, map[string]int{"decode": 2, "prefill": 3}, replicaRoleCounts(t, cli))
 }
 
-// TestModelDeployment_RoleSetChangeRebuildsTheGroup covers the other axis: adding a role and
-// removing one both move the total, so both rebuild.
+// TestModelDeployment_RoleSetChangeRebuildsTheGroup covers the other axis: removing a role takes
+// that role's group down at once, and the survivor's Pods turn over ONE AT A TIME.
+//
+// The survivor's turnover is the sole-rename the group naming performs: a two-role deployment's
+// groups are all hashed, and the one remaining role's group becomes the readable deployment name,
+// so every existing Pod carries a group label the spec no longer forms and its fingerprint no
+// longer matches. The removed role's Pods go in the first pass; the survivor's roll out on the
+// ordinary cadence, one departure at a time, and the group settles once the last one landed.
 func TestModelDeployment_RoleSetChangeRebuildsTheGroup(t *testing.T) {
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
@@ -168,11 +188,23 @@ func TestModelDeployment_RoleSetChangeRebuildsTheGroup(t *testing.T) {
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Empty(t, replicaNames(t, cli), "removing a role rebuilds the group")
+	assert.Equal(t, map[string]int{"prefill": 1}, replicaRoleCounts(t, cli),
+		"the removed role's group goes in the first pass, and one survivor rolls: the sole role's "+
+			"group is renamed by becoming the only one -- a readable name -- so its Pods are "+
+			"outdated and turn over on the rollout cadence")
 
-	_, err = reconcileModelDeployment(t, cli)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"qwen-prefill-0", "qwen-prefill-1"}, replicaNames(t, cli))
+	// The survivor's turnover completes; the group settles under the readable name alone.
+	for pass := 0; pass < 6; pass++ {
+		if _, err = reconcileModelDeployment(t, cli); err != nil {
+			break
+		}
+		if got := replicaRoleCounts(t, cli); got["prefill"] == 2 && len(groupNameCounts(t, cli)) == 1 {
+			break
+		}
+	}
+	assert.Equal(t, map[string]int{"prefill": 2}, replicaRoleCounts(t, cli))
+	assert.Equal(t, map[string]int{"qwen": 2}, groupNameCounts(t, cli),
+		"the settled group is the readable one, whole and alone")
 	assert.Equal(t, map[string]int{"2": 2}, groupTotals(t, cli))
 }
 
@@ -205,11 +237,11 @@ func TestModelDeployment_GroupIsIdempotent(t *testing.T) {
 // group is short of its total already, and deleting its survivors would widen exactly the gap that
 // keeps Kueue from composing the Workload.
 //
-// GONE IS NOT DEPARTING, and the difference is the whole reason both cases exist. This fixture's Pod
-// is already absent, which is what the fake client's Delete produces and what a live cluster reaches
-// only after Kueue's finalizer has been released. Getting there from an operator's `kubectl delete
-// pod` goes through the state the departing-replica case covers, and that one does rebuild -- so this
-// is not the assertion that a hand-deleted replica is replaced in isolation on a real cluster.
+// GONE IS NOT DEPARTING, and the difference is what the two cases cover. This fixture's Pod is
+// already absent, which is what the fake client's Delete produces and what a live cluster reaches
+// only after Kueue's finalizer has been released; getting there from an operator's `kubectl delete
+// pod` goes through the state the departing-replica case covers, where the replacement waits for
+// the ask rather than rebuilding anything.
 func TestModelDeployment_HandDeletedReplicaIsRecreatedWithoutARebuild(t *testing.T) {
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
@@ -217,16 +249,27 @@ func TestModelDeployment_HandDeletedReplicaIsRecreatedWithoutARebuild(t *testing
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
+	// decode loses one replica outright -- no finalizer, so it is GONE rather than departing, and its
+	// group is merely short rather than resizing.
+	var goneName string
+	for _, pod := range replicaPods(t, cli) {
+		if modelDeploymentPodRole(&pod) == "decode" {
+			goneName = pod.Name
+
+			break
+		}
+	}
+	require.NotEmpty(t, goneName, "the fixture must hold a decode replica to lose")
 	gone := new(core.Pod)
 	require.NoError(t, cli.Get(context.Background(),
-		ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen-decode-1"}, gone))
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: goneName}, gone))
 	require.NoError(t, cli.Delete(context.Background(), gone))
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
 	assert.Len(t, replicaNames(t, cli), 4, "the survivors stay and the missing one comes back")
-	assert.Equal(t, map[string]int{"4": 4}, groupTotals(t, cli))
+	assert.Equal(t, map[string]int{"2": 4}, groupTotals(t, cli))
 }
 
 // TestModelDeploymentPodGroupIncomplete_IsAReportedStateNotASilentOne is T9, at the level this tree
@@ -260,7 +303,9 @@ func TestModelDeploymentPodGroupIncomplete_IsAReportedStateNotASilentOne(t *test
 			Create: func(
 				ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption,
 			) error {
-				if pod, ok := obj.(*core.Pod); ok && pod.Name == "qwen-decode-1" && !failed {
+				// The replica reaches the API server nameless, so the failed create is picked out by
+				// its rendered prefix: the first decode replica the pass submits.
+				if pod, ok := obj.(*core.Pod); ok && pod.GenerateName == "qwen-decode-" && !failed {
 					failed = true
 
 					return kerrors.NewInternalError(errors.New("the API server said no"))
@@ -293,7 +338,7 @@ func TestModelDeploymentPodGroupIncomplete_IsAReportedStateNotASilentOne(t *test
 	assert.True(t, ModelDeploymentConditionQuotaReserved.IsFalse(stored))
 	assert.Equal(t, "PodGroupIncomplete",
 		ModelDeploymentConditionQuotaReserved.GetReason(stored))
-	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(stored), "3 of 4",
+	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(stored), "1 of 2",
 		"the message carries have/want, so a reader knows how far short it is")
 }
 
@@ -317,7 +362,9 @@ func TestModelDeploymentPodGroupIncomplete_ClearsWhenTheGroupCompletes(t *testin
 			Create: func(
 				ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption,
 			) error {
-				if pod, ok := obj.(*core.Pod); ok && pod.Name == "qwen-decode-1" && !failed {
+				// The replica reaches the API server nameless, so the failed create is picked out by
+				// its rendered prefix: the first decode replica the pass submits.
+				if pod, ok := obj.(*core.Pod); ok && pod.GenerateName == "qwen-decode-" && !failed {
 					failed = true
 
 					return kerrors.NewInternalError(errors.New("the API server said no"))
@@ -347,20 +394,23 @@ func TestModelDeploymentPodGroupIncomplete_ClearsWhenTheGroupCompletes(t *testin
 		"and what it is waiting on now is Kueue, which nothing here runs")
 }
 
-// TestModelDeployment_ADepartingReplicaTakesTheWorkloadWithIt covers the wait that had no end.
+// TestModelDeployment_ADepartingReplicaKeepsTheWorkloadAndWaitsForTheAsk covers the departure path
+// the generated names opened.
 //
-// A replica asked to leave cannot leave on its own. Kueue holds a finalizer on every Pod of a group
-// and releases it when the group finishes or when the Workload is deleted, and the group these render
-// is annotated serving -- which Kueue defines as never finished. The Workload is owned by that same
-// replica without a controller reference, so garbage collection is blocked behind it in turn.
-// Measured on a live cluster before the fix: a template edit left one Pod Succeeded and undeletable,
-// its replacement uncreatable because the name was taken, and the reconciler reissuing the same delete
-// every two seconds with nothing erroring.
+// A replica asked to leave cannot leave on its own: Kueue holds a finalizer on every Pod of a group
+// annotated serving -- which Kueue defines as never finished -- and releases the departed one only
+// once a replacement carrying the same role hash exists. The old design forced the release by
+// deleting the Workload, and Kueue answers a deleted Workload by stopping every member; the
+// replacement path instead keeps the Workload, reads Kueue's WaitingForReplacementPods ask off it,
+// and creates the replacement beside the departing member -- which is exactly what releases it.
 //
-// THE FIXTURE IS THE FINALIZER. Without it the fake client removes the Pod on Delete, the reconciler
-// sees a missing replica rather than a departing one, and the case passes against the very
-// implementation it exists to rule out.
-func TestModelDeployment_ADepartingReplicaTakesTheWorkloadWithIt(t *testing.T) {
+// THE FIXTURE IS THE FINALIZER. Without it the fake client removes the Pod on Delete, the
+// reconciler sees a missing replica rather than a departing one, and a reconciler that still
+// demolished the group on every departure would pass this case unread. Measured on a live cluster,
+// before the generated names: a template edit left one Pod undeletable, its replacement
+// uncreatable because the name was taken, and the reconciler reissuing the same delete every two
+// seconds with nothing erroring.
+func TestModelDeployment_ADepartingReplicaKeepsTheWorkloadAndWaitsForTheAsk(t *testing.T) {
 	ctx := context.Background()
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
@@ -368,37 +418,52 @@ func TestModelDeployment_ADepartingReplicaTakesTheWorkloadWithIt(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
-	leaving := new(core.Pod)
-	require.NoError(t, cli.Get(ctx,
-		ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen-decode-1"}, leaving))
-	leaving.Finalizers = []string{kueuepodconst.PodFinalizer}
-	require.NoError(t, cli.Update(ctx, leaving))
-	require.NoError(t, cli.Delete(ctx, leaving))
-
-	// The Workload Kueue composed for the group: plain owner references to the members, no controller
-	// reference, which is the shape the operator has to find it by.
-	wl := &kueue.Workload{}
-	wl.Name, wl.Namespace = "qwen", "team-a"
+	// decode loses one member the way a live cluster loses it: the delete lands, Kueue's finalizer
+	// holds the Pod, and it stays on the books as a departing member.
+	var departingName string
 	for _, pod := range replicaPods(t, cli) {
-		wl.OwnerReferences = append(wl.OwnerReferences, meta.OwnerReference{
-			APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: pod.UID,
-		})
+		if modelDeploymentPodRole(&pod) == "decode" {
+			departingName = pod.Name
+
+			break
+		}
 	}
+	require.NotEmpty(t, departingName, "the fixture must hold a decode replica to lose")
+	departing := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: departingName}, departing))
+	departing.Finalizers = []string{kueuepodconst.PodFinalizer}
+	require.NoError(t, cli.Update(ctx, departing))
+	require.NoError(t, cli.Delete(ctx, departing))
+
+	// The Workload Kueue composed for the groups: plain owner references to the members, no
+	// controller reference, which is the shape the operator has to find it by.
+	wl := askingGroupWorkload(replicaPods(t, cli), false)
 	require.NoError(t, cli.Create(ctx, wl))
 
+	// The pass that finds the departure creates nothing: Kueue has not yet said the departed member
+	// stopped counting, and a replacement created now would read to Kueue as one member over the
+	// count -- its answer is to evict the replacement itself.
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	err = cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}, new(kueue.Workload))
-	assert.True(t, kerrors.IsNotFound(err),
-		"the Workload is the only thing that releases the replica's finalizer, so it goes: %v", err)
+	require.NoError(t,
+		cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: wl.Name}, new(kueue.Workload)),
+		"the Workload stays: releasing the departed member no longer costs the group")
+	assert.Len(t, replicaNames(t, cli), 4,
+		"the departing member is still held, and nothing is created beside it before the ask")
 
-	// The survivors are deleted by the reconciler; the departing one stays because nothing here
-	// releases Kueue's finalizer -- there is no Kueue in this tree, which is exactly the state the
-	// live cluster was stuck in. Asserting the SET rather than "fewer than four" is what says no fifth
-	// Pod was created beside a member that cannot leave.
-	assert.Equal(t, []string{"qwen-decode-1"}, replicaNames(t, cli),
-		"the departure brings the group down, and nothing is built back while a member is still held")
+	// Kueue reads the departure and asks; the pass creates the replacement beside the held member,
+	// which is what releases it -- and the sibling role's group is nobody's cost to pay here.
+	setGroupAsk(t, cli, true)
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]int{"decode": 3, "prefill": 2}, replicaRoleCounts(t, cli),
+		"the departing member still carries its role's label; beside it are its survivor and the "+
+			"replacement, and the sibling role paid nothing")
+	require.Len(t, replicaNames(t, cli), 5,
+		"the departing member is still on the books -- only Kueue releases it -- and the replacement "+
+			"was created beside it")
 }
 
 // TestModelDeployment_NoDepartureLeavesTheWorkloadAlone is the other half, and without it the case
@@ -431,39 +496,37 @@ func TestModelDeployment_NoDepartureLeavesTheWorkloadAlone(t *testing.T) {
 	assert.Len(t, replicaNames(t, cli), 4)
 }
 
-// TestModelDeployment_RedistributingReplicasRebuildsTheGroup is the case a total-only predicate
-// cannot see.
+// TestModelDeployment_RedistributingReplicasRebuildsEachRolesOwnGroup is the case a type-keyed
+// group cannot survive.
 //
-// prefill 2 / decode 2 becoming prefill 1 / decode 3 leaves the group's declared total at four, so a
-// rebuild predicate reading only the sum answers "not resizing" — and the converge loop then trims a
-// prefill and creates a decode in the SAME pass, which is precisely the mixed group the rebuild
-// exists to avoid. The end state is reached anyway, one pass later, because a terminating replica is
-// itself a rebuild trigger; that is what makes this failure invisible from the end state alone.
-func TestModelDeployment_RedistributingReplicasRebuildsTheGroup(t *testing.T) {
+// prefill 2 / decode 2 becoming prefill 1 / decode 3 moves counts between roles under a
+// deployment-wide sum that does not move. One role per group makes each role's total the thing that
+// moved, so BOTH groups rebuild -- each on its own predicate -- and no group ever holds a departing
+// role's replica beside an arriving one's. An implementation still keyed on the instanceType reads
+// one unchanged sum, rebuilds nothing, and lets the converge loop trim and create in place: exactly
+// the mixed group the rebuild exists to avoid.
+func TestModelDeployment_RedistributingReplicasRebuildsEachRolesOwnGroup(t *testing.T) {
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	require.Equal(t, map[string]int{"4": 4}, groupTotals(t, cli))
+	require.Len(t, replicaNames(t, cli), 4)
 
 	moved := getModelDeployment(t, cli)
 	moved.Spec.Roles[0].Replicas = 1
 	moved.Spec.Roles[1].Replicas = 3
 	require.NoError(t, cli.Update(context.Background(), moved))
-	require.Equal(t, int32(4), modelDeploymentPodGroups(moved)[0].TotalCount,
-		"the premise: the total did not move, so only the per-role share can carry the change")
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	assert.Empty(t, replicaNames(t, cli),
-		"the whole group goes; creating the new decode beside a departing prefill is the mixed state")
+		"both groups go: each role's total moved, and each group is its role's alone")
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Equal(t, []string{
-		"qwen-decode-0", "qwen-decode-1", "qwen-decode-2", "qwen-prefill-0",
-	}, replicaNames(t, cli))
-	assert.Equal(t, map[string]int{"4": 4}, groupTotals(t, cli))
+	assert.Equal(t, map[string]int{"decode": 3, "prefill": 1}, replicaRoleCounts(t, cli))
+	assert.Equal(t, map[string]int{"1": 1, "3": 3}, groupTotals(t, cli),
+		"each rebuilt group declares its own role's new count")
 }
 
 // TestModelDeployment_RenamingARoleWithoutChangingCountsRebuilds covers the other shape change that
@@ -481,7 +544,9 @@ func TestModelDeployment_RenamingARoleWithoutChangingCountsRebuilds(t *testing.T
 
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
-	assert.Empty(t, replicaNames(t, cli), "a renamed role is a different PodSet, so the group is rebuilt")
+	assert.Equal(t, map[string]int{"decoder": 2, "prefill": 2}, replicaRoleCounts(t, cli),
+		"a renamed role is a different group, so its replicas are rebuilt -- and only its: the "+
+			"sibling's Pods agree with everything they declare and never move")
 }
 
 // newRenderInstanceTypeB is the SECOND InstanceType, and it is what makes every two-group case
@@ -527,9 +592,8 @@ func TestModelDeployment_TwoTypesAreCreatedAsTwoGroupsInOnePass(t *testing.T) {
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{
-		"qwen-decode-0", "qwen-decode-1", "qwen-prefill-0", "qwen-prefill-1",
-	}, replicaNames(t, cli), "every group's every replica, in the first pass")
+	assert.Equal(t, map[string]int{"decode": 2, "prefill": 2}, replicaRoleCounts(t, cli),
+		"every group's every replica, in the first pass")
 
 	// Two group names, two replicas each -- and each group's total counts only its own role, which is
 	// the number Kueue waits for before it composes that group's Workload.
@@ -588,7 +652,7 @@ func TestModelDeployment_OneGroupsChangeLeavesTheOtherAlone(t *testing.T) {
 	require.NoError(t, err)
 
 	// prefill's group comes down whole; decode's is untouched, still holding the very same Pods.
-	assert.Equal(t, []string{"qwen-decode-0", "qwen-decode-1"}, replicaNames(t, cli),
+	assert.Equal(t, map[string]int{"decode": 2}, replicaRoleCounts(t, cli),
 		"only the group whose shape moved is rebuilt")
 
 	for _, pod := range replicaPods(t, cli) {
@@ -668,9 +732,17 @@ func TestModelDeployment_ARebuildDoesNotDelayAnotherGroupsRepair(t *testing.T) {
 
 	// decode loses one replica outright -- no finalizer, so it is GONE rather than departing, and its
 	// group is merely short rather than resizing.
+	var goneName string
+	for _, pod := range replicaPods(t, cli) {
+		if modelDeploymentPodRole(&pod) == "decode" {
+			goneName = pod.Name
+
+			break
+		}
+	}
+	require.NotEmpty(t, goneName, "the fixture must hold a decode replica to lose")
 	gone := new(core.Pod)
-	require.NoError(t, cli.Get(ctx,
-		ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen-decode-1"}, gone))
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: goneName}, gone))
 	require.NoError(t, cli.Delete(ctx, gone))
 
 	// ...while prefill's shape moves, which rebuilds prefill's group and nothing else.
@@ -681,7 +753,7 @@ func TestModelDeployment_ARebuildDoesNotDelayAnotherGroupsRepair(t *testing.T) {
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"qwen-decode-0", "qwen-decode-1"}, replicaNames(t, cli),
+	assert.Equal(t, map[string]int{"decode": 2}, replicaRoleCounts(t, cli),
 		"decode's missing replica is created in this pass; holding it would leave that group short "+
 			"of its own total for a rebuild it has nothing to do with")
 }

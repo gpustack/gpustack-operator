@@ -42,6 +42,11 @@ listens on IPv6 and, on a dual-stack host, on both.
 own. The leader then stays not-ready rather than reporting the cause, so `0.0.0.0` and `::` are the
 only two values worth setting.
 
+`leader.extraEnv` is the same hatch for the environment: every entry renders after the derived
+variables, and a name the renderer derives — the pod's own identity variables and the snapshot path —
+is refused with the same message a member gets. The schema keys the list by `name`, so one name
+cannot carry two values.
+
 `replicas` defaults to `1`, and `5` is the ceiling in the **webhook** and in the schema alike: only
 one leader ever serves, so further replicas are spare processes rather than capacity. More than one
 requires [`highAvailability`](#high-availability) and is refused by the webhook without it, naming
@@ -108,9 +113,9 @@ marker, and the readiness gate above is what turns it into an endpoint decision.
 ## High availability
 
 Set `leader.highAvailability` and the leader elects through a **Kubernetes Lease** — once `replicas`
-exceeds one; below that the field is inert (see above). The field has no
-settings — the Lease carries the leader's own object name, `<backend>-leader`, in this operator's
-namespace — and its presence is the switch:
+exceeds one; below that the election is inert (see above). The election itself needs no settings —
+the Lease carries the leader's own object name, `<backend>-leader`, in this operator's namespace —
+so an empty block is the switch:
 
 ```yaml
 spec:
@@ -136,10 +141,14 @@ A lease-less image is not refused outright: at one replica the election flags ar
 such an image runs a single-leader backend even with `highAvailability` set — the flags arrive only
 when `replicas` rises past 1, which is where the missing backend would fail the leader at startup.
 
-⛔ **A member group on `RDMA`, `HIP` or `Ascend` cannot run under high availability today.** Those
+⛔ **A member group on `RDMA`, `ROCM` or `CANN` cannot run under high availability today.** Those
 transports need a vendor runtime `mirrored-mooncake` does not carry, and the vendor build does not
 carry the leadership backend — the two axes are independent, so covering them means rebuilding each
 variant.
+
+`MUSA` and `MACA` are not on that list because this project builds no variant for either, by
+intent: a group on one of them runs an image you built, so whether it also carries the leadership
+backend is a property of your build rather than of anything here.
 
 `EFA` is the one fabric not on that list: it needs no vendor runtime, only libfabric, so
 `mirrored-mooncake` compiles it in — the image build proves the transport installed by running a
@@ -152,7 +161,8 @@ alternative of leaving members on the leader Service address and letting readine
 
 ⛔ **`enable_oplog` is refused in `leader.extraArgs`**, and not as a policy choice: the store's
 operation log requires the etcd backend, which cannot be compiled together with the Lease backend, so
-the flag produces a leader that refuses to start. Standbys rebuild from snapshot and remounts instead.
+the flag produces a leader that refuses to start. Standbys rebuild from the snapshot below and from
+member remounts instead.
 
 ⛔ **`etcd_endpoints` is refused as well, and it is out of reach twice over.** The store reads it only
 where `ha_backend_connstring` is empty, which the election never leaves empty, and the etcd backend it
@@ -190,10 +200,63 @@ leader it is following.
 address, so the client reads the holder and follows it across an election without restarting. Where
 no election runs — the field unset, or one replica — the value is unchanged.
 
-**The Service address is not known to be wrong under HA** — a standby is not ready, so the Service
-already resolves to the serving leader. What is unmeasured is whether a member's reconnect follows
-the endpoint when an election moves it. The Lease is what this operator renders until that is
-measured; see #279 above.
+**`leader.highAvailability.memberAddressing` chooses between that and the Service address**, and
+defaults to `Lease`, which is the `k8s://` form above. `Service` hands members the leader Service
+instead — a standby is not ready, so the Service already resolves to whichever replica is serving.
+
+| value | what a member is given | what it pays |
+|---|---|---|
+| `Lease` (default) | the Lease's coordinates, read by the client itself | the member must reach the API server, so its image must carry the leadership backend |
+| `Service` | `<backend>-leader.<namespace>.svc:50051` | endpoint propagation after an election, which nothing here has measured |
+
+⛔ **Neither has been measured against the other.** The default is `Lease` because that is what this
+operator has always rendered, not because it won a comparison; the figure that would settle it is how
+long a member cannot reach a master after the leader Pod is deleted. Treat `Service` as the one to
+try. Changing the value rolls every member group, because it rewrites `MOONCAKE_MASTER`.
+
+**A snapshot is what a standby starts from, and without one it starts from nothing.** Set
+`leader.highAvailability.snapshot` and the serving replica writes the master's metadata to storage on
+an interval; a standby that takes over restores from the last one instead of serving an empty cache:
+
+```yaml
+spec:
+  connection:
+    managed:
+      leader:
+        replicas: 3
+        highAvailability:
+          snapshot:
+            persistentVolumeClaimName: mooncake-snapshots
+            intervalSeconds: 600
+            retentionCount: 2
+```
+
+⛔ **The claim must be `ReadWriteMany`, and nothing refuses one that is not.** The replica that serves
+writes the snapshot and a standby reads it, and they are different Pods — so on a claim only one of
+them can mount, the primary writes where the standby cannot read and no log line says so.
+
+Admission cannot check it, because the claim often does not exist yet when the backend is created.
+The reconciler checks once it can see the claim and reports `SnapshotStorageShared`. **The backend
+reaches `Ready` either way.**
+
+**What a failover loses is `intervalSeconds` wide.** Objects written since the last snapshot are not
+in the baseline, so the cache comes back partially cold rather than entirely cold. Raising the
+interval trades snapshot cost for a wider loss; `retentionCount` is how many older snapshots a
+restore can fall back to when a payload cannot be read.
+
+⛔ **The claim outlives the backend, and every key in the cache is nameable from it.** A snapshot is
+the master's metadata written as plain bytes with no encryption, so whoever can mount the claim can
+enumerate the keys the cache holds — including their tenant names under multi-tenancy. Nothing here
+deletes the claim when the backend goes away.
+
+⛔ **`memory_allocator` is refused in `leader.extraArgs` because of this feature**, under a name that
+mentions no part of it: the store builds its snapshot manager only under its default allocator,
+silently and with no log line either way. Any other value would leave the flags rendered, the claim
+mounted and this object stating a snapshot that is never written again.
+
+**The flags arrive as soon as the field is set, unlike the election's.** A single leader restores its
+own last snapshot when it restarts, which is worth having on its own — so a store image too old to
+carry the snapshot subsystem refuses to start here rather than ignoring the field.
 
 **A missing grant fails differently on each side, and one of them is silent.** A leader that cannot
 reach the Lease retries every second forever — liveness is ungated, so nothing restarts and the
@@ -204,8 +267,8 @@ store problem.
 ---
 
 **See also** — [KV Cache Backend](backend.md) (the object this leader belongs to, its members, and
-what status reports) · [KV Cache Local Disk Tier](local-disk-tier.md) (the leader's half of the
-offload pair) · [High Availability Operations](../operation/high-availability.md) (the replica knob
+what status reports) · [KV Cache Local Disk Tier](local-disk-tier.md) (the disk tier, whose offload
+flags this leader derives from the members' declaration) · [High Availability Operations](../operation/high-availability.md) (the replica knob
 per control-plane component) · [Settings & Environment Variables](../settings.md) (the
 `kv-cache-backend-image` Setting)
 

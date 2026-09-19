@@ -9,28 +9,14 @@ package v1alpha1
 type ModelDeploymentSpecApplyConfiguration struct {
 	// Model names what the engine serves.
 	Model *ModelDeploymentModelApplyConfiguration `json:"model,omitempty"`
-	// Engine selects the inference engine, which decides which argument keys the operator owns and
-	// which carrier the transfer configuration arrives on. Ownership is per (engine, key): a key one
-	// engine owns is an ordinary user argument on another.
+	// Engine is the inference engine this deployment runs, which decides which argument keys the
+	// operator owns and which carrier the transfer configuration arrives on. Ownership is per
+	// (engine, key): a key one engine owns is an ordinary user argument on another.
 	//
-	// It does NOT decide the connector, which follows the role's hardware instead: the connector is a
-	// property of the accelerator backend, so an Ascend pool and an NVIDIA pool running this engine
-	// get different ones.
-	Engine *string `json:"engine,omitempty"`
-	// EngineVersion is the engine's own version, e.g. "0.25.1" for vllm or "0.5.18" for sglang.
-	//
-	// - It is free-form and UNVALIDATED, by decision: the user guarantees that the version and the
-	// driver each role's hardware installed are aligned. A gate would need the runner's release
-	// matrix compiled into the operator, and the failure it would prevent is already legible as
-	// an ImagePullBackOff on a tag that does not exist.
-	// - It is per deployment rather than per role, which is what lets one version assemble a
-	// DIFFERENT image for each role: the backend half of the tag comes from the role's own
-	// InstanceType, so a prefill role on NVIDIA and a decode role on Ascend need no extra field.
-	// Published version sets do NOT overlap across every backend, so one version has to name a
-	// tag that exists for each backend the roles land on.
-	// - The lower bound is not decoration: `required` makes the key present, not the value
-	// non-empty, and an empty version assembles a malformed tag naming something never typed.
-	EngineVersion *string `json:"engineVersion,omitempty"`
+	// It does NOT decide the connector, which follows the role's hardware instead: the connector is
+	// a property of the accelerator backend, so an Ascend pool and an NVIDIA pool running this
+	// engine get different ones.
+	Engine *ModelDeploymentEngineApplyConfiguration `json:"engine,omitempty"`
 	// KVCache optionally attaches the deployment to a shared KV cache pool. A managed vLLM
 	// prefill/decode deployment without it still uses its router's point-to-point connector; it does
 	// not render the shared-store connector or its client configuration.
@@ -65,14 +51,21 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// individually addressable through their own Services either way, so a deployment written before
 	// this field existed serves exactly as it did.
 	Router *ModelDeploymentRouterApplyConfiguration `json:"router,omitempty"`
-	// DirectTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode
+	// KVTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode
 	// pair.
+	//
+	// THIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and
+	// both may be set at once. The gate that turns this leg on — a managed llm-d router, vLLM, not
+	// Ascend, and a role kind of prefill or decode — reads none of spec.kvCache, and when both are
+	// set the two are synthesized into ONE connector and one --kv-transfer-config: a deployment may
+	// share a pool for its blocks AND hand them from prefill to decode directly, at the same time.
 	//
 	// THE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from
 	// the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this
 	// one is engine to engine, and the two planes declare separately. A deployment can render
-	// this leg with no pool attached at all, which is why the field cannot live under KVCache.
-	DirectTransfer *ModelDeploymentDirectTransferApplyConfiguration `json:"directTransfer,omitempty"`
+	// this leg with no pool attached at all, which is another reason the field cannot live under
+	// KVCache.
+	KVTransfer *ModelDeploymentKVTransferApplyConfiguration `json:"kvTransfer,omitempty"`
 }
 
 // ModelDeploymentSpecApplyConfiguration constructs a declarative configuration of the ModelDeploymentSpec type for use with
@@ -92,16 +85,8 @@ func (b *ModelDeploymentSpecApplyConfiguration) WithModel(value *ModelDeployment
 // WithEngine sets the Engine field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Engine field is set to the value of the last call.
-func (b *ModelDeploymentSpecApplyConfiguration) WithEngine(value string) *ModelDeploymentSpecApplyConfiguration {
-	b.Engine = &value
-	return b
-}
-
-// WithEngineVersion sets the EngineVersion field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the EngineVersion field is set to the value of the last call.
-func (b *ModelDeploymentSpecApplyConfiguration) WithEngineVersion(value string) *ModelDeploymentSpecApplyConfiguration {
-	b.EngineVersion = &value
+func (b *ModelDeploymentSpecApplyConfiguration) WithEngine(value *ModelDeploymentEngineApplyConfiguration) *ModelDeploymentSpecApplyConfiguration {
+	b.Engine = value
 	return b
 }
 
@@ -134,10 +119,10 @@ func (b *ModelDeploymentSpecApplyConfiguration) WithRouter(value *ModelDeploymen
 	return b
 }
 
-// WithDirectTransfer sets the DirectTransfer field in the declarative configuration to the given value
+// WithKVTransfer sets the KVTransfer field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the DirectTransfer field is set to the value of the last call.
-func (b *ModelDeploymentSpecApplyConfiguration) WithDirectTransfer(value *ModelDeploymentDirectTransferApplyConfiguration) *ModelDeploymentSpecApplyConfiguration {
-	b.DirectTransfer = value
+// If called multiple times, the KVTransfer field is set to the value of the last call.
+func (b *ModelDeploymentSpecApplyConfiguration) WithKVTransfer(value *ModelDeploymentKVTransferApplyConfiguration) *ModelDeploymentSpecApplyConfiguration {
+	b.KVTransfer = value
 	return b
 }

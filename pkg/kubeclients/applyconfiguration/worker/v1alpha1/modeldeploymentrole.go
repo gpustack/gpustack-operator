@@ -4,6 +4,8 @@ package v1alpha1
 
 import (
 	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
+	corev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/core/v1"
+	v1 "k8s.io/api/core/v1"
 )
 
 // ModelDeploymentRoleApplyConfiguration represents a declarative configuration of the ModelDeploymentRole type for use
@@ -11,10 +13,25 @@ import (
 //
 // ModelDeploymentRole is one engine role and its replicas.
 //
-// Replicas and InstanceType are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to admission and
-// scheduling — Kueue PodSet counts and flavor selection — so a template that could shadow them would
-// make the admission feasibility check read a ledger that does not match reality. The template may
-// override container content and nothing else.
+// Replicas, InstanceType and Resources are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to
+// admission and scheduling — Kueue PodSet counts, flavor selection and the request the queue
+// accounts — so a container field able to shadow any of them would make the admission feasibility
+// check read a ledger that does not match reality. That is why the container fields below carry no
+// resource request at all: the accelerator half belongs in Resources and the rest is derived from
+// the InstanceType, and neither can be overridden here.
+//
+// EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Each role forms its
+// own Kueue pod group, whose members cannot leave one at a time, so that one group is rebuilt whole
+// while every sibling role keeps serving. A `replicas` change on this role does the same.
+//
+// ADDING OR REMOVING A ROLE REACHES FURTHER THAN THE ROLE IT NAMES. A deployment whose roles are one
+// names that group after the DEPLOYMENT, and a deployment with more than one names each group after
+// its ROLE, so going from one role to two renames the first role's group and rebuilds it as well.
+//
+// A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A REBUILD. The replica that left is replaced on
+// its own, under a new name, while its siblings keep serving — see
+// docs/reference/model-deployment.md under "One group per role" and "Rollout is a rolling
+// replacement".
 type ModelDeploymentRoleApplyConfiguration struct {
 	// Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.
 	//
@@ -27,6 +44,15 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// backstop for that marker being dropped. Two roles sharing a name would collapse into one
 	// PodSet whose count is their sum, which is a silent merge rather than an error.
 	Name *string `json:"name,omitempty"`
+	// Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name
+	// is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable
+	// by typing a string is one typo away from silently changing. Two roles may share a kind and
+	// differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and
+	// two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a
+	// deployment declaring one would render a role no reader of the rendered configuration could
+	// reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
+	// so such a deployment renders exactly as it did.
+	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
 	// Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of
 	// every role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.
 	//
@@ -45,45 +71,56 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit
 	// resources scaled by the requested card count, so they are not expressible here at all — a
 	// stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by
-	// a template either.
+	// the container fields below either.
 	//
 	// InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
 	// a replica wants is a property of the model being served, so two deployments on one InstanceType
 	// routinely want different counts.
 	Resources *ModelDeploymentRoleResourcesApplyConfiguration `json:"resources,omitempty"`
+	// Image is the container image to run. Leaving it empty is the ordinary case: the operator then
+	// synthesizes one from the pool's accelerator backend, the observed runtime version and the
+	// requested engine.
+	Image *string `json:"image,omitempty"`
+	// ImagePullPolicy is the pull policy for Image.
+	ImagePullPolicy *v1.PullPolicy `json:"imagePullPolicy,omitempty"`
+	// ImagePullSecrets are the secrets used to pull Image.
+	ImagePullSecrets []corev1.LocalObjectReferenceApplyConfiguration `json:"imagePullSecrets,omitempty"`
+	// Privileged runs the container privileged.
+	Privileged *bool `json:"privileged,omitempty"`
+	// Ports are the container ports to expose in addition to the engine's own. They do not
+	// reserve or select the transfer engine's runtime port window.
+	Ports []ModelDeploymentPortApplyConfiguration `json:"ports,omitempty"`
+	// AdditionalVolumes are volumes mounted into the container alongside the operator's own.
+	AdditionalVolumes []ModelDeploymentAdditionalVolumeApplyConfiguration `json:"additionalVolumes,omitempty"`
+	// Command replaces the whole argv, which is the TAKE-OVER tier: the user owns the whole
+	// command line, the operator synthesizes no engine argument and no client environment, the
+	// role is marked unmanaged and CacheAttached goes to Unknown. Arguments fold into Command;
+	// there is deliberately no Args, because a second append tier beside ExtraArgs would have no
+	// defined precedence.
+	//
+	// IT IS FROZEN AFTER CREATION, because it decides whether the operator configures this role at
+	// all: a role that supplies one is taken over by its author, which changes cache injection and
+	// what status can claim. The rest of the container fields are how the build is fetched, shaped
+	// and tuned, and stay editable.
+	Command []string `json:"command,omitempty"`
 	// ExtraArgs is appended AFTER the operator-synthesized arguments. An entry naming a key the
 	// operator owns is REJECTED rather than merged: a silent merge produces two values for one
 	// connector argument and no way to tell which one won.
+	//
+	// The name stays ExtraArgs rather than Args because args would read as the whole argv, which is
+	// what Command means; the two tiers differ in whether the operator contributes anything at all.
+	//
+	// THIS LIST IS NOT READ WHEN COMMAND IS SET: appending to an argv the role's author replaced
+	// would put words into a command line they own, so the take-over tier takes the whole line and
+	// this field does nothing beside it.
 	ExtraArgs []string `json:"extraArgs,omitempty"`
 	// Env is appended the same way and refused on the same terms. Keys the operator merely defaults
 	// are not owned: a user's value wins there and no rejection follows.
-	Env []InstanceEnvVarApplyConfiguration `json:"env,omitempty"`
-	// Template overlays the rendered container: the operator renders first and merges this on top.
 	//
-	// - A non-empty Command is the TAKE-OVER tier — the user owns the whole argv, the operator
-	// synthesizes no engine arguments and no client environment, the role is marked unmanaged and
-	// CacheAttached goes to Unknown. Arguments fold into Command; there is deliberately no Args,
-	// because a second append tier beside ExtraArgs would have no defined precedence.
-	// - It is MUTABLE, unlike the one an Instance carries, which is what makes a rollout possible
-	// at all.
-	// - EDITING IT RESTARTS EVERY ROLE, not just the replicas this template belongs to: every
-	// replica of the deployment is one member of a single Kueue pod group whose members cannot
-	// leave one at a time, so the group is rebuilt whole. The same is true of a `replicas` change,
-	// of adding or removing a role, and of a departure this operator did not initiate — see
-	// docs/reference/model-deployment.md under "Rollout is recreate".
-	// - Its Resources are refused at admission. The accelerator request belongs in the role's own
-	// Resources and the rest is derived from the InstanceType, so a template able to shadow either
-	// would make the admission feasibility check read a ledger that does not match reality.
-	Template *ModelDeploymentTemplateApplyConfiguration `json:"template,omitempty"`
-	// Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name
-	// is free-form and identifies the PodSet, while this selects behavior, and a semantic reachable
-	// by typing a string is one typo away from silently changing. Two roles may share a kind and
-	// differ in name ONLY where that kind is Server, because a pair of servers is a set of equals and
-	// two prefillers are not: nothing that consumes these roles expresses a second prefiller, so a
-	// deployment declaring one would render a role no reader of the rendered configuration could
-	// reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
-	// so such a deployment renders exactly as it did.
-	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
+	// There is ONE list here rather than an overlay beside it: the former second tier was appended
+	// and refused for owned names on exactly the same terms, so the nesting expressed a precedence
+	// that never existed.
+	Env []ModelDeploymentEnvVarApplyConfiguration `json:"env,omitempty"`
 }
 
 // ModelDeploymentRoleApplyConfiguration constructs a declarative configuration of the ModelDeploymentRole type for use with
@@ -97,6 +134,14 @@ func ModelDeploymentRole() *ModelDeploymentRoleApplyConfiguration {
 // If called multiple times, the Name field is set to the value of the last call.
 func (b *ModelDeploymentRoleApplyConfiguration) WithName(value string) *ModelDeploymentRoleApplyConfiguration {
 	b.Name = &value
+	return b
+}
+
+// WithKind sets the Kind field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Kind field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithKind(value workerv1alpha1.ModelDeploymentRoleKind) *ModelDeploymentRoleApplyConfiguration {
+	b.Kind = &value
 	return b
 }
 
@@ -124,6 +169,79 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithResources(value *ModelDeploy
 	return b
 }
 
+// WithImage sets the Image field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Image field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithImage(value string) *ModelDeploymentRoleApplyConfiguration {
+	b.Image = &value
+	return b
+}
+
+// WithImagePullPolicy sets the ImagePullPolicy field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ImagePullPolicy field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithImagePullPolicy(value v1.PullPolicy) *ModelDeploymentRoleApplyConfiguration {
+	b.ImagePullPolicy = &value
+	return b
+}
+
+// WithImagePullSecrets adds the given value to the ImagePullSecrets field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the ImagePullSecrets field.
+func (b *ModelDeploymentRoleApplyConfiguration) WithImagePullSecrets(values ...*corev1.LocalObjectReferenceApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithImagePullSecrets")
+		}
+		b.ImagePullSecrets = append(b.ImagePullSecrets, *values[i])
+	}
+	return b
+}
+
+// WithPrivileged sets the Privileged field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Privileged field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithPrivileged(value bool) *ModelDeploymentRoleApplyConfiguration {
+	b.Privileged = &value
+	return b
+}
+
+// WithPorts adds the given value to the Ports field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Ports field.
+func (b *ModelDeploymentRoleApplyConfiguration) WithPorts(values ...*ModelDeploymentPortApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithPorts")
+		}
+		b.Ports = append(b.Ports, *values[i])
+	}
+	return b
+}
+
+// WithAdditionalVolumes adds the given value to the AdditionalVolumes field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the AdditionalVolumes field.
+func (b *ModelDeploymentRoleApplyConfiguration) WithAdditionalVolumes(values ...*ModelDeploymentAdditionalVolumeApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithAdditionalVolumes")
+		}
+		b.AdditionalVolumes = append(b.AdditionalVolumes, *values[i])
+	}
+	return b
+}
+
+// WithCommand adds the given value to the Command field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Command field.
+func (b *ModelDeploymentRoleApplyConfiguration) WithCommand(values ...string) *ModelDeploymentRoleApplyConfiguration {
+	for i := range values {
+		b.Command = append(b.Command, values[i])
+	}
+	return b
+}
+
 // WithExtraArgs adds the given value to the ExtraArgs field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the ExtraArgs field.
@@ -137,28 +255,12 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithExtraArgs(values ...string) 
 // WithEnv adds the given value to the Env field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the Env field.
-func (b *ModelDeploymentRoleApplyConfiguration) WithEnv(values ...*InstanceEnvVarApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
+func (b *ModelDeploymentRoleApplyConfiguration) WithEnv(values ...*ModelDeploymentEnvVarApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
 	for i := range values {
 		if values[i] == nil {
 			panic("nil value passed to WithEnv")
 		}
 		b.Env = append(b.Env, *values[i])
 	}
-	return b
-}
-
-// WithTemplate sets the Template field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Template field is set to the value of the last call.
-func (b *ModelDeploymentRoleApplyConfiguration) WithTemplate(value *ModelDeploymentTemplateApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
-	b.Template = value
-	return b
-}
-
-// WithKind sets the Kind field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Kind field is set to the value of the last call.
-func (b *ModelDeploymentRoleApplyConfiguration) WithKind(value workerv1alpha1.ModelDeploymentRoleKind) *ModelDeploymentRoleApplyConfiguration {
-	b.Kind = &value
 	return b
 }

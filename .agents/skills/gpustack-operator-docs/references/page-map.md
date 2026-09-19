@@ -110,7 +110,7 @@ links here. It was split out when that page hit both the line and the `##` cap.
 
 ## `docs/kv-cache/local-disk-tier.md`
 
-**Owns** — the `members[].localDisk` layer end to end: the two halves admission pairs, the rendering
+**Owns** — the `members[].localDisks` layer end to end: the two halves admission pairs, the rendering
 table, the bucket that is the tier's write unit and the three bounds that follow from it, the
 eviction algebra and its four refusals, the five path rules and the host directory's ownership, the
 tier's immutability and its one exit, and the `hostPath` cost nothing accounts for.
@@ -141,6 +141,18 @@ fields, the quota policy file, the zero-mounted-members condition, and what a fu
 backend and links to it. And never the *enforcement* the Binding does not do: the one paragraph saying
 it is a grant and not an isolation boundary belongs here, but the mechanism a real boundary would need
 is not this page's to design.
+
+## `docs/kv-cache/walkthrough.md`
+
+**Owns** — the ORDER, and nothing else: the four objects a working shared cache takes, one pasteable
+manifest each, the check to run after each one, and the three configurations that read as working and
+are not. It is the delivery surface for `KVCacheBackend` and `ModelDeployment` together, and the only
+page that answers "what do I type first".
+
+**Never** — a field's semantics. Every explanation here is one clause plus a link to the page that
+owns it; a second account of `quota.ceiling` or of the snapshot's access modes is how the two drift
+apart. If a paragraph here grows past a clause, it belongs on `backend.md`, `leader.md` or `pool.md`
+and this page should link to it instead.
 
 ## `docs/accelerator-requests.md`
 

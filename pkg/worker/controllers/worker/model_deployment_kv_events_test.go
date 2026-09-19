@@ -39,14 +39,14 @@ func TestObserveModelDeploymentKVEventsPublishing(t *testing.T) {
 		{
 			name: "publisher_disabled",
 			deployment: routedModelDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Engine = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 			}),
 			status: meta.ConditionFalse, reason: modelDeploymentReasonKVEventsPublisherDisabled,
 		},
 		{
 			name: "producer_unmanaged",
 			deployment: routedModelDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Roles[0].Template.Command = []string{"/bin/custom-server"}
+				md.Spec.Roles[0].Command = []string{"/bin/custom-server"}
 			}),
 			status: meta.ConditionUnknown, reason: modelDeploymentReasonKVEventsRoleUnmanaged,
 		},

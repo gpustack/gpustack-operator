@@ -191,6 +191,42 @@ func TestMemberMasterEntry_TakesOneOfTwoForms(t *testing.T) {
 		"-ha_backend_connstring="+kuberess.SystemNamespaceName+"/mooncake-dram-leader")
 }
 
+// TestMemberMasterEntry_AddressingSelectsBetweenTheTwoForms pins the field, its default, and the
+// one thing the field must NOT move.
+//
+// The default is asserted from an object the schema has NOT defaulted -- an empty string -- because
+// that is what the renderer actually sees when a webhook is absent, and a renderer that treated an
+// empty value as "Service" would quietly rewrite every existing backend's members.
+//
+// The member's account stays put under both forms, and that is deliberate rather than an oversight:
+// the two entries exist to be compared on a cluster, and a comparison whose arms differ in two
+// things cannot attribute what it measures.
+func TestMemberMasterEntry_AddressingSelectsBetweenTheTwoForms(t *testing.T) {
+	addressed := func(value string) *workercore.KVCacheBackend {
+		return haBackend(func(kvcb *workercore.KVCacheBackend) {
+			kvcb.Spec.Connection.Managed.Leader.HighAvailability.MemberAddressing = value
+		})
+	}
+
+	lease := "k8s://" + kuberess.SystemNamespaceName + "/mooncake-dram-leader"
+	service := LeaderServiceHost(testBackend()) + ":50051"
+
+	assert.Equal(t, lease, MemberMasterEntry(addressed("")),
+		"an unset value is an object that never went through admission, not a request to move")
+	assert.Equal(t, lease, MemberMasterEntry(addressed(MemberAddressingLease)))
+	assert.Equal(t, service, MemberMasterEntry(addressed(MemberAddressingService)),
+		"the Service publishes only ready endpoints, and a standby is not ready")
+
+	accountFor := func(value string) string {
+		return RenderMemberDaemonSet(addressed(value), 0, "mooncake:v0.3.13").
+			Spec.Template.Spec.ServiceAccountName
+	}
+	assert.NotEmpty(t, accountFor(MemberAddressingLease),
+		"the equality below is worth nothing if both arms render no account at all")
+	assert.Equal(t, accountFor(MemberAddressingLease), accountFor(MemberAddressingService),
+		"the account does not move with the entry: one variable, or the cluster trip proves nothing")
+}
+
 // TestRenderLeaderRBAC_IsPerBackend pins that two backends do not share an account.
 //
 // The failure it guards is sameness, which a single-object assertion cannot see: a name built from

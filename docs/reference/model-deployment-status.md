@@ -56,8 +56,8 @@ for longer.** The liveness gate's failure threshold is wider than the readiness 
 > **Why** — the two cost different things: losing readiness withdraws a replica from the Service and
 > is undone by answering again, while a restart throws away a model that took the startup budget to
 > load. Equal thresholds would collapse them into one event. And without the liveness gate such a
-> replica has no way back at all, since this operator deletes a replica only for a group rebuild, a
-> scale-down or a spec change — never because it went quiet.
+> replica has no way back at all, since this operator deletes a replica only to rebuild a resizing
+> group, to shed a surplus, or to turn over an outdated one — never because it went quiet.
 
 **The operator tells the engine where to listen.** It renders `--host 0.0.0.0` and `--port <the port
 the Service targets>` into the engine's own command line, so the address traffic is sent to and the
@@ -114,10 +114,14 @@ cache not attached" is a real and actionable state.
 | `False` | `BindingNotReady` | wait for it, or look at the pool it points at |
 | `False` | `BindingDeleting` | find who deleted it; the replicas keep writing to the domain they attached to |
 
-**`QuotaReserved`** — whether **every one of** the deployment's Workloads holds Kueue quota. Roles on
-one instanceType are one Workload; roles on several are one per group. `True` is therefore an answer
-about the whole set and not about whichever Workload sorts first, because half a deployment holding
-quota is not the deployment holding quota.
+**`QuotaReserved`** — whether **every one of** the deployment's Workloads holds Kueue quota. Every
+role is its own group with its own Workload, so a deployment of N roles is N Workloads. `True` is
+therefore an answer about the whole set and not about whichever Workload sorts first, because half a
+deployment holding quota is not the deployment holding quota.
+
+A message that names groups names them **by role**, never by `instanceType`: two roles can name one
+type, so a type would point at two groups at once while a role names exactly the group that waits.
+The queue an operator has to free follows from the named role's own `instanceType`.
 
 It reads those Workloads' own conditions rather than asking the admission gate. The gate stops
 evaluating a Workload once it is admitted, so anything derived from it would answer for the moment of
@@ -126,7 +130,7 @@ admission and never again.
 | Value | Reason | Meaning |
 |---|---|---|
 | `True` | `Reserved` | every group has quota reserved; with one group the message names its cluster queue |
-| `False` | `Pending` | at least one group is waiting for quota, and the message names which instance types |
+| `False` | `Pending` | at least one group is waiting for quota, and the message names which roles' groups are waiting |
 | `False` | `PodGroupIncomplete` | fewer Pods exist than the group declares, so Kueue composes **no Workload at all**; the message carries `<have>/<want>` |
 | `False` | `PreemptedInPart` | a higher-priority workload reclaimed some groups while others are still admitted; the message says whether any role kind has no admitted group, and so whether the loss is of capacity or of a whole role |
 | `False` | `Parked` | the set failed to assemble for long enough that the joint check deactivated its Workloads; an identical re-apply does not clear it |
@@ -192,7 +196,8 @@ while saying nothing about.
 | Value | Reason | Meaning |
 |---|---|---|
 | `True` | `UpToDate` | every replica matches what the pass rendered |
-| `False` | `RolloutInProgress` | replicas that differed from the render were **deleted** this pass; the pass that finds them gone creates the replacements |
+| `False` | `RolloutInProgress` | replicas differ from the render and turn over **one per role per pass**; this pass deleted at most one replica per role, and the pass that finds it gone creates the replacement |
+| `False` | `ReplacementInProgress` | every surviving replica matches the render but the declared count is short: nobody changed the spec — a replica left on its own, and the pass creates each replacement as Kueue asks for it |
 | `False` | `RolloutHeldByCache` | replicas that differed from the render were **left in place**: no connection resolved this pass, and recreating them on that alone would rebuild every replica whenever the store blinks |
 | `Unknown` | `RolloutNotObserved` | the pass accounted for no replica at all, so it established nothing either way |
 
@@ -201,8 +206,14 @@ from the render it just performed. A pass that can vouch for none reports `Unkno
 was outdated" and "nothing was looked at" are the same zero and only one of them is an answer.
 
 That is not a rare path, and it is not a quiet one. A teardown, a whole-group rebuild, and the pass
-between a rollout's delete and its create while the replica names are still held all reach the status
-write that way — and those are the moments the replicas are least current.
+between a rollout's delete and the create that answers it all reach the status write that way — and
+those are the moments the replicas are least current.
+
+`ReplacementInProgress` and `RolloutInProgress` are separate because they answer opposite questions.
+A rollout answers "did my edit land"; a replacement answers "why is capacity moving when I changed
+nothing" — reading the first for the second sends you to diff a spec that did not change. While the
+pass replaces the missing ones, `WaitingForReplacementPods` on the group's Workload is the condition
+to watch.
 
 > **Why `Unknown` rather than leaving the last answer standing.** Leaving it alone keeps whatever the
 > last answering pass wrote, and after a steady deployment that is an authoritative `True`. A

@@ -309,9 +309,7 @@ func TestRecordModelDeploymentRuntimeVersionSkew(t *testing.T) {
 				ObjectMeta: meta.ObjectMeta{Name: "qwen-72b", Namespace: "team-a"},
 			}
 			role := &workercore.ModelDeploymentRole{Name: "server"}
-			if tc.image != "" {
-				role.Template = &workercore.ModelDeploymentTemplate{Image: tc.image}
-			}
+			role.Image = tc.image
 			it := &worker.InstanceType{
 				Status: workercore.InstanceTypeStatus{Detail: skewDetail(tc.versions...)},
 			}

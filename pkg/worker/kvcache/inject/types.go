@@ -141,8 +141,8 @@ type Connection struct {
 	// API spelling by the caller. It is backend-wide rather than per-node: one member group renders
 	// one DaemonSet, so a single Pod template cannot carry a different transport per node.
 	//
-	// It feeds the store client alone. The direct-transfer leg does not read it -- the two data
-	// planes declare separately, and vllmDirectTransferProtocol says why.
+	// It feeds the store client alone. The point-to-point leg does not read it -- the two data
+	// planes declare separately, and vllmKVTransferProtocol says why.
 	Protocol string
 }
 
@@ -163,17 +163,17 @@ type Input struct {
 	// Connection is what the pool and its backend published.
 	Connection Connection
 
-	// DirectTransfer enables the point-to-point connector used by a managed prefill/decode router.
+	// KVTransfer enables the point-to-point connector used by a managed prefill/decode router.
 	// With a complete Connection it is composed with the shared store; without one it is rendered on
-	// its own.
-	DirectTransfer bool
+	// its own. The two are orthogonal inputs, not alternatives: both may be on at once.
+	KVTransfer bool
 
-	// DirectTransferProtocol is the transport the point-to-point leg is told to use, declared by
+	// KVTransferProtocol is the transport the point-to-point leg is told to use, declared by
 	// the caller. Empty selects the renderer's default. It is passed through verbatim: the
 	// accepted set is a property of the mooncake build inside the engine's own image, which this
 	// operator neither ships nor can inspect, so gating it here would hard-code one image's
-	// compile set onto another image's connector. It is read only when DirectTransfer is set.
-	DirectTransferProtocol string
+	// compile set onto another image's connector. It is read only when KVTransfer is set.
+	KVTransferProtocol string
 
 	// PublishKVEvents asks the engine to publish cache-placement events for a router. It is resolved
 	// per role by the caller; a false value preserves the ordinary connector render byte for byte.

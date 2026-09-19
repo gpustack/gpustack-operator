@@ -205,7 +205,7 @@ func TestKVCachePoolBindingReconcile_UsageFollowsTheMastersGeneration(t *testing
 	})
 }
 
-// There is no case here for a Binding that asked for nothing. quotaCeiling is REQUIRED, because the
+// There is no case here for a Binding that asked for nothing. quota.ceiling is REQUIRED, because the
 // state it would describe does not work: the storage layer holds no default policy, and refuses a
 // tenant it has no policy for with the same error a domain that was never declared gets. The two
 // tests that used to pin that state were removed with it rather than rewritten — a test for a

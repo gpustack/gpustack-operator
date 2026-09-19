@@ -102,6 +102,11 @@ ARG RUNTIME_IMAGE="python:3.12-slim-bookworm"
 #     libhsa-runtime64 -- the runtime stage below gates exactly those two). The rocm/dev
 #     images publish linux/amd64 only, which is why the base-image workflow builds this
 #     target for amd64 alone.
+#
+# THREE VARIANTS AND NOT MORE, DELIBERATELY. The transport enum on KVCacheBackend also accepts musa
+# and maca, and there is no variant here for either: a group on one of those names its own image.
+# So "a protocol with no variant" is the intended state for those two rather than a gap, and an
+# inventory that pairs enum values against these ARGs is expected to come up two short.
 ARG CUDA_BUILDER_IMAGE="nvidia/cuda:13.0.3-devel-ubuntu22.04"
 ARG CUDA_RUNTIME_IMAGE="nvidia/cuda:13.0.3-runtime-ubuntu22.04"
 ARG CANN_BUILDER_IMAGE="quay.io/ascend/cann:9.1.1-910b-ubuntu22.04-py3.12-devel"

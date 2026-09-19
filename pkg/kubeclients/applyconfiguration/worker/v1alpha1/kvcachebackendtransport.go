@@ -9,25 +9,48 @@ package v1alpha1
 type KVCacheBackendTransportApplyConfiguration struct {
 	// Protocol is the transport the members are ASKED to use. Auto resolves to TCP.
 	//
-	// - TCP is the universal fallback. RDMA, EFA, HIP and Ascend are peers of one another, each a
-	// fabric- or vendor-specific fast path rather than a spelling of TCP: EFA in particular is
-	// reached through libfabric's SRD provider and has no RC queue pairs, so the RDMA transport
-	// cannot drive it.
+	// THESE VALUES ARE NOT THE STORE'S OWN SPELLINGS. What is written here is translated before it
+	// reaches a member, and two of the eight change word entirely: CANN renders as ascend and ROCM
+	// as hip. So a member's environment, its logs, and status.members[].protocol below all report
+	// the store's lowercase spelling rather than the one written here, and comparing the two as
+	// strings finds a difference that is not one.
+	//
+	// - TCP is the universal fallback. RDMA, EFA, CANN, ROCM, MUSA and MACA are peers of one
+	// another, each a fabric- or vendor-specific fast path rather than a spelling of TCP: EFA in
+	// particular is reached through libfabric's SRD provider and has no RC queue pairs, so the
+	// RDMA transport cannot drive it. MUSA and MACA are intra-node IPC transports, not host
+	// fabrics: they take no hostNetwork, no capabilities and no device resource.
 	// - Whether a member came up on what it asked for is NOT visible through this API.
 	// status.members[].protocol echoes this request back rather than reporting a result, so a
-	// member that fell back to TCP still reads as the fabric there, while serving. Only the
-	// member's own log says which transport the data plane installed.
+	// member that fell back to the store's tcp still reads as the fabric there, while serving.
+	// Only the member's own log says which transport the data plane installed.
 	// - Auto is deliberately NOT a per-node probe that promotes itself to a faster fabric: a member
 	// group renders one DaemonSet, whose single Pod template cannot carry a different transport
 	// per node, and promoting to RDMA grants hostNetwork and two capabilities — a privilege is
 	// requested, never inferred on an operator's behalf.
-	// - Membership in this enum means MEASURED AS COMPILED into a published artifact, which is what
-	// excludes the other ten strings that artifact's config parser accepts. It does not mean
-	// measured to move bytes: only TCP has been exercised end to end.
+	// - Membership in this enum means MEASURED AS COMPILED into an artifact a member can run, which
+	// is what excludes the other eight strings that artifact's config parser accepts. It does not
+	// mean measured to move bytes: only TCP has been exercised end to end. It also does not mean
+	// this project publishes an image carrying it — MUSA and MACA are deliberately in the enum
+	// with no variant in pack/mirrored-mooncake, so a group on either names its own image. A
+	// value here with neither a project variant nor a working self-built image is what the rule
+	// excludes; an absent variant on its own is not.
 	// - A host fabric needs two things this API cannot check: the member image must carry the
-	// runtime its transport links — CANN for Ascend, libfabric for EFA — and the NODE must run a
+	// runtime its transport links — the CANN toolkit for CANN, libfabric for EFA — and the NODE must run a
 	// device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.
 	// Which resource the member asks for is deviceResourceName below.
+	// - RESPELLING THIS ENUM CARRIES A RESIDUAL RISK, knowingly accepted, on the same terms as
+	// Medium's. The values were once Auto, TCP, RDMA, EFA, HIP and Ascend; HIP and Ascend are
+	// gone, replaced by the toolchain names ROCM and CANN, and the rest changed case. An object
+	// storing one of the old values becomes undeletable, because schema validation runs on the
+	// write path only: it reads back fine while every update is refused, the controller's
+	// finalizer removal included. NO RELEASE IS EXPOSED — this type is absent from every tag
+	// through v0.8.6, checked per tag — but a cluster tracking the default branch is, since that
+	// branch carried the old spellings. Clearing it is the first shipping release's job: confirm
+	// no leftover object exists, or write a recovery procedure. A conversion webhook is NOT the
+	// answer here for the reason an alias map is not: the schema enum is the gate a stored object
+	// meets first, so widening what admission accepts reaches nothing that the API server has
+	// already refused.
 	Protocol *string `json:"protocol,omitempty"`
 	// DeviceResourceName is the extended resource a host-fabric member asks one of, so the device
 	// cgroup lets it open the fabric device. It is CONSULTED ONLY on the RDMA and EFA protocols;
@@ -41,7 +64,7 @@ type KVCacheBackendTransportApplyConfiguration struct {
 	// protocol, and setting the field overrides it.
 	// - UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A fabric member naming no resource
 	// mounts the device tree and requests nothing, so the cgroup refuses the open, the store
-	// installs TCP, and the object still reads as the fabric it asked for. Naming one instead
+	// installs the store's tcp, and the object still reads as the fabric it asked for. Naming one instead
 	// keeps the member off a node that advertises none, which is the safer failure but not
 	// always the wanted one, so both stay reachable.
 	//

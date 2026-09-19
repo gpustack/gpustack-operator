@@ -106,7 +106,7 @@ func TestModelDeploymentCacheAttached_Table(t *testing.T) {
 			// otherwise corroborate a True.
 			name: "a role that took over the command line",
 			mutateMD: func(md *workercore.ModelDeployment) {
-				md.Spec.Roles[0].Template.Command = []string{"/bin/my-server"}
+				md.Spec.Roles[0].Command = []string{"/bin/my-server"}
 			},
 			pods:       func(md *workercore.ModelDeployment) []core.Pod { return readyPods(md, 2) },
 			domain:     readyDomain(func(d *modelDeploymentDomain) { d.Blocks = ptr.To[int64](512) }),

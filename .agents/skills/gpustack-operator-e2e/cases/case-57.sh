@@ -373,7 +373,8 @@ spec:
     name: ${DOMAIN}-term
     blockSize: 16
     dtype: bfloat16
-  quotaCeiling: 64Mi
+  quota:
+    ceiling: 64Mi
 YAML
 if ! kvi_wait_for kvcachepoolbindings.worker.gpustack.ai "$TERM_BINDING" '{.status.phase}' Ready 180 "$TEST_NS" >/dev/null; then
   record FAIL "a Binding that is being deleted is refused" \

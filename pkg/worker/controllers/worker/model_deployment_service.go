@@ -132,13 +132,13 @@ func renderModelDeploymentServiceFor(
 	return svc
 }
 
-// modelDeploymentServicePort is the port the deployment is served on: the role template's first
+// modelDeploymentServicePort is the port the deployment is served on: the role's first declared
 // entry, or the default every supported engine's OpenAI-compatible server listens on.
 //
-// It reads the same render the replicas get rather than the template directly, so the Service and
+// It reads the same render the replicas get rather than the fields directly, so the Service and
 // the containers behind it cannot name different ports.
 func modelDeploymentServicePort(role *workercore.ModelDeploymentRole) core.ContainerPort {
-	if role.Template == nil {
+	if len(role.Ports) == 0 {
 		return core.ContainerPort{
 			Name:          modelDeploymentDefaultPortName,
 			Protocol:      core.ProtocolTCP,
@@ -146,7 +146,7 @@ func modelDeploymentServicePort(role *workercore.ModelDeploymentRole) core.Conta
 		}
 	}
 
-	return modelDeploymentContainerPorts(role.Template)[0]
+	return modelDeploymentContainerPorts(role)[0]
 }
 
 // ModelDeploymentRoleServingPort returns the port a role's Service targets.

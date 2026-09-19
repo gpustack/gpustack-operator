@@ -566,7 +566,7 @@ func TestLeaderWorkload_SelectorSurvivesASpecChange(t *testing.T) {
 		k.Spec.Transport.Protocol = "RDMA"
 		leader := &k.Spec.Connection.Managed.Leader
 		leader.AllocationStrategy = "Random"
-		leader.ExtraArgs = map[string]string{"client_ttl": "30"}
+		leader.ExtraArgs = []string{"-client_ttl=30"}
 	}), "mooncake:v0.4.0")
 
 	require.NotNil(t, before.Spec.Selector)
@@ -585,18 +585,91 @@ func TestLeaderWorkload_SelectorSurvivesASpecChange(t *testing.T) {
 }
 
 // TestLeaderWorkload_IsDeterministic pins that one backend renders identically every time.
-// The reconciler converges this object on every pass, so a render that wandered — a map range in the
-// argv, say — would rewrite the Deployment forever and restart the master with it.
+// The reconciler converges this object on every pass, so a render that wandered — a sort that
+// reordered the hatch, say — would rewrite the Deployment forever and restart the master with it.
 func TestLeaderWorkload_IsDeterministic(t *testing.T) {
 	kvcb := testBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Connection.Managed.Leader.ExtraArgs = map[string]string{
-			"a": "1", "b": "2", "c": "3", "d": "4", "e": "5",
+		k.Spec.Connection.Managed.Leader.ExtraArgs = []string{
+			"-a=1", "-b=2", "-c=3", "-d=4", "-e=5",
 		}
 	})
 
 	first := RenderLeaderDeployment(kvcb, "mooncake:v0.3.13")
 	for range 20 {
 		assert.Equal(t, first, RenderLeaderDeployment(kvcb, "mooncake:v0.3.13"))
+	}
+}
+
+// TestLeaderWorkload_ExtraEnv pins the leader's environment hatch: every entry reaches the
+// container, in the order written, after everything derived — the same contract the member side's
+// hatch carries.
+func TestLeaderWorkload_ExtraEnv(t *testing.T) {
+	kvcb := testBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Leader.ExtraEnv = []workercore.InstanceEnvVar{
+			{Name: "MC_ALLOCATOR_SHARD_COUNT", Value: "8"},
+			{Name: "MC_MASTER_ELECTION_TIMEOUT_MS", Value: "5000"},
+		}
+	})
+
+	env := leaderContainer(t, kvcb, "mooncake:v0.3.13").Env
+	values := make(map[string]string, len(env))
+	for _, e := range env {
+		values[e.Name] = e.Value
+	}
+	assert.Equal(t, "8", values["MC_ALLOCATOR_SHARD_COUNT"])
+	assert.Equal(t, "5000", values["MC_MASTER_ELECTION_TIMEOUT_MS"])
+
+	names := make([]string, 0, len(env))
+	for _, e := range env {
+		names = append(names, e.Name)
+	}
+	assert.Equal(t,
+		[]string{"MC_ALLOCATOR_SHARD_COUNT", "MC_MASTER_ELECTION_TIMEOUT_MS"},
+		names[len(names)-2:],
+		"last and in the order written, so two renders of one spec are byte-identical")
+}
+
+// TestLeaderDerivedEnvs_CoversEveryNameTheRendererEmits holds the reserved list equal to what the
+// leader renderer actually emits, in both directions.
+//
+// The list is what admission refuses in the leader's extraEnv, and it is a SECOND copy of a fact
+// the renderer already has — so the failure it is exposed to is drift, in either direction and both
+// silent. A name the renderer emits but the list forgets is a container carrying that name twice,
+// with the winner left to the runtime; a name the list holds but nothing emits is a hatch entry
+// refused for a collision that cannot happen.
+//
+// The union is taken over several fixtures on purpose. No single backend renders all of them: the
+// Pod IP is emitted only under high availability, and the snapshot path only when a snapshot is
+// declared — which is also why both are reserved unconditionally, so the field that turns their
+// rendering on can be edited after the object exists without re-opening the name.
+func TestLeaderDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
+	fixtures := []struct {
+		name string
+		kvcb *workercore.KVCacheBackend
+	}{
+		{"a plain backend", testBackend()},
+		{"a backend electing its leader", haBackend()},
+		{"a backend keeping a snapshot", snapshotBackend()},
+	}
+
+	rendered := make(map[string]string)
+	for _, f := range fixtures {
+		for _, e := range leaderContainer(t, f.kvcb, "mooncake:v0.3.13").Env {
+			rendered[e.Name] = f.name
+		}
+	}
+
+	for name, fixture := range rendered {
+		assert.Contains(t, LeaderDerivedEnvs, name,
+			"%s is rendered by %q and is not reserved, so a leader could define it a second time "+
+				"through extraEnv and nothing would report the collision", name, fixture)
+	}
+	for _, name := range LeaderDerivedEnvs {
+		_, ok := rendered[name]
+		assert.True(t, ok,
+			"%s is reserved and no fixture here renders it: either the renderer stopped emitting it, "+
+				"in which case the reservation refuses a hatch entry for a collision that cannot "+
+				"happen, or this test is missing the path that does", name)
 	}
 }
 

@@ -11,7 +11,6 @@ import (
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
-	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
@@ -41,23 +40,6 @@ const (
 	// That function is not called: its subject is a ClusterQueue name, and reusing it here would
 	// make a group's identity read as a queue's. What is shared is the shape, not the derivation.
 	modelDeploymentPodGroupNamePrefix = "gpustack-fnv64-"
-
-	// modelDeploymentRoleReplicasAnnotation carries the replica count the role declared when this
-	// Pod was built, which is the half of the group's shape the total cannot express.
-	//
-	// The total alone is not a fingerprint of the shape. Moving prefill 2 / decode 2 to prefill 1 /
-	// decode 3 leaves it at four, so a predicate reading only the sum sees no change and lets the
-	// converge loop trim one Pod and add another IN THE SAME PASS -- producing exactly the mixed
-	// group the rebuild exists to avoid, and reaching a correct end state only because the next pass
-	// notices a terminating replica.
-	//
-	// A REPLICA THAT PREDATES IT COUNTS AS DISAGREEING, so the first pass after this ships rebuilds
-	// every existing group once. That is accepted rather than overlooked. The alternative is
-	// backfilling the annotation in place, which is a mutation path whose only job is to serve
-	// deployments that exist solely on a branch — ModelDeployment is in no released version — and the
-	// bound is one rebuild, once. It is also the same treatment the group-total annotation already
-	// gives a replica that predates it.
-	modelDeploymentRoleReplicasAnnotation = "modeldeployment." + systemname.LabelPrefix + "role-replicas"
 )
 
 // ModelDeploymentPodGroupMeta is the Kueue group metadata one replica's Pod carries.
@@ -75,98 +57,104 @@ type ModelDeploymentPodGroupMeta struct {
 	Annotations map[string]string
 }
 
-// modelDeploymentPodGroupSpec is one scheduling group: the roles naming one instanceType, the name
-// their Pods share, and the total Kueue waits for before it composes a Workload.
+// modelDeploymentPodGroupSpec is one scheduling group: the role it exists for, the name that role's
+// Pods share, and the total Kueue waits for before it composes a Workload.
 type modelDeploymentPodGroupSpec struct {
-	// InstanceType is the grouping key, and the reason the group exists at all.
+	// Role is the grouping key: one group is one role and nobody else's. The total below is that
+	// role's declared count, which is why the group needs no second number beside the total to
+	// fingerprint its shape -- the share annotation an earlier shape needed for exactly that went
+	// with the shape.
+	Role string
+
+	// InstanceType is carried, not keyed on. It is the role's own type, held here so every message
+	// and condition that names a cluster queue can name the queue this group schedules into: the
+	// ClusterQueue is named after the InstanceType, and naming the role instead would send an
+	// operator to an object that does not exist.
 	InstanceType string
 
 	// Name is what every Pod of this group carries in the membership label.
 	Name string
 
-	// TotalCount sums the replicas of THIS group's roles and of no others. A group claiming the
-	// deployment-wide total waits for Pods that are never coming.
+	// TotalCount is THIS group's role's declared replicas and no other role's. A group claiming
+	// another role's count waits for Pods that are never coming, or composes short of what its own
+	// role declared.
 	TotalCount int32
 }
 
-// modelDeploymentPodGroups returns the deployment's scheduling groups, one per distinct
-// instanceType.
+// modelDeploymentPodGroups returns the deployment's scheduling groups, one per role in the roles'
+// order.
 //
 // It is PURE: same deployment, same result, no client and no clock.
 //
-// THE SPLIT IS FORCED RATHER THAN CHOSEN. A queue name is derived from the instanceType and one
-// Workload carries one queue name, so two instanceTypes cannot be one Workload however much one
-// deployment they are.
+// THE GROUPING KEY IS THE ROLE, NOT THE instanceType. One group is one role's every replica, Kueue
+// composes one Workload per group, and everything the group exists to carry -- per-role counting,
+// per-role flavor assignment, per-role status -- hangs off that Workload. Keying on the type instead
+// puts two roles on one instanceType into one group, and their counts then disagree with nothing the
+// total can express: moving prefill 2 / decode 2 to prefill 1 / decode 3 leaves the sum at four, and
+// a rebuild predicate reading only the sum lets the converge loop mix departing and arriving roles
+// in one group. One role per group makes the total the role's own count, and no second fingerprint
+// is needed.
 //
-// THE GROUPING KEY IS THE instanceType, NOT THE ROLE. Two roles on one type are two PodSets of ONE
-// group; a third on another type is a second group. Keying on the role instead would produce three,
-// each separately admitted, and the atomicity a group exists for would cover one role at a time.
-//
-// THE ORDER IS THE ROLES' ORDER, first mention winning, so two passes over an unchanged spec return
-// the same names in the same places. A map's iteration order would not, and the group name is
-// written into Pods.
+// THE ORDER IS THE ROLES' ORDER, so two passes over an unchanged spec return the same names in the
+// same places. A map's iteration order would not, and the group name is written into Pods.
 func modelDeploymentPodGroups(md *workercore.ModelDeployment) []modelDeploymentPodGroupSpec {
-	groups := make([]modelDeploymentPodGroupSpec, 0, 1)
-	at := make(map[string]int, 1)
-
+	groups := make([]modelDeploymentPodGroupSpec, 0, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-
-		idx, seen := at[role.InstanceType]
-		if !seen {
-			idx = len(groups)
-			at[role.InstanceType] = idx
-			groups = append(groups, modelDeploymentPodGroupSpec{InstanceType: role.InstanceType})
-		}
-		groups[idx].TotalCount += role.Replicas
+		groups = append(groups, modelDeploymentPodGroupSpec{
+			Role:         role.Name,
+			InstanceType: role.InstanceType,
+			TotalCount:   role.Replicas,
+		})
 	}
 
 	sole := len(groups) == 1
 	for i := range groups {
-		groups[i].Name = modelDeploymentPodGroupNameOf(md, groups[i].InstanceType, sole)
+		groups[i].Name = modelDeploymentPodGroupNameOf(md, groups[i].Role, sole)
 	}
 
 	return groups
 }
 
-// modelDeploymentPodGroupFor returns the group a given instanceType forms within this deployment.
+// modelDeploymentPodGroupFor returns the group a given role forms within this deployment.
 func modelDeploymentPodGroupFor(
-	md *workercore.ModelDeployment, instanceType string,
+	md *workercore.ModelDeployment, role string,
 ) modelDeploymentPodGroupSpec {
 	groups := modelDeploymentPodGroups(md)
 	for i := range groups {
-		if groups[i].InstanceType == instanceType {
+		if groups[i].Role == role {
 			return groups[i]
 		}
 	}
 
-	// A type no role names forms no group. The groups are derived from the roles and every caller
-	// passes the type one of them named, so the empty spec is what "there is no such group" means
-	// rather than a case to handle.
-	return modelDeploymentPodGroupSpec{InstanceType: instanceType}
+	// A role the deployment does not declare forms no group. The groups are derived from the roles
+	// and every caller passes a name one of them carries, so the empty spec is what "there is no
+	// such group" means rather than a case to handle.
+	return modelDeploymentPodGroupSpec{Role: role}
 }
 
 // ModelDeploymentPodGroup returns the group metadata for one role's replicas.
 //
-// It is PURE: same deployment, same role, same result, no client and no clock. Every Pod of every
-// role sharing one instanceType joins ONE Kueue pod group, and Kueue then builds one Workload whose
-// PodSets are those roles and admits it as a unit -- which is the whole point of the group.
+// It is PURE: same deployment, same role, same result, no client and no clock. Every Pod of one role
+// joins that role's ONE Kueue pod group, and Kueue then builds one Workload from the group and
+// admits it as a unit -- which is the whole point of the group.
 //
 // IT TAKES NO ORDINAL, and that is a statement rather than an omission: nothing here varies with the
-// replica. The group's identity is the deployment's and the PodSet's identity is the role's, so two
+// replica. The group's identity is the role's and the PodSet's identity is the role's, so two
 // replicas of one role are deliberately indistinguishable to Kueue -- they are two Pods of one
 // PodSet. The ordinal lives in the Pod's NAME, where the reconciler needs it to decide which
 // replicas a scale-down removes.
 //
 // THE FAST-ADMISSION ANNOTATION IS NEVER SET, and its absence is asserted rather than assumed.
-// Kueue's fast path takes the FIRST runnable Pod of the group, sets that single PodSet's Count to
-// the whole group's total, and returns -- one PodSet then carries every role's Pods, the per-role
-// split this design exists to create is erased, and with it per-role flavor assignment. The
-// annotation is a trap for exactly this design, which is why a test names it and states that.
+// Kueue's fast path takes the FIRST runnable Pod of the group, sets that PodSet's Count to the whole
+// group's total, and returns -- the Workload then exists while the group is still short of the total
+// it declares, and the remaining replicas arrive as members of an already-admitted set rather than
+// as the set. The annotation is a trap for exactly this design, which is why a test names it and
+// states that.
 func ModelDeploymentPodGroup(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) ModelDeploymentPodGroupMeta {
-	group := modelDeploymentPodGroupFor(md, role.InstanceType)
+	group := modelDeploymentPodGroupFor(md, role.Name)
 
 	return ModelDeploymentPodGroupMeta{
 		Labels: map[string]string{
@@ -176,19 +164,17 @@ func ModelDeploymentPodGroup(
 			kueuepodconst.GroupTotalCountAnnotation: strconvx.Itoa(int(group.TotalCount)),
 			// THE ROLE HASH IS LOAD-BEARING, NOT COSMETIC. Kueue reads this annotation verbatim when
 			// present and otherwise derives a digest of the Pod spec's SHAPE -- containers,
-			// nodeSelector, affinity, tolerations.
-			//
-			// Two roles that happen to render identically -- same image, same request, and now
-			// necessarily the same instanceType, since a differing one puts them in different groups
-			// -- would derive the same digest and collapse into ONE PodSet of both their replicas.
-			// Per-role counting, per-role flavor assignment and per-role status all disappear at that
-			// point, with nothing erroring. Writing the role's own name here makes the PodSet
-			// identity the role's identity by construction, which is also why that name is validated
-			// to Kueue's PodSetReference pattern and to uniqueness.
+			// nodeSelector, affinity, tolerations -- and an opaque digest names the PodSet after
+			// nothing an operator wrote. Per-role flavor assignment and per-role status both join a
+			// Workload's PodSets to the roles by this name, so a digest breaks the join while nothing
+			// errors. Writing the role's own name here makes the PodSet identity the role's identity
+			// by construction, which is also why that name is validated to Kueue's PodSetReference
+			// pattern and to uniqueness.
 			//
 			// IT STAYS THE ROLE'S NAME AND DOES NOT GAIN THE instanceType. This is what Kueue groups
 			// PodSets by and what status reads to attribute a Pod, so folding the type in would
-			// change PodSet identity and break both. The type is carried in the group name instead.
+			// change PodSet identity and break both. The type is carried by the queue the group
+			// schedules into instead.
 			kueuepodconst.RoleHashAnnotation: role.Name,
 			// An inference deployment never finishes. Without this, Kueue applies BATCH semantics to
 			// it: a Pod reaching Succeeded is reported as reclaimable and its quota is handed back
@@ -199,9 +185,6 @@ func ModelDeploymentPodGroup(
 			// Workload being deleted does. deleteModelDeploymentGroupWorkload is what pays it, and
 			// removing this annotation without removing that call would leak Workloads.
 			kueuepodconst.GroupServingAnnotationKey: kueuepodconst.GroupServingAnnotationValue,
-			// Ours rather than Kueue's, and the only entry here Kueue does not read. It records what
-			// the total cannot: which share of the group this role declared.
-			modelDeploymentRoleReplicasAnnotation: strconvx.Itoa(int(role.Replicas)),
 		},
 	}
 }
@@ -240,10 +223,9 @@ func (r *ModelDeploymentReconciler) deleteModelDeploymentGroupWorkload(
 // modelDeploymentGroupIsResizing reports whether any Pod the deployment still owns declares a group
 // total other than the one the spec now asks for.
 //
-// It is the predicate the rebuild policy turns on. A change to any role's replicas, or to the set of
-// roles, moves the total that EVERY Pod of the group carries, and Kueue refuses to compose a
-// Workload for a group whose Pods disagree on it -- unretryably, with no Workload and no condition
-// naming the cause.
+// It is the predicate the rebuild policy turns on. A change to a role's replicas moves the total
+// that EVERY Pod of that role's group carries, and Kueue refuses to compose a Workload for a group
+// whose Pods disagree on it -- unretryably, with no Workload and no condition naming the cause.
 //
 // A TERMINATING POD STILL COUNTS. It remains a member of the group until it is actually gone, so
 // asking only about the survivors would let a new replica be created beside one that has merely been
@@ -251,35 +233,35 @@ func (r *ModelDeploymentReconciler) deleteModelDeploymentGroupWorkload(
 //
 // A Pod carrying no total at all counts as disagreeing: it predates the group and cannot be joined
 // to one, so it is replaced rather than adopted.
-// THE TOTAL IS NOT ENOUGH ON ITS OWN, so the per-role share is compared beside it. Moving prefill 2
-// / decode 2 to prefill 1 / decode 3 leaves the total at four: a sum-only predicate answers no, and
-// the converge loop then trims one replica and creates another in the SAME pass, which is the mixed
-// group this predicate exists to keep it out of. A role RENAMED without changing any count moves
-// neither number, and is caught by the same comparison finding no entry for the old role's name.
-// THE TOTAL A POD IS JUDGED AGAINST IS ITS OWN GROUP'S, not the deployment's. With two groups the
-// deployment-wide sum matches neither of them, so a predicate reading it answers "resizing" on every
-// pass forever -- a rebuild loop rather than a wrong number, and one that nothing reports.
+//
+// THE TOTAL IS ENOUGH ON ITS OWN, and nothing else is compared beside it. A group is one role, so
+// the total IS that role's declared count: no two roles can redistribute their shares under one
+// unchanged sum, and the share annotation an earlier shape needed for exactly that case is deleted
+// with the shape. A role RENAMED without changing any count moves no total either, and is caught one
+// branch above: no entry exists for the name its Pods still carry, so the group they joined comes
+// down.
+// THE TOTAL A POD IS JUDGED AGAINST IS ITS OWN ROLE'S GROUP'S, not the deployment's. With two groups
+// the deployment-wide sum matches neither of them, so a predicate reading it answers "resizing" on
+// every pass forever -- a rebuild loop rather than a wrong number, and one that nothing reports.
 //
 // THE ANSWER IS A SET OF GROUPS RATHER THAN A YES. One group's shape moving is no reason to tear down
 // a group that did not move, and a boolean cannot say which is which: every role of the deployment
 // would restart because one role's replica count changed.
 //
 // A POD IS JUDGED AGAINST THE GROUP IT ACTUALLY JOINED, read off its own membership label, AND the
-// group its role belongs to now is named beside it. A role moved onto another instanceType leaves one
-// group short and arrives in another that never had it. Both have to come down, and neither name is
-// derivable from the other: one is written on the Pod, the other is in the spec.
+// group its role forms now is named beside it. The two agree unless a Pod is sitting in a group its
+// own role does not form, and when they differ both have to come down -- neither name is derivable
+// from the other: one is written on the Pod, the other is in the spec.
 func modelDeploymentGroupsResizing(
 	md *workercore.ModelDeployment, pods []core.Pod,
 ) sets.Set[string] {
 	wantByRole := make(map[string]string, len(md.Spec.Roles))
-	shareByRole := make(map[string]string, len(md.Spec.Roles))
 	groupByRole := make(map[string]string, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		group := modelDeploymentPodGroupFor(md, role.InstanceType)
+		group := modelDeploymentPodGroupFor(md, role.Name)
 		groupByRole[role.Name] = group.Name
 		wantByRole[role.Name] = strconvx.Itoa(int(group.TotalCount))
-		shareByRole[role.Name] = strconvx.Itoa(int(role.Replicas))
 	}
 
 	resizing := sets.New[string]()
@@ -296,8 +278,7 @@ func modelDeploymentGroupsResizing(
 			continue
 		}
 
-		if pods[i].Annotations[kueuepodconst.GroupTotalCountAnnotation] != want ||
-			pods[i].Annotations[modelDeploymentRoleReplicasAnnotation] != shareByRole[name] {
+		if pods[i].Annotations[kueuepodconst.GroupTotalCountAnnotation] != want {
 			resizing.Insert(joined, groupByRole[name])
 		}
 	}
@@ -317,31 +298,30 @@ func modelDeploymentPodsInGroup(pods []core.Pod, group string) []core.Pod {
 	return members
 }
 
-// modelDeploymentPodGroupNameOf is a group's identity, shared by every Pod of every role naming one
-// instanceType.
+// modelDeploymentPodGroupNameOf is a group's identity, shared by every Pod of one role.
 //
-// A DEPLOYMENT WITH ONE GROUP KEEPS THE NAME IT ALWAYS HAD, which is compatibility and also the
+// A DEPLOYMENT WITH ONE ROLE KEEPS THE NAME IT ALWAYS HAD, which is compatibility and also the
 // better name: see modelDeploymentPodGroupName on why a readable one is worth having.
 //
-// A DEPLOYMENT WITH SEVERAL HASHES ALL OF THEM, the type included. A readable composite such as
-// "<name>-<type>" would share a namespace with deployment names and could equal one -- a deployment
-// "a" with a type "b-c" and a deployment "a-b" with a type "c" write the same label, and Kueue then
-// reads their replicas as one group. The hashed form carries the prefix that already marks a derived
-// name, so the two spaces never meet.
+// A DEPLOYMENT WITH SEVERAL ROLES HASHES ALL OF THEM, the role included. A readable composite such
+// as "<name>-<role>" would share a namespace with deployment names and could equal one -- a
+// deployment "a" with a role "b-c" and a deployment "a-b" with a role "c" write the same label, and
+// Kueue then reads their replicas as one group. The hashed form carries the prefix that already
+// marks a derived name, so the two spaces never meet.
 //
-// WHICH SHAPE A GROUP GETS DEPENDS ON HOW MANY THE DEPLOYMENT HAS, so gaining a second instanceType
-// would rename the first group and rebuild it. That is unreachable rather than tolerated: the set of
-// roles and each role's instanceType are frozen after creation. If that freeze is ever relaxed, this
-// is one of the places that stops being safe.
+// WHICH SHAPE A GROUP GETS DEPENDS ON HOW MANY ROLES THE DEPLOYMENT HAS, so a one-role deployment
+// gaining a second role renames the first role's group and rebuilds it. That is reached rather than
+// assumed unreachable, and the rebuild is the predicate's to catch -- the first role's Pods carry a
+// membership label nothing forms any more.
 func modelDeploymentPodGroupNameOf(
-	md *workercore.ModelDeployment, instanceType string, sole bool,
+	md *workercore.ModelDeployment, role string, sole bool,
 ) string {
 	if sole {
 		return modelDeploymentPodGroupName(md)
 	}
 
 	return modelDeploymentPodGroupNamePrefix +
-		stringx.SumByFNV64a(md.Namespace, "/", md.Name, "/", instanceType)
+		stringx.SumByFNV64a(md.Namespace, "/", md.Name, "/", role)
 }
 
 // modelDeploymentPodGroupName is the identity of a deployment's ONLY group.

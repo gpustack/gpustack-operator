@@ -21,8 +21,9 @@ const (
 	KVCacheInjectedAnnotationKey = "kvcache." + systemname.LabelPrefix + "injected"
 
 	// observabilityMetricsEnv and observabilityBandwidthEnv are turned on when the container has not
-	// spoken about them. They change no result, which is why a user-set value is left alone rather
-	// than refused: rejecting a Pod over a metrics toggle would be a refusal with nothing behind it.
+	// spoken about them. They are the one pair that still YIELDS rather than being overwritten, and
+	// the reason is that they change no result: they toggle reporting, so a user-set value is neither
+	// a second answer to a question this webhook answers nor something worth refusing a Pod over.
 	observabilityMetricsEnv   = "MC_TE_METRIC"
 	observabilityBandwidthEnv = "MC_STORE_CLIENT_METRIC_BANDWIDTH"
 )
@@ -32,13 +33,15 @@ const (
 // which is undiagnosable from outside.
 var ownedArgs = []string{"--kv-transfer-config", "--hicache-storage-backend"}
 
-// ownedEnv is the variable this webhook writes that SELECTS the mechanism, as opposed to the ones that
-// carry values inside it. Only this one refuses; the value variables yield, per
-// deviceplugin.ContainerEnvDeclared.
+// ownedEnv is the variable this webhook writes that SELECTS the mechanism, as opposed to the ones
+// that carry values inside it. The value variables do not refuse -- they are OVERWRITTEN, because
+// injection is opt-in and the opt-out is explicit.
 //
-// SGLANG_HICACHE_MOONCAKE_CONFIG_PATH is deliberately absent: this webhook stopped writing it when
-// SGLang moved to the environment vehicle, and a user who sets it has configured SGLang from a file of
-// their own, which is correct precedence rather than a collision.
+// SGLANG_HICACHE_MOONCAKE_CONFIG_PATH is absent HERE and refused ELSEWHERE, and the move is measured
+// rather than stylistic. This webhook does not write it, so it collides with nothing and cannot be
+// judged by a scan filtered on what the render writes. What it does is take a different branch of
+// the engine's configuration-source selector, leaving every injected variable present and unread --
+// see inject.ConfigSourceKeys, which carries the measurement.
 var ownedEnv = []string{"MOONCAKE_CONFIG_PATH"}
 
 // injectionRecord is the stamp: what this webhook decided, on the object it decided about.
@@ -109,30 +112,33 @@ func (r *PodKVCacheWebhook) injectPod(pod *core.Pod, res *resolution, out *injec
 	if err = checkOwnedKeys(pod, ctr, out); err != nil {
 		return err
 	}
+	if err = checkConfigSourceKeys(ctr, res.Input.Engine); err != nil {
+		return err
+	}
 	launch, err := checkLaunchArgs(ctr, res.Input.Engine, pod.Annotations)
 	if err != nil {
 		return err
 	}
 
 	for i := range out.Env {
-		if out.TenantEnvName != "" && out.Env[i].Name == out.TenantEnvName {
-			found := false
-			for j := range ctr.Env {
-				if ctr.Env[j].Name == out.Env[i].Name {
-					ctr.Env[j] = out.Env[i]
-					found = true
-				}
+		// AN INJECTION OVERRULES A VARIABLE THE WORKLOAD DECLARED FOR ITSELF. Injection is opt-in and
+		// the opt-out is explicit -- the label set to "false", or left off -- so a Pod that asked for
+		// it and then declared one of these variables has two answers for one setting, and this one
+		// is the one derived from the Binding it named.
+		//
+		// IT IS WRITTEN IN PLACE RATHER THAN APPENDED, although appending would also win: the kubelet
+		// folds a container's env list into a map in declaration order, so the last entry of a
+		// repeated name is the one the process sees. In place keeps the Pod readable -- one entry per
+		// name, showing the value that will apply -- and does not rely on a property a reader of the
+		// Pod cannot see.
+		found := false
+		for j := range ctr.Env {
+			if ctr.Env[j].Name == out.Env[i].Name {
+				ctr.Env[j] = out.Env[i]
+				found = true
 			}
-			if !found {
-				ctr.Env = append(ctr.Env, out.Env[i])
-			}
-			continue
 		}
-
-		// An injection never overrules a variable the workload declared for itself, except the tenant
-		// identity. The Binding is the source of that value, so yielding to the container would let it
-		// select a different reuse domain.
-		if !deviceplugin.ContainerEnvDeclared(ctr, out.Env[i].Name) {
+		if !found {
 			ctr.Env = append(ctr.Env, out.Env[i])
 		}
 	}
@@ -222,6 +228,41 @@ func targetContainer(pod *core.Pod) (*core.Container, error) {
 	return nil, fmt.Errorf("annotation %q names %q, which is not a container of this Pod. Name one "+
 		"of: %s", KVCacheContainerAnnotationKey, named,
 		strings.Join(containerNames(pod.Spec.Containers), ", "))
+}
+
+// checkConfigSourceKeys refuses a container that already selects a configuration SOURCE this webhook
+// does not write.
+//
+// It is separate from checkOwnedKeys because the two refuse different things. An owned key is a
+// second source for a setting this webhook renders, and the scan there is filtered by what THIS
+// render writes -- nothing collides with a key the render was never going to add. A key here
+// collides with nothing: the webhook writes no such key, and that is exactly why it is dangerous.
+// The engine reads its store configuration through mutually exclusive branches, so the key takes one
+// and the branch every injected variable lives in is never executed. The Pod then carries a full set
+// of variables nothing reads, and the injection record says it succeeded.
+//
+// The keys are per engine, from the package that measured them, because a key is only a branch
+// selector for the engine that reads it.
+func checkConfigSourceKeys(ctr *core.Container, engine inject.Engine) error {
+	env, args := inject.ConfigSourceKeys(engine)
+
+	for _, name := range env {
+		if deviceplugin.ContainerEnvDeclared(ctr, name) {
+			return fmt.Errorf("container %q sets %s, which points engine %q at a configuration file "+
+				"of its own; this webhook configures the store through the environment, and that "+
+				"branch is then never read -- every injected variable would be present and unused",
+				ctr.Name, name, engine)
+		}
+	}
+	for _, flag := range args {
+		if hasFlag(ctr.Args, flag) || hasFlag(ctr.Command, flag) {
+			return fmt.Errorf("container %q passes %s, which outranks the environment engine %q "+
+				"would otherwise read its store configuration from, so the injected variables would "+
+				"be present and unused", ctr.Name, flag, engine)
+		}
+	}
+
+	return nil
 }
 
 // checkOwnedKeys refuses a container that already carries a key selecting a KV cache mechanism, or a

@@ -54,7 +54,7 @@ func newKVCachePoolBinding() *workercore.KVCachePoolBinding {
 				BlockSize: 16,
 				Dtype:     "bfloat16",
 			},
-			QuotaCeiling: resource.MustParse("20Ti"),
+			Quota: workercore.KVCachePoolBindingQuota{Ceiling: resource.MustParse("20Ti")},
 		},
 	}
 }
@@ -65,6 +65,14 @@ func otherKVCachePoolBinding(domain string) *workercore.KVCachePoolBinding {
 	kvcpb := newKVCachePoolBinding()
 	kvcpb.Namespace, kvcpb.Name = "team-b", "batch"
 	kvcpb.Spec.Domain.Name = domain
+	return kvcpb
+}
+
+// siblingHoldingMostOfThePool is a neighbor whose own ceiling fits the pool; the cases that want
+// the pool oversubscribed say by how much.
+func siblingHoldingMostOfThePool(ceiling string) *workercore.KVCachePoolBinding {
+	kvcpb := otherKVCachePoolBinding("team-b-batch")
+	kvcpb.Spec.Quota.Ceiling = resource.MustParse(ceiling)
 	return kvcpb
 }
 
@@ -181,21 +189,31 @@ func TestKVCachePoolBindingWebhook_ValidateCreate(t *testing.T) {
 		{
 			name: "a ceiling of zero",
 			mutate: func(b *workercore.KVCachePoolBinding) {
-				b.Spec.QuotaCeiling = resource.MustParse("0")
+				b.Spec.Quota.Ceiling = resource.MustParse("0")
 			},
 			wantMsg: "must be greater than 0",
 		},
 		{
 			name: "a ceiling exactly the pool's own",
 			mutate: func(b *workercore.KVCachePoolBinding) {
-				b.Spec.QuotaCeiling = resource.MustParse("100Ti")
+				b.Spec.Quota.Ceiling = resource.MustParse("100Ti")
 			},
+			wantMsg: "",
+		},
+		{
+			// Fits the pool on its own, and the sibling in objs already holds most of the total, so
+			// together they oversubscribe it. Admission still says yes: the pool reports the
+			// oversubscription as a Condition, and refusing here would break the ordinary sequence
+			// of creating Bindings and then growing the backend.
+			name:    "a ceiling that fits the pool but oversubscribes it with its siblings",
+			objs:    []ctrlcli.Object{newKVCachePool(), siblingHoldingMostOfThePool("95Ti")},
+			mutate:  func(*workercore.KVCachePoolBinding) {},
 			wantMsg: "",
 		},
 		{
 			name: "a ceiling larger than the whole pool",
 			mutate: func(b *workercore.KVCachePoolBinding) {
-				b.Spec.QuotaCeiling = resource.MustParse("200Ti")
+				b.Spec.Quota.Ceiling = resource.MustParse("200Ti")
 			},
 			wantMsg: "must not exceed the pool's own ceiling of 100Ti",
 		},
@@ -248,14 +266,14 @@ func TestKVCachePoolBindingWebhook_ValidateUpdate(t *testing.T) {
 		{
 			name: "the ceiling lowered",
 			mutate: func(b *workercore.KVCachePoolBinding) {
-				b.Spec.QuotaCeiling = resource.MustParse("10Ti")
+				b.Spec.Quota.Ceiling = resource.MustParse("10Ti")
 			},
 			wantMsg: "",
 		},
 		{
 			name: "the ceiling raised past the pool's own",
 			mutate: func(b *workercore.KVCachePoolBinding) {
-				b.Spec.QuotaCeiling = resource.MustParse("200Ti")
+				b.Spec.Quota.Ceiling = resource.MustParse("200Ti")
 			},
 			wantMsg: "must not exceed the pool's own ceiling",
 		},
@@ -283,7 +301,7 @@ func TestKVCachePoolBindingWebhook_UpdateReadsThePoolOnlyForAMovedCeiling(t *tes
 			{"a finalizer being removed", func(b *workercore.KVCachePoolBinding) { b.Finalizers = nil }},
 			{"a status write", func(b *workercore.KVCachePoolBinding) { b.Status.Phase = "Degraded" }},
 			{"the ceiling rewritten in another spelling", func(b *workercore.KVCachePoolBinding) {
-				b.Spec.QuotaCeiling = resource.MustParse("21990232555520")
+				b.Spec.Quota.Ceiling = resource.MustParse("21990232555520")
 			}},
 		} {
 			t.Run(c.name, func(t *testing.T) {
@@ -301,7 +319,7 @@ func TestKVCachePoolBindingWebhook_UpdateReadsThePoolOnlyForAMovedCeiling(t *tes
 	t.Run("an update that moves the ceiling does need it", func(t *testing.T) {
 		oldKvcpb := newKVCachePoolBinding()
 		newKvcpb := oldKvcpb.DeepCopy()
-		newKvcpb.Spec.QuotaCeiling = resource.MustParse("30Ti")
+		newKvcpb.Spec.Quota.Ceiling = resource.MustParse("30Ti")
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcpb, newKvcpb)
 		require.Error(t, err)
@@ -756,7 +774,7 @@ func TestKVCachePoolBindingWebhook_SeparationIsNotRejudgedOnUpdate(t *testing.T)
 
 	oldKvcpb := newKVCachePoolBinding()
 	newKvcpb := oldKvcpb.DeepCopy()
-	newKvcpb.Spec.QuotaCeiling = resource.MustParse("30Ti")
+	newKvcpb.Spec.Quota.Ceiling = resource.MustParse("30Ti")
 
 	_, err = wh.ValidateUpdate(context.Background(), oldKvcpb, newKvcpb)
 	require.NoError(t, err,

@@ -9,11 +9,14 @@ import (
 // KVCacheBackendMemberLocalDiskApplyConfiguration represents a declarative configuration of the KVCacheBackendMemberLocalDisk type for use
 // with apply.
 //
-// KVCacheBackendMemberLocalDisk is the local SSD tier this member group's nodes contribute.
+// KVCacheBackendMemberLocalDisk is one local disk tier a member group's nodes contribute.
 //
-// It is the member's half of a pair; the leader's half is leader.offload, and admission refuses
-// either half alone. Set on its own, the leader never enqueues an offload task and the disk stays
-// empty while the member reports its capacity, which is a tier that reads as present and is not.
+// An entry in a group's list is what turns the tier on, on both sides at once: the leader renders
+// the flags that send evicted keys to disk from the list's presence alone, and it renders them in
+// the deferred mode — a key's write lands at eviction time and never at storage time — because
+// that is the only mode the store protects. The other mode has no field and none is wanted: it
+// evicts an unflushed bucket's sole replica, so there is nothing to pair this declaration with and
+// nothing to forget.
 type KVCacheBackendMemberLocalDiskApplyConfiguration struct {
 	// Path is the directory on each selected node that holds this tier, mounted into the member
 	// container from the host at the same location. It is REQUIRED and has no default: choosing a
@@ -66,7 +69,7 @@ type KVCacheBackendMemberLocalDiskApplyConfiguration struct {
 	//
 	// - "At that moment" is the whole of the promise. Nothing stores the selector's history and the
 	// members are gone by the time cleanup runs, so narrowing NodeSelector or removing the
-	// LocalDisk block before deleting the backend leaves the dropped nodes holding their content
+	// LocalDisks entry before deleting the backend leaves the dropped nodes holding their content
 	// with nothing reported about them. Delete the backend first and edit afterwards.
 	// - WHAT IS REMOVED IS THE CONTENT, NOT THE DIRECTORY, which was made by whoever prepared the
 	// node, may be a mount point, and carries an owner this operator did not choose.

@@ -20,6 +20,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/worker/kvcache"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -83,7 +84,7 @@ func renderModelDeploymentRouterObjects(
 			"router requires every role to use the same serving port; got %v", ports)
 	}
 
-	metrics, err := router.MetricsForEngine(md.Spec.Engine)
+	metrics, err := router.MetricsForEngine(md.Spec.Engine.Name)
 	if err != nil {
 		return ModelDeploymentRouterObjects{}, err
 	}
@@ -122,9 +123,9 @@ func renderModelDeploymentRouterObjects(
 		TokenizerEndpoint: modelDeploymentRoleEndpoint(md, modelDeploymentTokenizerRole(md)),
 		Namespace:         md.Namespace, EndpointSelector: endpointSelector,
 	}
-	if md.Spec.Engine == workercore.ModelDeploymentEngineVLLM {
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
 		routerInput.KVEvents = router.KVEvents{
-			Engine: md.Spec.Engine, Port: inject.VLLMKVEventsPort,
+			Engine: md.Spec.Engine.Name, Port: inject.VLLMKVEventsPort,
 			ReplayPort: inject.VLLMKVEventsReplayPort, Topic: inject.VLLMKVEventsTopic,
 		}
 	}
@@ -155,6 +156,8 @@ func renderModelDeploymentRouterObjects(
 		image = redirectedImage(ctx,
 			settings.ModelDeploymentRouterImage.ShouldValue(ctx))
 	}
+	proxyImage := redirectedImage(ctx,
+		settings.ModelDeploymentRouterProxyImage.ShouldValue(ctx))
 	replicas := int32(1)
 	if md.Spec.Router.Replicas != nil {
 		replicas = *md.Spec.Router.Replicas
@@ -180,12 +183,22 @@ func renderModelDeploymentRouterObjects(
 				}},
 				Spec: core.PodSpec{
 					ServiceAccountName: name,
+					ImagePullSecrets:   md.Spec.Router.ImagePullSecrets,
 					Containers: []core.Container{
 						{
-							Name: "envoy", Image: redirectedImage(ctx,
-								settings.ModelDeploymentRouterProxyImage.ShouldValue(ctx)),
-							Args:  []string{"-c", "/config/" + modelDeploymentRouterEnvoyConfigKey},
-							Ports: []core.ContainerPort{{Name: "http", ContainerPort: modelDeploymentRouterHTTPPort}},
+							Name: "envoy", Image: proxyImage,
+							// The same policy as the container below, for the same reason: this image
+							// is resolved through the redirect too, so it is as replaceable as the
+							// other one, and a mutable tag left on the default policy goes stale on
+							// a node that already has it.
+							//
+							// RESOLVED rather than passed through, because the field is optional and
+							// nothing defaults it: an empty value rendered here is one the API server
+							// fills in on write, which the aligner then reads back as a difference and
+							// corrects on every pass, updating the Deployment forever.
+							ImagePullPolicy: kvcache.ResolvePullPolicy(md.Spec.Router.ImagePullPolicy, proxyImage),
+							Args:            []string{"-c", "/config/" + modelDeploymentRouterEnvoyConfigKey},
+							Ports:           []core.ContainerPort{{Name: "http", ContainerPort: modelDeploymentRouterHTTPPort}},
 							ReadinessProbe: &core.Probe{ProbeHandler: core.ProbeHandler{
 								TCPSocket: &core.TCPSocketAction{Port: intstr.FromInt32(modelDeploymentRouterHTTPPort)},
 							}},
@@ -193,6 +206,7 @@ func renderModelDeploymentRouterObjects(
 						},
 						{
 							Name: "epp", Image: image, Args: args,
+							ImagePullPolicy: kvcache.ResolvePullPolicy(md.Spec.Router.ImagePullPolicy, image),
 							Env: []core.EnvVar{
 								configMapEnv(modelDeploymentRouterSelectorKey, "ENDPOINT_SELECTOR", name),
 								configMapEnv(modelDeploymentRouterTargetPortsKey, "ENDPOINT_TARGET_PORTS", name),
@@ -381,6 +395,13 @@ func alignModelDeploymentRouterDeployment(actual, expected *app.Deployment) (cha
 		actualPod.Spec.ServiceAccountName = expectedPod.Spec.ServiceAccountName
 		changed = true
 	}
+	// Compared although the pull policy below rides inside the containers: a secret added or
+	// removed here changes what a pull can authenticate, and a field rendered but never aligned
+	// is one an edit moves only by recreating the Deployment by hand.
+	if !kubemeta.DeepEqual(actualPod.Spec.ImagePullSecrets, expectedPod.Spec.ImagePullSecrets) {
+		actualPod.Spec.ImagePullSecrets = expectedPod.Spec.ImagePullSecrets
+		changed = true
+	}
 	if !kubemeta.DeepEqual(actualPod.Spec.Volumes, expectedPod.Spec.Volumes) {
 		actualPod.Spec.Volumes = expectedPod.Spec.Volumes
 		changed = true
@@ -458,14 +479,6 @@ const modelDeploymentRouterEnvoyConfig = `static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: router
-          # The original-destination cluster routes on x-gateway-destination-endpoint, and
-          # failure_mode_allow lets a request through when the EPP -- the only legitimate
-          # writer of that header -- is down. A client-supplied copy must never reach the
-          # filter chain, or the caller picks the upstream instead of the endpoint selector.
-          # The removal sits at the connection manager, which applies to downstream headers
-          # BEFORE the filters run: the route level would execute after ext_proc and strip
-          # the copy the EPP just set.
-          request_headers_to_remove: ["x-gateway-destination-endpoint"]
           route_config:
             name: router
             virtual_hosts:
@@ -475,6 +488,25 @@ const modelDeploymentRouterEnvoyConfig = `static_resources:
               - match: {prefix: "/"}
                 route: {cluster: original_destination_cluster, timeout: 86400s}
           http_filters:
+          # The original-destination cluster routes on x-gateway-destination-endpoint, and
+          # failure_mode_allow lets a request through when the EPP -- the only legitimate
+          # writer of that header -- is down. A client-supplied copy must never reach the
+          # cluster, or the caller picks the upstream instead of the endpoint selector.
+          #
+          # The removal is a filter placed ahead of ext_proc rather than a connection-manager
+          # or route-level setting, and each of those is wrong for its own reason. The
+          # connection manager HAS NO SUCH FIELD: request_headers_to_remove does not exist on
+          # HttpConnectionManager in any Envoy release, so configuring it there is not a
+          # late removal but a parse failure that stops the proxy from starting at all. The
+          # route level does exist, and runs after ext_proc, which would strip the header the
+          # EPP had just set. Filters run in order, so one placed here drops the client's copy
+          # before the EPP is consulted and leaves the EPP's own copy alone.
+          - name: envoy.filters.http.header_mutation
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
+              mutations:
+                request_mutations:
+                - remove: x-gateway-destination-endpoint
           - name: envoy.filters.http.ext_proc
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor

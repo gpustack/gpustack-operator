@@ -189,7 +189,7 @@ func (r *ModelDeploymentReconciler) readModelDeploymentCache(
 func modelDeploymentUnmanagedRole(md *workercore.ModelDeployment) string {
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		if role.Template != nil && len(role.Template.Command) > 0 {
+		if len(role.Command) > 0 {
 			return role.Name
 		}
 	}

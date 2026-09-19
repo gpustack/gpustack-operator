@@ -174,9 +174,9 @@ func TestTierSharedWith(t *testing.T) {
 				Connection: workercore.KVCacheBackendConnection{
 					Managed: &workercore.KVCacheBackendManaged{
 						Members: []workercore.KVCacheBackendMember{{
-							LocalDisk: &workercore.KVCacheBackendMemberLocalDisk{
+							LocalDisks: []workercore.KVCacheBackendMemberLocalDisk{{
 								Path: "/mnt/tier", CleanAfterDelete: clean,
-							},
+							}},
 						}},
 					},
 				},
@@ -260,8 +260,8 @@ func TestTierNodeSelected(t *testing.T) {
 
 // TestTierCleanable covers which backends have a tier to empty at all.
 func TestTierCleanable(t *testing.T) {
-	tier := func(path string, clean bool) *workercore.KVCacheBackendMemberLocalDisk {
-		return &workercore.KVCacheBackendMemberLocalDisk{Path: path, CleanAfterDelete: clean}
+	tier := func(path string, clean bool) []workercore.KVCacheBackendMemberLocalDisk {
+		return []workercore.KVCacheBackendMemberLocalDisk{{Path: path, CleanAfterDelete: clean}}
 	}
 	backend := func(members ...workercore.KVCacheBackendMember) *workercore.KVCacheBackend {
 		return &workercore.KVCacheBackend{
@@ -280,13 +280,13 @@ func TestTierCleanable(t *testing.T) {
 	}{
 		{
 			name:     "a tier that asked to be emptied",
-			kvcb:     backend(workercore.KVCacheBackendMember{LocalDisk: tier("/mnt/tier", true)}),
+			kvcb:     backend(workercore.KVCacheBackendMember{LocalDisks: tier("/mnt/tier", true)}),
 			wantPath: "/mnt/tier",
 		},
 		{
 			// The default, and the behavior of every release before the switch existed.
 			name: "a tier that did not ask keeps its content",
-			kvcb: backend(workercore.KVCacheBackendMember{LocalDisk: tier("/mnt/tier", false)}),
+			kvcb: backend(workercore.KVCacheBackendMember{LocalDisks: tier("/mnt/tier", false)}),
 		},
 		{
 			name: "a group with no tier",
@@ -296,7 +296,7 @@ func TestTierCleanable(t *testing.T) {
 			// Nothing here can empty a path that is not named, and treating blank as the working
 			// directory would empty whatever the cleanup Pod happened to start in.
 			name: "a tier asking to be emptied with no path",
-			kvcb: backend(workercore.KVCacheBackendMember{LocalDisk: tier("   ", true)}),
+			kvcb: backend(workercore.KVCacheBackendMember{LocalDisks: tier("   ", true)}),
 		},
 		{
 			name: "an external backend renders no member at all",
@@ -310,7 +310,7 @@ func TestTierCleanable(t *testing.T) {
 				return
 			}
 			assert.NotNil(t, member)
-			assert.Equal(t, tc.wantPath, member.LocalDisk.Path)
+			assert.Equal(t, tc.wantPath, member.LocalDisks[0].Path)
 		})
 	}
 }
@@ -560,7 +560,7 @@ func TestTierReuseVerdictNeedsFullCoverage(t *testing.T) {
 					Connection: workercore.KVCacheBackendConnection{
 						Managed: &workercore.KVCacheBackendManaged{
 							Members: []workercore.KVCacheBackendMember{
-								{LocalDisk: &workercore.KVCacheBackendMemberLocalDisk{Path: "/mnt/tier"}},
+								{LocalDisks: []workercore.KVCacheBackendMemberLocalDisk{{Path: "/mnt/tier"}}},
 							},
 						},
 					},
@@ -739,8 +739,8 @@ func TestMemberPodStuckReadsInitContainers(t *testing.T) {
 // helpers construct the reconciler with a client and nothing else. Measured before the guard: a nil
 // pointer dereference on the shared-path branch, from a fixture that merely declared a tier.
 func TestTierEventsSurviveANilRecorder(t *testing.T) {
-	tier := func(clean bool) *workercore.KVCacheBackendMemberLocalDisk {
-		return &workercore.KVCacheBackendMemberLocalDisk{Path: "/mnt/tier", CleanAfterDelete: clean}
+	tier := func(clean bool) []workercore.KVCacheBackendMemberLocalDisk {
+		return []workercore.KVCacheBackendMemberLocalDisk{{Path: "/mnt/tier", CleanAfterDelete: clean}}
 	}
 	backend := func(name string, clean bool) *workercore.KVCacheBackend {
 		return &workercore.KVCacheBackend{
@@ -749,7 +749,7 @@ func TestTierEventsSurviveANilRecorder(t *testing.T) {
 				Image: "mooncake:v0.3.13",
 				Connection: workercore.KVCacheBackendConnection{
 					Managed: &workercore.KVCacheBackendManaged{
-						Members: []workercore.KVCacheBackendMember{{LocalDisk: tier(clean)}},
+						Members: []workercore.KVCacheBackendMember{{LocalDisks: tier(clean)}},
 					},
 				},
 			},
@@ -787,9 +787,9 @@ func TestTierCleanupPodOfAnotherIncarnationIsNotBelieved(t *testing.T) {
 			Connection: workercore.KVCacheBackendConnection{
 				Managed: &workercore.KVCacheBackendManaged{
 					Members: []workercore.KVCacheBackendMember{{
-						LocalDisk: &workercore.KVCacheBackendMemberLocalDisk{
+						LocalDisks: []workercore.KVCacheBackendMemberLocalDisk{{
 							Path: "/mnt/tier", CleanAfterDelete: true,
-						},
+						}},
 					}},
 				},
 			},
@@ -913,9 +913,9 @@ func TestTierSharedPathStopsARemovalAlreadyRunning(t *testing.T) {
 					Connection: workercore.KVCacheBackendConnection{
 						Managed: &workercore.KVCacheBackendManaged{
 							Members: []workercore.KVCacheBackendMember{{
-								LocalDisk: &workercore.KVCacheBackendMemberLocalDisk{
+								LocalDisks: []workercore.KVCacheBackendMemberLocalDisk{{
 									Path: "/mnt/tier", CleanAfterDelete: true,
-								},
+								}},
 							}},
 						},
 					},
@@ -927,7 +927,7 @@ func TestTierSharedPathStopsARemovalAlreadyRunning(t *testing.T) {
 					Connection: workercore.KVCacheBackendConnection{
 						Managed: &workercore.KVCacheBackendManaged{
 							Members: []workercore.KVCacheBackendMember{{
-								LocalDisk:    &workercore.KVCacheBackendMemberLocalDisk{Path: "/mnt/tier"},
+								LocalDisks:   []workercore.KVCacheBackendMemberLocalDisk{{Path: "/mnt/tier"}},
 								NodeSelector: tc.rivalSelector,
 							}},
 						},
@@ -1021,9 +1021,9 @@ func TestTierCleanupSurvivesAFailedCollection(t *testing.T) {
 			Connection: workercore.KVCacheBackendConnection{
 				Managed: &workercore.KVCacheBackendManaged{
 					Members: []workercore.KVCacheBackendMember{{
-						LocalDisk: &workercore.KVCacheBackendMemberLocalDisk{
+						LocalDisks: []workercore.KVCacheBackendMemberLocalDisk{{
 							Path: "/mnt/tier", CleanAfterDelete: true,
-						},
+						}},
 					}},
 				},
 			},
@@ -1087,9 +1087,9 @@ func TestTierSharedPathDeleteIsGuardedByTheUIDItRead(t *testing.T) {
 			Connection: workercore.KVCacheBackendConnection{
 				Managed: &workercore.KVCacheBackendManaged{
 					Members: []workercore.KVCacheBackendMember{{
-						LocalDisk: &workercore.KVCacheBackendMemberLocalDisk{
+						LocalDisks: []workercore.KVCacheBackendMemberLocalDisk{{
 							Path: tierDir, CleanAfterDelete: true,
-						},
+						}},
 					}},
 				},
 			},
@@ -1101,7 +1101,7 @@ func TestTierSharedPathDeleteIsGuardedByTheUIDItRead(t *testing.T) {
 			Connection: workercore.KVCacheBackendConnection{
 				Managed: &workercore.KVCacheBackendManaged{
 					Members: []workercore.KVCacheBackendMember{{
-						LocalDisk:    &workercore.KVCacheBackendMemberLocalDisk{Path: tierDir},
+						LocalDisks:   []workercore.KVCacheBackendMemberLocalDisk{{Path: tierDir}},
 						NodeSelector: map[string]string{"tier": "a"},
 					}},
 				},

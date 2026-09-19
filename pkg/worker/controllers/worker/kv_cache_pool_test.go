@@ -41,7 +41,7 @@ func newTestKVCachePoolBinding(namespace, name, pool string) *workercore.KVCache
 			},
 			// Set, because the field is required and its zero value is one the webhook refuses. A
 			// fixture that left it at zero would be an object no cluster would have accepted.
-			QuotaCeiling: resource.MustParse("1Ti"),
+			Quota: workercore.KVCachePoolBindingQuota{Ceiling: resource.MustParse("1Ti")},
 		},
 	}
 }
@@ -314,4 +314,185 @@ func TestKVCachePoolReconcile_AbsentPoolIsNotAFailure(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, got, "and it is not requeued: the create will bring it back")
+}
+
+// TestObserveKVCachePoolQuotaWithinTotal pins the pool's verdict on whether every ceiling it has
+// granted still fits the total it declared.
+//
+// False is the verdict worth reading and it is NOT a fault: the store serves every tenant in
+// proportion, each Binding's status.effectiveQuota reports the figure actually granted, and no
+// Binding is refused or blamed for it. The sum counts only the Bindings whose ceilings the pass
+// writes into the ledger, so a releasing Binding and a contested domain are both left out of it.
+func TestObserveKVCachePoolQuotaWithinTotal(t *testing.T) {
+	// binding builds one fixture under its own reuse domain, so two cases never collide on one.
+	binding := func(domain, ceiling string) workercore.KVCachePoolBinding {
+		kvcpb := *newTestKVCachePoolBinding("team-a", domain, "shared")
+		kvcpb.Spec.Domain.Name = domain
+		kvcpb.Spec.Quota.Ceiling = resource.MustParse(ceiling)
+		return kvcpb
+	}
+
+	cases := []struct {
+		name       string
+		total      string
+		bindings   []workercore.KVCachePoolBinding
+		mutate     func(master *kvCachePoolMaster)
+		wantTrue   bool
+		wantReason string
+		wantMsg    []string
+	}{
+		{
+			name:       "two bindings at half the total each",
+			total:      "16Gi",
+			bindings:   []workercore.KVCachePoolBinding{binding("chat", "8Gi"), binding("batch", "8Gi")},
+			wantTrue:   true,
+			wantReason: "WithinTotal",
+			wantMsg:    []string{"sum to 16Gi", "total of 16Gi"},
+		},
+		{
+			name:  "a third binding taking the sum past the total",
+			total: "16Gi",
+			bindings: []workercore.KVCachePoolBinding{
+				binding("chat", "8Gi"), binding("batch", "8Gi"), binding("eval", "2Gi"),
+			},
+			wantReason: KVCachePoolReasonOversubscribed,
+			wantMsg:    []string{"sum to 18Gi", "total of 16Gi"},
+		},
+		{
+			// Its claim is over: counting it would hold the verdict False for as long as the drain
+			// takes, after the delete that fixed the oversubscription already happened.
+			name:  "a releasing binding is not counted",
+			total: "16Gi",
+			bindings: func() []workercore.KVCachePoolBinding {
+				live := binding("chat", "16Gi")
+				draining := binding("batch", "16Gi")
+				draining.DeletionTimestamp = &meta.Time{Time: time.Now()}
+				return []workercore.KVCachePoolBinding{live, draining}
+			}(),
+			wantTrue:   true,
+			wantReason: "WithinTotal",
+		},
+		{
+			// Two Bindings raced one cache onto a single domain and the pass dropped both from the
+			// desired tenants; counting the domain twice would also count its ceiling twice.
+			name:  "a contested domain is not counted",
+			total: "16Gi",
+			bindings: []workercore.KVCachePoolBinding{
+				binding("chat", "16Gi"),
+				func() workercore.KVCachePoolBinding {
+					second := binding("chat", "16Gi")
+					second.Namespace = "team-b"
+					return second
+				}(),
+			},
+			mutate: func(master *kvCachePoolMaster) {
+				master.contested["chat"] = []workercore.KVCachePoolBindingReference{
+					{Namespace: "team-a", Name: "chat"},
+					{Namespace: "team-b", Name: "chat"},
+				}
+			},
+			wantTrue:   true,
+			wantReason: "WithinTotal",
+		},
+		{
+			// The observation pass skips it first, so the verdict has to agree or the two would
+			// disagree about what the pool holds.
+			name:  "a binding with no domain is not counted",
+			total: "16Gi",
+			bindings: []workercore.KVCachePoolBinding{
+				binding("chat", "8Gi"), binding("", "16Gi"),
+			},
+			wantTrue:   true,
+			wantReason: "WithinTotal",
+		},
+		{
+			name:       "a pool nobody bound",
+			total:      "16Gi",
+			wantTrue:   true,
+			wantReason: "WithinTotal",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			kvcp := newTestKVCachePool("shared", "mooncake-dram")
+			kvcp.Spec.Quota.Total = resource.MustParse(c.total)
+			holder := &workercore.KVCachePool{ObjectMeta: *kvcp.ObjectMeta.DeepCopy()}
+
+			master := &kvCachePoolMaster{
+				bindings:  map[string][]workercore.KVCachePoolBinding{"shared": c.bindings},
+				contested: map[string][]workercore.KVCachePoolBindingReference{},
+			}
+			if c.mutate != nil {
+				c.mutate(master)
+			}
+
+			observeKVCachePoolQuotaWithinTotal(kvcp, holder, master)
+
+			condition := KVCachePoolConditionQuotaWithinTotal
+			require.True(t, condition.Exists(holder))
+			if c.wantTrue {
+				assert.True(t, condition.IsTrue(holder))
+			} else {
+				assert.True(t, condition.IsFalse(holder))
+			}
+			assert.Equal(t, c.wantReason, condition.GetReason(holder))
+			for _, want := range c.wantMsg {
+				assert.Contains(t, condition.GetMessage(holder), want)
+			}
+
+			// The verdict belongs to the pool alone: no Binding carries an error of its own for a
+			// ceiling the pool admitted.
+			for i := range c.bindings {
+				assert.Empty(t, c.bindings[i].Status.Conditions)
+			}
+		})
+	}
+}
+
+// TestKVCachePoolQuotaWithinTotalIsNotAPhaseAxis pins that the oversubscribed pool still reads
+// Ready. What False names is a proportional division the store performs by design, and a pool
+// telling an operator to fix what is working is the reading the positive spelling exists to avoid.
+func TestKVCachePoolQuotaWithinTotalIsNotAPhaseAxis(t *testing.T) {
+	r := &KVCachePoolReconciler{}
+
+	// Every phase axis observed healthy, so the only difference between the two holders below is
+	// the verdict under test.
+	healthy := func() *workercore.KVCachePool {
+		holder := &workercore.KVCachePool{ObjectMeta: meta.ObjectMeta{Name: "shared"}}
+		KVCachePoolConditionBackendResolved.True(holder, "Resolved", "")
+		KVCachePoolConditionQuotaLedgerAvailable.True(holder, "Separates", "")
+		KVCachePoolConditionQuotaPolicyWritable.True(holder, "Writable", "")
+		KVCachePoolConditionCapacityAllocatable.True(holder, "Allocatable", "")
+		return holder
+	}
+
+	// A 2Ti pool: one default 1Ti binding sits inside it, three take the sum past it, so the only
+	// difference between the two holders below is the verdict under test.
+	pool := newTestKVCachePool("shared", "mooncake-dram")
+	pool.Spec.Quota.Total = resource.MustParse("2Ti")
+
+	within := healthy()
+	observeKVCachePoolQuotaWithinTotal(pool, within,
+		&kvCachePoolMaster{bindings: map[string][]workercore.KVCachePoolBinding{
+			"shared": {*newTestKVCachePoolBinding("team-a", "chat", "shared")},
+		}})
+
+	over := healthy()
+	observeKVCachePoolQuotaWithinTotal(pool, over,
+		&kvCachePoolMaster{bindings: map[string][]workercore.KVCachePoolBinding{
+			"shared": {
+				*newTestKVCachePoolBinding("team-a", "chat", "shared"),
+				*newTestKVCachePoolBinding("team-b", "batch", "shared"),
+				*newTestKVCachePoolBinding("team-c", "eval", "shared"),
+			},
+		}})
+
+	require.True(t, KVCachePoolConditionQuotaWithinTotal.IsTrue(within))
+	require.True(t, KVCachePoolConditionQuotaWithinTotal.IsFalse(over))
+	require.Equal(t, KVCachePoolReasonOversubscribed,
+		KVCachePoolConditionQuotaWithinTotal.GetReason(over))
+
+	assert.Equal(t, r.summarizeKVCachePool(within).Phase, r.summarizeKVCachePool(over).Phase)
+	assert.Equal(t, KVCachePoolPhaseReady, r.summarizeKVCachePool(over).Phase)
 }

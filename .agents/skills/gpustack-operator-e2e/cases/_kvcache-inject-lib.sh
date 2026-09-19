@@ -211,7 +211,8 @@ spec:
     name: ${DOMAIN}
     blockSize: 16
     dtype: bfloat16
-  quotaCeiling: 256Mi
+  quota:
+    ceiling: 256Mi
 YAML
 
   if ! kvi_wait_for kvcachepoolbindings.worker.gpustack.ai "$BINDING" '{.status.phase}' Ready 180 "$TEST_NS" >/dev/null; then
@@ -245,7 +246,8 @@ spec:
     name: default
     blockSize: 16
     dtype: bfloat16
-  quotaCeiling: 256Mi
+  quota:
+    ceiling: 256Mi
 YAML
 
   if ! kvi_wait_for kvcachepoolbindings.worker.gpustack.ai "$BINDING_DEFAULT" '{.status.phase}' Ready 180 "$TEST_NS" >/dev/null; then

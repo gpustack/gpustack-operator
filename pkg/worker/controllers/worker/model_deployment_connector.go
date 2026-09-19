@@ -52,16 +52,16 @@ type ModelDeploymentConnectorInput struct {
 	// MasterServerAddress is the address of the store master, observed from the pool.
 	MasterServerAddress string
 
-	// Protocol is the transport in the artifact's own spelling, ALREADY MAPPED from the backend's
-	// enum by `mooncake.MemberProtocol`. `inject.Connection.Protocol` documents itself as arriving
-	// mapped, and that function is what maps it: it belongs to the package that owns the backend,
-	// it resolves Auto, and it falls back to Auto for an empty value.
+	// Protocols is what the pool's backend offers, in the artifact's own spelling and in group
+	// declaration order: each member group's effective protocol, ALREADY MAPPED by
+	// `mooncake.MemberProtocols`. It is a list because groups may now disagree — a VRAM group on a
+	// fabric beside a DRAM group on TCP — and which one the engine is handed is decided at
+	// synthesis, where the engine is known, by `inject.MatchTransport`.
 	//
-	// A mapping used to live in this file and was deleted rather than kept. It agreed with
-	// mooncake's table on every enum value -- so feeding one into the other was harmless and
-	// also pointless, and a third implementation of one table is a place for the next transport to
-	// be added in two of three.
-	Protocol string
+	// It feeds the store client alone. The point-to-point leg does not read it -- the two data
+	// planes declare separately, and vllmKVTransferProtocol says why. Empty is the no-store
+	// shape, which the renderer refuses for its own reason.
+	Protocols []string
 
 	// PublishKVEvents is true for a routed role that produces cache blocks.
 	PublishKVEvents bool
@@ -70,13 +70,14 @@ type ModelDeploymentConnectorInput struct {
 	// bind address.
 	KVEventsHost string
 
-	// DirectTransfer composes point-to-point P/D transfer with the shared store.
-	DirectTransfer bool
+	// KVTransfer composes point-to-point P/D transfer with the shared store. The two are
+	// orthogonal inputs and both may be on at once; neither is a branch that excludes the other.
+	KVTransfer bool
 
-	// DirectTransferProtocol is the transport the point-to-point leg is told to use, declared on
+	// KVTransferProtocol is the transport the point-to-point leg is told to use, declared on
 	// the ModelDeployment. Empty renders the renderer's default. It is passed through verbatim:
 	// the accepted set belongs to the engine image's mooncake build, not to this operator.
-	DirectTransferProtocol string
+	KVTransferProtocol string
 }
 
 // TWO FIELDS THIS STRUCT USED TO CARRY ARE GONE, and neither is a capability that was lost.
@@ -132,8 +133,8 @@ type ModelDeploymentConnectorRender struct {
 	// KVEvents is the rendered, dialable event contract, absent when this role does not publish.
 	KVEvents *inject.KVEvents
 
-	// DirectTransfer is true when Args include the point-to-point P/D connector.
-	DirectTransfer bool
+	// KVTransfer is true when Args include the point-to-point P/D connector.
+	KVTransfer bool
 }
 
 // modelDeploymentRoutesManagedVLLM is the gate both connector decisions share: the managed llm-d
@@ -145,11 +146,11 @@ type ModelDeploymentConnectorRender struct {
 // events it refuses, and a refused render is an error loop, not a deployment without events.
 func modelDeploymentRoutesManagedVLLM(md *workercore.ModelDeployment, manufacturer string) bool {
 	return md.Spec.Router != nil && md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
-		md.Spec.Engine == workercore.ModelDeploymentEngineVLLM &&
+		md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
 		manufacturer != nodefeature.ManufacturerAscend
 }
 
-func modelDeploymentUsesDirectTransfer(
+func modelDeploymentUsesKVTransfer(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) bool {
 	if !modelDeploymentRoutesManagedVLLM(md, manufacturer) {
@@ -292,20 +293,30 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		return ModelDeploymentConnectorRender{}, fmt.Errorf("unsupported role kind %q", in.Kind)
 	}
 
+	// Which of the pool's offers the engine is handed is decided HERE and not at resolution,
+	// because the answer needs the engine and the connection is resolved per deployment while the
+	// engine varies per role. The match is deterministic — the first offer in declaration order
+	// the engine's store backend accepts — and a pool serving nothing it accepts is refused
+	// rather than started on a transport its connector raises on.
+	protocol, err := inject.MatchTransport(engine, in.Protocols)
+	if err != nil {
+		return ModelDeploymentConnectorRender{}, err
+	}
+
 	res, err := inject.Render(inject.Input{
 		Engine: engine,
 		Role:   role,
 		Domain: in.Domain,
 		Connection: inject.Connection{
 			MasterAddress: in.MasterServerAddress,
-			Protocol:      in.Protocol,
+			Protocol:      protocol,
 		},
 		PublishKVEvents: in.PublishKVEvents,
 		KVEventsHost:    in.KVEventsHost,
-		DirectTransfer:  in.DirectTransfer,
+		KVTransfer:      in.KVTransfer,
 		// The protocol is threaded rather than resolved here: the renderer owns the default, and
 		// a second default in this file would be two definitions of one fact.
-		DirectTransferProtocol: in.DirectTransferProtocol,
+		KVTransferProtocol: in.KVTransferProtocol,
 	})
 	if err != nil {
 		return ModelDeploymentConnectorRender{}, err
@@ -324,7 +335,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		PodAnnotations: res.PodAnnotations,
 		Ports:          res.Ports,
 		KVEvents:       res.KVEvents,
-		DirectTransfer: res.DirectTransfer,
+		KVTransfer:     res.KVTransfer,
 	}, nil
 }
 
@@ -376,7 +387,7 @@ func modelDeploymentPublishesKVEvents(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) bool {
 	return modelDeploymentRoutesManagedVLLM(md, manufacturer) &&
-		(role.Template == nil || len(role.Template.Command) == 0) &&
+		len(role.Command) == 0 &&
 		ModelDeploymentEffectiveRoleKind(role) != workercore.ModelDeploymentRoleKindDecode
 }
 

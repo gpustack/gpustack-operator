@@ -7,31 +7,29 @@
 > **Read time** ~10 min
 
 A member group may declare a directory on each of its nodes, which configures the store client's
-offload keys to point at it. It is **two halves and admission requires both**, because either alone
-is accepted by the store and then does nothing it reports:
+offload keys to point at it. **Declaring the entry is the whole switch**: the leader has no field of
+its own and takes its offload flags from this list's presence. The list holds one entry, keyed by
+`path` — `status.capacity` reports one pair of figures for the whole backend, so a second tier could
+not be attributed.
 
 ```yaml
 spec:
   connection:
     managed:
-      leader:
-        offload:
-          enabled: true                # the leader's half
-          onEvict: true                # REQUIRED with enabled
       members:
       - nodeSelector: { kvcache: "true" }
         medium: DRAM
         capacityPerMember: 500Gi
-        localDisk:                     # the members' half
-          path: /var/lib/kvcache
-          capacity: 4Ti                # optional; unset means the store's own ceiling
-          keyLimit: 10000000           # optional; the same, on the key count
-          eviction:                    # optional; unset means the store's own behaviour
-            enabled: true              # default; false fills the tier and then stops writing
-            policy: LRU                # FIFO | LRU; unset means the store's own, which is FIFO
-            watermark:                 # optional; percentages of capacity
-              high: 90
-              low: 80
+        localDisks:                    # declaring an entry is what turns the tier on
+          - path: /var/lib/kvcache
+            capacity: 4Ti              # optional; unset means the store's own ceiling
+            keyLimit: 10000000         # optional; the same, on the key count
+            eviction:                  # optional; unset means the store's own behaviour
+              enabled: true            # default; false fills the tier and then stops writing
+              policy: LRU              # FIFO | LRU; unset means the store's own, which is FIFO
+              watermark:               # optional; percentages of capacity
+                high: 90
+                low: 80
 ```
 
 | what it renders | where |
@@ -39,19 +37,29 @@ spec:
 | `MOONCAKE_OFFLOAD_ENABLED` and `..._FILE_STORAGE_PATH`, plus `..._BUCKET_SIZE_LIMIT_BYTES` and `..._BUCKET_KEYS_LIMIT` | the member container |
 | `..._TOTAL_SIZE_LIMIT_BYTES` **and** `..._BUCKET_MAX_TOTAL_SIZE`, both from `capacity`; `..._TOTAL_KEYS_LIMIT` from `keyLimit` | the member container |
 | `..._BUCKET_EVICTION_POLICY`, `..._ENABLE_DISK_WATERMARK_EVICTION` and the two ratio variables, from `eviction` | the member container |
-| a `hostPath` volume and mount at `localDisk.path` | the member Pod |
-| `-enable_offload=true`, `-offload_on_evict=true` | the leader's argv |
+| a `hostPath` volume and mount at `localDisks[].path` | the member Pod |
+| `-enable_offload=true`, `-offload_on_evict=true` | the leader's argv, derived from this declaration |
 | a `preStop` hook, and a termination window derived from `scaleIn.gracePeriodSeconds` | the member Pod |
 
-**`onEvict` is required whenever `enabled` is set** — admission refuses the pair without it, in both
-directions. The store keeps an object queued for offload in memory until the disk write lands only on
-the branch this field selects; leaving it out selects write-through, where an eviction can destroy the
-sole replica of an object whose bucket has not been flushed. The mode is refused rather than
-documented, so there is nothing to opt into.
+**The mode is not selectable: the tier always runs deferred.** The leader renders
+`-enable_offload=true -offload_on_evict=true` together, and only when a group declares a tier — the
+flags come from the declaration rather than any field, and `leader.extraArgs` refuses both keys so
+the leader cannot drift out of step with the members' declaration.
+
+The store keeps an object queued for offload in memory until the disk write lands, which is the
+branch `-offload_on_evict` selects. The write-through alternative, where an eviction can destroy the
+sole replica of an object whose bucket has not been flushed, is not renderable by any shape of this
+object, so there is nothing to opt into.
 
 **A tier is a layer on a member group, never a group of its own** — see
 [The two axes](backend.md#the-two-axes) for why the shape has to be this way, and
 [KV Cache on Disk-Heavy Nodes](disk-heavy-nodes.md) for what to write on a node that is mostly disk.
+
+⚠️ **Every example on this page is a `DRAM` group, and that is not incidental.** What is and is not
+measured about pairing the tier with a `VRAM` group is stated once, beside the medium it belongs to,
+at [Reaching a node's accelerator](backend.md#reaching-a-nodes-accelerator) — read it before writing
+one. It is named there and not restated here on purpose: a second copy of a measurement is a second
+thing to keep true, and this page has already been wrong about it once.
 
 ## Contents
 
@@ -78,7 +86,7 @@ the history of what was and was not observed on the way to finding it is in
 [the spec](../../specs/2026-09-05-kv-cache-media-and-scaling.md#the-one-item-that-did-not-pass-no-byte-reached-the-disk).
 
 **The operator renders a smaller pair of its own**, so a modest backend closes buckets. They are
-**not in the API** and `extraEnvs` refuses them: moving them is a tuning decision that would need a
+**not in the API** and `extraEnv` refuses them: moving them is a tuning decision that would need a
 field, not an escape hatch that silently defines the same variable twice.
 
 Three bounds follow from the bucket being the unit, all enforced at apply time, all naming the same
@@ -86,7 +94,7 @@ figure:
 
 - `capacityPerMember` must hold **one bucket** on a group that declares a tier — the bytes are held in
   the memory segment until the bucket is complete.
-- `localDisk.capacity` and `localDisk.keyLimit`, when set, must hold one bucket and one bucket's worth
+- `localDisks[].capacity` and `localDisks[].keyLimit`, when set, must hold one bucket and one bucket's worth
   of keys.
 
 > **Why a refusal rather than a default** — the store stops taking offload work as soon as one more
@@ -126,7 +134,7 @@ bucket's worth per member behind it, is a real verdict.
 
 ## What the tier does when it fills
 
-`localDisk.eviction` is one choice with two outcomes, not a set of knobs:
+`localDisks[].eviction` is one choice with two outcomes, not a set of knobs:
 
 | `eviction` | what the tier does when full |
 |---|---|
@@ -154,15 +162,15 @@ act on them:
 > is what keeps a typo from being a silently disabled cache. Turning eviction off is `enabled: false`
 > rather than a third enum value, so there is exactly one way to say it.
 
-**Settings this API does not name are reachable through `members[].extraEnvs`**, which `extraArgs`
-cannot reach: that map renders config-key overrides, and this family is read from the environment
-only. A name the operator already renders is refused there, because Kubernetes takes a container
-carrying one name twice and leaves the winner to the runtime. ⛔ **Every value is world-readable**, on
-the cluster-scoped object and again in the Pod — no credential belongs there.
+**Settings this API does not name are reachable through `members[].extraEnv`**, which `extraArgs`
+cannot reach: its entries render as the entrypoint's config-key overrides, and this family is read
+from the environment only. A name the operator already renders is refused there, because Kubernetes
+takes a container carrying one name twice and leaves the winner to the runtime. ⛔ **Every value is
+world-readable**, on the cluster-scoped object and again in the Pod — no credential belongs there.
 
 ## The directory has to exist, and be writable by the image's user
 
-`localDisk.path` is mounted with `type: Directory`, so **the directory must already exist on every
+`localDisks[].path` is mounted with `type: Directory`, so **the directory must already exist on every
 node the group selects**. This is deliberate: a directory the kubelet creates is owned by `root` with
 mode `0755`, while the published store image runs as **uid 65532**, and the member then starts and
 cannot write to it. `fsGroup` does not help — it does not apply to `hostPath` volumes.
@@ -216,15 +224,13 @@ already wrote would stay on their nodes with nothing addressing it. **What the t
 frozen**: `capacity`, `keyLimit` and `eviction` each move either way, re-rendering the variables in
 the table above, and the tier's contents survive the restart that follows.
 
-⛔ **`leader.offload.enabled` cannot be turned off on its own while a group carries a tier**, because
-the pair rule refuses the half-configuration in both directions. It comes off only together with the
-tier, in the one edit below.
+**There is exactly one exit, and it needs the tier on the last group.** The immutability rule reads
+the list **by position** — the position identifies a group everywhere else, so it identifies the
+tier here too — and an update that drops the **last** group takes its tier with it.
 
-**There is exactly one exit, and it needs the tier on the last group.** The rules pair groups **by
-position** and stop at the end of the new list, so an update that drops the **last** group and clears
-`leader.offload` in the same edit is admitted. Dropping an earlier group is refused: every position
-after it would be compared against a different group's spec, which is also why reordering `members`
-is refused. That message is accurate rather than confused about which group you meant.
+Dropping an earlier group is refused: every position after it would be compared against a different
+group's spec, which is also why reordering `members` is refused. That message is accurate rather
+than confused about which group you meant.
 
 ⛔ **A backend whose only group carries a tier has no exit but deletion.** `members` requires at least
 one entry, so that group cannot be removed, and replacing it in place is the forbidden edit. Deleting
@@ -246,17 +252,17 @@ backend looking healthy.
 ## Emptying the directory when the backend goes away
 
 Deleting a `KVCacheBackend` leaves the tier directory exactly as it was. Set
-`members[].localDisk.cleanAfterDelete: true` and the operator empties it as part of the deletion, on
+`members[].localDisks[].cleanAfterDelete: true` and the operator empties it as part of the deletion, on
 every node that group's `nodeSelector` picks at the moment you delete it.
 
 ```yaml
       members:
         - medium: DRAM
           capacityPerMember: 64Gi
-          localDisk:
-            path: /var/lib/kvcache
-            capacity: 512Gi
-            cleanAfterDelete: true
+          localDisks:
+            - path: /var/lib/kvcache
+              capacity: 512Gi
+              cleanAfterDelete: true
 ```
 
 **It defaults to false, and false is what every release before it did.** What is on that disk is
@@ -330,7 +336,7 @@ same way.
 **A node the group has stopped selecting is not cleaned, and not reported either.** The spec is the
 only record of which nodes a group covered -- nothing keeps the selector's history, and the members
 are gone by the time the cleanup runs -- so a node dropped by narrowing `nodeSelector`, or by
-removing the `localDisk` block, cannot be named, let alone reached. **Delete the backend first and
+removing the `localDisks` entry, cannot be named, let alone reached. **Delete the backend first and
 edit afterwards**; editing first silently takes those nodes out of the cleanup.
 
 **A tier with no image to empty it is given up on immediately**, with the same event. When neither
@@ -360,7 +366,7 @@ ephemeral-storage accounting covers the container filesystem, `emptyDir` volumes
 `hostPath`. A request against it would reserve a figure nothing polices and would keep the member off
 the very node that has the disk.
 
-**Watching that filesystem is yours.** `localDisk.capacity` renders the store's own ceiling, which is
+**Watching that filesystem is yours.** `localDisks[].capacity` renders the store's own ceiling, which is
 the only bound on what the tier writes; nothing in Kubernetes will evict or throttle the member when
 the node's disk fills.
 

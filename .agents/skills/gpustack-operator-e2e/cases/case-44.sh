@@ -221,7 +221,7 @@ kind: KVCachePoolBinding
 metadata: {name: bind-q, namespace: ${NS_Q}}
 spec:
   poolRef: {name: ${POOL}}
-  quotaCeiling: ${CEILING}
+  quota: {ceiling: ${CEILING}}
   domain: {name: ${DOMAIN}, blockSize: 16, dtype: bfloat16}
 YAML
 )"

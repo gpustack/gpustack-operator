@@ -38,9 +38,15 @@ characters, so everything of unbounded length is an annotation.
 | annotation | `kvcache.gpustack.ai/binding` | a `KVCachePoolBinding` name, in this Pod's namespace | yes |
 | annotation | `kvcache.gpustack.ai/engine` | `vllm` \| `sglang` | yes |
 | annotation | `kvcache.gpustack.ai/manufacturer` | `ascend` | no — only with `engine: vllm`; selects the vLLM-Ascend runtime |
-| annotation | `kvcache.gpustack.ai/role` | `prefill` \| `decode` | no — **vLLM family only**; SGLang refuses any role |
+| annotation | `kvcache.gpustack.ai/role` | `prefill` \| `decode`; omitted for a plain server | no — **vLLM family only**; SGLang refuses any role |
 | annotation | `kvcache.gpustack.ai/container` | a container name | only when the Pod has more than one container |
 | annotation | `kvcache.gpustack.ai/launch-args-forwarded` | `"true"` | no — only when an unrecognised launcher, script, or image ENTRYPOINT forwards appended arguments to the declared engine |
+
+For a plain server, one that is not half of a prefill/decode split, LEAVE THE ROLE ANNOTATION OFF.
+`server` is not in its value domain and a Pod carrying it is refused, while the same arrangement is
+spelled `server` on `ModelDeployment.spec.roles[].kind`, which even defaults to it. The value that
+is correct there turns a Pod away here. An absent annotation renders the read-and-write
+configuration a shared cache wants.
 
 ```yaml
 apiVersion: apps/v1
@@ -61,6 +67,30 @@ spec:
           image: vllm/vllm-openai:v0.28.0
           command: ["vllm"]
           args: ["serve", "--model", "Qwen/Qwen3-8B"]
+```
+
+A bare Pod follows the same contract — the label opts it in, and the optional annotations select the
+role and the container:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bench
+  namespace: team-a
+  labels:
+    kvcache.gpustack.ai/inject: "true"          # the opt-in; a LABEL, not an annotation
+  annotations:
+    kvcache.gpustack.ai/binding: team-a         # a KVCachePoolBinding in this namespace
+    kvcache.gpustack.ai/engine: vllm
+    kvcache.gpustack.ai/role: decode            # optional: prefill or decode
+    kvcache.gpustack.ai/container: server       # required with more than one container
+spec:
+  containers:
+    - name: server
+      image: vllm/vllm-openai:v0.28.0
+      command: ["vllm"]
+      args: ["serve", "--model", "Qwen/Qwen2.5-72B-Instruct"]
 ```
 
 The engine is **declared, never guessed from the image**. Engines take entirely different flags, and a
@@ -104,7 +134,7 @@ and which keys their readers know.
 |---|---|---|
 | the pool's `status.clientEndpoint` | `master_server_address` | `MOONCAKE_MASTER` |
 | the metadata plane, always the literal `P2PHANDSHAKE` | `metadata_server` | `MOONCAKE_TE_META_DATA_SERVER` |
-| the backend's transport, always written | `protocol` | `MOONCAKE_PROTOCOL` |
+| the transport of the pool group the engine matched, always written | `protocol` | `MOONCAKE_PROTOCOL` |
 | the RDMA device filter, always empty | `device_name` | `MOONCAKE_DEVICE` |
 | the contributed storage segment, always `0` | `global_segment_size` | `MOONCAKE_GLOBAL_SEGMENT_SIZE` |
 | the pure-client topology | `mode: standalone-store` | no key — SGLang has none |
@@ -132,11 +162,22 @@ this operator does not render today.
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
 when the container has not spoken about them. A value you set yourself is left alone.
 
-**A variable you declare yourself wins, with two exceptions.** `MOONCAKE_CONFIG_PATH` selects the
-mechanism, so declaring it yourself is **refused at admission** rather than honoured. Two containers
-pointing at two different configurations is an ambiguity nothing would report.
-`MOONCAKE_TENANT_ID` is overwritten with the Binding's domain because the workload cannot select
-another reuse domain. Every other `env` entry the workload carries is left alone.
+**An injected variable overrules one you declared yourself.** Injection is opt-in and its opt-out
+is explicit, so a Pod that asked for it and then declares a Mooncake variable has given two answers
+to a question the Binding already answered; the injected value is written **in place**, leaving one
+entry per name rather than two.
+
+The two observability toggles above are the exception: they change no result, so a value you set is
+kept.
+
+Two kinds of key are **refused at admission** instead of overwritten, because overwriting them
+would not help.
+
+`MOONCAKE_CONFIG_PATH` and `--kv-transfer-config` select the **mechanism** — a second one is an
+ambiguity nothing reports. `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` and
+`--hicache-storage-backend-extra-config` select the configuration **source**, which leaves the
+injected variables present and unread. Each key, the engine it applies to and why it is refused are
+under [Refusals and their fixes](#refusals-and-their-fixes).
 
 This applies only to `env`: a value supplied through `envFrom` is invisible to the check and **will
 be overwritten with no symptom**, so declare Mooncake variables in `env`.
@@ -181,10 +222,14 @@ guarantee. The general launch check also refuses a suffix-less wrapper named `en
 unless its author declares that it forwards appended arguments. Admission cannot open the file, so
 the declaration is the only way to admit that uncertainty.
 
-Two keys are not refused as conflicts. `MOONCAKE_TENANT_ID` is overwritten with the Binding's domain
-because the workload cannot select another reuse domain. `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` is
-left alone because it means you configured SGLang from a file of your own; the injected variables
-then silently stop mattering — see [Reading the injection record](#reading-the-injection-record).
+⛔ **A key that selects where the engine reads its store configuration from is refused**, per engine:
+`SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` and `--hicache-storage-backend-extra-config` on SGLang,
+`MOONCAKE_CONFIG_PATH` on vLLM. None of them collides with anything this operator writes, and that
+is what makes them worth refusing: the engine selects one source out of three, so either key leaves
+every injected variable present on the Pod and read by nothing.
+
+The same key on an engine that does not read it is **not** refused — SGLang's variable means nothing
+to vLLM, and a refusal there would have nothing behind it.
 
 To take future Pods back over, set `kvcache.gpustack.ai/inject: "false"` on the workload's **Pod
 template**, or drop the label there. It does not undo an existing Pod: the injected args, env and
@@ -273,15 +318,17 @@ Pods admitted by an older operator may also carry `engineVersion`. New records o
 described the upstream source used when the injector was written, not the image in the Pod. Readers
 must ignore that legacy field and must not infer image compatibility from it.
 
-`vehicle` is on the record because it turns one otherwise-silent outcome into a one-line check: a Pod
-stamped `"vehicle":"environment"` whose cache stays cold is a Pod whose own
-`SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` or `--hicache-storage-backend-extra-config` has taken
-precedence over the injection. That precedence is correct — your explicit configuration outranks a
-defaulted one — so the webhook does not refuse it, and this annotation is where you find out.
+`vehicle` is on the record so a reader can tell which shape was written without decoding the
+container: `"file"` means a projected configuration document plus its volume, `"environment"` means
+variables alone.
+
+It used to carry a second job — telling you that your own `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` had
+taken precedence and left the injection inert. That outcome no longer occurs: those keys are refused
+at admission, so a Pod that was injected is a Pod whose injection is read.
 
 ## vLLM-Ascend requires the `ascend` transport
 
-**A `KVCacheBackend` whose transport is not `ascend` makes a vLLM-Ascend container fail to start**, and
+**A pool whose groups offer no `ascend` transport makes a vLLM-Ascend container fail to start**, and
 the injection is what triggers it. That engine accepts one transport and raises on the rest:
 
 ```text
@@ -298,12 +345,14 @@ share, so it surfaces as an admission rejection for an injected Pod and as a rec
 
 **The transport has two spellings and the message uses both.** What the pool offers and what the
 engine accepts are reported as the artifact spells them, because that is the value the container was
-handed: `tcp` against `ascend`. The value to set is the API's, **`Ascend`** with a capital, because
+handed: `tcp` against `ascend`. The value to set is the API's, **`CANN`**, because
 `spec.transport.protocol` is a case-sensitive enum.
 
 **The failing backend is not one somebody misconfigured.** `spec.transport.protocol` defaults to
-`Auto`, which resolves to `tcp` — so a backend left entirely at its defaults is precisely the one this
-engine cannot use. Pair vLLM-Ascend with a backend whose transport is `Ascend`.
+`Auto`, which resolves to the store's `tcp` — so a backend left entirely at its defaults is precisely the
+one this engine cannot use. Pair vLLM-Ascend with a pool that offers `CANN`: declared on the backend's
+`spec.transport.protocol`, or on one member group's `transport.protocol` when only one group serves
+the fabric.
 
 ## What a cache changes about a workload
 

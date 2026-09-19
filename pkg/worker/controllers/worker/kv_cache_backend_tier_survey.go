@@ -63,7 +63,7 @@ func (r *KVCacheBackendReconciler) reportKVCacheBackendTierReuse(
 	reused := map[string]int{}
 
 	for group := range kvcb.Spec.Connection.Managed.Members {
-		if kvcb.Spec.Connection.Managed.Members[group].LocalDisk == nil {
+		if len(kvcb.Spec.Connection.Managed.Members[group].LocalDisks) == 0 {
 			continue
 		}
 

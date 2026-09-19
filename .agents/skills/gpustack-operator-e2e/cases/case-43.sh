@@ -377,7 +377,7 @@ kind: KVCachePoolBinding
 metadata: {name: bind-a, namespace: ${NS_A}}
 spec:
   poolRef: {name: ${POOL}}
-  quotaCeiling: ${CEIL_A_MI}Mi
+  quota: {ceiling: ${CEIL_A_MI}Mi}
   domain: {name: ${DOM_A}, blockSize: 16, dtype: bfloat16}
 ---
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -385,7 +385,7 @@ kind: KVCachePoolBinding
 metadata: {name: bind-b, namespace: ${NS_B}}
 spec:
   poolRef: {name: ${POOL}}
-  quotaCeiling: ${CEIL_B_MI}Mi
+  quota: {ceiling: ${CEIL_B_MI}Mi}
   domain: {name: ${DOM_B}, blockSize: 16, dtype: bfloat16}
 YAML
 )"
@@ -522,7 +522,7 @@ kind: KVCachePoolBinding
 metadata: {name: bind-dup, namespace: ${NS_B}}
 spec:
   poolRef: {name: ${POOL}}
-  quotaCeiling: 1Gi
+  quota: {ceiling: 1Gi}
   domain: {name: ${DOM_A}, blockSize: 16, dtype: bfloat16}
 YAML
 )"
@@ -574,7 +574,7 @@ kind: KVCachePoolBinding
 metadata: {name: bind-other, namespace: ${NS_B}}
 spec:
   poolRef: {name: kvcp-other-${SFX}}
-  quotaCeiling: 1Gi
+  quota: {ceiling: 1Gi}
   domain: {name: ${DOM_A}, blockSize: 16, dtype: bfloat16}
 YAML
 )"
@@ -707,7 +707,7 @@ kubectl -n "$NS" exec "$POD" -c leader -- sh -c \
 
 # Forces a write: a changed ceiling is a PUT the master must persist.
 kubectl -n "$NS_B" patch kvcachepoolbindings.worker.gpustack.ai bind-b --type=merge \
-  -p '{"spec":{"quotaCeiling":"2Gi"}}' >/dev/null 2>&1
+  -p '{"spec":{"quota":{"ceiling":"2Gi"}}}' >/dev/null 2>&1
 
 ro_reason=""
 for _ in $(seq 1 40); do

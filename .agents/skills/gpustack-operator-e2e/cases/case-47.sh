@@ -141,7 +141,8 @@ spec:
     name: ${OTHER_DOMAIN}
     blockSize: 16
     dtype: bfloat16
-  quotaCeiling: 256Mi
+  quota:
+    ceiling: 256Mi
 YAML
 if ! kvi_wait_for kvcachepoolbindings.worker.gpustack.ai "$OTHER_BINDING" \
   '{.status.phase}' Ready 180 "$TEST_NS" >/dev/null; then
@@ -164,8 +165,9 @@ metadata:
   name: ${1}
   namespace: ${TEST_NS}
 spec:
-  engine: sglang
-  engineVersion: "0.5.18"
+  engine:
+    name: sglang
+    version: "0.5.18"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:
@@ -175,8 +177,7 @@ spec:
   - name: server
     instanceType: ${IT}
     replicas: 1
-    template:
-      image: ${CLIENT_IMAGE}
+    image: ${CLIENT_IMAGE}
 YAML
 }
 

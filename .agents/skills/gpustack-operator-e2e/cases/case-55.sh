@@ -14,8 +14,8 @@
 #
 #              What the record says is deliberately an ACTION and not an outcome: `tenantInjected`,
 #              never "isolated". Whether an injected tenant takes effect depends on the engine BUILD,
-#              and admission never inspects the image - engineVersion on the stamp is the release the
-#              facts table was measured at, not the one that will run. A Pod handed a variable its
+#              and admission never inspects the image, so no engine version is stamped anywhere -
+#              a record naming one would claim a fact nothing measured. A Pod handed a variable its
 #              build predates would otherwise be stamped as isolated while sharing a cache.
 #              Over-claiming in that direction is the failure this case exists to prevent.
 #
@@ -29,7 +29,7 @@
 # Inputs:      Pods on each accepted engine value against the real domain-carrying Binding. Nothing
 #              is mocked.
 # Expected:    a domain-carrying Binding is INJECTED, never refused; the record carries the domain and
-#              the engine version; a vLLM container receives no tenant key in any spelling while an
+#              no engine version; a vLLM container receives no tenant key in any spelling while an
 #              SGLang container receives the Binding's own domain as MOONCAKE_TENANT_ID; and across
 #              the engines this fixture can reach BOTH tenant answers appear.
 #
@@ -86,27 +86,19 @@ record PASS "a domain-carrying Binding is injected, not refused" \
   "the Pod was admitted; the gap is reported rather than pushed onto its author"
 
 domain="$(kvi_stamp stamped domain)"
-version="$(kvi_stamp stamped engineVersion)"
 
 # There is deliberately no assertion here that the domain "is" or "is not" enforced. The stamp used to
 # carry that, and it could not be honest: whether an engine honours an injected tenant depends on its
-# BUILD, and admission never looks at the image - the engineVersion it stamps is the release our facts
-# table was measured at, not the one the container will run. A Pod handed a variable its build
-# predates would have been stamped as isolated while sharing a cache. What is asserted instead is the
-# action taken, below.
+# BUILD, and admission never looks at the image. A Pod handed a variable its build predates would
+# have been stamped as isolated while sharing a cache. What is asserted instead is the action taken,
+# below. The same honesty rule is why no engine version is read off the stamp either: the record
+# carries what admission did, never what it measured nothing about.
 
 if [ "$domain" = "$DOMAIN" ]; then
   record PASS "the stamp names the domain that is not in effect" "domain=${domain}"
 else
   record FAIL "the stamp names the domain that is not in effect" \
     "domain='${domain:-<absent>}', expected '${DOMAIN}'"
-fi
-
-if [ -n "$version" ]; then
-  record PASS "the stamp names the version the answer was measured at" \
-    "engineVersion=${version}, so the record says why and not only what"
-else
-  record FAIL "the stamp names the version the answer was measured at" "engineVersion is absent"
 fi
 
 # What was DONE about the tenant. For an engine that reads none, the writes land on the store's own

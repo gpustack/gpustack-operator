@@ -46,7 +46,8 @@ metadata:
   namespace: team-a
 spec:
   poolRef: {name: shared-dram}
-  quotaCeiling: 600Gi                  # required
+  quota:                                # required
+    ceiling: 600Gi
   domain:                              # required, exactly one, every field immutable
     name: qwen-72b-v2
     blockSize: 64
@@ -142,7 +143,7 @@ under the old domain is not carried over, and pretending otherwise is what the r
 
 ## The ceiling is a request, the grant is the answer
 
-`spec.quotaCeiling` is what this namespace **asks for**. `status.effectiveQuota` is what the pool
+`spec.quota.ceiling` is what this namespace **asks for**. `status.effectiveQuota` is what the pool
 **granted**, and the two differ whenever the pool is oversubscribed.
 
 - When every ceiling fits inside the pool's allocatable capacity, the grant equals the ceiling.
@@ -150,6 +151,12 @@ under the old domain is not carried over, and pretending otherwise is what the r
   requested** — a domain asking for twice as much gets twice the share of the shortfall's remainder.
 - The reduction is computed by the store, not by this operator. The operator writes ceilings into the
   policy file and reads the resulting grants back.
+
+The pool's verdict on the sum is a Condition, not a refusal: `QuotaWithinTotal` on the pool is
+`True` while every Binding's ceiling can be granted in full, and turns `False` with reason
+`Oversubscribed` — naming the sum and the `total` — the moment the ceilings pass it. Nothing is
+refused; the store keeps serving, and each Binding's `status.effectiveQuota` is the proportional
+share already described.
 
 `status.usage` is what the master reports the domain as holding, republished as read — the operator
 caps nothing. What is bounded is the **store's charge**: it refuses a charge that would overshoot the
@@ -308,7 +315,9 @@ is the section above.
 
 **See also** — [KV Cache Backend](backend.md) (the store this pool publishes, and where eviction is
 configured) · [KV Cache Injection](../reference/kv-cache-injection.md) (how a Pod consumes the grant
-this page describes) · [Admission](../architecture/admission.md) (the gates and the four-view status
+this page describes) · [Model Deployment](../reference/model-deployment.md) (the other half of the
+worked pair: a rendered engine names this Binding through `spec.kvCache.poolRef`) ·
+[Admission](../architecture/admission.md) (the gates and the four-view status
 pattern) · [Settings & Environment Variables](../settings.md)
 
 **Next** → [Accelerator Requests](../accelerator-requests.md) — how a workload asks for the devices it

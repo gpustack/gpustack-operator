@@ -11,6 +11,7 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	testingclock "k8s.io/utils/clock/testing"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -167,10 +168,10 @@ func TestModelDeploymentJointAdmission_ReadyAtOnceForEverythingElse(t *testing.T
 			},
 		},
 		{
-			// One instance type is one group, and Kueue admits a group as a unit without help.
+			// One role is one group, and Kueue admits a group as a unit without help.
 			name: "single_group_deployment",
 			objs: func() []ctrlcli.Object {
-				md := jointDeployment("qwen", "h20-8x", "h20-8x")
+				md := jointDeployment("qwen", "h20-8x")
 				pod := jointGroupPod("qwen-prefill-0", "qwen", "qwen")
 
 				return []ctrlcli.Object{jointCheckObject(), md, pod, jointWorkload("wl", true, pod)}
@@ -225,8 +226,8 @@ func TestModelDeploymentJointAdmission_TheWholeSetOrNone(t *testing.T) {
 			"the group that can run waits for the one that cannot")
 		assert.NotEqual(t, kueue.CheckStateRetry, jointCheckState(got),
 			"a Retry evicts and drops the reservation the barrier is made of")
-		assert.Contains(t, jointCheckMessage(got), "a100-8x",
-			"the message names the instance type still waiting, which is what an operator acts on")
+		assert.Contains(t, jointCheckMessage(got), "decode",
+			"the message names the role still waiting, which is what an operator acts on")
 
 		// THE QUOTA IS KEPT WHILE IT WAITS. Pending is a hold, and the reservation is what the other
 		// group is waiting to observe; a controller that dropped it here would take the barrier apart
@@ -553,7 +554,7 @@ func TestModelDeploymentJointAdmission_TheBound(t *testing.T) {
 		assert.NotEmpty(t, got.Name, "and it still exists: parking is not a delete")
 
 		msg := jointCheckMessage(got)
-		assert.Contains(t, msg, "a100-8x", "the message names the group that could not be placed")
+		assert.Contains(t, msg, "decode", "the message names the group that could not be placed")
 		assert.Contains(t, msg, "re-apply",
 			"and the action that clears it, because an identical re-apply bumps no resourceVersion, "+
 				"delivers no event, and leaves an operator watching nothing happen")
@@ -597,9 +598,52 @@ func TestModelDeploymentJointAdmission_TheBound(t *testing.T) {
 		assert.True(t, kueueworkload.IsActive(got),
 			"and the deployment is held rather than parked, because the wait has an ordinary cause")
 		assert.NotContains(t, jointCheckMessage(got), "parked")
-		assert.Contains(t, jointCheckMessage(got), "a100-8x",
+		assert.Contains(t, jointCheckMessage(got), "decode",
 			"the message names the group still assembling, which is what an operator acts on")
 	})
+
+	// THE SAME BOUND, ONE STEP EARLIER, WHERE THE COUNT IS THE ONLY THING THAT CAN TELL. Every
+	// replica the group declares exists as an object, so a count over objects reports it assembled;
+	// one of them has been asked to go, so a count over members reports it short. The first reading
+	// lets the settled bound fire and deactivate a Workload whose rebuild is proceeding normally.
+	t.Run("a_group_whose_replica_is_terminating_is_still_assembling", func(t *testing.T) {
+		cli := newJointClient(terminatingFixture()...)
+		pendingSince(t, cli, "wl-first", start)
+
+		got := reconcileJointAt(t, cli, "wl-first", start.Add(_JointAdmissionInfeasibleAfter+time.Minute))
+
+		assert.Equal(t, kueue.CheckStatePending, jointCheckState(got),
+			"the sibling still waits: the group it waits for has not got its members yet")
+		assert.True(t, kueueworkload.IsActive(got),
+			"and it is held rather than parked -- a replica on its way out is an ordinary cause")
+		assert.NotContains(t, jointCheckMessage(got), "parked")
+		assert.Contains(t, jointCheckMessage(got), "decode",
+			"the message names the group whose replica is leaving")
+	})
+}
+
+// terminatingFixture is the same rebuild one step earlier, where the group is at its declared total
+// ON PAPER: both replicas exist as objects, but one has already been asked to go.
+//
+// It is the reading the count has to get right. A Pod carrying a deletion timestamp is not a member
+// the group will have, so counting it reports the group as assembled for as long as the kubelet
+// takes to finish -- and an assembled-looking group is what lets the settled bound fire and park the
+// rebuild it exists to protect.
+func terminatingFixture() []ctrlcli.Object {
+	md := jointDeployment("qwen", "h20-8x", "a100-8x")
+	md.Spec.Roles[1].Replicas = 2
+	groups := modelDeploymentPodGroups(md)
+
+	first := jointGroupPod("qwen-prefill-0", groups[0].Name, "qwen")
+	second := jointGroupPod("qwen-decode-0", groups[1].Name, "qwen")
+	leaving := jointGroupPod("qwen-decode-1", groups[1].Name, "qwen")
+	leaving.DeletionTimestamp = ptr.To(meta.Now())
+	leaving.Finalizers = []string{"kueue.x-k8s.io/managed"}
+
+	return []ctrlcli.Object{
+		jointCheckObject(), md, first, second, leaving,
+		jointWorkload("wl-first", true, first),
+	}
 }
 
 // rebuildingFixture is a deployment mid-rebuild: the second group declares two replicas, one of them
@@ -617,4 +661,112 @@ func rebuildingFixture() []ctrlcli.Object {
 		jointCheckObject(), md, first, second,
 		jointWorkload("wl-first", true, first),
 	}
+}
+
+// sameTypePairFixture builds the prefill/decode deployment whose two roles name ONE instance type,
+// with one replica and one Workload per group and the second group's reservation controlled by the
+// caller.
+//
+// BOTH GROUPS SCHEDULE INTO THE SAME CLUSTER QUEUE, which is what separates this shape from
+// twoGroupFixture: the queue is named after the instance type, so the group holding quota holds it
+// in the very queue its sibling waits for, and the two compete for one pool instead of waiting in
+// two parallel ones.
+func sameTypePairFixture(secondReserved bool) []ctrlcli.Object {
+	md := jointDeployment("qwen", "h20-8x", "h20-8x")
+	groups := modelDeploymentPodGroups(md)
+
+	first := jointGroupPod("qwen-prefill-0", groups[0].Name, "qwen")
+	second := jointGroupPod("qwen-decode-0", groups[1].Name, "qwen")
+
+	return []ctrlcli.Object{
+		jointCheckObject(), md, first, second,
+		jointWorkload("wl-first", true, first),
+		jointWorkload("wl-second", secondReserved, second),
+	}
+}
+
+// TestModelDeploymentJointAdmission_TwoRolesOnOneInstanceType covers the deployment a grouping by
+// instance type used to fold into one group.
+//
+// A PAIR ON ONE INSTANCE TYPE IS TWO GROUPS, AND WAS NOT ALWAYS. Keying a group on the instance
+// type made this deployment one group, and one group is a unit Kueue admits atomically on its own,
+// so the pair sat outside the barrier: its decoder could wait for capacity forever while its
+// prefiller held quota in the same queue, with nothing to stop either side. Grouping on the role
+// makes the two roles two groups, and these cases keep them two -- a grouping that counts types
+// instead of roles answers Ready to this fixture and goes red against the held and parked cases
+// while every two-instanceType case in this file stays green, which is exactly the hole the role
+// key closed.
+//
+// THE MESSAGE NAMES THE WAITING ROLE, WHICH IS THE ONLY NAME THAT PICKS ONE OF THE TWO GROUPS OUT.
+// Both schedule into the queue named after the one type there is, so the type names a queue the
+// waiting side and the holding side share alike and identifies neither; the role names exactly the
+// group that waits, and the queue an operator has to free follows from that role's own instance
+// type.
+//
+// THE NOT-PARKED SIDE OF THE TABLE IS REQUIRED. A controller that held or parked every deployment
+// would pass the pair cases alone, so the feasible pair and the single-role deployment beside them
+// answer Ready to the same reconcile that holds and parks the short pair.
+func TestModelDeploymentJointAdmission_TwoRolesOnOneInstanceType(t *testing.T) {
+	start := time.Date(2026, 9, 13, 10, 0, 0, 0, time.UTC)
+
+	t.Run("one_role_short_still_holds_the_other", func(t *testing.T) {
+		cli := newJointClient(sameTypePairFixture(false)...)
+
+		got := reconcileJoint(t, cli, "wl-first")
+
+		assert.Equal(t, kueue.CheckStatePending, jointCheckState(got),
+			"a prefiller waits for its decoder although both name one instance type, because two "+
+				"roles are two groups")
+		assert.NotEqual(t, kueue.CheckStateRetry, jointCheckState(got),
+			"a Retry evicts, and these siblings compete for the one queue named after their shared "+
+				"type, so two Retrying sides would evict each other out of it indefinitely")
+		assert.Contains(t, jointCheckMessage(got), "decode",
+			"the message names the waiting role, which picks its group out of the two on one type")
+		assert.True(t, workloadHasReservation(t, cli, "wl-first"),
+			"the side that can run keeps the quota it reserved in that queue while it waits")
+	})
+
+	t.Run("after_the_bound_it_parks_and_reaches_status", func(t *testing.T) {
+		cli := newJointClient(sameTypePairFixture(false)...)
+		pendingSince(t, cli, "wl-first", start)
+
+		got := reconcileJointAt(t, cli, "wl-first", start.Add(_JointAdmissionInfeasibleAfter+time.Minute))
+
+		assert.False(t, kueueworkload.IsActive(got),
+			"a pair that cannot assemble is parked out of the queue it holds, not held in it forever")
+		assert.NotEmpty(t, got.Name, "and the Workload still exists: parking is not a delete")
+
+		// THE PARK REACHES THE DEPLOYMENT'S STATUS THROUGH THIS READER, which is the function the
+		// status observer calls to report Parked. It takes the verdict from exactly what this
+		// controller wrote -- inactive plus its own marker -- and the status cases build their parked
+		// Workload by hand, so a park this controller can no longer be seen to have made is caught
+		// nowhere but here.
+		assert.Equal(t, []string{"wl-first"}, parkedModelDeploymentWorkloads([]*kueue.Workload{got}),
+			"the parked state reaches the deployment's reported status, not just this Workload")
+	})
+
+	t.Run("a_feasible_pair_is_admitted_even_past_the_bound", func(t *testing.T) {
+		cli := newJointClient(sameTypePairFixture(true)...)
+		pendingSince(t, cli, "wl-first", start)
+
+		got := reconcileJointAt(t, cli, "wl-first", start.Add(_JointAdmissionInfeasibleAfter+time.Minute))
+
+		assert.Equal(t, kueue.CheckStateReady, jointCheckState(got),
+			"the barrier holds a set that cannot assemble, and this one assembled")
+		assert.True(t, kueueworkload.IsActive(got), "a feasible pair is never parked")
+	})
+
+	t.Run("a_single_role_deployment_is_never_parked", func(t *testing.T) {
+		md := jointDeployment("qwen", "h20-8x")
+		groups := modelDeploymentPodGroups(md)
+		pod := jointGroupPod("qwen-prefill-0", groups[0].Name, "qwen")
+		cli := newJointClient(jointCheckObject(), md, pod, jointWorkload("wl", true, pod))
+		pendingSince(t, cli, "wl", start)
+
+		got := reconcileJointAt(t, cli, "wl", start.Add(_JointAdmissionInfeasibleAfter+time.Minute))
+
+		assert.Equal(t, kueue.CheckStateReady, jointCheckState(got),
+			"one role is one group, which Kueue admits as a unit without this barrier's help")
+		assert.True(t, kueueworkload.IsActive(got), "so the bound has nothing to say to it")
+	})
 }

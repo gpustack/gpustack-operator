@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
+	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/ptr"
 
@@ -39,17 +40,15 @@ func memberGroup(kvcb *workercore.KVCacheBackend) workercore.KVCacheBackendMembe
 	return kvcb.Spec.Connection.Managed.Members[0]
 }
 
-// withMemberDiskTier declares a complete local disk tier on the canonical group.
+// withMemberDiskTier declares a local disk tier on the canonical group.
 //
-// Both halves, because a tier declared on one side only is refused at admission — a fixture that
-// set one would describe an object that cannot exist, and the renderer would be asked a question
-// the API never puts to it.
+// The member side is the whole declaration: the group's localDisks is what turns the tier on, and
+// the leader's flags are derived from it, so there is no second half for a fixture to set.
 func withMemberDiskTier(kvcb *workercore.KVCacheBackend) {
-	kvcb.Spec.Connection.Managed.Members[0].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
+	kvcb.Spec.Connection.Managed.Members[0].LocalDisks = []workercore.KVCacheBackendMemberLocalDisk{{
 		Path:     "/var/lib/kvcache",
 		Capacity: resource.MustParse("4Ti"),
-	}
-	kvcb.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+	}}
 }
 
 // withMemberScaleInGrace sets the wait a departing member's process holds for after deregistering
@@ -73,14 +72,31 @@ func withSecondMemberGroup(kvcb *workercore.KVCacheBackend) {
 		})
 }
 
+// withSecondMemberGroupVRAM adds a VRAM group on the SAME selector as the first group: one node
+// contributing both media is the shape the medium choice exists for. The mutators carry what a
+// case adds — a device resource, a transport — so the fixture itself stays the plain form.
+func withSecondMemberGroupVRAM(mutate ...func(*workercore.KVCacheBackendMember)) func(*workercore.KVCacheBackend) {
+	return func(kvcb *workercore.KVCacheBackend) {
+		group := workercore.KVCacheBackendMember{
+			NodeSelector:      map[string]string{"kvcache-dram": "true"},
+			Medium:            "VRAM",
+			CapacityPerMember: resource.MustParse("80Gi"),
+			LocalBufferSize:   resource.MustParse("4Gi"),
+		}
+		for _, m := range mutate {
+			m(&group)
+		}
+		kvcb.Spec.Connection.Managed.Members = append(kvcb.Spec.Connection.Managed.Members, group)
+	}
+}
+
 // withSecondGroupDiskTier puts the tier on the SECOND group, so the preStop hook is rendered for a
 // group whose port moved. Only one group may carry a tier, so this is the tier rather than a second.
 func withSecondGroupDiskTier(kvcb *workercore.KVCacheBackend) {
-	kvcb.Spec.Connection.Managed.Members[1].LocalDisk = &workercore.KVCacheBackendMemberLocalDisk{
+	kvcb.Spec.Connection.Managed.Members[1].LocalDisks = []workercore.KVCacheBackendMemberLocalDisk{{
 		Path:     "/var/lib/kvcache",
 		Capacity: resource.MustParse("4Ti"),
-	}
-	kvcb.Spec.Connection.Managed.Leader.Offload = &workercore.KVCacheBackendLeaderOffload{Enabled: true}
+	}}
 }
 
 func memberContainer(t *testing.T, kvcb *workercore.KVCacheBackend, image string) core.Container {
@@ -95,6 +111,23 @@ func memberEnv(t *testing.T, kvcb *workercore.KVCacheBackend, image string) map[
 	env := make(map[string]string)
 	for _, e := range memberContainer(t, kvcb, image).Env {
 		env[e.Name] = e.Value
+	}
+	return env
+}
+
+// envWithoutDownwardAPIForGroup is envWithoutDownwardAPI for a backend carrying more than one member
+// group, where which group is being read is the point of the assertion.
+func envWithoutDownwardAPIForGroup(
+	t *testing.T, kvcb *workercore.KVCacheBackend, group int, image string,
+) map[string]string {
+	t.Helper()
+	ds := RenderMemberDaemonSet(kvcb, group, image)
+	require.Len(t, ds.Spec.Template.Spec.Containers, 1, "a member runs exactly one container")
+	env := make(map[string]string)
+	for _, e := range ds.Spec.Template.Spec.Containers[0].Env {
+		if e.ValueFrom == nil {
+			env[e.Name] = e.Value
+		}
 	}
 	return env
 }
@@ -179,12 +212,75 @@ func TestMemberWorkload_Environment(t *testing.T) {
 		"MOONCAKE_PROTOCOL":            "tcp",
 		"MOONCAKE_GLOBAL_SEGMENT_SIZE": fmt.Sprintf("%d", 500*1024*1024*1024),
 		"MOONCAKE_LOCAL_BUFFER_SIZE":   fmt.Sprintf("%d", 4*1024*1024*1024),
+		"MC_TE_METRIC":                 "1",
+		"AMD_VISIBLE_DEVICES":          "void",
+		"CAMBRICON_VISIBLE_DEVICES":    "void",
+		"IX_VISIBLE_DEVICES":           "void",
+		"MTHREADS_VISIBLE_DEVICES":     "void",
+		"NVIDIA_VISIBLE_DEVICES":       "void",
 	}, envWithoutDownwardAPI(t, kvcb, "mooncake:v0.3.13"),
 		"the whole environment, so a key added later has to be added here too")
 
 	_, hasMetadataNormalised := env["MOONCAKE_TE_METADATA_SERVER"]
 	assert.False(t, hasMetadataNormalised,
 		"MOONCAKE_TE_METADATA_SERVER is the wrong spelling and fails silently; it must never appear")
+}
+
+// TestMemberWorkload_VisibleDevicesFollowTheMedium is the other half of the assertion above: the
+// host-memory group hides the accelerators, and the device-memory group must not, or it would hide
+// the devices its own segment is made of.
+//
+// Asserted as a pair in one test because neither half means anything alone. "DRAM hides them" is
+// satisfied by a renderer that hides them from everybody, which would leave no VRAM group able to
+// start at all.
+func TestMemberWorkload_VisibleDevicesFollowTheMedium(t *testing.T) {
+	kvcb := testMemberBackend(withSecondMemberGroupVRAM())
+
+	dram := envWithoutDownwardAPIForGroup(t, kvcb, 0, "mooncake:v0.3.13")
+	vram := envWithoutDownwardAPIForGroup(t, kvcb, 1, "mooncake:v0.3.13")
+
+	for _, name := range []string{
+		"AMD_VISIBLE_DEVICES",
+		"CAMBRICON_VISIBLE_DEVICES",
+		"IX_VISIBLE_DEVICES",
+		"MTHREADS_VISIBLE_DEVICES",
+		"NVIDIA_VISIBLE_DEVICES",
+	} {
+		assert.Equal(t, "void", dram[name],
+			"a host-memory group must be denied every vendor's devices, or its image decides the medium")
+
+		_, present := vram[name]
+		assert.False(t, present,
+			"a device-memory group must keep its devices: %s", name)
+	}
+}
+
+// TestMemberWorkload_TransferMetricsAreOnForEveryMedium pins the switch that does NOT follow the
+// medium, asserted against the same two groups as the test above so the contrast is in one place.
+//
+// The medium decides which devices a group may see; it says nothing about whether the group's data
+// plane is measured. Rendering this one conditionally would leave whichever medium lost the
+// condition reporting no throughput and no task latency at all, which reads exactly like a member
+// that is transferring nothing.
+//
+// That every group renders it is also what makes this switch cost a roll of every member rather
+// than of one medium's members, which the recording guard states as the wider of its two blast
+// radii.
+func TestMemberWorkload_TransferMetricsAreOnForEveryMedium(t *testing.T) {
+	kvcb := testMemberBackend(withSecondMemberGroupVRAM())
+
+	dram := envWithoutDownwardAPIForGroup(t, kvcb, 0, "mooncake:v0.3.13")
+	vram := envWithoutDownwardAPIForGroup(t, kvcb, 1, "mooncake:v0.3.13")
+
+	assert.Equal(t, "1", dram["MC_TE_METRIC"],
+		"the artifact defaults this OFF, so an absent key is an unmeasured host-memory data plane")
+	assert.Equal(t, "1", vram["MC_TE_METRIC"],
+		"the artifact defaults this OFF, so an absent key is an unmeasured device-memory data plane")
+
+	assert.Contains(t, MemberDerivedEnvs, "MC_TE_METRIC",
+		"rendered unconditionally and therefore reserved: a group could otherwise define it a "+
+			"second time through extraEnv, and a container carrying one name twice leaves the "+
+			"winner to the runtime")
 }
 
 // envWithoutDownwardAPI returns the literal-valued environment, leaving out the entries sourced from
@@ -324,22 +420,263 @@ func TestMemberWorkload_Requests(t *testing.T) {
 	}
 }
 
+// TestMemberWorkload_TwoMediaOnTheSameNodes renders the shape the medium choice exists for: one
+// backend whose DRAM group and VRAM group select the SAME nodes. Each group is its own DaemonSet,
+// each accounts its segment against the memory its medium is made of, and the fabric privileges
+// follow each group's OWN protocol rather than the backend's.
+func TestMemberWorkload_TwoMediaOnTheSameNodes(t *testing.T) {
+	kvcb := testMemberBackend(withSecondMemberGroupVRAM(func(group *workercore.KVCacheBackendMember) {
+		group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"}
+	}))
+
+	dram := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13")
+	vram := RenderMemberDaemonSet(kvcb, 1, "mooncake:v0.3.13")
+
+	assert.NotEqual(t, dram.Name, vram.Name, "two groups are two DaemonSets, never one")
+	assert.Equal(t, dram.Spec.Template.Spec.NodeSelector, vram.Spec.Template.Spec.NodeSelector,
+		"both select the same nodes: one node contributes both media")
+
+	dramContainer := dram.Spec.Template.Spec.Containers[0]
+	dramMemory := dramContainer.Resources.Requests[core.ResourceMemory]
+	assert.True(t, resource.MustParse("504Gi").Equal(dramMemory),
+		"a DRAM segment is host memory: capacityPerMember + localBufferSize, got %s", &dramMemory)
+	assert.Empty(t, dramContainer.Resources.Limits, "a DRAM group charges no device")
+	assert.False(t, dram.Spec.Template.Spec.HostNetwork)
+	assert.Nil(t, dramContainer.SecurityContext,
+		"the DRAM group declares no transport, so it inherits the backend's TCP and claims no fabric")
+
+	vramPodSpec := vram.Spec.Template.Spec
+	vramContainer := vramPodSpec.Containers[0]
+	vramMemory := vramContainer.Resources.Requests[core.ResourceMemory]
+	assert.True(t, resource.MustParse("4Gi").Equal(vramMemory),
+		"a VRAM segment is device memory: host memory carries localBufferSize only, got %s", &vramMemory)
+	assert.Empty(t, vramContainer.Resources.Limits,
+		"device memory is claimed by allocating it: charging an accelerator here would take a whole "+
+			"one from inference to account for a fraction of one device's memory")
+	assert.True(t, vramPodSpec.HostNetwork)
+	require.NotNil(t, vramContainer.SecurityContext)
+	require.NotNil(t, vramContainer.SecurityContext.Capabilities)
+	assert.ElementsMatch(t, []core.Capability{"IPC_LOCK", "SYS_RESOURCE"},
+		vramContainer.SecurityContext.Capabilities.Add,
+		"the group's own RDMA gets the fabric's two capabilities while the backend stays on TCP")
+	assert.Nil(t, vramContainer.SecurityContext.Privileged,
+		"a named device resource is what keeps the member off the privileged fallback")
+
+	env := map[string]string{}
+	for _, e := range vramContainer.Env {
+		env[e.Name] = e.Value
+	}
+	assert.Equal(t, "rdma", env["MOONCAKE_PROTOCOL"],
+		"the member is told its own group's protocol, not the backend's")
+}
+
+// TestMemberWorkload_GroupTransportOverridesTheBackend pins the inheritance in both directions:
+// a group that declares a transport renders its own, and a group that declares none renders the
+// backend's — the second being what keeps a one-group backend byte-identical to what it rendered
+// before the field existed.
+func TestMemberWorkload_GroupTransportOverridesTheBackend(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Transport.Protocol = "RDMA"
+	}, withSecondMemberGroupVRAM(func(group *workercore.KVCacheBackendMember) {
+		group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "TCP"}
+	}))
+
+	inherited := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec
+	assert.True(t, inherited.HostNetwork,
+		"the group that declares nothing renders the backend's fabric")
+
+	overridden := RenderMemberDaemonSet(kvcb, 1, "mooncake:v0.3.13").Spec.Template.Spec
+	assert.False(t, overridden.HostNetwork, "the group's own protocol replaces the backend's")
+	assert.Equal(t, core.DNSClusterFirst, overridden.DNSPolicy)
+	assert.Empty(t, overridden.Volumes, "TCP mounts no device tree")
+	assert.Nil(t, overridden.Containers[0].SecurityContext,
+		"no security context at all on the path that needs none")
+	assert.Empty(t, overridden.Containers[0].Resources.Limits,
+		"a VRAM group charges no extended resource whatever its transport is")
+
+	env := map[string]string{}
+	for _, e := range overridden.Containers[0].Env {
+		env[e.Name] = e.Value
+	}
+	assert.Equal(t, "tcp", env["MOONCAKE_PROTOCOL"], "the member is told its own group's protocol")
+}
+
+// TestMemberWorkload_VRAMGrantsNothingItWasNotDeclared pins that the medium on its own grants no
+// privilege, mounts nothing, and charges nothing.
+//
+// Two earlier designs are kept out by this test. One read an absent device-resource name as a
+// request for a privileged host-network Pod: the privilege it granted reached the node's device
+// nodes and not the vendor's user-space driver, which is not under /dev, so it produced a member
+// that started, looked healthy, and could not allocate a segment on two of the three vendors. The
+// other charged one extended resource per VRAM member, which takes a whole accelerator away from
+// inference to account for a fraction of one device's memory — a member's segment is one cudaMalloc
+// on one device, so it cannot use the rest of what it took.
+//
+// The fabric rendering still applies, because it is keyed on the protocol and never on the medium:
+// on an RDMA backend this group gets the device tree and the two capabilities like any other.
+func TestMemberWorkload_VRAMGrantsNothingItWasNotDeclared(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Transport.Protocol = "RDMA"
+	}, withSecondMemberGroupVRAM())
+
+	podSpec := RenderMemberDaemonSet(kvcb, 1, "mooncake:v0.3.13").Spec.Template.Spec
+	container := podSpec.Containers[0]
+
+	require.NotNil(t, container.SecurityContext)
+	assert.Nil(t, container.SecurityContext.Privileged,
+		"the medium is not a request for privilege")
+	require.NotNil(t, container.SecurityContext.Capabilities)
+	assert.Equal(t, []core.Capability{"IPC_LOCK", "SYS_RESOURCE"}, container.SecurityContext.Capabilities.Add,
+		"the fabric path is keyed on the protocol, so the medium does not exempt this group from it")
+
+	assert.True(t, podSpec.HostNetwork, "rdma takes the host network whatever the medium is")
+	require.Len(t, podSpec.Volumes, 1, "the device tree, from the fabric path")
+	assert.Equal(t, RDMADevicePath, podSpec.Volumes[0].HostPath.Path)
+
+	memory := container.Resources.Requests[core.ResourceMemory]
+	assert.True(t, resource.MustParse("4Gi").Equal(memory),
+		"host memory still carries localBufferSize only, got %s", &memory)
+	assert.Empty(t, container.Resources.Limits,
+		"nothing is charged: device memory is claimed by allocating it")
+}
+
+// TestMemberWorkload_DeclaredSecurityContextMergesOntoTheFabricOne is the test for the one merge
+// rule that is not obvious, and the one whose failure is silent.
+//
+// A group declaring a security context on a host fabric keeps IPC_LOCK and SYS_RESOURCE, because
+// without them the transfer engine cannot pin the memory it registers — and it fails at
+// registration, long after the container started and looked healthy. A whole-struct substitution
+// would have dropped both while turning this test's own privileged assertion green, which is why
+// the capability assertion is here rather than in a test of its own.
+func TestMemberWorkload_DeclaredSecurityContextMergesOntoTheFabricOne(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Transport.Protocol = "RDMA"
+		members := k.Spec.Connection.Managed.Members
+		members[0].SecurityContext = &core.SecurityContext{
+			Privileged:   ptr.To(true),
+			RunAsUser:    ptr.To(int64(0)),
+			Capabilities: &core.Capabilities{Add: []core.Capability{"SYS_ADMIN"}},
+		}
+	})
+
+	container := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec.Containers[0]
+
+	require.NotNil(t, container.SecurityContext)
+	require.NotNil(t, container.SecurityContext.Privileged)
+	assert.True(t, *container.SecurityContext.Privileged, "a field set here wins")
+	require.NotNil(t, container.SecurityContext.RunAsUser)
+	assert.Equal(t, int64(0), *container.SecurityContext.RunAsUser)
+
+	require.NotNil(t, container.SecurityContext.Capabilities)
+	assert.Equal(t,
+		[]core.Capability{"IPC_LOCK", "SYS_ADMIN", "SYS_RESOURCE"},
+		container.SecurityContext.Capabilities.Add,
+		"the union, sorted: dropping the fabric's two would fail only at memory registration")
+}
+
+// TestMemberWorkload_DeclaredSecurityContextOnATCPGroupStandsAlone is the other half: with no
+// fabric context to merge onto, what is declared is what is rendered, and nothing is added.
+func TestMemberWorkload_DeclaredSecurityContextOnATCPGroupStandsAlone(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Members[0].SecurityContext = &core.SecurityContext{
+			Privileged: ptr.To(true),
+		}
+	})
+
+	container := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec.Containers[0]
+
+	require.NotNil(t, container.SecurityContext)
+	require.NotNil(t, container.SecurityContext.Privileged)
+	assert.True(t, *container.SecurityContext.Privileged)
+	assert.Nil(t, container.SecurityContext.Capabilities,
+		"tcp renders no capabilities, so there is nothing to union with")
+}
+
+// TestMemberWorkload_DeclaredHostPathsMountInOrder pins the vendor-driver path: the mounts appear in
+// the order declared, and each volume is named from its POSITION so it can collide with neither
+// another entry nor the two volumes this renderer owns.
+func TestMemberWorkload_DeclaredHostPathsMountInOrder(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
+			{
+				Path:      "/usr/local/Ascend/driver",
+				MountPath: "/usr/local/Ascend/driver",
+				Type:      ptr.To(core.HostPathDirectory),
+				ReadOnly:  true,
+			},
+			{Path: "/usr/local/dcmi", MountPath: "/usr/local/dcmi"},
+		}
+	})
+
+	podSpec := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec
+	container := podSpec.Containers[0]
+
+	require.Len(t, podSpec.Volumes, 2)
+	assert.Equal(t, "host-path-0", podSpec.Volumes[0].Name)
+	assert.Equal(t, "/usr/local/Ascend/driver", podSpec.Volumes[0].HostPath.Path)
+	require.NotNil(t, podSpec.Volumes[0].HostPath.Type)
+	assert.Equal(t, core.HostPathDirectory, *podSpec.Volumes[0].HostPath.Type)
+	assert.Equal(t, "host-path-1", podSpec.Volumes[1].Name)
+	assert.Nil(t, podSpec.Volumes[1].HostPath.Type,
+		"an entry that names no type gets the empty one, which the kubelet does not check")
+
+	require.Len(t, container.VolumeMounts, 2)
+	assert.Equal(t, "/usr/local/Ascend/driver", container.VolumeMounts[0].MountPath)
+	assert.True(t, container.VolumeMounts[0].ReadOnly)
+	assert.Equal(t, "/usr/local/dcmi", container.VolumeMounts[1].MountPath)
+	assert.False(t, container.VolumeMounts[1].ReadOnly)
+}
+
+// TestMemberWorkload_DeclaredRuntimeClassReachesThePodSpec pins the third of the three declared
+// grants. It is on the pod spec rather than the container, unlike the other two.
+func TestMemberWorkload_DeclaredRuntimeClassReachesThePodSpec(t *testing.T) {
+	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Members[0].RuntimeClassName = "ascend"
+	})
+
+	podSpec := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec
+
+	require.NotNil(t, podSpec.RuntimeClassName)
+	assert.Equal(t, "ascend", *podSpec.RuntimeClassName)
+}
+
 // TestMemberWorkload_NoDiskTierRendersWhatItAlwaysDid is the guard that this feature does not roll
 // every backend already running.
 //
-// It compares against a template RECORDED from the renderer as it stood before the disk tier
-// existed, not against a fresh render — a fresh one moves with the code and would be green by
-// construction, which is exactly the failure this guard exists to catch.
+// It compares against a RECORDED template rather than a fresh render — a fresh one moves with the
+// code and would be green by construction, which is exactly the failure this guard exists to catch.
 //
 // What is at stake is not cosmetic. The pod-spec hash is in the recording, and the reconciler
 // deletes every member Pod whose hash has moved. A byte of drift here means every member of every
 // existing backend is deleted and recreated on upgrade, and each one comes back with an empty
 // segment: the cache is gone, and nothing about the change said it would be.
 //
-// This guard was falsified before it was trusted: changing memberShutdownSeconds from 60 to 61 —
-// one byte, on a field that has nothing to do with the disk tier — turns it red and moves the hash
-// from e4e1f6a5… to 950bb64a…. A guard this load-bearing that has never been seen to fail is a
-// guard nobody has checked.
+// THE RECORDING HAS BEEN DELIBERATELY MOVED TWICE, and a reader comparing this against an older
+// checkout should know which change did it rather than treating it as drift. It was first recorded
+// from the renderer as it stood before the local disk tier existed, at hash e4e1f6a5…. It then held
+// 8bae493a…, which is that same template plus the five vendor visibility variables a host-memory
+// group renders so that no accelerator is injected into it. It now holds 47b8aec8…, which adds the
+// transfer engine's metrics switch.
+//
+// EACH MOVE COST A ROLL, AND THE TWO DID NOT COST THE SAME ONE. The visibility variables render
+// only on a host-memory group, so that move rolled those and left device-memory groups rendering
+// exactly as before. The metrics switch renders on EVERY group, so the second move rolls every
+// member of every backend regardless of medium — a strictly wider blast radius than the first, and
+// the reason this paragraph separates them rather than counting moves.
+//
+// Both were accepted with that cost understood. The first refused to leave a group asking for host
+// memory free to consume device memory instead, unaccounted for by the scheduler and fatal to
+// whichever workload had properly requested that card. The second buys the only measurement of the
+// member's data plane there is: the leader's Prometheus surface counts keys and bytes and says
+// nothing about throughput or task latency, and the engine end of the same transfer already
+// reports both.
+//
+// This guard has been seen to fail three times, which is why it is trusted. Changing
+// memberShutdownSeconds from 60 to 61 — one byte, on a field unrelated to any of this — turned it
+// red against the first recording. The visibility variables turned it red against that same
+// recording, and the metrics switch against the second. Each time that is how the cost became
+// visible at all rather than being discovered on somebody's cluster. A guard this load-bearing that
+// has never been seen to fail is a guard nobody has checked.
 func TestMemberWorkload_NoDiskTierRendersWhatItAlwaysDid(t *testing.T) {
 	recorded, err := os.ReadFile("testdata/member_pod_template_no_disk_tier.json")
 	require.NoError(t, err, "the recording is the contract; without it this test proves nothing")
@@ -438,7 +775,7 @@ func TestMemberWorkload_DiskTierIsAllOrNothing(t *testing.T) {
 	t.Run("an unset capacity leaves the store's own ceilings alone", func(t *testing.T) {
 		kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 			withMemberDiskTier(k)
-			k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("0")
+			k.Spec.Connection.Managed.Members[0].LocalDisks[0].Capacity = resource.MustParse("0")
 		})
 		env := memberEnv(t, kvcb, "mooncake:v0.3.13")
 
@@ -469,7 +806,7 @@ func TestMemberWorkload_DiskTierIsAllOrNothing(t *testing.T) {
 	t.Run("a set key limit is rendered", func(t *testing.T) {
 		kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 			withMemberDiskTier(k)
-			k.Spec.Connection.Managed.Members[0].LocalDisk.KeyLimit = 500000
+			k.Spec.Connection.Managed.Members[0].LocalDisks[0].KeyLimit = 500000
 		})
 		env := memberEnv(t, kvcb, "mooncake:v0.3.13")
 
@@ -517,7 +854,7 @@ func TestMemberWorkload_DiskTierEviction(t *testing.T) {
 			withMemberDiskTier(k)
 			eviction := &workercore.KVCacheBackendMemberLocalDiskEviction{}
 			mutate(eviction)
-			k.Spec.Connection.Managed.Members[0].LocalDisk.Eviction = eviction
+			k.Spec.Connection.Managed.Members[0].LocalDisks[0].Eviction = eviction
 		}
 	}
 
@@ -616,13 +953,13 @@ func TestMemberWorkload_DiskTierEviction(t *testing.T) {
 	}
 }
 
-// TestMemberWorkload_ExtraEnvs pins the hatch's rendering: every entry reaches the container, in key
-// order, after everything derived.
-func TestMemberWorkload_ExtraEnvs(t *testing.T) {
+// TestMemberWorkload_ExtraEnv pins the hatch's rendering: every entry reaches the container, in
+// the order written, after everything derived.
+func TestMemberWorkload_ExtraEnv(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Connection.Managed.Members[0].ExtraEnvs = map[string]string{
-			"MOONCAKE_OFFLOAD_USE_URING":                  "true",
-			"MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS": "5",
+		k.Spec.Connection.Managed.Members[0].ExtraEnv = []workercore.InstanceEnvVar{
+			{Name: "MOONCAKE_OFFLOAD_USE_URING", Value: "true"},
+			{Name: "MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS", Value: "5"},
 		}
 	})
 	container := memberContainer(t, kvcb, "mooncake:v0.3.13")
@@ -638,15 +975,15 @@ func TestMemberWorkload_ExtraEnvs(t *testing.T) {
 	require.Len(t, names, len(env), "no name may appear twice: Kubernetes takes a duplicate and "+
 		"leaves the winner to the runtime, which is why admission refuses a derived name here")
 	assert.Equal(t,
-		[]string{"MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS", "MOONCAKE_OFFLOAD_USE_URING"},
+		[]string{"MOONCAKE_OFFLOAD_USE_URING", "MOONCAKE_OFFLOAD_HEARTBEAT_INTERVAL_SECONDS"},
 		names[len(names)-2:],
-		"last and in key order, so two renders of one spec are byte-identical")
+		"last and in the order written, so two renders of one spec are byte-identical")
 }
 
 // TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits holds the reserved list equal to what is
 // actually rendered, in both directions.
 //
-// The list is what admission refuses in extraEnvs, and it is a SECOND copy of a fact the renderer
+// The list is what admission refuses in extraEnv, and it is a SECOND copy of a fact the renderer
 // already has — so the failure it is exposed to is drift, in either direction and both silent. A
 // name the renderer emits but the list forgets is a container carrying that name twice, with the
 // winner left to the runtime; a name the list holds but nothing emits is a hatch entry refused for a
@@ -664,7 +1001,7 @@ func TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 		{"a tier with every ceiling and an eviction band", []func(*workercore.KVCacheBackend){
 			func(k *workercore.KVCacheBackend) {
 				withMemberDiskTier(k)
-				disk := k.Spec.Connection.Managed.Members[0].LocalDisk
+				disk := &k.Spec.Connection.Managed.Members[0].LocalDisks[0]
 				disk.KeyLimit = 500000
 				disk.Eviction = &workercore.KVCacheBackendMemberLocalDiskEviction{
 					Enabled: ptr.To(true),
@@ -678,7 +1015,7 @@ func TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 		{"a tier with eviction switched off", []func(*workercore.KVCacheBackend){
 			func(k *workercore.KVCacheBackend) {
 				withMemberDiskTier(k)
-				k.Spec.Connection.Managed.Members[0].LocalDisk.Eviction = &workercore.KVCacheBackendMemberLocalDiskEviction{Enabled: ptr.To(false)}
+				k.Spec.Connection.Managed.Members[0].LocalDisks[0].Eviction = &workercore.KVCacheBackendMemberLocalDiskEviction{Enabled: ptr.To(false)}
 			},
 		}},
 		{"the transport that mounts the host's libfabric", []func(*workercore.KVCacheBackend){
@@ -697,7 +1034,7 @@ func TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 	for name, fixture := range rendered {
 		assert.Contains(t, MemberDerivedEnvs, name,
 			"%s is rendered by %q and is not reserved, so a group could define it a second time "+
-				"through extraEnvs and nothing would report the collision", name, fixture)
+				"through extraEnv and nothing would report the collision", name, fixture)
 	}
 	for _, name := range MemberDerivedEnvs {
 		_, ok := rendered[name]
@@ -802,11 +1139,13 @@ func TestMemberWorkload_Protocol(t *testing.T) {
 		{requested: "TCP", rendered: "tcp", privileged: false},
 		{requested: "RDMA", rendered: "rdma", privileged: true},
 		{requested: "EFA", rendered: "efa", privileged: true},
-		{requested: "HIP", rendered: "hip", privileged: false},
+		{requested: "ROCM", rendered: "hip", privileged: false},
+		{requested: "MUSA", rendered: "musa", privileged: false},
+		{requested: "MACA", rendered: "maca", privileged: false},
 		// This spelling has a consumer outside this package: inject's engineTransportConstraint
 		// records that vLLM-Ascend's store backend accepts exactly this string, so renaming it here
-		// would refuse every Ascend pool that engine can use.
-		{requested: "Ascend", rendered: "ascend", privileged: false},
+		// would refuse every CANN pool that engine can use.
+		{requested: "CANN", rendered: "ascend", privileged: false},
 	}
 
 	for _, c := range cases {
@@ -845,6 +1184,34 @@ func TestMemberWorkload_Protocol(t *testing.T) {
 	}), 0, "mooncake:v0.3.13").Spec.Template.Spec
 	assert.Equal(t, tcpSpec, unsetSpec,
 		"an unset transport renders exactly what Auto does, never an empty protocol")
+}
+
+// TestMemberProtocols pins the offers an engine is matched against: every group's effective
+// transport in declaration order, with the backend-wide value as the whole list for a backend
+// that declares no groups — the shape an external backend takes, and every backend written before
+// groups could disagree.
+func TestMemberProtocols(t *testing.T) {
+	t.Run("each group's own transport, in declaration order", func(t *testing.T) {
+		kvcb := testMemberBackend(withSecondMemberGroupVRAM(func(group *workercore.KVCacheBackendMember) {
+			group.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"}
+		}))
+		assert.Equal(t, []string{"tcp", "rdma"}, MemberProtocols(kvcb))
+	})
+
+	t.Run("a group declaring none inherits the backend's", func(t *testing.T) {
+		kvcb := testMemberBackend(withSecondMemberGroup)
+		assert.Equal(t, []string{"tcp", "tcp"}, MemberProtocols(kvcb))
+	})
+
+	t.Run("a backend with no groups offers the backend-wide value alone", func(t *testing.T) {
+		kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed = nil
+			k.Spec.Transport.Protocol = "RDMA"
+		})
+		assert.Equal(t, []string{"rdma"}, MemberProtocols(kvcb),
+			"the slice is never empty, so a caller matching against it never asks whether the "+
+				"pool offers anything")
+	})
 }
 
 // TestMemberWorkload_RDMAContext pins the security context of the one path that needs one.
@@ -1212,22 +1579,22 @@ func TestMemberWorkload_PullPolicyAndSecrets(t *testing.T) {
 	})
 }
 
-// TestMemberWorkload_ExtraArgs pins the escape hatch's rendering. It is `-D key=value` on this
-// side — the entrypoint's own per-key override — and not the leader's `-key=value`, because the two
-// binaries accept different things.
+// TestMemberWorkload_ExtraArgs pins the escape hatch's rendering. An entry is written as its own
+// flag token and renders as the entrypoint's "-D key=value" override with the dashes gone — and
+// not the leader's verbatim "-key=value", because the two binaries accept different things.
 func TestMemberWorkload_ExtraArgs(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Connection.Managed.Members[0].ExtraArgs = map[string]string{
-			"enable_ssd_offload": "true",
-			"client_ttl":         "30",
+		k.Spec.Connection.Managed.Members[0].ExtraArgs = []string{
+			"-enable_ssd_offload=true",
+			"-client_ttl=30",
 		}
 	})
 
 	assert.Equal(t, []string{
-		"-D", "client_ttl=30",
 		"-D", "enable_ssd_offload=true",
+		"-D", "client_ttl=30",
 	}, memberContainer(t, kvcb, "mooncake:v0.3.13").Args,
-		"sorted by key, so two renders of one spec are byte-identical")
+		"in the order written, so two renders of one spec are byte-identical")
 }
 
 // TestMemberWorkload_IsDeterministic pins that one group renders identically every time. The
@@ -1235,8 +1602,8 @@ func TestMemberWorkload_ExtraArgs(t *testing.T) {
 // forever and roll every member with it.
 func TestMemberWorkload_IsDeterministic(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Connection.Managed.Members[0].ExtraArgs = map[string]string{
-			"a": "1", "b": "2", "c": "3", "d": "4", "e": "5",
+		k.Spec.Connection.Managed.Members[0].ExtraArgs = []string{
+			"-a=1", "-b=2", "-c=3", "-d=4", "-e=5",
 		}
 	})
 
@@ -1257,7 +1624,7 @@ func TestMemberWorkload_SelectorSurvivesASpecChange(t *testing.T) {
 		group := &k.Spec.Connection.Managed.Members[0]
 		group.NodeSelector = map[string]string{"kvcache-dram": "true", "zone": "b"}
 		group.CapacityPerMember = resource.MustParse("1Ti")
-		group.ExtraArgs = map[string]string{"client_ttl": "30"}
+		group.ExtraArgs = []string{"-client_ttl=30"}
 	}), 0, "mooncake:v0.4.0")
 
 	require.NotNil(t, before.Spec.Selector)
@@ -1354,7 +1721,7 @@ func TestMemberWorkload_FingerprintCoversEveryOtherField(t *testing.T) {
 		{
 			field: "extraArgs",
 			mutate: func(k *workercore.KVCacheBackend) {
-				k.Spec.Connection.Managed.Members[0].ExtraArgs = map[string]string{"client_ttl": "30"}
+				k.Spec.Connection.Managed.Members[0].ExtraArgs = []string{"-client_ttl=30"}
 			},
 		},
 		{
@@ -1412,13 +1779,13 @@ func TestMemberWorkload_FingerprintCoversTheDiskTier(t *testing.T) {
 		{
 			field: "the tier's path, which is both a mount and an environment variable",
 			mutate: func(k *workercore.KVCacheBackend) {
-				k.Spec.Connection.Managed.Members[0].LocalDisk.Path = "/var/lib/elsewhere"
+				k.Spec.Connection.Managed.Members[0].LocalDisks[0].Path = "/var/lib/elsewhere"
 			},
 		},
 		{
 			field: "the tier's capacity, which admission deliberately leaves editable",
 			mutate: func(k *workercore.KVCacheBackend) {
-				k.Spec.Connection.Managed.Members[0].LocalDisk.Capacity = resource.MustParse("8Ti")
+				k.Spec.Connection.Managed.Members[0].LocalDisks[0].Capacity = resource.MustParse("8Ti")
 			},
 		},
 		{
@@ -1525,7 +1892,7 @@ func TestMemberWorkload_SurveyQuotesThePathAgainstTheShell(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ds := RenderMemberDaemonSet(testMemberBackend(func(kvcb *workercore.KVCacheBackend) {
 				withMemberDiskTier(kvcb)
-				kvcb.Spec.Connection.Managed.Members[0].LocalDisk.Path = tc.path
+				kvcb.Spec.Connection.Managed.Members[0].LocalDisks[0].Path = tc.path
 			}), 0, "mooncake:v0.3.13")
 
 			var script string
@@ -1625,5 +1992,74 @@ func TestMemberWorkload_FabricDeviceResource(t *testing.T) {
 					"no fabric resource was asked for, and nothing else on this path sets a limit")
 			}
 		})
+	}
+}
+
+// TestMemberProtocols_EveryEnumValueResolves is the guard on the one drift that produces an empty
+// transport rather than an error.
+//
+// memberProtocols translates the API's spelling into the artifact's, and a lookup that misses
+// returns the empty string. Nothing downstream treats that as a failure on its own: an unconstrained
+// engine accepts any offer, so a ninth enum value added without its map entry would reach the engine
+// as an empty MOONCAKE_PROTOCOL rather than as a refusal. The two lists live in different packages
+// and nothing but this test makes one follow the other.
+//
+// The enum is read out of the GENERATED CRD rather than restated here, because a copy of it would
+// drift in exactly the case this exists to catch. Both schema sites are read: the backend's
+// spec.transport.protocol and a member group's own, which carry the same values through separate
+// markers and can therefore diverge.
+func TestMemberProtocols_EveryEnumValueResolves(t *testing.T) {
+	crd, ok := workercore.GetCustomResourceDefinitions()["KVCacheBackend"]
+	require.True(t, ok, "the KVCacheBackend CRD is generated under this key")
+
+	var schema *apiext.JSONSchemaProps
+	for i := range crd.Spec.Versions {
+		if crd.Spec.Versions[i].Schema != nil && crd.Spec.Versions[i].Schema.OpenAPIV3Schema != nil {
+			schema = crd.Spec.Versions[i].Schema.OpenAPIV3Schema
+			break
+		}
+	}
+	require.NotNil(t, schema, "the CRD carries a structural schema")
+
+	enumAt := func(t *testing.T, path ...string) []string {
+		t.Helper()
+
+		node := schema
+		for _, step := range path {
+			if step == "" {
+				// The array step: descend into the item schema rather than the property.
+				require.NotNil(t, node.Items, "the schema still has an item schema here")
+				node = node.Items.Schema
+				continue
+			}
+			next, found := node.Properties[step]
+			require.True(t, found, "the schema still has a %q under %v", step, path)
+			node = &next
+		}
+
+		require.NotEmpty(t, node.Enum, "the field at %v still carries an enum", path)
+
+		values := make([]string, 0, len(node.Enum))
+		for _, raw := range node.Enum {
+			var value string
+			require.NoError(t, json.Unmarshal(raw.Raw, &value))
+			values = append(values, value)
+		}
+		return values
+	}
+
+	backendEnum := enumAt(t, "spec", "transport", "protocol")
+	groupEnum := enumAt(t, "spec", "connection", "managed", "members", "", "transport", "protocol")
+
+	assert.Equal(t, backendEnum, groupEnum,
+		"a group's protocol replaces the backend's, so one value accepted at one site and not the "+
+			"other would be accepted and then unresolvable")
+
+	for _, value := range backendEnum {
+		resolved, found := memberProtocols[value]
+		assert.True(t, found,
+			"enum value %q has no entry in memberProtocols: it would resolve to the empty string, "+
+				"which reaches the member as an empty MOONCAKE_PROTOCOL rather than as an error", value)
+		assert.NotEmpty(t, resolved, "enum value %q maps to the empty string", value)
 	}
 }

@@ -26,15 +26,16 @@ func newRenderDeployment(mutate ...func(*workercore.ModelDeployment)) *workercor
 	md := &workercore.ModelDeployment{
 		ObjectMeta: meta.ObjectMeta{Name: "qwen", Namespace: "team-a", UID: "md-uid"},
 		Spec: workercore.ModelDeploymentSpec{
-			Model:         workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
-			Engine:        workercore.ModelDeploymentEngineVLLM,
-			EngineVersion: "0.25.1",
-			KVCache:       &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
+			Model: workercore.ModelDeploymentModel{Name: "Qwen/Qwen2.5-72B-Instruct"},
+			Engine: workercore.ModelDeploymentEngine{
+				Name: workercore.ModelDeploymentEngineVLLM, Version: "0.25.1",
+			},
+			KVCache: &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
 			Roles: []workercore.ModelDeploymentRole{{
 				Name:         "server",
 				Replicas:     2,
 				InstanceType: "h20-8x",
-				Template:     &workercore.ModelDeploymentTemplate{Image: "vllm/vllm-openai:v0.25.1"},
+				Image:        "vllm/vllm-openai:v0.25.1",
 			}},
 		},
 	}
@@ -85,7 +86,6 @@ func renderOne(t *testing.T, md *workercore.ModelDeployment, it *worker.Instance
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment:   md,
 		Role:         &md.Spec.Roles[0],
-		Ordinal:      0,
 		InstanceType: it,
 	})
 	require.NoError(t, err)
@@ -104,19 +104,22 @@ func envValue(pod *core.Pod, name string) (string, bool) {
 }
 
 // TestRenderModelDeploymentPod_Identity pins what makes a rendered Pod findable and schedulable:
-// its name, the labels a Service selects on, the entrance label that routes it into the role's
-// pool, the resource note a watch filters on, and the controller reference that makes it ours.
+// its generated name prefix, the labels a Service selects on, the entrance label that routes it
+// into the role's pool, the resource note a watch filters on, and the controller reference that
+// makes it ours.
 func TestRenderModelDeploymentPod_Identity(t *testing.T) {
 	md := newRenderDeployment()
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment:   md,
 		Role:         &md.Spec.Roles[0],
-		Ordinal:      3,
 		InstanceType: newRenderInstanceType(),
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, "qwen-server-3", pod.Name)
+	// The replica carries no name of its own: the prefix names the deployment and the role, and
+	// the suffix the API server appends to it is the only per-instance part.
+	assert.Empty(t, pod.Name)
+	assert.Equal(t, "qwen-server-", pod.GenerateName)
 	assert.Equal(t, "team-a", pod.Namespace)
 
 	assert.Equal(t, "model-deployment", pod.Labels[modelDeploymentLabelKeyName])
@@ -148,14 +151,14 @@ func TestRenderModelDeploymentPod_DecodeUsesRoutingSidecar(t *testing.T) {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
-				md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{{
-					Name: "http", Protocol: core.ProtocolTCP, Port: tc.externalPort,
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{
+					Protocol: core.ProtocolTCP, Port: tc.externalPort,
 				}}
 			})
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
 				Connector: ModelDeploymentConnectorRender{
-					Args: []string{"--kv-transfer-config", `{}`}, DirectTransfer: true,
+					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
 				},
 				NativeSidecar: true,
 			})
@@ -195,14 +198,14 @@ func TestRenderModelDeploymentPod_DecodeUsesClassicSidecarBelowTheFloor(t *testi
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
-		md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{{
-			Name: "http", Protocol: core.ProtocolTCP, Port: 8000,
+		md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{
+			Protocol: core.ProtocolTCP, Port: 8000,
 		}}
 	})
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
 		Connector: ModelDeploymentConnectorRender{
-			Args: []string{"--kv-transfer-config", `{}`}, DirectTransfer: true,
+			Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
 		},
 		NativeSidecar: false,
 	})
@@ -262,15 +265,15 @@ func TestRenderModelDeploymentPod_ProbeRouteFollowsTheServingShape(t *testing.T)
 		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
-			md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{{
-				Name: "http", Protocol: core.ProtocolTCP, Port: 8000,
+			md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{
+				Protocol: core.ProtocolTCP, Port: 8000,
 			}}
 		})
 
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
 			Connector: ModelDeploymentConnectorRender{
-				Args: []string{"--kv-transfer-config", `{}`}, DirectTransfer: true,
+				Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
 			},
 			NativeSidecar: true,
 		})
@@ -398,7 +401,7 @@ func TestRenderModelDeploymentPod_RoleKindLabelSeparatesAPair(t *testing.T) {
 			Replicas:     2,
 			InstanceType: "h20-8x",
 			Kind:         workercore.ModelDeploymentRoleKindDecode,
-			Template:     &workercore.ModelDeploymentTemplate{Image: "vllm/vllm-openai:v0.25.1"},
+			Image:        "vllm/vllm-openai:v0.25.1",
 		})
 	})
 
@@ -407,7 +410,6 @@ func TestRenderModelDeploymentPod_RoleKindLabelSeparatesAPair(t *testing.T) {
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment:   md,
 			Role:         &md.Spec.Roles[i],
-			Ordinal:      0,
 			InstanceType: it,
 		})
 		require.NoError(t, err)
@@ -420,7 +422,7 @@ func TestRenderModelDeploymentPod_RoleKindLabelSeparatesAPair(t *testing.T) {
 }
 
 // TestRenderModelDeploymentPod_Command covers the whole argv, which the operator owns end to end
-// because InstanceTemplate has Command and no Args: there is nowhere to put arguments beside an
+// because Command replaces it and there is no Args: there is nowhere to put arguments beside an
 // image's own entrypoint, so the append tier can only append to a command line the operator built.
 func TestRenderModelDeploymentPod_Command(t *testing.T) {
 	testCases := []struct {
@@ -491,7 +493,7 @@ func TestRenderModelDeploymentPod_Command(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Engine = tc.engine
+				md.Spec.Engine.Name = tc.engine
 				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
 			})
 
@@ -514,7 +516,7 @@ func TestRenderModelDeploymentPod_Command(t *testing.T) {
 func TestRenderModelDeploymentPod_TakeOver(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].ExtraArgs = []string{"--max-model-len=32768"}
-		md.Spec.Roles[0].Template.Command = []string{"/bin/my-server", "--flag"}
+		md.Spec.Roles[0].Command = []string{"/bin/my-server", "--flag"}
 	})
 
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
@@ -618,9 +620,9 @@ func TestRenderModelDeploymentPod_ConnectorPortCollision(t *testing.T) {
 		// A template's port name is synthesized from its number, so a user-declared port on the
 		// publisher's number always lands here rather than in the dedupe arm above.
 		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{
-				{Name: "http", Protocol: core.ProtocolTCP, Port: 8000},
-				{Name: "events", Protocol: core.ProtocolTCP, Port: 5557},
+			md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{
+				{Protocol: core.ProtocolTCP, Port: 8000},
+				{Protocol: core.ProtocolTCP, Port: 5557},
 			}
 		})
 		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
@@ -636,15 +638,15 @@ func TestRenderModelDeploymentPod_ConnectorPortCollision(t *testing.T) {
 			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
 			md.Spec.Roles[0].ExtraArgs = []string{"--port", "9100"}
-			md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{
-				{Name: "http", Protocol: core.ProtocolTCP, Port: 8000},
-				{Name: "side", Protocol: core.ProtocolTCP, Port: 9100},
+			md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{
+				{Protocol: core.ProtocolTCP, Port: 8000},
+				{Protocol: core.ProtocolTCP, Port: 9100},
 			}
 		})
 		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
 			Connector: ModelDeploymentConnectorRender{
-				Args: []string{"--kv-transfer-config", `{}`}, DirectTransfer: true,
+				Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
 			},
 		})
 		require.Error(t, err, "the engine port must clear every declared port, not only the served one")
@@ -652,9 +654,9 @@ func TestRenderModelDeploymentPod_ConnectorPortCollision(t *testing.T) {
 	})
 }
 
-// TestRenderModelDeploymentPod_Env covers the merge across tiers: what the operator owns is
-// rendered first and cannot be replaced, what it defaults yields to a user's value, and the
-// template overlay wins over the role's own append tier.
+// TestRenderModelDeploymentPod_Env covers the merge of the two sources: what the operator owns is
+// rendered first and cannot be replaced, what it defaults yields to a user's value, and what the
+// user appended lands after both.
 func TestRenderModelDeploymentPod_Env(t *testing.T) {
 	connector := ModelDeploymentConnectorRender{
 		Env:          []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: inject.ConfigFilePath}},
@@ -663,8 +665,7 @@ func TestRenderModelDeploymentPod_Env(t *testing.T) {
 
 	testCases := []struct {
 		name     string
-		roleEnv  []workercore.InstanceEnvVar
-		tmplEnv  []workercore.InstanceEnvVar
+		roleEnv  []workercore.ModelDeploymentEnvVar
 		wantEnv  map[string]string
 		wantGone []string
 	}{
@@ -674,23 +675,17 @@ func TestRenderModelDeploymentPod_Env(t *testing.T) {
 		},
 		{
 			name:    "a defaulted key yields to the user's value",
-			roleEnv: []workercore.InstanceEnvVar{{Name: "MC_TE_METRIC", Value: "0"}},
+			roleEnv: []workercore.ModelDeploymentEnvVar{{Name: "MC_TE_METRIC", Value: "0"}},
 			wantEnv: map[string]string{"MC_TE_METRIC": "0"},
 		},
 		{
 			name:    "an owned key supplied anyway never displaces the operator's",
-			roleEnv: []workercore.InstanceEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}},
+			roleEnv: []workercore.ModelDeploymentEnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: "/tmp/mine.json"}},
 			wantEnv: map[string]string{"MOONCAKE_CONFIG_PATH": inject.ConfigFilePath},
 		},
 		{
-			name:    "the template overlay replaces the role's append tier by name",
-			roleEnv: []workercore.InstanceEnvVar{{Name: "HF_HOME", Value: "/role"}},
-			tmplEnv: []workercore.InstanceEnvVar{{Name: "HF_HOME", Value: "/template"}},
-			wantEnv: map[string]string{"HF_HOME": "/template"},
-		},
-		{
 			name:    "an ordinary user variable is passed through untouched",
-			roleEnv: []workercore.InstanceEnvVar{{Name: "VLLM_LOGGING_LEVEL", Value: "DEBUG"}},
+			roleEnv: []workercore.ModelDeploymentEnvVar{{Name: "VLLM_LOGGING_LEVEL", Value: "DEBUG"}},
 			wantEnv: map[string]string{"VLLM_LOGGING_LEVEL": "DEBUG"},
 		},
 	}
@@ -699,7 +694,6 @@ func TestRenderModelDeploymentPod_Env(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles[0].Env = tc.roleEnv
-				md.Spec.Roles[0].Template.Env = tc.tmplEnv
 			})
 
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
@@ -892,7 +886,7 @@ func TestRenderModelDeploymentPod_Ports(t *testing.T) {
 	assert.Equal(t, "http", pod.Spec.Containers[0].Ports[0].Name)
 
 	md = newRenderDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{
+		md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{
 			{Port: 9000, Protocol: core.ProtocolTCP},
 		}
 	})
@@ -908,9 +902,9 @@ func TestRenderModelDeploymentPod_Ports(t *testing.T) {
 // hardware HAS been observed, which is why the second case matters as much as the first: an
 // InstanceType whose detail has not converged must not produce a tag with a hole in it.
 func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
-	t.Run("no template at all still renders", func(t *testing.T) {
+	t.Run("no image at all still renders", func(t *testing.T) {
 		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template = nil
+			md.Spec.Roles[0].Image = ""
 		})
 
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
@@ -918,7 +912,7 @@ func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
 			Role:         &md.Spec.Roles[0],
 			InstanceType: newRenderInstanceType(),
 		})
-		require.NoError(t, err, "a nil template is not an error once the image can be synthesized")
+		require.NoError(t, err, "an empty image is not an error once one can be synthesized")
 		assert.Equal(t, "gpustack/runner:cuda12.9-vllm0.25.1", pod.Spec.Containers[0].Image)
 	})
 
@@ -931,7 +925,7 @@ func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
 
 	t.Run("an unobserved runtime version refuses rather than rendering a hole", func(t *testing.T) {
 		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template = nil
+			md.Spec.Roles[0].Image = ""
 		})
 		it := newRenderInstanceType(func(it *worker.InstanceType) {
 			it.Status.Detail.RuntimeVersion = ""
@@ -951,7 +945,7 @@ func TestRenderModelDeploymentPod_SynthesizesTheImage(t *testing.T) {
 
 	t.Run("a manufacturer with no runner backend refuses", func(t *testing.T) {
 		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template = nil
+			md.Spec.Roles[0].Image = ""
 		})
 		it := newRenderInstanceType(func(it *worker.InstanceType) {
 			it.Status.Detail.Manufacturer = nodefeature.ManufacturerCambricon
@@ -1048,7 +1042,7 @@ func TestRenderModelDeploymentPod_NoClientConfigWithoutOne(t *testing.T) {
 // on every pass forever.
 func TestModelDeploymentPodSpecHash_IsDeterministic(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[0].Env = []workercore.InstanceEnvVar{
+		md.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{
 			{Name: "B", Value: "2"}, {Name: "A", Value: "1"},
 		}
 	})
@@ -1073,6 +1067,57 @@ func TestModelDeploymentPodSpecHash_DoesNotCoverItself(t *testing.T) {
 		"rehashing a rendered Pod must reproduce the value it already carries")
 }
 
+// TestModelDeploymentPodSpecHash_DoesNotCoverTheName is the migration half of the fingerprint's
+// subject: the hash covers {Labels, Annotations, Spec} and no part of the naming, so a replica
+// named by an earlier scheme is not stale merely for being old. The rollout compares fingerprints,
+// and a hash that read the name would read every surviving replica as outdated the moment the
+// naming scheme changed.
+//
+// THE POSITIVE BASELINE RUNS IN THE SAME TABLE on purpose. "The fingerprint ignores the name" alone
+// would pass against a fingerprint that ignored everything, so beside the case that must not move
+// it sits one that must.
+func TestModelDeploymentPodSpecHash_DoesNotCoverTheName(t *testing.T) {
+	base := renderOne(t, newRenderDeployment(), newRenderInstanceType())
+	stored := base.Annotations[modelDeploymentPodSpecHashAnnotation]
+
+	testCases := []struct {
+		name   string
+		mutate func(*core.Pod)
+		moves  bool
+	}{
+		{
+			// The name an earlier scheme would have given this replica. Neither the rendered prefix
+			// nor this assigned name is part of the fingerprint's subject -- which is what lets a
+			// replica named before the generated naming exist beside ones named after it without
+			// reading as stale.
+			name: "a name assigned by an earlier scheme leaves the fingerprint where it was",
+			mutate: func(pod *core.Pod) {
+				pod.Name = "qwen-server-3"
+			},
+		},
+		{
+			name: "a spec change moves the fingerprint",
+			mutate: func(pod *core.Pod) {
+				pod.Spec.Containers[0].Image = "vllm/vllm-openai:v0.26.0"
+			},
+			moves: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := base.DeepCopy()
+			tc.mutate(pod)
+
+			if tc.moves {
+				assert.NotEqual(t, stored, modelDeploymentPodSpecHash(pod))
+				return
+			}
+			assert.Equal(t, stored, modelDeploymentPodSpecHash(pod))
+		})
+	}
+}
+
 // TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput walks the inputs a rollout must react
 // to and asserts each one moves the fingerprint. A change that did not would leave replicas running
 // a spec nobody asked for, with the deployment reporting itself Ready.
@@ -1088,7 +1133,7 @@ func TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput(t *testing.T) {
 	}{
 		{
 			name:   "image",
-			mutate: func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Template.Image = "vllm/vllm-openai:v0.26.0" },
+			mutate: func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0" },
 		},
 		{
 			name:   "model",
@@ -1101,7 +1146,7 @@ func TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput(t *testing.T) {
 		{
 			name: "environment",
 			mutate: func(md *workercore.ModelDeployment) {
-				md.Spec.Roles[0].Env = []workercore.InstanceEnvVar{{Name: "A", Value: "1"}}
+				md.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{{Name: "A", Value: "1"}}
 			},
 		},
 		{
@@ -1227,8 +1272,8 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		// the engine opens are one figure. That is what makes gating on it correct rather than a way
 		// to strand a replica, and it is why this case no longer withholds the gates.
 		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{
-				{Port: 9100, Name: "serve", Protocol: core.ProtocolTCP},
+			md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{
+				{Port: 9100, Protocol: core.ProtocolTCP},
 			}
 		})
 
@@ -1258,8 +1303,8 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		// SUCCEED while the published endpoint forwards a protocol nothing answers.
 		for _, proto := range []core.Protocol{core.ProtocolUDP, core.ProtocolSCTP} {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Roles[0].Template.Ports = []workercore.InstancePort{
-					{Port: 8000, Name: "serve", Protocol: proto},
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{
+					{Port: 8000, Protocol: proto},
 				}
 			})
 

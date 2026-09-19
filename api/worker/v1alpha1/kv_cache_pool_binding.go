@@ -30,6 +30,8 @@ import (
 // +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["kvcpb"],subResources=["status"]
 // +k8s:crd-gen:printcolumn:name="Pool",type="string",jsonPath=".spec.poolRef.name"
 // +k8s:crd-gen:printcolumn:name="Domain",type="string",jsonPath=".spec.domain.name"
+// +k8s:crd-gen:printcolumn:name="BlockSize",type="integer",jsonPath=".spec.domain.blockSize"
+// +k8s:crd-gen:printcolumn:name="Dtype",type="string",jsonPath=".spec.domain.dtype"
 // +k8s:crd-gen:printcolumn:name="Effective",type="string",jsonPath=".status.effectiveQuota"
 // +k8s:crd-gen:printcolumn:name="Usage",type="string",jsonPath=".status.usage"
 // +k8s:crd-gen:printcolumn:name="Phase",type="string",jsonPath=".status.phase"
@@ -69,7 +71,16 @@ type KVCachePoolBindingSpec struct {
 	// +required
 	Domain KVCachePoolBindingDomain `json:"domain" protobuf:"bytes,2,name=domain"`
 
-	// QuotaCeiling is what this namespace may consume in its reuse domain, written verbatim into that
+	// Quota is what this namespace asks of its pool, shaped like the pool's own declared ceiling so
+	// one concept is spelled one way on both sides of the grant.
+	//
+	// +required
+	Quota KVCachePoolBindingQuota `json:"quota" protobuf:"bytes,3,name=quota"`
+}
+
+// KVCachePoolBindingQuota is the quota this namespace asks of its pool.
+type KVCachePoolBindingQuota struct {
+	// Ceiling is what this namespace may consume in its reuse domain, written verbatim into that
 	// one tenant's requested quota rather than kept as a total this operator maintains.
 	//
 	//   - IT IS A REQUEST, NOT A GRANT. The pool reduces every tenant's effective quota in proportion
@@ -87,7 +98,7 @@ type KVCachePoolBindingSpec struct {
 	//   - A value that is not positive is refused at admission.
 	//
 	// +required
-	QuotaCeiling resource.Quantity `json:"quotaCeiling" protobuf:"bytes,3,name=quotaCeiling"`
+	Ceiling resource.Quantity `json:"ceiling" protobuf:"bytes,1,name=ceiling"`
 }
 
 // KVCachePoolBindingPoolReference names the cluster-scoped pool this Binding grants.
