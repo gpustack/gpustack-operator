@@ -1,6 +1,7 @@
 package mooncake
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,6 +33,7 @@ func TestRenderLeaderFlags(t *testing.T) {
 			want: []string{
 				"-rpc_port=50051",
 				"-metrics_port=9003",
+				"-default_kv_lease_ttl=5m",
 				"-allocation_strategy=free_ratio_first",
 				"-pod_name=$(KUBERNETES_POD_NAME)",
 				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
@@ -45,6 +47,7 @@ func TestRenderLeaderFlags(t *testing.T) {
 			want: []string{
 				"-rpc_port=50051",
 				"-metrics_port=9003",
+				"-default_kv_lease_ttl=5m",
 				"-allocation_strategy=random",
 				"-pod_name=$(KUBERNETES_POD_NAME)",
 				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
@@ -56,6 +59,7 @@ func TestRenderLeaderFlags(t *testing.T) {
 			want: []string{
 				"-rpc_port=50051",
 				"-metrics_port=9003",
+				"-default_kv_lease_ttl=5m",
 				"-pod_name=$(KUBERNETES_POD_NAME)",
 				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
 			},
@@ -74,6 +78,7 @@ func TestRenderLeaderFlags(t *testing.T) {
 			want: []string{
 				"-rpc_port=50051",
 				"-metrics_port=9003",
+				"-default_kv_lease_ttl=5m",
 				"-allocation_strategy=free_ratio_first",
 				"-enable_multi_tenants=true",
 				"-tenant_quota_connector_uri=/var/lib/mooncake/tenant-quota-policy.yaml",
@@ -93,6 +98,7 @@ func TestRenderLeaderFlags(t *testing.T) {
 			want: []string{
 				"-rpc_port=50051",
 				"-metrics_port=9003",
+				"-default_kv_lease_ttl=5m",
 				"-allocation_strategy=free_ratio_first",
 				"-pod_name=$(KUBERNETES_POD_NAME)",
 				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
@@ -117,6 +123,7 @@ func TestRenderLeaderFlags(t *testing.T) {
 			want: []string{
 				"-rpc_port=50051",
 				"-metrics_port=9003",
+				"-default_kv_lease_ttl=5m",
 				"-allocation_strategy=free_ratio_first",
 				"-pod_name=$(KUBERNETES_POD_NAME)",
 				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
@@ -137,6 +144,7 @@ func TestRenderLeaderFlags(t *testing.T) {
 			want: []string{
 				"-rpc_port=50051",
 				"-metrics_port=9003",
+				"-default_kv_lease_ttl=5m",
 				"-allocation_strategy=free_ratio_first",
 				"-pod_name=$(KUBERNETES_POD_NAME)",
 				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
@@ -208,6 +216,7 @@ func TestRenderLeaderFlags_HighAvailability(t *testing.T) {
 	assert.Equal(t, []string{
 		"-rpc_port=50051",
 		"-metrics_port=9003",
+		"-default_kv_lease_ttl=5m",
 		"-enable_ha=true",
 		"-ha_backend_type=k8s",
 		"-ha_backend_connstring=" + kuberess.SystemNamespaceName + "/mooncake-dram-leader",
@@ -337,4 +346,40 @@ func TestRenderLeaderFlags_OmitsWhatThisScopeDoesNotRun(t *testing.T) {
 	// -port is a prefix of -pod_name and of nothing else here; assert it exactly so the check
 	// above cannot pass by accident.
 	require.NotContains(t, strings.Split(got, " "), "-port=50051")
+}
+
+// TestRenderLeaderFlags_LeaseTTLStaysOverridable holds the two mechanics that let an operator
+// replace the lease this renderer supplies. Neither is visible from the rendered argv alone, and
+// each fails silently on its own: reserving the key turns the operator's entry into an admission
+// refusal, and rendering ours after theirs turns it into a value the artifact discards.
+//
+// The golden lists above already assert that the flag is rendered. What is asserted here is that
+// it can still be taken back, which is the half a later edit is liable to remove while every other
+// test stays green.
+func TestRenderLeaderFlags_LeaseTTLStaysOverridable(t *testing.T) {
+	const key = "default_kv_lease_ttl"
+
+	// Reserving the key would make admission refuse the very entry the renderer leaves room for.
+	// This is a deliberate omission rather than one nobody has gotten to yet -- see the note above
+	// LeaderExtraArgsRules, which records it so the next completeness pass does not add it.
+	assert.NotContains(t, LeaderExtraArgsRules.Derived, key,
+		"%s must stay off the derived list, because reserving it is what would refuse an "+
+			"operator's own value and leave the setting reachable from nowhere", key)
+
+	// The artifact takes the last of two duplicate flags, so an operator's entry wins only by
+	// landing after ours. Asserted on the index rather than on membership: both are present either
+	// way, and the order is the entire difference between an override and a discarded token.
+	got := RenderLeaderFlags(leaderBackend(workercore.KVCacheBackendLeader{
+		Replicas:           ptr.To[int32](1),
+		AllocationStrategy: "FreeRatioFirst",
+		ExtraArgs:          []string{"-" + key + "=90s"},
+	}))
+
+	ours := slices.Index(got, "-"+key+"="+LeaderKVLeaseTTL)
+	theirs := slices.Index(got, "-"+key+"=90s")
+	require.NotEqual(t, -1, ours, "the rendered default must still be present")
+	require.NotEqual(t, -1, theirs, "the operator's entry must reach the argv intact")
+	assert.Less(t, ours, theirs,
+		"the operator's entry must render after the default, because the artifact reads the "+
+			"last of two duplicate flags and the earlier one is what it discards")
 }

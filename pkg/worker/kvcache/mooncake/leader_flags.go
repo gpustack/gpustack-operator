@@ -31,6 +31,22 @@ const (
 	// LeaderPodIPEnv is the third, and it is defined only under high availability because only the
 	// election reads it. See the -rpc_address flag for what it decides.
 	LeaderPodIPEnv = "KUBERNETES_POD_IP"
+
+	// LeaderKVLeaseTTL is how long a cached object is protected from eviction, rendered in place of
+	// the artifact's own ten seconds.
+	//
+	// A lease is granted when an object is READ, not when it is written: completing a write grants a
+	// zero-length one, so an object nobody has read yet is evictable immediately. What this value
+	// bounds is therefore the RECENTLY READ set, not the write rate, and eviction skips a protected
+	// object outright rather than falling back to it when it finds nothing else.
+	//
+	// Ten seconds is short enough that a block read by one engine replica is evictable again before
+	// the next replica asks for it, which is the reuse a shared cache exists to provide. Five
+	// minutes covers that, and costs nothing until the set read within it outgrows the store, which
+	// is a store sized below its own working set rather than a consequence of this value.
+	//
+	// It is a duration string because the flag accepts ms, s, m and h suffixes.
+	LeaderKVLeaseTTL = "5m"
 )
 
 // leaderAllocationStrategies maps this API's spelling of an allocation strategy onto the artifact's.
@@ -59,6 +75,10 @@ var leaderAllocationStrategies = map[string]string{
 //   - No flag at the artifact's own default. A flag this spec does not address is absent, so a
 //     default that changes upstream shows up as a behavior change to investigate rather than as a
 //     value we silently re-asserted.
+//
+// -default_kv_lease_ttl is the one flag that stands outside all of this, in both directions: it is
+// rendered from no field, at a value chosen here rather than the artifact's, and it is the only
+// rendered flag the passthrough is allowed to win over. Its render site says why.
 func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 	leader := kvcb.Spec.Connection.Managed.Leader
 
@@ -66,6 +86,23 @@ func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 		fmt.Sprintf("-rpc_port=%d", LeaderRPCPort),
 		fmt.Sprintf("-metrics_port=%d", LeaderMetricsPort),
 	}
+
+	// Rendered unconditionally, from no field, and NOT reserved against the passthrough. Every other
+	// flag here is one or the other; this one is neither, and both halves are the point.
+	//
+	// It is rendered because the artifact's default protects a cached object for ten seconds, which
+	// is shorter than the gap between one engine replica reading a block and the next one asking for
+	// it -- so the default quietly costs the reuse a shared cache exists to provide. It is left
+	// reachable because the value that suits a deployment depends on its read pattern and its store
+	// size, neither of which this API describes, so a single number here can only be a better
+	// starting point and never the answer.
+	//
+	// Two mechanics make the override work, and both have to hold. The key is absent from the
+	// leader's derived list, so admission accepts it in extraArgs instead of refusing it as a
+	// collision. And the artifact parses duplicate flags last-one-wins, while the passthrough is
+	// appended after this line -- so an operator's entry is simply the one that takes effect, with
+	// no inspection of extraArgs needed here.
+	flags = append(flags, "-default_kv_lease_ttl="+LeaderKVLeaseTTL)
 
 	// The election, rendered as one group or not at all, and only when one runs: highAvailability
 	// with a single replica has nothing to elect -- see leaderNeedsAPIAccess. Splitting the group
@@ -172,8 +209,11 @@ func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 		fmt.Sprintf("-pod_namespace=$(%s)", LeaderPodNamespaceEnv))
 
 	// The escape hatch goes last and in the order written, so two renders of one spec are
-	// byte-identical and a passthrough can override nothing the lines above already decided —
+	// byte-identical and a passthrough can override nothing the lines above DERIVED from a field --
 	// admission refuses a key that collides with a derived flag, which is what keeps that true.
+	// -default_kv_lease_ttl is the deliberate exception and the reason this sentence names derived
+	// flags rather than every flag above: it is rendered from no field, left off the derived list,
+	// and overridden here by an operator who needs a different number.
 	// Entries carry their own dashes and render verbatim: one entry is one flag token, the shape
 	// the artifact's own parser reads.
 	flags = append(flags, leader.ExtraArgs...)

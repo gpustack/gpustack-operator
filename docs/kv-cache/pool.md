@@ -179,8 +179,9 @@ domain's own objects to make room for the next write.** Measured on a real store
 - The store's general eviction counters stay at **zero** throughout — this path is not on them — so a
   dashboard watching evictions sees nothing happen.
 - A write **is** refused, with `TENANT_QUOTA_EXCEEDED`, when nothing can be discarded: reading an
-  object puts it under a lease — about 10 s by default, set by a store flag — and a write while every
-  object in a filled grant holds one fails.
+  object puts it under a lease — five minutes as this operator renders the store, and adjustable per
+  backend through [the leader's](leader.md) `extraArgs` — and a write while every object in a filled
+  grant holds one fails. The measurement above was taken at the store's own ten seconds.
 
 ⚠️ **`status.overQuota` does not report this, and cannot.** The store computes it as *charge exceeds
 grant* while refusing any charge that would overshoot, so writing past a grant leaves it `false`
