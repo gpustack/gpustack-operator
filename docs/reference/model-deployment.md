@@ -47,7 +47,7 @@ spec:
       replicas: 4
       instanceType: gpustack-nvidia-a10g-linux-amd64
       resources:
-        accelerator: 2                   # cards per replica
+        accelerator: 2                   # cards per Pod
 ```
 
 `poolRef` is a `LocalObjectReference` on purpose: naming another namespace, the cluster-scoped
@@ -67,25 +67,36 @@ Today the value reaching the renderer is synthesized from the engine, the role's
 pool's backend, and this field is read by nothing. It is also frozen after creation, so a widened
 enum reaches new deployments only.
 
-`roles` takes **1 to 10** entries. The upper bound is Kueue's rather than this operator's — every role
-becomes one PodSet of the Workload its group composes, and `Workload.spec.podSets` is capped at ten —
-and it lives in the validating webhook rather than in the schema so the refusal can say whose limit it
-is, and so tracking an upstream number is not a schema change every stored object must survive.
+`roles` takes **1 to 10** entries. The upper bound is Kueue's rather than this operator's — the
+refusal names the 10-PodSet cap on `Workload.spec.podSets` as its cause — and it lives in the
+validating webhook rather than in the schema so the refusal can say whose limit it is, and so
+tracking an upstream number is not a schema change every stored object must survive.
 
-`replicas` and `instanceType` are structured fields and stay so: they are inputs to Kueue PodSet
-counts and flavor selection, so an override able to shadow them would make the feasibility check read
-a ledger that does not match reality.
+`replicas` counts **independent serving instances**: each one starts, serves and is replaced on its
+own. Changing the number adds or removes instances, and the ones that survive are not restarted —
+they keep serving without interruption and keep whatever cache they hold.
 
-Each replica's accelerator request lives in `roles[].resources`, whose fields mirror
-[Accelerator Requests](../accelerator-requests.md). CPU, memory and ephemeral storage are **derived**
-from the InstanceType's per-unit resources scaled by the card count, so they are not expressible here.
+`size` is how many Pods form one instance, defaulting to 1. The Pods of one instance are
+fate-sharing — they start together and are replaced together — and changing `size` replaces every
+instance of the role. Today 1 is the only value admission accepts: the rendering that would build
+one instance across several Pods does not exist yet, and the refusal says so rather than naming a
+field bound.
+
+`replicas`, `size` and `instanceType` are structured fields and stay so: admission and scheduling
+read them, so an override able to shadow them would make the feasibility check read a ledger that
+does not match reality.
+
+The accelerator request of **one Pod** lives in `roles[].resources`, whose fields mirror
+[Accelerator Requests](../accelerator-requests.md) — at `size: 1` the Pod and the instance are the
+same request. CPU, memory and ephemeral storage are **derived** from the InstanceType's per-unit
+resources scaled by the card count, so they are not expressible here.
 
 ## Prefill and decode
 
 Several roles in one deployment are admitted **atomically**: a pool that cannot fit all of them leaves
 all of them queued, instead of admitting the prefillers and stranding them waiting for decoders that
-never arrive. Every role is its own pod group, so the set is held together by an admission check this
-operator runs, which holds every group until the whole set has reserved quota.
+never arrive. Every replica of every role is its own pod group, so the set is held together by an
+admission check this operator runs, which holds every group until the whole set has reserved quota.
 
 ```yaml
   roles:
@@ -173,30 +184,29 @@ spec:
         accelerator: 2
 ```
 
-**The replicas of a role become one Kueue pod group — one group per role.** Two roles naming the same
-`instanceType` are still two groups, each composing its own Workload. The example above therefore has
-**two** groups of two replicas, admitted as a set.
+**Each replica of a role becomes its own Kueue pod group — one group per replica, declaring a total
+of one.** Two roles naming the same `instanceType` are still separate groups, each replica composing
+its own Workload. The example above therefore has **four** groups of one replica, admitted as a set.
 
-⛔ **A lost replica is replaced, and its siblings keep serving.** A node drained, a replica preempted
-for higher-priority work, a kubelet evicting under pressure — each costs the one replica that left,
-not its group. The group stays admitted and the gap is filled, so on a cluster with preemption
-enabled a single departure is routine rather than exceptional.
+⛔ **A lost replica is replaced once its slot reads empty, and its siblings keep serving.** A node
+drained, a replica preempted for higher-priority work, a kubelet evicting under pressure — each costs
+the one replica that left, not its siblings: every replica is its own group with its own Workload, so
+a departure touches no other replica's admission.
 
-> **Why replacing the one works** — the group is annotated as serving, so Kueue never treats it as
-> finished; instead it keeps the Workload admitted, reports the gap through the
-> `WaitingForReplacementPods` condition on that Workload, and releases the departed Pod's finalizer
-> once a replacement exists. That condition is what an operator reads while the replacement happens,
-> and this operator creates on it: a replacement is issued when Kueue asks, never before, because a
-> Pod created beside a departed member Kueue still counts active reads as one over the total and
-> Kueue's answer to the excess is to delete the newcomer.
+> **Why the slot is what a replacement waits for** — the group is annotated as serving, so Kueue never
+> releases the finalizer it holds on the departed Pod; only that replica's Workload being deleted
+> releases it. The replacement is created once no Pod for that replica's ordinal reads on the API
+> server — never beside a member still listed, because a second member in a group of one reads as
+> excess, and Kueue's answer to the excess is to delete the newcomer.
 
-⭐ **The role is what bounds the blast radius, and no knob is needed to get that.** A loss or an edit
-inside one role's group does not reach another role's group — `prefill` turning over leaves `decode`
-serving. The groups are still admitted together — an `AdmissionCheck` holds one until the other can
-be admitted too, so `prefill` still never starts without `decode`.
+⭐ **The replica is what bounds the blast radius, and no knob is needed to get that.** A loss or an
+edit inside one replica's group does not reach another replica's group — one `prefill` replica turning
+over leaves its siblings and all of `decode` serving. The groups are still admitted together — an
+`AdmissionCheck` holds them until the whole set has reserved quota, so `prefill` still never starts
+without `decode`.
 
 Splitting `instanceType`s now buys different hardware, and nothing else: the isolation it used to
-buy, every role has by default.
+buy, every replica has by default.
 
 **With a shared pool** — the same object plus one block:
 
@@ -266,8 +276,9 @@ disagree on the protocol until both converge — the same window an `engine.vers
 
 | Key | Value | What it is for |
 |---|---|---|
-| label `kueue.x-k8s.io/pod-group-name` | the deployment's name for a sole role's group, or `gpustack-fnv64-<hash>` per role when that name is too long for a label value or the deployment declares several roles | membership: it is what makes a role's replicas one group. Multi-role groups hash the role in, because a readable composite would share a namespace with deployment names and could equal one |
-| annotation `kueue.x-k8s.io/pod-group-total-count` | the role's own `replicas`, and no other role's | how many Pods Kueue waits for before composing anything. A group claiming another role's count waits for Pods that are never coming |
+| label `kueue.x-k8s.io/pod-group-name` | `gpustack-fnv64-<hash>` over the namespace, deployment, role and ordinal — always the hashed form, on every shape | membership: it is what makes a replica its own group. The name is unique, not parseable: the ordinal travels in its own label and the hash is never read back, so a sole role's replica names its group exactly as one role of several does |
+| label `modeldeployment.gpustack.ai/pod-ordinal` | the replica's slot within its role, from 0 up | the one per-replica identity the converger reads back: the group name is derived from it, the spec hash covers it, and a scale-down sheds the highest ordinals first |
+| annotation `kueue.x-k8s.io/pod-group-total-count` | `1`, always | how many Pods Kueue waits for before composing anything. The group is this replica and nobody else's, so a replica-count change moves no total any member carries — a resize is a trim, not a rebuild |
 | annotation `kueue.x-k8s.io/role-hash` | the role's `name` | the PodSet's identity, so two identically-shaped roles stay two PodSets |
 | annotation `kueue.x-k8s.io/pod-group-serving` | `"true"` | an inference deployment never finishes; without it Kueue reclaims the quota of a replica that exited |
 | label `kueue.x-k8s.io/queue-name` | the `status.entrance` **published by** the role's InstanceType | unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type rather than re-derived from its name, so this operator and the reconcile that creates the LocalQueue cannot disagree about the queue |
@@ -280,19 +291,19 @@ and otherwise derives a digest of the Pod spec's *shape*, which names the PodSet
 operator wrote — status joins a Workload's PodSets to the roles by this name, so a digest breaks the
 join while nothing errors.
 
-> **`kueue.x-k8s.io/pod-group-fast-admission` must never be set.** That path composes the Workload from
-> the first runnable Pod alone and gives that single PodSet the whole group's total, so the remaining
-> replicas join an already-admitted set rather than composing the set. The Workload still looks well
-> formed. The operator never sets it, and a test asserts its absence.
+> **`kueue.x-k8s.io/pod-group-fast-admission` must never be set.** That path composes the Workload
+> from the first runnable Pod alone and gives that single PodSet the whole group's total; with a total
+> of one it buys nothing, and it stays a trap for the day a group ever grows a second member. The
+> operator never sets it, and a test asserts its absence.
 
 ### Different hardware per role
 
 A Kueue Workload carries one `queueName`, and that name is the one the role's `instanceType`
-publishes as its `status.entrance`. Every role is its own group regardless, so roles on two
-`instanceType`s were never going to be one Workload — and neither were two roles on one. The set is
-admitted together by an admission check rather than by Kueue's intra-group rule.
+publishes as its `status.entrance`. Every replica is its own group regardless, so two roles were never
+going to share a Workload — on two `instanceType`s or on one. The set is admitted together by an
+admission check rather than by Kueue's intra-group rule.
 
-See [One group per role](#one-group-per-role) for what that costs an edit, and the last row of
+See [One group per replica](#one-group-per-replica) for what that costs an edit, and the last row of
 [What admission refuses](#what-admission-refuses) for the one state in which the shape is refused
 instead.
 
@@ -554,12 +565,23 @@ appearing as an unattributable `ImagePullBackOff`.
 
 ## Rollout is a rolling replacement
 
-A spec change that changes a replica's rendered Pod **deletes and recreates** it — one replica per
-role per pass, waited out. There are no surge or unavailable knobs.
+Changing `replicas` adds or removes instances and nothing more: the survivors are not restarted, do
+not reload their weights and keep their cached blocks. What still replaces **every** instance of the
+role is an edit that changes what a replica's Pod renders — `image`, `extraArgs`, `env`, `ports`,
+`additionalVolumes` — or a change to `size`.
+
+Such an edit **deletes and recreates** the role's replicas — one replica per role per pass, waited
+out. The role set itself cannot be edited at all; admission refuses it, so there is no role rename or
+addition to roll. There are no surge or unavailable knobs.
 
 The one-at-a-time cadence is a constraint rather than a choice: Kueue counts a group against its
 declared total, so a replacement created beside a member Kueue still counts active reads as one over,
 and Kueue's answer to the excess is to delete the newest un-finalized Pod — the replacement itself.
+
+A replacement is a **fresh admission**, not a rider on the reservation the departed replica held:
+freeing the slot deletes that replica's Workload, and the reservation goes with it. The cadence guard
+therefore turns a replica over only when every replica the role declares holds an admitted Workload —
+on a full pool a rollout waits for capacity rather than shedding replicas it cannot re-reserve.
 
 The cost is real and worth stating, and it rides on the block lease described under
 [What a cache changes about a workload](kv-cache-injection.md#what-a-cache-changes-about-a-workload): a lease survives a long queue and does **not**
@@ -577,7 +599,7 @@ that. Nothing is required of you, but on a busy deployment the restart is worth 
 
 ### A replica that leaves is replaced
 
-Most departures are not a spec change, and none of them restarts a role:
+Most departures are not a spec change, and none of them touches a sibling:
 
 | Cause | Who initiates it |
 |---|---|
@@ -586,28 +608,32 @@ Most departures are not a spec change, and none of them restarts a role:
 | **the kubelet evicting** a replica under node pressure | the node |
 | `kubectl delete pod` on one replica | you |
 
-The lost replica is replaced and its siblings keep serving. The group's Workload stays admitted,
-Kueue reports the gap on it as `WaitingForReplacementPods` and releases the departed Pod's finalizer
-once the replacement exists — that condition is what to read while it happens.
+Who frees the slot depends on the cause. Kueue's own preemption evicts the departed replica's
+Workload, and that eviction removes the Pod and releases the slot; the replacement then follows on
+its own.
 
-The replacement carries a fresh name the API server assigns, never the departed Pod's name, so
-nothing blocks the create. What that means for anything that addresses replicas, and the selector to
-use instead, is three paragraphs below.
+A delete that lands on the Pod alone — a drain, a kubelet eviction, `kubectl delete pod` — leaves
+that replica's Workload standing, and the Workload is what holds the slot: the Pod stays readable on
+the API server and no replacement is created beside it. Deleting the departed replica's Workload
+releases the Pod and the quota, and the replacement follows once the ordinal reads empty.
 
-A group with no Workload yet — still assembling its first set — creates freely, because there is
-nothing to ask; the ask exists only once a group that was complete has lost a member.
+The create gate waits on the ordinal and nothing else: a replacement is created once no Pod for that
+ordinal reads on the API server, and an ordinal nothing ever occupied reads empty at once.
+
+The replacement carries a fresh name the API server assigns, never the departed Pod's name. What that
+means for anything that addresses replicas, and the selector to use instead, is below.
 
 On a cluster with preemption enabled, a replica going away is therefore **routine rather than an
 incident** — worth knowing before you chase one as a fault.
 
 **A replica on a node that is NotReady but still registered is never replaced.** Its Pod keeps its
-`nodeName` and a Running phase, so Kueue counts it active and never reports it absent. Force-deleting
-that Pod is how two processes end up holding one accelerator; deleting the Node object resolves it,
-which is what a cluster that replaces nodes already does.
+`nodeName` and a Running phase, so its ordinal still reads occupied and no replacement is created.
+Force-deleting that Pod is how two processes end up holding one accelerator; deleting the Node object
+resolves it, which is what a cluster that replaces nodes already does.
 
 **A replica's name is assigned by the API server, so nothing can predict it.** A replacement is a new
-Pod under a new name rather than the departed one's name reused, which is what lets it be created
-while the Pod it replaces is still finalizing. Address replicas by label instead of by name:
+Pod under a new name rather than the departed one's name reused, and it is created only after the
+departed Pod has left the server. Address replicas by label instead of by name:
 
 ```bash
 kubectl get pods -l app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=<deployment>
@@ -617,9 +643,10 @@ Add `,app.kubernetes.io/component=<role>` for one role's replicas, or
 `,modeldeployment.gpustack.ai/role-kind=prefill` for every prefiller regardless of what its role is
 called. A runbook that spells `<deployment>-<role>-0` breaks here and has no fixed name to move to.
 
-A change to the replica counts or the role set is a different, larger event: it moves the group's
-declared total, and the group is **rebuilt** rather than rolled. See
-[One group per role](#one-group-per-role) for what that costs.
+Changing `replicas` is not one of these departures either: it adds or sheds instances and leaves the
+survivors running. See [Rollout is a rolling replacement](#rollout-is-a-rolling-replacement) for
+which edits replace every instance instead. The role set cannot be edited at all — admission refuses
+it.
 
 ### Which fields are the deployment's identity
 
@@ -631,7 +658,7 @@ this deployment being run right now*.**
 |---|---|
 | `model`, `engine.name`, `kvCache` | `engine.version`, `kvTransfer` |
 | `router.name` in place — the router block itself may be added or removed | `router.replicas`, `router.extraArgs` |
-| the set of roles, and each role's `name` and `kind` | `roles[].replicas` |
+| the set of roles, and each role's `name` and `kind` | `roles[].replicas`, `roles[].size` |
 | `roles[].instanceType` | `roles[].extraArgs`, `roles[].env` |
 | `roles[].resources` | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes` |
 | `roles[].command` | labels and annotations |
@@ -659,25 +686,24 @@ by precedent and stops meaning anything.
 > object with `kubectl apply` or `kubectl edit`. This is not a quirk of the freeze: omitting a value
 > in a merge patch IS setting it to null, and the rule is reading what you actually sent.
 
-### One group per role
+### One group per replica
 
-The grouping key is the **role**: every role's replicas form one pod group, and Kueue composes one
-Workload per group. Two roles naming the same `instanceType` are two groups — a queue name is derived
-from the `instanceType` and one Workload carries one queue name, so rather than forbid the shape the
-roles are simply not made to share.
+The grouping key is the **replica**: every replica of every role forms its own pod group, derived from
+the role and the replica's ordinal within it, and Kueue composes one Workload per group with a
+declared total of one. Two roles naming the same `instanceType` share nothing — a queue name is
+derived from the `instanceType` and one Workload carries one queue name, so rather than forbid the
+shape the roles are simply not made to share.
 
-**What an edit costs is therefore the role edited.** A `replicas` change or a role-set change rebuilds
-that role's group alone; a role-field edit rolls that role alone. One exception: a deployment crossing
-between one role and several renames every group — the sole-role group carries the deployment's name
-while multi-role groups carry hashes — so adding a second role rebuilds the first.
+**What an edit costs is therefore the replica, not the group it used to share.** Growing or shrinking
+`replicas` adds or removes whole groups and leaves every surviving replica's group, Workload and
+admission untouched; a role-field edit rolls that role's replicas one at a time.
 
 The groups are still admitted as a **set** — see the last row of
 [What admission refuses](#what-admission-refuses) for what happens when that gate cannot be installed.
 
-A rebuild takes **two passes**. The group's declared total is carried by every Pod and Kueue requires
-them all to agree on it, so nothing is created while any Pod still declares the old one; the pass that
-finds the old group gone creates the new one whole. Deleting the group's Workload is what releases
-Kueue's finalizer on its Pods — a *serving* group is never finished, so nothing else releases it.
+A scale-down sheds the **highest ordinals first**, deleting each departing replica's Pod together with
+its own Workload: the Workload delete is what releases Kueue's finalizer on the Pod and the quota the
+replica held, because a serving group is never finished and nothing else releases either.
 
 ## What admission refuses
 
