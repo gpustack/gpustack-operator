@@ -205,6 +205,26 @@ func TestValidateModelDeployment(t *testing.T) {
 			md:   modelDeployment(workercore.ModelDeploymentEngineVLLM),
 		},
 		{
+			// The legal value is ACCEPTED, not merely defaulted: a role stating one instance of one
+			// Pod is the shape every deployment has, and refusing it would make the field unusable
+			// rather than merely capped.
+			name: "role_size_one",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) { r.InstanceSize = 1 }),
+			),
+		},
+		{
+			// The refusal NAMES THE MISSING CAPABILITY rather than the field's bounds, because the
+			// limit is progress rather than design: the rendering that builds one instance across
+			// several Pods does not exist, and a bounds-shaped message would read as a permanent
+			// rule after the day it lands.
+			name: "role_size_two",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) { r.InstanceSize = 2 }),
+			),
+			wantMessage: "a role's instance cannot span more than one Pod yet",
+		},
+		{
 			name: "role_kinds_prefill_and_decode",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
 				role(func(r *workercore.ModelDeploymentRole) {

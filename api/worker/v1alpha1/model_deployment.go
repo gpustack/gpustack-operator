@@ -276,7 +276,8 @@ type ModelDeploymentKVTransfer struct {
 //
 // EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Each role forms its
 // own Kueue pod group, whose members cannot leave one at a time, so that one group is rebuilt whole
-// while every sibling role keeps serving. A `replicas` change on this role does the same.
+// while every sibling role keeps serving. A `replicas` change does not rebuild: it adds or removes
+// instances, and every instance that stays keeps running.
 //
 // ADDING OR REMOVING A ROLE REACHES FURTHER THAN THE ROLE IT NAMES. A deployment whose roles are one
 // names that group after the DEPLOYMENT, and a deployment with more than one names each group after
@@ -317,17 +318,32 @@ type ModelDeploymentRole struct {
 	// +k8s:validation:enum=["server","prefill","decode"]
 	Kind ModelDeploymentRoleKind `json:"kind,omitempty" protobuf:"bytes,8,opt,name=kind,casttype=ModelDeploymentRoleKind"`
 
-	// Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of
-	// every role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.
+	// Replicas is how many independent serving instances this role runs. The instances are
+	// independent: each one starts, serves and is replaced on its own, and none of them depends on
+	// another being present.
 	//
-	// CHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod
-	// carries and which Kueue requires them all to agree on, so the operator deletes the group's Pods
-	// and recreates them under the new total rather than adding or trimming a few. A replica that
-	// leaves loses its cached blocks to its siblings.
+	// CHANGING THIS NUMBER ADDS OR REMOVES INSTANCES. Growing it creates new instances beside the
+	// ones already running; shrinking it removes some of them. The instances that survive are not
+	// restarted: they keep serving without interruption and keep whatever cache they hold.
 	//
 	// +k8s:validation:default=1
 	// +k8s:validation:minimum=1
 	Replicas int32 `json:"replicas,omitempty" protobuf:"varint,2,opt,name=replicas"`
+
+	// InstanceSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they
+	// start together, they are replaced together, and none of them serves alone — the instance,
+	// not the Pod, is the unit that appears and disappears.
+	//
+	// CHANGING THIS NUMBER REPLACES EVERY INSTANCE OF THE ROLE. The Pods a running instance is made
+	// of are not the Pods the new size asks for, so each instance is replaced as a whole rather than
+	// grown or trimmed in place.
+	//
+	// THE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and
+	// Go forbids a field and a method sharing a name; the API field is size.
+	//
+	// +k8s:validation:default=1
+	// +k8s:validation:minimum=1
+	InstanceSize int32 `json:"size,omitempty" protobuf:"varint,15,opt,name=size"`
 
 	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
 	// It is what the queue-name entrance label is derived from.
@@ -337,7 +353,7 @@ type ModelDeploymentRole struct {
 	// +k8s:validation:maxLength=253
 	InstanceType string `json:"instanceType" protobuf:"bytes,3,name=instanceType"`
 
-	// Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED
+	// Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED
 	// FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.
 	//
 	// It carries only the ACCELERATOR half of a request, because that is the only half a workload
@@ -347,7 +363,7 @@ type ModelDeploymentRole struct {
 	// the container fields below either.
 	//
 	// InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
-	// a replica wants is a property of the model being served, so two deployments on one InstanceType
+	// a Pod wants is a property of the model being served, so two deployments on one InstanceType
 	// routinely want different counts.
 	Resources *ModelDeploymentRoleResources `json:"resources,omitempty" protobuf:"bytes,4,opt,name=resources"`
 
@@ -533,13 +549,13 @@ type ModelDeploymentAdditionalVolume struct {
 	HostPath *core.HostPathVolumeSource `json:"hostPath,omitempty" protobuf:"bytes,6,opt,name=hostPath"`
 }
 
-// ModelDeploymentRoleResources is what one replica of a role asks of an accelerator.
+// ModelDeploymentRoleResources is what one Pod of a role asks of an accelerator.
 //
 // It deliberately mirrors the accelerator fields of InstanceResources — the same names, the same
 // meanings — rather than inventing a second vocabulary for one request, and it deliberately omits
 // that type's CPU, RAM and LocalStorage, which are derived here rather than declared.
 type ModelDeploymentRoleResources struct {
-	// Accelerator is how many accelerator cards ONE REPLICA asks for.
+	// Accelerator is how many accelerator cards ONE POD asks for.
 	//
 	//   - Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and
 	//     on update alike, the same way an Instance's does. The value is written into the stored
@@ -548,7 +564,7 @@ type ModelDeploymentRoleResources struct {
 	//     InstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is
 	//     the only role using that type, and refused when another role shares the type because the
 	//     resulting multi-PodSet Workload cannot be admitted by that queue.
-	//   - A replica meant to run without an accelerator belongs on an InstanceType that is not
+	//   - A Pod meant to run without an accelerator belongs on an InstanceType that is not
 	//     acceleratable, where CPU is what the queue accounts in.
 	Accelerator *resource.Quantity `json:"accelerator,omitempty" protobuf:"bytes,1,opt,name=accelerator"`
 

@@ -4489,7 +4489,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Type:        "boolean",
 														},
 														"replicas": {
-															Description: "Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of\nevery role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.\nCHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod\ncarries and which Kueue requires them all to agree on, so the operator deletes the group's Pods\nand recreates them under the new total rather than adding or trimming a few. A replica that\nleaves loses its cached blocks to its siblings.",
+															Description: "Replicas is how many independent serving instances this role runs. The instances are\nindependent: each one starts, serves and is replaced on its own, and none of them depends on\nanother being present.\nCHANGING THIS NUMBER ADDS OR REMOVES INSTANCES. Growing it creates new instances beside the\nones already running; shrinking it removes some of them. The instances that survive are not\nrestarted: they keep serving without interruption and keep whatever cache they hold.",
 															Type:        "integer",
 															Format:      "int32",
 															Default: &v1.JSON{
@@ -4498,11 +4498,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Minimum: ptr.To[float64](1),
 														},
 														"resources": {
-															Description: "Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED\nFIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload\ndecides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit\nresources scaled by the requested card count, so they are not expressible here at all — a\nstronger guarantee than refusing them, since a field that does not exist cannot be shadowed by\nthe container fields below either.\nInstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards\na replica wants is a property of the model being served, so two deployments on one InstanceType\nroutinely want different counts.",
+															Description: "Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED\nFIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload\ndecides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit\nresources scaled by the requested card count, so they are not expressible here at all — a\nstronger guarantee than refusing them, since a field that does not exist cannot be shadowed by\nthe container fields below either.\nInstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards\na Pod wants is a property of the model being served, so two deployments on one InstanceType\nroutinely want different counts.",
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"accelerator": {
-																	Description: "Accelerator is how many accelerator cards ONE REPLICA asks for.\n- Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and\non update alike, the same way an Instance's does. The value is written into the stored\nobject rather than applied at render time, so what was admitted is what can be read back.\n- AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable\nInstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is\nthe only role using that type, and refused when another role shares the type because the\nresulting multi-PodSet Workload cannot be admitted by that queue.\n- A replica meant to run without an accelerator belongs on an InstanceType that is not\nacceleratable, where CPU is what the queue accounts in.",
+																	Description: "Accelerator is how many accelerator cards ONE POD asks for.\n- Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and\non update alike, the same way an Instance's does. The value is written into the stored\nobject rather than applied at render time, so what was admitted is what can be read back.\n- AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable\nInstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is\nthe only role using that type, and refused when another role shares the type because the\nresulting multi-PodSet Workload cannot be admitted by that queue.\n- A Pod meant to run without an accelerator belongs on an InstanceType that is not\nacceleratable, where CPU is what the queue accounts in.",
 																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
 																	AnyOf: []v1.JSONSchemaProps{
 																		{
@@ -4536,6 +4536,15 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																},
 															},
 															Nullable: true,
+														},
+														"size": {
+															Description: "InstanceSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they\nstart together, they are replaced together, and none of them serves alone — the instance,\nnot the Pod, is the unit that appears and disappears.\nCHANGING THIS NUMBER REPLACES EVERY INSTANCE OF THE ROLE. The Pods a running instance is made\nof are not the Pods the new size asks for, so each instance is replaced as a whole rather than\ngrown or trimmed in place.\nTHE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and\nGo forbids a field and a method sharing a name; the API field is size.",
+															Type:        "integer",
+															Format:      "int32",
+															Default: &v1.JSON{
+																Raw: []byte(`1`),
+															},
+															Minimum: ptr.To[float64](1),
 														},
 													},
 												},

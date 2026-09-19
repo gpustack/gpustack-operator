@@ -5449,6 +5449,9 @@ func (m *ModelDeploymentRole) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i = encodeVarintGenerated(dAtA, i, uint64(m.InstanceSize))
+	i--
+	dAtA[i] = 0x78
 	if len(m.Command) > 0 {
 		for iNdEx := len(m.Command) - 1; iNdEx >= 0; iNdEx-- {
 			i -= len(m.Command[iNdEx])
@@ -8084,6 +8087,7 @@ func (m *ModelDeploymentRole) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
+	n += 1 + sovGenerated(uint64(m.InstanceSize))
 	return n
 }
 
@@ -9827,6 +9831,7 @@ func (this *ModelDeploymentRole) String() string {
 		`Ports:` + repeatedStringForPorts + `,`,
 		`AdditionalVolumes:` + repeatedStringForAdditionalVolumes + `,`,
 		`Command:` + fmt.Sprintf("%v", this.Command) + `,`,
+		`InstanceSize:` + fmt.Sprintf("%v", this.InstanceSize) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -27116,6 +27121,25 @@ func (m *ModelDeploymentRole) Unmarshal(dAtA []byte) error {
 			}
 			m.Command = append(m.Command, string(dAtA[iNdEx:postIndex]))
 			iNdEx = postIndex
+		case 15:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field InstanceSize", wireType)
+			}
+			m.InstanceSize = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.InstanceSize |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

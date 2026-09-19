@@ -9,13 +9,13 @@ import (
 // ModelDeploymentRoleResourcesApplyConfiguration represents a declarative configuration of the ModelDeploymentRoleResources type for use
 // with apply.
 //
-// ModelDeploymentRoleResources is what one replica of a role asks of an accelerator.
+// ModelDeploymentRoleResources is what one Pod of a role asks of an accelerator.
 //
 // It deliberately mirrors the accelerator fields of InstanceResources — the same names, the same
 // meanings — rather than inventing a second vocabulary for one request, and it deliberately omits
 // that type's CPU, RAM and LocalStorage, which are derived here rather than declared.
 type ModelDeploymentRoleResourcesApplyConfiguration struct {
-	// Accelerator is how many accelerator cards ONE REPLICA asks for.
+	// Accelerator is how many accelerator cards ONE POD asks for.
 	//
 	// - Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and
 	// on update alike, the same way an Instance's does. The value is written into the stored
@@ -24,7 +24,7 @@ type ModelDeploymentRoleResourcesApplyConfiguration struct {
 	// InstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is
 	// the only role using that type, and refused when another role shares the type because the
 	// resulting multi-PodSet Workload cannot be admitted by that queue.
-	// - A replica meant to run without an accelerator belongs on an InstanceType that is not
+	// - A Pod meant to run without an accelerator belongs on an InstanceType that is not
 	// acceleratable, where CPU is what the queue accounts in.
 	Accelerator *resource.Quantity `json:"accelerator,omitempty"`
 	// AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced

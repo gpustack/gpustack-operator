@@ -900,6 +900,7 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 		errs = append(errs, validateModelDeploymentRoleExtraArgs(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleEnv(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleResources(role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleSize(role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleAdditionalVolumes(role, rolePath)...)
 	}
 
@@ -1064,6 +1065,31 @@ func validateModelDeploymentRoleResources(
 			ressPath.Child("acceleratorSlicedMemoryPercentage"),
 			ressPath.Child("acceleratorSlicedCoresPercentage"),
 		),
+	)}
+}
+
+// validateModelDeploymentRoleSize refuses an instance size larger than one Pod, for as long as no
+// rendering builds one instance across several Pods.
+//
+// THE MESSAGE NAMES THE MISSING CAPABILITY RATHER THAN THE FIELD'S BOUNDS, because the limit is
+// progress rather than design: it disappears on the day multi-Pod instances are rendered, and a
+// bounds-shaped message ("size must be 1") would outlive that day and read like a permanent rule.
+//
+// THE FLOOR IS NOT THIS RULE'S. The schema's minimum refuses a size below one before any webhook
+// runs, so the only value that can reach here is one asking for more Pods than the rendering
+// builds; repeating the floor here would put one interval under two owners and leave no record of
+// which layer answers for it.
+func validateModelDeploymentRoleSize(
+	role *workercore.ModelDeploymentRole, rolePath *field.Path,
+) field.ErrorList {
+	if role.InstanceSize <= 1 {
+		return nil
+	}
+
+	return field.ErrorList{field.Invalid(
+		rolePath.Child("size"), role.InstanceSize,
+		"a role's instance cannot span more than one Pod yet: the rendering that builds one "+
+			"instance across several Pods does not exist",
 	)}
 }
 

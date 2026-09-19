@@ -22,7 +22,8 @@ import (
 //
 // EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Each role forms its
 // own Kueue pod group, whose members cannot leave one at a time, so that one group is rebuilt whole
-// while every sibling role keeps serving. A `replicas` change on this role does the same.
+// while every sibling role keeps serving. A `replicas` change does not rebuild: it adds or removes
+// instances, and every instance that stays keeps running.
 //
 // ADDING OR REMOVING A ROLE REACHES FURTHER THAN THE ROLE IT NAMES. A deployment whose roles are one
 // names that group after the DEPLOYMENT, and a deployment with more than one names each group after
@@ -53,18 +54,29 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
 	// so such a deployment renders exactly as it did.
 	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
-	// Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of
-	// every role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.
+	// Replicas is how many independent serving instances this role runs. The instances are
+	// independent: each one starts, serves and is replaced on its own, and none of them depends on
+	// another being present.
 	//
-	// CHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod
-	// carries and which Kueue requires them all to agree on, so the operator deletes the group's Pods
-	// and recreates them under the new total rather than adding or trimming a few. A replica that
-	// leaves loses its cached blocks to its siblings.
+	// CHANGING THIS NUMBER ADDS OR REMOVES INSTANCES. Growing it creates new instances beside the
+	// ones already running; shrinking it removes some of them. The instances that survive are not
+	// restarted: they keep serving without interruption and keep whatever cache they hold.
 	Replicas *int32 `json:"replicas,omitempty"`
+	// InstanceSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they
+	// start together, they are replaced together, and none of them serves alone — the instance,
+	// not the Pod, is the unit that appears and disappears.
+	//
+	// CHANGING THIS NUMBER REPLACES EVERY INSTANCE OF THE ROLE. The Pods a running instance is made
+	// of are not the Pods the new size asks for, so each instance is replaced as a whole rather than
+	// grown or trimmed in place.
+	//
+	// THE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and
+	// Go forbids a field and a method sharing a name; the API field is size.
+	InstanceSize *int32 `json:"size,omitempty"`
 	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
 	// It is what the queue-name entrance label is derived from.
 	InstanceType *string `json:"instanceType,omitempty"`
-	// Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED
+	// Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED
 	// FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.
 	//
 	// It carries only the ACCELERATOR half of a request, because that is the only half a workload
@@ -74,7 +86,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// the container fields below either.
 	//
 	// InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
-	// a replica wants is a property of the model being served, so two deployments on one InstanceType
+	// a Pod wants is a property of the model being served, so two deployments on one InstanceType
 	// routinely want different counts.
 	Resources *ModelDeploymentRoleResourcesApplyConfiguration `json:"resources,omitempty"`
 	// Image is the container image to run. Leaving it empty is the ordinary case: the operator then
@@ -150,6 +162,14 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithKind(value workerv1alpha1.Mo
 // If called multiple times, the Replicas field is set to the value of the last call.
 func (b *ModelDeploymentRoleApplyConfiguration) WithReplicas(value int32) *ModelDeploymentRoleApplyConfiguration {
 	b.Replicas = &value
+	return b
+}
+
+// WithInstanceSize sets the InstanceSize field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the InstanceSize field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithInstanceSize(value int32) *ModelDeploymentRoleApplyConfiguration {
+	b.InstanceSize = &value
 	return b
 }
 
