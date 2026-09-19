@@ -2,6 +2,9 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -1593,6 +1596,329 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 				"the startup gate carries the load window that readiness must not have to tolerate")
 			assert.Greater(t, c.LivenessProbe.FailureThreshold, c.ReadinessProbe.FailureThreshold,
 				"a restart throws away a loaded model, so it must cost more than losing readiness")
+		})
+	}
+}
+
+// TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender pins the WHOLE rendered
+// Pod -- serialized and digested, not field-picked -- for one input off every branch of the
+// renderer. The other cases in this file assert the fields they exist for, so a refactor of the
+// render path could drop a field no case reads and every one of them would stay green; this is the
+// case that cannot, because it compares the bytes of everything at once.
+//
+// THE DIGESTS WERE CAPTURED FROM THE RENDERER AS IT STOOD BEFORE IT WAS SPLIT into a template half
+// and a stamp half, and that split had to reproduce every one of them exactly. Capturing them
+// afterwards instead would make this case testify for its own subject: it would pass, and pass
+// looking exactly like a proof. To re-baseline after an intended rendering change: empty the
+// table, run this case, and pin the digests the failures print.
+func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
+	pinned := map[string]string{
+		"a sole server role": "d87c92f0c4cf18c007c92ac7bbd4c6b0d117684b0f2a460beb9e6a1f63ba93c7",
+		"a sole server role with a synthesized cache connector":                              "634ccbac2c1fdc7b3db9e8190cd31fcdfac5115deb9dffa0681974cf63f403ef",
+		"a take-over role carrying a connector it must be given no part of":                  "80050fc86966586eaf37db94764cf38d48ac9b155946c1add1684405229a2dcc",
+		"a direct decoder with a native routing sidecar":                                     "97e234d430d0f201e68c14c2f649d4cd8a26aba40d73020bca653b0c2bb33b72",
+		"a direct decoder with a classic routing sidecar":                                    "ed3ae2e67620a35c20f2ee39e99ec6d1959b1b5ccdac85552851673ecca285f0",
+		"a role naming no image, synthesized from the observed hardware":                     "915807215cff3e495900ceef93779525f503bf9a6d16bd6d01140fb3a3834f5c",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "b50c586bffda63f6b76518d9f502540690d068f0c3e33fd82d9af5199c04f59c",
+		"the prefill role of a two-role deployment":                                          "ec03d04a12a8f8d342dfad637a206d7be04585d6f64691253e0807dabec3b55b",
+		"the decode role of a two-role deployment":                                           "d461a28fefe67c6a1774ea320f539893e9627daa7d9055a3a60408f8ed541ad6",
+	}
+
+	// newPinnedInput builds the render input the way the reconciler does: the deployment and its
+	// role as one object, the InstanceType resolved beside it. Every case calls its builder again
+	// for a second render rather than reusing one Pod, so a digest also states that two renders of
+	// one input agree -- reusing an object would state nothing a copy had not already said.
+	newPinnedInput := func(
+		t *testing.T, roleIndex int, mutate ...func(*workercore.ModelDeployment),
+	) ModelDeploymentRenderInput {
+		t.Helper()
+
+		md := newRenderDeployment(mutate...)
+
+		return ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[roleIndex],
+			InstanceType: newRenderInstanceType(),
+		}
+	}
+
+	synthesizedConnector := func(t *testing.T) ModelDeploymentConnectorRender {
+		t.Helper()
+
+		conn, err := SynthesizeModelDeploymentConnector(
+			connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA))
+		require.NoError(t, err)
+
+		return conn
+	}
+
+	testCases := []struct {
+		name  string
+		input func(*testing.T) ModelDeploymentRenderInput
+	}{
+		{
+			name:  "a sole server role",
+			input: func(t *testing.T) ModelDeploymentRenderInput { return newPinnedInput(t, 0) },
+		},
+		{
+			name: "a sole server role with a synthesized cache connector",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				in := newPinnedInput(t, 0)
+				in.Connector = synthesizedConnector(t)
+
+				return in
+			},
+		},
+		{
+			name: "a take-over role carrying a connector it must be given no part of",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				in := newPinnedInput(t, 0, func(md *workercore.ModelDeployment) {
+					md.Spec.Roles[0].Command = []string{"/bin/my-server", "--flag"}
+				})
+				in.Connector = synthesizedConnector(t)
+
+				return in
+			},
+		},
+		{
+			name: "a direct decoder with a native routing sidecar",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				in := newPinnedInput(t, 0, func(md *workercore.ModelDeployment) {
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+					md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{
+						Protocol: core.ProtocolTCP, Port: 8000,
+					}}
+				})
+				in.Connector = ModelDeploymentConnectorRender{
+					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+				}
+				in.NativeSidecar = true
+
+				return in
+			},
+		},
+		{
+			name: "a direct decoder with a classic routing sidecar",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				in := newPinnedInput(t, 0, func(md *workercore.ModelDeployment) {
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+					md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{
+						Protocol: core.ProtocolTCP, Port: 8000,
+					}}
+				})
+				in.Connector = ModelDeploymentConnectorRender{
+					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+				}
+				in.NativeSidecar = false
+
+				return in
+			},
+		},
+		{
+			name: "a role naming no image, synthesized from the observed hardware",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				return newPinnedInput(t, 0, func(md *workercore.ModelDeployment) {
+					md.Spec.Roles[0].Image = ""
+				})
+			},
+		},
+		{
+			name: "a TLS-listening role with declared ports, privileges, a runtime class and a volume",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				in := newPinnedInput(t, 0, func(md *workercore.ModelDeployment) {
+					md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{
+						Protocol: core.ProtocolTCP, Port: 9000,
+					}}
+					md.Spec.Roles[0].ExtraArgs = []string{"--ssl-certfile", "/etc/tls/tls.crt"}
+					md.Spec.Roles[0].Privileged = true
+					md.Spec.Roles[0].AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{{
+						MountPath: "/models",
+						HostPath:  &core.HostPathVolumeSource{Path: "/mnt/models"},
+					}}
+				})
+				in.RuntimeClassName = "nvidia"
+
+				return in
+			},
+		},
+		{
+			name: "the prefill role of a two-role deployment",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				return newPinnedInput(t, 0, twoRoleDeploymentMutations()...)
+			},
+		},
+		{
+			name: "the decode role of a two-role deployment",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				return newPinnedInput(t, 1, twoRoleDeploymentMutations()...)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod, err := renderModelDeploymentPod(context.Background(), tc.input(t))
+			require.NoError(t, err)
+
+			encoded, err := json.Marshal(pod)
+			require.NoError(t, err)
+			sum := sha256.Sum256(encoded)
+			digest := hex.EncodeToString(sum[:])
+
+			want, ok := pinned[tc.name]
+			if !ok {
+				t.Fatalf("no pinned digest for %q; the digest this build produces is %s -- pin it in the table", tc.name, digest)
+			}
+			assert.Equal(t, want, digest)
+		})
+	}
+}
+
+// twoRoleDeploymentMutations turns the single-role fixture into a prefill/decode pair, keeping the
+// second role on the same InstanceType so both halves render rather than one failing to size.
+func twoRoleDeploymentMutations() []func(*workercore.ModelDeployment) {
+	return []func(*workercore.ModelDeployment){
+		func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Name = "prefill"
+			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+		},
+		func(md *workercore.ModelDeployment) {
+			md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+				Name:         "decode",
+				Replicas:     2,
+				InstanceType: "h20-8x",
+				Kind:         workercore.ModelDeploymentRoleKindDecode,
+				Image:        "vllm/vllm-openai:v0.25.1",
+			})
+		},
+	}
+}
+
+// TestRenderModelDeploymentPod_TemplateCarriesNoGroupMetadataOrHash states the boundary the split
+// exists to enforce: the template half renders what a role's spec states and NOTHING that names one
+// replica's group membership or fingerprint, and the stamp half is what puts those on.
+//
+// BOTH HALVES ARE NEEDED OR THE CASE PROVES NOTHING. "The template lacks these keys" is true of a
+// template that renders nothing at all, so beside the absences stand presences: the template's own
+// output carries the metadata it IS responsible for, and the same Pod -- stamped -- carries all
+// four keys it is not. A per-replica value leaking into the template is also silent: it renders a
+// wrong Pod rather than erroring, which is why the boundary is asserted here rather than left to
+// placement.
+//
+// The Kueue keys are spelled literally rather than read off the constants because a constant that
+// drifted would satisfy an assertion built from it while the real key rode through the template.
+func TestRenderModelDeploymentPod_TemplateCarriesNoGroupMetadataOrHash(t *testing.T) {
+	md := newRenderDeployment()
+	role := &md.Spec.Roles[0]
+
+	template, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+		Deployment:   md,
+		Role:         role,
+		InstanceType: newRenderInstanceType(),
+	})
+	require.NoError(t, err)
+
+	assert.NotContains(t, template.Labels, "kueue.x-k8s.io/pod-group-name")
+	assert.NotContains(t, template.Annotations, "kueue.x-k8s.io/pod-group-total-count")
+	assert.NotContains(t, template.Annotations, "kueue.x-k8s.io/role-hash")
+	assert.NotContains(t, template.Annotations, modelDeploymentPodSpecHashAnnotation)
+
+	// The positive baseline for the absences above: this is a rendered template, not an empty one,
+	// and it carries the metadata of its own -- the identity labels, the resource note a watch
+	// filters on, the controller reference that makes the Pod ours.
+	assert.Equal(t, "qwen-server-", template.GenerateName)
+	require.Len(t, template.Spec.Containers, 1)
+	require.Len(t, template.OwnerReferences, 1)
+	assert.True(t, systemmeta.MatchResource(template, ModelDeploymentResourceType))
+
+	stampModelDeploymentPod(template, md, role)
+
+	assert.Equal(t, "qwen", template.Labels["kueue.x-k8s.io/pod-group-name"],
+		"a sole role's group keeps the deployment's own name")
+	assert.Equal(t, "2", template.Annotations["kueue.x-k8s.io/pod-group-total-count"],
+		"the group declares the role's replica count")
+	assert.Equal(t, "server", template.Annotations["kueue.x-k8s.io/role-hash"],
+		"the role hash stays the role's own name")
+	assert.Contains(t, template.Annotations, modelDeploymentPodSpecHashAnnotation)
+}
+
+// TestRenderModelDeploymentPodTemplate_RendersTwoReplicasOfOneRoleIdentical is the invariant that
+// keeps replica identity out of the render path: two replicas of one role receive the SAME
+// template.
+//
+// THE INPUT IS THE ONLY ROAD A REPLICA'S IDENTITY COULD TAKE, and it carries none today -- the
+// render takes no ordinal and no name -- so "two replicas of one role" is the same fixture rendered
+// twice, from freshly built inputs the way two reconcile passes would build them. The comparison is
+// on serialized bytes rather than picked fields, because a difference in a field no assertion reads
+// is exactly the difference this case exists to catch.
+func TestRenderModelDeploymentPodTemplate_RendersTwoReplicasOfOneRoleIdentical(t *testing.T) {
+	testCases := []struct {
+		name  string
+		input func(*testing.T) ModelDeploymentRenderInput
+	}{
+		{
+			name: "a server role",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				md := newRenderDeployment()
+
+				return ModelDeploymentRenderInput{
+					Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				}
+			},
+		},
+		{
+			name: "a direct decoder with a native routing sidecar",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+					md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{
+						Protocol: core.ProtocolTCP, Port: 8000,
+					}}
+				})
+
+				return ModelDeploymentRenderInput{
+					Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+					Connector: ModelDeploymentConnectorRender{
+						Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+					},
+					NativeSidecar: true,
+				}
+			},
+		},
+		{
+			name: "a take-over role",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.Roles[0].Command = []string{"/bin/my-server", "--flag"}
+				})
+
+				return ModelDeploymentRenderInput{
+					Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				}
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			first, err := renderModelDeploymentPodTemplate(context.Background(), tc.input(t))
+			require.NoError(t, err)
+			second, err := renderModelDeploymentPodTemplate(context.Background(), tc.input(t))
+			require.NoError(t, err)
+
+			// The baseline the comparison needs: the template rendered a Pod, or equality below
+			// would hold between two empty objects and prove nothing.
+			require.Len(t, first.Spec.Containers, 1)
+
+			firstJSON, err := json.Marshal(first)
+			require.NoError(t, err)
+			secondJSON, err := json.Marshal(second)
+			require.NoError(t, err)
+
+			assert.Equal(t, string(firstJSON), string(secondJSON))
 		})
 	}
 }

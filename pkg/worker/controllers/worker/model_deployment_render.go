@@ -238,11 +238,37 @@ func modelDeploymentSelectorLabels(
 
 // renderModelDeploymentPod renders one replica.
 //
+// It composes the two halves a replica's Pod is built in: the template, which produces everything
+// the role's spec states, and the stamp, which puts the Kueue group metadata and the spec-hash
+// fingerprint on afterwards. The boundary is the load-bearing part -- the template is what every
+// replica of a role shares, so nothing that names one member may be produced inside it.
+//
 // It returns an error rather than a best-effort Pod whenever the request cannot be sized — an
 // InstanceType whose accelerator detail has not been computed yet, a role with no image. Falling
 // back to a whole-card or an empty request would produce a Pod that runs and charges the wrong
 // quota, which is the failure this whole path exists to avoid.
 func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput) (*core.Pod, error) {
+	pod, err := renderModelDeploymentPodTemplate(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+
+	stampModelDeploymentPod(pod, in.Deployment, in.Role)
+
+	return pod, nil
+}
+
+// renderModelDeploymentPodTemplate renders the whole of a replica's Pod that its role's spec
+// states: the labels, the annotations, the PodSpec and every container in it.
+//
+// IT PRODUCES NOTHING THAT VARIES FROM ONE REPLICA OF A ROLE TO THE NEXT, and that is the property
+// the split into a template and a stamp exists to keep checkable: the Kueue group metadata and the
+// spec-hash fingerprint are stamped on afterwards, because a per-replica group name differs between
+// the members of one role, and a value naming one member leaking into this function would render
+// each replica a different Pod with nothing erroring anywhere. The connector's PodAnnotations are
+// written here rather than in the stamp because they carry the pool's endpoint and domain, which
+// every replica of the role shares.
+func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRenderInput) (*core.Pod, error) {
 	md, role := in.Deployment, in.Role
 
 	// A STATED IMAGE ALWAYS WINS, and synthesis is the fallback rather than the rule: it is how a
@@ -444,8 +470,37 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 	})
 	kubemeta.ControlOnWithoutBlock(pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
 
+	// THE CONNECTOR'S ANNOTATIONS ARE TEMPLATE OUTPUT, AND THE FINGERPRINT THE STAMP WRITES OVER
+	// THIS POD IS THE WHOLE REASON THE CARRIER WORKS. The client configuration lives in one of
+	// these annotations rather than in a ConfigMap, and the fingerprint covers {Labels, Annotations,
+	// PodSpec} -- so changing the pool endpoint or the domain moves the hash and the replicas are
+	// recreated to pick it up. Stamping them after that fingerprint instead would leave the hash
+	// blind to the configuration and every replica holding a stale one, with nothing failing.
+	//
+	// Gated on the same take-over check as the volume that projects them: a role that replaced the
+	// command line gets no part of the connector, and half of it would be worse than none.
+	if !takeOver && len(in.Connector.PodAnnotations) > 0 {
+		if pod.Annotations == nil {
+			pod.Annotations = make(map[string]string, len(in.Connector.PodAnnotations)+1)
+		}
+		for k, v := range in.Connector.PodAnnotations {
+			pod.Annotations[k] = v
+		}
+	}
+
+	return pod, nil
+}
+
+// stampModelDeploymentPod puts the Kueue group metadata on a rendered replica and then writes the
+// spec-hash fingerprint, in that order. The fingerprint covers the labels and annotations it finds
+// on the Pod, so writing it before the group metadata would leave it blind to a change that moves
+// only the group -- a replica whose role was renamed would keep its old fingerprint and never be
+// seen as outdated.
+func stampModelDeploymentPod(
+	pod *core.Pod, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) {
 	// The Kueue group metadata, which is what makes the replicas of one role ONE Workload rather
-	// than one Workload each. It goes on here, before the fingerprint, for the same reason the
+	// than one Workload each. It goes on before the fingerprint below, for the same reason the
 	// connector's annotations do: the group's declared total is one of the values a spec change
 	// moves, and a fingerprint blind to it would leave every replica declaring a size the deployment
 	// no longer has.
@@ -464,32 +519,12 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 		pod.Annotations[k] = v
 	}
 
-	// THE CONNECTOR'S ANNOTATIONS GO ON BEFORE THE FINGERPRINT, and the order is the whole reason
-	// this carrier works. The client configuration lives in one of these annotations rather than in
-	// a ConfigMap, and the fingerprint below covers {Labels, Annotations, PodSpec} -- so changing
-	// the pool endpoint or the domain moves the hash and the replicas are recreated to pick it up.
-	// Moving this after the fingerprint would leave the hash blind to the configuration and every
-	// replica holding a stale one, with nothing failing.
-	//
-	// Gated on the same take-over check as the volume that projects them: a role that replaced the
-	// command line gets no part of the connector, and half of it would be worse than none.
-	if !takeOver && len(in.Connector.PodAnnotations) > 0 {
-		if pod.Annotations == nil {
-			pod.Annotations = make(map[string]string, len(in.Connector.PodAnnotations)+1)
-		}
-		for k, v := range in.Connector.PodAnnotations {
-			pod.Annotations[k] = v
-		}
-	}
-
 	// The fingerprint is written last so that it covers everything above it, and it is read back on
 	// every pass to decide whether a running replica was built from the current spec.
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string, 1)
 	}
 	pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentPodSpecHash(pod)
-
-	return pod, nil
 }
 
 func modelDeploymentCommandPort(command []string) (int32, error) {
