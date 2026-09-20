@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"gpustack.ai/gpustack/pkg/device"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 )
 
 // fabricGroups builds one group whose accelerators carry the given fabric records, in order. A nil
@@ -97,6 +99,32 @@ func TestConstructFabricNodeLabels(t *testing.T) {
 			want: map[string]string{NodeFabricDomainLabelKey: "ub-7"},
 		},
 		{
+			// The clique is in the value, so a partitioned fabric publishes one value per clique
+			// rather than one for the cluster. Two nodes on either side of a partition are what
+			// this keeps apart; a node holding both halves, below, has no value at all.
+			name: "a partitioned fabric names the clique in the value",
+			groups: fabricGroups(
+				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "1"},
+				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "1"}),
+			want: map[string]string{NodeFabricDomainLabelKey: "nvlink-c0-1"},
+		},
+		{
+			// One fabric, partitioned across this node. Neither half can address the other, so the
+			// node has no single answer to a key that promises the whole node.
+			name: "one fabric whose cliques disagree",
+			groups: fabricGroups(
+				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "0"},
+				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "1"}),
+			want: map[string]string{},
+		},
+		{
+			// Zero is a real clique, so it is rendered like any other rather than dropping back to
+			// the two-part form -- which would make clique 0 collide with the whole cluster.
+			name:   "the first clique is named like any other",
+			groups: fabricGroups(&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "0"}),
+			want:   map[string]string{NodeFabricDomainLabelKey: "nvlink-c0-0"},
+		},
+		{
 			name:   "no accelerators at all",
 			groups: device.DevicesGroupList{},
 			want:   map[string]string{},
@@ -114,6 +142,30 @@ func TestConstructFabricNodeLabels(t *testing.T) {
 			assert.Equal(t, c.want, ConstructFabricNodeLabels(c.groups))
 		})
 	}
+}
+
+// The widest value a manufacturer can report still publishes, and this is the assertion that says
+// so at production width.
+//
+// The other size case asserts that an oversized value is withheld; on its own it would pass for a
+// construction that withheld everything, and the ids it uses are two characters long. This is its
+// positive baseline: a real cluster id is 32 characters, a clique is up to ten digits, and the value
+// is withheld whole rather than truncated when it does not fit -- so a domain that outgrew the cap
+// would take the node out of it with nothing reporting that it had.
+func TestConstructFabricNodeLabels_TheWidestValueFits(t *testing.T) {
+	widest := &device.Fabric{
+		Kind:     "nvlink",
+		ID:       strings.Repeat("f", 32), // a cluster uuid, all 16 bytes as lowercase hex
+		CliqueID: "4294967295",            // the largest clique a uint32 can name
+	}
+
+	got := ConstructFabricNodeLabels(fabricGroups(widest, widest))
+
+	value, ok := got[NodeFabricDomainLabelKey]
+	require.True(t, ok, "the widest value is published rather than withheld")
+	assert.Equal(t, "nvlink-"+strings.Repeat("f", 32)+"-4294967295", value)
+	assert.LessOrEqual(t, len(value), 63, "the label value cap this construction has to fit")
+	assert.Equal(t, value, kubemeta.SanitizeLabelValue(value), "and the sanitizer leaves it unchanged")
 }
 
 // The two rules the reduction enforces, tested where they are observable.
@@ -142,6 +194,16 @@ func TestSoleFabricDomain(t *testing.T) {
 		{
 			name:   "a record with no kind is not a domain",
 			groups: fabricGroups(&device.Fabric{ID: "7"}),
+		},
+		{
+			// The clique reaches the value through the reduction, not through the label writer, so
+			// this is where composing it is observable.
+			name: "a clique every accelerator agrees on is part of the domain",
+			groups: fabricGroups(
+				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "2"},
+				&device.Fabric{Kind: "nvlink", ID: "c0", CliqueID: "2"}),
+			wantOK:  true,
+			wantDom: "nvlink-c0-2",
 		},
 	}
 	for _, c := range cases {

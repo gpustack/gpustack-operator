@@ -12,12 +12,20 @@ const (
 	FabricFeatureLabelPrefix = FeatureLabelPrefix + "fabric."
 
 	// NodeFabricDomainLabelKey names the scale-up interconnect domain every accelerator on this
-	// node belongs to, as `<kind>-<id>`.
+	// node belongs to, as `<kind>-<id>` — and as `<kind>-<id>-<clique>` on a manufacturer that
+	// partitions a domain into subsets which can address one another.
 	//
 	// The kind is part of the value and not merely of the key, because a domain id is only
 	// comparable within its own interconnect: an Ascend super pod id is a small integer and an AMD
 	// XGMI hive id is a 64-bit number, so `7` could name both and a selector matching on the id
 	// alone would co-locate a job across two unrelated fabrics.
+	//
+	// The clique is in the value for that same reason one level down. Two NVIDIA accelerators
+	// sharing a fabric cluster uuid but not the clique inside it are on one fabric and still cannot
+	// address each other, so naming the cluster alone would promise co-location the partition does
+	// not deliver — and promise it to the nodes on the far side of that partition, which is exactly
+	// where this value is compared. A manufacturer reporting no clique renders the two-part form
+	// unchanged.
 	//
 	// Emitted only when every accelerator on the node reports the same domain, which is what makes
 	// it usable as an equality selector: a node whose accelerators sit in different domains has no
@@ -78,6 +86,11 @@ func ConstructFabricNodeLabels(groups device.DevicesGroupList) map[string]string
 // domain, and treating the silent half as agreement would publish a key that promises the whole
 // node.
 //
+// The clique is part of the value where a manufacturer reports one, so two accelerators in
+// different cliques of one fabric disagree here exactly as two in different fabrics do — which is
+// the answer a node holding both should give, since neither half can address the other. See
+// NodeFabricDomainLabelKey for why the partition belongs in the value rather than beside it.
+//
 // A disagreement about the size is narrower and costs only the size. The domain is what the
 // accelerators were compared on, so cards agreeing on it while reporting different member counts --
 // a driver answering with a stale scale on one card, or a reading taken mid-recable -- leaves the
@@ -96,6 +109,9 @@ func soleFabricDomain(groups device.DevicesGroupList) (domain string, members ui
 			}
 
 			seen := fabric.Kind + "-" + fabric.ID
+			if fabric.CliqueID != "" {
+				seen += "-" + fabric.CliqueID
+			}
 			if domain == "" {
 				domain, members = seen, fabric.MemberCount
 				continue
