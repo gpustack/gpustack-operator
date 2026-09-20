@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# CASE 68 — A deployment whose roles sit on TWO InstanceTypes becomes two pod groups, is admitted
-#   as a set or not at all, parks when the set never assembles, and scales one group without
-#   touching the other   (MUTATING, self-cleaning)
+# CASE 68 — A deployment whose roles sit on TWO InstanceTypes is admitted as a set or not at all,
+#   parks when the set never assembles, and scales one role without touching anything already
+#   running   (MUTATING, self-cleaning)
 #
 #   case-68.sh <NS>
 #
@@ -28,10 +28,15 @@
 #              comment where it is created.
 #
 # Expected:    Phase A -- the set assembles (both roles on the working type):
-#              - the deployment renders ONE pod group, and its replicas carry one group name;
+#              - each replica carries a group name of its own, so two roles of one replica each are
+#                TWO groups even though they share an InstanceType. This read "one group" while a
+#                role was the admission unit and one type allowed one queue name, hence one Workload;
 #              - every replica reaches admitted, so the scale assertion below has Pods to compare.
 #              Phase B -- two groups, one of them infeasible:
-#              - the deployment's replicas carry TWO distinct group names;
+#              - the deployment's replicas carry TWO distinct group names. NOTE that this count no
+#                longer separates Phase B from Phase A, which also has two: what Phase B varies is
+#                that the groups land in different ClusterQueues and one of those is held, so the
+#                load-bearing rows are the admission ones, not the count;
 #              - Kueue composes TWO Workloads;
 #              - NO role is admitted while one group cannot be placed -- and the control below is
 #                what makes that mean anything;
@@ -42,8 +47,10 @@
 #              - with the check's own LastTransitionTime back-dated past the bound, the next
 #                reconcile DEACTIVATES the workloads rather than deleting them, and the
 #                deployment's QuotaReserved condition reports Parked naming what is waiting.
-#              Phase D -- per-group blast radius (runs on the Phase A shape):
-#              - scaling one role leaves the OTHER group's Pod UIDs unchanged.
+#              Phase D -- blast radius of a scale (runs on the Phase A shape):
+#              - scaling one role leaves the other role's Pod UIDs unchanged, AND leaves the scaled
+#                role's own existing replicas unchanged. The second half is what only holds once a
+#                replica is the admission unit; the first held before it too.
 #              Phase E -- the barrier OPENS, with the sibling arriving demonstrably later:
 #              - one group RESERVES and is confirmed held (reserved=1, admitted=0 of 2);
 #              - only then is the other group made placeable, and EVERY group reaches admitted --
@@ -168,6 +175,17 @@ group_names() {
   k -n "$NS" get pods -l "app.kubernetes.io/instance=$1" \
     -o jsonpath='{range .items[*]}{.metadata.labels.kueue\.x-k8s\.io/pod-group-name}{"\n"}{end}' 2>/dev/null \
     | grep -v '^$' | sort -u
+}
+
+# PREDICATES FOR wait_for, WHICH RE-RUNS A COMMAND EACH ROUND. Passing `test "$(reading)" = n`
+# instead expands the reading ONCE, before the wait even begins, and then compares that same stale
+# value on every round -- a wait that can only succeed immediately or run out the clock. It reads
+# like a wait and behaves like a single sample.
+group_count_is() { [ "$(group_names "$1" | wc -l | tr -d ' ')" = "$2" ]; }
+admitted_count_is_not() { [ "$(admitted_count)" != "$1" ]; }
+md_quota_reason_is() {
+  [ "$(k -n "$NS" get modeldeployment "$1" \
+    -o jsonpath='{.status.conditions[?(@.type=="QuotaReserved")].reason}' 2>/dev/null)" = "$2" ]
 }
 
 # Pod name=UID for one role, which is what tells a Pod that STAYED from one replaced by an
@@ -318,16 +336,28 @@ YAML
 # ---------------------------------------------------------------- Phase A: one group, admitted.
 apply_deployment "$MD" "$(two_roles_one_type)"
 
-if wait_for "$SETTLE" test "$(group_names "$MD" | wc -l | tr -d ' ')" = 1; then
-  record PASS "one type is one group" "$(group_names "$MD" | tr '\n' ' ')"
+# TWO ROLES ON ONE TYPE ARE TWO GROUPS, AND THAT IS THE POINT RATHER THAN A REGRESSION. This row
+# read `= 1` while a ROLE was the admission unit: two roles on one InstanceType shared the single
+# Workload that type's one queue name allowed. A replica is the unit now, and a group is named from
+# the deployment, the role and the replica's ordinal -- so two roles of one replica each are two
+# groups whatever they sit on.
+#
+# WHICH COSTS PHASE B ITS OLD DISCRIMINATOR, and saying so here is what stops the next reader from
+# trusting a number that no longer separates anything: Phase B's shape is ALSO two groups, so the
+# count cannot tell the one-type case from the two-type one. What Phase B varies is whether the two
+# groups can be PLACED -- they land in different ClusterQueues and one of them is held -- and its
+# load-bearing rows are the admission ones below, not the count.
+if wait_for "$SETTLE" group_count_is "$MD" 2; then
+  record PASS "roles sharing one type still get a group each" "$(group_names "$MD" | tr '\n' ' ')"
 else
-  record FAIL "one type is one group" "saw [$(group_names "$MD" | tr '\n' ' ')]"
+  record FAIL "roles sharing one type still get a group each" "saw [$(group_names "$MD" | tr '\n' ' ')]"
 fi
 
 # ------------------------------------------------- Phase D (on the Phase A shape): blast radius.
 before_beta="$(role_uids "$MD" beta)"
-if [ -z "$before_beta" ]; then
-  record SKIP "scale leaves the other group alone" "no replicas to compare; earlier phase failed"
+before_alpha="$(role_uids "$MD" alpha)"
+if [ -z "$before_beta" ] || [ -z "$before_alpha" ]; then
+  record SKIP "a scale leaves every living replica alone" "no replicas to compare; earlier phase failed"
 else
   # A JSON PATCH ON ONE FIELD, NOT A MERGE PATCH ON THE LIST. A merge patch replaces `roles`
   # wholesale, so a role restated without its `command` sets command to null -- and that
@@ -340,14 +370,28 @@ else
   fi
   sleep 20
   after_beta="$(role_uids "$MD" beta)"
-  # ONE GROUP, SO THIS IS THE BASELINE AND NOT THE FEATURE. With both roles on one type the whole
-  # deployment is one group and a shape change rebuilds all of it, so beta's UIDs are EXPECTED to
-  # move here. The row records which it saw rather than asserting a direction, and the two-group
-  # comparison below is the one that carries the claim.
-  if [ "$before_beta" = "$after_beta" ]; then
-    record PASS "baseline: one group, beta untouched" "unchanged"
+  after_alpha="$(role_uids "$MD" alpha)"
+
+  # THE DIRECTION IS ASSERTED NOW, AND IT DELIBERATELY WAS NOT BEFORE. While a whole deployment was
+  # one group, a replicas change rebuilt all of it and beta moving was as correct as beta staying --
+  # so this row recorded whichever value it saw and PASSED either way, which made it blind to the
+  # behaviour it looks like it is about. Every replica is its own group now: a scale of alpha is not
+  # beta's business, and it is not alpha's own survivors' business either.
+  #
+  # ALPHA'S SURVIVORS ARE THE HALF THAT IS NEW HERE. A reading of beta alone passed before this spec
+  # and passes after it, so it cannot tell the two apart; what only holds now is that the replica
+  # alpha already had keeps its identity while a second is added beside it.
+  kept_alpha=0
+  for e in $before_alpha; do
+    case " $after_alpha " in *" $e "*) kept_alpha=$((kept_alpha + 1)) ;; esac
+  done
+  want_alpha="$(printf '%s\n' $before_alpha | grep -c . || true)"
+  if [ "$before_beta" = "$after_beta" ] && [ "$kept_alpha" = "$want_alpha" ]; then
+    record PASS "a scale leaves every living replica alone" \
+      "beta untouched, and all ${want_alpha} of alpha's own replicas kept their UIDs: only the added one is new"
   else
-    record PASS "baseline: one group, beta rebuilt with the group" "changed as a single group must"
+    record FAIL "a scale leaves every living replica alone" \
+      "beta before/after [${before_beta}] / [${after_beta}]; alpha kept ${kept_alpha}/${want_alpha} of its UIDs"
   fi
 fi
 
@@ -407,7 +451,7 @@ sleep 10
 apply_deployment "$MD" "$(two_roles_two_types)"
 
 two_groups=no
-if wait_for "$SETTLE" test "$(group_names "$MD" | wc -l | tr -d ' ')" = 2; then
+if wait_for "$SETTLE" group_count_is "$MD" 2; then
   two_groups=yes
   record PASS "two types are two groups" "$(group_names "$MD" | wc -l | tr -d ' ') distinct group names"
 else
@@ -458,7 +502,7 @@ fi
 # THE CONTROL. Without it the row above is true whether or not the joint check exists: both groups
 # being unplaceable would satisfy it, and so would an operator that admits nothing at all.
 apply_deployment "$MD_CONTROL" "$(one_role)"
-if wait_for "$SETTLE" test "$(admitted_count)" != 0; then
+if wait_for "$SETTLE" admitted_count_is_not 0; then
   record PASS "control: the feasible role alone IS admitted" "the refusal above is the barrier's"
 else
   record FAIL "control: the feasible role alone IS admitted" \
@@ -521,6 +565,14 @@ else
   else
     record FAIL "the bound parks rather than deletes" "no workload was deactivated within ${SETTLE}s"
   fi
+
+  # THE FLIP AND THE REPORT COME FROM DIFFERENT CONTROLLERS, so the wait above does not cover this
+  # one. spec.active is patched by the joint-admission controller; the deployment's condition is
+  # computed a ModelDeployment reconcile later, from that same flag plus the marker the barrier left
+  # on the check. Reading it the instant the Workload flips samples a status the deciding pass has
+  # not written yet -- measured, it returns the Pending the barrier had published before parking,
+  # which reads exactly like a barrier that never parked at all.
+  wait_for "$SETTLE" md_quota_reason_is "$MD" Parked
 
   msg="$(k -n "$NS" get modeldeployment "$MD" \
     -o jsonpath='{.status.conditions[?(@.type=="QuotaReserved")].message}' 2>/dev/null)"

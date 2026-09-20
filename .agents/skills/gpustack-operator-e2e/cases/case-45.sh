@@ -170,11 +170,18 @@ fi
 
 # --- webhook rows: the manifest is schema-complete, so the webhook is what answers ---
 
-refuses "two roles are refused, naming the spec that introduces them" \
-  "multiple roles are not supported by this version" \
-  "  - name: decode
-    instanceType: ${IT}
-    replicas: 1" ""
+# A SECOND ROLE IS NO LONGER REFUSED, so the row that asserted it is gone rather than inverted. What
+# replaced it lives in case-51: its row 0 applies a two-role deployment and requires it to be
+# ACCEPTED, which is the same fact asserted from the side that now holds. Keeping a refusal row here
+# would have it fail against a correct operator, and keeping an acceptance row would duplicate a
+# baseline another case already licenses its whole table on.
+
+# THE SIZE CAP IS PROGRESS RATHER THAN DESIGN, and the refusal is worded to say so. A bounds-shaped
+# message ("size must be 1") would outlive the day a multi-Pod instance can be rendered; naming the
+# missing capability instead means the message stops being true at the same moment the limit does.
+refuses "a role asking for more than one Pod per instance is refused" \
+  "a role's instance cannot span more than one Pod yet" \
+  "    size: 2" ""
 
 refuses "an owned argument in extraArgs is refused" \
   "is set by the operator for engine" \
