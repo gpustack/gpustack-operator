@@ -36,14 +36,25 @@ type nvidia struct {
 	once   sync.Once
 	nvml   *nvml.NVML
 	logger klog.Logger
+
+	// fabricsMu guards fabrics. Nothing calls the detect pass concurrently today -- the preflight
+	// subcommand builds its own detector in its own process, and the daemon's loop runs one pass at
+	// a time -- so this lock is insurance against a second caller rather than a race being fixed.
+	// It is held here instead of being left out because the map outlives a pass, which makes "one
+	// caller" a property of the callers rather than of this type.
+	fabricsMu sync.Mutex
+	// fabrics remembers the registration each accelerator last answered the fabric query with, keyed
+	// by its UUID. See rememberFabric for why a failed read reuses it instead of reporting none.
+	fabrics map[string]fabricInfo
 }
 
 // New creates a new nvidia device interface and initializes the NVML library.
 func New(opts device.DetectorOptions) device.Detector {
 	logger := opts.Logger.WithName(Manufacturer)
 	return &nvidia{
-		nvml:   nvml.New(binding.WithLogger(logger)),
-		logger: logger,
+		nvml:    nvml.New(binding.WithLogger(logger)),
+		logger:  logger,
+		fabrics: make(map[string]fabricInfo),
 	}
 }
 
@@ -200,6 +211,7 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 		}
 
 		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class, pciDev.Switches)
+		topo.Fabric = in.readFabric(dev, uuid, logger)
 
 		var status device.AcceleratorStatus
 		{

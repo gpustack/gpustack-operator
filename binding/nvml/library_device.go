@@ -332,8 +332,14 @@ func (l GpuFabricInfoHandler) V1() (GpuFabricInfo, Return) {
 	return gpuFabricInfo, ret
 }
 
+// The probe names the entry point this calls. It previously named nvmlDeviceGetGpuFabricInfo_v2,
+// following the _v2 suffix its siblings above use, and the vendor declares no such function: for
+// this call the versioned entry point is spelled with a trailing V, and the _v2 suffix belongs to
+// the struct version macro instead. Probing for a name nothing exports made this method answer
+// ERROR_FUNCTION_NOT_FOUND on every driver, which a caller falling back to V1 could not tell from a
+// driver that genuinely lacks the newer call.
 func (l GpuFabricInfoHandler) V2() (GpuFabricInfo_v2, Return) {
-	if l.so.Lookup("nvmlDeviceGetGpuFabricInfo_v2") != nil {
+	if l.so.Lookup("nvmlDeviceGetGpuFabricInfoV") != nil {
 		return GpuFabricInfo_v2{}, ERROR_FUNCTION_NOT_FOUND
 	}
 
