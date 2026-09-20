@@ -851,7 +851,7 @@ T4 reads, and it cannot be settled without hardware this plan does not have — 
 that names both). A spike that cannot reach the uncertainty would be a task that is green by
 construction.
 
-- [ ] **T1 · Extract the serving lifecycle**
+- [x] **T1 · Extract the serving lifecycle**
       Blocked by: None
       Owns: `pkg/deviceplugin/serving.go`, `pkg/deviceplugin/server.go`
       Gate: review
