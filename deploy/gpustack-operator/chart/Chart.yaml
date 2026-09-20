@@ -33,7 +33,7 @@ annotations:
 # declared dependency, while an undeclared tree under "charts/" always renders.
 dependencies:
   - name: kueue
-    version: 0.18.4
+    version: 0.18.9
     repository: ""
     condition: kueue.enabled
   - name: node-feature-discovery

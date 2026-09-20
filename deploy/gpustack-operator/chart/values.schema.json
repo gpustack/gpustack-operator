@@ -1012,7 +1012,7 @@
       "type": "object"
     },
     "kueue": {
-      "description": "[Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.4).",
+      "description": "[Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.9).",
       "properties": {
         "controllerManager": {
           "properties": {
@@ -1038,7 +1038,7 @@
                       "type": "string"
                     },
                     "tag": {
-                      "default": "v0.18.4",
+                      "default": "v0.18.9",
                       "description": "Kueue controller manager image tag, stated rather than inherited so a subchart\nbump cannot move the image without the diff showing it.",
                       "title": "tag",
                       "type": "string"
