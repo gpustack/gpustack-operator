@@ -50,6 +50,22 @@ func (a *Allocator) Start(ctx context.Context) error {
 		NoPartitioned: a.noPartitioned,
 	}
 
+	// The RDMA family is served on every platform that serves the vendor families, so it is
+	// started here, once, rather than by the loop below: that loop is keyed on a detected
+	// manufacturer, and a network interface belongs to the node rather than to a vendor. A
+	// platform that registers no creator starts none, which keeps a device manager that today
+	// starts no allocator at all from failing on a socket directory it does not have.
+	if rdmaAllocatorCreator != nil {
+		allocator := rdmaAllocatorCreator(createOpts)
+		gox.Go(func() {
+			if err := allocator.Start(sCtx); err != nil {
+				logger.Error(err, "failed to start allocator", "family", allocator.Name())
+				errCh <- err
+			}
+		})
+		defer allocator.Stop()
+	}
+
 	for {
 		select {
 		case <-ctx.Done():

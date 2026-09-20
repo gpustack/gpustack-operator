@@ -10,8 +10,11 @@ import (
 	"gpustack.ai/gpustack/pkg/devicemanager/allocator/metax"
 	"gpustack.ai/gpustack/pkg/devicemanager/allocator/mthreads"
 	"gpustack.ai/gpustack/pkg/devicemanager/allocator/nvidia"
+	"gpustack.ai/gpustack/pkg/devicemanager/allocator/rdma"
 	"gpustack.ai/gpustack/pkg/devicemanager/allocator/thead"
 )
+
+var rdmaAllocatorCreator = rdma.New
 
 var supportedAllocatorCreators = map[string]func(device.AllocatorOptions) device.Allocator{
 	amd.Manufacturer:       amd.New,

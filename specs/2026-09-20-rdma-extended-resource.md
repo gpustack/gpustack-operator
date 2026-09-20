@@ -750,8 +750,9 @@ four issues rather than assumed:
   container cannot open, which is the exact failure this feature exists to end. Mitigated by F5
   trying more than one layout and naming what was tried.
 - **A failing RDMA server takes the node's accelerator servers down with it** → `Allocator.Start`
-  returns on the first error any allocator reports (`pkg/devicemanager/allocator/allocator.go:41-47`
-  and `:56-58`), so an RDMA server that cannot listen ends every family on that node. Today a node
+  returns on the first error any allocator reports (`pkg/devicemanager/allocator/allocator.go:41`
+  and the select at `:69-74`), so an RDMA server that cannot listen ends every family on that
+  node. Today a node
   runs only the allocators of the manufacturers it detected, so this shared fate is newly extended
   to a family that is started unconditionally. Mitigated only by the platform split F1 describes,
   which is why that split is not optional; the coupling itself is inherited from the existing loop
@@ -965,7 +966,7 @@ A spike that cannot reach the uncertainty would be a task that is green by const
       code it guards is still T5's.
       Verify: `go test ./pkg/deviceplugin/...`
 
-- [ ] **T7 · Wire the allocator**
+- [x] **T7 · Wire the allocator**
       Blocked by: T5
       Owns: `pkg/devicemanager/allocator/rdma/**`, `pkg/devicemanager/allocator/allocator.go`,
       `pkg/devicemanager/allocator/allocator_linux.go`,
