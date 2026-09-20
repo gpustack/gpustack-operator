@@ -303,23 +303,48 @@ func modelDeploymentRoleStatuses(
 	md *workercore.ModelDeployment, pods []core.Pod,
 	wlByReplica map[types.UID]*kueue.Workload,
 ) []workercore.ModelDeploymentRoleStatus {
+	// EVERY FIGURE HERE IS PER REPLICA, WHICH IS WHY THE PODS ARE GROUPED FIRST. Both counts read
+	// wrong when taken per Pod once a replica may be several of them, and they read wrong in
+	// different directions: Ready would report a replica that is half up as partly serving, when a
+	// group whose members are not all up serves nothing at all; QuotaReserved would report one
+	// reservation once per member, because the members of a replica share a single Workload, so a
+	// role of two replicas of four Pods would claim eight reservations against a desired count of
+	// two. At one member per replica the grouping is the identity, which is why this reads exactly
+	// as it did for the shape that came before.
+	//
+	size := make(map[string]int, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		size[md.Spec.Roles[i].Name] = modelDeploymentRoleSize(&md.Spec.Roles[i])
+	}
+
 	ready := make(map[string]int32, len(md.Spec.Roles))
 	reserved := make(map[string]int32, len(md.Spec.Roles))
 	flavors := make(map[string]sets.Set[string], len(md.Spec.Roles))
-	for i := range pods {
-		pod := &pods[i]
-		if pod.DeletionTimestamp != nil {
-			continue
+	for _, view := range modelDeploymentGroupPodsByReplica(pods) {
+		role := view.Role
+
+		// A REPLICA IS READY WHEN IT HOLDS EVERY MEMBER IT DECLARES AND ALL OF THEM ARE READY. The
+		// completeness half is not redundant with the readiness half: a replica short of a member
+		// can have every member it DOES hold reporting ready, while Kueue has composed no Workload
+		// for it and it is admitted by nothing.
+		allReady := modelDeploymentReplicaIsComplete(view, size[role])
+		for _, pod := range view.Members {
+			allReady = allReady && podIsReady(pod)
 		}
-		role := modelDeploymentPodRole(pod)
-		if podIsReady(pod) {
+		if allReady {
 			ready[role]++
 		}
 
 		// THE REPLICA'S OWN WORKLOAD, not one resolved for its role: each replica composes one of
 		// its own, and a missing one is indistinguishable from an unassigned one through any
-		// coarser view.
-		wl := wlByReplica[pod.UID]
+		// coarser view. Its members all resolve to that same Workload, so it is read ONCE per
+		// replica -- reading it per member is what would multiply the count by the size.
+		var wl *kueue.Workload
+		for _, pod := range view.Members {
+			if wl = wlByReplica[pod.UID]; wl != nil {
+				break
+			}
+		}
 		if wl == nil {
 			continue
 		}
@@ -509,12 +534,11 @@ func observeModelDeploymentQuota(
 		return
 	}
 
-	var live int
-	for i := range pods {
-		if pods[i].DeletionTimestamp == nil {
-			live++
-		}
-	}
+	// IN REPLICAS, NOT PODS, because every message below spells this figure "replicas" and compares
+	// it against a declared count that is in replicas. The two agree only while a replica is one
+	// Pod.
+	live := len(modelDeploymentGroupPodsByReplica(pods))
+	all := len(modelDeploymentGroupPodsIncludingDeparting(pods))
 
 	// EVERY REPLICA TERMINATING IS NOT "ALL RESERVED". The early return above guards an empty LIST;
 	// this guards an empty RESULT, and they are different emptinesses. A recreate rollout or a group
@@ -527,7 +551,7 @@ func observeModelDeploymentQuota(
 		// on their way out is what a reclaimed group looks like from the Pod side, so "all of them are
 		// terminating" without the reason why sends the reader to look for who deleted them.
 		ModelDeploymentConditionQuotaReserved.Unknown(holder, "AllReplicasTerminating", fmt.Sprintf(
-			"all %d replicas are terminating, so none holds quota to report on%s", len(pods), taken))
+			"all %d replicas are terminating, so none holds quota to report on%s", all, taken))
 
 		return
 	}
@@ -547,12 +571,26 @@ func observeModelDeploymentQuota(
 	// reads, so a Pod cannot be counted in one place and not another -- and a replica that predates
 	// the label, or one still being built, is counted against the role it belongs to rather than
 	// against none.
+	// THE COUNT IS OF COMPLETE REPLICAS, NOT OF PODS, and the distinction is what keeps this branch
+	// working above one member per replica. group.TotalCount is a count of REPLICAS, so comparing a
+	// tally of Pods against it reads a role of two replicas of four Pods as having eight of two --
+	// the condition never fires, and the state it exists to name goes unreported precisely where it
+	// is most likely: a group short of a member is one Kueue composes nothing for.
+	views := modelDeploymentGroupPodsByReplica(pods)
 	groups := modelDeploymentPodGroups(md)
 	for _, group := range groups {
+		size := 1
+		for i := range md.Spec.Roles {
+			if md.Spec.Roles[i].Name == group.Role {
+				size = modelDeploymentRoleSize(&md.Spec.Roles[i])
+
+				break
+			}
+		}
+
 		var alive int
-		for i := range pods {
-			if pods[i].DeletionTimestamp == nil &&
-				modelDeploymentPodRole(&pods[i]) == group.Role {
+		for _, view := range views {
+			if view.Role == group.Role && modelDeploymentReplicaIsComplete(view, size) {
 				alive++
 			}
 		}
@@ -628,9 +666,13 @@ func observeModelDeploymentQuota(
 
 		return
 	}
+	// THE BARRIER IS STATED ABOUT THE REPLICAS STILL WAITING, not about the deployment. A scale-up
+	// reaches this branch with the replicas that were already running still admitted and only the new
+	// ones queued, so a sentence saying no replica is admitted contradicts the count beside it and
+	// tells an operator nothing is serving while the deployment serves.
 	ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
-		"%d of this deployment's %d replicas are waiting for quota: the replicas of roles %s. No "+
-			"replica is admitted until the whole set can run%s",
+		"%d of this deployment's %d replicas are waiting for quota: the replicas of roles %s. Those "+
+			"replicas are admitted only once the whole set can run%s",
 		waiting, modelDeploymentDeclaredReplicas(md), strings.Join(waitingRoles, ", "), taken))
 }
 
@@ -657,18 +699,32 @@ func observeModelDeploymentQuota(
 //
 // The Workloads arrive in name order, so a replica briefly owned by two during a rebuild resolves
 // to the same one on every pass rather than flipping while the old one drains.
+//
+// THE OWNERSHIP IS INVERTED ONCE rather than searched per Pod. A Workload names its members, so
+// reading the references forward builds the whole answer in one walk; asking each Pod which Workload
+// claims it walks every Workload's references again for every Pod, and a deployment's Pods and its
+// Workloads both grow with it. Keeping the FIRST Workload to claim a UID is what preserves the name
+// order above: the walk visits the Workloads in that order, so the entry a contested replica lands
+// on is the same one the per-Pod search would have stopped at.
 func modelDeploymentReplicaWorkloads(
 	pods []core.Pod, wls []*kueue.Workload,
 ) map[types.UID]*kueue.Workload {
+	owners := make(map[types.UID]*kueue.Workload, len(pods))
+	for _, wl := range wls {
+		for _, ref := range wl.OwnerReferences {
+			if !modelDeploymentOwnerRefNamesAPod(ref) {
+				continue
+			}
+			if _, claimed := owners[ref.UID]; !claimed {
+				owners[ref.UID] = wl
+			}
+		}
+	}
+
 	byReplica := make(map[types.UID]*kueue.Workload, len(pods))
 	for i := range pods {
-		uid := pods[i].UID
-		for _, wl := range wls {
-			if modelDeploymentWorkloadOwnsAny(wl, sets.New(uid)) {
-				byReplica[uid] = wl
-
-				break
-			}
+		if wl := owners[pods[i].UID]; wl != nil {
+			byReplica[pods[i].UID] = wl
 		}
 	}
 
@@ -714,14 +770,18 @@ func modelDeploymentReplicaWorkloads(
 func modelDeploymentPreemptedInPart(
 	md *workercore.ModelDeployment, pods []core.Pod, wlByReplica map[types.UID]*kueue.Workload,
 ) (lost, kept []string, lostReplicas int) {
+	// Grouped without dropping the departing, unlike the figures above: replicas on their way out
+	// is what a reclaimed group looks like from the Pod side, so skipping them here would hide the
+	// preemption this function exists to name.
+	views := modelDeploymentGroupPodsIncludingDeparting(pods)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		var lostRole, keptRole bool
-		for j := range pods {
-			if modelDeploymentPodRole(&pods[j]) != role.Name {
+		for _, view := range views {
+			if view.Role != role.Name {
 				continue
 			}
-			wl := wlByReplica[pods[j].UID]
+			wl := modelDeploymentReplicaWorkload(view, wlByReplica)
 			if wl == nil {
 				continue
 			}
@@ -836,15 +896,15 @@ func modelDeploymentDeclaredReplicas(md *workercore.ModelDeployment) int {
 func modelDeploymentRolesWithUncomposedReplicas(
 	md *workercore.ModelDeployment, pods []core.Pod, wlByReplica map[types.UID]*kueue.Workload,
 ) (roles []string, uncomposed int) {
+	views := modelDeploymentGroupPodsByReplica(pods)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		var short int
-		for j := range pods {
-			pod := &pods[j]
-			if pod.DeletionTimestamp != nil || modelDeploymentPodRole(pod) != role.Name {
+		for _, view := range views {
+			if view.Role != role.Name {
 				continue
 			}
-			if wlByReplica[pod.UID] == nil {
+			if modelDeploymentReplicaWorkload(view, wlByReplica) == nil {
 				short++
 			}
 		}
@@ -857,6 +917,33 @@ func modelDeploymentRolesWithUncomposedReplicas(
 	return roles, uncomposed
 }
 
+// EVERY FIGURE THIS FILE PUBLISHES IS IN REPLICAS, because that is the unit `desired` is in and the
+// unit every message names. A Pod-keyed loop produces a figure in Pods, which is the same number
+// only while a replica is one Pod: a role of two replicas of two would report "4 of this
+// deployment's 2 replicas are waiting", a statement about a deployment that cannot exist.
+//
+// The members of a replica share one Workload, so a Pod-keyed loop over an unreserved replica also
+// counts that one Workload once per member -- the miscount is a multiplication by `size` rather
+// than a stray increment, and it grows with exactly the field this shape was added for.
+
+// modelDeploymentReplicaWorkload is the Workload the members of one replica share, or nil when Kueue
+// has composed none -- which is what an incomplete group looks like, since Kueue composes nothing
+// until a group holds every member it declares.
+//
+// It is read from the first member that answers rather than from a fixed one: a replica short of
+// its leader still has the Workload its surviving members joined.
+func modelDeploymentReplicaWorkload(
+	view modelDeploymentReplicaView, wlByReplica map[types.UID]*kueue.Workload,
+) *kueue.Workload {
+	for _, pod := range view.Members {
+		if wl := wlByReplica[pod.UID]; wl != nil {
+			return wl
+		}
+	}
+
+	return nil
+}
+
 // modelDeploymentRolesWithUnquotaedReplicas names the roles that have a live replica whose
 // workload holds no quota reservation, and counts those replicas.
 //
@@ -867,15 +954,15 @@ func modelDeploymentRolesWithUncomposedReplicas(
 func modelDeploymentRolesWithUnquotaedReplicas(
 	md *workercore.ModelDeployment, pods []core.Pod, wlByReplica map[types.UID]*kueue.Workload,
 ) (roles []string, waiting int) {
+	views := modelDeploymentGroupPodsByReplica(pods)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		var short int
-		for j := range pods {
-			pod := &pods[j]
-			if pod.DeletionTimestamp != nil || modelDeploymentPodRole(pod) != role.Name {
+		for _, view := range views {
+			if view.Role != role.Name {
 				continue
 			}
-			if wl := wlByReplica[pod.UID]; wl == nil ||
+			if wl := modelDeploymentReplicaWorkload(view, wlByReplica); wl == nil ||
 				!kubeapistatus.ConditionType(kueue.WorkloadQuotaReserved).IsTrue(wl) {
 				short++
 			}
@@ -950,12 +1037,23 @@ func (r *ModelDeploymentReconciler) findModelDeploymentGroupWorkloads(
 // modelDeploymentWorkloadOwnsAny reports whether the Workload names any of these Pods as an owner.
 func modelDeploymentWorkloadOwnsAny(wl *kueue.Workload, pods sets.Set[types.UID]) bool {
 	for _, ref := range wl.OwnerReferences {
-		if ref.Kind == "Pod" && ref.APIVersion == "v1" && pods.Has(ref.UID) {
+		if modelDeploymentOwnerRefNamesAPod(ref) && pods.Has(ref.UID) {
 			return true
 		}
 	}
 
 	return false
+}
+
+// modelDeploymentOwnerRefNamesAPod reports whether an owner reference names a Pod, which is the only
+// kind of owner a replica's Workload is matched on.
+//
+// THE KIND IS CHECKED BECAUSE A UID ALONE IS NOT A RELATION. A Workload carries whatever owners its
+// composer gave it, and a reference to some other kind that happened to match a Pod's UID would make
+// an unrelated object answer for a replica. Both readers of this relation go through here so that
+// the two cannot come to disagree about what owning a replica means.
+func modelDeploymentOwnerRefNamesAPod(ref meta.OwnerReference) bool {
+	return ref.Kind == "Pod" && ref.APIVersion == "v1"
 }
 
 // observeModelDeploymentRoleKinds reports whether every role kind has a ready replica.

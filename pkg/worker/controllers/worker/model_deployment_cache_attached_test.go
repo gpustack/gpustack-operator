@@ -3,12 +3,14 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -358,4 +360,79 @@ func TestModelDeploymentCacheAttached_OnlyReadyReplicasAreAsked(t *testing.T) {
 	assert.Equal(t, []string{"qwen-server-0"}, scraper.calls,
 		"a replica that is not Ready, and one that is leaving, are not asked")
 	assert.True(t, ModelDeploymentConditionCacheAttached.IsTrue(got))
+}
+
+// TestModelDeploymentCacheAttached_AnInstanceShortAMemberIsNotAsked holds this condition's idea of a
+// ready replica equal to the one the role statuses publish.
+//
+// A REPLICA IS READY WHEN EVERY MEMBER OF IT IS, and asking its leader alone is not the same
+// question. The leader of an instance whose sibling is absent or still starting can be Ready on its
+// own — nothing makes an engine's readiness probe wait for the collective to form, since the probe
+// is the deployment author's — so a leader-only filter puts this condition's account of the cache
+// next to a ready count of zero, with nothing to tell a reader which of the two to believe.
+//
+// THE WHOLE INSTANCE IS THE BASELINE. Without the first subtest the second passes against a filter
+// that asks nobody at all, which is the implementation a reader would least expect to be wrong.
+func TestModelDeploymentCacheAttached_AnInstanceShortAMemberIsNotAsked(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 2
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+
+	member := func(ordinal, index int, ready bool) core.Pod {
+		pod := readyReplica(md, int32(ordinal), ready)
+		pod.Name = fmt.Sprintf("%s-%s-r%d-m%d", md.Name, md.Spec.Roles[0].Name, ordinal, index)
+		pod.UID = types.UID(pod.Name + "-uid")
+		pod.Labels[modelDeploymentReplicaOrdinalLabel] = fmt.Sprint(ordinal)
+		pod.Labels[modelDeploymentMemberIndexLabel] = fmt.Sprint(index)
+
+		return *pod
+	}
+
+	readings := map[string]ModelDeploymentCacheReading{
+		"qwen-server-r0-m0": ModelDeploymentCacheActive,
+		"qwen-server-r1-m0": ModelDeploymentCacheActive,
+	}
+
+	t.Run("both_instances_whole", func(t *testing.T) {
+		pods := []core.Pod{
+			member(0, 0, true), member(0, 1, true),
+			member(1, 0, true), member(1, 1, true),
+		}
+		scraper := &fakeModelDeploymentCacheScraper{readings: readings}
+
+		got := cacheAttachedOf(t, md, pods, readyDomain(), scraper)
+
+		assert.Equal(t, []string{"qwen-server-r0-m0", "qwen-server-r1-m0"}, scraper.calls,
+			"one leader per whole instance, and only the leader: the ranks serve no API to ask")
+		assert.True(t, ModelDeploymentConditionCacheAttached.IsTrue(got))
+	})
+
+	t.Run("one_instance_short_a_member", func(t *testing.T) {
+		// Instance 1 holds a Ready leader and nothing else. The role statuses count it as zero ready
+		// replicas, and this condition has to agree.
+		pods := []core.Pod{
+			member(0, 0, true), member(0, 1, true),
+			member(1, 0, true),
+		}
+		scraper := &fakeModelDeploymentCacheScraper{readings: readings}
+
+		cacheAttachedOf(t, md, pods, readyDomain(), scraper)
+
+		assert.Equal(t, []string{"qwen-server-r0-m0"}, scraper.calls,
+			"the leader of an instance short a member is Ready on its own and is still not asked")
+	})
+
+	t.Run("one_member_of_an_instance_is_not_ready", func(t *testing.T) {
+		pods := []core.Pod{
+			member(0, 0, true), member(0, 1, true),
+			member(1, 0, true), member(1, 1, false),
+		}
+		scraper := &fakeModelDeploymentCacheScraper{readings: readings}
+
+		cacheAttachedOf(t, md, pods, readyDomain(), scraper)
+
+		assert.Equal(t, []string{"qwen-server-r0-m0"}, scraper.calls,
+			"a rank that is not Ready withholds its whole instance, leader included")
+	})
 }

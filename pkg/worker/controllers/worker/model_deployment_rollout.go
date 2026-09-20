@@ -257,20 +257,27 @@ func modelDeploymentReplicasMissing(
 	md *workercore.ModelDeployment, pods []core.Pod,
 	wlByReplica map[types.UID]*kueue.Workload,
 ) (int, []string) {
+	// LIVE COUNTS REPLICAS, NOT PODS, and it has to: the shortfall below subtracts it from a
+	// DECLARED count, which is in replicas. Tallying Pods makes `short` negative for any role whose
+	// replicas hold more than one member, so the branch never fires and a genuinely missing replica
+	// goes unnamed. At one member per replica the two tallies are the same number, which is why
+	// this read as a Pod count for as long as that was true.
+	//
+	// A REPLICA COUNTS AS LIVE WHETHER OR NOT IT IS COMPLETE, which is the opposite of what the
+	// quota condition asks and correct for a different question: this one is "is a slot empty", and
+	// a slot holding a half-built replica is not empty. The incompleteness is the rollout's to
+	// repair, and it is reported by the condition that owns that reading.
 	live := make(map[string]int, len(md.Spec.Roles))
 	occupied := make(map[string]map[int]bool, len(md.Spec.Roles))
-	for i := range pods {
-		if pods[i].DeletionTimestamp != nil {
+	for _, view := range modelDeploymentGroupPodsByReplica(pods) {
+		live[view.Role]++
+		if !view.Seated {
 			continue
 		}
-		role := modelDeploymentPodRole(&pods[i])
-		live[role]++
-		if ordinal, ok := modelDeploymentPodOrdinal(&pods[i]); ok {
-			if occupied[role] == nil {
-				occupied[role] = make(map[int]bool)
-			}
-			occupied[role][ordinal] = true
+		if occupied[view.Role] == nil {
+			occupied[view.Role] = make(map[int]bool)
 		}
+		occupied[view.Role][view.Ordinal] = true
 	}
 
 	missing := 0

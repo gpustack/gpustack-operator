@@ -100,7 +100,7 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentCache(
 		return
 	}
 
-	ready := modelDeploymentReadyReplicas(pods)
+	ready := modelDeploymentReadyReplicas(md, pods)
 	if len(ready) == 0 {
 		ModelDeploymentConditionCacheAttached.Unknown(holder, modelDeploymentReasonNoReplicaReady,
 			"no replica has become ready yet, so no engine has an account to give")
@@ -197,16 +197,63 @@ func modelDeploymentUnmanagedRole(md *workercore.ModelDeployment) string {
 	return ""
 }
 
-// modelDeploymentReadyReplicas selects the replicas an engine can be asked about: Ready, and not on
-// their way out. A terminating replica may still answer, and what it says is about a process that is
-// leaving.
-func modelDeploymentReadyReplicas(pods []core.Pod) []*core.Pod {
+// modelDeploymentReadyReplicas selects the replicas an engine can be asked about: whole, ready, not
+// on their way out, and represented by the one member of each that answers. A terminating replica
+// may still answer, and what it says is about a process that is leaving.
+//
+// ONLY THE LEADER IS ASKED, because only the leader serves the API this question is put through. A
+// replica of several members runs one engine spread across them and exposes it at member zero; the
+// others hold ranks and answer nothing. Asking them would not return a different account of the
+// cache -- it would return no account at all, and those non-answers land in the unreadable or
+// failing tallies, which turns a healthy multi-member deployment's cache condition False for a
+// reason that has nothing to do with its cache.
+//
+// READY MEANS WHAT THE PUBLISHED REPLICA COUNTS MEAN, which is why the whole replica is weighed
+// rather than its leader alone. A replica is ready when every member of it is, and the role statuses
+// beside this condition count them that way; a leader that is Ready while a sibling is absent or
+// still starting would otherwise put this condition's account of the cache next to a ready count of
+// zero, with nothing to tell a reader which of the two to believe. Nothing enforces that an engine's
+// leader stays unready until its collective forms -- the readiness probe is the deployment author's
+// -- so the agreement has to be made here rather than assumed.
+//
+// A REPLICA OF A ROLE THE SPEC NO LONGER DECLARES IS NOT ASKED. Its size is unknown, so there is no
+// count to hold its members against, and a Pod the deployment has stopped declaring is one on its
+// way out rather than one whose cache the deployment is reporting on.
+//
+// A POD CARRYING NO MEMBER LABEL IS THE LEADER, which is what makes this filter free for the shape
+// that came before: a single-member replica's Pod has no such label and reads as member zero, and a
+// replica of one member is whole as soon as that Pod is there, so exactly the same Pods are asked as
+// were asked before.
+func modelDeploymentReadyReplicas(md *workercore.ModelDeployment, pods []core.Pod) []*core.Pod {
+	sizes := make(map[string]int, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		sizes[md.Spec.Roles[i].Name] = modelDeploymentRoleSize(&md.Spec.Roles[i])
+	}
+
+	// The grouping drops the members already on their way out, so a replica losing one is short of
+	// its declared total here and falls out with the incomplete ones.
 	ready := make([]*core.Pod, 0, len(pods))
-	for i := range pods {
-		if pods[i].DeletionTimestamp != nil || !podIsReady(&pods[i]) {
+	for _, replica := range modelDeploymentGroupPodsByReplica(pods) {
+		size, declared := sizes[replica.Role]
+		if !declared || len(replica.Members) != size {
 			continue
 		}
-		ready = append(ready, &pods[i])
+
+		var leader *core.Pod
+		whole := true
+		for _, member := range replica.Members {
+			if !podIsReady(member) {
+				whole = false
+
+				break
+			}
+			if modelDeploymentPodMemberIndex(member) == modelDeploymentLeaderMemberIndex {
+				leader = member
+			}
+		}
+		if whole && leader != nil {
+			ready = append(ready, leader)
+		}
 	}
 
 	return ready

@@ -478,6 +478,130 @@ func roleReplica(md *workercore.ModelDeployment, role string) core.Pod {
 	}}
 }
 
+// TestModelDeploymentStatus_CountsArePerReplicaNotPerPod pins both figures at the size where taking
+// them per Pod goes wrong, and the two go wrong in OPPOSITE directions -- which is why one case
+// asserting "the numbers changed" would not be enough.
+//
+// Ready would OVERCOUNT a partly-up replica as partly serving, when a group whose members are not
+// all up has no Workload composed for it and serves nothing. QuotaReserved would overcount too, but
+// for an unrelated reason: the members of a replica share ONE Workload, so reading it per member
+// multiplies the count by the size and a role of two replicas claims four reservations against a
+// desired count of two. Neither error produces any diagnostic -- both just print a larger number.
+func TestModelDeploymentStatus_CountsArePerReplicaNotPerPod(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 3
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	role := md.Spec.Roles[0].Name
+
+	member := func(ordinal, index int, ready bool) core.Pod {
+		pod := core.Pod{ObjectMeta: meta.ObjectMeta{
+			Name:      fmt.Sprintf("%s-%s-r%d-m%d", md.Name, role, ordinal, index),
+			Namespace: md.Namespace,
+			UID:       types.UID(fmt.Sprintf("uid-r%d-m%d", ordinal, index)),
+			Labels: map[string]string{
+				modelDeploymentLabelKeyComponent:   role,
+				modelDeploymentReplicaOrdinalLabel: fmt.Sprint(ordinal),
+				modelDeploymentMemberIndexLabel:    fmt.Sprint(index),
+			},
+		}}
+		if ready {
+			pod.Status.Conditions = []core.PodCondition{{Type: core.PodReady, Status: core.ConditionTrue}}
+		}
+
+		return pod
+	}
+
+	// THE THREE REPLICAS COVER THE TWO HALVES OF "READY" SEPARATELY, which one of them alone would
+	// not: replica 1 has every member it declares and one of them is not ready, and replica 2 has
+	// only ready members but is short of one. An implementation checking readiness without
+	// completeness passes on replica 1 and fails on replica 2; one checking completeness without
+	// readiness does the reverse. Only a fixture carrying both can tell those apart.
+	pods := []core.Pod{
+		member(0, 0, true), member(0, 1, true), // fully up
+		member(1, 0, true), member(1, 1, false), // complete, not all ready
+		member(2, 0, true), // all ready, incomplete
+	}
+
+	// One Workload per REPLICA, owned by both of its members -- which is what Kueue composes and
+	// what makes the per-member reading double-count.
+	workloadFor := func(ordinal int, reserved bool) *kueue.Workload {
+		wl := &kueue.Workload{ObjectMeta: meta.ObjectMeta{
+			Name: fmt.Sprintf("wl-r%d", ordinal), Namespace: md.Namespace,
+		}}
+		for index := range 2 {
+			wl.OwnerReferences = append(wl.OwnerReferences, meta.OwnerReference{
+				APIVersion: "v1", Kind: "Pod",
+				Name: fmt.Sprintf("%s-%s-r%d-m%d", md.Name, role, ordinal, index),
+				UID:  types.UID(fmt.Sprintf("uid-r%d-m%d", ordinal, index)),
+			})
+		}
+		if reserved {
+			wl.Status.Conditions = []meta.Condition{{
+				Type: kueue.WorkloadQuotaReserved, Status: meta.ConditionTrue, Reason: "QuotaReserved",
+			}}
+		}
+
+		return wl
+	}
+
+	statuses := roleStatusesOver(md, pods,
+		[]*kueue.Workload{workloadFor(0, true), workloadFor(1, true), workloadFor(2, true)})
+	require.Len(t, statuses, 1)
+
+	assert.Equal(t, int32(3), statuses[0].Desired, "desired counts instances, as it always did")
+	assert.Equal(t, int32(1), statuses[0].Ready,
+		"only replica 0 qualifies: replica 1 is complete but not all ready, replica 2 is all ready "+
+			"but incomplete, and neither of those is a replica anything can be served from")
+	assert.Equal(t, int32(3), statuses[0].QuotaReserved,
+		"three replicas hold three reservations -- one per Workload, not one per member")
+}
+
+// TestObserveModelDeploymentQuota_AnIncompleteReplicaIsReportedAboveOneMember pins the branch that
+// stops working silently when a replica becomes several Pods.
+//
+// THE COMPARISON HAS TWO UNITS IN IT. A role's declared total counts REPLICAS, so tallying Pods
+// against it reads a role of two replicas of two Pods as having four of two -- the condition never
+// fires, and the state it exists to name is exactly the one it would have missed: a group short of
+// a member is a group Kueue composes NO Workload for, so it holds no quota and nothing else on this
+// status says why.
+func TestObserveModelDeploymentQuota_AnIncompleteReplicaIsReportedAboveOneMember(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 2
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	role := md.Spec.Roles[0].Name
+
+	member := func(ordinal, index int) core.Pod {
+		return core.Pod{ObjectMeta: meta.ObjectMeta{
+			Name:      fmt.Sprintf("%s-%s-r%d-m%d", md.Name, role, ordinal, index),
+			Namespace: md.Namespace,
+			UID:       types.UID(fmt.Sprintf("uid-r%d-m%d", ordinal, index)),
+			Labels: map[string]string{
+				modelDeploymentLabelKeyComponent:   role,
+				modelDeploymentReplicaOrdinalLabel: fmt.Sprint(ordinal),
+				modelDeploymentMemberIndexLabel:    fmt.Sprint(index),
+			},
+		}}
+	}
+
+	// Four Pods, which is the declared Pod count -- and the point of the case: a tally of Pods sees
+	// four and stops. But they form ONE complete replica and two halves of others, so only one
+	// replica of the two declared exists as far as Kueue is concerned.
+	pods := []core.Pod{member(0, 0), member(0, 1), member(1, 0), member(2, 0)}
+
+	holder := &workercore.ModelDeployment{}
+	observeQuotaOver(md, pods, nil, holder)
+
+	assert.Equal(t, string(meta.ConditionFalse),
+		ModelDeploymentConditionQuotaReserved.GetStatus(holder))
+	assert.Equal(t, modelDeploymentReasonPodGroupIncomplete,
+		ModelDeploymentConditionQuotaReserved.GetReason(holder))
+	message := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
+	assert.Contains(t, message, "1 of 2 replicas",
+		"the figure has to be in replicas, which is the unit the declared total is in: %s", message)
+}
+
 // TestModelDeploymentStatus_AssignedFlavorsArePerReplica is the regression for reading one Workload
 // for a role whose replicas are one each.
 //
@@ -1353,6 +1477,14 @@ func TestObserveModelDeploymentQuota_TwoRolesOnOneInstanceTypeStillNameTheGroup(
 		"the holding group is not named, which would read as the one waiting")
 	assert.NotContains(t, msg, "h20-8x",
 		"the shared type names a queue both groups use, so it cannot say which group is waiting")
+
+	// THE BARRIER IS STATED ABOUT THE REPLICAS THAT WAIT, not about the deployment. This fixture is
+	// the state that makes the difference readable: the prefiller holds quota while the decoder
+	// waits, which is also what every scale-up looks like on the pass after the edit.
+	assert.Contains(t, msg, "Those replicas are admitted only once the whole set can run")
+	assert.NotContains(t, msg, "No replica is admitted",
+		"a replica of this deployment is admitted -- the prefiller's -- so this sentence would tell "+
+			"an operator nothing is serving while the deployment serves")
 }
 
 // TestObserveModelDeploymentQuota_EveryGroupReservedIsReserved is the other side. Without it the
@@ -2167,4 +2299,88 @@ func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhatWasLost(t *testing.T
 			}
 		})
 	}
+}
+
+// TestObserveModelDeploymentQuota_WaitingFiguresAreInReplicasNotPods is the arithmetic every message
+// this condition publishes depends on: the numerator counts replicas, because the denominator beside
+// it is the declared replica count.
+//
+// A POD-KEYED TALLY DOES NOT MERELY OVERCOUNT, IT PRINTS AN IMPOSSIBLE SENTENCE. At size two the
+// numerator is double the denominator, so the condition reads "4 of this deployment's 2 replicas",
+// and an operator reading it is looking at a deployment that cannot exist. The multiplier is `size`,
+// so the defect is invisible at the shape everything else is tested in and arrives with the field
+// this whole shape was added for.
+//
+// THE MEMBERS SHARE ONE WORKLOAD, which is the second half of the same miscount: a Pod-keyed loop
+// asking "does this Pod's replica hold quota" asks the same Workload once per member.
+func TestObserveModelDeploymentQuota_WaitingFiguresAreInReplicasNotPods(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 2
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	role := md.Spec.Roles[0].Name
+
+	member := func(ordinal, index int) core.Pod {
+		return core.Pod{ObjectMeta: meta.ObjectMeta{
+			Name:      fmt.Sprintf("%s-%s-r%d-m%d", md.Name, role, ordinal, index),
+			Namespace: md.Namespace,
+			UID:       types.UID(fmt.Sprintf("uid-r%d-m%d", ordinal, index)),
+			Labels: map[string]string{
+				modelDeploymentLabelKeyComponent:   role,
+				modelDeploymentReplicaOrdinalLabel: fmt.Sprint(ordinal),
+				modelDeploymentMemberIndexLabel:    fmt.Sprint(index),
+			},
+		}}
+	}
+
+	// Two whole replicas of two members each: four Pods, two replicas, and no Workload composed for
+	// either -- the ordinary "still being admitted" state.
+	pods := []core.Pod{member(0, 0), member(0, 1), member(1, 0), member(1, 1)}
+
+	holder := new(workercore.ModelDeployment)
+	observeQuotaOver(md, pods, nil, holder)
+
+	msg := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
+	assert.Contains(t, msg, "2 of this deployment's 2 replicas",
+		"the figure counts Pods rather than replicas, so it reports more waiting replicas than the "+
+			"deployment declares")
+	assert.NotContains(t, msg, "4 of this deployment's",
+		"four is the Pod count: at size two a Pod-keyed tally doubles every figure this message carries")
+}
+
+// TestObserveModelDeploymentQuota_OwnershipIsAKindAndAUIDTogether pins the half of the ownership
+// relation a UID comparison drops without saying so.
+//
+// A UID IS UNIQUE, SO MATCHING ON IT ALONE LOOKS SAFE. It is not a relation, though: a Workload
+// carries whatever owners composed it, and this operator reads that list to decide which Workload
+// speaks for which replica. A reference of some other kind answering for a Pod would let an
+// unrelated object report quota for a replica that holds none — the one reading this condition
+// exists to prevent.
+//
+// THE ACCEPTED CASE IS WHAT GIVES THE REFUSED ONE ITS MEANING. Without it the assertion below is
+// satisfied by a lookup that matches nothing at all.
+func TestObserveModelDeploymentQuota_OwnershipIsAKindAndAUIDTogether(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 1 })
+	pod := *readyReplica(md, 0, true)
+
+	owned := groupWorkload([]core.Pod{pod}, true)
+	require.Len(t, owned.OwnerReferences, 1)
+
+	holder := new(workercore.ModelDeployment)
+	observeQuotaOver(md, []core.Pod{pod}, []*kueue.Workload{owned}, holder)
+	require.True(t, ModelDeploymentConditionQuotaReserved.IsTrue(holder),
+		"the baseline: a Workload naming this Pod holds quota for this replica")
+
+	// The same UID under a different kind names a different object.
+	impostor := owned.DeepCopy()
+	impostor.OwnerReferences[0].Kind = "ReplicaSet"
+	impostor.OwnerReferences[0].APIVersion = "apps/v1"
+
+	holder = new(workercore.ModelDeployment)
+	observeQuotaOver(md, []core.Pod{pod}, []*kueue.Workload{impostor}, holder)
+
+	assert.False(t, ModelDeploymentConditionQuotaReserved.IsTrue(holder),
+		"a reference that does not name a Pod must not answer for one")
+	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder), "have no workload yet",
+		"and the replica reads as one nothing has composed a Workload for")
 }

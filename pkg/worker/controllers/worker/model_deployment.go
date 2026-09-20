@@ -1153,6 +1153,20 @@ func modelDeploymentAdmittedReplicas(workloads []kueue.Workload, pods []*core.Po
 	return admitted
 }
 
+// modelDeploymentReplicaMembers is every live Pod seated on one ordinal, which is what a replica is
+// once it may have more than one member. The order is the caller's list order and carries no
+// meaning: a replica leaves as a whole, so nothing downstream picks between its members.
+func modelDeploymentReplicaMembers(pods []*core.Pod, ordinal int) []*core.Pod {
+	members := make([]*core.Pod, 0, 1)
+	for _, pod := range pods {
+		if at, ok := modelDeploymentPodOrdinal(pod); ok && at == ordinal {
+			members = append(members, pod)
+		}
+	}
+
+	return members
+}
+
 // modelDeploymentSurplusReplicas picks which Pods of an over-counted role leave: the Pods that
 // claim no ordinal first, then the Pods a seat holds beyond its one occupant, at most `surplus` of
 // them.
@@ -1169,20 +1183,6 @@ func modelDeploymentAdmittedReplicas(workloads []kueue.Workload, pods []*core.Po
 // stable across passes, and nothing else about two occupants of one seat tells them apart. A Pod
 // with no ordinal leaves before any seated one because every seated Pod is accounted for by the
 // declared count.
-// modelDeploymentReplicaMembers is every live Pod seated on one ordinal, which is what a replica is
-// once it may have more than one member. The order is the caller's list order and carries no
-// meaning: a replica leaves as a whole, so nothing downstream picks between its members.
-func modelDeploymentReplicaMembers(pods []*core.Pod, ordinal int) []*core.Pod {
-	members := make([]*core.Pod, 0, 1)
-	for _, pod := range pods {
-		if at, ok := modelDeploymentPodOrdinal(pod); ok && at == ordinal {
-			members = append(members, pod)
-		}
-	}
-
-	return members
-}
-
 func modelDeploymentSurplusReplicas(
 	kept []*core.Pod, want map[int][]*core.Pod, surplus int,
 ) []*core.Pod {
@@ -1232,9 +1232,23 @@ func modelDeploymentSurplusReplicas(
 		shed = append(shed, occupants[1:]...)
 	}
 
-	// Highest ordinal first, so two passes over the same state shed in the same order and the
-	// departures issue from the top down like every other removal.
+	// ORDINAL-LESS PODS FIRST, then the highest ordinal, so that two passes over the same state shed
+	// in the same order and the seated departures issue from the top down like every other removal.
+	//
+	// THE FIRST HALF IS LOAD-BEARING WHENEVER THE CAP BELOW BITES. Sorting by ordinal alone puts an
+	// ordinal-less Pod last, because it floors below every seat -- so a state holding both an
+	// ordinal-less Pod and a duplicated seat sheds the duplicate and keeps the Pod that belongs to
+	// no replica at all. That Pod then counts against the declared total on the next pass, which is
+	// how a role can sit one replica short with nothing left to shed.
 	slices.SortFunc(shed, func(a, b *core.Pod) int {
+		aSeated, bSeated := modelDeploymentOrdinalOrFloor(a) >= 0, modelDeploymentOrdinalOrFloor(b) >= 0
+		if aSeated != bSeated {
+			if !aSeated {
+				return -1
+			}
+
+			return 1
+		}
 		if c := modelDeploymentOrdinalOrFloor(b) - modelDeploymentOrdinalOrFloor(a); c != 0 {
 			return c
 		}

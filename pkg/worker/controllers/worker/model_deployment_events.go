@@ -93,20 +93,20 @@ func modelDeploymentReplicaDepartures(pods []core.Pod) []modelDeploymentReplicaD
 				pod:    pod.Name,
 				reason: modelDeploymentEventReplicaEvicted,
 				message: fmt.Sprintf(
-					"replica %s was evicted; its cached blocks are lost to its siblings, and any KV "+
+					"%s was evicted; its cached blocks are lost to its siblings, and any KV "+
 						"lease it holds lapses after the %s kv_lease_duration window, failing the "+
 						"requests still waiting on them",
-					pod.Name, modelDeploymentKVLeaseWindow),
+					modelDeploymentPodDescription(pod), modelDeploymentKVLeaseWindow),
 			})
 		case pod.DeletionTimestamp != nil:
 			departures = append(departures, modelDeploymentReplicaDeparture{
 				pod:    pod.Name,
 				reason: modelDeploymentEventReplicaLeaving,
 				message: fmt.Sprintf(
-					"replica %s is going away; its cached blocks are lost to its siblings, and any "+
+					"%s is going away; its cached blocks are lost to its siblings, and any "+
 						"KV lease it holds lapses after the %s kv_lease_duration window, failing "+
 						"the requests still waiting on them",
-					pod.Name, modelDeploymentKVLeaseWindow),
+					modelDeploymentPodDescription(pod), modelDeploymentKVLeaseWindow),
 			})
 		default:
 			restarts := modelDeploymentReplicaRestarts(pod)
@@ -117,10 +117,10 @@ func modelDeploymentReplicaDepartures(pods []core.Pod) []modelDeploymentReplicaD
 				pod:    pod.Name,
 				reason: modelDeploymentEventReplicaRestarted,
 				message: fmt.Sprintf(
-					"replica %s has restarted %d time(s); each restart interrupts the engine's "+
+					"%s has restarted %d time(s); each restart interrupts the engine's "+
 						"heartbeat, so the blocks it held were lost and any KV lease lapsed after "+
 						"the %s kv_lease_duration window",
-					pod.Name, restarts, modelDeploymentKVLeaseWindow),
+					modelDeploymentPodDescription(pod), restarts, modelDeploymentKVLeaseWindow),
 			})
 		}
 	}

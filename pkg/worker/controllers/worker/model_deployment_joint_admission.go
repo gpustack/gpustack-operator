@@ -433,7 +433,13 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 			// Settled turn true and park the healthy replacement this guard exists to protect.
 			// Quota holding below still reads every replica, terminating ones included, because a
 			// Workload holding a leaving Pod is holding it.
-			if liveByGroup[group].Len() == 0 {
+			// SHORT OF ITS MEMBERS IS STILL ASSEMBLING, not merely empty. Kueue composes no
+			// Workload for a group that has not reached its declared total, so a replica holding
+			// some of its members is in exactly the state this branch describes -- and reading it
+			// as present sends the verdict to the message below, which tells an operator to look
+			// for a quota problem that does not exist. At one member per replica the two readings
+			// are the same test, which is why this was a comparison against zero.
+			if liveByGroup[group].Len() < modelDeploymentRoleSize(role) {
 				roleAssembling = true
 			}
 			if anyWorkloadHoldsQuotaFor(wlList.Items, members) ||

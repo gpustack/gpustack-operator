@@ -1202,7 +1202,7 @@ implementation.
       is per-ReplicaGroup, so this needs the per-Member one T12 adds.
       Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestModelDeploymentService' -v`
 
-- [ ] **T15 · Readiness, rollout and teardown at ReplicaGroup granularity**
+- [x] **T15 · Readiness, rollout and teardown at ReplicaGroup granularity**
       Blocked by: T13
       Owns: `pkg/worker/controllers/worker/model_deployment_status.go`,
       `pkg/worker/controllers/worker/model_deployment_rollout.go`, and their tests

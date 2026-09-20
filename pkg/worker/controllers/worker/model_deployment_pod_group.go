@@ -251,6 +251,115 @@ func modelDeploymentPodOrdinal(pod *core.Pod) (int, bool) {
 	return ordinal, true
 }
 
+// modelDeploymentReplicaView is one replica as the cluster currently holds it: which role and
+// ordinal it occupies, and the live Pods seated on it.
+type modelDeploymentReplicaView struct {
+	// Role is the role the members belong to.
+	Role string
+	// Ordinal is the slot this replica occupies, meaningful only when Seated is true.
+	Ordinal int
+	// Seated is false for a Pod claiming no ordinal. Such a Pod belongs to no replica anything can
+	// name, and it stands alone as a view of its own -- which is what it was before replicas had
+	// members, so the figures taken over these views do not move for it.
+	Seated bool
+	// Members are the live Pods on this replica, in the order the input held them.
+	Members []*core.Pod
+}
+
+// modelDeploymentGroupPodsByReplica groups live Pods into the replicas they belong to, skipping the
+// ones already on their way out.
+//
+// IT EXISTS SO THAT ONE GROUPING SERVES EVERY PER-REPLICA FIGURE. Readiness, quota reservation and
+// group completeness are all answers about replicas, and each of them was a count over Pods when a
+// replica was one Pod. Reconstructing the grouping separately in each place is how two of them come
+// to disagree about what a replica is -- and the disagreement would be silent, because every one of
+// them reports a plain number that looks reasonable whatever it counted.
+//
+// A POD WITH NO ORDINAL IS ITS OWN VIEW, keyed by POSITION rather than by name or UID. Both of those
+// would be the obvious choice and both are wrong: the key has to separate such Pods without
+// depending on a field being set, and one that collapses when the field is empty merges every
+// unseated Pod of a role into a single replica.
+func modelDeploymentGroupPodsByReplica(pods []core.Pod) []modelDeploymentReplicaView {
+	return modelDeploymentGroupPods(pods, true)
+}
+
+// modelDeploymentGroupPodsIncludingDeparting groups every Pod, departing ones included.
+//
+// IT EXISTS FOR THE FIGURES ABOUT LEAVING. A replica being reclaimed is a replica whose members are
+// all on their way out, so the grouping that skips them answers zero for exactly the state those
+// figures are about — a preemption report that reads "0 replicas" while the pool takes the role
+// apart, and a "they are all terminating" message with nothing to count.
+func modelDeploymentGroupPodsIncludingDeparting(pods []core.Pod) []modelDeploymentReplicaView {
+	return modelDeploymentGroupPods(pods, false)
+}
+
+func modelDeploymentGroupPods(pods []core.Pod, skipDeparting bool) []modelDeploymentReplicaView {
+	type key struct {
+		role     string
+		ordinal  int
+		standing int // 0 when seated; the Pod's position plus one otherwise
+	}
+
+	at := make(map[key]int, len(pods))
+	views := make([]modelDeploymentReplicaView, 0, len(pods))
+	for i := range pods {
+		pod := &pods[i]
+		if skipDeparting && pod.DeletionTimestamp != nil {
+			continue
+		}
+
+		k := key{role: modelDeploymentPodRole(pod)}
+		view := modelDeploymentReplicaView{Role: k.role}
+		if ordinal, ok := modelDeploymentPodOrdinal(pod); ok {
+			k.ordinal, view.Ordinal, view.Seated = ordinal, ordinal, true
+		} else {
+			k.standing = i + 1
+		}
+
+		if idx, seen := at[k]; seen {
+			views[idx].Members = append(views[idx].Members, pod)
+
+			continue
+		}
+		view.Members = []*core.Pod{pod}
+		at[k] = len(views)
+		views = append(views, view)
+	}
+
+	return views
+}
+
+// modelDeploymentReplicaIsComplete reports whether a replica holds every member it declares.
+//
+// AN INCOMPLETE REPLICA IS NOT A PARTLY WORKING ONE. Kueue composes no Workload at all for a pod
+// group short of its declared total, so such a replica holds no quota, is admitted by nothing and
+// serves nothing -- it is not "most of the way there", it is absent with some Pods lying around.
+// Every figure that counts replicas therefore excludes it rather than discounting it.
+func modelDeploymentReplicaIsComplete(view modelDeploymentReplicaView, size int) bool {
+	if !view.Seated {
+		// A Pod that claims no ordinal declares one member, itself.
+		return len(view.Members) == 1
+	}
+
+	return len(view.Members) == size
+}
+
+// modelDeploymentPodDescription names a Pod the way its own shape makes true: a replica when a
+// replica is one Pod, and a member of one when it is not.
+//
+// IT READS THE LABEL RATHER THAN THE SPEC, because the caller of a message is reporting on a Pod
+// that exists and the spec may already describe something else -- and because a Pod that predates
+// multi-member replicas is a replica whatever the spec now says. The label is present exactly when
+// the Pod was rendered as one member of several, which is exactly when calling it a replica is
+// wrong.
+func modelDeploymentPodDescription(pod *core.Pod) string {
+	if _, ok := pod.Labels[modelDeploymentMemberIndexLabel]; ok {
+		return "member " + pod.Name
+	}
+
+	return "replica " + pod.Name
+}
+
 // modelDeploymentPodMemberIndex reads which member of its replica a Pod was rendered as.
 //
 // IT DEFAULTS TO THE LEADER RATHER THAN REPORTING ABSENCE, which is the opposite of the ordinal
