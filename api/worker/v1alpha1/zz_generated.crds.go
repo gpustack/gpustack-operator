@@ -4489,12 +4489,13 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Type:        "boolean",
 														},
 														"replicas": {
-															Description: "Replicas is how many independent serving instances this role runs. The instances are\nindependent: each one starts, serves and is replaced on its own, and none of them depends on\nanother being present.\nCHANGING THIS NUMBER ADDS OR REMOVES INSTANCES. Growing it creates new instances beside the\nones already running; shrinking it removes some of them. The instances that survive are not\nrestarted: they keep serving without interruption and keep whatever cache they hold.",
+															Description: "Replicas is how many independent serving instances this role runs. The instances are\nindependent: each one starts, serves and is replaced on its own, and none of them depends on\nanother being present.\nCHANGING THIS NUMBER ADDS OR REMOVES INSTANCES. Growing it creates new instances beside the\nones already running; shrinking it removes some of them. The instances that survive are not\nrestarted: they keep serving without interruption and keep whatever cache they hold.\nTHE UPPER BOUND IS A LIMIT ON THIS OPERATOR, NOT ON KUBERNETES. A pass renders every instance\nthis role declares before it writes any of them, so the number is a multiplier on the work one\nreconcile does; left open at the type's range, a single accepted field value is enough to\nexhaust the worker before the API server ever throttles the creates. The bound is set where no\ndeployment anybody serves can reach it.",
 															Type:        "integer",
 															Format:      "int32",
 															Default: &v1.JSON{
 																Raw: []byte(`1`),
 															},
+															Maximum: ptr.To[float64](1024),
 															Minimum: ptr.To[float64](1),
 														},
 														"resources": {
@@ -4538,12 +4539,13 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Nullable: true,
 														},
 														"size": {
-															Description: "ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they\nstart together, they are replaced together, and none of them serves alone — the instance,\nnot the Pod, is the unit that appears and disappears.\nCHANGING THIS NUMBER REPLACES EVERY INSTANCE OF THE ROLE. The Pods a running instance is made\nof are not the Pods the new size asks for, so each instance is replaced as a whole rather than\ngrown or trimmed in place.\nTHE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and\nGo forbids a field and a method sharing a name; the API field is size.",
+															Description: "ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they\nstart together, they are replaced together, and none of them serves alone — the instance,\nnot the Pod, is the unit that appears and disappears.\nTHIS NUMBER IS FIXED AT CREATION AND CANNOT BE CHANGED. An instance's size is the shape of the\ninstance, not a dial on it: the Pods a running instance is made of are not the Pods a different\nsize asks for. Scaling is what replicas is for, and it leaves every running instance alone. To\nserve at a different size, create a deployment that declares it.\nABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods\nis rendered with stable names and publishes the first Pod's address, this instance's size and\neach Pod's own rank to every container. What an engine does with those facts -- which\nparallelism it turns on, and over how many ranks -- stays the author's to say.\nTHE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and\nGo forbids a field and a method sharing a name; the API field is size.\nTHE UPPER BOUND IS THE SAME LIMIT REPLICAS CARRIES, AND IT MULTIPLIES WITH IT: this number is\nhow many Pods one instance is rendered as, so a pass renders replicas times this many before it\nwrites any of them. It is set far above the sizes an accelerator topology makes sense at, and\nfar below the range that turns one accepted field value into an out-of-memory worker.",
 															Type:        "integer",
 															Format:      "int32",
 															Default: &v1.JSON{
 																Raw: []byte(`1`),
 															},
+															Maximum: ptr.To[float64](64),
 															Minimum: ptr.To[float64](1),
 														},
 													},

@@ -64,17 +64,34 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// CHANGING THIS NUMBER ADDS OR REMOVES INSTANCES. Growing it creates new instances beside the
 	// ones already running; shrinking it removes some of them. The instances that survive are not
 	// restarted: they keep serving without interruption and keep whatever cache they hold.
+	//
+	// THE UPPER BOUND IS A LIMIT ON THIS OPERATOR, NOT ON KUBERNETES. A pass renders every instance
+	// this role declares before it writes any of them, so the number is a multiplier on the work one
+	// reconcile does; left open at the type's range, a single accepted field value is enough to
+	// exhaust the worker before the API server ever throttles the creates. The bound is set where no
+	// deployment anybody serves can reach it.
 	Replicas *int32 `json:"replicas,omitempty"`
 	// ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they
 	// start together, they are replaced together, and none of them serves alone — the instance,
 	// not the Pod, is the unit that appears and disappears.
 	//
-	// CHANGING THIS NUMBER REPLACES EVERY INSTANCE OF THE ROLE. The Pods a running instance is made
-	// of are not the Pods the new size asks for, so each instance is replaced as a whole rather than
-	// grown or trimmed in place.
+	// THIS NUMBER IS FIXED AT CREATION AND CANNOT BE CHANGED. An instance's size is the shape of the
+	// instance, not a dial on it: the Pods a running instance is made of are not the Pods a different
+	// size asks for. Scaling is what replicas is for, and it leaves every running instance alone. To
+	// serve at a different size, create a deployment that declares it.
+	//
+	// ABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods
+	// is rendered with stable names and publishes the first Pod's address, this instance's size and
+	// each Pod's own rank to every container. What an engine does with those facts -- which
+	// parallelism it turns on, and over how many ranks -- stays the author's to say.
 	//
 	// THE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and
 	// Go forbids a field and a method sharing a name; the API field is size.
+	//
+	// THE UPPER BOUND IS THE SAME LIMIT REPLICAS CARRIES, AND IT MULTIPLIES WITH IT: this number is
+	// how many Pods one instance is rendered as, so a pass renders replicas times this many before it
+	// writes any of them. It is set far above the sizes an accelerator topology makes sense at, and
+	// far below the range that turns one accepted field value into an out-of-memory worker.
 	ReplicaSize *int32 `json:"size,omitempty"`
 	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
 	// It is what the queue-name entrance label is derived from.

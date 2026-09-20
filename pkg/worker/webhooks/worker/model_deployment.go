@@ -298,6 +298,17 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 const modelDeploymentIdentityMessage = "this is part of what makes this deployment the deployment " +
 	"it is: a different value describes a different deployment, which is created rather than edited"
 
+// modelDeploymentReplicaSizeFrozenMessage is the reason a size change carries, and it points at the
+// field that does move rather than only refusing.
+//
+// IT NAMES replicas BECAUSE THE REFUSAL IS OTHERWISE A DEAD END. An operator changing size almost
+// always wants more capacity, which replicas gives without touching anything already serving. The
+// one thing size can do -- serve at a different instance shape -- genuinely needs a new deployment,
+// and saying both is what separates "you asked for the wrong field" from "you cannot have this".
+const modelDeploymentReplicaSizeFrozenMessage = "an instance's size is fixed when the deployment is " +
+	"created: the Pods of a running instance cannot become a different number of Pods. Change " +
+	"replicas to run more or fewer instances, or create a deployment that declares the size you want"
+
 // validateModelDeploymentRouterName allows a router to be added or removed, but not changed in
 // place. Changing the implementation is a delete and create with an interval between them.
 func validateModelDeploymentRouterName(md, old *workercore.ModelDeployment) field.ErrorList {
@@ -412,6 +423,18 @@ func validateModelDeploymentRoleIdentity(md, old *workercore.ModelDeployment) fi
 // role that supplies one is taken over by its author, which changes cache injection and what status
 // can claim. The rest of the role's container fields are how the build is fetched, shaped and
 // tuned, and are editable.
+//
+// size IS FROZEN FOR A DIFFERENT REASON AND SO CARRIES A DIFFERENT MESSAGE. The others are identity:
+// a different value describes a different deployment. This one is arithmetic the Pods of a running
+// instance cannot survive -- an instance of n Pods is admitted as one group of n, and a new n makes
+// every living instance the wrong shape at once, with no intermediate state in which the deployment
+// is serving. What the reader needs is the field that does move, so the message names replicas.
+//
+// FREEZING IT ALSO KEEPS ONE NUMBER UNDER ONE WRITER. An instance renders as a StatefulSet whose own
+// replica count is this size, and Kueue's StatefulSet integration derives a pod group's declared
+// total from that count. A count that never moves cannot be read as two different totals by two
+// controllers; a count that moves would relocate the defect rather than fix it -- a group's declared
+// total changing while the group is running, one layer further down than where it used to be.
 func validateModelDeploymentRoleIdentityFields(
 	rolePath *field.Path, role, was *workercore.ModelDeploymentRole,
 ) field.ErrorList {
@@ -419,6 +442,10 @@ func validateModelDeploymentRoleIdentityFields(
 	if role.Kind != was.Kind {
 		errs = append(errs, field.Invalid(
 			rolePath.Child("kind"), role.Kind, modelDeploymentIdentityMessage))
+	}
+	if role.ReplicaSize != was.ReplicaSize {
+		errs = append(errs, field.Invalid(
+			rolePath.Child("size"), role.ReplicaSize, modelDeploymentReplicaSizeFrozenMessage))
 	}
 	if role.InstanceType != was.InstanceType {
 		errs = append(errs, field.Invalid(
@@ -911,7 +938,6 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 		errs = append(errs, validateModelDeploymentRoleExtraArgs(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleEnv(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleResources(role, rolePath)...)
-		errs = append(errs, validateModelDeploymentRoleSize(role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleAdditionalVolumes(role, rolePath)...)
 	}
 
@@ -1076,31 +1102,6 @@ func validateModelDeploymentRoleResources(
 			ressPath.Child("acceleratorSlicedMemoryPercentage"),
 			ressPath.Child("acceleratorSlicedCoresPercentage"),
 		),
-	)}
-}
-
-// validateModelDeploymentRoleSize refuses an instance size larger than one Pod, for as long as no
-// rendering builds one instance across several Pods.
-//
-// THE MESSAGE NAMES THE MISSING CAPABILITY RATHER THAN THE FIELD'S BOUNDS, because the limit is
-// progress rather than design: it disappears on the day multi-Pod instances are rendered, and a
-// bounds-shaped message ("size must be 1") would outlive that day and read like a permanent rule.
-//
-// THE FLOOR IS NOT THIS RULE'S. The schema's minimum refuses a size below one before any webhook
-// runs, so the only value that can reach here is one asking for more Pods than the rendering
-// builds; repeating the floor here would put one interval under two owners and leave no record of
-// which layer answers for it.
-func validateModelDeploymentRoleSize(
-	role *workercore.ModelDeploymentRole, rolePath *field.Path,
-) field.ErrorList {
-	if role.ReplicaSize <= 1 {
-		return nil
-	}
-
-	return field.ErrorList{field.Invalid(
-		rolePath.Child("size"), role.ReplicaSize,
-		"a role's instance cannot span more than one Pod yet: the rendering that builds one "+
-			"instance across several Pods does not exist",
 	)}
 }
 

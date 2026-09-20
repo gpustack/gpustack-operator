@@ -216,15 +216,14 @@ func TestValidateModelDeployment(t *testing.T) {
 			),
 		},
 		{
-			// The refusal NAMES THE MISSING CAPABILITY rather than the field's bounds, because the
-			// limit is progress rather than design: the rendering that builds one instance across
-			// several Pods does not exist, and a bounds-shaped message would read as a permanent
-			// rule after the day it lands.
+			// A size above one is ACCEPTED ON CREATE, which is the whole of what create has to say
+			// about it: an instance of several Pods is a shape the renderer builds, not a request
+			// some later rule has to talk the user out of. What cannot happen to it is a change,
+			// and that is an update rule, asserted against a stored object rather than here.
 			name: "role_size_two",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
 				role(func(r *workercore.ModelDeploymentRole) { r.ReplicaSize = 2 }),
 			),
-			wantMessage: "a role's instance cannot span more than one Pod yet",
 		},
 		{
 			name: "role_kinds_prefill_and_decode",
@@ -1475,6 +1474,58 @@ func TestModelDeploymentWebhook_ValidateUpdateStatesTheRuleNotTheMechanism(t *te
 		assert.False(t, errsContain(got, wrongReason),
 			"the message must not send the reader looking for %q", wrongReason)
 	}
+}
+
+// TestModelDeploymentWebhook_ValidateUpdateFreezesSizeButNotReplicas holds the two halves of the
+// scaling story against each other, on one object, in one test.
+//
+// THE PAIR IS THE POINT, NOT EITHER HALF. A rule refusing a size change would also be satisfied by
+// a rule refusing every numeric change, and that implementation takes away the only elasticity this
+// role has. Asserting the refusal beside the acceptance is what distinguishes "size is frozen" from
+// "numbers are frozen", and the two subtests start from the same stored object so nothing but the
+// field under test differs.
+//
+// THE REFUSAL MUST NAME size AND POINT AT replicas. An operator raising size almost always wants
+// capacity, which replicas gives without disturbing anything already serving; a refusal that only
+// says no leaves them with a deployment they believe cannot grow.
+func TestModelDeploymentWebhook_ValidateUpdateFreezesSizeButNotReplicas(t *testing.T) {
+	r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+
+	stored := func() *workercore.ModelDeployment {
+		md := modelDeploymentWithEveryField()
+		for i := range md.Spec.Roles {
+			md.Spec.Roles[i].Replicas, md.Spec.Roles[i].ReplicaSize = 1, 2
+		}
+
+		return md
+	}
+
+	t.Run("size_change_is_refused", func(t *testing.T) {
+		old := stored()
+		md := old.DeepCopy()
+		md.Spec.Roles[0].ReplicaSize = 3
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		require.Error(t, err)
+
+		got := err.Error()
+		assert.True(t, errsContain(got, "spec.roles[0].size"), got)
+		assert.True(t, errsContain(got, "fixed when the deployment is created"), got)
+		assert.True(t, errsContain(got, "replicas"),
+			"the refusal has to name the field that does move: %s", got)
+		// The other frozen fields answer "this is a different deployment". Size is not that: the
+		// deployment is the same one, and what cannot happen is this edit to it.
+		assert.False(t, errsContain(got, "describes a different deployment"), got)
+	})
+
+	t.Run("replicas_change_is_accepted", func(t *testing.T) {
+		old := stored()
+		md := old.DeepCopy()
+		md.Spec.Roles[0].Replicas = 4
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err, "scaling a role is the one edit this whole shape exists to allow")
+	})
 }
 
 // TestModelDeploymentWebhook_ValidateUpdateAllowsMetadataAndTheDeletionWindow covers the two edits

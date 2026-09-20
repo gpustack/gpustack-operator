@@ -155,6 +155,19 @@ refuses() {
   fi
 }
 
+# The mirror of `refuses`, for a row whose point is that a value is NOT rejected. It carries the same
+# empty-output trap for the same reason: "created" must be observed, because a row that passes on no
+# output at all reports an acceptance nothing produced.
+accepts() {
+  local check="$1" role_extra="$2" kv_extra="$3" out
+  out="$(manifest "$role_extra" "$kv_extra" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
+  if [ -n "$out" ] && [ -z "${out##*created*}" ]; then
+    record PASS "$check" "accepted by both the schema and the webhook"
+  else
+    record FAIL "$check" "wanted an acceptance, got: $(echo "$out" | cut -c1-160)"
+  fi
+}
+
 # Row 0. Without this every row below is meaningless.
 base_out="$(manifest "" "" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
 # The same empty-output trap as in `refuses`, and it matters most here: this row is what licenses
@@ -176,11 +189,11 @@ fi
 # would have it fail against a correct operator, and keeping an acceptance row would duplicate a
 # baseline another case already licenses its whole table on.
 
-# THE SIZE CAP IS PROGRESS RATHER THAN DESIGN, and the refusal is worded to say so. A bounds-shaped
-# message ("size must be 1") would outlive the day a multi-Pod instance can be rendered; naming the
-# missing capability instead means the message stops being true at the same moment the limit does.
-refuses "a role asking for more than one Pod per instance is refused" \
-  "a role's instance cannot span more than one Pod yet" \
+# THE SIZE CAP IS GONE, AND THE ROW IS INVERTED RATHER THAN DELETED. It used to assert a refusal
+# worded as a missing capability -- deliberately, so that the message would stop being true at the
+# same moment the limit did. That day came: a role's instance may span several Pods, so the value
+# this row sends is now the ordinary case and the assertion is that nothing refuses it.
+accepts "a role asking for more than one Pod per instance is accepted" \
   "    size: 2" ""
 
 refuses "an owned argument in extraArgs is refused" \
