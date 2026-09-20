@@ -154,11 +154,14 @@ func newPreflightCommand() *cobra.Command {
 			// check above happened before it ran. Reporting a hardware verdict assembled while
 			// the operator was interrupting it would answer a question that was withdrawn.
 			network := preflight.PreflightNetwork()
+			// The kubelet's topology policy is read on the same terms: it belongs to the machine
+			// rather than to any manufacturer, and it gates nothing the pass above measured.
+			topology := p.PreflightTopology()
 			if err := ctx.Err(); err != nil {
 				return fmt.Errorf("preflight was interrupted before it could report: %w", err)
 			}
 
-			return preflight.Report(os.Stdout, groups, network)
+			return preflight.Report(os.Stdout, groups, network, topology)
 		},
 	}
 

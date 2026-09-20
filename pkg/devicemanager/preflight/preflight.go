@@ -553,6 +553,7 @@ func detection(groups device.DevicesGroupList, unmeasured bool) device.Preflight
 type preflightResult struct {
 	Accelerators device.PreflightGroupList `json:"accelerators" yaml:"accelerators"`
 	Network      NetworkReport             `json:"network" yaml:"network"`
+	Topology     TopologyReport            `json:"topology" yaml:"topology"`
 }
 
 // Report writes the result to w as one YAML document and then reports whether the node failed.
@@ -566,10 +567,19 @@ type preflightResult struct {
 // stops none of them: it withholds a node label, which changes what a flavor selects rather than
 // what an allocator can hand out. A link row that failed the pass would make every script gating
 // an install on this command start refusing nodes that allocate perfectly well.
-func Report(w io.Writer, grpList device.PreflightGroupList, network NetworkReport) error {
+//
+// The topology section is reported on the same terms, and does not contribute to the failure
+// either. The kubelet's TopologyManager policy stops no allocation mode an allocator offers -- it
+// decides which placements the kubelet admits, not what this node can hand out -- so a topology
+// row that failed the pass would refuse nodes on the same grounds.
+func Report(
+	w io.Writer, grpList device.PreflightGroupList, network NetworkReport, topology TopologyReport,
+) error {
 	enc := yaml.NewEncoder(w)
 	enc.SetIndent(4)
-	if err := enc.Encode(preflightResult{Accelerators: grpList, Network: network}); err != nil {
+	if err := enc.Encode(preflightResult{
+		Accelerators: grpList, Network: network, Topology: topology,
+	}); err != nil {
 		return fmt.Errorf("encode result: %w", err)
 	}
 

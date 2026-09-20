@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -462,21 +463,29 @@ func TestReport_WritesTheDocumentEvenWhenTheNodeFailed(t *testing.T) {
 			Reason:      "nvml: function not found",
 		}},
 	}}
+	topology := TopologyReport{
+		Timestamp: time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC),
+		Policy:    TopologyPolicyUnknown,
+		Depth:     device.PreflightDepthDeclared,
+		Note:      "no kubelet configuration this report reads names a topology manager policy",
+	}
 
 	var buf bytes.Buffer
-	err := Report(&buf, grpList, NetworkReport{})
+	err := Report(&buf, grpList, NetworkReport{}, topology)
 
 	require.Error(t, err, "an unavailable capability is a failure")
 	assert.Contains(t, err.Error(), "nvml: function not found", "the driver's own words reach the caller")
 
-	// The document's top level is a map holding both sections. Decoding it as the bare accelerator
+	// The document's top level is a map holding every section. Decoding it as the bare accelerator
 	// list — which is what this assertion did while that list WAS the top level — now fails
-	// loudly, and that is the property the shape was chosen for: appending the network section as
+	// loudly, and that is the property the shape was chosen for: appending a later section as
 	// a second YAML document instead would have left this decode succeeding while silently seeing
 	// none of it.
 	var decoded preflightResult
 	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &decoded), "the document is still valid YAML")
 	assert.Equal(t, grpList, decoded.Accelerators, "and it is the whole result, not a truncated one")
+	assert.Equal(t, topology, decoded.Topology,
+		"the topology section travels in the same document, not a second one")
 }
 
 // Every manufacturer asked about appears in the result, whatever it had to report. A manufacturer
