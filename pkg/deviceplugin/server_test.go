@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -3991,6 +3992,75 @@ func (*fakeListAndWatchStream) SendHeader(grpcmetadata.MD) error { return nil }
 func (*fakeListAndWatchStream) SetTrailer(grpcmetadata.MD)       {}
 func (*fakeListAndWatchStream) SendMsg(any) error                { return nil }
 func (*fakeListAndWatchStream) RecvMsg(any) error                { return nil }
+
+// TestResourceServer_ListAndWatch_RetriesTheInitialResponse covers the first half of the stream. The
+// poll it runs under ends when its condition returns nil, so a failed inventory read that is only
+// logged ends the poll as a success having sent nothing: the stream goes on to its watch loop and
+// kubelet holds no device list until some later reconcile happens to fire the notifier. Every
+// vendor's device-plugin server serves through this one loop, so the resource reading zero after a
+// transient read failure would be every vendor's.
+func TestResourceServer_ListAndWatch_RetriesTheInitialResponse(t *testing.T) {
+	const nodeName = "node-law-retry"
+
+	var (
+		failGet  atomic.Bool
+		failures atomic.Int32
+	)
+	failGet.Store(true)
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(twoCardDevices(nodeName, workercore.DeviceAllocationModeNone)).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		WithInterceptorFuncs(ctrlintercept.Funcs{
+			Get: func(
+				ctx context.Context, c ctrlcli.WithWatch, key ctrlcli.ObjectKey,
+				obj ctrlcli.Object, opts ...ctrlcli.GetOption,
+			) error {
+				if failGet.Load() {
+					failures.Add(1)
+					return errors.New("simulated inventory read failure")
+				}
+
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+
+	// Exclusive against a fixture whose accelerators carry no slicing capability: the pairing
+	// advertises one device per accelerator, so an empty list is a failure here rather than the
+	// cross-mode withhold it would be under a Sliced server.
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeExclusive,
+		Reconciler:     &DevicesReconciler{NodeName: nodeName, Client: cli},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sent := make(chan *ListAndWatchResponse, 1)
+	go func() {
+		_ = s.ListAndWatch(&Empty{}, &fakeListAndWatchStream{ctx: ctx, sent: sent})
+	}()
+
+	// Let the read recover only once it has actually failed at least once. Recovering before the
+	// first attempt would leave the first read succeeding, which passes whether or not the poll
+	// retries -- the criterion has to make the failure happen before it can mean anything.
+	require.Eventually(t, func() bool {
+		return failures.Load() > 0
+	}, 15*time.Second, 20*time.Millisecond, "the inventory was never read")
+	failGet.Store(false)
+
+	select {
+	case resp := <-sent:
+		assert.NotEmpty(t, resp.GetDevices(),
+			"the retried response carries no devices, so the retry sent an empty list")
+	case <-time.After(20 * time.Second):
+		t.Fatal("the initial list and watch response was never sent after the inventory read recovered")
+	}
+}
 
 // TestResourceServer_ListAndWatch_UnsubscribesWhenTheStreamEnds is the wiring half of the unsubscribe
 // guard. TestDevicesReconciler_ReconcileNotifier_Unsubscribes proves the release closure removes a

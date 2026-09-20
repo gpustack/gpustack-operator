@@ -82,10 +82,18 @@ func (s *ResourceServer) ListAndWatch(_ *Empty, srv grpc.ServerStreamingServer[L
 	err := waitx.PollUntilContextCancel(ctx, 2*time.Second, true, func(ctx context.Context) error {
 		resp, err := s.getListAndWatchResponse(ctx)
 		if err != nil {
-			// Nothing to do, keep looping until success or context cancellation.
+			// Returned rather than swallowed. This poll ends on a nil return, so logging and
+			// falling through would end it as a success having sent nothing, and the stream
+			// would go on to the watch loop with kubelet holding no device list at all: the
+			// resource reads as zero until some later reconcile happens to fire the notifier.
 			s.Logger.Error(err, "get initial list and watch response, retry later")
-		} else if err = srv.Send(resp); err != nil {
-			// Return error to restart Device Plugin Server.
+			return err
+		}
+		if err = srv.Send(resp); err != nil {
+			// Also retried, for the same reason. A stream that will not take the first
+			// response is one kubelet has stopped reading, and this poll ends when the
+			// stream's context does.
+			s.Logger.Error(err, "send initial list and watch response, retry later")
 			return err
 		}
 		return nil
