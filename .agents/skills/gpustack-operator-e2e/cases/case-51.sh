@@ -337,12 +337,16 @@ fi
 PREFILL_BEFORE="$(role_uids prefill)"
 DECODE_BEFORE="$(role_uids decode)"
 
-TPL='"image":"'"$IMAGE"'","command":["/pause"]}'
+# The role object's closing brace belongs to the caller below, NOT here. Carrying one in this
+# fragment too produced "command":["/pause"]}} in every patch this case has ever sent, which the API
+# server rejects while DECODING -- before any webhook or controller sees it. The row that depends on
+# the patch therefore could not pass, and had never passed.
+TPL='"image":"'"$IMAGE"'","command":["/pause"]'
 # CAPTURED, NOT DISCARDED. This patch used to send both streams to /dev/null, and a REFUSED patch
 # then produced exactly what a slow scale produces: nothing happens, the poll below runs out, and
 # the row reports "prefill never reached 2 replicas" -- a symptom, with its cause thrown away at the
-# only moment it was available. Measured: that row failed on two first runs and passed on a rerun,
-# which is the signature of a message nobody kept rather than of a scale that is merely slow.
+# only moment it was available. Capturing it is what turned that symptom into the decoding error
+# above, which is the whole reason the brace was findable at all.
 SCALE_PATCH="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai "$REBUILD_MD" --type=merge \
   -p '{"spec":{"roles":[{"name":"prefill","kind":"prefill","instanceType":"'"$IT"'","replicas":2,'"$TPL"'},{"name":"decode","kind":"decode","instanceType":"'"$IT"'","replicas":1,'"$TPL"'}]}}' \
   2>&1)"
