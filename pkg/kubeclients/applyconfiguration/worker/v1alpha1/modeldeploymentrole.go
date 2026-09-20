@@ -20,18 +20,21 @@ import (
 // resource request at all: the accelerator half belongs in Resources and the rest is derived from
 // the InstanceType, and neither can be overridden here.
 //
-// EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Each role forms its
-// own Kueue pod group, whose members cannot leave one at a time, so that one group is rebuilt whole
-// while every sibling role keeps serving. A `replicas` change does not rebuild: it adds or removes
-// instances, and every instance that stays keeps running.
+// EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Every replica is a
+// Kueue pod group of its own, so they are replaced one at a time -- one per role per pass -- and
+// every sibling role keeps serving throughout. A `replicas` change rolls nothing at all: it adds or
+// removes instances, and every instance that stays keeps running, keeps the accelerators it was
+// admitted with and keeps whatever cache it holds.
 //
-// ADDING OR REMOVING A ROLE REACHES FURTHER THAN THE ROLE IT NAMES. A deployment whose roles are one
-// names that group after the DEPLOYMENT, and a deployment with more than one names each group after
-// its ROLE, so going from one role to two renames the first role's group and rebuilds it as well.
+// ADDING OR REMOVING A ROLE REACHES NO FURTHER THAN THE ROLE IT NAMES. A replica's group is named
+// from the deployment, the role and that replica's ordinal, and from nothing else -- not from how
+// many roles the deployment declares -- so a second role arriving leaves the first role's replicas
+// exactly where they were. Renaming a role is what moves that role's own replicas: each of its
+// ordinals derives a new group and is replaced.
 //
-// A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A REBUILD. The replica that left is replaced on
+// A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A ROLLOUT. The replica that left is replaced on
 // its own, under a new name, while its siblings keep serving — see
-// docs/reference/model-deployment.md under "One group per role" and "Rollout is a rolling
+// docs/reference/model-deployment.md under "One group per replica" and "Rollout is a rolling
 // replacement".
 type ModelDeploymentRoleApplyConfiguration struct {
 	// Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.

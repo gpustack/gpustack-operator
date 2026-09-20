@@ -198,7 +198,7 @@ func observeModelDeploymentRollout(
 			"%d of the declared replicas are missing: %s. Every replica this pass could compare "+
 				"matched what it rendered, so no rollout is in flight. What removed them is not "+
 				"this condition's to say -- a preemption reports itself on the quota condition -- "+
-				"and the pass creates each replacement as Kueue asks for it",
+				"and each replacement is created once its ordinal holds no member",
 			missing, strings.Join(missingWhere, "; ")))
 	default:
 		ModelDeploymentConditionReplicasUpToDate.True(holder, modelDeploymentReasonUpToDate,

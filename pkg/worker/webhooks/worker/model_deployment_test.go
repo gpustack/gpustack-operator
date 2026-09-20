@@ -105,12 +105,14 @@ func TestValidateModelDeployment(t *testing.T) {
 			),
 		},
 		{
-			// The bound is Kueue's, so the refusal has to say so: a user who reads only the number
-			// files a bug here, and a user who reads whose number it is goes and looks at the
-			// Workload their roles become.
+			// The bound is THIS PROJECT'S, so the refusal has to say so. It was Kueue's while every
+			// role was one PodSet of a single Workload, and a message naming Kueue would now send a
+			// user to look at a Workload their roles no longer become -- each replica carries its
+			// own. Naming this operator sends them to ask for the limit to be raised instead,
+			// which is where that decision now lives.
 			name:        "roles_eleven",
 			md:          modelDeployment(workercore.ModelDeploymentEngineVLLM, numberedRoles(11)...),
-			wantMessage: "Kueue caps Workload.spec.podSets at 10",
+			wantMessage: "a shape this operator does not serve",
 		},
 		{
 			name: "roles_ten",
@@ -124,7 +126,7 @@ func TestValidateModelDeployment(t *testing.T) {
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "worker" }),
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "worker" }),
 			),
-			wantMessage: "grouping both roles into one PodSet whose count is their sum",
+			wantMessage: "group that declares a single member",
 		},
 		{
 			// The Service fronting a role is named <deployment>-<role>, and a Service name is a DNS
@@ -1037,9 +1039,10 @@ func TestModelDeploymentWebhook_Default(t *testing.T) {
 }
 
 // TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup covers the explicit
-// value that defaulting deliberately leaves alone. Roles sharing one InstanceType form PodSets in
-// one Workload, and an accelerated queue cannot admit that Workload when one PodSet requests none
-// of the accelerator credits the queue covers.
+// value that defaulting deliberately leaves alone. A role asking for no accelerator on an
+// acceleratable type requests nothing its queue accounts for, so its replicas are admitted and run
+// while that queue charges them nothing -- and the siblings sharing the type are charged for every
+// card they hold, competing for a pool this role spends from uncounted.
 func TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup(t *testing.T) {
 	withDerivedFromNode(t, true)
 

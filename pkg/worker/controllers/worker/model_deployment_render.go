@@ -917,8 +917,9 @@ func modelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
 //
 // WITHOUT IT SUCH A REPLICA HAS NO RECOVERY PATH. Losing readiness only withdraws it from the
 // Service; the Pod keeps running, keeps the accelerators Kueue admitted it with, and this controller
-// deletes a replica only when the group is rebuilt, when the spec no longer names it, or when its
-// rendered spec changed -- never because it stopped answering.
+// deletes a replica only when the deployment is torn down, when the spec no longer names its role,
+// when a scale-down sheds its ordinal, or when its rendered spec changed -- never because it
+// stopped answering.
 //
 // A TAKE-OVER ROLE GETS NEITHER, for the reason the command, the connector volumes and the client
 // environment above it are also withheld: the operator did not build that command line, so it cannot

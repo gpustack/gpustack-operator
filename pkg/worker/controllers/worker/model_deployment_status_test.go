@@ -297,10 +297,12 @@ func TestModelDeploymentStatus_AssignedFlavorIsAbsentUntilItIsAssigned(t *testin
 	md := twoRoleDeployment()
 	prefill, decode := &md.Spec.Roles[0], &md.Spec.Roles[1]
 
-	// BOTH ROLES SIT ON ONE instanceType HERE, so one Workload can own both replicas and carry a
-	// PodSet for each, and the replicas are what attach that Workload to the roles. A case with no
-	// replicas resolves no Workload at all and would answer nil to everything below -- passing the
-	// absence assertions for a reason that has nothing to do with the guard they exist to pin.
+	// THE FIXTURE PUTS BOTH REPLICAS UNDER ONE WORKLOAD, which is not the shape this operator
+	// renders -- every replica is admitted as its own -- but it is the shortest one that attaches a
+	// Workload to both roles at once, and what this case pins is what the field reads while a
+	// Workload carries no assignment at all. A case with no replicas resolves no Workload and would
+	// answer nil to everything below, passing the absence assertions for a reason that has nothing
+	// to do with the guard they exist to pin.
 	pods := []core.Pod{roleReplica(md, prefill.Name), roleReplica(md, decode.Name)}
 	owning := func(wl *kueue.Workload) []*kueue.Workload {
 		for i := range pods {
@@ -761,8 +763,9 @@ func TestObserveModelDeploymentQuota(t *testing.T) {
 //
 // IT USED TO HOLD BY CONSTRUCTION AND NOW IT IS ENFORCED, which is why the case matters more than it
 // did. With one Workload covering both PodSets there was no way for the condition to disagree
-// between roles. Roles on several instanceTypes are several Workloads, so what keeps this true is
-// the per-group answer rather than the shape of the object it reads.
+// between roles. Every replica is its own Workload now -- so even one role on one instanceType is
+// several of them -- and what keeps this true is the answer computed across them rather than the
+// shape of the object it reads.
 func TestObserveModelDeploymentQuota_TrueCoversEveryRole(t *testing.T) {
 	md := twoRoleDeployment()
 

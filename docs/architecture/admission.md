@@ -93,6 +93,11 @@ accelerator in the pool.
   accelerator twice.
 - The verdict message names the role that is starved.
 
+> **Nothing this operator renders produces a multi-PodSet Workload today.** A `ModelDeployment`
+> admits each replica as its own pod group of one, so the reasoning above describes the check's
+> shape rather than a state its own workloads reach. It stands because the check answers for every
+> workload in the queues it is referenced from, not only for the ones rendered here.
+
 The ledger seeds every accelerator at `M`, so an exclusive over-admit coarse `credits` let through is
 caught exactly and held with `Retry`, transient and self-healing once Kueue re-admits after the backoff.
 A **check-only** gate: never preempts, never `Rejected`.

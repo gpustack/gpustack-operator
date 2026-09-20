@@ -113,20 +113,23 @@ func (r *ModelDeploymentWebhook) ReceiveDeletionUpdate() {}
 // have it. A role that names no count is asking for the ordinary thing — a card — and until now it
 // got a replica that requested no accelerator at all.
 //
-// THE COST OF LEAVING IT UNSET IS NOT A SMALLER REPLICA, it is a deployment that never starts. An
-// accelerated pool's ClusterQueue covers only that manufacturer's credits, so a role requesting no
-// accelerator requests nothing the queue covers. A Workload whose ONLY PodSet is such a role is
-// admitted, with an assignment carrying no flavors.
+// THE COST OF LEAVING IT UNSET IS NOT A SMALLER REPLICA, it is a replica that runs outside the
+// quota it was supposed to be answerable to. An accelerated pool's ClusterQueue covers only that
+// manufacturer's credits, so a role requesting no accelerator requests nothing the queue covers --
+// and the manager is configured to ignore what a queue does not declare. Measured on a cluster: the
+// Workload of such a replica reserves, reports Admitted, its Pod runs, and the queue's usage of
+// those credits stays at zero. Nothing errors anywhere.
 //
-// Add a second PodSet of any kind and the scheduler writes an admission carrying fewer assignments
-// than the Workload has PodSets, the API refuses it, and the Workload is requeued immediately and
-// forever -- measured at roughly a hundred scheduling cycles a second, with the deployment parked
-// and nothing reporting why. So this surfaces on a multi-role deployment whether or not its other
-// roles ask for cards: a mixed deployment is refused exactly like an all-uncovered one.
+// THAT IS A QUIETER FAILURE THAN THE ONE IT REPLACES, which is why the rule outlived its first
+// reason. While a role was one PodSet of a Workload shared with its siblings, the same shape made
+// the scheduler write fewer assignments than the Workload had PodSets, the API refused the update,
+// and the Workload requeued forever -- roughly a hundred scheduling cycles a second, parked and
+// loud. Each replica carries its own single-PodSet Workload now, so that collision cannot happen;
+// what is left is a replica holding accelerators nobody charged it for.
 //
 // AN EXPLICIT ZERO IS LEFT ALONE. Zero is a value the user wrote, and silently replacing it would
-// make the request stop meaning what it says. Validation refuses the multi-PodSet shape that Kueue
-// cannot admit and points a CPU-only replica at a CPU-only InstanceType instead.
+// make the request stop meaning what it says. Validation refuses it on an accelerated type shared
+// with another role and points a CPU-only replica at a CPU-only InstanceType instead.
 //
 // IT RUNS ON UPDATE AS WELL AS CREATE, because roles are not frozen: a deployment edited to add a
 // second role would otherwise carry an undefaulted one and reach exactly the state above. The
@@ -146,9 +149,11 @@ func (r *ModelDeploymentWebhook) Default(ctx context.Context, obj runtime.Object
 		return nil
 	}
 
-	// Roles must all name one InstanceType, but that is a VALIDATION rule and validation has not run
-	// yet -- mutating admission comes first. So each role is defaulted against the type it names,
-	// and the reads are memoized rather than assumed to be one.
+	// Roles may each name a DIFFERENT InstanceType, so each is defaulted against the type it names
+	// and the reads are memoized rather than assumed to be one. That is no longer a defense against
+	// running before validation -- it is the shape: a deployment's roles are admitted as a set
+	// ACROSS types, one group per replica, so several types in one object is ordinary rather than a
+	// state some later rule rejects.
 	seen := make(map[string]*worker.InstanceType, 1)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
@@ -679,14 +684,19 @@ func validateModelDeploymentKVCache(md *workercore.ModelDeployment) field.ErrorL
 	)}
 }
 
-// modelDeploymentMaxRoles is the number of roles one deployment may declare, and it is KUEUE'S
-// number rather than this project's: each role becomes one PodSet of the group's single Workload,
-// and Workload.spec.podSets is capped at ten.
+// modelDeploymentMaxRoles is the number of roles one deployment may declare.
 //
-// THE VALUE MUST BE READ OFF THE KUEUE THAT RUNS, not off the type library this module compiles
-// against. The two are deliberately different versions here, and this cap has moved between Kueue
-// releases, so go-to-definition answers a question about the wrong tree: the number to check against
-// is the podSets maxItems in the Workload CRD the cluster has installed.
+// IT WAS KUEUE'S NUMBER AND IS NOW THIS PROJECT'S, which is the whole of what changed. While every
+// role was one PodSet of a single Workload, this was Workload.spec.podSets's own maxItems and the
+// value had to be read off the Kueue that runs rather than the type library this module compiles
+// against. Each replica is admitted as its own Workload carrying one PodSet now, so no Kueue bound
+// constrains how many roles a deployment declares, and ten is a product bound: a prefill/decode
+// deployment names two, nothing rendered here has a use for ten, and an unbounded count would let
+// one object fan out into arbitrarily many Workloads, Services and queue references with no answer
+// at admission time.
+//
+// SO THE NUMBER IS NO LONGER WORTH CHECKING AGAINST A CLUSTER, which the wording this replaces
+// asked a reader to do. Raising it is a product decision, not a Kueue upgrade.
 const modelDeploymentMaxRoles = 10
 
 // validateModelDeploymentRolesCount caps the number of roles.
@@ -707,20 +717,20 @@ func validateModelDeploymentRolesCount(md *workercore.ModelDeployment) field.Err
 	return field.ErrorList{field.Invalid(
 		field.NewPath("spec", "roles"), len(md.Spec.Roles),
 		fmt.Sprintf(
-			"at most %d roles: every role becomes one PodSet of the deployment's single Kueue "+
-				"Workload, and Kueue caps Workload.spec.podSets at %d — an extra role produces a "+
-				"Workload the API server will not store, which surfaces as a Workload that is never "+
-				"created rather than as an error on this object",
-			modelDeploymentMaxRoles, modelDeploymentMaxRoles,
+			"at most %d roles: every role renders its own replicas, Services and queue references, "+
+				"and a deployment naming more than that is a shape this operator does not serve — a "+
+				"prefill/decode deployment names two",
+			modelDeploymentMaxRoles,
 		),
 	)}
 }
 
 // validateModelDeploymentRoleNames refuses two roles sharing a name.
 //
-// The name becomes the Kueue PodSet name, so a duplicate does not collide — it MERGES. Two roles
-// with one name are grouped into a single PodSet whose count is their sum, and the deployment then
-// runs a shape nobody asked for with nothing reporting it.
+// A replica's Kueue group is derived from the role's name and the replica's ordinal, so two roles
+// sharing a name put their same-numbered replicas in ONE group — a group that declares a total of
+// one and now holds two members. Kueue answers the excess by deleting the newer of them, so one
+// role's replica is removed on account of the other's, repeatedly, with nothing reporting why.
 //
 // The name's SHAPE — Kueue's PodSetReference pattern and its 63-character bound — is the schema's,
 // not restated here. Structural validation runs before this handler, so a pattern check here could
@@ -752,8 +762,9 @@ func validateModelDeploymentRoleNames(md *workercore.ModelDeployment) field.Erro
 		errs = append(errs,
 			field.Duplicate(rolesPath.Index(i).Child("name"), name),
 			field.Invalid(rolesPath.Index(i).Child("name"), name, fmt.Sprintf(
-				"a role name is its Kueue PodSet name, so this does not collide with %s — it MERGES, "+
-					"grouping both roles into one PodSet whose count is their sum",
+				"a role's name is part of the Kueue group each of its replicas joins, so this does "+
+					"not collide with %s — it puts the two roles' same-numbered replicas into one "+
+					"group that declares a single member, and Kueue deletes whichever arrived later",
 				rolesPath.Index(first).Child("name"))))
 	}
 
@@ -1181,9 +1192,21 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 	return append(errs, validateModelDeploymentPairCannotShareOneAccelerator(md, seen, rolesPath)...), nil
 }
 
-// validateModelDeploymentZeroAcceleratorInMultiRoleGroup refuses a PodSet that requests nothing an
-// accelerated queue covers when another PodSet shares its Workload. Kueue cannot persist a partial
-// assignment for that Workload and otherwise retries the rejected update without backoff.
+// validateModelDeploymentZeroAcceleratorInMultiRoleGroup refuses a role that requests nothing an
+// accelerated queue covers while sharing that instance type with another role.
+//
+// WHAT IT PREVENTS IS A REPLICA THAT RUNS UNCHARGED. The queue covers only the manufacturer's
+// credits and the manager ignores what a queue does not declare, so such a replica reserves,
+// reports Admitted and runs while the queue's usage of those credits stays at zero -- measured on a
+// cluster, with nothing erroring. Its siblings on the same type are charged for every card they
+// hold and compete for a pool this one spends from without being counted.
+//
+// THE RULE IS SCOPED TO A SHARED TYPE rather than to every zero, because a role alone on an
+// acceleratable type is a deployment whose whole pool went uncharged -- visible as a deployment
+// that never consumes quota -- while one hidden among charged siblings is not visible at all.
+// NOTE that the reason above is not the one this rule was written for. That one was Kueue refusing
+// a partial assignment for a Workload whose PodSets outnumbered its assignments, and it cannot
+// happen now that every replica carries a Workload of a single PodSet.
 func validateModelDeploymentZeroAcceleratorInMultiRoleGroup(
 	md *workercore.ModelDeployment,
 	instanceTypes map[string]*worker.InstanceType,
@@ -1206,9 +1229,11 @@ func validateModelDeploymentZeroAcceleratorInMultiRoleGroup(
 		errs = append(errs, field.Invalid(
 			rolesPath.Index(i).Child("resources", "accelerator"), role.Resources.Accelerator.String(),
 			fmt.Sprintf(
-				"must be greater than zero because multiple roles using acceleratable instance type %q "+
-					"form one Workload whose queue accounts only in accelerator credits; request at least "+
-					"one accelerator or use a non-acceleratable instance type for this CPU-only role",
+				"must be greater than zero because the queue behind acceleratable instance type %q "+
+					"accounts only in accelerator credits: this role's replicas would be admitted and "+
+					"run while that queue charges them nothing, spending from the pool its sibling "+
+					"roles on the same type are charged for; request at least one accelerator or use "+
+					"a non-acceleratable instance type for this CPU-only role",
 				role.InstanceType,
 			),
 		))
@@ -1303,19 +1328,26 @@ func validateModelDeploymentPairCannotShareOneAccelerator(
 // validateModelDeploymentBarrierIsInstallable refuses a deployment whose roles span several
 // instanceTypes when nothing in the cluster can gate the set.
 //
-// SEVERAL instanceTypes ARE SEVERAL POD GROUPS AND SEVERAL WORKLOADS, and Kueue's own atomicity
-// covers one group. What relates them is the joint-admission check, and that check reaches a Workload
-// only through a ClusterQueue that references it -- which the queue reconciler does only while the
-// derived-from-node setting is on. With it off an administrator authors queues through the
-// InstanceType API, no queue carries the check, and the barrier is not installed anywhere.
+// SEVERAL instanceTypes ARE SEVERAL CLUSTER QUEUES, and the queues are what this rule turns on.
+// Being several Workloads is not what separates the refused shape from the accepted one -- every
+// deployment of more than one replica is several Workloads, since each replica is admitted as its
+// own. Being answered by several QUEUES is. What relates Workloads across queues is the
+// joint-admission check, and that check reaches a Workload only through a ClusterQueue that
+// references it -- which the queue reconciler does only while the derived-from-node setting is on.
+// With it off an administrator authors queues through the InstanceType API, no queue carries the
+// check, and the barrier is not installed anywhere.
 //
 // THE SHAPE IS REFUSED RATHER THAN ADMITTED UNGUARDED. Admitting it would let a prefiller start and
 // serve while its decoder waits for capacity that never arrives -- a deployment that reads as
 // half-started and is in fact never going to finish, with nothing naming the reason. A refusal at the
 // API names the setting, which is the one thing the operator can act on.
 //
-// A SINGLE-instanceType DEPLOYMENT IS UNAFFECTED whatever the setting says: it is one group, and one
-// group is admitted as a unit by Kueue without help from anything here.
+// A SINGLE-instanceType DEPLOYMENT IS NOT REFUSED HERE whatever the setting says, and that is
+// narrower than it reads. Its roles are still several Workloads and Kueue still admits them one at
+// a time; what it is not is several queues, so there is no second quota pool that can be empty
+// while the first is not. The joint-admission barrier still covers such a deployment wherever a
+// queue carries the check -- this rule is about the shape no check can be installed for, not about
+// a shape that needs none.
 func validateModelDeploymentBarrierIsInstallable(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) field.ErrorList {

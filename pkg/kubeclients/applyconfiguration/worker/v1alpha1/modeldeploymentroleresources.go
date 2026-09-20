@@ -22,8 +22,9 @@ type ModelDeploymentRoleResourcesApplyConfiguration struct {
 	// object rather than applied at render time, so what was admitted is what can be read back.
 	// - AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable
 	// InstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is
-	// the only role using that type, and refused when another role shares the type because the
-	// resulting multi-PodSet Workload cannot be admitted by that queue.
+	// the only role using that type, and refused when another role shares the type: replicas
+	// asking for nothing the queue accounts in are admitted and run while that queue charges
+	// them nothing, spending from the pool their siblings on that type are charged for.
 	// - A Pod meant to run without an accelerator belongs on an InstanceType that is not
 	// acceleratable, where CPU is what the queue accounts in.
 	Accelerator *resource.Quantity `json:"accelerator,omitempty"`
