@@ -1984,7 +1984,8 @@ func pdRole(name string, kind workercore.ModelDeploymentRoleKind, instanceType s
 	}
 }
 
-// TestModelDeploymentWebhook_APairMayNotShareOneAccelerator covers F4.
+// TestModelDeploymentWebhook_APairMayNotShareOneAccelerator covers when a shared accelerator is
+// refused and when it is not.
 //
 // THE QUALIFIER IS WHAT THE TABLE IS FOR. A rule with none refuses every sliced pair and blocks the
 // heterogeneous shape two instanceTypes exist to enable; a rule keyed on the type NAMES being
@@ -2329,7 +2330,7 @@ func withDerivedFromNode(t *testing.T, on bool) {
 	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-derived-from-node": strconv.FormatBool(on)})
 }
 
-// TestModelDeploymentWebhook_SeveralInstanceTypesNeedTheBarrier covers the refusal T6 adds, in both
+// TestModelDeploymentWebhook_SeveralInstanceTypesNeedTheBarrier covers the barrier refusal in both
 // directions.
 //
 // THE POSITIVE CASE IS WHAT MAKES THE REFUSAL MEAN ANYTHING. Without it, a rule refusing every

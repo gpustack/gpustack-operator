@@ -771,9 +771,11 @@ type ModelDeploymentRoleStatus struct {
 	// +required
 	Name string `json:"name" protobuf:"bytes,1,name=name"`
 
-	// Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Both are
-	// ALWAYS present: they are counted from a Pod list that succeeded, so a zero here is an observed
-	// zero. A failed list writes no status at all.
+	// Desired is how many INSTANCES the spec asks for, and Ready is how many of them are Ready. Both
+	// count instances rather than Pods, which is the same number only while an instance is one Pod: a
+	// role of two instances of four Pods reports two, and an instance is Ready only when every Pod it
+	// declares is. Both are ALWAYS present -- they are counted from a Pod list that succeeded, so a
+	// zero here is an observed zero. A failed list writes no status at all.
 	Desired int32 `json:"desired" protobuf:"varint,2,name=desired"`
 
 	Ready int32 `json:"ready" protobuf:"varint,3,name=ready"`

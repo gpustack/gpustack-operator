@@ -176,7 +176,7 @@ func TestModelDeploymentReplicaGroupName_HashCoversTheNamespace(t *testing.T) {
 		modelDeploymentReplicaGroupName(there, "prefill", 0))
 }
 
-// TestModelDeploymentReplicaGroupName_ShapeIndependentOfRoleCount is AC2.1, the property the
+// TestModelDeploymentReplicaGroupName_ShapeIndependentOfRoleCount covers the property the
 // sole-role branch used to break: a first role's replicas name their groups identically whether
 // that role is the only one or one of several, so gaining or losing a SIBLING ROLE moves no group
 // name and turns nothing over.

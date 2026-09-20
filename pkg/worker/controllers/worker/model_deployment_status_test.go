@@ -290,7 +290,7 @@ func TestComputeModelDeploymentStatus_Unmanaged(t *testing.T) {
 //
 // "Not assigned yet" and "assigned to a flavor whose name is empty" are different facts, and a
 // present list collapses them into one that READS AS AN ASSIGNMENT. The assertion is therefore nil,
-// not [], on the same object across two observations -- which is also what Story 4 needs: an
+// not [], on the same object across two observations -- which is also what a reader needs: an
 // operator asking which accelerator model a role actually landed on must be able to tell "not yet"
 // from an answer.
 func TestModelDeploymentStatus_AssignedFlavorIsAbsentUntilItIsAssigned(t *testing.T) {
@@ -368,7 +368,7 @@ func TestModelDeploymentStatus_AssignedFlavorIsAbsentUntilItIsAssigned(t *testin
 		"a Workload that names no assignment for this role has no answer for it")
 }
 
-// TestModelDeploymentStatus_QuotaReservedCountsReplicas is AC7's first acceptance: the count that
+// TestModelDeploymentStatus_QuotaReservedCountsReplicas pins the count that
 // says how far into admission a role actually is.
 //
 // ONE WORKLOAD PER REPLICA IS WHAT MAKES THE COUNT REACHABLE. A role that shared one workload
@@ -423,7 +423,7 @@ func TestModelDeploymentStatus_QuotaReservedCountsReplicas(t *testing.T) {
 	}
 }
 
-// TestModelDeploymentStatus_MixedFlavorsAcrossReplicas is AC7's third acceptance, and the state one
+// TestModelDeploymentStatus_MixedFlavorsAcrossReplicas covers the state one
 // PodSet per role could not produce.
 //
 // TWO REPLICAS OF ONE ROLE CARRY TWO DIFFERENT ASSIGNMENTS. Kueue assigns a flavor per workload and
@@ -882,8 +882,8 @@ func TestObserveModelDeploymentQuota(t *testing.T) {
 	}
 }
 
-// TestObserveModelDeploymentQuota_TrueCoversEveryRole is F8's last acceptance: True cannot be true
-// for one role and not another.
+// TestObserveModelDeploymentQuota_TrueCoversEveryRole pins the one thing the condition may not do:
+// be true for one role and not another.
 //
 // IT USED TO HOLD BY CONSTRUCTION AND NOW IT IS ENFORCED, which is why the case matters more than it
 // did. With one Workload covering both PodSets there was no way for the condition to disagree
@@ -975,7 +975,7 @@ func TestObserveModelDeploymentQuota_AllReplicasTerminating(t *testing.T) {
 	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder), "all 2 replicas")
 }
 
-// TestSyncModelDeploymentStatus_RebuiltWholesale is F7's last acceptance, and the reason every
+// TestSyncModelDeploymentStatus_RebuiltWholesale is the reason every
 // observed field is derived rather than patched: a value that was true once must not survive a
 // disagreement with the Pods.
 func TestSyncModelDeploymentStatus_RebuiltWholesale(t *testing.T) {
@@ -1023,7 +1023,7 @@ func TestSyncModelDeploymentStatus_WritesNothingWhenUnchanged(t *testing.T) {
 	assert.Equal(t, 1, writes.statusUpdates, "an unchanged status must not be written again")
 }
 
-// TestSyncModelDeploymentStatus_AFailingListWritesNoStatus is AC7's second acceptance, and the rule
+// TestSyncModelDeploymentStatus_AFailingListWritesNoStatus pins the rule
 // is the counterfactual in its name.
 //
 // "I COULD NOT SEE" AND "THERE ARE NONE" MUST NOT SHARE A READING. The quota count sits beside

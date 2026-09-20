@@ -70,7 +70,8 @@ func TestRenderModelDeploymentService_IsOneClusterIPForEveryReplica(t *testing.T
 	assert.True(t, modelDeploymentOwns(svc, getModelDeployment(t, cli)))
 }
 
-// TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide is T7's shape.
+// TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide covers which Services exist and
+// what each of them fronts.
 //
 // WHY A P/D DEPLOYMENT NEEDS THIS AT ALL: the two roles are deliberately different configurations,
 // so an address resolving to "whichever replica" is an address for neither of them — a decoder has
@@ -314,7 +315,7 @@ func TestRenderModelDeploymentServices_AtSizeOneIsUnchanged(t *testing.T) {
 	}
 }
 
-// TestRenderModelDeploymentService_Port covers both readings of F9's rule, including that the
+// TestRenderModelDeploymentService_Port covers both readings of the port rule, including that the
 // Service and the container behind it can never name different ports — they read one render.
 func TestRenderModelDeploymentService_Port(t *testing.T) {
 	testCases := []struct {
@@ -553,7 +554,7 @@ func TestModelDeploymentEndpointReadsEveryFlagTheEngineGets(t *testing.T) {
 			"cannot see it")
 }
 
-// TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService is F9's third acceptance. The
+// TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService pins what a scale owes it. The
 // Service holds an allocated ClusterIP that every client which resolved the name is still using, so
 // a scale must move its endpoints and leave the object alone.
 func TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService(t *testing.T) {

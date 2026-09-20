@@ -1218,8 +1218,8 @@ func TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput(t *testing.T) {
 	}
 }
 
-// TestRenderModelDeploymentPod_ConfigChangeMovesTheSpecHash is the rollout property T14 exists for,
-// and the one a ConfigMap carrier could not have delivered.
+// TestRenderModelDeploymentPod_ConfigChangeMovesTheSpecHash is the rollout property a ConfigMap
+// carrier could not have delivered.
 //
 // A ConfigMap reaches a Pod as a NAME, so re-rendering its contents leaves core.PodSpec
 // byte-identical while the hash's subject is {Labels, Annotations, PodSpec}. The hash would not

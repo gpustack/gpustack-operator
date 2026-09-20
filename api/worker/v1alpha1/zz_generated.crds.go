@@ -4777,7 +4777,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															XListType: ptr.To[string]("atomic"),
 														},
 														"desired": {
-															Description: "Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Both are\nALWAYS present: they are counted from a Pod list that succeeded, so a zero here is an observed\nzero. A failed list writes no status at all.",
+															Description: "Desired is how many INSTANCES the spec asks for, and Ready is how many of them are Ready. Both\ncount instances rather than Pods, which is the same number only while an instance is one Pod: a\nrole of two instances of four Pods reports two, and an instance is Ready only when every Pod it\ndeclares is. Both are ALWAYS present -- they are counted from a Pod list that succeeded, so a\nzero here is an observed zero. A failed list writes no status at all.",
 															Type:        "integer",
 															Format:      "int32",
 														},

@@ -7737,7 +7737,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 					},
 					"desired": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Both are ALWAYS present: they are counted from a Pod list that succeeded, so a zero here is an observed zero. A failed list writes no status at all.",
+							Description: "Desired is how many INSTANCES the spec asks for, and Ready is how many of them are Ready. Both count instances rather than Pods, which is the same number only while an instance is one Pod: a role of two instances of four Pods reports two, and an instance is Ready only when every Pod it declares is. Both are ALWAYS present -- they are counted from a Pod list that succeeded, so a zero here is an observed zero. A failed list writes no status at all.",
 							Default:     0,
 							Type:        []string{"integer"},
 							Format:      "int32",

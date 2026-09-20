@@ -13,9 +13,11 @@ import (
 type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// Name is the role this entry describes.
 	Name *string `json:"name,omitempty"`
-	// Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Both are
-	// ALWAYS present: they are counted from a Pod list that succeeded, so a zero here is an observed
-	// zero. A failed list writes no status at all.
+	// Desired is how many INSTANCES the spec asks for, and Ready is how many of them are Ready. Both
+	// count instances rather than Pods, which is the same number only while an instance is one Pod: a
+	// role of two instances of four Pods reports two, and an instance is Ready only when every Pod it
+	// declares is. Both are ALWAYS present -- they are counted from a Pod list that succeeded, so a
+	// zero here is an observed zero. A failed list writes no status at all.
 	Desired *int32 `json:"desired,omitempty"`
 	Ready   *int32 `json:"ready,omitempty"`
 	// QuotaReserved is how many of the role's replicas hold a quota reservation. Each replica is

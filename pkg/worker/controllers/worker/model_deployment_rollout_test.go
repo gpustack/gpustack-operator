@@ -826,7 +826,7 @@ func TestModelDeploymentRollout_TheGapARolloutOpensStaysTheRollouts(t *testing.T
 // per-role lookup could not make: a role that lost ONE replica's workload while the others keep
 // theirs is not a replacement, because no replica is missing.
 //
-// THE FIXTURE IS THE T5 HANDOFF'S OWN EXAMPLE. Three replicas declared, three Pods live, and the
+// THE FIXTURE IS THE ONE THAT FOUND THIS. Three replicas declared, three Pods live, and the
 // middle one's workload deleted by hand while its siblings' survive: the old role-granularity
 // lookup hit a sibling's workload for the whole role, and the quota axis reported the survivors'
 // reservation for the missing one. The rollout axis stayed silent here -- a missing WORKLOAD is not

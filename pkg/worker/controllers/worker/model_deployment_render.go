@@ -538,7 +538,7 @@ func stampModelDeploymentPod(
 	// the converger, a sibling's entrypoint -- derives the same string from the same four values
 	// without reading anything.
 	//
-	// AT SIZE ONE THE NAME STAYS GENERATED, deliberately. F3 obtains a replica's identity from its
+	// AT SIZE ONE THE NAME STAYS GENERATED, deliberately. A replica's identity is obtained from its
 	// ordinal label rather than from its name, so naming single-Member replicas would buy nothing
 	// and would cost the one thing GenerateName gives: a create that cannot collide with a Pod of
 	// the same ordinal still draining, which is exactly the state the converger's create gate waits

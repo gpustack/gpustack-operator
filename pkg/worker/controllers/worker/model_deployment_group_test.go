@@ -76,7 +76,8 @@ func replicaRoleCounts(t *testing.T, cli ctrlcli.Client) map[string]int {
 	return counts
 }
 
-// TestModelDeployment_GroupIsCreatedInOnePass is F2's first obligation.
+// TestModelDeployment_GroupIsCreatedInOnePass covers what a pass owes Kueue before it can
+// compose anything at all.
 //
 // Kueue composes NO Workload for a group it has not fully seen: fewer runnable Pods than the
 // declared total is an unretryable compose error. Every group is one replica now, so the group is
@@ -134,7 +135,7 @@ func TestModelDeployment_GroupMembersAgreeAndAreOwned(t *testing.T) {
 	}
 }
 
-// TestModelDeployment_ScaleUpKeepsTheSurvivorsAndAddsTheMissingOrdinal is AC1.4, the property the
+// TestModelDeployment_ScaleUpKeepsTheSurvivorsAndAddsTheMissingOrdinal covers the property the
 // per-replica groups buy: a replicas change moves no total any running Pod carries and no group any
 // running Pod is a member of, so the survivors are left exactly as they stand and only the ordinals
 // the new count names that no Pod holds are created.
@@ -185,8 +186,8 @@ func TestModelDeployment_ScaleUpKeepsTheSurvivorsAndAddsTheMissingOrdinal(t *tes
 	assert.Equal(t, map[string]int{"1": 5}, groupTotals(t, cli))
 }
 
-// TestModelDeployment_ScaleDownRemovesTheDepartingOrdinalsWorkload is AC1.5, and the Workload half
-// is the point.
+// TestModelDeployment_ScaleDownRemovesTheDepartingOrdinalsWorkload removes both halves, and the
+// Workload half is the point.
 //
 // A scale-down removes the Pod AND the Workload of the replica whose ordinal the new count no
 // longer names, from the high end. The Pod alone would leak: the departing replica's Workload holds
@@ -470,10 +471,10 @@ func TestModelDeployment_HandDeletedReplicaIsRecreatedWithoutARebuild(t *testing
 	assert.Equal(t, map[string]int{"1": 4}, groupTotals(t, cli))
 }
 
-// TestModelDeploymentPodGroupIncomplete_IsAReportedStateNotASilentOne is T9, at the level this tree
-// can reach.
+// TestModelDeploymentPodGroupIncomplete_IsAReportedStateNotASilentOne covers it at the level this
+// tree can reach.
 //
-// F2's failure mode is SILENCE: a group short of its declared total has Pods, they are gated, Kueue
+// The failure mode of an incomplete group is SILENCE: a group short of its declared total has Pods, they are gated, Kueue
 // composes no Workload at all, and nothing says why. So the assertion is the ABSENCE of a Workload
 // alongside a condition that names the absence -- and an absence is exactly the assertion that
 // passes for the wrong reason when the query is wrong.
@@ -524,7 +525,7 @@ func TestModelDeploymentPodGroupIncomplete_IsAReportedStateNotASilentOne(t *test
 	require.Len(t, wlList.Items, 1, "the control: this List does return Workloads it can see")
 	require.Equal(t, control.Name, wlList.Items[0].Name)
 
-	// And none of them is ours, which is the state F2 describes.
+	// And none of them is ours, which is the state an incomplete group leaves behind.
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 	pods, err := r.listModelDeploymentPods(context.Background(), md)
 	require.NoError(t, err)
@@ -924,7 +925,8 @@ func groupNameCounts(t *testing.T, cli ctrlcli.Client) map[string]int {
 	return counts
 }
 
-// TestModelDeployment_TwoTypesAreCreatedAsTwoGroupsInOnePass is F2's obligation for the split shape.
+// TestModelDeployment_TwoTypesAreCreatedAsTwoGroupsInOnePass is the same obligation for the split
+// shape.
 //
 // Both roles' every ordinal is created by the SAME pass, for the reason the single-group case
 // already states: Kueue composes no Workload for a group it has not seen its member of, so a
