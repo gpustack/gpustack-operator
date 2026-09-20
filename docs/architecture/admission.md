@@ -94,9 +94,12 @@ accelerator in the pool.
 - The verdict message names the role that is starved.
 
 > **Nothing this operator renders produces a multi-PodSet Workload today.** A `ModelDeployment`
-> admits each replica as its own pod group of one, so the reasoning above describes the check's
-> shape rather than a state its own workloads reach. It stands because the check answers for every
-> workload in the queues it is referenced from, not only for the ones rendered here.
+> admits each replica as a pod group of its own, and every member of that group carries the same
+> role — so the Workload holds one PodSet, whose count is the role's `size`, never one per role.
+>
+> The reasoning above therefore describes the check's shape rather than a state its own workloads
+> reach. It stands because the check answers for every workload in the queues it is referenced
+> from, not only for the ones rendered here.
 
 The ledger seeds every accelerator at `M`, so an exclusive over-admit coarse `credits` let through is
 caught exactly and held with `Retry`, transient and self-healing once Kueue re-admits after the backoff.

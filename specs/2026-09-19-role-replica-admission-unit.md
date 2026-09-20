@@ -1227,7 +1227,7 @@ implementation.
       becomes an acceptance.
       Verify: `bash .agents/skills/gpustack-operator-e2e/cases/case-79.sh <NS>`
 
-- [ ] **T17 · Documentation for the multi-Member shape**
+- [x] **T17 · Documentation for the multi-Member shape**
       Blocked by: T12, T13, T14, T15
       Owns: `docs/reference/model-deployment.md`, `api/worker/v1alpha1/model_deployment.go`
       Acceptance: The reference page states the four-level vocabulary, what `size` costs to change

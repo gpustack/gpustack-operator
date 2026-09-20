@@ -36,6 +36,11 @@ are absent when the corresponding rendered Pods do not carry publisher configura
 role except the three shapes listed below, which carry no gates and keep the weaker meaning. One
 still loading its model counts as not ready for as long as that takes.
 
+**Both figures count replicas, which is the same as counting Pods only while a replica is one Pod.**
+A role at `size: 2` with `replicas: 2` runs four Pods and reports `desired: 2`. A replica of several
+Pods is ready only when **every** member it declares is, so a role showing `1/2` with three of its
+four Pods running is reporting one whole instance, not three quarters of the role.
+
 A gated replica carries a startup gate, a readiness gate and a liveness gate, all reading the
 engine's own `GET /health` on the port the Service targets, so `ready == desired` and "the endpoint
 answers" are one fact rather than two.
