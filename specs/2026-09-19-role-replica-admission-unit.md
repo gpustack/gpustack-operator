@@ -1,15 +1,15 @@
 # Spec: Role Replica Admission Unit
 
-Status: Built
-Blocked on: the end-to-end suite, and nothing else. Every other gate is green — the unit tests, both
-lint targets, and four rounds of measurement on a live cluster, each recorded beside the claim it
-settles. What is owed is e2e: five existing cases assert the shape this spec replaces (45, 49, 50,
-51 and 68), and one new case has no stand-in anywhere — the scale that leaves a surviving replica's
-UID untouched, which is the whole point of the change and which nothing currently asserts at any
-level. Case 68 is the instructive one: it passes today and will keep passing, because its fixtures
-are all single-replica and its assertions count group names rather than name them, so it is blind
-to the change rather than broken by it. Running any of this needs an operator image built and
-deployed, which is why it is a step rather than a missing conclusion.
+Status: Building
+Blocked on: the multi-Pod instance render path, which this spec now carries rather than defers. Its
+substrate is settled and measured (F8, T10), `size` is already immutable and legal above one (T11),
+and what is open is the rendering and the converger behind it (T12, T13).
+The first half — one replica as the admission unit — is built and has been run end to end on a live
+two-node cluster: cases 1, 45, 49, 50, 51, 61 and 68 all execute, and every failure that round
+produced was in the suite rather than in the operator (assertions still written for one Workload per
+role, three waits whose predicate was expanded before the wait began, and one status read taken a
+reconcile too early). Those are fixed. What is owed is the second half: a role's replica may still
+only be one Pod, and the field that says otherwise is validated to `1`.
 Type: Feature
 
 ## Summary
@@ -20,9 +20,17 @@ every running replica of that role. Each one reloads its model weights and the r
 a window with no serving capacity at all. This spec narrows the admission unit from *a role* to
 *one replica*, so a replica count change adds or removes exactly the replicas it names and leaves
 every other one running. It also splits the one number a role carries today into the two it has
-always meant — **how many independent serving instances** and **how large one instance is** — so
-that a future multi-Pod instance (tensor/pipeline/expert parallelism across hosts) has a field to
-live in rather than being conflated with the replica count.
+always meant — **how many independent serving instances** and **how large one instance is**.
+
+The second number is then made to work. A role's replica may be **several fate-sharing Pods** —
+which is what tensor, pipeline, expert or sequence parallelism across hosts requires — rendered as
+Pods this operator names itself, so that member `-m0` is durably the leader and every member has a
+stable address to find the others by. The two numbers answer different questions and are edited on
+different terms: **`replicas` is the horizontal one** and changing it disturbs nothing already
+running, **`size` is the shape of one instance** and is frozen after creation. Admission stays
+Kueue's: one pod group per replica, `size` members in it, and the existing joint barrier gates the
+whole deployment as a set. This is deliberately the capability a LeaderWorkerSet provides, obtained
+without adding LeaderWorkerSet as a CRD, controller and chart dependency.
 
 ## Motivation
 
@@ -46,16 +54,37 @@ live in rather than being conflated with the replica count.
    still admits as a whole or not at all; only the unit the barrier enumerates changes.
 5. **The status can report a partially admitted role.** With one Workload per replica, "2 of 3
    admitted" becomes a reachable state and must be readable.
+6. **A replica may be several Pods that share a fate.** `size: n` renders one replica as `n` Pods
+   that are admitted together, become ready together and are replaced together, with a durable
+   leader at ordinal `-0` and an address every member can reach its peers on. This is what a model
+   too large for one host needs — tensor, pipeline, expert or sequence parallelism all place ranks
+   on separate hosts and require the ranks to find each other before any of them serves.
+7. **The two numbers are edited on different terms, and the API enforces the difference.**
+   `replicas` is the horizontal control and may be changed at any time, disturbing nothing already
+   running. `size` is the shape of one instance: it is **frozen after creation**, because every
+   member of a running instance was built for the rank layout the old value described. Refusing the
+   edit is better than performing it as a mass replacement — the user who wanted a different shape
+   wanted a different deployment, and the one who typed it by accident gets told rather than
+   charged for a full rebuild.
 
 ### Non-Goals
 
-1. **Rendering a multi-Pod instance.** This spec defines the field and pins its semantics; the
-   render path for an instance larger than one Pod — per-member hostnames, a headless Service,
-   member index and instance size reaching the engine — is deliberately deferred. The field ships
-   now and is validated to `1` until that path exists; the reasoning is recorded in Open Question 3.
-2. **Switching the workload substrate.** Replicas stay operator-created `core.Pod` objects. This
-   spec deliberately moves the admission unit to where a LeaderWorkerSet would put it, so that a
-   later substrate change is an increment rather than a rewrite, but it does not make that change.
+1. **Adopting LeaderWorkerSet.** The capability is in scope; the dependency is not. LWS would
+   supply stable names, a leader ordinal and a rolling update, but as a CRD, a controller, a chart
+   subchart and a Go module — and its Kueue integration would then own admission, which is where
+   the value of this spec lives. Naming the Members and giving them a headless Service supplies the
+   same three properties from `core/v1` alone. ⭐ LWS is itself the evidence that the substrate
+   buys less than it appears to: it is built on StatefulSets and **still** carries its own Pod
+   controller and its own revision bookkeeping, because neither a StatefulSet's replacement nor its
+   rolling update survives contact with a Kueue pod group. Alternatives records what is given up:
+   LWS's `maxSurge`, its two-template leader/worker split, and its restart-on-member-failure policy.
+2. **Driving an engine's parallelism arguments.** The operator renders what a multi-Pod instance
+   needs from Kubernetes — members, ordinals, a leader address, a joint admission — and passes the
+   rank layout to the container as environment. It does not compose `--tensor-parallel-size` or its
+   siblings: the degrees do not decompose from `size` alone (under pipeline parallelism the member
+   count is a product of two degrees), and a formula missing an input is worse than no formula
+   because it passes. Declaring the degrees as fields is separate work, tracked upstream of this
+   spec at <https://github.com/gpustack/gpustack-operator/issues/203>.
 3. **A configurable rollout policy.** The cadence stays one replica per role per pass. `maxSurge`
    and `maxUnavailable` are not introduced: surge on an accelerated pool costs a whole extra card
    of quota for the duration of the rollout, and a surge replica that cannot be admitted stalls
@@ -68,9 +97,40 @@ live in rather than being conflated with the replica count.
 
 ## Proposal
 
-The deployment keeps rendering one Pod per replica and keeps admitting through Kueue, and Pod names
-keep coming from the API server. What changes is the size of the group each Pod joins, the fact that
-each replica now carries an ordinal identifying it, and the unit the joint-admission barrier counts.
+A deployment admits through Kueue as it does today. What changes is the size of the group each Pod
+joins, the fact that each replica carries an ordinal identifying it, the unit the joint-admission
+barrier counts, and — for a role whose `size` is above one — the object that carries a replica's
+Pods.
+
+### Vocabulary
+
+Four levels, and each has exactly one name. The rest of this spec uses these words and no synonyms.
+
+| Level | Name | What it is | Carried by | Kueue sees |
+|---|---|---|---|---|
+| 1 | **Deployment** | one `ModelDeployment` | the CR | a set the barrier gates as a whole |
+| 2 | **Role** | one entry of `spec.roles[]` — `prefill`, `decode` | nothing of its own | a PodSet name, repeated |
+| 3 | **ReplicaGroup** | one independent serving instance; a Role has `replicas` of them | `size` Pods this operator names, plus a headless Service when `size > 1` | **one pod group = one Workload** |
+| 4 | **Member** | one Pod inside a ReplicaGroup; a ReplicaGroup has `size` of them | a Pod | one member of that pod group |
+
+Three consequences are worth stating because each is a place a reader could reasonably assume
+otherwise:
+
+- **A ReplicaGroup is the admission unit at every size.** `size: 1` and `size: 4` differ in how many
+  Members the group declares, not in what a group is. The `pod-group-total-count` annotation carries
+  `size`; it carried `1` in the first half of this spec because every group had one Member.
+- **`PodGroup` is deliberately not a level here.** Kueue already uses *pod group* for what level 3
+  is, and giving the word a second meaning inside the one document that has to reason about Kueue's
+  admission is how a sentence ends up true under one reading and false under the other.
+- **The leader is a Member, not a level.** It is the Member at member index `0`, which this
+  operator assigns by naming it — the name is derived, not elected, so it is fixed before the Pod
+  exists and no reader has to wait for a decision. A ReplicaGroup of `size: 1` has a leader too,
+  and it is the only Member.
+
+The API keeps its two words — `replicas` counts ReplicaGroups, `size` counts Members — because they
+are the user's controls and renaming a field to match an internal vocabulary is a cost paid by
+everyone who writes the YAML. `size` also matches LeaderWorkerSet's own field exactly, which keeps
+the mapping to that substrate a rename-free one should it ever be taken.
 
 ### User Stories
 
@@ -98,9 +158,29 @@ replicas have been admitted, so that "waiting for capacity" is distinguishable f
 
 #### Story 5
 
-As a platform engineer, I want a role that will later run one model instance across several hosts
-to declare that shape in its own field, so that the instance size and the instance count are never
-confused — and so that changing the safe one stays safe.
+As a platform engineer, I want a role that runs one model instance across several hosts to declare
+that shape in its own field, so that the instance size and the instance count are never confused —
+and so that changing the safe one stays safe.
+
+#### Story 6
+
+As a platform engineer deploying a model too large for one host, I want one replica to be several
+Pods that are admitted together and can address each other, so that I can run tensor or pipeline
+parallelism across hosts without giving up the admission guarantee that the whole deployment
+starts or none of it does.
+
+#### Story 7
+
+As an operator whose decode capacity is short, I want to add a second decode instance by changing
+`replicas` from 1 to 2, so that I get another entire multi-Pod instance beside the one already
+serving — and the one already serving is not touched, even though the thing being added is several
+Pods rather than one.
+
+#### Story 8
+
+As an operator who typed the wrong instance size, I want the API to refuse the edit rather than
+perform it, so that I find out by being told instead of by watching every instance of the role be
+torn down and rebuilt.
 
 ### Core Features & Acceptance Criteria
 
@@ -236,14 +316,21 @@ server through `GenerateName`.
   field is `size`; its Go identifier is `ReplicaSize`, because gogo protobuf already puts a
   `Size()` method on the type and Go forbids the collision. The criterion is what the **generated
   CRD** calls the field, not what the Go struct calls it.
-- **AC4.3** That field is documented as fate-sharing: the Pods of one instance start together and
-  are replaced together, and changing it replaces every instance of the role.
+- **AC4.3** That field is documented as fate-sharing: the Members of one ReplicaGroup start
+  together, are admitted together and are replaced together.
+- **AC4.3b** The field is **immutable after creation**, and the refusal says so. Changing it is not
+  a scale — every Member of a running instance was built for the rank layout the old value
+  described, so the only honest implementation is to replace every ReplicaGroup of the role, which
+  is a new deployment wearing the name of the old one. Refusing costs the user who meant it one
+  `kubectl delete`; performing it costs the user who did not mean it every instance they had.
+  ⚠️ This REPLACES the earlier statement that changing the field replaces every instance of the
+  role. That statement described the field while nothing rendered it; it is not the contract.
 - **AC4.4** `spec.roles[].resources.accelerator` is re-documented as what **one Pod** asks for,
   not what one replica asks for. At instance size 1 the two readings coincide; at any larger size
   they do not, and the field is per-Pod.
-- **AC4.5** Validation refuses an instance size other than `1` for as long as the render path for
-  a multi-Pod instance does not exist, with a message that names the limitation rather than the
-  field's bounds.
+- **AC4.5** An instance size above `1` is **accepted and rendered**, per F8. The refusal that stood
+  in for the missing render path is deleted rather than reworded, and the e2e row asserting it
+  becomes an acceptance — a deleted rule still needs something reporting the day it comes back.
 
 #### F5 — Joint admission counts replicas
 
@@ -342,6 +429,116 @@ removing it from the path is what this feature is for.
   it. The cost, which the field's own documentation has to state, is that the list does not say
   which replica holds which flavor; that is answered from the Pods.
 
+#### F8 — A ReplicaGroup above one Member is `size` named Pods and a headless Service
+
+The render path this spec used to defer as a Non-Goal, now in scope. **No workload controller sits
+between this operator and the Members**: it names them, creates them and replaces them, exactly as
+it already does for the single-Member groups of the first half. Alternatives records why the two
+substrates that look like they would carry this — one StatefulSet per Role, and one per
+ReplicaGroup — do not, and both reasons are measured rather than argued.
+
+- **AC8.1** A role with `size: n > 1` renders **n Pods per ReplicaGroup**, named
+  `<deployment>-<role>-r<replica>-m<member>`. A role with `size: 1` renders exactly the Pod it
+  renders today, byte for byte. The two paths are one rendering with `n = 1` as its ordinary case,
+  not two admission models: a ReplicaGroup is one pod group and one Workload either way.
+- **AC8.2** **The Members are named rather than generated**, and that is what the shape is bought
+  for: a rank cannot join a collective it cannot address, and a Pod created by `GenerateName` has
+  no name anything can predict. The name is a pure function of (deployment, role, replica, member),
+  so every reader — the renderer, the converger, a sibling Member's entrypoint — derives the same
+  string without reading anything.
+- **AC8.3** Every Member of a ReplicaGroup is created in one pass, never one-after-another. A
+  Member that Kueue has scheduling-gated is never Ready until the group is admitted, and the group
+  is not admitted until every Member exists — so any rendering that waits for Member *i* before
+  creating *i+1* deadlocks. Both halves of that circle were measured, not reasoned: see F8's
+  premise, measured.
+- **AC8.4** A **headless Service per ReplicaGroup**, plus `hostname` and `subdomain` on every
+  Member, is what turns those names into DNS. ⭐ This is `core/v1` behaviour and owes nothing to
+  any controller: measured on a live cluster, two ordinary Pods carrying `hostname`/`subdomain`
+  behind a headless Service resolved each other by name with no StatefulSet anywhere.
+- **AC8.5** Every Member of a ReplicaGroup carries the **same** `pod-group-name` and a
+  `pod-group-total-count` of `size`, so Kueue composes **one Workload with one PodSet of `size`** —
+  the role's name, per F1. The joint barrier keeps counting ReplicaGroups, so F5 is unchanged: what
+  moves is how many Members a group declares, not how many groups a deployment has.
+- **AC8.6** The rank layout reaches the container as **environment**: the leader's address, the
+  group size, and this Member's own index. The first two are **constants of the ReplicaGroup** —
+  `<deployment>-<role>-r<replica>-m0.<headless-service>` and `size`. ⭐ The third is read through
+  the **downward API from a label**, not written as a literal: the template declares
+  `fieldRef: metadata.labels['<member-index-label>']` and the per-Member stamp writes that label.
+  The declaration is therefore identical in every Member's Pod while the value differs, which is
+  what keeps one template per ReplicaGroup and keeps the fingerprint comparable; see Boundaries.
+  ⛔ The operator composes **no** engine parallelism argument (Non-Goal 2): it publishes the facts
+  an entrypoint or an engine needs to compose its own.
+- **AC8.7** The role's **Service selects only the leader**. Every Member carries the role's identity
+  labels, so a selector written for `size: 1` fronts all `size` Members — and every Member but the
+  leader serves no API at all, making a plain round-robin fail for `(size-1)/size` of requests.
+- **AC8.8** Deleting one ReplicaGroup — its Members, its headless Service and its Workload — does
+  not disturb any other ReplicaGroup of the role. This is Goal 1 at the new size, and it is the row
+  the e2e suite has to carry because nothing below e2e has a ClusterQueue to be charged against.
+- **AC8.9** **Kueue's pod integration composes the group, and the shape it composes is measured.**
+  One Workload named for the `pod-group-name` the Members share, owned by **the Member Pods**, with
+  **one PodSet named for the role-hash** and a count of `size`. The fast-admission annotation is
+  **absent**, which this spec's Boundaries name as a **Never**. Kueue's `statefulset` and
+  `deployment` integrations never participate, for the simplest possible reason: this operator
+  creates no such object. The measurement, and the control that gives it meaning, are recorded
+  below.
+- **AC8.10** ⭐ **Replacing any one Member replaces the whole ReplicaGroup, and this is Kueue's
+  constraint rather than a choice this spec makes.** Measured: deleting one Member of an admitted
+  group leaves it on the API server indefinitely — Kueue's finalizer holds it, phase reaches
+  `Failed` — while the Workload stays `Admitted` and gains `WaitingForReplacementPods`. Deleting
+  that Workload is the only release, and doing so makes Kueue stop **every surviving Member** of
+  the group (its own event says `Stopped: Workload is deleted`). So a rollout, a Member crash and a
+  spec change all take the same path: the ReplicaGroup goes as a unit and comes back as a unit.
+  This is F5's fate-sharing arriving as a mechanism instead of an intention.
+
+#### F8's premise, measured
+
+Hand-applied YAML on a cluster running this chart's Kueue, with no operator involvement: a headless
+Service and a StatefulSet of two Pods whose **template** carries the queue-name label, the pod-group
+name and a total count of two, against a control differing in exactly one line — the same queue-name
+label **on the StatefulSet object** as well.
+
+| Reading | Queue-name on the Members only | Control: also on the object |
+| --- | --- | --- |
+| Workload name | the pod group's own name | `statefulset-<name>-<hash>` |
+| Workload owner | the two **Pods** | the **StatefulSet** |
+| PodSet | one named for the role-hash, count 2 | one named `main`, count from `spec.replicas` |
+| Fast-admission annotation | **absent** | — |
+| Role-hash annotation | **survives** | — |
+| What the StatefulSet webhook added to the template | **nothing** | `pod-suspending-parent: statefulset` |
+
+The control is what makes the left column mean anything: it produced the StatefulSet-integration
+shape, so "the integration did not claim it" is not "the integration is not running". ⭐ Read the
+left column again with F8's shape in mind: **Kueue never saw the StatefulSet at all** — it saw two
+Pods carrying the right metadata and composed exactly the group F8 wants. That is what made the
+substrate look optional, and the third reading below is what settled it.
+
+Three further readings came out of the same cluster, and each one moved a decision:
+
+- **⭐ A pod group's Workload does not exist until every declared Member does.** With one Member of
+  a declared two, there was no Workload at all and the Member sat gated. Adding the second — by
+  `spec.replicas`, leaving the template untouched — assembled the Workload, admitted it, and
+  **ungated both Members together**, inside one four-second sampling interval. This is AC8.3's
+  argument as an observation rather than a deduction: any creation order that waits for Member *i*
+  to be Ready before creating *i+1* cannot terminate, because Readiness is downstream of an
+  admission that is downstream of *i+1* existing.
+- **⚠️ Editing the Pod template of a group that is not yet admitted breaks that ReplicaGroup.** A
+  request change applied in place left a Member `Failed` while still gated, nothing replaced it,
+  and the Workload settled on `WaitingForReplacementPods`. AC8.10 is why the shape this spec builds
+  never does that.
+- **⭐⭐ A deleted Member of an admitted group does not go, and nothing replaces it.** This is the
+  reading that chose the substrate. Deleting one Member of a two-Member admitted group: it stayed
+  on the API server with Kueue's finalizer and a `deletionTimestamp`, phase walking to `Failed`,
+  for as long as it was watched; the Workload stayed `Admitted` and gained
+  `WaitingForReplacementPods`; **and the StatefulSet never issued a second `SuccessfulCreate`** —
+  it cannot, because the name is still taken. Deleting the Workload released it, and Kueue then
+  stopped the **surviving** Member too, saying so in an event: `Stopped: Workload is deleted`. The
+  whole group came back with new UIDs about half a minute later.
+
+  ⇒ Both of the things a StatefulSet would have been carried for — replacing a lost Member, and
+  rolling Members one at a time — are **inert** inside a Kueue serving group. What is left once
+  they are removed is naming, and naming is a few lines of rendering. AC8.10 states this as a rule;
+  Alternatives records it as the adjudication.
+
 ### Notes / Constraints / Caveats
 
 **Kueue version.** The cluster runs the chart pinned in `hack/deps.sh`, **Kueue v0.18.4**. The
@@ -398,7 +595,8 @@ admission. The chart declares `kubeVersion: ">=1.23.0-0"`.
 set, so an admitted Workload's granted counts cannot be reduced in place. This is why shrinking a
 role has to delete the Workloads of the replicas it removes rather than adjust a shared one.
 
-**What the LeaderWorkerSet substrate looks like**, since Non-Goal 2 aims this design at it. It is
+**What the LeaderWorkerSet substrate looks like**, since Non-Goal 1 declines the dependency while
+F8 takes the capability, and a later substrate change stays possible. It is
 StatefulSet-descended rather than Deployment-descended: a group's name carries its index and not its
 revision, a rolling update replaces each index in place from the highest down, and a surge borrows a
 higher index rather than a new naming scope. The readings behind each of those are in Alternatives,
@@ -417,6 +615,16 @@ F3's identity model already admits and a revision-scoped naming scheme would hav
   LeaderWorkerSet names a group `<lws>-<index>` — while the labels stay ours.
 - **Always:** keep the renderer's output for a role independent of which replica it is rendering.
   The group metadata and the fingerprint are stamped on afterwards.
+  ⭐ **This SURVIVES multi-Member ReplicaGroups, and the reason is worth stating because the
+  opposite is the obvious assumption.** Members differ by index and a rank layout, which looks
+  like output that must vary per Member — but everything that varies is carried by **metadata the
+  stamp writes and the template merely points at**: the member index is a label, reached from the
+  template through `fieldRef`, so the container spec is identical in every Member while the value
+  differs; and the leader's address is a **constant of the ReplicaGroup**, not a per-Member value.
+  So the renderer still emits one template per ReplicaGroup and the fingerprint stays comparable.
+  ⛔ A design that needs the renderer to emit
+  per-Member argv has left this boundary, and that is the signal to stop rather than a detail to
+  work around — a fingerprint that differs per Member makes every Member read as a pending rollout.
 - **Ask first:** before introducing any new spec field beyond the instance-size field this spec
   names.
 - **Ask first:** before changing what the joint-admission barrier promises, as opposed to what it
@@ -567,15 +775,17 @@ its Pod, so the quota is returned rather than stranded.
 #### `spec.roles[].size` — how big one instance is
 
 The Pods of one instance are fate-sharing: they start together, they are replaced together, and none
-of them serves alone. **Today the only accepted value is 1**, and the refusal names the missing
-capability rather than a bound — the rendering that builds one instance across several Pods does not
-exist yet, so a bounds-shaped message would read as a permanent rule after the day it lands.
+of them serves alone. **Any value of 1 or more is accepted**, and F8 renders it: above one, a
+ReplicaGroup is `size` named Members behind a headless Service, with member `m0` the leader.
 
-⚠️ **Changing it replaces every instance of the role**, because the Pods a running instance is made
-of are not the Pods the new size asks for.
+⚠️ **It cannot be changed after creation** (AC4.3b). The Pods a running instance is made of are not
+the Pods a different size asks for, so there is no edit that does not replace every instance of the
+role at once — and per AC8.10 that is true of the substrate too, not just of this operator's
+preference. Scaling is `replicas`, which disturbs nothing already running.
 
-- **Use it for** the multi-Pod instance shapes this API is being kept open for (tensor parallelism
-  across Pods, a future LeaderWorkerSet substrate).
+- **Use it for** the multi-Pod instance shapes this API exists for: tensor, pipeline, expert or
+  sequence parallelism spread across hosts. ⛔ The operator publishes the rank layout and composes
+  none of the engine's arguments from it (Non-Goal 2).
 - The Go identifier is `ReplicaSize`, not `Size` — gogo protobuf puts a `Size()` method on the type.
   The API name is `size`, which matches LeaderWorkerSet's own field.
 
@@ -904,12 +1114,141 @@ implementation.
       existing "Rollout is a rolling replacement" section rather than a new one.
       Verify: `make lint docs`
 
+- [x] **T10 · PoC: measure what Kueue does with a multi-Member pod group, and what a workload
+      controller does or does not add on top** — everything after it is shaped by the answer.
+      Blocked by: None
+      Owns: `<no product files>`
+      Gate: review
+      **Answered, and the answer changed F8's substrate.** The run did what it was written to do:
+      a StatefulSet whose Pod template alone carried the Kueue metadata was **not** claimed by
+      Kueue's `statefulset` integration, against a control — the same object with the queue-name
+      label on it as well — that was. But the same readings showed Kueue composing the group from
+      **the Pods**, with the StatefulSet nowhere in the Workload; and a follow-up measured that a
+      deleted Member of an admitted group is held by Kueue's finalizer, so the StatefulSet can
+      never replace it, and that releasing it stops the whole group. ⇒ The two capabilities the
+      substrate was for are inert here, so F8 now renders Members directly. Everything is recorded
+      in *F8's premise, measured*; AC8.3, AC8.4, AC8.9 and AC8.10 rest on it.
+      ⚠️ The task as originally written also named a fallback — dropping `statefulset` from the
+      chart's framework list if the integration claimed the object either way. It was never needed
+      and the framework list is untouched.
+      Verify: manual, readings recorded in this spec beside F8.
+
+- [x] **T11 · `size` becomes immutable, and above one becomes legal**
+      Blocked by: T10
+      Owns: `pkg/worker/webhooks/worker/model_deployment.go`,
+      `pkg/worker/webhooks/worker/model_deployment_test.go`
+      Acceptance: `validateModelDeploymentRoleSize` is deleted. An update changing
+      `spec.roles[].size` on an existing deployment is refused, naming the field and saying that an
+      instance's shape is fixed at creation; an update changing `replicas` on the same object is
+      accepted in the same test. Creation with any `size >= 1` is accepted. The immutability rule
+      sits beside the existing frozen-field rules rather than in a new pass.
+      Verify: `go test ./pkg/worker/webhooks/worker/ -run 'TestModelDeployment' -v`
+      Done: the rule sits with the other frozen fields and carries its own message rather than the
+      identity one, because the reason differs — the deployment is the same one, and what cannot
+      happen is this edit to it. The refusal names `replicas` so it is not a dead end. The test was
+      mutation-checked: with the rule removed it fails on the assertion, not on the build.
+
+- [ ] **T12 · A ReplicaGroup above one Member renders as `size` named Members**
+      Blocked by: T10, T11
+      Owns: `pkg/worker/controllers/worker/model_deployment_render.go`,
+      `pkg/worker/controllers/worker/model_deployment_pod_group.go`,
+      `pkg/worker/controllers/worker/model_deployment_render_test.go`
+      Acceptance: A role with `size: 1` renders exactly the Pod it renders today — asserted by
+      comparison against the current output, so the common path is provably untouched. A role with
+      `size: n > 1` renders n Pods per ReplicaGroup, each **named**
+      `<deployment>-<role>-r<replica>-m<member>` with `hostname` set to that name and `subdomain`
+      to the ReplicaGroup's headless Service, carrying the group metadata of AC8.5 and the rank
+      environment of AC8.6 — leader address and size as literals, member index through a
+      `fieldRef` on a label the stamp writes. A test asserts the **container spec is identical**
+      across the Members of a group and across two groups of one role, which is the Boundaries
+      invariant at the new size, and that the member-index label is the only thing separating two
+      Members. `pod-group-total-count` becomes `size` instead of the constant `1`.
+      Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestRenderModelDeployment' -v`
+
+- [ ] **T13 · The converger creates, compares and replaces at ReplicaGroup granularity**
+      Blocked by: T12
+      Owns: `pkg/worker/controllers/worker/model_deployment.go`, and its tests
+      ⚠️ **This task exists because the plan did not have it.** The converger — roughly five hundred
+      lines keyed on one Pod per (role, ordinal) — is what actually creates and deletes replicas,
+      and no earlier task named it. Every other task in this half depends on it.
+      Acceptance: the desired set becomes one entry per ReplicaGroup holding `size` Members, and
+      every existing per-ordinal decision (surplus shedding, the create gate that waits for a
+      departing Pod's absence, the delete that takes the Workload with it) applies to the group as
+      a whole. **A ReplicaGroup is created, compared and deleted as a unit** (AC8.10): no path
+      deletes one Member and leaves the others, because the measurement shows that state is not
+      recoverable without deleting the Workload anyway. At `size: 1` the decisions are identical to
+      today's, asserted by keeping the existing tests unchanged and green.
+      Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestModelDeploymentReconciler' -v`
+
+- [ ] **T14 · Addressability: a headless Service per ReplicaGroup, and a role Service that fronts
+      only leaders**
+      Blocked by: T12
+      Owns: `pkg/worker/controllers/worker/model_deployment_service.go`,
+      `pkg/worker/controllers/worker/model_deployment_service_test.go`
+      Acceptance: Each ReplicaGroup of a `size > 1` role owns a headless Service
+      (`clusterIP: None`) selecting its own Members, created and deleted with that ReplicaGroup.
+      The role's own Service gains a selector term that matches only the leader Member, and a test
+      asserts a three-Member ReplicaGroup puts exactly one endpoint behind it. At `size: 1` the
+      role Service's selector is unchanged, asserted by comparison. ⚠️ The leader must be
+      identifiable by a **label** for a selector to match it: the ordinal label F3 already writes
+      is per-ReplicaGroup, so this needs the per-Member one T12 adds.
+      Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestModelDeploymentService' -v`
+
+- [ ] **T15 · Readiness, rollout and teardown at ReplicaGroup granularity**
+      Blocked by: T13
+      Owns: `pkg/worker/controllers/worker/model_deployment_status.go`,
+      `pkg/worker/controllers/worker/model_deployment_rollout.go`, and their tests
+      Acceptance: A ReplicaGroup counts as ready only when **every** Member is ready, so
+      `status.roles[].ready` counts instances and not Pods. The rollout replaces whole
+      ReplicaGroups, never individual Members, keeping the one-replica-per-role-per-pass cadence —
+      which AC8.10 makes the only workable cadence rather than a stylistic one. Deleting a
+      deployment deletes each ReplicaGroup's Members, headless Service and Workload, and the
+      Workload-holds-finalizer cycle is broken exactly as it is for single-Member groups.
+      Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestModelDeployment(Status|Rollout)' -v`
+
+- [ ] **T16 · End-to-end: a multi-Member deployment, and a scale that leaves it alone**
+      Blocked by: T12, T13, T14, T15
+      Owns: `.agents/skills/gpustack-operator-e2e/cases/case-79.sh`,
+      `.agents/skills/gpustack-operator-e2e/SKILL.md`
+      Acceptance: A new case deploys a role at `size: 2, replicas: 1`, and asserts: one Workload
+      with one PodSet of **two**; both Members gated until the group is admitted, then both
+      admitted together; the role's Service holding exactly one endpoint; each Member resolving the
+      leader's DNS name. It then scales `replicas` to 2 and asserts the first ReplicaGroup's Member
+      UIDs are unchanged while a second ReplicaGroup appears — Story 7, and the row that only e2e
+      can carry. Case 45 gains the `size` immutability refusal; its size-above-one refusal row
+      becomes an acceptance.
+      Verify: `bash .agents/skills/gpustack-operator-e2e/cases/case-79.sh <NS>`
+
+- [ ] **T17 · Documentation for the multi-Member shape**
+      Blocked by: T12, T13, T14, T15
+      Owns: `docs/reference/model-deployment.md`, `api/worker/v1alpha1/model_deployment.go`
+      Acceptance: The reference page states the four-level vocabulary, what `size` costs to change
+      (nothing, because it cannot be changed), that a ReplicaGroup is replaced as a unit and why
+      (AC8.10), and that engine parallelism arguments remain the user's. ⚠️ The page's `##` budget
+      is at nine of ten: the multi-Member content extends the existing sections rather than opening
+      a new one.
+      ⓘ The `size` field comment half of this is already done — T11 rewrote it to state
+      immutability and what a multi-Pod instance publishes, since the rule and the field
+      documentation describing it cannot correctly land in different commits.
+      Verify: `make lint docs`
+
 **Checkpoints.** After T4 the API is settled and the other tracks can assume it. After T6 the
 system is coherent and every goal about replica-count elasticity holds. ⚠️ **It is not shippable
 there**: T7 carries both create idempotence and the two changes that keep a rollout from walking a
 deployment toward zero admitted replicas on a contended pool (see Risks). What T6 buys is a
 reviewable, working intermediate state — not a release. After T9 the documented behavior matches
 the built behavior.
+
+⭐ **T9 ends the first half, and it is a shippable line on its own** — a role's replica count is
+elastic and nothing about it depends on the second half existing. T10 opens the second: a replica
+may be several Members. **T10 is a measurement, not an implementation**, and sequencing it first is
+the decision in this plan that paid for itself: it was written to check one inferred premise, and
+what it returned instead was that F8's whole substrate was optional. Discovered at T12 that would
+have been discovered as most of a rewrite already spent.
+
+T12 and T13 are the two wide ones — the render path and the converger — and T13 is where the
+plan's own gap was: the converger belonged to no task until the implementation of T12 walked into
+it. T14 and T15 have disjoint `Owns:` and run concurrently behind T13.
 
 **T4 runs first and alone.** It is the only task that runs `make generate`, and the generation tree
 is shared across worktrees, so it cannot overlap with anything. T8 also regenerates, and is already
@@ -991,6 +1330,10 @@ trigger. Four existing cases are in its blast radius and one new case is require
 
 - **CASE 45** (the ModelDeployment admission surface) — must still pass unchanged; T4 adds one
   refusal to it, the `size` rejection, from the webhook layer that owns it.
+  ⚠️ **T11 then inverts that row**: the size-above-one refusal becomes an **acceptance**, because
+  the rule is deleted rather than reworded, and a new refusal takes its place — an **update**
+  changing `size`. A deleted rule still needs a row: without one, nothing reports the day it
+  returns, and the suite's silence would read as a rule that was never there.
 - **CASE 49** (the group forms, and deleting the deployment completes) — retitled and re-rowed for
   one Workload per replica. Its existing row asserting the operator breaks the
   Workload-holds-finalizer-holds-Workload cycle itself is the row T7 depends on, and it becomes
@@ -1009,8 +1352,28 @@ trigger. Four existing cases are in its blast radius and one new case is require
   quota moves by exactly one replica's worth in each direction. This is the only place the quota
   arithmetic can be observed at all — a fake client has no ClusterQueue.
 
+- **NEW CASE (T16)** — the multi-Member shape, which nothing below e2e can carry: a role at
+  `size: 2, replicas: 1` composes **one** Workload with **one PodSet of two**; both Members stay
+  gated until the group is admitted and are then admitted together; the role's Service holds
+  exactly one endpoint; each Member resolves the leader's DNS name. Then `replicas` goes to 2 and
+  the first ReplicaGroup's Member UIDs are unchanged while a second ReplicaGroup appears — Story 7
+  at a size where a rebuild would be most expensive and least visible.
+
 The PoC in T1 is not an e2e case: it runs before any code exists, against hand-applied YAML. Its
-result is recorded in this spec rather than in the suite.
+result is recorded in this spec rather than in the suite. **T10's PoC is the same kind** and is
+recorded the same way, beside F8.
+
+⭐ **What the first e2e round actually found, and why it belongs here rather than in a report.**
+Every one of the six failures was in the suite, not in the operator: three assertions still written
+for one Workload per role (case 50 read a single Workload's `podSetAssignments` where the shape is
+now one PodSet per Workload; case 68 expected one group where two roles of one replica are two;
+case 51 asserted a refusal this spec deletes), two instrument defects (three `wait_for` calls whose
+predicate was expanded **before** the wait began, so the loop compared one stale sample every
+round; one status read taken immediately after a Workload flipped, when the condition is written by
+a different controller a reconcile later), and one stale comment in the operator claiming a rule
+that no longer exists. ⚠️ **The suite's own instruments failing is the expected shape of this
+round** — the assertions were written against the design this spec replaces, so a green first run
+would have been the surprising outcome and the reason to distrust the suite.
 
 > Cross-check findings are folded in below once the independent review returns.
 
@@ -1053,6 +1416,54 @@ this design needs a group name that differs per replica.** A template cannot exp
 varies by ordinal, so the per-replica group metadata would have to be written by a mutating Pod
 webhook rewriting Pods some other controller created — more machinery than rendering the Pods
 directly, not less.
+
+### Move to a StatefulSet per ReplicaGroup
+
+⚠️ **This was F8's shape for one revision of this spec, and it is recorded here because the
+reasoning that reached it was sound and still failed.** One StatefulSet per **ReplicaGroup** —
+`spec.replicas: size`, one object per replica — really does remove the conditions the per-Role
+objections need:
+
+1. **The declared total moving is the defect this spec exists to remove** — and it moves because the
+   count moves. Here the count is `size`, which AC4.3b makes immutable, and `replicas` changes add
+   or delete whole StatefulSets while editing none.
+2. **The structural obstacle disappears.** Each StatefulSet holds exactly one ReplicaGroup, so the
+   group name is a **constant of that object's template** rather than a value varying by ordinal.
+3. **Objections (2) and (3) need Kueue's StatefulSet integration to claim these objects**, and T10
+   measured, against a control, that it does not when the queue-name label is on the Members alone.
+
+All three hold. ⭐ **What they establish is that the shape is possible, and the question that was
+never asked is what the object would then be doing.** T10's own readings answer it: the Workload
+Kueue composed was owned by **the Pods**, with one PodSet named for the role-hash and a count of
+two — the StatefulSet appears nowhere in it. So the substrate was carrying exactly two things:
+replacing a Member that goes away, and rolling Members one at a time.
+
+**Both were then measured to be inert inside a Kueue serving group**, which is what moved F8 off it:
+
+- A deleted Member of an admitted group is held on the API server by Kueue's finalizer. The
+  StatefulSet cannot replace it — the name is still taken — and never tried: no second
+  `SuccessfulCreate`, for as long as it was watched.
+- Releasing it means deleting the Workload, and doing that makes Kueue stop **every surviving
+  Member** of the group (`Stopped: Workload is deleted`). So there is no such thing as rolling one
+  Member; the group goes as a unit whatever the substrate believes.
+
+⇒ What remained was stable names, and F8 obtains those by naming the Pods — `hostname` and
+`subdomain` against a headless Service, measured to resolve with no controller present. The PVCs
+the earlier rejection called unwanted stay unwanted and now stay impossible rather than merely
+unset.
+
+⭐ **LeaderWorkerSet is the corroboration.** It is built on StatefulSets and still carries its own
+Pod controller, its own revision bookkeeping and its own `partition` arithmetic
+(`pkg/controllers/pod_controller.go`, `rollingUpdateParameters`) — because it is working around the
+same two facts from the other side. A design that adopts the substrate and then reimplements what
+the substrate was for has paid for it twice.
+
+⚠️ **What this costs, stated plainly.** A Member that crashes is replaced by this operator's own
+convergence rather than by a controller in `kube-controller-manager`. That is a real transfer of
+responsibility — it is the one thing the substrate would genuinely have done — and the mitigation
+is that the convergence already exists and is watch-driven: the deployment `Owns` its Pods, so a
+Member's disappearance is an event rather than a poll. And per AC8.10 the replacement is a whole
+ReplicaGroup either way, which is work no StatefulSet was going to do.
 
 ### Introduce a per-revision ReplicaSet between the deployment and its Pods
 
@@ -1109,11 +1520,22 @@ group and, on a replica count change, creates or deletes Workloads for the affec
 existing ones are only updated for queue name and priority — never for their PodSets. Upstream
 documents the same behavior: on scale up, only the newly created group of Pods is gated.
 
-It is deferred rather than taken because it is a substrate change — a new CRD and controller
+It is declined rather than taken because it is a substrate change — a new CRD and controller
 dependency, a new chart subchart, a new Go module — while the first thing it requires is exactly
-what this spec does: move the admission unit to one replica and re-base the barrier on it. Doing
-that first makes the substrate question a separate, smaller decision. The render path this spec
-keeps intact is the same template an LWS would carry.
+what this spec does: move the admission unit to one replica and re-base the barrier on it.
+
+⚠️ **The question it was once deferred to is now answered, and answered the other way.** The
+earlier reading was that doing the admission work first would leave "adopt LWS" as a separate,
+smaller decision; F8 instead obtains the three properties that decision was about — a stable
+leader, addressable members, and a group that scales by whole groups — from `core/v1` alone, with
+no new dependency of any kind. **What is given up is
+real** and belongs here rather than in a footnote: LWS's `maxSurge` (a Non-Goal anyway), its
+two-template leader/worker split (so a leader wanting different arguments to its workers must get
+them from the rank environment rather than from a second template), and its policy for restarting a
+whole group when one member fails (here that is the operator's own rollout path, at ReplicaGroup
+granularity per T15 — and per AC8.10 there is no finer granularity available to anyone, LWS
+included). Adopting LWS later remains an increment rather than a rewrite: `size` already
+matches its field name, and a ReplicaGroup already maps to one of its groups.
 
 ### Admit a role once at least one replica has reserved quota
 
@@ -1276,12 +1698,23 @@ the task that carry it.
    group-name label is the only other per-replica carrier and is rejected for a different reason:
    parsing an ordinal back out of it is the same defect as parsing one out of a name, and AC2.3
    allows that name to fall back to a hashed form. Stated in F3 and in Boundaries.
-3. ✅ **Decided — the instance-size field ships now, validated to `1`.** The two numbers are
-   separated in the API before anything can conflate them. The cost is a field with a single legal
-   value; what buys it is AC4.4 — `resources.accelerator` being per-Pod rather than per-replica is
-   a documentation change that is only unambiguous once the second number exists. Specified in F4,
-   built in T4. The alternatives set aside were re-documenting `replicas` alone and adding the
-   field later, and implementing multi-Pod instances in the same change — the second is a Non-Goal.
+3. ⚠️ **SUPERSEDED — the field shipped validated to `1`, and this spec now renders it.** The
+   original decision was to separate the two numbers in the API before anything could conflate
+   them, accept a field with a single legal value, and defer the render path; what bought it was
+   AC4.4, since `resources.accelerator` being per-Pod rather than per-replica is only unambiguous
+   once the second number exists. That reasoning stands and is why the field exists at all.
+   **What changed is the scope, by decision rather than by discovery:** multi-Pod instances were a
+   Non-Goal, and are now F8. The refusal is deleted, and `size` gains immutability (AC4.3b) in its
+   place — a field with one legal value needs no immutability rule, and a field that shapes a
+   running instance does.
+   ⭐ **The reading that made it affordable is that the rejection of a StatefulSet substrate was
+   narrower than it looked** — Alternatives had rejected one per *Role*, and one per *ReplicaGroup*
+   is a different object graph. ⚠️ **That reading opened the scope and then turned out not to be
+   the answer**: T10 measured that a StatefulSet contributes nothing to a Kueue serving group that
+   this operator is not already doing, so F8 renders the Members directly. The conclusion the
+   reading bought — that this belongs in this spec rather than a second one — survives its own
+   premise, because what made it affordable was never the substrate but the discovery that the
+   capability needed no new dependency.
 4. ✅ **Decided — the API field is named `size`; its Go identifier is `ReplicaSize`.** The API name
    matches LeaderWorkerSet's own field exactly, which makes a later substrate change a
    zero-translation mapping. `replicaSize` as the API name would read more self-describing within
