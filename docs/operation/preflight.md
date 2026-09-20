@@ -510,7 +510,7 @@ the figure is the evidence, and a cap near the card's own size could be read as 
 
 ## Reading the result
 
-One YAML document goes to stdout, with **two sections**:
+One YAML document goes to stdout, with **three sections**:
 
 ```yaml
 accelerators:            # one group per manufacturer asked about
@@ -520,6 +520,10 @@ accelerators:            # one group per manufacturer asked about
 network:                 # the node's RDMA links — belongs to no manufacturer
   timestamp: ...
   checks: [...]
+topology:                # what this node's kubelet does with a NUMA hint
+  timestamp: ...
+  policy: single-numa-node
+  depth: declared
 ```
 
 Each `accelerators` group carries the time it was read, the detection answer, and a row per
@@ -542,6 +546,21 @@ the question, while a verdict without a device is the unreadable-tree case this 
 surface. A section with no rows carries a `note` saying which of the two reasons applies: the
 enumeration failed, or the node has no RDMA hardware.
 
+The `topology` section names the TopologyManager policy this node's kubelet is configured with,
+read out of the kubelet's own configuration — the same three places the CRI endpoint is read from.
+
+It matters because the policy decides what the kubelet does with the NUMA hint a device plugin
+publishes: `single-numa-node` and `restricted` gate admission on it, `best-effort` admits a
+misaligned placement anyway, and `none` discards it. So a request pairing an accelerator with an
+[RDMA interface](../architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)
+lands them on one NUMA node only where the policy enforces it.
+
+**A policy that no readable configuration names is reported as `unknown`, never as the kubelet's
+default.** The policy can also be set by a command-line flag none of those files shows, so
+reporting `none` because nothing was found would publish a value nobody read. An `unknown` always
+carries a `note` saying which of the three reasons applies: no file named one, a file could not be
+read, or two distribution trees name different policies.
+
 **The exit code is non-zero only for an `unavailable` accelerator answer.** A capability this
 generation does not declare, a manufacturer nothing is checked for, a node carrying none of its
 hardware, an answer that went no deeper and a step that was emitted are all answers, and a run that
@@ -549,6 +568,10 @@ reports them has done its job.
 
 **A broken RDMA link does not fail the run.** It withholds a node label, which changes what a
 flavor selects rather than what an allocator can hand out.
+
+**Neither does the topology section, whatever it says** — including a policy it could not read at
+all. The policy decides which placements the kubelet admits, not what this node can hand out, so
+failing the run on it would refuse nodes that allocate perfectly well.
 
 > **Why** — this exit code answers whether the node can serve the allocation modes its allocators
 > offer, and a down link stops none of them. The reasoning is recorded in the feature's spec.

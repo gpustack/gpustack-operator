@@ -1,11 +1,6 @@
 # Spec: RDMA as an allocatable resource
 
-Status: Building
-Blocked on: the implementation this document specifies, task by task under
-[Implementation Plan](#implementation-plan). The Status becomes `Shipped` when the four resource
-keys below are served by the Device Manager, every acceptance criterion under F1-F8 has a passing
-test, and the documentation F8 names is written.
-
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -502,6 +497,13 @@ layout, and an unresolvable name reports which layouts were tried** — the disc
 own RDMA resolution already follows, for the same reason: a single hard-coded path that is wrong on
 one distribution fails with no way to tell that from a host that has no RDMA.
 
+**A resolved endpoint whose device node the host does not carry fails the whole allocation, naming
+it.** The node is the grant: a response that dropped it and returned the rest would start a
+container holding a token for an adapter it cannot open, which is the silent half-grant this
+resource exists to end, one layer down. The connection manager is the deliberate asymmetry — it
+belongs to the node rather than to any endpoint, so a host without one promised nothing, and the
+response simply carries one device fewer.
+
 The environment variable is the one narrow piece of engine-facing shape this round takes on, and it
 is named as such: a container that was granted a device but cannot tell which one has been handed
 half a resource. A per-engine translation beyond this belongs to the consumer work.
@@ -520,7 +522,8 @@ row of the verification table instead, so the gap is a known unknown rather than
 
 Acceptance: a case with a fixture sysfs tree asserts the response injects the verbs device belonging
 to the granted endpoint and not a sibling's; a case whose name resolves under neither layout asserts
-the error names both.
+the error names both; and a case whose name resolves but whose node the fixture host does not carry
+asserts the allocation fails naming that node, rather than returning a response without it.
 
 #### F6 — no cross-mode exclusion is introduced
 
@@ -575,11 +578,18 @@ do with the hints [C3](#c3--numa-is-reported-or-nothing-is) publishes.
   allocation mode, and a network interface has neither"
   (`pkg/devicemanager/preflight/network.go:42-48`). A kubelet policy has neither either, and it is
   not a statement about a link.
-- It reads the policy through the seam that already reads this node's kubelet configuration:
-  `kubeletCRISources` (`pkg/devicemanager/preflight/hostexec.go:266-270`) globs
-  `var/lib/kubelet/kubeadm-flags.env`, `var/lib/kubelet/config.yaml` and the distribution drop-in
-  under `var/lib/rancher/*/agent/etc/kubelet.conf.d/*.conf`, and `valueAfter` reads a key out of
-  them. This adds a key, not a reader.
+- It reads the policy through the seam that already reads this node's kubelet configuration, and
+  that seam is **generalized first rather than copied**. The traversal `kubeletCRIEndpoint` held —
+  glob `var/lib/kubelet/kubeadm-flags.env`, `var/lib/kubelet/config.yaml` and the distribution
+  drop-in under `var/lib/rancher/*/agent/etc/kubelet.conf.d/*.conf` in order; group matches by
+  directory so files in one are an override and two directories are a conflict; take the value with
+  `valueAfter` — becomes `readKubeletSetting` (`pkg/devicemanager/preflight/hostexec.go:339`) over
+  one `kubeletConfigSources` table (`:269`). It returns what it established and leaves each caller
+  to render it, which is where the two readings differ and the only place they may: the CRI read
+  drives what preflight measures, so it refuses a host it cannot interpret; this one drives nothing,
+  so it degrades to `unknown`. **This adds a setting, not a reader.** A second reader would be a
+  second answer to "where does a kubelet keep its configuration", and a source added to one and not
+  the other would silently stop reading a policy on every node that keeps its configuration there.
 - **Not found is `unknown`, never `none`.** The default is `none`, but the policy can also be set by
   a command-line flag in a place none of the three sources covers, and reporting the default as if it
   had been read would publish a measurement that was never taken.
@@ -600,8 +610,15 @@ exit code is unchanged in every case.
   same-container requirement, and the TopologyManager prerequisite.
 - The page-map table in the documentation skill gains the row routing "the RDMA extended resources"
   to the first of these, so the next change lands there without re-deciding.
+- `docs/operation/preflight.md` gains the `topology` section: what it reports, why an unread policy
+  is `unknown` rather than the kubelet's default, and that it never moves the exit code. **This
+  page was missed when this list was first written, and the miss has a shape worth naming: the
+  page's own sentence "One YAML document goes to stdout, with **two sections**" became false the
+  moment the section landed, and a list of what to ADD does not contain the sentences that have
+  become wrong.** The docs gate cannot catch it — it checks links, structure, size and anchors,
+  never whether a sentence is still true.
 
-Acceptance: `make lint docs` passes, and the two pages stay under the per-page caps.
+Acceptance: `make lint docs` passes, and the three pages stay under the per-page caps.
 
 ### Verification
 
@@ -818,14 +835,17 @@ pkg/deviceplugin/
 pkg/nodefeature/
   rdma.go                 # T2  the four resource names, beside the rdma.* node labels
 pkg/devicemanager/allocator/
-  rdma/allocator.go       # T7  the device.Allocator owning the four servers, as a vendor does
+  rdma/deviceplugin.go    # T7  the device.Allocator owning the four servers, as a vendor does
+                          #     — named as the vendor packages name theirs, not allocator.go
   allocator.go            # T7  starts it beside the per-manufacturer ones
   allocator_linux.go      # T7  the creator; allocator_other.go is its absent counterpart
 pkg/devicemanager/preflight/
   topology.go             # T8  the TopologyManager policy section
   preflight.go            # T8  the report gains that section
+  hostexec.go             # T8  the kubelet-configuration reader, generalized to take a setting
 docs/architecture/network-topology.md    # T9
 docs/accelerator-requests.md             # T9
+docs/operation/preflight.md              # T9
 ```
 
 **The split between the two RDMA locations is forced, not stylistic.** The servers need
@@ -892,6 +912,16 @@ requires `ibv_devinfo` to report **the granted device**, which is what a wrong r
 whichever of the two layouts that host presents, and **cannot say which one answered** — so a pass
 does not retire the other layout, and neither layout is retired by any reading this plan can take.
 A spike that cannot reach the uncertainty would be a task that is green by construction.
+
+⚠️ **The second layout was nonetheless wrong, and saying "no reading here can settle it" is what
+hid that.** As built it scanned the hardware parent itself for uverbs entries; the kernel puts a
+class device at `<parent>/<class>/<name>`, so they are under `<parent>/infiniband_verbs/`, and the
+layout could never have answered. No hardware was needed to see it — the rule is written down three
+times in this repository, including in this feature's own fixture for the RDMA device. It survived
+because the fixture spelled the path the way the code read it, so both layout cases passed under
+the wrong implementation and the right one. Corrected, with the fixture planting through one helper
+and the old scan run against the suite to confirm it now fails. What R2 still owes is unchanged:
+which layout a live host answers through.
 
 - [x] **T1 · Extract the serving lifecycle**
       Blocked by: None
@@ -983,19 +1013,28 @@ A spike that cannot reach the uncertainty would be a task that is green by const
       Owns: `pkg/devicemanager/preflight/topology.go`,
       `pkg/devicemanager/preflight/topology_test.go`,
       `pkg/devicemanager/preflight/preflight.go`, `pkg/devicemanager/preflight/preflight_test.go`,
-      `pkg/devicemanager/cmd.go`, `pkg/devicemanager/preflight/network_test.go`
-      — the last because a top-level section changes `Report`'s signature, and that file holds one
-      of its three call sites
+      `pkg/devicemanager/cmd.go`, `pkg/devicemanager/preflight/network_test.go`,
+      `pkg/devicemanager/preflight/hostexec.go`
+      — `network_test.go` because a top-level section changes `Report`'s signature, and that file
+      holds one of its three call sites; `hostexec.go` because F7 reads through the existing
+      kubelet-configuration seam rather than beside it, which means generalizing that reader in
+      place. Both are read by the other tasks and written by none, so the widened set still
+      intersects no sibling's.
       Acceptance: [F7](#f7--preflight-reports-the-topologymanager-policy) — each of the three
       kubelet-configuration sources answers when it carries the key; none answering yields `unknown`
       with a note saying why, never the default reported as if read; and a case with a failing
       topology row asserts the report still returns success, so the exit code is unmoved.
       Verify: `go test ./pkg/devicemanager/...`
 
-- [ ] **T9 · Documentation**
+- [x] **T9 · Documentation**
       Blocked by: T2, T6, T8
       Owns: `docs/architecture/network-topology.md`, `docs/accelerator-requests.md`,
-      `.claude/skills/gpustack-operator-docs/references/page-map.md`
+      `docs/operation/preflight.md`,
+      `.claude/skills/gpustack-operator-docs/references/page-map.md`,
+      `.claude/skills/gpustack-operator-docs/SKILL.md`
+      — `preflight.md` because F7 adds a section to the document that page describes, and the
+      page's own sentence counting those sections goes false the moment it does; `SKILL.md`
+      because the routing table it carries is the one a writer reads before the page map.
       Acceptance: [F8](#f8--the-documentation-says-what-is-now-true), and both pages stay under the
       per-page caps — the first has four `##` slots and about seven hundred lines of room, the
       second three slots and about six hundred.

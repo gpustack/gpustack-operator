@@ -115,10 +115,15 @@ kubelet's device-plugin registration server unlinks **every socket** in
 `kubelet.sock`. That directory is a hostPath in the device-manager, so the unlink takes the plugin's
 own socket with it while the plugin's process carries on untouched.
 
-`ResourceServer.Start` (`pkg/deviceplugin/server.go`) therefore serves in **generations** — a socket,
-a gRPC server on it, and a registration naming the two to kubelet — and loops over them. The socket
+`serving.Start` (`pkg/deviceplugin/serving.go`) therefore serves in **generations** — a socket, a
+gRPC server on it, and a registration naming the two to kubelet — and loops over them. The socket
 going missing is the level-based signal that kubelet restarted, so the next generation listens and
 registers again.
+
+That loop is the one every device-plugin server in this repository runs: `ResourceServer`
+(`pkg/deviceplugin/server.go`) embeds it for the per-manufacturer resources, and the four RDMA
+servers (`pkg/deviceplugin/rdma_server.go`) drive the same one. A kubelet wipe therefore strands
+the RDMA resource keys on exactly the terms above, and recovers them on the same terms.
 
 A generation ending because its server stopped serving is a second, separate signal. Unlinking the
 socket belongs to the *start* of a generation, so that a retiring one cannot unlink whatever holds
