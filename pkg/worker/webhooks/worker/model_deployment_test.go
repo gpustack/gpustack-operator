@@ -1499,6 +1499,125 @@ func TestModelDeploymentWebhook_ValidateUpdateStatesTheRuleNotTheMechanism(t *te
 	}
 }
 
+// TestModelDeploymentWebhook_RefusesMemberNamesThatCannotBeHostnames covers the budget a
+// multi-Member role spends that a single-Member one does not.
+//
+// THE FIRST CASE IS THE ONE THAT MATTERS: its <deployment>-<role> is legal, so the Service-name rule
+// accepts it, and only the member name it implies is too long. A test whose refused input was
+// already refused by another rule would pass against a build where this rule does not exist.
+func TestModelDeploymentWebhook_RefusesMemberNamesThatCannotBeHostnames(t *testing.T) {
+	r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+
+	// 40 + 1 + 20 = 61 characters, which is a legal Service name; the member name it implies is 67.
+	// The names end in an alphanumeric on purpose: a trailing hyphen is refused by the Service-name
+	// rule for a reason that has nothing to do with length, and an input refused twice would let
+	// this case pass against a build where the rule under test is missing.
+	longName := "deploymentaaaaaaaaaaaaaaaaaaaaaaaaaaaaax"
+	longRole := "roleaaaaaaaaaaaaaaay"
+
+	build := func(name, role string, replicas, size int32) *workercore.ModelDeployment {
+		md := modelDeploymentWithEveryField()
+		md.Name = name
+		md.Spec.Roles = md.Spec.Roles[:1]
+		md.Spec.Roles[0].Name = role
+		md.Spec.Roles[0].Replicas, md.Spec.Roles[0].ReplicaSize = replicas, size
+
+		return md
+	}
+
+	t.Run("a_name_legal_at_size_one_is_refused_above_it", func(t *testing.T) {
+		// The baseline: the same deployment at size one is ACCEPTED, which is what proves the
+		// refusal below is about the member name and not about the role or deployment name.
+		_, err := r.ValidateCreate(context.Background(), build(longName, longRole, 1, 1))
+		require.NoError(t, err, "at one member per replica the render names nothing, so there is no budget")
+
+		_, err = r.ValidateCreate(context.Background(), build(longName, longRole, 1, 2))
+		require.Error(t, err)
+
+		got := err.Error()
+		assert.True(t, errsContain(got, "spec.roles[0]: Invalid value"),
+			"the error belongs to the role, since four inputs spell the name it measured: %s", got)
+		assert.True(t, errsContain(got, "cannot be a hostname"), got)
+		assert.True(t, errsContain(got, longName+"-"+longRole+"-r0-m1"),
+			"the message has to quote the name it measured, or nobody can tell what to shorten: %s", got)
+	})
+
+	t.Run("a_scale_that_lengthens_the_name_is_refused", func(t *testing.T) {
+		// 57 characters of prefix, which is exact: -r9-m1 reaches 63 and fits, -r10-m1 reaches 64
+		// and does not. This is the case the Service-name rule structurally cannot catch, since it
+		// skips roles that already exist and the pair it measures never changes.
+		// Ten replicas reach ordinal 9, which is one digit; eleven reach ordinal 10, which is two.
+		name, role := "deploymentaaaaaaaaaaaaaaaaaaaaaaaaax", "roleaaaaaaaaaaaaaaay"
+		old := build(name, role, 10, 2)
+		_, err := r.ValidateCreate(context.Background(), old)
+		require.NoError(t, err, "ten replicas reach ordinal 9, and -r9-m1 is exactly 63")
+
+		_, err = r.ValidateUpdate(context.Background(), old, build(name, role, 11, 2))
+		require.Error(t, err, "the eleventh reaches ordinal 10, adding a digit to the longest name")
+
+		got := err.Error()
+		assert.True(t, errsContain(got, "declare fewer replicas"), got)
+		// THE FIELD THE REFUSAL NAMES IS THE ONE THE USER CAN ACT ON. Nothing about `size` moved on
+		// this edit and nothing could -- it is immutable -- so an error attached to it would send an
+		// operator to change the one input this deployment has already frozen.
+		assert.False(t, errsContain(got, "spec.roles[0].size"),
+			"a replicas-only scale must not be reported against size, which did not change: %s", got)
+		assert.True(t, errsContain(got, "spec.roles[0]: Invalid value"), got)
+	})
+}
+
+// TestModelDeploymentWebhook_RefusesTwoServicesNamedTheSame covers the collision distinct role names
+// do not prevent, because the two names come out of two different formulas: a role is fronted by
+// <deployment>-<role>, and a role of several members publishes each instance behind
+// <deployment>-<role>-r<ordinal>.
+//
+// THE TWO BASELINES ARE WHAT MAKE THE REFUSAL MEAN ANYTHING. The same pair of role names at one
+// member per instance is ACCEPTED -- no instance Service is rendered there, so no name is claimed
+// twice -- which is what proves the rule is about the derived Service and not about role names that
+// look alike. And a sibling named something else is accepted at either size, which is what proves it
+// is not simply refusing multi-member roles.
+func TestModelDeploymentWebhook_RefusesTwoServicesNamedTheSame(t *testing.T) {
+	r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+
+	// Role "x" runs two instances, so it derives <deployment>-x-r0 and <deployment>-x-r1. A sibling
+	// named "x-r0" derives <deployment>-x-r0 for itself.
+	build := func(sibling string, size int32) *workercore.ModelDeployment {
+		md := modelDeploymentWithEveryField()
+		md.Spec.Roles = md.Spec.Roles[:1]
+		md.Spec.Roles[0].Name = "x"
+		md.Spec.Roles[0].Replicas, md.Spec.Roles[0].ReplicaSize = 2, size
+
+		second := *md.Spec.Roles[0].DeepCopy()
+		second.Name, second.Replicas, second.ReplicaSize = sibling, 1, 1
+
+		md.Spec.Roles = append(md.Spec.Roles, second)
+
+		return md
+	}
+
+	t.Run("a_sibling_named_like_a_derived_instance_service_is_refused", func(t *testing.T) {
+		_, err := r.ValidateCreate(context.Background(), build("x-r0", 1))
+		require.NoError(t, err,
+			"at one member per instance no headless Service is rendered, so the name is claimed once")
+
+		_, err = r.ValidateCreate(context.Background(), build("x-r0", 2))
+		require.Error(t, err)
+
+		got := err.Error()
+		assert.True(t, errsContain(got, "qwen-72b-x-r0"),
+			"the message quotes the name both would carry, or nobody can tell what collides: %s", got)
+		assert.True(t, errsContain(got, "spec.roles[1].name"),
+			"the refusal belongs to the role that can be renamed, which is the one declared second: %s", got)
+	})
+
+	t.Run("an_unrelated_sibling_is_accepted_at_either_size", func(t *testing.T) {
+		for _, size := range []int32{1, 2} {
+			_, err := r.ValidateCreate(context.Background(), build("y", size))
+			require.NoErrorf(t, err, "a sibling named y collides with nothing at size %d", size)
+		}
+	})
+}
+
 // TestModelDeploymentWebhook_ValidateUpdateFreezesSizeButNotReplicas holds the two halves of the
 // scaling story against each other, on one object, in one test.
 //

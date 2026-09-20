@@ -446,6 +446,14 @@ ReplicaGroup — do not, and both reasons are measured rather than argued.
   no name anything can predict. The name is a pure function of (deployment, role, replica, member),
   so every reader — the renderer, the converger, a sibling Member's entrypoint — derives the same
   string without reading anything.
+- **AC8.2b** ⚠️ **Naming the Members spends a length budget, and admission is where that is
+  refused.** A Member's name is its hostname, so it is a DNS-1123 label of 63 characters, while the
+  rule that already exists measures only `<deployment>-<role>` — a 61-character pair is legal there
+  and implies a 67-character Member name. Without a rule the deployment is admitted, every Pod
+  create is rejected, and the reconciler retries forever with the cause two objects away from the
+  field that caused it. The rule measures the **longest name the declared counts can currently
+  produce** rather than a worst case over `int32`, and it runs on **update as well as create**,
+  because `replicas` is a field a user is invited to change and a scale can lengthen every name.
 - **AC8.3** Every Member of a ReplicaGroup is created in one pass, never one-after-another. A
   Member that Kueue has scheduling-gated is never Ready until the group is admitted, and the group
   is not admitted until every Member exists — so any rendering that waits for Member *i* before
@@ -1148,7 +1156,7 @@ implementation.
       happen is this edit to it. The refusal names `replicas` so it is not a dead end. The test was
       mutation-checked: with the rule removed it fails on the assertion, not on the build.
 
-- [ ] **T12 · A ReplicaGroup above one Member renders as `size` named Members**
+- [x] **T12 · A ReplicaGroup above one Member renders as `size` named Members**
       Blocked by: T10, T11
       Owns: `pkg/worker/controllers/worker/model_deployment_render.go`,
       `pkg/worker/controllers/worker/model_deployment_pod_group.go`,
@@ -1165,7 +1173,7 @@ implementation.
       Members. `pod-group-total-count` becomes `size` instead of the constant `1`.
       Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestRenderModelDeployment' -v`
 
-- [ ] **T13 · The converger creates, compares and replaces at ReplicaGroup granularity**
+- [x] **T13 · The converger creates, compares and replaces at ReplicaGroup granularity**
       Blocked by: T12
       Owns: `pkg/worker/controllers/worker/model_deployment.go`, and its tests
       ⚠️ **This task exists because the plan did not have it.** The converger — roughly five hundred
@@ -1180,7 +1188,7 @@ implementation.
       today's, asserted by keeping the existing tests unchanged and green.
       Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestModelDeploymentReconciler' -v`
 
-- [ ] **T14 · Addressability: a headless Service per ReplicaGroup, and a role Service that fronts
+- [x] **T14 · Addressability: a headless Service per ReplicaGroup, and a role Service that fronts
       only leaders**
       Blocked by: T12
       Owns: `pkg/worker/controllers/worker/model_deployment_service.go`,

@@ -500,6 +500,8 @@ func validateModelDeployment(
 	errs = append(errs, validateModelDeploymentRolesCount(md)...)
 	errs = append(errs, validateModelDeploymentRoleNames(md)...)
 	errs = append(errs, validateModelDeploymentRoleServiceNames(md, existingRoles)...)
+	errs = append(errs, validateModelDeploymentServiceNamesAreDistinct(md)...)
+	errs = append(errs, validateModelDeploymentRoleMemberNames(md)...)
 	errs = append(errs, validateModelDeploymentRoleKinds(md)...)
 	errs = append(errs, validateModelDeploymentRouter(md)...)
 
@@ -842,6 +844,134 @@ func validateModelDeploymentRoleServiceNames(
 			rolesPath.Index(i).Child("name"), role, fmt.Sprintf(
 				"this role is fronted by a Service named %q (%d characters), which is not a valid "+
 					"Service name: %s. Shorten or rename this role, or the deployment",
+				name, len(name), strings.Join(why, "; "))))
+	}
+
+	return errs
+}
+
+// validateModelDeploymentServiceNamesAreDistinct refuses a deployment two of whose Services would
+// be named the same thing.
+//
+// THE COLLISION IS BETWEEN TWO DIFFERENT FORMULAS, which is why distinct role names are not enough
+// to prevent it. A role is fronted by `<deployment>-<role>`, and a role of several members publishes
+// each instance behind `<deployment>-<role>-r<ordinal>` — so a role named `x` running instances of
+// several Pods derives `<deployment>-x-r0`, and a sibling role named `x-r0` derives the same name
+// for itself. Both roles are legal, they do not share a name, and nothing else in this handler
+// compares them.
+//
+// WHAT IT PREVENTS IS SILENT, WHICH IS WHY IT IS REFUSED RATHER THAN RESOLVED. The converger aligns
+// the Services it renders against what the cluster holds, one list entry at a time; two entries
+// naming one object make every pass rewrite that object into the other's shape. The instance's
+// headless Service and the role's ClusterIP Service are not interchangeable — one publishes per-Pod
+// records with no cluster IP, the other load-balances — so whichever shape loses the pass takes its
+// consumers with it: either the members of an instance stop resolving each other, or the role stops
+// answering. Nothing reports it; both objects exist and one of them is the wrong kind of Service.
+//
+// IT IS CHECKED ON EVERY REQUEST rather than only for roles that are new. `replicas` is a field a
+// user is invited to change, and it decides how many instance Services a role derives, so a scale-up
+// is exactly the edit that walks a legal deployment into a collision.
+func validateModelDeploymentServiceNamesAreDistinct(md *workercore.ModelDeployment) field.ErrorList {
+	var errs field.ErrorList
+
+	// The deployment's own Service is named after the deployment, and it claims that name before any
+	// role is considered.
+	claimedBy := map[string]string{md.Name: "the deployment's own Service"}
+
+	rolesPath := field.NewPath("spec", "roles")
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+
+		derived := []string{md.Name + "-" + role.Name}
+		describes := []string{fmt.Sprintf("the Service fronting role %q", role.Name)}
+		// Only above one member: an instance of a single Pod has nobody to address and no headless
+		// Service is rendered for it, so enumerating names here that nothing creates would refuse a
+		// deployment that works.
+		if role.ReplicaSize > 1 {
+			for ordinal := range int(role.Replicas) {
+				derived = append(derived,
+					fmt.Sprintf("%s-%s-r%d", md.Name, role.Name, ordinal))
+				describes = append(describes,
+					fmt.Sprintf("the headless Service publishing instance %d of role %q",
+						ordinal, role.Name))
+			}
+		}
+
+		for j, name := range derived {
+			if by, taken := claimedBy[name]; taken {
+				errs = append(errs, field.Invalid(
+					rolesPath.Index(i).Child("name"), role.Name, fmt.Sprintf(
+						"%s would be named %q, and so would %s. One name is one object, and the "+
+							"two need different shapes, so whichever is written last leaves the "+
+							"other without the addresses it publishes. Rename this role",
+						describes[j], name, by)))
+
+				continue
+			}
+			claimedBy[name] = describes[j]
+		}
+	}
+
+	return errs
+}
+
+// validateModelDeploymentRoleMemberNames refuses a role whose members would be named something
+// Kubernetes cannot use as a hostname.
+//
+// IT IS A SEPARATE RULE FROM THE SERVICE-NAME ONE ABOVE, AND NOT A WIDENING OF IT, because the two
+// have different subjects and different triggers. That rule is about <deployment>-<role>, which no
+// update can move, so it is checked once when a role appears. This one is about
+// <deployment>-<role>-r<ordinal>-m<member>, whose length depends on `replicas` -- a field a user is
+// invited to change -- so it has to be checked on every update, including for roles that already
+// exist. Merging them would mean either re-checking an immutable pair forever or letting a scale
+// walk a legal deployment into an illegal one.
+//
+// THE FAILURE IT PREVENTS IS A LOOP RATHER THAN AN ERROR. A member's name is its hostname, which is
+// a DNS-1123 label of 63 characters, while the names above are only checked to 63 for the shorter
+// composite -- so a 61-character <deployment>-<role> is legal there and produces a 67-character
+// member here. Without this rule the deployment is admitted, every Pod create is rejected by the API
+// server, and the reconciler retries forever with the cause two objects away from the field that
+// caused it. Above one member that is the ONLY thing that happens: there is nothing partial to
+// observe, because the group is never composed at all.
+//
+// IT MEASURES THE LONGEST NAME THE SPEC CAN CURRENTLY PRODUCE rather than a worst case over the
+// field's type. Budgeting for a ten-digit ordinal would take twenty-four characters away from every
+// deployment to cover counts nobody runs; measuring the declared counts costs nothing and refuses
+// the scale that would break it, at the moment that scale is requested.
+func validateModelDeploymentRoleMemberNames(md *workercore.ModelDeployment) field.ErrorList {
+	var errs field.ErrorList
+
+	rolesPath := field.NewPath("spec", "roles")
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		// At one member per replica the render names nothing: the Pod keeps the generated name it
+		// has always had, and no hostname is set. There is no budget to check.
+		if role.ReplicaSize <= 1 {
+			continue
+		}
+
+		// The highest ordinal and the highest member index, which together spell the longest name
+		// this role can produce. Both floor at zero so a role declaring no replicas -- which the
+		// schema refuses, but which a rule must not depend on -- still measures something real.
+		name := fmt.Sprintf("%s-%s-r%d-m%d", md.Name, role.Name,
+			max(int(role.Replicas)-1, 0), int(role.ReplicaSize)-1)
+		why := validation.IsDNS1123Label(name)
+		if len(why) == 0 {
+			continue
+		}
+
+		// THE ERROR IS ATTACHED TO THE ROLE RATHER THAN TO ONE OF ITS FIELDS, because four inputs
+		// spell this name -- the deployment's name, the role's name, `replicas` and `size` -- and
+		// which of them moved is not knowable from the object being validated. Naming `size` would
+		// be actively misleading on the edit that reaches here most often: a scale that takes
+		// `replicas` from 9 to 10 lengthens the ordinal and trips this, while `size` is immutable
+		// and therefore the one input the user cannot act on. The detail below names every input
+		// that can be changed instead.
+		errs = append(errs, field.Invalid(
+			rolesPath.Index(i), name, fmt.Sprintf(
+				"a replica of this role is addressed by naming each of its Pods, and the longest "+
+					"such name would be %q (%d characters), which cannot be a hostname: %s. "+
+					"Shorten the role or the deployment, or declare fewer replicas",
 				name, len(name), strings.Join(why, "; "))))
 	}
 
