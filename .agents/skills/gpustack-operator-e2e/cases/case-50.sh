@@ -5,9 +5,9 @@
 #
 #   case-50.sh <NS>
 #
-# Goal:        CASE 49 proves the roles compose into one Workload. This proves what that buys, and it
-#              is the only claim in the family that a shortage can demonstrate: when the pool cannot
-#              hold every role, NOTHING starts.
+# Goal:        CASE 49 proves every replica composes a Workload of its own. This proves what holds
+#              the set together once they are independent, and it is the only claim in the family a
+#              shortage can demonstrate: when the pool cannot hold every role, NOTHING starts.
 #
 #              THE MEASUREMENT IS BUILT AROUND THE FAILING SHAPE, NOT AROUND THE PASSING ONE. If each
 #              role were its own Workload -- which is what the replicas were before they became a pod
@@ -66,8 +66,30 @@ FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
+# The first InstanceType A DEPLOYMENT CAN ACTUALLY NAME, which is not the same as the first one the
+# API returns.
+#
+# THE LIST COMES BACK SORTED BY NAME AND CARRIES TYPES ON THEIR WAY OUT. Case 68 creates its own
+# `case68-nowhere` and deletes it without waiting, and that name sorts before an ordinary derived
+# type -- so a case running straight after it picks a type that is already terminating. Naming one
+# is refused at admission, and the run then dies at fixture time for a reason that has nothing to do
+# with what it measures. Inactive is excluded for the mirror reason: a deployment on one is admitted
+# and then never scheduled, so the case waits out every timeout it has.
+usable_instance_type() {
+  kubectl get instancetypes.worker.gpustack.ai \
+    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}{"\n"}{end}' \
+    2>/dev/null \
+    | while IFS='|' read -r name deleting inactive; do
+        [ -n "$name" ] || continue
+        [ -z "$deleting" ] || continue
+        [ "$inactive" = true ] && continue
+        echo "$name"
+        break
+      done
+}
+
 if [ -z "$IT" ]; then
-  IT="$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  IT="$(usable_instance_type)"
 fi
 if [ -z "$IT" ]; then
   echo "[case-50] no InstanceType in the cluster; run case-1 first" >&2
@@ -206,14 +228,41 @@ $(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
 EOF
 }
 
-# The PodSets this deployment's Workload has been assigned a flavor for, "" when it holds no
-# admission at all. Assignment is per PodSet, so this is also how "both roles, one admission" is read.
+# Every Workload of this deployment, one name per line. THE PLURAL IS THE WHOLE CORRECTION: a
+# replica is the admission unit, so a two-role deployment of one replica each has TWO Workloads of
+# one PodSet each, where it once had ONE Workload of two PodSets. group_workload returns the first
+# match and stays right where any Workload will do -- asking whether one was composed at all -- but
+# it cannot answer a question about the set.
+deployment_workloads() {
+  local md="$1" uids row wl owners u
+  uids="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${md}" \
+    -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' 2>/dev/null)"
+  [ -n "$uids" ] || return 0
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    wl="${row%%=*}"
+    owners="${row#*=}"
+    for u in $uids; do
+      # Padded on both sides so a uid cannot match a longer one it is a prefix of.
+      case " $owners " in *" $u "*) echo "$wl"; break ;; esac
+    done
+  done <<EOF
+$(kubectl -n "$NS" get workloads.kueue.x-k8s.io \
+  -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.ownerReferences[*].uid}{"\n"}{end}' 2>/dev/null)
+EOF
+}
+
+# Every PodSet this deployment holds an assignment for, across ALL of its Workloads, "" when it holds
+# no admission anywhere. Counting words over the set is how "both roles admitted" is read now: each
+# Workload contributes the one PodSet of the replica it answers for, so a two-role deployment of one
+# replica each yields two words. Reading a single Workload yields one and looks exactly like a role
+# that was starved.
 assigned_sets() {
   local wl
-  wl="$(group_workload "$1")"
-  [ -n "$wl" ] || return 0
-  kubectl -n "$NS" get workloads.kueue.x-k8s.io "$wl" \
-    -o jsonpath='{range .status.admission.podSetAssignments[*]}{.name}{" "}{end}' 2>/dev/null
+  for wl in $(deployment_workloads "$1"); do
+    kubectl -n "$NS" get workloads.kueue.x-k8s.io "$wl" \
+      -o jsonpath='{range .status.admission.podSetAssignments[*]}{.name}{" "}{end}' 2>/dev/null
+  done
 }
 
 wait_admitted() {
@@ -389,9 +438,11 @@ $(role_block decode decode 1)"
     fi
   fi
 
-  # THE ROW THIS FILE EXISTS FOR. Independent Workloads would have ungated the role that fits and
-  # queued the other; one Workload gates both. Counted over the replicas of EACH role, so a reading
-  # of "some gated" cannot pass for "all gated".
+  # THE ROW THIS FILE EXISTS FOR, and it is a stronger claim than it used to be. The Workloads ARE
+  # independent now -- one per replica -- so nothing in Kueue's own atomicity keeps the role that
+  # fits from starting; what holds them together is the joint-admission check this operator
+  # references from the queue. Counted over the replicas of EACH role, so a reading of "some gated"
+  # cannot pass for "all gated".
   UNGATED=""
   SEEN=0
   for role in prefill decode; do

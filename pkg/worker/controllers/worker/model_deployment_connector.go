@@ -250,8 +250,24 @@ func ModelDeploymentOwnsArg(engine, arg string) bool {
 // than for what it duplicates: re-pointing it silently swaps the whole client configuration — pool
 // address, transport, metadata source — for whatever the other file says, and every symptom then
 // appears one layer away from its cause.
+//
+// The rank variables are owned ON EVERY ENGINE rather than per engine, because they describe the
+// Kubernetes shape a Pod was rendered in and no engine reads them by name. They are owned even for a
+// role at size one, where nothing renders them: the alternative is a rule that turns on with a field
+// value, and a refusal a user meets only after widening an instance is worse than one they meet on
+// the edit that names the key.
 func ModelDeploymentOwnsEnv(engine, name string) bool {
-	return slices.Contains(modelDeploymentOwnedKeys[engine].Env, name)
+	return slices.Contains(modelDeploymentRankEnvNames, name) ||
+		slices.Contains(modelDeploymentOwnedKeys[engine].Env, name)
+}
+
+// modelDeploymentRankEnvNames is what a multi-Member instance publishes to its main container. It is
+// declared beside the ownership test rather than beside the render, because ownership is the reason
+// it is a list at all -- the renderer writes the three entries directly.
+var modelDeploymentRankEnvNames = []string{
+	modelDeploymentLeaderAddressEnv,
+	modelDeploymentReplicaSizeEnv,
+	modelDeploymentMemberIndexEnv,
 }
 
 // ModelDeploymentDefaultsEnv reports whether the operator merely defaults this environment variable,

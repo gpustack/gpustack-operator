@@ -14,7 +14,8 @@
 `status.phase` is the field to read first: `Starting`, `Ready`, `Degraded` or `Deleting`. `Degraded`
 means some required serving capacity is ready and some is not: either some role replicas are down, or
 all role replicas are ready but a declared router has no ready replica.
-`status.roles[]` carries `name`, `kind`, `desired`, `ready`, `unmanaged` and `assignedFlavor` per role.
+`status.roles[]` carries `name`, `kind`, `desired`, `ready`, `quotaReserved`, `unmanaged` and
+`assignedFlavors` per role.
 
 Without a router, `status.endpoint` is the address the deployment-wide Service serves on, in the form
 `<scheme>://<name>.<namespace>.svc:<port>`. The scheme is read from the same role the port is — the
@@ -34,6 +35,11 @@ are absent when the corresponding rendered Pods do not carry publisher configura
 **`ready` counts replicas whose engine answered, not replicas whose process started** — for every
 role except the three shapes listed below, which carry no gates and keep the weaker meaning. One
 still loading its model counts as not ready for as long as that takes.
+
+**Both figures count replicas, which is the same as counting Pods only while a replica is one Pod.**
+A role at `size: 2` with `replicas: 2` runs four Pods and reports `desired: 2`. A replica of several
+Pods is ready only when **every** member it declares is, so a role showing `1/2` with three of its
+four Pods running is reporting one whole instance, not three quarters of the role.
 
 A gated replica carries a startup gate, a readiness gate and a liveness gate, all reading the
 engine's own `GET /health` on the port the Service targets, so `ready == desired` and "the endpoint
@@ -56,8 +62,8 @@ for longer.** The liveness gate's failure threshold is wider than the readiness 
 > **Why** — the two cost different things: losing readiness withdraws a replica from the Service and
 > is undone by answering again, while a restart throws away a model that took the startup budget to
 > load. Equal thresholds would collapse them into one event. And without the liveness gate such a
-> replica has no way back at all, since this operator deletes a replica only to rebuild a resizing
-> group, to shed a surplus, or to turn over an outdated one — never because it went quiet.
+> replica has no way back at all, since this operator deletes a replica only to shed one the spec no
+> longer declares, or to turn over an outdated one — never because it went quiet.
 
 **The operator tells the engine where to listen.** It renders `--host 0.0.0.0` and `--port <the port
 the Service targets>` into the engine's own command line, so the address traffic is sent to and the
@@ -88,14 +94,31 @@ would restart a replica answering every request; an HTTP engine speaks TCP whate
 says, so a gate would **pass** while the published endpoint forwards a protocol nothing answers.
 Replicas of all three are Ready as soon as their process starts.
 
-`assignedFlavor` answers *which accelerator model did this role actually get*, read from the group
-Workload's per-PodSet assignment. It is **absent** rather than empty while no assignment exists,
-because "not assigned yet" and "assigned to a flavor with no name" are different facts and one of them
-reads as an answer.
+`quotaReserved` is how many of the role's replicas hold a quota reservation. Each replica is its own
+Workload and reserves on its own, so a role sits anywhere between zero and `desired` while capacity
+arrives — where a role that shared one Workload passed all-or-nothing and this figure could not exist.
 
-**Absent does not only mean "not admitted yet".** The field reports the flavor of a role's
-*accelerator* credits. A role admitted onto a pool carrying no accelerator at all reports nothing here
-while being perfectly healthy — its Workload holds an assignment, naming a flavor for `cpu`.
+The field is always present once written, and its zero is an observed zero: it is counted from Pod
+and Workload lists that succeeded, and a failed list writes no status at all rather than a zero. The
+two readings call for opposite actions — a visible 0 means the pass read everything and no replica
+holds quota, so investigate capacity; a field that is not there means the pass could not see, so wait,
+or look at the operator rather than the pool.
+
+`assignedFlavors` answers *which accelerator models did this role's replicas actually get*, read from
+each replica's own Workload's per-PodSet assignment. It is a **deduplicated, sorted** list, because
+each replica is its own Workload and Kueue assigns a flavor per Workload — two replicas of one role
+can land on different flavors.
+
+It is **absent** rather than empty while no assignment exists, and absent does not only mean "not
+admitted yet". The field reports the flavor of a replica's *accelerator* credits: a role admitted onto
+a pool carrying no accelerator at all reports nothing here while being perfectly healthy — its
+Workloads hold assignments, naming a flavor for `cpu`.
+
+One entry means every assigned replica of the role names it. Several entries mean the replicas were
+assigned different flavors — the signal to investigate, not a degraded form of one answer. Which
+replica carries which flavor is deliberately not here: the ordinal such an answer would key on is the
+converger's internal slotting rather than a promise this API makes, and a reader who needs the mapping
+reads the replicas' own Pods.
 
 That is the field's contract rather than a gap in it. The answer is read through the same lens the
 per-accelerator admission gate uses, and a flavor reported here that the gate would not fit against
@@ -115,13 +138,13 @@ cache not attached" is a real and actionable state.
 | `False` | `BindingDeleting` | find who deleted it; the replicas keep writing to the domain they attached to |
 
 **`QuotaReserved`** — whether **every one of** the deployment's Workloads holds Kueue quota. Every
-role is its own group with its own Workload, so a deployment of N roles is N Workloads. `True` is
-therefore an answer about the whole set and not about whichever Workload sorts first, because half a
-deployment holding quota is not the deployment holding quota.
+replica is its own group with its own Workload, so a deployment of N replicas is N Workloads. `True`
+is therefore an answer about the whole set and not about whichever Workload sorts first, because half
+a deployment holding quota is not the deployment holding quota.
 
 A message that names groups names them **by role**, never by `instanceType`: two roles can name one
-type, so a type would point at two groups at once while a role names exactly the group that waits.
-The queue an operator has to free follows from the named role's own `instanceType`.
+type, so a type would point at two roles' groups at once while a role names exactly the set that
+waits. The queue an operator has to free follows from the named role's own `instanceType`.
 
 It reads those Workloads' own conditions rather than asking the admission gate. The gate stops
 evaluating a Workload once it is admitted, so anything derived from it would answer for the moment of
@@ -129,10 +152,10 @@ admission and never again.
 
 | Value | Reason | Meaning |
 |---|---|---|
-| `True` | `Reserved` | every group has quota reserved; with one group the message names its cluster queue |
-| `False` | `Pending` | at least one group is waiting for quota, and the message names which roles' groups are waiting |
-| `False` | `PodGroupIncomplete` | fewer Pods exist than the group declares, so Kueue composes **no Workload at all**; the message carries `<have>/<want>` |
-| `False` | `PreemptedInPart` | a higher-priority workload reclaimed some groups while others are still admitted; the message says whether any role kind has no admitted group, and so whether the loss is of capacity or of a whole role |
+| `True` | `Reserved` | every replica has quota reserved; with one role the message names its cluster queue |
+| `False` | `Pending` | at least one replica is waiting for quota; the message names how many, and where they wait |
+| `False` | `PodGroupIncomplete` | fewer replicas exist than a role declares, so Kueue composes **no Workload at all** for the missing ones; the message carries `<have>/<want>` and the role's cluster queue |
+| `False` | `PreemptedInPart` | a higher-priority workload reclaimed some replicas' quota while others are still admitted; the message says whether any role kind has no admitted replica left, and so whether the loss is of capacity or of a whole role |
 | `False` | `Parked` | the set failed to assemble for long enough that the joint check deactivated its Workloads; an identical re-apply does not clear it |
 | `False` | `NoQueueInReservedNamespace` | the deployment is in a reserved namespace, which has no LocalQueue, so it will never be scheduled |
 | `Unknown` | `AdmissionInFlight` | a group is complete and has no Workload yet — Kueue composes it asynchronously, so absence is admission in flight, not refusal |
@@ -147,7 +170,7 @@ Workload. Telling them apart is why the reason exists.
 `Pending`, `PreemptedInPart` and `Parked` all say the set does not hold quota, and they are separate
 because the action differs. `Pending` resolves itself when capacity appears. `Parked` is over already:
 those workloads were deactivated and no longer ask for anything. `PreemptedInPart` is the one to act
-on, and the groups that kept their quota hold accelerators until either the reclaimed groups are
+on, and the replicas that kept their quota hold accelerators until either the reclaimed replicas are
 admitted again or the deployment is deleted.
 
 > **Why it is not just a slower `Pending`.** How long the wait is worth making depends on what
@@ -197,7 +220,7 @@ while saying nothing about.
 |---|---|---|
 | `True` | `UpToDate` | every replica matches what the pass rendered |
 | `False` | `RolloutInProgress` | replicas differ from the render and turn over **one per role per pass**; this pass deleted at most one replica per role, and the pass that finds it gone creates the replacement |
-| `False` | `ReplacementInProgress` | every surviving replica matches the render but the declared count is short: nobody changed the spec — a replica left on its own, and the pass creates each replacement as Kueue asks for it |
+| `False` | `ReplacementInProgress` | every surviving replica matches the render but the declared count is short — what removed them is not this condition's to say, and a preemption reports itself on the quota condition; the pass creates each replacement once the departed replica's ordinal reads empty |
 | `False` | `RolloutHeldByCache` | replicas that differed from the render were **left in place**: no connection resolved this pass, and recreating them on that alone would rebuild every replica whenever the store blinks |
 | `Unknown` | `RolloutNotObserved` | the pass accounted for no replica at all, so it established nothing either way |
 
@@ -205,19 +228,19 @@ A pass answers only for the replicas it can vouch for — ones whose hash it rea
 from the render it just performed. A pass that can vouch for none reports `Unknown`, because "nothing
 was outdated" and "nothing was looked at" are the same zero and only one of them is an answer.
 
-That is not a rare path, and it is not a quiet one. A teardown, a whole-group rebuild, and the pass
-between a rollout's delete and the create that answers it all reach the status write that way — and
-those are the moments the replicas are least current.
+That is not a rare path, and it is not a quiet one. A teardown and the pass between a rollout's
+delete and the create that answers it both reach the status write that way — and those are the
+moments the replicas are least current.
 
 `ReplacementInProgress` and `RolloutInProgress` are separate because they answer opposite questions.
 A rollout answers "did my edit land"; a replacement answers "why is capacity moving when I changed
 nothing" — reading the first for the second sends you to diff a spec that did not change. While the
-pass replaces the missing ones, `WaitingForReplacementPods` on the group's Workload is the condition
-to watch.
+pass waits to replace a missing one, what to watch is the departed Pod itself: the replacement is
+created only once no Pod for that ordinal reads on the API server.
 
 > **Why `Unknown` rather than leaving the last answer standing.** Leaving it alone keeps whatever the
-> last answering pass wrote, and after a steady deployment that is an authoritative `True`. A
-> replica-count edit then deletes every replica without accounting for one, and the object goes on
+> last answering pass wrote, and after a steady deployment that is an authoritative `True`. A pass
+> that finds every replica on its way out accounts for none of them — and a sticky answer would go on
 > reporting that every replica matches the render while none exists.
 
 `RolloutHeldByCache` is the answer to "I changed the image and nothing happened". Nothing else on the
@@ -229,19 +252,20 @@ read, which is accurate and about a different subject.
 > blink puts every deployment on the pool into this state. The message therefore says what *would* be
 > delayed, and never that something is.
 
-> **And not every edit is delayed.** A change to the replica counts or the role set moves the group
-> annotations, so the group resizes and takes the whole-group rebuild, which runs **before** this guard
-> and proceeds during an outage. What waits is an edit that changes a replica's rendered Pod while
-> leaving the group's shape alone.
+> **And not every change is delayed.** A `replicas` change proceeds during an outage: the ordinals it
+> adds do not exist yet and are created without a connector, and the ordinals it sheds leave on the
+> ordinary path. What waits is an edit that changes a running replica's rendered Pod.
 
-> **That is also the lever, if you need the edit sooner.** The group-shape change carries the withheld
-> edit through the outage with it, and it costs **two** rebuilds rather than one: every replica reloads
-> now and comes back without a cache, then reloads again when the store returns and the connector is
-> rendered back in.
+> **A scale-out is no longer a lever for the waiting edit.** Replicas added during the outage are
+> created without a connector and turn over once more when the store returns — they pay the second
+> reload themselves — but the edit waiting on the running replicas still waits. What bounds the wait
+> is the store's own recovery, and the condition's message says what waits rather than promising a way
+> out.
 
-> **The stall is a decision, not a missing feature.** A rollout that never withholds an edit is
-> possible, and it is **refused** — it takes the price above on your behalf, on every deployment with
-> an edit waiting. Measured, a withheld edit lands within seconds of the store returning.
+> **The stall is a decision, not a missing feature.** The guard exists because the alternative —
+> recreating every replica whose render lost its connector — deletes every replica of every deployment
+> on a pool for a few seconds of store unavailability. Measured, a withheld edit lands within seconds
+> of the store returning.
 
 **`RoleKindsReady`** — whether every role **kind** the deployment declares has at least one ready
 replica. It is deliberately **not** replica completeness: "every role has all the replicas it asked

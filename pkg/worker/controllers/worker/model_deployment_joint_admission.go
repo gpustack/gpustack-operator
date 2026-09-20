@@ -253,14 +253,21 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
-	// EVERYTHING THAT IS NOT A MULTI-GROUP ModelDeployment IS READY AT ONCE, AND THAT CASE HAS TO BE
+	// EVERYTHING THAT IS NOT A MULTI-ROLE ModelDeployment IS READY AT ONCE, AND THAT CASE HAS TO BE
 	// PRESENT OR THE CHECK PARKS THE CLUSTER. The check is referenced from every operator-owned
 	// queue, so every Workload in them carries it -- including ones this operator did not create. A
 	// controller that answered only about its own objects would leave all the others Pending forever
 	// with nothing naming the cause.
+	//
+	// THE EXEMPTION COUNTS ROLES WHILE THE VERDICT COUNTS REPLICAS, and the asymmetry is the point:
+	// modelDeploymentPodGroups returns one entry per role, so what is measured here is how many
+	// roles the deployment spreads over. Counting replicas instead would pull a single-role
+	// deployment of several replicas inside the barrier, where it would gain partial-quota holds
+	// and exposure to the park bound for no atomicity at all -- there is no second role whose
+	// admission has to coincide with its.
 	if md == nil || len(modelDeploymentPodGroups(md)) < 2 {
 		return ctrl.Result{}, r.applyVerdict(ctx, wl, checks, kueue.CheckStateReady,
-			"nothing to wait for: this workload is not one group of a multi-group model deployment")
+			"nothing to wait for: this workload is not one replica of a multi-role model deployment")
 	}
 
 	held, err := r.jointVerdict(ctx, md)
@@ -352,14 +359,15 @@ type jointHeld struct {
 	State   kueue.CheckState
 	Message string
 
-	// Settled reports that the deployment has stopped changing shape: every group has every replica
+	// Settled reports that the deployment has stopped changing shape: every role has every replica
 	// it declares, and what it is waiting for is capacity rather than its own replicas.
 	//
 	// ONLY A SETTLED DEPLOYMENT MAY BE PARKED. The infeasibility bound exists for a set that cannot
-	// assemble, and a deployment mid-rebuild is short of its totals for an ordinary reason that
-	// resolves on its own. Without this distinction a rebuild slower than the bound -- a large image
-	// on a cold node is enough -- parks a deployment that was about to start, and nothing in the
-	// cluster ever sets spec.active back to true, so the park is permanent.
+	// assemble, and a deployment still assembling or replacing a replica is short of its totals for
+	// an ordinary reason that resolves on its own. Without this distinction a replacement slower
+	// than the bound -- a large image on a cold node is enough -- parks a deployment that was about
+	// to start, and nothing in the cluster ever sets spec.active back to true, so the park is
+	// permanent.
 	//
 	// IT ERRS TOWARD HOLDING RATHER THAN PARKING, which is the direction that loses nothing: holding
 	// costs reserved quota until an operator looks, while parking a healthy rollout costs the rollout.
@@ -369,15 +377,16 @@ type jointHeld struct {
 	Settled bool
 }
 
-// jointVerdict answers Ready when every group of the deployment holds a quota reservation.
+// jointVerdict answers Ready when every replica of every role of the deployment holds a quota
+// reservation.
 //
 // THE RESERVATION IS THE OBSERVABLE, not the admission: a sibling still held by this very check has
-// reserved and not been admitted, so waiting for admission would be a deadlock in which every group
-// waits for a state only the others opening can produce.
+// reserved and not been admitted, so waiting for admission would be a deadlock in which every
+// replica waits for a state only the others opening can produce.
 //
-// A GROUP WITH NO WORKLOAD YET IS NOT READY AND IS NOT AN ERROR. Kueue composes a group's Workload
-// only once it has seen that group's whole declared total, so a group still being created simply has
-// not got there, and the message says which one.
+// A REPLICA WITH NO WORKLOAD YET IS NOT READY AND IS NOT AN ERROR. Kueue composes a replica's
+// Workload only once it has seen that replica's Pod, so an ordinal still being created simply has
+// not got there, and the message names the role that is waiting.
 func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 	ctx context.Context, md *workercore.ModelDeployment,
 ) (jointHeld, error) {
@@ -391,42 +400,80 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 		return jointHeld{}, fmt.Errorf("list workloads: %w", err)
 	}
 
-	// A GROUP SHORT OF ITS DECLARED TOTAL IS ASSEMBLING, and that is measured rather than assumed
-	// because it is what separates a rollout from a dead end. A group being rebuilt is short by
-	// construction -- the reconciler deletes its replicas and creates them again on a later pass --
-	// and while it is short Kueue composes no Workload for it, so the siblings read it as waiting.
-	// The two look identical from the waiting side, and only the count tells them apart.
-	// THE LISTS NAME ROLES, NOT INSTANCE TYPES. A group is one role's, and two roles can name one
-	// instance type: a list of types then names a queue two groups share and identifies neither,
-	// while a role names exactly the group that is waiting. The queue an operator has to free
-	// follows from the named role's own instance type.
+	// THE VERDICT COUNTS REPLICAS, ONE JUDGEMENT PER (role, ordinal) THE SPEC DECLARES, because the
+	// replica is what reserves quota now: a role's replicas reserve separately and either of them
+	// can be the one the set is waiting on. A slot is found by deriving its group name through the
+	// same pure derivation the renderer stamped the Pod with, so a Pod meets its slot by
+	// construction and never by parsing anything back out of a name.
+	//
+	// A ROLE SHORT OF A LIVE REPLICA IS STILL ASSEMBLING, and that is measured rather than assumed
+	// because it is what separates a rollout from a dead end for the park bound. A role whose
+	// replica is being replaced is short by construction -- the pass deletes the Pod and a later
+	// pass creates its replacement -- and while it is short Kueue may have composed no Workload for
+	// that ordinal, so the siblings read it as waiting. The two look identical from the waiting
+	// side, and only the live count tells them apart.
+	//
+	// THE LISTS NAME ROLES, NOT INSTANCE TYPES. Two roles can name one instance type: a list of
+	// types then names a queue two roles share and identifies neither, while a role names exactly
+	// the replicas that are waiting. The queue an operator has to free follows from the named
+	// role's own instance type.
 	var waiting, assembling []string
-	for _, group := range modelDeploymentPodGroups(md) {
-		members := byGroup[group.Name]
-		// ASSEMBLING IS MEASURED OVER THE REPLICAS THAT ARE STAYING. A Pod already asked to go is not
-		// a member the group will have, so counting it lets a group in the middle of a rebuild read
-		// as complete -- and a complete-looking group is exactly what lets Settled turn true and park
-		// the healthy rebuild this guard exists to protect. Quota holding below still reads every
-		// replica, terminating ones included, because a Workload holding a leaving Pod is holding it.
-		if liveByGroup[group.Name].Len() < int(group.TotalCount) {
-			assembling = append(assembling, group.Role)
+	reserved, replicas := 0, 0
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+
+		var roleWaiting, roleAssembling bool
+		for ordinal := range int(role.Replicas) {
+			replicas++
+			group := modelDeploymentReplicaGroupName(md, role.Name, ordinal)
+			members := byGroup[group]
+			// ASSEMBLING IS MEASURED OVER THE REPLICAS THAT ARE STAYING. A Pod already asked to go
+			// is not a member the role will have, so counting it lets a role in the middle of a
+			// replacement read as complete -- and a complete-looking role is exactly what lets
+			// Settled turn true and park the healthy replacement this guard exists to protect.
+			// Quota holding below still reads every replica, terminating ones included, because a
+			// Workload holding a leaving Pod is holding it.
+			// SHORT OF ITS MEMBERS IS STILL ASSEMBLING, not merely empty. Kueue composes no
+			// Workload for a group that has not reached its declared total, so a replica holding
+			// some of its members is in exactly the state this branch describes -- and reading it
+			// as present sends the verdict to the message below, which tells an operator to look
+			// for a quota problem that does not exist. At one member per replica the two readings
+			// are the same test, which is why this was a comparison against zero.
+			if liveByGroup[group].Len() < modelDeploymentRoleSize(role) {
+				roleAssembling = true
+			}
+			if anyWorkloadHoldsQuotaFor(wlList.Items, members) ||
+				jointReplicaDepartingRollout(md, wlList.Items, members, liveByGroup[group]) {
+				reserved++
+				continue
+			}
+			roleWaiting = true
 		}
-		if members != nil && anyWorkloadHoldsQuotaFor(wlList.Items, members) {
-			continue
+
+		if roleWaiting {
+			waiting = append(waiting, role.Name)
 		}
-		waiting = append(waiting, group.Role)
+		if roleAssembling {
+			assembling = append(assembling, role.Name)
+		}
 	}
+	// READY IS ANSWERED BEFORE ASSEMBLING IS CONSULTED, and the order is the whole relationship
+	// between this verdict and a rollout: an ordinal whose predecessor is draining reads as present
+	// below, so a deployment rolling -- every replica either holding quota or mid-replacement --
+	// answers Ready rather than being dragged back to Pending by its own rollout. Assembling is
+	// what remains when something is missing without that evidence.
 	if len(waiting) == 0 {
 		return jointHeld{
-			State:   kueue.CheckStateReady,
-			Message: "every group of this deployment has reserved quota",
+			State: kueue.CheckStateReady,
+			Message: "every replica of this deployment has reserved quota or is being replaced by " +
+				"this operator's own rollout",
 		}, nil
 	}
 	if len(assembling) > 0 {
 		return jointHeld{
 			State: kueue.CheckStatePending,
 			Message: fmt.Sprintf(
-				"holding this group while the deployment is still assembling: the groups of roles "+
+				"holding this replica while the deployment is still assembling: the roles "+
 					"%s do not yet have every replica they declare, so Kueue has composed no "+
 					"workload for them yet. Nothing is wrong with the cluster; this resolves itself as "+
 					"the replicas appear",
@@ -437,13 +484,60 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 	return jointHeld{
 		State: kueue.CheckStatePending,
 		Message: fmt.Sprintf(
-			"holding this group until the whole deployment can run: %d of %d groups have reserved quota, "+
-				"and the ones still waiting are the groups of roles %s. Every group keeps the quota it has "+
+			"holding this replica until the whole deployment can run: %d of %d replicas have reserved quota, "+
+				"and the ones still waiting belong to the roles %s. Every replica keeps the quota it has "+
 				"reserved while it waits",
-			len(modelDeploymentPodGroups(md))-len(waiting), len(modelDeploymentPodGroups(md)),
-			strings.Join(waiting, ", ")),
+			reserved, replicas, strings.Join(waiting, ", ")),
 		Settled: true,
 	}, nil
+}
+
+// jointReplicaDepartingRollout reports whether a replica that holds no quota reservation is absent
+// because this operator is replacing it, which the barrier reads as presence rather than as a
+// missing member.
+//
+// THE EVIDENCE IS THE SHAPE A REPLACEMENT LEAVES BEHIND, not a hash comparison: whether the
+// departing Pod was built from the current spec is something only the convergence loop can judge,
+// because the desired hash comes out of the render it performs. What the barrier can read is that a
+// member of the ordinal's group is on its way out while no Workload at all owns the group's
+// members -- the operator deletes exactly that pair when it frees a replica's slot. THE TEST IS THE
+// ABSENCE OF EVERY WORKLOAD AND NOT ONLY OF A RESERVATION, because a Workload that survives
+// without its reservation names a preemption -- Kueue's preemption stops a group by deleting its
+// Pods while the Workload stands -- and reading a preempted replica as present would open the
+// barrier exactly when the set cannot run. A deployment being deleted is kept out by its own
+// deletion timestamp, so a teardown -- which leaves the same shape a replacement does -- cannot
+// read as a rollout that will finish.
+//
+// TWO STATES THIS CANNOT TELL APART, STATED SO THE NEXT READER KNOWS THEY ARE CONFLATED: a replica
+// whose Pod and Workload were both deleted by hand also reads as a rollout, which is tolerable
+// because the convergence loop recreates a missing ordinal freely and the recomposed Workload
+// reserves on its own; and a rollout interrupted by deleting the deployment reads as absence
+// rather than as a rollout, which holds instead of opening -- the safer answer for a deployment
+// nothing is going to reassemble.
+func jointReplicaDepartingRollout(
+	md *workercore.ModelDeployment,
+	wls []kueue.Workload,
+	members, live sets.Set[types.UID],
+) bool {
+	if md.DeletionTimestamp != nil || members.Len() == 0 || members.Len() == live.Len() {
+		return false
+	}
+
+	return !anyWorkloadOwnsAny(wls, members)
+}
+
+// anyWorkloadOwnsAny reports whether one of these Workloads owns any of the given replicas, quota
+// or no quota. It is the presence half of the rollout test above, where anyWorkloadHoldsQuotaFor
+// is its reservation half: a preempted replica's Workload owns it and holds nothing, and that
+// difference is what keeps a preemption from reading as a rollout.
+func anyWorkloadOwnsAny(wls []kueue.Workload, members sets.Set[types.UID]) bool {
+	for i := range wls {
+		if modelDeploymentWorkloadOwnsAny(&wls[i], members) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // modelDeploymentReplicaGroups indexes a deployment's own replicas by the pod group each one joined.
@@ -618,17 +712,18 @@ func carriesJointCheck(wl *kueue.Workload) bool {
 	return jointCheckEntry(wl) != nil
 }
 
-// jointSiblings maps a Workload that changed to the other groups of the same deployment.
+// jointSiblings maps a Workload that changed to the sibling replicas' workloads of the same
+// deployment.
 //
-// WITHOUT IT THE BARRIER ONLY EVER CLOSES. A held group's verdict is a statement about a DIFFERENT
+// WITHOUT IT THE BARRIER ONLY EVER CLOSES. A held replica's verdict is a statement about a DIFFERENT
 // object: it stays Pending until the last sibling reserves quota, and that reservation is written to
 // the sibling's Workload. Watching only this controller's own object delivers that event to the
-// sibling alone, so the held group is never judged again and a barrier that correctly refused a
+// sibling alone, so the held replica is never judged again and a barrier that correctly refused a
 // half-feasible set never opens when the set becomes feasible.
 //
-// IT HIDES IN A CLUSTER WHERE THE GROUPS RESERVE AT NEARLY THE SAME MOMENT, which is the ordinary
-// case and not a guarantee: each group's own event then arrives after the others have already
-// reserved, and every group opens on its own watch.
+// IT HIDES IN A CLUSTER WHERE THE REPLICAS RESERVE AT NEARLY THE SAME MOMENT, which is the ordinary
+// case and not a guarantee: each replica's own event then arrives after the others have already
+// reserved, and every replica opens on its own watch.
 func (r *ModelDeploymentJointAdmissionReconciler) jointSiblings(
 	ctx context.Context, obj ctrlcli.Object,
 ) []ctrlreconcile.Request {

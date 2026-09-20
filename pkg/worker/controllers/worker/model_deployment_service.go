@@ -30,10 +30,56 @@ func renderModelDeploymentServices(
 	svcs := make([]*core.Service, 0, len(md.Spec.Roles)+1)
 	svcs = append(svcs, renderModelDeploymentService(md))
 	for i := range md.Spec.Roles {
-		svcs = append(svcs, renderModelDeploymentRoleService(md, &md.Spec.Roles[i], manufacturers))
+		role := &md.Spec.Roles[i]
+		svcs = append(svcs, renderModelDeploymentRoleService(md, role, manufacturers))
+
+		// ONE HEADLESS SERVICE PER REPLICA, AND ONLY ABOVE SIZE ONE. It is what publishes the
+		// members' names in DNS, so a replica whose only member has nobody to address needs none --
+		// rendering one anyway would put an object per replica on the cluster for no consumer.
+		//
+		// They come AFTER the role's own Service in this list, which matters because the caller
+		// garbage collects by comparing this list against what exists: a replica's Service must be
+		// derivable from the spec alone, and a scale-down drops the entries its ordinals no longer
+		// reach.
+		if modelDeploymentRoleSize(role) == 1 {
+			continue
+		}
+		for ordinal := range int(role.Replicas) {
+			svcs = append(svcs, renderModelDeploymentReplicaService(md, role, ordinal))
+		}
 	}
 
 	return svcs
+}
+
+// renderModelDeploymentReplicaService renders the headless Service one replica's members are
+// published behind, which is the subdomain each of them names.
+//
+// IT IS HEADLESS BECAUSE THE POINT IS THE PER-POD RECORDS, not a virtual address. A ClusterIP would
+// load-balance across the members, which is the one thing a rank must never do: a collective's
+// member addresses its peers individually, by name, and an address that resolves to "whichever
+// member" is an address for none of them.
+//
+// IT SELECTS ON THE ORDINAL, so a replica's Service publishes that replica's members and nobody
+// else's. The role's identity labels alone would make every replica's Service front every member of
+// the role, and each member would then resolve its peers to the wrong replica's Pods -- a collective
+// that forms across instance boundaries and serves wrong answers rather than failing.
+//
+// IT PUBLISHES UNREADY MEMBERS. Without publishNotReadyAddresses a member's record does not exist
+// until the kubelet calls it ready, and a rank cannot become ready until it has joined the
+// collective it needs the record to find: the group would deadlock on its own readiness. This is
+// the same circularity the gating has, resolved the same way -- by not waiting.
+func renderModelDeploymentReplicaService(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, ordinal int,
+) *core.Service {
+	svc := renderModelDeploymentServiceFor(
+		md, role, modelDeploymentReplicaServiceName(md, role.Name, ordinal))
+
+	svc.Spec.ClusterIP = core.ClusterIPNone
+	svc.Spec.PublishNotReadyAddresses = true
+	svc.Spec.Selector[modelDeploymentReplicaOrdinalLabel] = strconvx.Itoa(ordinal)
+
+	return svc
 }
 
 // renderModelDeploymentService renders the one Service a deployment is reached through.
@@ -52,7 +98,30 @@ func renderModelDeploymentServices(
 // spec's whole kind field exists to prevent. Per-role addressability is what this task adds; a real
 // front door needs the router, and that is a later spec.
 func renderModelDeploymentService(md *workercore.ModelDeployment) *core.Service {
-	return renderModelDeploymentServiceFor(md, &md.Spec.Roles[0], md.Name)
+	svc := renderModelDeploymentServiceFor(md, &md.Spec.Roles[0], md.Name)
+	modelDeploymentFrontLeadersOnly(svc, &md.Spec.Roles[0])
+
+	return svc
+}
+
+// modelDeploymentFrontLeadersOnly narrows a Service that serves the OpenAI API to the one member of
+// each replica that answers it.
+//
+// EVERY MEMBER CARRIES THE ROLE'S IDENTITY LABELS -- they have to, since that is what attributes a
+// Pod to its role in status, in the converger and in every other selector -- so a selector written
+// when a replica was one Pod fronts all `size` of them. Above size one the members that are not the
+// leader serve no API at all, so a plain round-robin fails for (size-1)/size of requests, with the
+// successes and failures interleaved rather than the Service being visibly broken.
+//
+// AT SIZE ONE THE SELECTOR IS LEFT EXACTLY AS IT WAS, and not merely equivalently: a single-Member
+// replica's Pod carries no member-index label, so adding the term there would select nothing and
+// empty every Service of every deployment already running.
+func modelDeploymentFrontLeadersOnly(svc *core.Service, role *workercore.ModelDeploymentRole) {
+	if modelDeploymentRoleSize(role) == 1 {
+		return
+	}
+
+	svc.Spec.Selector[modelDeploymentMemberIndexLabel] = strconvx.Itoa(modelDeploymentLeaderMemberIndex)
 }
 
 // renderModelDeploymentRoleService renders the Service that fronts ONE role.
@@ -81,6 +150,7 @@ func renderModelDeploymentRoleService(
 	manufacturers map[string]string,
 ) *core.Service {
 	svc := renderModelDeploymentServiceFor(md, role, md.Name+"-"+role.Name)
+	modelDeploymentFrontLeadersOnly(svc, role)
 	if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
 		for _, port := range inject.KVEventsPorts() {
 			svc.Spec.Ports = append(svc.Spec.Ports, core.ServicePort{
@@ -123,6 +193,11 @@ func renderModelDeploymentServiceFor(
 			}},
 		},
 	}
+
+	// The selector this leaves is the role's identity and nothing else, which selects EVERY member
+	// of every replica. Each caller then narrows it to what it is for: the two ClusterIP Services
+	// front leaders (modelDeploymentFrontLeadersOnly), and a replica's headless Service narrows to
+	// that replica instead. Deciding it here would give one of the three the wrong endpoints.
 
 	systemmeta.NoteResource(svc, ModelDeploymentResourceType, map[string]string{
 		ModelDeploymentResourceNoteRole: role.Name,
@@ -235,6 +310,19 @@ func alignModelDeploymentService(actual, expected *core.Service) (changed bool) 
 	if actual.Spec.Type != expected.Spec.Type {
 		actual.Spec.Type = expected.Spec.Type
 		actual.Spec.Ports = expected.Spec.Ports
+		changed = true
+	}
+
+	// CONVERGED BECAUSE IT IS MUTABLE AND LOAD-BEARING. A replica's headless Service publishes its
+	// members before the kubelet calls them ready, and it has to: a member cannot become ready until
+	// it has joined a collective it needs these records to find, so a group whose records wait for
+	// readiness deadlocks on its own. Turning the field off out of band breaks exactly that, and the
+	// symptom is a replica that never starts serving with every object looking correct.
+	//
+	// clusterIP is NOT converged beside it, and the asymmetry is the API's rather than a choice: it
+	// is immutable after creation, so a write here would fail the update rather than fix anything.
+	if actual.Spec.PublishNotReadyAddresses != expected.Spec.PublishNotReadyAddresses {
+		actual.Spec.PublishNotReadyAddresses = expected.Spec.PublishNotReadyAddresses
 		changed = true
 	}
 

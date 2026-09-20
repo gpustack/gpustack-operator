@@ -42,13 +42,14 @@ import (
 
 // ModelDeploymentReconciler reconciles v1alpha1.ModelDeployment objects to finish the following
 // tasks:
-//   - Render one Kubernetes Pod per role, owned by the ModelDeployment and carrying the entrance
-//     label that routes it into the role's pool, as the template every replica of that role is
-//     created from. The API server names each replica, so a replacement never inherits the name of
-//     the replica it replaces.
-//   - Converge that set continuously: create a replica the role is short of once Kueue asks for it,
-//     remove one beyond the role's declared count, and replace one whose spec no longer matches
-//     what it was built from.
+//   - Render one Kubernetes Pod per (role, ordinal), owned by the ModelDeployment and carrying the
+//     entrance label that routes it into the role's pool plus the Kueue group metadata of that one
+//     replica. The API server names each replica, so a replacement never inherits the name of the
+//     replica it replaces.
+//   - Converge that set continuously: create the ordinals the role is short of once the ordinal
+//     reads empty on the API server, remove the ordinals the role no longer declares -- each with
+//     its own Workload -- and replace one whose spec no longer matches what it was built from,
+//     once every declared replica holds an admitted Workload.
 //
 // It creates NO Instance. An Instance renders exactly one Pod and its spec is immutable after
 // creation, so routing replicas through it would make "one replica, several Pods" inexpressible and
@@ -242,80 +243,56 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		return ctrl.Result{}, err
 	}
 
-	// F10: a change to any role's replicas, or to the set of roles, moves the group's declared total,
-	// and Kueue refuses to compose a Workload for a group whose Pods disagree on it. So such a change
-	// is a REBUILD of the whole group rather than a per-replica rollout: while any Pod still declares
-	// the old total, the survivors are deleted and NOTHING is created.
+	// A REPLICA IS A SCHEDULING UNIT OF ITS OWN: its Kueue group is the one-member group derived
+	// from its (role, ordinal), so a change to a role's replica count moves no total any running
+	// Pod carries. It names ordinals the spec now declares or stops naming ones it no longer does,
+	// and neither is a change the survivors have to agree on before Kueue composes anything -- the
+	// whole-group rebuild the per-role groups needed is gone with them, and the per-ordinal
+	// arithmetic below is what replaces it.
 	//
-	// The create is what has to wait, and that is the whole point of the flag. Deleting alone would
-	// not be enough: a Pod that has been asked to terminate is still a member of the group until it
-	// actually goes, so adding the new replica beside it produces exactly the mixed-total state this
-	// exists to avoid -- and that state's symptom is no Workload at all, which reads like the
-	// operator having stopped rather than like a rollout in progress.
+	// A DEPARTING REPLICA NEVER FREES ITS OWN SLOT, whatever the phase it drains through, so what
+	// the replacement waits for is the Pod's absence and nothing shorter. Measured on the version
+	// this project runs: a deleted member of a serving group holds Running through its drain, moves
+	// to Succeeded -- a phase Kueue still counts as active -- and stays on the books, finalizer in
+	// place, with its Workload still admitted; deleting that Workload is what makes the Pod go, and
+	// the wait is the drain's own length rather than a constant. The create gate below therefore
+	// reads whether the ordinal still holds a Pod, and no timeout stands in for that reading.
 	//
-	// The predicate reads the terminating Pods too, for the same reason.
+	// THE DEPARTING REPLICA'S OWN WORKLOAD IS WHAT HOLDS IT. A Pod of a serving group carries
+	// Kueue's finalizer until that group's Workload is deleted, and nothing else releases it. A
+	// replica this pass removes -- for good or to be replaced -- takes its Workload with it below:
+	// deleting the Pod alone would leave the Workload holding quota and the finalizer holding the
+	// Pod, forever, with nothing erroring. For a REPLACED replica the delete is doubly load-bearing
+	// -- it is what empties the ordinal the replacement's create gate observes, and the replacement
+	// is a fresh admission competing for the quota it releases.
 	//
-	// IT ANSWERS PER GROUP. A deployment whose roles sit on different instanceTypes is several groups,
-	// and one group's shape moving is no reason to restart a group that did not move.
-	resizing := modelDeploymentGroupsResizing(md, actual)
-
-	// A DEPARTING REPLICA NO LONGER REBUILDS THE GROUP, and what opened the replacement path is the
-	// naming above rather than anything Kueue grew. Measured on the version this project runs:
-	// Kueue keeps a group's Workload admitted when a member disappears, reports the gap as the
-	// WaitingForReplacementPods condition on that Workload, and finalizes the departed Pod as soon
-	// as a replacement carrying the same role hash exists -- so replacing one replica is a path
-	// Kueue supports. The condition is READ below rather than re-derived, because the predicate
-	// deciding whether a departed Pod still counts is Kueue's, it has three branches, and a copy of
-	// it here would agree until the day it did not.
-	//
-	// What used to close that path was this operator's own naming: a slot name derived from the
-	// ordinal was held by the departed Pod until its finalizer released, and the replacement could
-	// not be created under it. Replacements now carry a fresh server-assigned name, so nothing
-	// blocks the create, and a departure costs the group nothing. Deleting the Workload -- which
-	// stops every member -- is paid by a RESIZE alone, where the totals baked into the members
-	// leave no lesser option.
-	//
-	// IT IS STILL PER GROUP. A departure is a question for the group's own Workload and no other's:
-	// the finalizer that holds the departed Pod is held by that Workload alone.
-	rebuild := resizing
-
-	// The survivors are deleted here rather than left to the stop Kueue performs when the Workload
-	// goes. Relying on that would make the group's teardown a side effect of another controller's
-	// answer to our delete, observable only on a cluster that runs it.
-
 	// NO SUPPRESSION SET STANDS BETWEEN THE DELETES AND THE CREATES, and the reason is the shape of
 	// the decisions rather than a guard beside them. Every count below is taken from the member list
 	// this pass started from, so a role this pass removes a member from still sits at its declared
 	// count in that list and creates nothing -- and a role short of its declared count is one whose
-	// members were left standing, so the pass deletes nothing from it. A group cannot receive a
-	// create and a delete from the same pass, and the mixed-member state the old guard existed to
-	// keep out of the group can no longer be assembled.
+	// members were left standing, so the pass deletes nothing from it. A role cannot receive a
+	// create and a delete from the same pass, and a create beside a member on its way out waits for
+	// that member to be gone from the API server rather than for any ask about it.
 
 	// What this pass decides about replicas carrying an earlier spec, for the condition that reports
-	// it. A rebuild pass records nothing: it deletes every replica without comparing a hash, so it
+	// it. A teardown pass records nothing: it deletes every replica without comparing a hash, so it
 	// has no answer to give and passes nil below rather than a zeroed one.
 	var rollout modelDeploymentRollout
 
 	// The live members are collected by role first, because the comparison this convergence makes is
-	// per role: how many Pods the role owns, whether each matches the template the role renders, and
-	// how many the spec declares. A Pod already on its way out is counted by neither side -- it is
-	// still a member of its group, but it is not one the spec can keep.
+	// per role: which ordinals the role's Pods occupy, whether each matches what the role renders
+	// for ITS ordinal, and how many the spec declares. A Pod already on its way out is counted by
+	// neither side -- it is still a member of its group, but it is not one the spec can keep.
 	liveByRole := make(map[string][]*core.Pod, len(md.Spec.Roles))
+
+	// A replica of a role the spec no longer names is deleted here, and its Workload with it: the
+	// role was scaled to zero or renamed, and in both cases the departure is permanent rather than
+	// a gap a replacement fills.
+	departed := make([]core.Pod, 0, len(actual))
 	for i := range actual {
 		pod := &actual[i]
 		if pod.DeletionTimestamp != nil {
 			// Already on its way out; a create issued now would race the delete and be rejected.
-			continue
-		}
-
-		if group := pod.Labels[kueuepodconst.GroupNameLabel]; rebuild.Has(group) {
-			logger.Info("rebuilding the pod group",
-				"pod", pod.Name, "group", group, "resizing", resizing.Has(group))
-			if err = r.Client.Delete(ctx, pod); err != nil && !kerrors.IsNotFound(err) {
-				logger.Error(err, "delete replica of the rebuilt group", "pod", pod.Name)
-				return ctrl.Result{}, err
-			}
-
 			continue
 		}
 
@@ -327,6 +304,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				logger.Error(err, "delete replica", "pod", pod.Name)
 				return ctrl.Result{}, err
 			}
+			departed = append(departed, *pod)
 
 			continue
 		}
@@ -338,43 +316,41 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// instead would mean that during exactly the window a departure event is for — a replica on its
 	// way out — no event and no status were written at all.
 	var requeue bool
-	if rebuild.Len() > 0 {
-		// The new group is created by the pass that finds the old one gone, in one go, exactly as a
-		// deployment that never had one is. Requeuing rather than returning keeps the status write
-		// below on the path, so the rebuild is visible while it happens.
-		requeue = true
-
-		// Without this the deletes above are requests nobody can honor: the replicas carry Kueue's
-		// finalizer, and this Workload is the only thing whose removal releases it.
-		//
-		// ONE CALL PER REBUILDING GROUP, scoped to that group's own replicas. The lookup matches a
-		// Workload by the Pods it owns, so handing it the whole set would reach every group's
-		// Workload -- including those of groups this pass is leaving alone, whose replicas would then
-		// be stopped by Kueue for a change that did not concern them.
-		for _, group := range sets.List(rebuild) {
-			members := modelDeploymentPodsInGroup(actual, group)
-			if len(members) == 0 {
-				// A group named only because a role is arriving in it: it has no replicas yet, so
-				// there is no Workload and nothing to release.
-				continue
-			}
-			if err = r.deleteModelDeploymentGroupWorkload(ctx, md, members); err != nil {
-				logger.Error(err, "delete group workload", "group", group)
-				return ctrl.Result{}, err
-			}
+	if len(departed) > 0 {
+		// AFTER THE DELETES, NOT INSTEAD OF THEM: the survivors are deleted here rather than left
+		// to the stop Kueue performs when a Workload goes, because that stop is another
+		// controller's answer to our delete. The Workload removal is what releases Kueue's
+		// finalizer on each departed replica -- one Workload per replica now, so a removed role
+		// frees exactly the quota its replicas held.
+		if err = r.deleteModelDeploymentGroupWorkload(ctx, md, departed); err != nil {
+			logger.Error(err, "delete departed replicas' workloads")
+			return ctrl.Result{}, err
 		}
+	}
+
+	// A replica already leaving when this pass began was sent away by something other than this
+	// operator: a hand deleting the Pod, a node drain, an eviction. None of those deletes the
+	// replica's Workload, and a serving group's finalizer is released by nothing else -- so without
+	// this the ordinal is held by a Pod that can never leave, and the create gate below never opens
+	// for it. The deletes above cover only what this pass itself sent away.
+	if err = r.releaseModelDeploymentStrandedWorkloads(ctx, md, actual); err != nil {
+		logger.Error(err, "release the workloads of replicas nothing here sent away")
+		return ctrl.Result{}, err
 	}
 
 	// The convergence itself, one role at a time, and THE COUNT MOVES BEFORE THE CURRENCY: a role
 	// short of its declared count does not roll its outdated members in the same breath, because
-	// deleting from a group that is already short widens exactly the gap the create gate below is
-	// waiting to close. A role's currency is worth nothing until its count is right.
-	// ONE LIST OF WORKLOADS PER PASS, TAKEN ONLY IF A ROLE ASKS FOR IT. The create gate below reads
-	// a Kueue-written condition, so the read stays uncached -- the informer lags the writer and the
-	// gate would act on the previous pass's answer. What is not defensible is issuing it once per
-	// short role: the list is the namespace's and the answer is the same for every role, while this
-	// pass requeues every couple of seconds for as long as any role is short. Deferring it to first
-	// need keeps a deployment that is merely rolling from paying for a read nobody looks at.
+	// deleting from a set that is already short widens exactly the gap the create gate below is
+	// waiting to close -- and the admitted-counting guard below refuses a short role on its own,
+	// since a missing admission is one admission already in flight. A role's currency is worth
+	// nothing until its count is right.
+	// ONE LIST OF WORKLOADS PER PASS, TAKEN ONLY IF A ROLE ASKS FOR IT. The rollout guard below
+	// reads Kueue's Admitted verdicts, so the read stays uncached -- the informer lags the writer
+	// and the guard would act on the previous pass's answer. What is not defensible is issuing it
+	// once per rolling role: the list is the namespace's and the answer is the same for every
+	// role, while a held rollout requeues every couple of seconds for as long as it waits.
+	// Deferring it to first need keeps a deployment that is merely scaling, or settled, from
+	// paying for a read nobody looks at.
 	listWorkloads := sync.OnceValues(func() ([]kueue.Workload, error) {
 		wlList := new(kueue.WorkloadList)
 		if err := r.APIReader.List(ctx, wlList, ctrlcli.InNamespace(md.Namespace)); err != nil {
@@ -384,30 +360,97 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		return wlList.Items, nil
 	})
 
-	createCount := make(map[string]int, len(md.Spec.Roles))
+	createOrdinals := make(map[string][]int, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		group := modelDeploymentPodGroupFor(md, role.Name)
 		live := liveByRole[role.Name]
 		declared := int(role.Replicas)
-		wantHash := desired[role.Name].Annotations[modelDeploymentPodSpecHashAnnotation]
+		want := desired[role.Name]
 
-		// THE SURPLUS IS SHED NEWEST FIRST, and before any hash is compared, so the members the
-		// count keeps are the longest-serving ones. This is the state a replacement created while
-		// the departed Pod was still active leaves behind -- one more live Pod than the group's
-		// PodSet declares -- and leaving it standing would have Kueue evict a member of its own
-		// choosing on every pass.
+		// THE ORDINALS THE SPEC STILL NAMES KEEP THEIR PODS, and the ones it no longer names go --
+		// highest first, so a scale-down sheds the youngest slots and the ordinals stay dense from
+		// zero. Each departing replica takes its own Workload with it: its group is its own, so no
+		// other replica's admission is touched, and without the Workload the Pod would hold Kueue's
+		// finalizer -- and its quota -- forever.
+		//
+		// A POD WITH NO ORDINAL CLAIMS NO SLOT. It was rendered before the per-replica groups
+		// existed; it is kept for now and judged below, where no hash this pass computes can match
+		// it, so it turns over on the ordinary rollout cadence instead of being torn out at once.
+		// THE COUNTS BELOW ARE IN TWO DIFFERENT UNITS, and keeping them apart is what makes a role
+		// of multi-Member replicas arithmetically the same as one of single-Member replicas.
+		// `declared` counts REPLICAS, which is what the spec states and what a scale moves.
+		// `declaredPods` counts the Pods those replicas are made of, which is what a list of live
+		// Pods can be compared against. At size one the two are equal, which is why every decision
+		// here reads identically for the shape that existed before this one.
+		size := modelDeploymentRoleSize(role)
+		declaredPods := declared * size
+
+		removed := make([]*core.Pod, 0)
+		kept := make([]*core.Pod, 0, len(live))
+		occupied := make(map[int]bool, declared)
+		orphans := 0
+		for _, pod := range live {
+			ordinal, ok := modelDeploymentPodOrdinal(pod)
+			switch {
+			case !ok:
+				kept = append(kept, pod)
+				orphans++
+			case ordinal >= declared:
+				removed = append(removed, pod)
+			default:
+				occupied[ordinal] = true
+				kept = append(kept, pod)
+			}
+		}
+
+		// THE COUNT STILL BINDS, for the state the ordinal arithmetic alone cannot name: more live
+		// Pods than the role declares, every one of them sitting on a slot the spec does keep --
+		// duplicates on one ordinal, or pods with no ordinal at all. The surplus leaves BY SLOT
+		// rather than by age: a Pod with no ordinal claims no seat and goes before any that holds
+		// one, and a slot carrying more than one member keeps the member its current render
+		// describes -- the one a replacement would build anyway, so shedding it would only schedule
+		// the same churn for the next pass -- with the greatest name deciding between members
+		// nothing separates, which is determinism rather than meaning. Each departing replica takes
+		// its Workload with it: leaving the excess standing would have Kueue evict a member of its
+		// own choosing on every pass.
+		if surplus := len(kept) - declaredPods; surplus > 0 {
+			shedSurplus := modelDeploymentSurplusReplicas(kept, want, surplus)
+			removed = append(removed, shedSurplus...)
+			kept = slices.DeleteFunc(kept, func(pod *core.Pod) bool {
+				return slices.Contains(shedSurplus, pod)
+			})
+		}
+
+		// Highest ordinal first, so the departures are logged -- and issued -- from the top down and
+		// two passes over the same state delete in the same order. A pod with no ordinal sorts
+		// last: it holds no seat, so every seated one outranks it, and the name settles what the
+		// slot cannot.
+		slices.SortFunc(removed, func(a, b *core.Pod) int {
+			if c := modelDeploymentOrdinalOrFloor(b) - modelDeploymentOrdinalOrFloor(a); c != 0 {
+				return c
+			}
+
+			return strings.Compare(b.Name, a.Name)
+		})
+
 		var shed bool
-		if surplus := len(live) - declared; surplus > 0 {
-			modelDeploymentSortReplicasNewestFirst(live)
-			for _, pod := range live[:surplus] {
-				logger.Info("removing replica beyond the role's declared count", "pod", pod.Name)
+		if len(removed) > 0 {
+			for _, pod := range removed {
+				logger.Info("removing replica the role no longer declares",
+					"pod", pod.Name, "role", role.Name)
 				if err = r.Client.Delete(ctx, pod); err != nil && !kerrors.IsNotFound(err) {
-					logger.Error(err, "delete surplus replica", "pod", pod.Name)
+					logger.Error(err, "delete removed replica", "pod", pod.Name)
 					return ctrl.Result{}, err
 				}
 			}
-			live = live[surplus:]
+			removedPods := make([]core.Pod, 0, len(removed))
+			for _, pod := range removed {
+				removedPods = append(removedPods, *pod)
+			}
+			if err = r.deleteModelDeploymentGroupWorkload(ctx, md, removedPods); err != nil {
+				logger.Error(err, "delete removed replicas' workloads", "role", role.Name)
+				return ctrl.Result{}, err
+			}
 			shed = true
 			requeue = true
 		}
@@ -415,16 +458,72 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// Counted before the comparison rather than after: reaching this line is what makes the pass
 		// able to answer at all, and a pass that answers "nothing outdated" without having got here
 		// is reporting that it looked, not what it found.
-		var outdated []*core.Pod
-		for _, pod := range live {
-			rollout.accounted++
+		//
+		// THE HASH IS THE SEAT'S OWN, because the group name -- and with it the fingerprint -- is
+		// derived per (role, ordinal): a Pod is current only against the render of its own seat,
+		// which is what keeps a scale-up from rolling the survivors and a slot swap from passing
+		// unnoticed.
+		//
+		// THE VERDICT IS THE REPLICA'S, NOT THE POD'S, and that is not a rounding of the same
+		// answer. A replica's members share one Kueue group and are admitted as one; Kueue holds a
+		// deleted member of an admitted group until that group's Workload goes, and deleting that
+		// Workload stops the surviving members anyway. So replacing one member of a replica is not
+		// a cheaper rollout than replacing the replica -- it is the same operation with a window in
+		// the middle where the deployment is serving from a group that cannot be repaired. One
+		// member reading outdated therefore condemns its replica, and the counts this feeds are in
+		// replicas so that a role of two replicas of four Pods reports two things that can roll,
+		// not eight.
+		outdatedByOrdinal := make(map[int]bool, len(kept))
+		orphaned := make([]*core.Pod, 0, orphans)
+		for _, pod := range kept {
+			ordinal, ok := modelDeploymentPodOrdinal(pod)
+			if !ok {
+				// A Pod claiming no ordinal belongs to no replica, so it is its own unit of
+				// rollout -- which is what it already was before replicas had members.
+				rollout.accounted++
+				rollout.outdated++
+				orphaned = append(orphaned, pod)
 
-			if pod.Annotations[modelDeploymentPodSpecHashAnnotation] == wantHash {
 				continue
 			}
 
-			rollout.outdated++
-			outdated = append(outdated, pod)
+			member := modelDeploymentPodMemberIndex(pod)
+			members := want[ordinal]
+			if member < len(members) &&
+				pod.Annotations[modelDeploymentPodSpecHashAnnotation] ==
+					members[member].Annotations[modelDeploymentPodSpecHashAnnotation] {
+				continue
+			}
+
+			outdatedByOrdinal[ordinal] = true
+		}
+
+		// A REPLICA SHORT OF ITS MEMBERS IS OUTDATED TOO, and nothing above notices it: every Pod
+		// that IS there can carry the current fingerprint while the replica is still missing a
+		// member, and a replica Kueue cannot compose a Workload for is not one the deployment is
+		// serving from. It is condemned on the same terms as one carrying a stale render, which
+		// keeps the repair path single.
+		seen := make(map[int]int, len(occupied))
+		for _, pod := range kept {
+			if ordinal, ok := modelDeploymentPodOrdinal(pod); ok {
+				seen[ordinal]++
+			}
+		}
+		incompleteByOrdinal := make(map[int]bool, len(occupied))
+		for ordinal := range occupied {
+			if seen[ordinal] != size {
+				outdatedByOrdinal[ordinal] = true
+				incompleteByOrdinal[ordinal] = true
+			}
+		}
+
+		outdated := orphaned
+		for ordinal := range occupied {
+			rollout.accounted++
+			if outdatedByOrdinal[ordinal] {
+				rollout.outdated++
+				outdated = append(outdated, modelDeploymentReplicaMembers(kept, ordinal)...)
+			}
 		}
 
 		if connection == nil && md.Status.KVCache != nil && len(outdated) > 0 {
@@ -445,23 +544,25 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// few seconds of store unavailability would delete every replica of every deployment on
 			// that pool, and each one then reloads its weights. The blip becomes the outage.
 			//
-			// The cost is that this also withholds a spec change that moves a replica's rendered Pod
-			// without moving the group's shape, until the connection returns.
+			// The cost is that this also withholds a spec change that moves a running replica's
+			// rendered Pod, until the connection returns.
 			//
 			// THE SPLIT THAT WOULD AVOID IT IS REFUSED, and not for the price it was first parked on.
 			// That design keeps a base hash over the spec without the connector beside a separate
 			// connector fingerprint, so a spec edit rolls from the base hash while only the fingerprint
 			// comparison is skipped here. Acting on that precision is what costs: the base hash
-			// difference deletes a replica, any replica leaving rebuilds the whole group, the group is
-			// rebuilt by a pass that still has no connector to give it, and when the store returns the
-			// desired render regains the connector and rebuilds it again. Where an edit is waiting, the
-			// split pays two whole-group reloads in place of one.
+			// difference deletes a replica, the replacement is rendered by a pass that still has no
+			// connector to give it, and when the store returns the desired render regains the
+			// connector and rolls the replacement again. Where an edit is waiting, the split pays two
+			// reloads for one replica in place of one.
 			//
-			// The operator still has that trade, which is what bounds the wait: a change to the replica
-			// counts or to the set of roles moves the group annotations and takes the rebuild branch
-			// above, which runs before this guard and proceeds during an outage, carrying the withheld
-			// edit at exactly that price. Refused here is making the trade on behalf of someone who was
-			// not told what it costs.
+			// The trade the operator used to hold is gone with the rebuild it rode on: a change to
+			// the replica counts no longer replaces anyone, so nothing carries a withheld edit past
+			// this guard. A scale during an outage still proceeds -- the ordinals it adds do not exist
+			// yet, and the creates below run -- but the replicas it creates pay the second turnover
+			// themselves when the store returns, which is exactly the cost the old lever charged for
+			// and nobody can decline any more. What bounds the wait now is the store's own recovery,
+			// and the message in the condition says what waits rather than promising a way out.
 			//
 			// Leaving them alone is also what this design already decided for the neighboring case:
 			// an admin deleting the Binding leaves running Pods running, because tearing down a
@@ -476,7 +577,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// New replicas are still created below, without a connector: a replica that does not
 			// exist yet cannot be given an address that does not exist yet either.
 			logger.V(3).Info("no connection this pass; leaving the replicas as built", "role", role.Name)
-			rollout.held += len(outdated)
+			// Counted in REPLICAS, matching rollout.outdated above: `outdated` is a list of the
+			// Pods to delete, and a multi-Member replica contributes several of them to it, so its
+			// length is the wrong unit for a figure that reports how many instances are waiting.
+			rollout.held += len(outdatedByOrdinal) + len(orphaned)
 			outdated = nil
 		}
 
@@ -484,51 +588,176 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// here and replaced by a later pass. The cost is this replica's cached blocks, which its
 		// siblings lose when it goes.
 		//
-		// AT MOST ONE PER ROLE PER PASS, never while the role is short of its count, and never
-		// beside a surplus this pass already shed. Kueue admits the group as one Workload, and a
-		// replacement created before the departed member goes inactive reads as one member over the
-		// count: Kueue's answer to that excess is to delete the newest un-finalized gated Pod, which
-		// is the replacement itself. One departure at a time, waited out, is the whole cadence.
-		if len(outdated) > 0 && !shed && len(live) == declared {
-			modelDeploymentSortReplicasNewestFirst(outdated)
-			pod := outdated[0]
-			logger.Info("recreating replica built from an earlier spec", "pod", pod.Name)
-			if err = r.Client.Delete(ctx, pod); err != nil && !kerrors.IsNotFound(err) {
-				logger.Error(err, "delete outdated replica", "pod", pod.Name)
-				return ctrl.Result{}, err
+		// THE CURRENCY OF A ROLLOUT IS AN ADMITTED REPLICA, NOT A LIVE ONE. A replacement is a
+		// fresh admission -- deleting the departed replica's Workload is what frees it, and with
+		// that delete the reservation is gone too -- so a created-but-still-queued replacement
+		// holds nothing while it waits. A guard that counted live replicas would read that queued
+		// Pod as progress and keep deleting outdated ones behind it, and on a contended pool the
+		// rollout walks the deployment down to zero admitted replicas and stops there, a deficit
+		// no declared count covers and the barrier does not catch. The guard therefore turns a
+		// replica over only when every replica the role declares holds an admitted Workload: one
+		// admission is in flight at a time, and the pass comes back for the next departure once
+		// the replacement has actually been admitted. A deployment whose replicas hold no
+		// admitted Workloads at all never rolls -- without admission there is no capacity to
+		// trade, and an edit waits for it rather than stripping what serves.
+		//
+		// THE DEPARTING REPLICA'S WORKLOAD IS DELETED WITH IT, and that is not bookkeeping. The
+		// group is annotated serving, so Kueue never releases the finalizer it holds on the Pod
+		// whatever phase the Pod drains through, and a Workload left standing keeps the ordinal
+		// occupied and the replacement unwritable forever. The delete is what empties the slot
+		// the create gate below observes, and it costs the reservation -- which is why the guard
+		// above refuses to run two of them at once.
+		//
+		// AT MOST ONE PER ROLE PER PASS, never beside a surplus this pass already shed, and THE
+		// HIGHEST ORDINAL TURNS OVER FIRST -- the end the scale-down sheds from -- so the ordinals
+		// a rollout keeps current stay dense from zero and two passes over the same state pick the
+		// same victim.
+		// A POD THAT CANNOT BE ADMITTED AS A DECLARED REPLICA IS TURNED OVER WITHOUT WAITING FOR THE
+		// GUARD, and this exception is what keeps the guard from being a deadlock rather than a
+		// brake. Two shapes qualify, for one reason.
+		//
+		// The guard exists to spend admitted capacity one replica at a time, and it reads that
+		// capacity as a count of admitted Workloads against a count of declared replicas. AN
+		// INCOMPLETE REPLICA has none to spend: Kueue composes no Workload at all for a group short
+		// of its declared total, so it holds no reservation, serves nothing, and contributes zero to
+		// the count. A POD CLAIMING NO ORDINAL breaks the correspondence the comparison rests on
+		// instead -- it seats no replica, so whatever Workload owns it answers for no declared slot:
+		// one of its own makes the count long, and one shared with its fellows makes it short. The
+		// two are the same defect seen from either side, and either way the comparison is against a
+		// number this role can never reach again.
+		//
+		// Left to the guard either one is unreachable in both directions at once -- it can never be
+		// admitted, so `admitted == declared` can never hold again for this role, so it is never
+		// replaced AND no later spec edit ever rolls either. The role sits broken and silently
+		// ignores every subsequent change.
+		//
+		// The create gate below does not cover either: an ordinal holding even one member is
+		// occupied, and a Pod with no ordinal is credited against the declared count there, so
+		// nothing is owed for them. Replacing WHOLE is the only repair, on the same terms as every
+		// other member loss -- an incomplete replica's surviving members hold a group Kueue will
+		// neither admit nor release, so putting a fresh member beside them would join a group that
+		// was already refused.
+		//
+		// THIS IS ALSO WHAT KEEPS THE ADMITTED COUNT BELOW HONEST. It is taken over every live Pod
+		// of the role, ordinal-less ones included, which would be the wrong denominator -- but every
+		// such Pod is outdated by the rule above, so reaching the comparison at all means there are
+		// none, and the count is over seated replicas exactly when it is read.
+		ungated := make([]*core.Pod, 0, len(outdated))
+		for _, pod := range outdated {
+			ordinal, ok := modelDeploymentPodOrdinal(pod)
+			if !ok || incompleteByOrdinal[ordinal] {
+				ungated = append(ungated, pod)
 			}
-			requeue = true
 		}
 
-		// THE CREATE GATE. A role short of its declared count is created for on Kueue's own ask, or
-		// freely when no Workload exists to ask: a group short of its total composes no Workload at
-		// all, so waiting on a condition that cannot exist would deadlock a deployment's first pass.
-		// A group this pass is rebuilding creates nothing either -- its members are still draining,
-		// and a create beside them is the mixed-total state the rebuild exists to avoid.
-		if short := declared - len(live); short > 0 && !rebuild.Has(group.Name) {
-			// A GROUP WITH NO MEMBERS IS NOT ASKED, and the check sits here rather than inside the
-			// call so that it also skips the read: there is no Workload to have an opinion yet, and
-			// the branch below creates freely, so paying for an API-server list would buy nothing.
-			var asks, found bool
-			if members := modelDeploymentPodsInGroup(actual, group.Name); len(members) > 0 {
-				workloads, askErr := listWorkloads()
-				if askErr != nil {
-					logger.Error(askErr, "read the group workload", "group", group.Name)
-					return ctrl.Result{}, askErr
-				}
-				asks, found = modelDeploymentGroupWorkloadAsksForReplacement(workloads, members)
+		if len(outdated) > 0 && !shed {
+			workloads, wlErr := listWorkloads()
+			if wlErr != nil {
+				logger.Error(wlErr, "read the role's workloads", "role", role.Name)
+				return ctrl.Result{}, wlErr
 			}
 
-			switch {
-			case found && !asks:
-				// Kueue has not asked for a replacement. Creating one now would put one more active
-				// Pod in the group than its PodSet declares, and Kueue's answer to that excess is
-				// to delete the newest un-finalized Pod -- the replacement this pass just built. The
-				// pass comes back instead; the ask it waits for is a condition flip nothing here
-				// watches, and the requeue is what covers it.
+			// The victim is drawn from those when there are any, so that what the guard cannot clear
+			// is what leaves. Same pick as below -- highest ordinal -- so two passes over one state
+			// still choose the same Pod, and a seated replica goes before one holding no ordinal
+			// because the pick reads a missing ordinal as below every seat.
+			unguarded := len(ungated) > 0
+			pick := outdated
+			if unguarded {
+				pick = ungated
+			}
+
+			if admitted := modelDeploymentAdmittedReplicas(workloads, live); unguarded ||
+				admitted == declared {
+				// THE WHOLE REPLICA TURNS OVER, not the member that was picked. The pick names one
+				// Pod, and that Pod's replica is what departs: its members hold one Kueue group,
+				// so a delete of some of them leaves a group Kueue will not admit and will not
+				// release, and the Workload delete below would stop the rest regardless.
+				pod := modelDeploymentHighestOrdinalReplica(pick)
+				departing := []*core.Pod{pod}
+				if ordinal, ok := modelDeploymentPodOrdinal(pod); ok {
+					departing = modelDeploymentReplicaMembers(pick, ordinal)
+				}
+
+				logger.Info("recreating replica",
+					"pod", pod.Name, "members", len(departing),
+					"why", map[bool]string{true: "short of its members", false: "built from an earlier spec"}[unguarded])
+				departed := make([]core.Pod, 0, len(departing))
+				for _, member := range departing {
+					if err = r.Client.Delete(ctx, member); err != nil && !kerrors.IsNotFound(err) {
+						logger.Error(err, "delete outdated replica member", "pod", member.Name)
+						return ctrl.Result{}, err
+					}
+					departed = append(departed, *member)
+				}
+				// One call for the whole replica: its members share a single Workload, so this is
+				// one delete however many of them there were.
+				if err = r.deleteModelDeploymentGroupWorkload(ctx, md, departed); err != nil {
+					logger.Error(err, "delete the departing replica's workload", "pod", pod.Name)
+					return ctrl.Result{}, err
+				}
 				requeue = true
-			default:
-				createCount[role.Name] = short
+			} else {
+				// The rollout holds rather than proceeding short. Nothing this deployment owns
+				// observes the admission that releases it -- the verdict lands on a Workload no
+				// watch here follows -- so the requeue is the poll that notices, exactly as it is
+				// for the departure the create gate waits out.
+				requeue = true
+			}
+		}
+
+		// THE CREATE GATE, PER MISSING ORDINAL: an ordinal with no live Pod in the cached list is
+		// created for only once the API server holds no Pod for it either. The same read answers
+		// the two questions a missing ordinal carries -- whether a create this deployment already
+		// issued is standing on the server unseen by the cache, and whether a departing holder has
+		// finished leaving -- and it is read ON THE API SERVER for both, because the cache lags the
+		// server in exactly the window each question lives in.
+		//
+		// AN EARLIER GATE HERE ASKED THE ORDINAL'S WORKLOAD WHETHER KUEE WANTED A REPLACEMENT, AND
+		// NO REPLACEMENT PATH CONSULTS THAT ASK ANY MORE, because on this design the ask has no
+		// object to be asked of. Freeing an ordinal deletes that replica's Workload with the Pod,
+		// so by the time the Pod is gone there is no Workload left to read a verdict from -- an ask
+		// gated on it would be a condition that is never true, a wait with no exit. Waiting for the
+		// vacancy itself replaces the ask and covers it strictly: while the departing Pod is still
+		// on the server the ask could already read True, yet creating then seats two members in a
+		// one-member group and Kueue's answer to that excess is to delete the newest gated Pod --
+		// the replacement itself.
+		//
+		// THE MISSING ORDINALS ARE FILLED LOWEST FIRST, and only as many as the count is short: a
+		// role short by one with two ordinals free -- a pre-per-replica pod still serving among
+		// them -- creates the lower slot and lets the surplus pod's own departure settle the other.
+		// IN REPLICAS, NOT PODS. A role short of its declared count is short of whole instances, and
+		// `kept` is a list of Pods -- at size one they are the same number, which is why this read
+		// as len(kept) for as long as a replica was a Pod. An ordinal that is occupied at all counts
+		// as present here even if it is short a member; the rollout above is what repairs that,
+		// because filling the gap in place would seat a member in a group Kueue already refused.
+		if missing := declared - len(occupied) - orphans; missing > 0 {
+			// ONE UNCACHED READ FOR THE ROLE, taken before the loop rather than inside it: every
+			// free ordinal asks the same question of the same objects, and asking it per ordinal
+			// cost one list each while a departure drained.
+			taken, takenErr := r.modelDeploymentTakenGroups(ctx, md, role.Name)
+			if takenErr != nil {
+				logger.Error(takenErr, "read the role's groups on the api server", "role", role.Name)
+				return ctrl.Result{}, takenErr
+			}
+
+			for ordinal := 0; ordinal < declared && len(createOrdinals[role.Name]) < missing; ordinal++ {
+				if occupied[ordinal] {
+					continue
+				}
+
+				if taken.Has(modelDeploymentReplicaGroupName(md, role.Name, ordinal)) {
+					// The server holds a Pod for this ordinal the cached list does not account
+					// for: a create whose response was lost, or a departure still draining. The
+					// pass creates nothing beside it and comes back -- the informer will deliver
+					// the Pod's eventual event, and the requeue is what covers the gap either
+					// way, because nothing else wakes this deployment when the drain completes.
+					requeue = true
+
+					continue
+				}
+
+				createOrdinals[role.Name] = append(createOrdinals[role.Name], ordinal)
 			}
 		}
 	}
@@ -546,22 +775,35 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	var createErr error
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		for range createCount[role.Name] {
-			// One fresh object per replica: the template is every replica of the role's, and the
-			// API server names each instance separately.
-			pod := desired[role.Name].DeepCopy()
-			if err = r.Client.Create(ctx, pod); err != nil {
-				logger.Error(err, "create replica", "role", role.Name)
-				if createErr == nil {
-					createErr = err
-				}
+		for _, ordinal := range createOrdinals[role.Name] {
+			// EVERY MEMBER OF THE REPLICA IS ISSUED, AND A FAILURE ON ONE DOES NOT ABANDON THE REST.
+			// The members share one Kueue group whose declared total is the replica's size, and
+			// Kueue composes no Workload at all until that many exist -- so a replica left short is
+			// a replica whose members sit gated with nothing naming a cause. Issuing the rest costs
+			// nothing when the failure was transient and is the only way out when it was not.
+			for _, want := range desired[role.Name][ordinal] {
+				// One fresh object per member: the template is every Pod of the role's, stamped for
+				// its own ordinal and member index.
+				pod := want.DeepCopy()
+				if err = r.Client.Create(ctx, pod); err != nil {
+					logger.Error(err, "create replica member",
+						"role", role.Name, "ordinal", ordinal,
+						"member", pod.Labels[modelDeploymentMemberIndexLabel])
+					if createErr == nil {
+						createErr = err
+					}
 
-				continue
+					continue
+				}
+				logger.Info("created replica member", "pod", pod.Name)
 			}
-			logger.Info("created replica", "pod", pod.Name)
 			// A replica this pass just rendered and created is current by construction, so the pass
 			// can answer for it. Without this a deployment's first pass could not answer at all, and
 			// its second pass would write a status for a spec nobody changed.
+			//
+			// IT COUNTS THE REPLICA AND NOT ITS MEMBERS, because the rollout figures this feeds are
+			// about instances: a role of two replicas of four Pods each is two things that can be
+			// outdated, not eight.
 			rollout.accounted++
 		}
 	}
@@ -759,17 +1001,30 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentOwnedChildren(
 	})
 }
 
-// renderModelDeploymentPods renders one Pod per role, keyed by role name.
+// renderModelDeploymentPods renders the deployment's desired replicas: the members of one replica,
+// keyed by role name and then by ordinal.
 //
-// ONE POD PER ROLE rather than one per replica: the spec declares a count of interchangeable
-// replicas and carries no identity for any one of them, so what the render produces is the template
-// the count is created from, and the API server names each instance. The converge loop compares and
-// creates by role and count for exactly that reason -- a suffix the API server assigns is nothing a
-// name-keyed loop could predict or match.
+// ONE RENDER PER ORDINAL rather than one per role: the spec declares a count of replicas and names
+// none of them, but the ordinals it implies -- zero through count minus one -- each carry group
+// metadata of their own, and the spec-hash fingerprint covers it. Two ordinals of one role therefore
+// hash differently, and the converge loop compares a live Pod against the render of ITS ordinal,
+// which is what keeps a scale-up from rolling the survivors.
+//
+// A REPLICA IS A SLICE BECAUSE A REPLICA MAY BE SEVERAL PODS, and the slice is ordered by member
+// index so that entry zero is the leader. Every entry shares the replica's Kueue group -- one
+// Workload, one admission, all members or none -- so the slice is a unit the converger creates,
+// compares and deletes whole. It is never partially applied: Kueue holds a deleted member of an
+// admitted group on the API server until the group's Workload goes, and deleting that Workload
+// stops the surviving members anyway, so a half-replica is not a state this operator can reach on
+// purpose or recover from by halves.
+//
+// The render is still ONE TEMPLATE PER ROLE, stamped per member -- the template is every Pod of the
+// role's, and nothing that names one replica or one member may be produced inside it. What separates
+// two members is what the stamp writes: a name, a hostname and an index label.
 func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	ctx context.Context, md *workercore.ModelDeployment,
 	connection *ModelDeploymentConnectorInput,
-) (map[string]*core.Pod, error) {
+) (map[string]map[int][]*core.Pod, error) {
 	// The overcommit setting is the Instance path's, deliberately: it decides how a declared
 	// resource becomes a request, and this renderer derives the same values the Instance webhook
 	// does. A second knob for one translation would let the two disagree on one cluster.
@@ -780,7 +1035,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	clusterVersion := system.LoopbackKubeVersion.Get()
 	nativeSidecar := kubediscovery.SupportsFeature(&clusterVersion, kubediscovery.FeatureNativeSidecar)
 
-	desired := make(map[string]*core.Pod)
+	desired := make(map[string]map[int][]*core.Pod, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 
@@ -836,11 +1091,23 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			in.Connector = connector
 		}
 
-		pod, err := renderModelDeploymentPod(ctx, in)
+		template, err := renderModelDeploymentPodTemplate(ctx, in)
 		if err != nil {
 			return nil, err
 		}
-		desired[role.Name] = pod
+
+		size := modelDeploymentRoleSize(role)
+		rolePods := make(map[int][]*core.Pod, role.Replicas)
+		for ordinal := range int(role.Replicas) {
+			members := make([]*core.Pod, 0, size)
+			for member := range size {
+				pod := template.DeepCopy()
+				stampModelDeploymentPod(pod, md, role, ordinal, member)
+				members = append(members, pod)
+			}
+			rolePods[ordinal] = members
+		}
+		desired[role.Name] = rolePods
 	}
 
 	return desired, nil
@@ -853,71 +1120,237 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 // project compiles against: pkg/controller/jobs/pod, a whole controller implementation whose import
 // would buy one string. Kueue v0.18 moved it into apis/kueue/v1beta2, so an upgrade replaces this
 // with the imported constant rather than a hunt.
+//
+// NO PRODUCTION PATH READS IT ANY MORE, and the test fixtures that stamp it are its remaining
+// consumers: they stand in for a Kueue that has noticed a departure, which is a state worth
+// reproducing even though the converger now waits out the departing Pod's existence rather than
+// this verdict -- a replacement created while the departing member is still listed is deleted by
+// Kueue as the group's excess whatever the condition says.
 const kueueWorkloadWaitingForReplacementPods = "WaitingForReplacementPods"
 
-// modelDeploymentGroupWorkloadAsksForReplacement reports whether the group's Workload exists, and
-// whether it asks for replacement Pods.
+// modelDeploymentTakenGroups names the replica groups of one role the API server still holds a
+// member of, read uncached.
 //
-// THE READ GOES TO THE API SERVER RATHER THAN THE CACHE, and the short-role path is the one place
-// in the pass that pays for it. The condition is the input that decides whether this pass creates,
-// it is written by a controller nothing here watches, and the pass is woken by Pod events -- so a
-// cached copy may simply not have seen Kueue's write yet. Reading through the API server makes the
-// requeue's verdict authoritative; the alternative is a poll that lags its own two seconds by an
-// unbounded cache delay in exactly the state that ends by being fixed.
+// THE READ GOES TO THE API SERVER AND NOT THE CACHE, because the two disagree in exactly the
+// window this read exists to close: a create the server persisted whose response never came back
+// is on the server and not yet in the informer cache, and a cache read would call the ordinal
+// free and create a second Pod for it -- two members of a one-member group, which Kueue answers
+// by deleting the newer one.
 //
-// IT FINDS THE WORKLOAD THE WAY THE STATUS PATH DOES -- a plain owner reference to any member of
-// the group, which is Kueue's own shape for a pod group -- and scans every match rather than the
-// first, for the reason findModelDeploymentGroupWorkloads states: a Workload left behind still
-// holds finalizers on replicas that cannot otherwise leave. A group with no member at all has no
-// Workload to ask, and the caller creates freely.
-// THE WORKLOADS ARE HANDED IN RATHER THAN READ HERE, because the answer to "which Workloads are in
-// this namespace" is the same for every role of the deployment and the caller asks once for all of
-// them. Reading inside would put an unfiltered list on the hot path once per short role per pass.
-func modelDeploymentGroupWorkloadAsksForReplacement(
-	workloads []kueue.Workload, pods []core.Pod,
-) (asks, found bool) {
-	if len(pods) == 0 {
-		return false, false
+// ONE READ ANSWERS FOR THE WHOLE ROLE, and that is what keeps the create gate off the hot path it
+// would otherwise sit on. The question is asked once per ordinal the gate finds free, so narrowing
+// each read to one group meant a role short of n replicas paid n uncached lists -- and paid them
+// again on every requeue for as long as a departure took to drain. Listing the role once and
+// bucketing the result by the group label each Pod carries answers all of those ordinals from the
+// same bytes; the selection is strictly wider, so no Pod the per-ordinal read would have found is
+// missed.
+//
+// THE BUCKET KEY IS THE GROUP NAME RATHER THAN THE ORDINAL LABEL, and the two differ in
+// exactly one population: a replica rendered before the per-replica groups existed can carry a
+// group's membership label with no ordinal label of its own, and it still sits in the ordinal's
+// group counting as a member -- creating beside it is the same excess, so the occupancy the gate
+// reads is the group's, which is also the unit Kueue counts. Any member is the right threshold at
+// every size: a group short of its declared total is one Kueue composes no Workload for, so seating
+// a new member beside a straggler produces a replica that never gets admitted rather than one that
+// is merely crowded. The owner reference is confirmed client-side for the same reason
+// listModelDeploymentPods confirms it: a Pod carrying this deployment's labels but controlled by an
+// earlier incarnation of the same name claims no slot this deployment owes, and the deployment
+// creates around it rather than waiting behind it.
+func (r *ModelDeploymentReconciler) modelDeploymentTakenGroups(
+	ctx context.Context, md *workercore.ModelDeployment, role string,
+) (sets.Set[string], error) {
+	podList := new(core.PodList)
+	err := r.APIReader.List(ctx, podList,
+		ctrlcli.InNamespace(md.Namespace),
+		ctrlcli.MatchingLabels{
+			modelDeploymentLabelKeyName:      modelDeploymentLabelValueName,
+			modelDeploymentLabelKeyInstance:  md.Name,
+			modelDeploymentLabelKeyComponent: role,
+		})
+	if err != nil {
+		return nil, fmt.Errorf("list the members of role %q's groups: %w", role, err)
 	}
 
-	ours := sets.New[types.UID]()
-	for i := range pods {
-		ours.Insert(pods[i].UID)
-	}
-
-	for i := range workloads {
-		wl := &workloads[i]
-		if !modelDeploymentWorkloadOwnsAny(wl, ours) {
+	taken := sets.New[string]()
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if !modelDeploymentOwns(pod, md) {
 			continue
 		}
-		found = true
-		if kubeapistatus.ConditionType(kueueWorkloadWaitingForReplacementPods).IsTrue(wl) {
-			asks = true
+		if group := pod.Labels[kueuepodconst.GroupNameLabel]; group != "" {
+			taken.Insert(group)
 		}
 	}
 
-	return asks, found
+	return taken, nil
 }
 
-// modelDeploymentSortReplicasNewestFirst orders replicas for deletion: newest by creationTimestamp
-// first, and by name when the timestamps tie.
+// modelDeploymentAdmittedReplicas counts how many of these replicas hold an admitted Workload of
+// their own.
 //
-// THE TIEBREAK IS FOR DETERMINISM RATHER THAN MEANING. creationTimestamp has second granularity,
-// so the replicas of one create pass all carry the same one, and a rule with no total order would
-// pick a different victim on every pass over the same state. The name is arbitrary -- the API
-// server assigns it -- but it is stable, which is the only property a level-based choice needs.
+// A REPLICA COUNTS WHEN ITS WORKLOAD IS ADMITTED, and by nothing weaker. Admission is the
+// statement that quota was granted; a created-but-still-queued replacement has a Workload that is
+// composed and not admitted, or none yet, and either way it holds nothing -- counting it as
+// progress is what would let a rollout on a contended pool strip a deployment to zero admitted
+// replicas. Matching is by ownership rather than by any derived name, for the reason
+// findModelDeploymentGroupWorkloads states: a group's Workload carries plain owner references to
+// its members, and it is the members that say which Workload is theirs.
+func modelDeploymentAdmittedReplicas(workloads []kueue.Workload, pods []*core.Pod) int {
+	ours := sets.New[types.UID]()
+	for _, pod := range pods {
+		ours.Insert(pod.UID)
+	}
+
+	admitted := 0
+	for i := range workloads {
+		wl := &workloads[i]
+		if modelDeploymentWorkloadOwnsAny(wl, ours) &&
+			kubeapistatus.ConditionType(kueue.WorkloadAdmitted).IsTrue(wl) {
+			admitted++
+		}
+	}
+
+	return admitted
+}
+
+// modelDeploymentReplicaMembers is every live Pod seated on one ordinal, which is what a replica is
+// once it may have more than one member. The order is the caller's list order and carries no
+// meaning: a replica leaves as a whole, so nothing downstream picks between its members.
+func modelDeploymentReplicaMembers(pods []*core.Pod, ordinal int) []*core.Pod {
+	members := make([]*core.Pod, 0, 1)
+	for _, pod := range pods {
+		if at, ok := modelDeploymentPodOrdinal(pod); ok && at == ordinal {
+			members = append(members, pod)
+		}
+	}
+
+	return members
+}
+
+// modelDeploymentSurplusReplicas picks which Pods of an over-counted role leave: the Pods that
+// claim no ordinal first, then the Pods a seat holds beyond its one occupant, at most `surplus` of
+// them.
 //
-// NEWEST FIRST SO THE LONGEST-SERVING SURVIVE: a replica that has been serving holds the cached
-// blocks its siblings reference, and a scale-down that shed the eldest would drop the most state
-// the deployment still pays for.
-func modelDeploymentSortReplicasNewestFirst(pods []*core.Pod) {
-	slices.SortFunc(pods, func(a, b *core.Pod) int {
-		if c := b.CreationTimestamp.Compare(a.CreationTimestamp.Time); c != 0 {
+// A SEAT IS AN (ORDINAL, MEMBER) PAIR rather than an ordinal, because a replica of size n has n
+// seats and each of them holds exactly one Pod. At size one the two readings coincide, which is
+// why this generalisation leaves the single-Member decisions untouched: there is one seat per
+// ordinal and it is the leader's.
+//
+// A SEAT KEEPS THE POD ITS CURRENT RENDER DESCRIBES -- the one whose fingerprint matches what the
+// role renders for that seat -- because that is the Pod a replacement would build anyway, and
+// shedding it would only schedule the same churn for the next pass. The greatest name decides
+// between occupants nothing separates, which is determinism rather than meaning: the name is
+// stable across passes, and nothing else about two occupants of one seat tells them apart. A Pod
+// with no ordinal leaves before any seated one because every seated Pod is accounted for by the
+// declared count.
+func modelDeploymentSurplusReplicas(
+	kept []*core.Pod, want map[int][]*core.Pod, surplus int,
+) []*core.Pod {
+	type seat struct{ ordinal, member int }
+
+	var shed []*core.Pod
+	bySeat := make(map[seat][]*core.Pod, len(kept))
+	for _, pod := range kept {
+		ordinal, ok := modelDeploymentPodOrdinal(pod)
+		if !ok {
+			shed = append(shed, pod)
+
+			continue
+		}
+		bySeat[seat{ordinal, modelDeploymentPodMemberIndex(pod)}] = append(
+			bySeat[seat{ordinal, modelDeploymentPodMemberIndex(pod)}], pod)
+	}
+
+	for at, occupants := range bySeat {
+		if len(occupants) < 2 {
+			continue
+		}
+		// The render of THIS seat, or nothing when the seat is one the role no longer describes --
+		// a member index beyond the declared size, left by a Pod of some earlier shape. Absence is
+		// carried as its own flag rather than as an empty string, because a Pod carrying no
+		// fingerprint at all -- one built by a hand -- would otherwise compare EQUAL to it and be
+		// kept as the seat's current occupant. Nothing matches an absent render, so those occupants
+		// sort by name alone and the seat still sheds down to one.
+		wantHash, described := "", false
+		if members := want[at.ordinal]; at.member < len(members) {
+			wantHash = members[at.member].Annotations[modelDeploymentPodSpecHashAnnotation]
+			described = true
+		}
+		slices.SortFunc(occupants, func(a, b *core.Pod) int {
+			am := described && a.Annotations[modelDeploymentPodSpecHashAnnotation] == wantHash
+			bm := described && b.Annotations[modelDeploymentPodSpecHashAnnotation] == wantHash
+			if am != bm {
+				if am {
+					return -1
+				}
+
+				return 1
+			}
+
+			return strings.Compare(b.Name, a.Name)
+		})
+		shed = append(shed, occupants[1:]...)
+	}
+
+	// ORDINAL-LESS PODS FIRST, then the highest ordinal, so that two passes over the same state shed
+	// in the same order and the seated departures issue from the top down like every other removal.
+	//
+	// THE FIRST HALF IS LOAD-BEARING WHENEVER THE CAP BELOW BITES. Sorting by ordinal alone puts an
+	// ordinal-less Pod last, because it floors below every seat -- so a state holding both an
+	// ordinal-less Pod and a duplicated seat sheds the duplicate and keeps the Pod that belongs to
+	// no replica at all. That Pod then counts against the declared total on the next pass, which is
+	// how a role can sit one replica short with nothing left to shed.
+	slices.SortFunc(shed, func(a, b *core.Pod) int {
+		aSeated, bSeated := modelDeploymentOrdinalOrFloor(a) >= 0, modelDeploymentOrdinalOrFloor(b) >= 0
+		if aSeated != bSeated {
+			if !aSeated {
+				return -1
+			}
+
+			return 1
+		}
+		if c := modelDeploymentOrdinalOrFloor(b) - modelDeploymentOrdinalOrFloor(a); c != 0 {
 			return c
 		}
 
 		return strings.Compare(b.Name, a.Name)
 	})
+	if len(shed) > surplus {
+		shed = shed[:surplus]
+	}
+
+	return shed
+}
+
+// modelDeploymentHighestOrdinalReplica picks the replica a rollout replaces first: the highest
+// ordinal, and the greatest name when one slot's members are otherwise indistinguishable.
+//
+// THE CHOICE IS BY ORDINAL AND NOT BY CREATION TIMESTAMP -- a timestamp says when an object was
+// made, not which slot it holds, and the slot is what the replacement renders against. The
+// greatest name is the tiebreak for determinism rather than meaning: it is the API server's own
+// assignment and it is stable, which is the only property a level-based choice needs. A Pod with
+// no ordinal outranks nothing: it holds no seat, so every seated replica goes before it.
+func modelDeploymentHighestOrdinalReplica(pods []*core.Pod) *core.Pod {
+	choice := pods[0]
+	for _, pod := range pods[1:] {
+		if c := modelDeploymentOrdinalOrFloor(pod) - modelDeploymentOrdinalOrFloor(choice); c > 0 ||
+			(c == 0 && strings.Compare(pod.Name, choice.Name) > 0) {
+			choice = pod
+		}
+	}
+
+	return choice
+}
+
+// modelDeploymentOrdinalOrFloor reads the ordinal a replica holds, with a Pod carrying none
+// reading below every seat: it claims no slot, so it sorts after every replica that does.
+func modelDeploymentOrdinalOrFloor(pod *core.Pod) int {
+	ordinal, ok := modelDeploymentPodOrdinal(pod)
+	if !ok {
+		return -1
+	}
+
+	return ordinal
 }
 
 // getModelDeploymentInstanceType reads the InstanceType a role is admitted against.

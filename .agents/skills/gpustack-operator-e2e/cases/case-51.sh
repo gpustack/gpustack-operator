@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# CASE 51 — Every P/D refusal fires, from the layer that owns it, and a group shape change rebuilds
-#           the group
+# CASE 51 — Every P/D refusal fires, from the layer that owns it, and a replicas change replaces
+#           nobody
 #   (NON-MUTATING for the refusals, which are server-side dry-runs; one short-lived deployment for
-#    the rebuild)
+#    the convergence rows)
 #
 #   case-51.sh <NS>
 #
@@ -14,7 +14,8 @@
 #                schema   — the role name's PodSetReference pattern, the closed `kind` enum, and
 #                           uniqueness, which `roles` gets from being a list-map keyed on `name`;
 #                webhook  — the count, one-instanceType, and the kind combinations;
-#                controller — the group rebuild, which is a convergence rather than a refusal.
+#                controller — what a replicas change does to the replicas already running, which is
+#                             a convergence rather than a refusal.
 #
 #              THE TRAP IS CASE 45'S, AND IT IS WORSE HERE. Every manifest below carries several
 #              roles, so a mistake in the SHARED part of the manifest refuses all of them — and a
@@ -36,9 +37,9 @@
 #              or on whether a cache has caught up.
 #
 # Inputs:      All real, nothing mocked. `--dry-run=server` runs the schema and the webhook and
-#              persists nothing. The rebuild row creates one ModelDeployment and deletes it again.
+#              persists nothing. The convergence rows create one ModelDeployment and delete it again.
 #
-# Deferred:    Whether the rebuilt group is then ADMITTED — one Workload, two PodSets — is case-49's,
+# Deferred:    Whether each replica's group is then ADMITTED — one Workload each — is case-49's,
 #              and whether a short pool leaves both roles queued is case-50's. This file stops at
 #              the operator's own writes, which is what it can assert without an engine.
 #
@@ -53,13 +54,44 @@ fi
 BINDING="${E2E_MD_BINDING:-case51-no-such-binding}"
 IT="${E2E_MD_INSTANCE_TYPE:-}"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
+# The second image exists only to be DIFFERENT from the first: the control row below changes it to
+# move the rendered Pod, and never runs it long enough to care what it does. It must still be a real
+# image, because a replica that cannot pull is a replica that never replaces its predecessor.
+CONTROL_IMAGE="${E2E_MD_CONTROL_IMAGE:-registry.k8s.io/pause:3.9}"
+if [ "$CONTROL_IMAGE" = "$IMAGE" ]; then
+  echo "[case-51] E2E_MD_IMAGE and E2E_MD_CONTROL_IMAGE are the same image, so the control row" >&2
+  echo "          would change nothing and report a rebuild that never happened" >&2
+  exit 2
+fi
 
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
+# The first InstanceType A DEPLOYMENT CAN ACTUALLY NAME, which is not the same as the first one the
+# API returns.
+#
+# THE LIST COMES BACK SORTED BY NAME AND CARRIES TYPES ON THEIR WAY OUT. Case 68 creates its own
+# `case68-nowhere` and deletes it without waiting, and that name sorts before an ordinary derived
+# type -- so a case running straight after it picks a type that is already terminating. Naming one
+# is refused at admission, and the run then dies at fixture time for a reason that has nothing to do
+# with what it measures. Inactive is excluded for the mirror reason: a deployment on one is admitted
+# and then never scheduled, so the case waits out every timeout it has.
+usable_instance_type() {
+  kubectl get instancetypes.worker.gpustack.ai \
+    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}{"\n"}{end}' \
+    2>/dev/null \
+    | while IFS='|' read -r name deleting inactive; do
+        [ -n "$name" ] || continue
+        [ -z "$deleting" ] || continue
+        [ "$inactive" = true ] && continue
+        echo "$name"
+        break
+      done
+}
+
 if [ -z "$IT" ]; then
-  IT="$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  IT="$(usable_instance_type)"
 fi
 if [ -z "$IT" ]; then
   echo "[case-51] no InstanceType in the cluster; run case-1 first" >&2
@@ -136,6 +168,20 @@ refuses() {
   esac
 }
 
+# THE POSITIVE SIDE OF THE SAME INSTRUMENT, and it exists because one rule this case asserted was
+# REMOVED rather than reworded. A deleted refusal must be replaced by the acceptance that took its
+# place instead of simply dropped: dropping it leaves nothing at all reporting the day the refusal
+# returns, and a rule that comes back silently is exactly what a refusal suite is for.
+accepts() {
+  local check="$1" roles="$2" out
+  out="$(manifest "$roles" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
+  case "$out" in
+    *"created (server dry run)"* | *"configured (server dry run)"*)
+      record PASS "$check" "accepted by both the schema and the webhook" ;;
+    *) record FAIL "$check" "refused: ${out:0:220}" ;;
+  esac
+}
+
 # --- row 0: the baseline, and the headline ---
 
 out="$(manifest "$(two_roles)" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
@@ -157,8 +203,12 @@ for i in $(seq 0 10); do
     replicas: 1
 "
 done
-refuses "eleven roles are refused naming KUEUE's cap" \
-  "Kueue caps Workload.spec.podSets at 10" "$eleven"
+# THE CAP IS THIS PROJECT'S, and the refusal has to say whose it is. It used to be Kueue's --
+# Workload.spec.podSets maxItems, binding while every role was one PodSet of a single Workload --
+# and a message still naming Kueue would send a reader to look at a Workload their roles no longer
+# become, since each replica now carries its own.
+refuses "eleven roles are refused naming THIS PROJECT's cap" \
+  "a shape this operator does not serve" "$eleven"
 
 # BY THE SCHEMA, and the attribution is the finding rather than a detail. `roles` is a list-map keyed
 # on `name`, so the API server rejects the duplicate during validation and the webhook's own rule --
@@ -173,22 +223,30 @@ refuses "two roles sharing a name are refused BY THE SCHEMA" \
     instanceType: ${IT}
     replicas: 1"
 
-# NO SECOND InstanceType HAS TO EXIST. This rule is answered from the submitted object alone --
-# validateModelDeploymentRoleInstanceTypes only compares the strings in spec.roles -- and validate()
-# runs it BEFORE any rule that reads the cluster, returning early when it speaks. So a name that
-# resolves to nothing still exercises exactly this refusal, and gating the row on a second real
-# InstanceType left it untested on the single-type cluster this PR was developed against.
+# THIS ROW WAS A REFUSAL AND IS NOW AN ACCEPTANCE, because the rule behind it was deleted rather
+# than reworded. While a role was the admission unit, one Workload carried one queue name and roles
+# on two InstanceTypes had nowhere to be admitted together, so the webhook refused the shape up
+# front. A replica is the unit now: each becomes its own group, and the joint barrier admits or
+# holds the whole set across however many types it spans. Several types in one deployment is the
+# premise of that barrier rather than a state anything rejects.
 #
-# The second name is used when the cluster has one, because a row that refuses a real pair is the
-# stronger evidence; the synthetic name is the fallback rather than the default.
-refuses "two instanceTypes are refused, and the message names the gap" \
-  "is not possible today" \
-  "  - name: prefill
+# A SECOND REAL InstanceType IS REQUIRED NOW, WHERE THE REFUSAL NEEDED NONE. The deleted rule was
+# answered from the submitted object alone and ran before anything read the cluster, so a synthetic
+# name exercised it. With that rule gone the object reaches the rules that DO read the cluster, and
+# a name resolving to nothing is refused for not existing -- which would pass a careless row for
+# entirely the wrong reason. So this row skips rather than substituting a fabricated name.
+if [ -n "${IT2:-}" ]; then
+  accepts "two instanceTypes are ACCEPTED, which is the joint barrier's whole premise" \
+    "  - name: prefill
     instanceType: ${IT}
     replicas: 1
   - name: decode
-    instanceType: ${IT2:-case51-no-such-instance-type}
+    instanceType: ${IT2}
     replicas: 1"
+else
+  record SKIP "two instanceTypes are ACCEPTED, which is the joint barrier's whole premise" \
+    "needs a second real InstanceType and this cluster materialized one. NOT closed by a synthetic name, which is now refused for not existing; CASE 68 covers the same premise by CREATING its second type"
+fi
 
 refuses "kind: server beside another kind is refused" \
   "cannot be combined with another kind" \
@@ -219,14 +277,16 @@ refuses "a kind outside the enum is refused BY THE SCHEMA" \
     instanceType: ${IT}
     replicas: 1"
 
-# --- the controller: a shape change rebuilds the group ---
+# --- the controller: a replicas change replaces nobody, an image change replaces everybody ---
 
 REBUILD_MD=case51-rebuild
 
-# The two totals the rebuild moves between, named once. They appear in the poll loops, the patch and
-# the stale-Pod filter, and three literals cannot be kept in step by anything but attention.
-OLD_TOTAL=2   # prefill 1 + decode 1, the shape two_roles renders
-NEW_TOTAL=3   # prefill 2 + decode 1, the shape the patch below asks for
+# THE DECLARED TOTAL IS ONE AND STAYS ONE, whatever the replica counts are. Each replica is a Kueue
+# group of its own, so the number a Pod declares is a property of the group it is alone in rather
+# than of the deployment it belongs to -- which is precisely what lets a replicas change leave every
+# living replica untouched. A reading of anything else here means a Pod joined a group expecting a
+# sibling that will never arrive, and Kueue composes nothing for it.
+DECLARED_TOTAL=1
 # Deleted without waiting, then any Workload still holding the replicas is released by hand. Kueue
 # keeps a finalizer on every Pod of a serving group and drops it only when that Workload goes, so a
 # cleanup that blocks on the deployment would block for as long as the caller allows if the operator
@@ -255,11 +315,10 @@ EOF
 }
 trap cleanup EXIT
 
-# THE TOTAL IS WHAT IS OBSERVED, not the Pod count, and that is the point of the row. Every Pod of
-# the group carries the group's declared total and Kueue requires them all to agree; a rebuild is
-# how the operator keeps that true when the number moves. Counting Pods alone would pass against an
-# implementation that added one Pod beside three declaring the old total -- which is the exact state
-# that composes no Workload at all.
+# THE TOTAL IS OBSERVED ALONGSIDE THE UIDS, not instead of them. A Pod declaring anything but one
+# has joined a group waiting for a sibling that will never come, and Kueue composes no Workload for
+# it -- a state that looks like nothing at all from the outside, and one that counting Pods or
+# reading UIDs would both pass straight through.
 totals() {
   kubectl -n "$NS" get pods \
     -l "app.kubernetes.io/instance=${REBUILD_MD}" \
@@ -267,81 +326,135 @@ totals() {
     2>/dev/null | sort -u | tr '\n' ' '
 }
 
+# Pod name=UID for one role, sorted. THE UID IS THE OBSERVABLE THIS HALF OF THE CASE RESTS ON: a
+# replica that stayed and one replaced by an identical render are the same Pod to every other
+# reading -- same name pattern, same spec, same labels -- and differ only in the identity the
+# cluster assigned. A fake client leaves it empty, which is why this cannot be asserted below e2e.
+role_uids() {
+  kubectl -n "$NS" get pods \
+    -l "app.kubernetes.io/instance=${REBUILD_MD},app.kubernetes.io/component=$1" \
+    -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.uid}{"\n"}{end}' 2>/dev/null \
+    | grep -v '^$' | sort | tr '\n' ' '
+}
+
+# The UIDs of one role that are STILL PRESENT out of a recorded set, as a count.
+surviving() {
+  local before="$1" role="$2" now n=0 e
+  now="$(role_uids "$role")"
+  for e in $before; do
+    case " $now " in *" $e "*) n=$((n + 1)) ;; esac
+  done
+  echo "$n"
+}
+
 # KEPT, unlike a dry-run row's: every rebuild row below depends on this object existing, so a refusal
 # here would otherwise surface as three timeouts with three wrong diagnoses instead of one message.
 REBUILD_APPLY="$(MD_NAME="$REBUILD_MD" manifest "$(two_roles)" | kubectl apply -f - 2>&1)"
 
 for _ in $(seq 1 30); do
-  [ "$(totals)" = "${OLD_TOTAL} " ] && break
+  [ "$(totals)" = "${DECLARED_TOTAL} " ] && break
   sleep 2
 done
-if [ "$(totals)" = "${OLD_TOTAL} " ]; then
-  record PASS "the group is created carrying one declared total" \
-    "every Pod of the two-role group declares ${OLD_TOTAL}"
+if [ "$(totals)" = "${DECLARED_TOTAL} " ]; then
+  record PASS "every replica declares a group total of one" \
+    "both roles' replicas declare ${DECLARED_TOTAL}: each is a group of itself"
 else
-  record FAIL "the group is created carrying one declared total" \
+  record FAIL "every replica declares a group total of one" \
     "observed totals: '$(totals)'; apply said: ${REBUILD_APPLY:0:200}"
 fi
 
-TPL='"image":"'"$IMAGE"'","command":["/pause"]}'
-kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai "$REBUILD_MD" --type=merge \
-  -p '{"spec":{"roles":[{"name":"prefill","kind":"prefill","instanceType":"'"$IT"'","replicas":2,'"$TPL"'},{"name":"decode","kind":"decode","instanceType":"'"$IT"'","replicas":1,'"$TPL"'}]}}' \
-  >/dev/null 2>&1
+# Recorded BEFORE the patch, which is the only moment they can be recorded: the whole question is
+# whether these exact identities survive it.
+PREFILL_BEFORE="$(role_uids prefill)"
+DECODE_BEFORE="$(role_uids decode)"
 
-CONVERGED=no
-MIXED=no
+# The role object's closing brace belongs to the caller below, NOT here. Carrying one in this
+# fragment too produced "command":["/pause"]}} in every patch this case has ever sent, which the API
+# server rejects while DECODING -- before any webhook or controller sees it. The row that depends on
+# the patch therefore could not pass, and had never passed.
+TPL='"image":"'"$IMAGE"'","command":["/pause"]'
+# CAPTURED, NOT DISCARDED. This patch used to send both streams to /dev/null, and a REFUSED patch
+# then produced exactly what a slow scale produces: nothing happens, the poll below runs out, and
+# the row reports "prefill never reached 2 replicas" -- a symptom, with its cause thrown away at the
+# only moment it was available. Capturing it is what turned that symptom into the decoding error
+# above, which is the whole reason the brace was findable at all.
+SCALE_PATCH="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai "$REBUILD_MD" --type=merge \
+  -p '{"spec":{"roles":[{"name":"prefill","kind":"prefill","instanceType":"'"$IT"'","replicas":2,'"$TPL"'},{"name":"decode","kind":"decode","instanceType":"'"$IT"'","replicas":1,'"$TPL"'}]}}' \
+  2>&1)"
+
+SCALED=no
+BAD_TOTAL=no
 for _ in $(seq 1 45); do
   t="$(totals)"
-  # A mixed reading is the failure this row exists to catch, and it is caught by OBSERVING rather
-  # than by reasoning: two live Pods disagreeing on the total is the state Kueue refuses to compose
-  # a Workload for, and it looks like nothing at all from the outside.
-  case "$t" in
-    *2*3*|*3*2*) MIXED=yes ;;
-  esac
-  [ "$t" = "${NEW_TOTAL} " ] && { CONVERGED=yes; break; }
+  # ANY total but one is the failure this poll exists to catch, and it is caught by OBSERVING rather
+  # than by reasoning: a Pod waiting for a sibling that will never join composes no Workload, and it
+  # looks like nothing at all from the outside.
+  [ -n "$t" ] && [ "$t" != "${DECLARED_TOTAL} " ] && BAD_TOTAL=yes
+  [ "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${REBUILD_MD},app.kubernetes.io/component=prefill" \
+    --no-headers 2>/dev/null | grep -c . || true)" = 2 ] && { SCALED=yes; break; }
   sleep 2
 done
 
-if [ "$CONVERGED" = yes ]; then
-  record PASS "a replicas change rebuilds the group under the new total" \
-    "every Pod of the group ends up declaring ${NEW_TOTAL}"
+# THE INVERTED ROW. Until this spec a replicas change moved a number every member of the deployment
+# carried, so the group had to be torn down and recomposed and every replica went with it. The
+# assertion is now the opposite one, and it is measured on UIDs because nothing else can tell a
+# replica that STAYED from one replaced by an identical render.
+if [ "$SCALED" != yes ]; then
+  record FAIL "a replicas change leaves every living replica alone" \
+    "prefill never reached 2 replicas; totals read '$(totals)'; the patch said: ${SCALE_PATCH:0:220}"
 else
-  record FAIL "a replicas change rebuilds the group under the new total" \
-    "observed totals: '$(totals)'"
-fi
-
-# WHAT THIS ROW CAN AND CANNOT SAY. Polling every 2s cannot see a mixed state that appears and
-# resolves between two samples, so a PASS here is "no mixed state was OBSERVED", never "none existed"
-# -- and the row is worded that way rather than claiming the stronger thing. What makes it more than
-# a coin flip is the second reading below, taken from the final state: the rebuild is expected to
-# delete every old-total Pod before creating any new-total one, so no Pod of the old total may
-# survive into the converged group. That one does not depend on sampling luck.
-if [ "$MIXED" = no ]; then
-  record PASS "no mixed-total state was OBSERVED during the rebuild" \
-    "polled every 2s and never sampled ${OLD_TOTAL} and ${NEW_TOTAL} together; a window shorter than the interval is not visible to this row"
-else
-  record FAIL "no mixed-total state was OBSERVED during the rebuild" \
-    "sampled a mixed reading, which is the state that composes no Workload at all"
-fi
-
-# ONLY MEANINGFUL IF A REBUILD HAPPENED. Run unconditionally, this row fires whenever the rebuild
-# never started -- a refused patch leaves every Pod declaring the old total -- and reports it as a
-# failure of rebuild ATOMICITY. That is one FAIL for two very different causes, naming the wrong one,
-# which is the same misdiagnosis capturing the apply output was meant to end.
-if [ "$CONVERGED" != yes ]; then
-  record SKIP "no replica of the old total survives into the rebuilt group" \
-    "the group never converged to ${NEW_TOTAL}, so there is no rebuilt group to read; see the row above for why"
-else
-  STALE="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${REBUILD_MD}" \
-    -o jsonpath="{range .items[?(@.metadata.annotations.kueue\\.x-k8s\\.io/pod-group-total-count==\"${OLD_TOTAL}\")]}{.metadata.name}{\" \"}{end}" \
-    2>/dev/null)"
-  if [ -z "$STALE" ]; then
-    record PASS "no replica of the old total survives into the rebuilt group" \
-      "read from the converged state, so it does not depend on catching the window"
+  kept_p="$(surviving "$PREFILL_BEFORE" prefill)"
+  kept_d="$(surviving "$DECODE_BEFORE" decode)"
+  want_p="$(printf '%s\n' $PREFILL_BEFORE | grep -c . || true)"
+  want_d="$(printf '%s\n' $DECODE_BEFORE | grep -c . || true)"
+  # THE SIBLING ROLE IS HALF THE ROW. A scale that rebuilt only the role it names would still be a
+  # regression, and a check reading prefill alone would call it a pass.
+  if [ "$kept_p" = "$want_p" ] && [ "$kept_d" = "$want_d" ]; then
+    record PASS "a replicas change leaves every living replica alone" \
+      "all ${want_p} prefill and ${want_d} decode replicas kept their UIDs across the scale; the new replica is created beside them"
   else
-    record FAIL "no replica of the old total survives into the rebuilt group" \
-      "still declaring ${OLD_TOTAL}: ${STALE}"
+    record FAIL "a replicas change leaves every living replica alone" \
+      "prefill kept ${kept_p}/${want_p} UIDs, decode kept ${kept_d}/${want_d}: a scale rebuilt replicas it was not asked to touch"
   fi
+fi
+
+if [ "$BAD_TOTAL" = no ]; then
+  record PASS "no replica ever declared a total other than one" \
+    "polled every 2s across the scale; a window shorter than the interval is not visible to this row"
+else
+  record FAIL "no replica ever declared a total other than one" \
+    "sampled a total other than ${DECLARED_TOTAL}, which is a group waiting for a member that will never arrive"
+fi
+
+# THE CONTROL, AND WITHOUT IT THE ROW ABOVE PROVES NOTHING. "The UIDs did not change" is also what a
+# broken observation reports -- a role_uids that silently returned the same string twice, a patch
+# that never applied -- so the same instrument has to be shown reporting the other value.
+#
+# THE CONTROL IS AN IMAGE CHANGE, NOT A ROLE RENAME. A rename would replace every replica of the
+# renamed role, which is the reading this row wants, but no rename ever reaches the converger: the
+# role set is part of a deployment's identity and admission refuses any edit to it, in either
+# direction. A control the API rejects is a control that never runs, and a row that records SKIP
+# leaves the assertion above resting on an instrument nobody watched answer twice.
+#
+# An image change is refused by nothing, moves the rendered Pod, and therefore rolls every replica
+# of the role it names -- one at a time, which is why this waits for the whole role to turn over
+# rather than for a single Pod.
+CONTROL_BEFORE="$(role_uids decode)"
+CONTROL_PATCH="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai "$REBUILD_MD" --type=json \
+  -p '[{"op":"replace","path":"/spec/roles/1/image","value":"'"$CONTROL_IMAGE"'"}]' 2>&1)"
+
+CONTROL_DONE=no
+for _ in $(seq 1 90); do
+  [ "$(surviving "$CONTROL_BEFORE" decode)" = 0 ] && { CONTROL_DONE=yes; break; }
+  sleep 2
+done
+
+if [ "$CONTROL_DONE" = yes ]; then
+  record PASS "the control: an image change DOES replace that role's replicas" \
+    "none of the old decode UIDs survived the image change, so the reading above is the instrument answering rather than failing to look"
+else
+  record FAIL "the control: an image change DOES replace that role's replicas" \
+    "$(surviving "$CONTROL_BEFORE" decode) of the old decode UID(s) outlived an image change, so this instrument cannot tell a replacement from a survivor and the row above is unproven. patch said: ${CONTROL_PATCH:0:200}"
 fi
 
 # Results.

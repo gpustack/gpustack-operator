@@ -105,12 +105,14 @@ func TestValidateModelDeployment(t *testing.T) {
 			),
 		},
 		{
-			// The bound is Kueue's, so the refusal has to say so: a user who reads only the number
-			// files a bug here, and a user who reads whose number it is goes and looks at the
-			// Workload their roles become.
+			// The bound is THIS PROJECT'S, so the refusal has to say so. It was Kueue's while every
+			// role was one PodSet of a single Workload, and a message naming Kueue would now send a
+			// user to look at a Workload their roles no longer become -- each replica carries its
+			// own. Naming this operator sends them to ask for the limit to be raised instead,
+			// which is where that decision now lives.
 			name:        "roles_eleven",
 			md:          modelDeployment(workercore.ModelDeploymentEngineVLLM, numberedRoles(11)...),
-			wantMessage: "Kueue caps Workload.spec.podSets at 10",
+			wantMessage: "a shape this operator does not serve",
 		},
 		{
 			name: "roles_ten",
@@ -124,7 +126,7 @@ func TestValidateModelDeployment(t *testing.T) {
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "worker" }),
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "worker" }),
 			),
-			wantMessage: "grouping both roles into one PodSet whose count is their sum",
+			wantMessage: "group that declares a single member",
 		},
 		{
 			// The Service fronting a role is named <deployment>-<role>, and a Service name is a DNS
@@ -203,6 +205,25 @@ func TestValidateModelDeployment(t *testing.T) {
 			// into needing a second role to agree with.
 			name: "role_instance_type_single",
 			md:   modelDeployment(workercore.ModelDeploymentEngineVLLM),
+		},
+		{
+			// The legal value is ACCEPTED, not merely defaulted: a role stating one instance of one
+			// Pod is the shape every deployment has, and refusing it would make the field unusable
+			// rather than merely capped.
+			name: "role_size_one",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) { r.ReplicaSize = 1 }),
+			),
+		},
+		{
+			// A size above one is ACCEPTED ON CREATE, which is the whole of what create has to say
+			// about it: an instance of several Pods is a shape the renderer builds, not a request
+			// some later rule has to talk the user out of. What cannot happen to it is a change,
+			// and that is an update rule, asserted against a stored object rather than here.
+			name: "role_size_two",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) { r.ReplicaSize = 2 }),
+			),
 		},
 		{
 			name: "role_kinds_prefill_and_decode",
@@ -361,6 +382,29 @@ func TestValidateModelDeployment(t *testing.T) {
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
 				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "MC_TE_METRIC", Value: "0"}}
 			})),
+		},
+		{
+			// The rank keys are owned WHATEVER THE ENGINE, because they describe the Pod's shape
+			// rather than anything an engine reads by name. Refusing them is not tidiness: the
+			// index is rendered as a fieldRef, a user entry of that name would be merged onto it by
+			// value, and an EnvVar carrying both a value and a source is refused by the API server
+			// -- so an unowned key here turns a legal deployment into one that cannot render.
+			name: "env_rank_key_is_owned_on_every_engine",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang, role(func(r *workercore.ModelDeploymentRole) {
+				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "GPUSTACK_MEMBER_INDEX", Value: "0"}}
+			})),
+			wantMessage: "GPUSTACK_MEMBER_INDEX",
+		},
+		{
+			// Owned at size one as well, where nothing renders it. A rule that switched on with a
+			// field value would let the key through on create and refuse it only once an instance
+			// was widened -- and `size` is frozen, so that edit is a new deployment away.
+			name: "env_rank_key_is_owned_at_size_one",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.ReplicaSize = 1
+				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "GPUSTACK_REPLICA_SIZE", Value: "8"}}
+			})),
+			wantMessage: "GPUSTACK_REPLICA_SIZE",
 		},
 		{
 			// A role that took over the command line is refused too, because the renderer drops
@@ -1017,9 +1061,10 @@ func TestModelDeploymentWebhook_Default(t *testing.T) {
 }
 
 // TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup covers the explicit
-// value that defaulting deliberately leaves alone. Roles sharing one InstanceType form PodSets in
-// one Workload, and an accelerated queue cannot admit that Workload when one PodSet requests none
-// of the accelerator credits the queue covers.
+// value that defaulting deliberately leaves alone. A role asking for no accelerator on an
+// acceleratable type requests nothing its queue accounts for, so its replicas are admitted and run
+// while that queue charges them nothing -- and the siblings sharing the type are charged for every
+// card they hold, competing for a pool this role spends from uncounted.
 func TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup(t *testing.T) {
 	withDerivedFromNode(t, true)
 
@@ -1454,6 +1499,177 @@ func TestModelDeploymentWebhook_ValidateUpdateStatesTheRuleNotTheMechanism(t *te
 	}
 }
 
+// TestModelDeploymentWebhook_RefusesMemberNamesThatCannotBeHostnames covers the budget a
+// multi-Member role spends that a single-Member one does not.
+//
+// THE FIRST CASE IS THE ONE THAT MATTERS: its <deployment>-<role> is legal, so the Service-name rule
+// accepts it, and only the member name it implies is too long. A test whose refused input was
+// already refused by another rule would pass against a build where this rule does not exist.
+func TestModelDeploymentWebhook_RefusesMemberNamesThatCannotBeHostnames(t *testing.T) {
+	r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+
+	// 40 + 1 + 20 = 61 characters, which is a legal Service name; the member name it implies is 67.
+	// The names end in an alphanumeric on purpose: a trailing hyphen is refused by the Service-name
+	// rule for a reason that has nothing to do with length, and an input refused twice would let
+	// this case pass against a build where the rule under test is missing.
+	longName := "deploymentaaaaaaaaaaaaaaaaaaaaaaaaaaaaax"
+	longRole := "roleaaaaaaaaaaaaaaay"
+
+	build := func(name, role string, replicas, size int32) *workercore.ModelDeployment {
+		md := modelDeploymentWithEveryField()
+		md.Name = name
+		md.Spec.Roles = md.Spec.Roles[:1]
+		md.Spec.Roles[0].Name = role
+		md.Spec.Roles[0].Replicas, md.Spec.Roles[0].ReplicaSize = replicas, size
+
+		return md
+	}
+
+	t.Run("a_name_legal_at_size_one_is_refused_above_it", func(t *testing.T) {
+		// The baseline: the same deployment at size one is ACCEPTED, which is what proves the
+		// refusal below is about the member name and not about the role or deployment name.
+		_, err := r.ValidateCreate(context.Background(), build(longName, longRole, 1, 1))
+		require.NoError(t, err, "at one member per replica the render names nothing, so there is no budget")
+
+		_, err = r.ValidateCreate(context.Background(), build(longName, longRole, 1, 2))
+		require.Error(t, err)
+
+		got := err.Error()
+		assert.True(t, errsContain(got, "spec.roles[0]: Invalid value"),
+			"the error belongs to the role, since four inputs spell the name it measured: %s", got)
+		assert.True(t, errsContain(got, "cannot be a hostname"), got)
+		assert.True(t, errsContain(got, longName+"-"+longRole+"-r0-m1"),
+			"the message has to quote the name it measured, or nobody can tell what to shorten: %s", got)
+	})
+
+	t.Run("a_scale_that_lengthens_the_name_is_refused", func(t *testing.T) {
+		// 57 characters of prefix, which is exact: -r9-m1 reaches 63 and fits, -r10-m1 reaches 64
+		// and does not. This is the case the Service-name rule structurally cannot catch, since it
+		// skips roles that already exist and the pair it measures never changes.
+		// Ten replicas reach ordinal 9, which is one digit; eleven reach ordinal 10, which is two.
+		name, role := "deploymentaaaaaaaaaaaaaaaaaaaaaaaaax", "roleaaaaaaaaaaaaaaay"
+		old := build(name, role, 10, 2)
+		_, err := r.ValidateCreate(context.Background(), old)
+		require.NoError(t, err, "ten replicas reach ordinal 9, and -r9-m1 is exactly 63")
+
+		_, err = r.ValidateUpdate(context.Background(), old, build(name, role, 11, 2))
+		require.Error(t, err, "the eleventh reaches ordinal 10, adding a digit to the longest name")
+
+		got := err.Error()
+		assert.True(t, errsContain(got, "declare fewer replicas"), got)
+		// THE FIELD THE REFUSAL NAMES IS THE ONE THE USER CAN ACT ON. Nothing about `size` moved on
+		// this edit and nothing could -- it is immutable -- so an error attached to it would send an
+		// operator to change the one input this deployment has already frozen.
+		assert.False(t, errsContain(got, "spec.roles[0].size"),
+			"a replicas-only scale must not be reported against size, which did not change: %s", got)
+		assert.True(t, errsContain(got, "spec.roles[0]: Invalid value"), got)
+	})
+}
+
+// TestModelDeploymentWebhook_RefusesTwoServicesNamedTheSame covers the collision distinct role names
+// do not prevent, because the two names come out of two different formulas: a role is fronted by
+// <deployment>-<role>, and a role of several members publishes each instance behind
+// <deployment>-<role>-r<ordinal>.
+//
+// THE TWO BASELINES ARE WHAT MAKE THE REFUSAL MEAN ANYTHING. The same pair of role names at one
+// member per instance is ACCEPTED -- no instance Service is rendered there, so no name is claimed
+// twice -- which is what proves the rule is about the derived Service and not about role names that
+// look alike. And a sibling named something else is accepted at either size, which is what proves it
+// is not simply refusing multi-member roles.
+func TestModelDeploymentWebhook_RefusesTwoServicesNamedTheSame(t *testing.T) {
+	r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+
+	// Role "x" runs two instances, so it derives <deployment>-x-r0 and <deployment>-x-r1. A sibling
+	// named "x-r0" derives <deployment>-x-r0 for itself.
+	build := func(sibling string, size int32) *workercore.ModelDeployment {
+		md := modelDeploymentWithEveryField()
+		md.Spec.Roles = md.Spec.Roles[:1]
+		md.Spec.Roles[0].Name = "x"
+		md.Spec.Roles[0].Replicas, md.Spec.Roles[0].ReplicaSize = 2, size
+
+		second := *md.Spec.Roles[0].DeepCopy()
+		second.Name, second.Replicas, second.ReplicaSize = sibling, 1, 1
+
+		md.Spec.Roles = append(md.Spec.Roles, second)
+
+		return md
+	}
+
+	t.Run("a_sibling_named_like_a_derived_instance_service_is_refused", func(t *testing.T) {
+		_, err := r.ValidateCreate(context.Background(), build("x-r0", 1))
+		require.NoError(t, err,
+			"at one member per instance no headless Service is rendered, so the name is claimed once")
+
+		_, err = r.ValidateCreate(context.Background(), build("x-r0", 2))
+		require.Error(t, err)
+
+		got := err.Error()
+		assert.True(t, errsContain(got, "qwen-72b-x-r0"),
+			"the message quotes the name both would carry, or nobody can tell what collides: %s", got)
+		assert.True(t, errsContain(got, "spec.roles[1].name"),
+			"the refusal belongs to the role that can be renamed, which is the one declared second: %s", got)
+	})
+
+	t.Run("an_unrelated_sibling_is_accepted_at_either_size", func(t *testing.T) {
+		for _, size := range []int32{1, 2} {
+			_, err := r.ValidateCreate(context.Background(), build("y", size))
+			require.NoErrorf(t, err, "a sibling named y collides with nothing at size %d", size)
+		}
+	})
+}
+
+// TestModelDeploymentWebhook_ValidateUpdateFreezesSizeButNotReplicas holds the two halves of the
+// scaling story against each other, on one object, in one test.
+//
+// THE PAIR IS THE POINT, NOT EITHER HALF. A rule refusing a size change would also be satisfied by
+// a rule refusing every numeric change, and that implementation takes away the only elasticity this
+// role has. Asserting the refusal beside the acceptance is what distinguishes "size is frozen" from
+// "numbers are frozen", and the two subtests start from the same stored object so nothing but the
+// field under test differs.
+//
+// THE REFUSAL MUST NAME size AND POINT AT replicas. An operator raising size almost always wants
+// capacity, which replicas gives without disturbing anything already serving; a refusal that only
+// says no leaves them with a deployment they believe cannot grow.
+func TestModelDeploymentWebhook_ValidateUpdateFreezesSizeButNotReplicas(t *testing.T) {
+	r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+
+	stored := func() *workercore.ModelDeployment {
+		md := modelDeploymentWithEveryField()
+		for i := range md.Spec.Roles {
+			md.Spec.Roles[i].Replicas, md.Spec.Roles[i].ReplicaSize = 1, 2
+		}
+
+		return md
+	}
+
+	t.Run("size_change_is_refused", func(t *testing.T) {
+		old := stored()
+		md := old.DeepCopy()
+		md.Spec.Roles[0].ReplicaSize = 3
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		require.Error(t, err)
+
+		got := err.Error()
+		assert.True(t, errsContain(got, "spec.roles[0].size"), got)
+		assert.True(t, errsContain(got, "fixed when the deployment is created"), got)
+		assert.True(t, errsContain(got, "replicas"),
+			"the refusal has to name the field that does move: %s", got)
+		// The other frozen fields answer "this is a different deployment". Size is not that: the
+		// deployment is the same one, and what cannot happen is this edit to it.
+		assert.False(t, errsContain(got, "describes a different deployment"), got)
+	})
+
+	t.Run("replicas_change_is_accepted", func(t *testing.T) {
+		old := stored()
+		md := old.DeepCopy()
+		md.Spec.Roles[0].Replicas = 4
+
+		_, err := r.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err, "scaling a role is the one edit this whole shape exists to allow")
+	})
+}
+
 // TestModelDeploymentWebhook_ValidateUpdateAllowsMetadataAndTheDeletionWindow covers the two edits
 // that must keep working, including the one that releases the object.
 func TestModelDeploymentWebhook_ValidateUpdateAllowsMetadataAndTheDeletionWindow(t *testing.T) {
@@ -1768,7 +1984,8 @@ func pdRole(name string, kind workercore.ModelDeploymentRoleKind, instanceType s
 	}
 }
 
-// TestModelDeploymentWebhook_APairMayNotShareOneAccelerator covers F4.
+// TestModelDeploymentWebhook_APairMayNotShareOneAccelerator covers when a shared accelerator is
+// refused and when it is not.
 //
 // THE QUALIFIER IS WHAT THE TABLE IS FOR. A rule with none refuses every sliced pair and blocks the
 // heterogeneous shape two instanceTypes exist to enable; a rule keyed on the type NAMES being
@@ -2113,7 +2330,7 @@ func withDerivedFromNode(t *testing.T, on bool) {
 	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-derived-from-node": strconv.FormatBool(on)})
 }
 
-// TestModelDeploymentWebhook_SeveralInstanceTypesNeedTheBarrier covers the refusal T6 adds, in both
+// TestModelDeploymentWebhook_SeveralInstanceTypesNeedTheBarrier covers the barrier refusal in both
 // directions.
 //
 // THE POSITIVE CASE IS WHAT MAKES THE REFUSAL MEAN ANYTHING. Without it, a rule refusing every

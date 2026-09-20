@@ -20,17 +20,21 @@ import (
 // resource request at all: the accelerator half belongs in Resources and the rest is derived from
 // the InstanceType, and neither can be overridden here.
 //
-// EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Each role forms its
-// own Kueue pod group, whose members cannot leave one at a time, so that one group is rebuilt whole
-// while every sibling role keeps serving. A `replicas` change on this role does the same.
+// EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Every replica is a
+// Kueue pod group of its own, so they are replaced one at a time -- one per role per pass -- and
+// every sibling role keeps serving throughout. A `replicas` change rolls nothing at all: it adds or
+// removes instances, and every instance that stays keeps running, keeps the accelerators it was
+// admitted with and keeps whatever cache it holds.
 //
-// ADDING OR REMOVING A ROLE REACHES FURTHER THAN THE ROLE IT NAMES. A deployment whose roles are one
-// names that group after the DEPLOYMENT, and a deployment with more than one names each group after
-// its ROLE, so going from one role to two renames the first role's group and rebuilds it as well.
+// ADDING OR REMOVING A ROLE REACHES NO FURTHER THAN THE ROLE IT NAMES. A replica's group is named
+// from the deployment, the role and that replica's ordinal, and from nothing else -- not from how
+// many roles the deployment declares -- so a second role arriving leaves the first role's replicas
+// exactly where they were. Renaming a role is what moves that role's own replicas: each of its
+// ordinals derives a new group and is replaced.
 //
-// A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A REBUILD. The replica that left is replaced on
+// A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A ROLLOUT. The replica that left is replaced on
 // its own, under a new name, while its siblings keep serving — see
-// docs/reference/model-deployment.md under "One group per role" and "Rollout is a rolling
+// docs/reference/model-deployment.md under "One group per replica" and "Rollout is a rolling
 // replacement".
 type ModelDeploymentRoleApplyConfiguration struct {
 	// Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.
@@ -53,18 +57,46 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
 	// so such a deployment renders exactly as it did.
 	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
-	// Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of
-	// every role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.
+	// Replicas is how many independent serving instances this role runs. The instances are
+	// independent: each one starts, serves and is replaced on its own, and none of them depends on
+	// another being present.
 	//
-	// CHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod
-	// carries and which Kueue requires them all to agree on, so the operator deletes the group's Pods
-	// and recreates them under the new total rather than adding or trimming a few. A replica that
-	// leaves loses its cached blocks to its siblings.
+	// CHANGING THIS NUMBER ADDS OR REMOVES INSTANCES. Growing it creates new instances beside the
+	// ones already running; shrinking it removes some of them. The instances that survive are not
+	// restarted: they keep serving without interruption and keep whatever cache they hold.
+	//
+	// THE UPPER BOUND IS A LIMIT ON THIS OPERATOR, NOT ON KUBERNETES. A pass renders every instance
+	// this role declares before it writes any of them, so the number is a multiplier on the work one
+	// reconcile does; left open at the type's range, a single accepted field value is enough to
+	// exhaust the worker before the API server ever throttles the creates. The bound is set where no
+	// deployment anybody serves can reach it.
 	Replicas *int32 `json:"replicas,omitempty"`
+	// ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they
+	// start together, they are replaced together, and none of them serves alone — the instance,
+	// not the Pod, is the unit that appears and disappears.
+	//
+	// THIS NUMBER IS FIXED AT CREATION AND CANNOT BE CHANGED. An instance's size is the shape of the
+	// instance, not a dial on it: the Pods a running instance is made of are not the Pods a different
+	// size asks for. Scaling is what replicas is for, and it leaves every running instance alone. To
+	// serve at a different size, create a deployment that declares it.
+	//
+	// ABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods
+	// is rendered with stable names and publishes the first Pod's address, this instance's size and
+	// each Pod's own rank to every container. What an engine does with those facts -- which
+	// parallelism it turns on, and over how many ranks -- stays the author's to say.
+	//
+	// THE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and
+	// Go forbids a field and a method sharing a name; the API field is size.
+	//
+	// THE UPPER BOUND IS THE SAME LIMIT REPLICAS CARRIES, AND IT MULTIPLIES WITH IT: this number is
+	// how many Pods one instance is rendered as, so a pass renders replicas times this many before it
+	// writes any of them. It is set far above the sizes an accelerator topology makes sense at, and
+	// far below the range that turns one accepted field value into an out-of-memory worker.
+	ReplicaSize *int32 `json:"size,omitempty"`
 	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
 	// It is what the queue-name entrance label is derived from.
 	InstanceType *string `json:"instanceType,omitempty"`
-	// Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED
+	// Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED
 	// FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.
 	//
 	// It carries only the ACCELERATOR half of a request, because that is the only half a workload
@@ -74,7 +106,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// the container fields below either.
 	//
 	// InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
-	// a replica wants is a property of the model being served, so two deployments on one InstanceType
+	// a Pod wants is a property of the model being served, so two deployments on one InstanceType
 	// routinely want different counts.
 	Resources *ModelDeploymentRoleResourcesApplyConfiguration `json:"resources,omitempty"`
 	// Image is the container image to run. Leaving it empty is the ordinary case: the operator then
@@ -150,6 +182,14 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithKind(value workerv1alpha1.Mo
 // If called multiple times, the Replicas field is set to the value of the last call.
 func (b *ModelDeploymentRoleApplyConfiguration) WithReplicas(value int32) *ModelDeploymentRoleApplyConfiguration {
 	b.Replicas = &value
+	return b
+}
+
+// WithReplicaSize sets the ReplicaSize field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ReplicaSize field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithReplicaSize(value int32) *ModelDeploymentRoleApplyConfiguration {
+	b.ReplicaSize = &value
 	return b
 }
 

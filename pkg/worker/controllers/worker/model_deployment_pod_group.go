@@ -6,11 +6,12 @@ import (
 
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/validation"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
@@ -40,6 +41,34 @@ const (
 	// That function is not called: its subject is a ClusterQueue name, and reusing it here would
 	// make a group's identity read as a queue's. What is shared is the shape, not the derivation.
 	modelDeploymentPodGroupNamePrefix = "gpustack-fnv64-"
+
+	// modelDeploymentReplicaOrdinalLabel carries the ordinal a replica was rendered at, which is
+	// the only per-replica identity the converger keys on: the group name is derived from it, the
+	// spec-hash covers it, and a scale-down decides which replicas stay by it.
+	//
+	// IT IS BUILT FROM systemname.LabelPrefix RATHER THAN SPELLED, because the prefix is the one
+	// place this project states its label domain; a second spelling would drift with nothing
+	// failing.
+	modelDeploymentReplicaOrdinalLabel = "modeldeployment." + systemname.LabelPrefix + "pod-ordinal"
+
+	// modelDeploymentMemberIndexLabel carries which Pod of its replica this one is, counting from
+	// zero. The ordinal label above says which replica; this says which member of it, and the two
+	// together name exactly one Pod of the deployment.
+	//
+	// IT IS A LABEL RATHER THAN AN ENVIRONMENT VALUE THE RENDERER WRITES, and that is what keeps
+	// one Pod template per replica. The container reads its own rank through a fieldRef naming this
+	// key, so the container spec is identical in every member while the value differs -- a renderer
+	// writing the index into env directly would make two members of one replica hash differently
+	// and every member read as a pending rollout.
+	//
+	// IT IS ALSO WHAT MAKES A LEADER SELECTABLE. A Service selector cannot express "the Pod whose
+	// name ends in -m0", so fronting only the member that serves the API needs the index to be
+	// matchable, and index zero is the leader by construction rather than by election.
+	modelDeploymentMemberIndexLabel = "modeldeployment." + systemname.LabelPrefix + "member-index"
+
+	// modelDeploymentLeaderMemberIndex is the member every replica has and the only one the role's
+	// Service fronts. A replica of size one is all leader; above that, the others serve no API.
+	modelDeploymentLeaderMemberIndex = 0
 )
 
 // ModelDeploymentPodGroupMeta is the Kueue group metadata one replica's Pod carries.
@@ -57,46 +86,46 @@ type ModelDeploymentPodGroupMeta struct {
 	Annotations map[string]string
 }
 
-// modelDeploymentPodGroupSpec is one scheduling group: the role it exists for, the name that role's
-// Pods share, and the total Kueue waits for before it composes a Workload.
+// modelDeploymentPodGroupSpec is one role's entry in the deployment's scheduling picture: the role,
+// a name that role's share of the picture is keyed by, and the total the role declares.
+//
+// THE NAME IS A JOIN KEY RATHER THAN A WAY OF FINDING ANYTHING. A Pod's Kueue group is that one
+// replica's own, derived per (role, ordinal) by modelDeploymentReplicaGroupName, so no Pod carries
+// this name in its membership label. What still consumes this shape -- the status paths that key a
+// role's Workloads by group name -- joins through it, which is the remaining coupling the per-replica
+// split left behind and is refined by the status work that follows it.
 type modelDeploymentPodGroupSpec struct {
-	// Role is the grouping key: one group is one role and nobody else's. The total below is that
-	// role's declared count, which is why the group needs no second number beside the total to
-	// fingerprint its shape -- the share annotation an earlier shape needed for exactly that went
-	// with the shape.
+	// Role is the grouping key: one entry is one role and nobody else's, and the total below is
+	// that role's declared count.
 	Role string
 
 	// InstanceType is carried, not keyed on. It is the role's own type, held here so every message
-	// and condition that names a cluster queue can name the queue this group schedules into: the
+	// and condition that names a cluster queue can name the queue this role schedules into: the
 	// ClusterQueue is named after the InstanceType, and naming the role instead would send an
 	// operator to an object that does not exist.
 	InstanceType string
 
-	// Name is what every Pod of this group carries in the membership label.
+	// Name is the per-role join key described on the struct. It is stable for a role and distinct
+	// between roles, which is all a join key owes.
 	Name string
 
-	// TotalCount is THIS group's role's declared replicas and no other role's. A group claiming
-	// another role's count waits for Pods that are never coming, or composes short of what its own
-	// role declared.
+	// TotalCount is THIS role's declared replicas and no other role's.
 	TotalCount int32
 }
 
-// modelDeploymentPodGroups returns the deployment's scheduling groups, one per role in the roles'
-// order.
+// modelDeploymentPodGroups returns the deployment's roles as scheduling entries, one per role in the
+// roles' order.
 //
 // It is PURE: same deployment, same result, no client and no clock.
 //
-// THE GROUPING KEY IS THE ROLE, NOT THE instanceType. One group is one role's every replica, Kueue
-// composes one Workload per group, and everything the group exists to carry -- per-role counting,
-// per-role flavor assignment, per-role status -- hangs off that Workload. Keying on the type instead
-// puts two roles on one instanceType into one group, and their counts then disagree with nothing the
-// total can express: moving prefill 2 / decode 2 to prefill 1 / decode 3 leaves the sum at four, and
-// a rebuild predicate reading only the sum lets the converge loop mix departing and arriving roles
-// in one group. One role per group makes the total the role's own count, and no second fingerprint
-// is needed.
+// THE GROUPING KEY IS THE ROLE, NOT THE instanceType. Kueue admits each replica as its own unit and
+// everything the role-level picture exists to carry -- per-role counting, per-role flavor
+// assignment, per-role status -- still hangs off that grouping. Keying on the type instead puts two
+// roles on one instanceType into one entry, and their counts then disagree with nothing the total
+// can express: moving prefill 2 / decode 2 to prefill 1 / decode 3 leaves the sum at four.
 //
 // THE ORDER IS THE ROLES' ORDER, so two passes over an unchanged spec return the same names in the
-// same places. A map's iteration order would not, and the group name is written into Pods.
+// same places. A map's iteration order would not, and these names key status maps.
 func modelDeploymentPodGroups(md *workercore.ModelDeployment) []modelDeploymentPodGroupSpec {
 	groups := make([]modelDeploymentPodGroupSpec, 0, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
@@ -105,63 +134,81 @@ func modelDeploymentPodGroups(md *workercore.ModelDeployment) []modelDeploymentP
 			Role:         role.Name,
 			InstanceType: role.InstanceType,
 			TotalCount:   role.Replicas,
+			Name:         modelDeploymentPodGroupNameOf(md, role.Name),
 		})
-	}
-
-	sole := len(groups) == 1
-	for i := range groups {
-		groups[i].Name = modelDeploymentPodGroupNameOf(md, groups[i].Role, sole)
 	}
 
 	return groups
 }
 
-// modelDeploymentPodGroupFor returns the group a given role forms within this deployment.
-func modelDeploymentPodGroupFor(
-	md *workercore.ModelDeployment, role string,
-) modelDeploymentPodGroupSpec {
-	groups := modelDeploymentPodGroups(md)
-	for i := range groups {
-		if groups[i].Role == role {
-			return groups[i]
-		}
+// modelDeploymentRoleSize is how many Pods one replica of this role is made of.
+//
+// IT FLOORS AT ONE RATHER THAN TRUSTING THE FIELD. The schema defaults the field to one, so an
+// object that went through the API server always carries at least that -- but a role built in
+// memory, which every test and several callers do, carries the zero value. A zero reaching the
+// total-count annotation would declare a group of no members, and Kueue composes no Workload at
+// all for one: the replica would sit gated forever with nothing naming a cause.
+func modelDeploymentRoleSize(role *workercore.ModelDeploymentRole) int {
+	if role.ReplicaSize < 1 {
+		return 1
 	}
 
-	// A role the deployment does not declare forms no group. The groups are derived from the roles
-	// and every caller passes a name one of them carries, so the empty spec is what "there is no
-	// such group" means rather than a case to handle.
-	return modelDeploymentPodGroupSpec{Role: role}
+	return int(role.ReplicaSize)
 }
 
-// ModelDeploymentPodGroup returns the group metadata for one role's replicas.
+// ModelDeploymentPodGroup returns the group metadata for ONE member of ONE replica of a role: the
+// member at the given index, of the replica at the given ordinal.
 //
-// It is PURE: same deployment, same role, same result, no client and no clock. Every Pod of one role
-// joins that role's ONE Kueue pod group, and Kueue then builds one Workload from the group and
-// admits it as a unit -- which is the whole point of the group.
+// It is PURE: same deployment, role, ordinal, member, same result, no client and no clock. Every
+// replica joins a Kueue pod group of its own -- its members, one Workload, one admission -- which
+// is what makes a scale or a replacement a change to that replica alone rather than a change every
+// sibling has to agree on before Kueue composes anything.
 //
-// IT TAKES NO ORDINAL, and that is a statement rather than an omission: nothing here varies with the
-// replica. The group's identity is the role's and the PodSet's identity is the role's, so two
-// replicas of one role are deliberately indistinguishable to Kueue -- they are two Pods of one
-// PodSet. The ordinal lives in the Pod's NAME, where the reconciler needs it to decide which
-// replicas a scale-down removes.
+// THE ORDINAL IS WHAT TELLS TWO REPLICAS OF ONE ROLE APART, in this metadata and nowhere else: the
+// group name is derived from it and the ordinal label carries it in plain digits, so a Pod's
+// membership and its identity say the same thing twice, once for Kueue and once for the converger.
+// The group name is NEVER parsed back -- the labels are the only things read back, and the name
+// owes nothing to a reader beyond uniqueness.
+//
+// THE MEMBER INDEX DOES NOT ENTER THE GROUP NAME, and that is the whole point of the group: the
+// members of one replica share a name because they are one admission, and what separates them is a
+// label Kueue does not read. Folding the index into the name would give every member its own group
+// of one, which is the shape this design exists to avoid.
 //
 // THE FAST-ADMISSION ANNOTATION IS NEVER SET, and its absence is asserted rather than assumed.
 // Kueue's fast path takes the FIRST runnable Pod of the group, sets that PodSet's Count to the whole
-// group's total, and returns -- the Workload then exists while the group is still short of the total
-// it declares, and the remaining replicas arrive as members of an already-admitted set rather than
-// as the set. The annotation is a trap for exactly this design, which is why a test names it and
-// states that.
+// group's total, and returns. At a total of one it buys nothing; above one it is actively wrong,
+// admitting a group of several on the strength of one member being runnable -- which is the
+// opposite of the fate-sharing the total expresses. A test names it and states that.
 func ModelDeploymentPodGroup(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, ordinal, member int,
 ) ModelDeploymentPodGroupMeta {
-	group := modelDeploymentPodGroupFor(md, role.Name)
+	labels := map[string]string{
+		kueuepodconst.GroupNameLabel:       modelDeploymentReplicaGroupName(md, role.Name, ordinal),
+		modelDeploymentReplicaOrdinalLabel: strconvx.Itoa(ordinal),
+	}
+	// THE MEMBER INDEX IS WRITTEN ONLY WHERE IT DISTINGUISHES SOMETHING, and the reason is that a
+	// replica of one member renders the Pod it rendered before this label existed -- byte for byte,
+	// which a test pins. Adding a label every single-Member replica would carry would move every
+	// one of their fingerprints and roll every deployment on the cluster on the pass this landed,
+	// to record an index that has exactly one possible value.
+	//
+	// Readers get that value anyway: modelDeploymentPodMemberIndex answers with the leader's index
+	// when the label is absent, which is what the label would have said.
+	if modelDeploymentRoleSize(role) > 1 {
+		labels[modelDeploymentMemberIndexLabel] = strconvx.Itoa(member)
+	}
 
 	return ModelDeploymentPodGroupMeta{
-		Labels: map[string]string{
-			kueuepodconst.GroupNameLabel: group.Name,
-		},
+		Labels: labels,
 		Annotations: map[string]string{
-			kueuepodconst.GroupTotalCountAnnotation: strconvx.Itoa(int(group.TotalCount)),
+			// THE TOTAL IS THE REPLICA'S SIZE, AND A REPLICA COUNT CHANGE NEVER MOVES IT: the group
+			// is this replica and nobody else's, so adding or removing replicas adds or removes
+			// whole groups rather than editing the total any running member carries. That is what
+			// turns a resize into a trim rather than a rebuild, and it survives sizes above one
+			// only because the size itself is frozen at creation -- a mutable size would put this
+			// number back under two writers, which is the defect the per-replica split removed.
+			kueuepodconst.GroupTotalCountAnnotation: strconvx.Itoa(modelDeploymentRoleSize(role)),
 			// THE ROLE HASH IS LOAD-BEARING, NOT COSMETIC. Kueue reads this annotation verbatim when
 			// present and otherwise derives a digest of the Pod spec's SHAPE -- containers,
 			// nodeSelector, affinity, tolerations -- and an opaque digest names the PodSet after
@@ -171,22 +218,164 @@ func ModelDeploymentPodGroup(
 			// by construction, which is also why that name is validated to Kueue's PodSetReference
 			// pattern and to uniqueness.
 			//
-			// IT STAYS THE ROLE'S NAME AND DOES NOT GAIN THE instanceType. This is what Kueue groups
-			// PodSets by and what status reads to attribute a Pod, so folding the type in would
-			// change PodSet identity and break both. The type is carried by the queue the group
-			// schedules into instead.
+			// IT STAYS THE ROLE'S NAME AND DOES NOT GAIN THE ordinal. This is what Kueue groups
+			// PodSets by and what status reads to attribute a Pod, so folding the ordinal in would
+			// give every replica its own PodSet identity and break the join the annotation exists
+			// to carry.
 			kueuepodconst.RoleHashAnnotation: role.Name,
 			// An inference deployment never finishes. Without this, Kueue applies BATCH semantics to
 			// it: a Pod reaching Succeeded is reported as reclaimable and its quota is handed back
 			// while the deployment is still meant to be serving.
 			//
-			// IT HAS A COST THE TEARDOWN PATH PAYS. Kueue reads a serving group as one that is never
-			// finished, so it never releases the finalizer it holds on the group's Pods; only the
-			// Workload being deleted does. deleteModelDeploymentGroupWorkload is what pays it, and
-			// removing this annotation without removing that call would leak Workloads.
+			// IT HAS A COST THE DEPARTURE PATHS PAY. Kueue reads a serving group as one that is
+			// never finished, so it never releases the finalizer it holds on the group's Pods; only
+			// the Workload being deleted does. deleteModelDeploymentGroupWorkload is what pays it,
+			// and removing this annotation without removing that call would leak Workloads.
 			kueuepodconst.GroupServingAnnotationKey: kueuepodconst.GroupServingAnnotationValue,
 		},
 	}
+}
+
+// modelDeploymentPodOrdinal reads the ordinal a replica was rendered at.
+//
+// IT REPORTS ABSENCE RATHER THAN GUESSING ZERO: a Pod carrying no ordinal label -- one rendered
+// before the per-replica groups existed, or built by a hand -- is not any ordinal's to claim, and
+// the converger treats such a Pod as outdated rather than adopting it onto an ordinal it never
+// carried.
+func modelDeploymentPodOrdinal(pod *core.Pod) (int, bool) {
+	ordinal, err := strconvx.Atoi[int](pod.Labels[modelDeploymentReplicaOrdinalLabel])
+	if err != nil || ordinal < 0 {
+		return 0, false
+	}
+
+	return ordinal, true
+}
+
+// modelDeploymentReplicaView is one replica as the cluster currently holds it: which role and
+// ordinal it occupies, and the live Pods seated on it.
+type modelDeploymentReplicaView struct {
+	// Role is the role the members belong to.
+	Role string
+	// Ordinal is the slot this replica occupies, meaningful only when Seated is true.
+	Ordinal int
+	// Seated is false for a Pod claiming no ordinal. Such a Pod belongs to no replica anything can
+	// name, and it stands alone as a view of its own -- which is what it was before replicas had
+	// members, so the figures taken over these views do not move for it.
+	Seated bool
+	// Members are the live Pods on this replica, in the order the input held them.
+	Members []*core.Pod
+}
+
+// modelDeploymentGroupPodsByReplica groups live Pods into the replicas they belong to, skipping the
+// ones already on their way out.
+//
+// IT EXISTS SO THAT ONE GROUPING SERVES EVERY PER-REPLICA FIGURE. Readiness, quota reservation and
+// group completeness are all answers about replicas, and each of them was a count over Pods when a
+// replica was one Pod. Reconstructing the grouping separately in each place is how two of them come
+// to disagree about what a replica is -- and the disagreement would be silent, because every one of
+// them reports a plain number that looks reasonable whatever it counted.
+//
+// A POD WITH NO ORDINAL IS ITS OWN VIEW, keyed by POSITION rather than by name or UID. Both of those
+// would be the obvious choice and both are wrong: the key has to separate such Pods without
+// depending on a field being set, and one that collapses when the field is empty merges every
+// unseated Pod of a role into a single replica.
+func modelDeploymentGroupPodsByReplica(pods []core.Pod) []modelDeploymentReplicaView {
+	return modelDeploymentGroupPods(pods, true)
+}
+
+// modelDeploymentGroupPodsIncludingDeparting groups every Pod, departing ones included.
+//
+// IT EXISTS FOR THE FIGURES ABOUT LEAVING. A replica being reclaimed is a replica whose members are
+// all on their way out, so the grouping that skips them answers zero for exactly the state those
+// figures are about — a preemption report that reads "0 replicas" while the pool takes the role
+// apart, and a "they are all terminating" message with nothing to count.
+func modelDeploymentGroupPodsIncludingDeparting(pods []core.Pod) []modelDeploymentReplicaView {
+	return modelDeploymentGroupPods(pods, false)
+}
+
+func modelDeploymentGroupPods(pods []core.Pod, skipDeparting bool) []modelDeploymentReplicaView {
+	type key struct {
+		role     string
+		ordinal  int
+		standing int // 0 when seated; the Pod's position plus one otherwise
+	}
+
+	at := make(map[key]int, len(pods))
+	views := make([]modelDeploymentReplicaView, 0, len(pods))
+	for i := range pods {
+		pod := &pods[i]
+		if skipDeparting && pod.DeletionTimestamp != nil {
+			continue
+		}
+
+		k := key{role: modelDeploymentPodRole(pod)}
+		view := modelDeploymentReplicaView{Role: k.role}
+		if ordinal, ok := modelDeploymentPodOrdinal(pod); ok {
+			k.ordinal, view.Ordinal, view.Seated = ordinal, ordinal, true
+		} else {
+			k.standing = i + 1
+		}
+
+		if idx, seen := at[k]; seen {
+			views[idx].Members = append(views[idx].Members, pod)
+
+			continue
+		}
+		view.Members = []*core.Pod{pod}
+		at[k] = len(views)
+		views = append(views, view)
+	}
+
+	return views
+}
+
+// modelDeploymentReplicaIsComplete reports whether a replica holds every member it declares.
+//
+// AN INCOMPLETE REPLICA IS NOT A PARTLY WORKING ONE. Kueue composes no Workload at all for a pod
+// group short of its declared total, so such a replica holds no quota, is admitted by nothing and
+// serves nothing -- it is not "most of the way there", it is absent with some Pods lying around.
+// Every figure that counts replicas therefore excludes it rather than discounting it.
+func modelDeploymentReplicaIsComplete(view modelDeploymentReplicaView, size int) bool {
+	if !view.Seated {
+		// A Pod that claims no ordinal declares one member, itself.
+		return len(view.Members) == 1
+	}
+
+	return len(view.Members) == size
+}
+
+// modelDeploymentPodDescription names a Pod the way its own shape makes true: a replica when a
+// replica is one Pod, and a member of one when it is not.
+//
+// IT READS THE LABEL RATHER THAN THE SPEC, because the caller of a message is reporting on a Pod
+// that exists and the spec may already describe something else -- and because a Pod that predates
+// multi-member replicas is a replica whatever the spec now says. The label is present exactly when
+// the Pod was rendered as one member of several, which is exactly when calling it a replica is
+// wrong.
+func modelDeploymentPodDescription(pod *core.Pod) string {
+	if _, ok := pod.Labels[modelDeploymentMemberIndexLabel]; ok {
+		return "member " + pod.Name
+	}
+
+	return "replica " + pod.Name
+}
+
+// modelDeploymentPodMemberIndex reads which member of its replica a Pod was rendered as.
+//
+// IT DEFAULTS TO THE LEADER RATHER THAN REPORTING ABSENCE, which is the opposite of the ordinal
+// above, and the asymmetry is deliberate. A missing ordinal means the Pod belongs to no replica the
+// converger can name, so guessing one would adopt it onto a slot it never held. A missing member
+// index means something narrower: every replica rendered before multi-Member groups existed has
+// exactly one Pod, and that Pod is its replica's only member -- which is the leader. Reading it as
+// the leader is therefore what the label would have said, and treating those Pods as unplaceable
+// would turn every existing single-Member replica into a rollout on the pass this label landed.
+func modelDeploymentPodMemberIndex(pod *core.Pod) int {
+	member, err := strconvx.Atoi[int](pod.Labels[modelDeploymentMemberIndexLabel])
+	if err != nil || member < 0 {
+		return modelDeploymentLeaderMemberIndex
+	}
+
+	return member
 }
 
 // deleteModelDeploymentGroupWorkload deletes the Workload Kueue composed for this deployment's group,
@@ -220,122 +409,136 @@ func (r *ModelDeploymentReconciler) deleteModelDeploymentGroupWorkload(
 	return nil
 }
 
-// modelDeploymentGroupIsResizing reports whether any Pod the deployment still owns declares a group
-// total other than the one the spec now asks for.
+// releaseModelDeploymentStrandedWorkloads deletes the Workload of a replica that is on its way out
+// with no member of its group left standing.
 //
-// It is the predicate the rebuild policy turns on. A change to a role's replicas moves the total
-// that EVERY Pod of that role's group carries, and Kueue refuses to compose a Workload for a group
-// whose Pods disagree on it -- unretryably, with no Workload and no condition naming the cause.
+// IT EXISTS BECAUSE A DEPARTURE THIS OPERATOR DID NOT INITIATE HAS NOTHING TO DELETE THE WORKLOAD.
+// Every path this operator drives -- teardown, a role disappearing, a scale-down, a rollout
+// replacement -- deletes the Workload of the replica it removes. A replica removed by a hand, a node
+// drain or an eviction has no such path, and a serving group's finalizer is released by nothing but
+// its Workload being deleted. Without this the Pod stays terminating behind the finalizer, its
+// Workload stays admitted holding quota, the ordinal stays occupied, and the create gate never opens
+// for it: no replacement is ever made and it takes a hand to recover.
 //
-// A TERMINATING POD STILL COUNTS. It remains a member of the group until it is actually gone, so
-// asking only about the survivors would let a new replica be created beside one that has merely been
-// asked to leave, which is the mixed state this predicate exists to keep the reconciler out of.
+// NEITHER TERMINAL PHASE RECOVERS ON ITS OWN, and they fail differently, which is why the remedy is
+// here rather than at the create gate. A container killed for exceeding its grace period reaches
+// Failed, which Kueue counts as INACTIVE, so a replacement created beside it would push the group
+// over its total and Kueue would finalize the dead member -- that one could have been left to the
+// create gate. A container that exits cleanly on SIGTERM reaches Succeeded, which Kueue counts as
+// ACTIVE, so the same replacement is the excess member and Kueue deletes the REPLACEMENT instead,
+// again and again. Deleting the Workload is the one remedy that covers both.
 //
-// A Pod carrying no total at all counts as disagreeing: it predates the group and cannot be joined
-// to one, so it is replaced rather than adopted.
+// THE LIVE MEMBERS ARE WHAT MAKE IT SAFE. Kueue answers a deleted Workload by stopping the whole
+// group, so this deletes only a Workload that owns no Pod still standing; a group with a member
+// still serving is left alone even while a sibling of it drains. One replica per group is the shape
+// this operator renders, which is what makes the two readings coincide here, but the condition is
+// written about the members rather than about the count so that a group ever holding more than one
+// is not stopped by this path.
 //
-// THE TOTAL IS ENOUGH ON ITS OWN, and nothing else is compared beside it. A group is one role, so
-// the total IS that role's declared count: no two roles can redistribute their shares under one
-// unchanged sum, and the share annotation an earlier shape needed for exactly that case is deleted
-// with the shape. A role RENAMED without changing any count moves no total either, and is caught one
-// branch above: no entry exists for the name its Pods still carry, so the group they joined comes
-// down.
-// THE TOTAL A POD IS JUDGED AGAINST IS ITS OWN ROLE'S GROUP'S, not the deployment's. With two groups
-// the deployment-wide sum matches neither of them, so a predicate reading it answers "resizing" on
-// every pass forever -- a rebuild loop rather than a wrong number, and one that nothing reports.
-//
-// THE ANSWER IS A SET OF GROUPS RATHER THAN A YES. One group's shape moving is no reason to tear down
-// a group that did not move, and a boolean cannot say which is which: every role of the deployment
-// would restart because one role's replica count changed.
-//
-// A POD IS JUDGED AGAINST THE GROUP IT ACTUALLY JOINED, read off its own membership label, AND the
-// group its role forms now is named beside it. The two agree unless a Pod is sitting in a group its
-// own role does not form, and when they differ both have to come down -- neither name is derivable
-// from the other: one is written on the Pod, the other is in the spec.
-func modelDeploymentGroupsResizing(
-	md *workercore.ModelDeployment, pods []core.Pod,
-) sets.Set[string] {
-	wantByRole := make(map[string]string, len(md.Spec.Roles))
-	groupByRole := make(map[string]string, len(md.Spec.Roles))
-	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
-		group := modelDeploymentPodGroupFor(md, role.Name)
-		groupByRole[role.Name] = group.Name
-		wantByRole[role.Name] = strconvx.Itoa(int(group.TotalCount))
-	}
-
-	resizing := sets.New[string]()
+// Absence is success, on the terms deleteModelDeploymentGroupWorkload states: a pass that runs after
+// a previous one already deleted the Workload finds nothing, and that is the state this wants.
+func (r *ModelDeploymentReconciler) releaseModelDeploymentStrandedWorkloads(
+	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
+) error {
+	departing := make([]core.Pod, 0, len(pods))
+	standing := sets.New[types.UID]()
 	for i := range pods {
-		joined := pods[i].Labels[kueuepodconst.GroupNameLabel]
-		name := modelDeploymentPodRole(&pods[i])
-
-		want, named := wantByRole[name]
-		if !named {
-			// Its role is gone -- renamed, or removed -- so it belongs to no group the spec now
-			// forms. The group it is sitting in is the one that has to come down.
-			resizing.Insert(joined)
+		if pods[i].DeletionTimestamp != nil {
+			departing = append(departing, pods[i])
 
 			continue
 		}
+		standing.Insert(pods[i].UID)
+	}
+	if len(departing) == 0 {
+		return nil
+	}
 
-		if pods[i].Annotations[kueuepodconst.GroupTotalCountAnnotation] != want {
-			resizing.Insert(joined, groupByRole[name])
+	wls, err := r.findModelDeploymentGroupWorkloads(ctx, md, departing)
+	if err != nil {
+		return err
+	}
+
+	for _, wl := range wls {
+		if modelDeploymentWorkloadOwnsAny(wl, standing) {
+			continue
+		}
+		if err = r.Client.Delete(ctx, wl); err != nil && !kerrors.IsNotFound(err) {
+			return fmt.Errorf("delete stranded workload %s: %w", wl.Name, err)
 		}
 	}
 
-	return resizing
+	return nil
 }
 
-// modelDeploymentPodsInGroup selects the replicas carrying one group's membership label.
-func modelDeploymentPodsInGroup(pods []core.Pod, group string) []core.Pod {
-	var members []core.Pod
-	for i := range pods {
-		if pods[i].Labels[kueuepodconst.GroupNameLabel] == group {
-			members = append(members, pods[i])
-		}
-	}
-
-	return members
-}
-
-// modelDeploymentPodGroupNameOf is a group's identity, shared by every Pod of one role.
+// modelDeploymentReplicaGroupName derives the Kueue group name of one replica: the replica of the
+// given role at the given ordinal.
 //
-// A DEPLOYMENT WITH ONE ROLE KEEPS THE NAME IT ALWAYS HAD, which is compatibility and also the
-// better name: see modelDeploymentPodGroupName on why a readable one is worth having.
+// THE NAME IS ALWAYS THE HASHED FORM, and that is a decision rather than an escape. Kueue names a
+// group's Workload after the group VERBATIM, and a Workload is an object name -- a lowercase RFC
+// 1123 subdomain -- so the group name owes that charset whatever a readable composite would have
+// bought; a separator the charset forbids has no readable form to offer, and a separator it allows
+// (the hyphen) cannot decompose, which was never needed anyway. The hash covers NAMESPACE, NAME,
+// ROLE AND ORDINAL: the group name is only ever compared with other Pods' -- in one namespace, but
+// two deployments of one name in two namespaces must not read as one group.
 //
-// A DEPLOYMENT WITH SEVERAL ROLES HASHES ALL OF THEM, the role included. A readable composite such
-// as "<name>-<role>" would share a namespace with deployment names and could equal one -- a
-// deployment "a" with a role "b-c" and a deployment "a-b" with a role "c" write the same label, and
-// Kueue then reads their replicas as one group. The hashed form carries the prefix that already
-// marks a derived name, so the two spaces never meet.
-//
-// WHICH SHAPE A GROUP GETS DEPENDS ON HOW MANY ROLES THE DEPLOYMENT HAS, so a one-role deployment
-// gaining a second role renames the first role's group and rebuilds it. That is reached rather than
-// assumed unreachable, and the rebuild is the predicate's to catch -- the first role's Pods carry a
-// membership label nothing forms any more.
-func modelDeploymentPodGroupNameOf(
-	md *workercore.ModelDeployment, role string, sole bool,
+// THE NAME IS UNIQUE, NOT PARSEABLE, and the difference is the point: nothing ever derives the
+// ordinal back from it. The ordinal travels in its own label, and the name owes a reader uniqueness
+// and nothing else -- which is also why the derivation has no shape that varies with how many roles
+// the deployment declares: a first role's replica names its group the same way whether it is the
+// only role or one of several.
+func modelDeploymentReplicaGroupName(
+	md *workercore.ModelDeployment, role string, ordinal int,
 ) string {
-	if sole {
-		return modelDeploymentPodGroupName(md)
-	}
+	return modelDeploymentPodGroupNamePrefix + stringx.SumByFNV64a(
+		md.Namespace, "/", md.Name, "/", role, "/", strconvx.Itoa(ordinal))
+}
 
+// modelDeploymentReplicaServiceName is the headless Service that publishes one replica's members,
+// and the subdomain every one of those members names.
+//
+// IT IS READABLE RATHER THAN HASHED, unlike the Kueue group name above, and the reason is who reads
+// it. A group name is compared and never shown; this one is half of an address a person debugging a
+// collective types, and it is also what an engine's logs quote when a rank cannot reach its leader.
+// The cost of readability is a length budget, since a Service name is a DNS-1035 label of 63
+// characters. Nothing here enforces it: the budget is checked at ADMISSION, against the longest name
+// the role's declared counts can produce, so a deployment whose members could not be named is
+// refused rather than rendered into objects the API server rejects one at a time.
+//
+// IT EXISTS ONLY ABOVE SIZE ONE. A replica of one member has nobody to address, so rendering a
+// Service for it would create an object per replica for no consumer.
+func modelDeploymentReplicaServiceName(
+	md *workercore.ModelDeployment, role string, ordinal int,
+) string {
+	return md.Name + "-" + role + "-r" + strconvx.Itoa(ordinal)
+}
+
+// modelDeploymentMemberName is the name of one member of one replica, which is also its hostname and
+// therefore half of the DNS record its siblings resolve it by.
+//
+// THE MEMBER INDEX IS LAST SO THE LEADER IS RECOGNIZABLE, and it counts from zero so that member
+// zero is the leader of every replica by construction. Nothing elects it and nothing stores the
+// decision: a reader with the deployment, the role and the ordinal can write down the leader's
+// address without consulting the cluster, which is what makes the address available to a container
+// before any member of the group has started.
+//
+// THE NAME IS NEVER PARSED BACK. The ordinal and the member index each travel in a label of their
+// own, and this string owes a reader uniqueness and recognizability rather than structure.
+func modelDeploymentMemberName(
+	md *workercore.ModelDeployment, role string, ordinal, member int,
+) string {
+	return modelDeploymentReplicaServiceName(md, role, ordinal) + "-m" + strconvx.Itoa(member)
+}
+
+// modelDeploymentPodGroupNameOf is a role's name in the group-name-keyed shapes the status paths
+// still consume: a per-role join key, derived the same way a replica's group name is but without the
+// ordinal, and carried by no Pod.
+//
+// IT IS ALWAYS THE HASHED FORM, on the same terms modelDeploymentReplicaGroupName states, and for a
+// second reason that one does not have: a derivation whose shape varied with the number of roles
+// would rename the first role's key when a second role arrived, and a key that moves under its
+// consumers is worse than one that was always opaque.
+func modelDeploymentPodGroupNameOf(md *workercore.ModelDeployment, role string) string {
 	return modelDeploymentPodGroupNamePrefix +
 		stringx.SumByFNV64a(md.Namespace, "/", md.Name, "/", role)
-}
-
-// modelDeploymentPodGroupName is the identity of a deployment's ONLY group.
-//
-// It is the deployment's own name when that is a valid label value, because this label is the first
-// thing an operator greps for and a hash tells them nothing. An over-long name -- an object name may
-// run to 253 characters while a label value stops at 63 -- falls back to the hashed form.
-//
-// The hash covers NAMESPACE AND NAME, not the name alone: the group name is only ever compared with
-// other Pods', and two deployments of the same name in two namespaces must not be read as one group.
-func modelDeploymentPodGroupName(md *workercore.ModelDeployment) string {
-	if len(validation.IsValidLabelValue(md.Name)) == 0 {
-		return md.Name
-	}
-
-	return modelDeploymentPodGroupNamePrefix + stringx.SumByFNV64a(md.Namespace, "/", md.Name)
 }

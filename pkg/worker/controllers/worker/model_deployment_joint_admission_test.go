@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	testingclock "k8s.io/utils/clock/testing"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -168,11 +171,13 @@ func TestModelDeploymentJointAdmission_ReadyAtOnceForEverythingElse(t *testing.T
 			},
 		},
 		{
-			// One role is one group, and Kueue admits a group as a unit without help.
-			name: "single_group_deployment",
+			// One role is exempt from the barrier no matter how many replicas it declares: Kueue
+			// admits each replica as its own unit without help.
+			name: "single_role_deployment",
 			objs: func() []ctrlcli.Object {
 				md := jointDeployment("qwen", "h20-8x")
-				pod := jointGroupPod("qwen-prefill-0", "qwen", "qwen")
+				pod := jointGroupPod("qwen-prefill-0",
+					modelDeploymentReplicaGroupName(md, "prefill", 0), "qwen")
 
 				return []ctrlcli.Object{jointCheckObject(), md, pod, jointWorkload("wl", true, pod)}
 			},
@@ -189,14 +194,19 @@ func TestModelDeploymentJointAdmission_ReadyAtOnceForEverythingElse(t *testing.T
 	}
 }
 
-// twoGroupFixture builds a deployment over two instance types, one group's replica and Workload per
-// entry, with the second group's reservation controlled by the caller.
+// twoGroupFixture builds a deployment over two instance types, one replica and one Workload per
+// role, with the second role's reservation controlled by the caller.
+//
+// THE GROUP NAMES COME FROM THE SAME DERIVATION THE RENDERER STAMPS, per (role, ordinal): a
+// fixture spelling names of its own would pass against a barrier that joins on any other key, which
+// is exactly the defect per-replica enumeration exists to close.
 func twoGroupFixture(secondReserved bool) []ctrlcli.Object {
 	md := jointDeployment("qwen", "h20-8x", "a100-8x")
-	groups := modelDeploymentPodGroups(md)
 
-	first := jointGroupPod("qwen-prefill-0", groups[0].Name, "qwen")
-	second := jointGroupPod("qwen-decode-0", groups[1].Name, "qwen")
+	first := jointGroupPod("qwen-prefill-0",
+		modelDeploymentReplicaGroupName(md, "prefill", 0), "qwen")
+	second := jointGroupPod("qwen-decode-0",
+		modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
 
 	return []ctrlcli.Object{
 		jointCheckObject(), md, first, second,
@@ -622,21 +632,23 @@ func TestModelDeploymentJointAdmission_TheBound(t *testing.T) {
 	})
 }
 
-// terminatingFixture is the same rebuild one step earlier, where the group is at its declared total
-// ON PAPER: both replicas exist as objects, but one has already been asked to go.
+// terminatingFixture is a role mid-replacement: the second role declares two replicas, both exist
+// as objects, and one has already been asked to go.
 //
 // It is the reading the count has to get right. A Pod carrying a deletion timestamp is not a member
-// the group will have, so counting it reports the group as assembled for as long as the kubelet
-// takes to finish -- and an assembled-looking group is what lets the settled bound fire and park the
-// rebuild it exists to protect.
+// the role will have, so counting it reports the role as assembled for as long as the kubelet takes
+// to finish -- and an assembled-looking role is what lets the settled bound fire and park the
+// replacement it exists to protect.
 func terminatingFixture() []ctrlcli.Object {
 	md := jointDeployment("qwen", "h20-8x", "a100-8x")
 	md.Spec.Roles[1].Replicas = 2
-	groups := modelDeploymentPodGroups(md)
 
-	first := jointGroupPod("qwen-prefill-0", groups[0].Name, "qwen")
-	second := jointGroupPod("qwen-decode-0", groups[1].Name, "qwen")
-	leaving := jointGroupPod("qwen-decode-1", groups[1].Name, "qwen")
+	first := jointGroupPod("qwen-prefill-0",
+		modelDeploymentReplicaGroupName(md, "prefill", 0), "qwen")
+	second := jointGroupPod("qwen-decode-0",
+		modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
+	leaving := jointGroupPod("qwen-decode-1",
+		modelDeploymentReplicaGroupName(md, "decode", 1), "qwen")
 	leaving.DeletionTimestamp = ptr.To(meta.Now())
 	leaving.Finalizers = []string{"kueue.x-k8s.io/managed"}
 
@@ -646,16 +658,17 @@ func terminatingFixture() []ctrlcli.Object {
 	}
 }
 
-// rebuildingFixture is a deployment mid-rebuild: the second group declares two replicas, one of them
-// exists, and Kueue has therefore composed no Workload for it. That is the state the reconciler
-// leaves behind between deleting a group's replicas and creating them again.
+// rebuildingFixture is a role short of its declared replicas: the second role declares two, one of
+// them exists, and Kueue has therefore composed no Workload for the other. That is the state the
+// reconciler leaves behind between an ordinal's departure and its replacement's creation.
 func rebuildingFixture() []ctrlcli.Object {
 	md := jointDeployment("qwen", "h20-8x", "a100-8x")
 	md.Spec.Roles[1].Replicas = 2
-	groups := modelDeploymentPodGroups(md)
 
-	first := jointGroupPod("qwen-prefill-0", groups[0].Name, "qwen")
-	second := jointGroupPod("qwen-decode-0", groups[1].Name, "qwen")
+	first := jointGroupPod("qwen-prefill-0",
+		modelDeploymentReplicaGroupName(md, "prefill", 0), "qwen")
+	second := jointGroupPod("qwen-decode-0",
+		modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
 
 	return []ctrlcli.Object{
 		jointCheckObject(), md, first, second,
@@ -664,19 +677,20 @@ func rebuildingFixture() []ctrlcli.Object {
 }
 
 // sameTypePairFixture builds the prefill/decode deployment whose two roles name ONE instance type,
-// with one replica and one Workload per group and the second group's reservation controlled by the
+// with one replica and one Workload per role and the second role's reservation controlled by the
 // caller.
 //
-// BOTH GROUPS SCHEDULE INTO THE SAME CLUSTER QUEUE, which is what separates this shape from
-// twoGroupFixture: the queue is named after the instance type, so the group holding quota holds it
-// in the very queue its sibling waits for, and the two compete for one pool instead of waiting in
-// two parallel ones.
+// BOTH ROLES SCHEDULE INTO THE SAME CLUSTER QUEUE, which is what separates this shape from
+// twoGroupFixture: the queue is named after the instance type, so the replica holding quota holds
+// it in the very queue its sibling waits for, and the two compete for one pool instead of waiting
+// in two parallel ones.
 func sameTypePairFixture(secondReserved bool) []ctrlcli.Object {
 	md := jointDeployment("qwen", "h20-8x", "h20-8x")
-	groups := modelDeploymentPodGroups(md)
 
-	first := jointGroupPod("qwen-prefill-0", groups[0].Name, "qwen")
-	second := jointGroupPod("qwen-decode-0", groups[1].Name, "qwen")
+	first := jointGroupPod("qwen-prefill-0",
+		modelDeploymentReplicaGroupName(md, "prefill", 0), "qwen")
+	second := jointGroupPod("qwen-decode-0",
+		modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
 
 	return []ctrlcli.Object{
 		jointCheckObject(), md, first, second,
@@ -758,15 +772,601 @@ func TestModelDeploymentJointAdmission_TwoRolesOnOneInstanceType(t *testing.T) {
 
 	t.Run("a_single_role_deployment_is_never_parked", func(t *testing.T) {
 		md := jointDeployment("qwen", "h20-8x")
-		groups := modelDeploymentPodGroups(md)
-		pod := jointGroupPod("qwen-prefill-0", groups[0].Name, "qwen")
+		pod := jointGroupPod("qwen-prefill-0",
+			modelDeploymentReplicaGroupName(md, "prefill", 0), "qwen")
 		cli := newJointClient(jointCheckObject(), md, pod, jointWorkload("wl", true, pod))
 		pendingSince(t, cli, "wl", start)
 
 		got := reconcileJointAt(t, cli, "wl", start.Add(_JointAdmissionInfeasibleAfter+time.Minute))
 
 		assert.Equal(t, kueue.CheckStateReady, jointCheckState(got),
-			"one role is one group, which Kueue admits as a unit without this barrier's help")
+			"one role is exempt no matter how many replicas it declares, and Kueue admits each of "+
+				"them as its own unit without this barrier's help")
 		assert.True(t, kueueworkload.IsActive(got), "so the bound has nothing to say to it")
 	})
+}
+
+// TestModelDeploymentJointAdmission_EveryReplicaOfEveryRole pins the unit the verdict counts.
+//
+// THE UNIT IS THE REPLICA, NOT THE ROLE. A role's replicas reserve quota separately now, so either
+// of them can be the one the set is waiting on: a barrier that answered per role -- any replica
+// reserving counts for all of them -- reads this fixture as complete and opens for a deployment
+// that is one replica short, which is the partial admission the barrier exists to prevent.
+//
+// BOTH DIRECTIONS ARE REQUIRED. A barrier that held everything would pass the held case, and one
+// that opened everything would pass the Ready case; only the pair says the count is being read.
+func TestModelDeploymentJointAdmission_EveryReplicaOfEveryRole(t *testing.T) {
+	// threeReplicaFixture: prefill of one replica, decode of two, with decode's second replica's
+	// reservation controlled by the caller.
+	threeReplicaFixture := func(secondReserved bool) []ctrlcli.Object {
+		md := jointDeployment("qwen", "h20-8x", "a100-8x")
+		md.Spec.Roles[1].Replicas = 2
+
+		prefill := jointGroupPod("qwen-prefill-0",
+			modelDeploymentReplicaGroupName(md, "prefill", 0), "qwen")
+		first := jointGroupPod("qwen-decode-0",
+			modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
+		second := jointGroupPod("qwen-decode-1",
+			modelDeploymentReplicaGroupName(md, "decode", 1), "qwen")
+
+		return []ctrlcli.Object{
+			jointCheckObject(), md, prefill, first, second,
+			jointWorkload("wl-prefill", true, prefill),
+			jointWorkload("wl-decode-0", true, first),
+			jointWorkload("wl-decode-1", secondReserved, second),
+		}
+	}
+
+	t.Run("one_replica_short_holds_the_whole_set", func(t *testing.T) {
+		cli := newJointClient(threeReplicaFixture(false)...)
+
+		got := reconcileJoint(t, cli, "wl-prefill")
+
+		assert.Equal(t, kueue.CheckStatePending, jointCheckState(got),
+			"decode's first replica reserving does not speak for its sibling: the replica is the "+
+				"unit the set waits on")
+		assert.NotEqual(t, kueue.CheckStateRetry, jointCheckState(got),
+			"a Retry evicts and drops the reservation the barrier is made of")
+		assert.Contains(t, jointCheckMessage(got), "decode",
+			"the message names the role whose replica is still waiting, which is what an operator acts on")
+		assert.True(t, workloadHasReservation(t, cli, "wl-prefill"),
+			"every replica keeps the quota it reserved while the set assembles")
+	})
+
+	t.Run("every_replica_reserved_is_ready", func(t *testing.T) {
+		got := reconcileJoint(t, newJointClient(threeReplicaFixture(true)...), "wl-prefill")
+
+		assert.Equal(t, kueue.CheckStateReady, jointCheckState(got))
+	})
+}
+
+// TestModelDeploymentJointAdmission_TheExemptionCountsRolesNotReplicas keeps the barrier's door
+// shut on the deployment it was never for.
+//
+// THE EXEMPTION AND THE VERDICT COUNT DIFFERENT THINGS, and the difference is deliberate: the
+// barrier exists for atomicity ACROSS ROLES, so a deployment with one role is answered Ready at
+// once whatever its replica count. An implementation that counted replicas here would pull this
+// deployment inside, where it would gain partial-quota holds and exposure to the park bound for no
+// atomicity at all -- and the held multi-role cases in this file are the pairing that shows the
+// Ready below is an exemption rather than a barrier that never closes.
+func TestModelDeploymentJointAdmission_TheExemptionCountsRolesNotReplicas(t *testing.T) {
+	md := jointDeployment("qwen", "h20-8x")
+	md.Spec.Roles[0].Replicas = 2
+
+	reserved := jointGroupPod("qwen-decode-0",
+		modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
+	waiting := jointGroupPod("qwen-decode-1",
+		modelDeploymentReplicaGroupName(md, "decode", 1), "qwen")
+	cli := newJointClient(
+		jointCheckObject(), md, reserved, waiting,
+		jointWorkload("wl-decode-0", true, reserved),
+		jointWorkload("wl-decode-1", false, waiting))
+
+	got := reconcileJoint(t, cli, "wl-decode-0")
+
+	assert.Equal(t, kueue.CheckStateReady, jointCheckState(got),
+		"one role is outside the barrier however many replicas it declares, so a sibling with no "+
+			"reservation is Kueue's business and not this check's")
+}
+
+// TestModelDeploymentJointAdmission_AnAbsentReplicaIsReadByItsDeparture is the departure rule's
+// falsification point, hand-built per state because the rule is a pure judgement over a state and
+// the state is the whole subject.
+//
+// ABSENCE IS TWO STATES AND THEY WANT OPPOSITE VERDICTS. A replica absent because this operator is
+// replacing it -- its predecessor draining, its Workload deleted to free the slot -- must read as
+// present, or a rollout drags the whole multi-role deployment back to Pending for the length of a
+// drain. A replica absent because nothing ever composed it must stay missing, or the barrier opens
+// exactly when the set cannot assemble. A preempted replica -- its Pod stopped, its Workload
+// surviving without the reservation -- must not read as either of those, or the barrier opens while
+// the quota is genuinely gone.
+func TestModelDeploymentJointAdmission_AnAbsentReplicaIsReadByItsDeparture(t *testing.T) {
+	start := time.Date(2026, 9, 13, 10, 0, 0, 0, time.UTC)
+
+	// departingFixture: prefill holds quota; decode's replica is the state under test.
+	departingFixture := func(decode core.Pod, decodeWorkload *kueue.Workload) []ctrlcli.Object {
+		md := jointDeployment("qwen", "h20-8x", "a100-8x")
+
+		prefill := jointGroupPod("qwen-prefill-0",
+			modelDeploymentReplicaGroupName(md, "prefill", 0), "qwen")
+
+		objs := []ctrlcli.Object{
+			jointCheckObject(), md, prefill, &decode,
+			jointWorkload("wl-first", true, prefill),
+		}
+		if decodeWorkload != nil {
+			objs = append(objs, decodeWorkload)
+		}
+
+		return objs
+	}
+
+	decodePod := func(md *workercore.ModelDeployment) *core.Pod {
+		pod := jointGroupPod("qwen-decode-0",
+			modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
+		pod.Finalizers = []string{"kueue.x-k8s.io/managed"}
+
+		return pod
+	}
+
+	t.Run("a_draining_predecessor_counts_as_present", func(t *testing.T) {
+		md := jointDeployment("qwen", "h20-8x", "a100-8x")
+		leaving := decodePod(md)
+		leaving.DeletionTimestamp = ptr.To(meta.Now())
+
+		got := reconcileJoint(t, newJointClient(departingFixture(*leaving, nil)...), "wl-first")
+
+		assert.Equal(t, kueue.CheckStateReady, jointCheckState(got),
+			"a replica whose predecessor is draining and whose Workload this operator deleted to "+
+				"free its slot is being replaced, and the barrier does not hold its siblings for the "+
+				"length of a drain")
+		assert.True(t, kueueworkload.IsActive(got), "and it is never parked")
+	})
+
+	t.Run("a_missing_replica_stays_missing_and_is_never_parked", func(t *testing.T) {
+		// The predecessor is gone and the replacement has not been created: nothing occupies the
+		// ordinal at all. That is the state a role whose creates are erroring sits in, and the one
+		// the barrier exists for -- but it is also an ordinary state mid-assembly, so the bound may
+		// not touch it.
+		md := jointDeployment("qwen", "h20-8x", "a100-8x")
+		absent := decodePod(md)
+		absent.Finalizers = nil
+
+		cli := newJointClient(departingFixture(*absent, nil)...)
+		absent.DeletionTimestamp = ptr.To(meta.Now())
+		require.NoError(t, cli.Delete(context.Background(), absent))
+		pendingSince(t, cli, "wl-first", start)
+
+		got := reconcileJointAt(t, cli, "wl-first", start.Add(_JointAdmissionInfeasibleAfter+time.Minute))
+
+		assert.Equal(t, kueue.CheckStatePending, jointCheckState(got),
+			"an ordinal with no replica at all is the deployment still assembling, and the set waits")
+		assert.True(t, kueueworkload.IsActive(got),
+			"a deployment short of its own replicas is assembling, not infeasible, so the bound "+
+				"does not park it")
+		assert.Contains(t, jointCheckMessage(got), "decode",
+			"the message names the role still assembling")
+	})
+
+	t.Run("a_surviving_workload_without_quota_is_not_a_rollout", func(t *testing.T) {
+		// The preempted shape: Kueue's preemption stops a group by deleting its Pods while the
+		// Workload stands, so the Pod is terminating and the Workload exists holding nothing.
+		// Reading that as a replacement would open the barrier while the quota is genuinely gone.
+		md := jointDeployment("qwen", "h20-8x", "a100-8x")
+		stopped := decodePod(md)
+		stopped.DeletionTimestamp = ptr.To(meta.Now())
+
+		got := reconcileJoint(t, newJointClient(departingFixture(*stopped,
+			jointWorkload("wl-decode", false, stopped))...), "wl-first")
+
+		assert.Equal(t, kueue.CheckStatePending, jointCheckState(got),
+			"a replica whose Workload survives without its reservation was preempted, not replaced, "+
+				"and the set waits for the quota to come back")
+		assert.True(t, kueueworkload.IsActive(got))
+	})
+
+	t.Run("a_live_successor_without_a_workload_waits_like_any_other", func(t *testing.T) {
+		// The compose-lag shape the spec's replacement cadence ends on: the predecessor is gone,
+		// the successor exists, and Kueue has not composed its Workload yet. Nothing here says
+		// rollout -- no predecessor, no Workload -- so it reads as an ordinary wait, and an
+		// ordinary wait past the bound is a park.
+		md := jointDeployment("qwen", "h20-8x", "a100-8x")
+		successor := decodePod(md)
+		successor.Finalizers = nil
+
+		cli := newJointClient(departingFixture(*successor, nil)...)
+		pendingSince(t, cli, "wl-first", start)
+
+		got := reconcileJointAt(t, cli, "wl-first", start.Add(_JointAdmissionInfeasibleAfter+time.Minute))
+
+		assert.Equal(t, kueue.CheckStatePending, jointCheckState(got),
+			"a live successor with no Workload composed is a wait, and the barrier holds it")
+		assert.False(t, kueueworkload.IsActive(got),
+			"the shape is stable and the wait is not, so past the bound the hold becomes a park")
+	})
+}
+
+// newRolloutClient builds the client both rollout cases run on: the deployment's status
+// subresources for the convergence loop, and the Workload's and the check's for the barrier's
+// verdict writes.
+func newRolloutClient(objs ...ctrlcli.Object) ctrlcli.Client {
+	return ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithStatusSubresource(
+			&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{},
+			&kueue.Workload{}, &kueue.AdmissionCheck{},
+		).
+		WithObjects(objs...).
+		Build()
+}
+
+// stampReplicaUIDs gives every replica a distinct UID, standing in for the API server's half of a
+// create: the fake client assigns none, and every ownership question in this controller is answered
+// by UID -- a fleet of empty UIDs makes one Workload "own" every replica, and a barrier test that
+// cannot tell replicas apart proves nothing.
+func stampReplicaUIDs(t *testing.T, cli ctrlcli.Client) {
+	t.Helper()
+
+	for i, pod := range replicaPods(t, cli) {
+		if pod.UID != "" {
+			continue
+		}
+		pod.UID = types.UID(fmt.Sprintf("uid-%s-%d", pod.Name, i))
+		require.NoError(t, cli.Update(context.Background(), &pod))
+	}
+}
+
+// armReplicaFinalizers gives every replica Kueue's own finalizer, which is the admission-time shape
+// on a real cluster: a deleted replica then lingers as terminating rather than vanishing, and it is
+// that lingering the departure rule and the replacement gates read.
+func armReplicaFinalizers(t *testing.T, cli ctrlcli.Client) {
+	t.Helper()
+
+	for _, pod := range replicaPods(t, cli) {
+		if slices.Contains(pod.Finalizers, kueuepodconst.PodFinalizer) {
+			continue
+		}
+		pod.Finalizers = append(pod.Finalizers, kueuepodconst.PodFinalizer)
+		require.NoError(t, cli.Update(context.Background(), &pod))
+	}
+}
+
+// composeWorkloadFor stands in for Kueue composing and reserving for one replica: a Workload named
+// after the Pod's group verbatim, owning that Pod, holding a reservation, and carrying this
+// controller's check as Pending -- the state a Workload is in between reserving and the barrier's
+// first verdict.
+func composeWorkloadFor(t *testing.T, cli ctrlcli.Client, pod core.Pod) {
+	t.Helper()
+
+	wl := new(kueue.Workload)
+	wl.Name, wl.Namespace = pod.Labels[kueuepodconst.GroupNameLabel], pod.Namespace
+	wl.UID = types.UID("uid-" + wl.Name)
+	wl.OwnerReferences = []meta.OwnerReference{{
+		APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: pod.UID,
+	}}
+	wl.Status.Conditions = []meta.Condition{{
+		Type:               kueue.WorkloadQuotaReserved,
+		Status:             meta.ConditionTrue,
+		Reason:             "Test",
+		LastTransitionTime: meta.Now(),
+	}}
+	wl.Status.AdmissionChecks = []kueue.AdmissionCheckState{{
+		Name:  kueue.AdmissionCheckReference(_JointAdmissionCheckName),
+		State: kueue.CheckStatePending,
+	}}
+
+	require.NoError(t, cli.Create(context.Background(), wl))
+}
+
+// admitWorkload stands in for Kueue's move once every check on a reserved Workload reads Ready.
+func admitWorkload(t *testing.T, cli ctrlcli.Client, wl *kueue.Workload) {
+	t.Helper()
+
+	wl.Status.Conditions = append(wl.Status.Conditions, meta.Condition{
+		Type:               kueue.WorkloadAdmitted,
+		Status:             meta.ConditionTrue,
+		Reason:             "Test",
+		LastTransitionTime: meta.Now(),
+	})
+	require.NoError(t, cli.Status().Update(context.Background(), wl))
+}
+
+// rolloutWorkloads lists the namespace's Workloads, for the rounds that run the barrier over all of
+// them.
+func rolloutWorkloads(t *testing.T, cli ctrlcli.Client) []kueue.Workload {
+	t.Helper()
+
+	wlList := new(kueue.WorkloadList)
+	require.NoError(t, cli.List(context.Background(), wlList, ctrlcli.InNamespace("team-a")))
+
+	return wlList.Items
+}
+
+// rolloutImages reports the image of every live replica, which is what tells a replica built before
+// an edit from one built after it.
+func rolloutImages(t *testing.T, cli ctrlcli.Client) map[string]string {
+	t.Helper()
+
+	images := make(map[string]string)
+	for _, pod := range replicaPods(t, cli) {
+		if pod.DeletionTimestamp == nil {
+			images[pod.Name] = pod.Spec.Containers[0].Image
+		}
+	}
+
+	return images
+}
+
+// rolloutSetup converges the deployment, stands in for Kueue on its whole admission half, and runs
+// the barrier once -- the steady state every rollout case then edits.
+func rolloutSetup(t *testing.T, cli ctrlcli.Client) {
+	t.Helper()
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	stampReplicaUIDs(t, cli)
+	armReplicaFinalizers(t, cli)
+	for _, pod := range replicaPods(t, cli) {
+		composeWorkloadFor(t, cli, pod)
+	}
+
+	for _, wl := range rolloutWorkloads(t, cli) {
+		got := reconcileJoint(t, cli, wl.Name)
+		require.Equal(t, kueue.CheckStateReady, jointCheckState(got),
+			"the steady state is feasible: every replica holds quota, so the barrier opens")
+		admitWorkload(t, cli, got)
+	}
+}
+
+// TestModelDeploymentJointAdmission_AnAdmittedWorkloadIsSkippedThroughARollout drives a rollout
+// under the mechanics this operator runs today -- a replaced replica's Pod and Workload are deleted
+// together, and its replacement is a fresh Pod whose own fresh Workload reserves and is judged on
+// its own -- and pins what that makes of the barrier.
+//
+// WHAT THIS FALSIFIES IS THE SKIP, not the verdict. A Workload that was admitted stays admitted
+// through the rollout, so the only answer the barrier may give about it is none: re-answering an
+// admitted Workload mid-rollout -- while a replacement already exists with no Workload composed for
+// it yet and the deployment reads as assembling -- would write Pending over a settled placement and
+// drag a running deployment back through the barrier it already passed. A barrier that stopped
+// skipping turns Ready into Pending here; nothing else in this file can see that, because every
+// other case judges Workloads that are still waiting.
+//
+// THE ASSERTIONS ARE SCOPED TO WORKLOADS ALREADY ADMITTED, and the scope is the mechanics rather
+// than a relaxation: a replacement's Workload does not exist before its ordinal turns over, and it
+// cannot be admitted before the barrier has judged it, so the loop admits it once the verdict reads
+// Ready -- Kueue's own move -- and from then on holds it to the same skip as the originals.
+func TestModelDeploymentJointAdmission_AnAdmittedWorkloadIsSkippedThroughARollout(t *testing.T) {
+	ctx := context.Background()
+	cli := newRolloutClient(jointCheckObject(), twoRoleDeployment(), newRenderInstanceType())
+
+	rolloutSetup(t, cli)
+
+	changed := getModelDeployment(t, cli)
+	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
+	changed.Spec.Roles[1].Image = "vllm/vllm-openai:v0.26.0"
+	require.NoError(t, cli.Update(ctx, changed))
+
+	for round := 0; round < 40; round++ {
+		// KUEUE RELEASES A DEPARTED REPLICA'S FINALIZER ONCE ITS WORKLOAD IS GONE. The converger
+		// deletes the pair together, and the fake cluster holds the Pod until this clears it -- the
+		// compressed shape of the drain a real cluster measures in tens of seconds.
+		wls := rolloutWorkloads(t, cli)
+		for _, pod := range replicaPods(t, cli) {
+			if pod.DeletionTimestamp == nil || anyWorkloadOwnsAny(wls, sets.New(pod.UID)) {
+				continue
+			}
+			pod.Finalizers = nil
+			require.NoError(t, cli.Update(ctx, &pod))
+		}
+
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err, "round %d", round)
+		stampReplicaUIDs(t, cli)
+
+		// THE BARRIER RUNS WHILE THE NEWEST REPLICAS HAVE NO WORKLOAD YET: Kueue composes on its
+		// own events, and this loop composes at the round's end. The gap is the state the skip
+		// exists for -- a barrier that re-judged an admitted Workload now would read the
+		// deployment as assembling and answer Pending over a settled placement.
+		for _, wl := range rolloutWorkloads(t, cli) {
+			// Read off the object as it ARRIVED, not as the reconcile leaves it: a Workload that
+			// was already admitted is owed no new answer, while a replacement's fresh Workload is
+			// Kueue's to admit once the barrier opens. The two cannot be told apart by name -- a
+			// replacement's Workload carries the departed one's -- so the admission on the object
+			// is what says which this one is.
+			if !kueueworkload.IsAdmitted(&wl) {
+				got := reconcileJoint(t, cli, wl.Name)
+				if jointCheckState(got) == kueue.CheckStateReady {
+					admitWorkload(t, cli, got)
+				}
+				continue
+			}
+
+			got := reconcileJoint(t, cli, wl.Name)
+			assert.Equal(t, kueue.CheckStateReady, jointCheckState(got),
+				"round %d: a Workload that already passed the barrier keeps the verdict it was "+
+					"admitted on, through a rollout that momentarily reads the deployment as "+
+					"assembling", round)
+			assert.True(t, kueueworkload.IsAdmitted(got),
+				"round %d: nothing here may evict an admitted Workload", round)
+			assert.True(t, kueueworkload.IsActive(got),
+				"round %d: and nothing here may park one", round)
+		}
+
+		// KUEUE COMPOSES ONE WORKLOAD PER LIVE REPLICA THAT HAS NONE, named after the replica's own
+		// group: the replacement does not ride the departed replica's Workload in -- it is a fresh
+		// reservation of its own, which the barrier judges on the next round.
+		wls = rolloutWorkloads(t, cli)
+		for _, pod := range replicaPods(t, cli) {
+			if pod.DeletionTimestamp == nil && !anyWorkloadOwnsAny(wls, sets.New(pod.UID)) {
+				composeWorkloadFor(t, cli, pod)
+			}
+		}
+
+		current := true
+		for _, image := range rolloutImages(t, cli) {
+			current = current && image == "vllm/vllm-openai:v0.26.0"
+		}
+		if current && len(rolloutImages(t, cli)) == 4 {
+			return
+		}
+	}
+
+	t.Fatal("the rollout did not complete within its rounds")
+}
+
+// TestModelDeploymentJointAdmission_ARolloutRunsToCompletionWithTheBarrierActive drives a rollout
+// under the mechanics the spec's replacement path is built for -- freeing a replica's slot deletes
+// its Workload, so each replacement is a fresh reservation the barrier has to judge -- with the
+// barrier running over every Workload on every round.
+//
+// THIS ONE IS A SMOKE FOR THE ROLLOUT, NOT THE DEPARTURE RULE'S FALSIFICATION POINT. Its
+// assertions hold under either interleaving of predecessor and successor, which is exactly why it
+// can drive the convergence loop's real cadence without guessing at the create gate's timing: what
+// it proves is that the whole loop -- edit, departures, slot frees, recompositions, verdicts,
+// admissions -- runs to the end with no Retry, no Reject and no park anywhere, and that the
+// deployment comes out the other side fully admitted. The departure rule itself is pinned
+// hand-built, per state, in the case above.
+func TestModelDeploymentJointAdmission_ARolloutRunsToCompletionWithTheBarrierActive(t *testing.T) {
+	ctx := context.Background()
+	cli := newRolloutClient(jointCheckObject(), twoRoleDeployment(), newRenderInstanceType())
+
+	rolloutSetup(t, cli)
+
+	changed := getModelDeployment(t, cli)
+	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
+	changed.Spec.Roles[1].Image = "vllm/vllm-openai:v0.26.0"
+	require.NoError(t, cli.Update(ctx, changed))
+
+	// draining counts the rounds a departed replica has been draining. The converger deletes the
+	// replica's Workload with the Pod, and the fake cluster holds the Pod until the finalizer is
+	// cleared below -- the compressed shape of a drain the real cluster measures in tens of seconds.
+	draining := make(map[string]int)
+	admittedMidReplacement := false
+
+	for round := 0; round < 40; round++ {
+		for _, pod := range replicaPods(t, cli) {
+			if pod.DeletionTimestamp == nil {
+				continue
+			}
+			if _, seen := draining[pod.Name]; seen {
+				continue
+			}
+			draining[pod.Name] = 0
+		}
+		for name := range draining {
+			draining[name]++
+		}
+		// ONE DRAIN COMPLETES PER ROUND and the other stays open. The pass deletes one replica per
+		// role, so both predecessors of a pair are draining together; releasing both in one round
+		// would seat both replacements before either is judged, and every admission would land after
+		// the window had shut. Holding one predecessor draining -- Workload gone, Pod still on the
+		// books -- while the other ordinal's replacement is composed and judged is the state the
+		// departure rule exists for, and the flag below proves the loop reached it.
+		for _, pod := range replicaPods(t, cli) {
+			if pod.DeletionTimestamp == nil || draining[pod.Name] < 2 {
+				continue
+			}
+			pod.Finalizers = nil
+			require.NoError(t, cli.Update(ctx, &pod))
+			delete(draining, pod.Name)
+			break
+		}
+
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err, "round %d", round)
+		stampReplicaUIDs(t, cli)
+
+		// KUEUE COMPOSES PER GROUP ON ITS OWN EVENTS, and one composition per round is the
+		// interleaving where a sibling is judged while another ordinal's recomposition has not
+		// landed. Composing all of them at once would answer every verdict through quota and never
+		// exercise the window between a slot freeing and its reservation returning.
+		composed := false
+		wls := rolloutWorkloads(t, cli)
+		for _, pod := range replicaPods(t, cli) {
+			if composed || pod.DeletionTimestamp != nil {
+				continue
+			}
+			owned := false
+			for i := range wls {
+				for _, ref := range wls[i].OwnerReferences {
+					owned = owned || (ref.Kind == "Pod" && ref.UID == pod.UID)
+				}
+			}
+			if owned {
+				continue
+			}
+			composeWorkloadFor(t, cli, pod)
+			composed = true
+		}
+
+		// THE BARRIER RUNS OVER EVERY WORKLOAD, ADMITTED ONES INCLUDED; nothing here skips it.
+		for _, wl := range rolloutWorkloads(t, cli) {
+			got := reconcileJoint(t, cli, wl.Name)
+
+			assert.NotEqual(t, kueue.CheckStateRetry, jointCheckState(got),
+				"round %d: a Retry would evict this Workload and drop the very reservation the "+
+					"rollout's next step depends on", round)
+			assert.NotEqual(t, kueue.CheckStateRejected, jointCheckState(got),
+				"round %d: a Rejected is final, and a set mid-rollout is not infeasible", round)
+			assert.True(t, kueueworkload.IsActive(got),
+				"round %d: a deployment mid-rollout is changing shape, so the bound never parks it",
+				round)
+
+			if jointCheckState(got) != kueue.CheckStateReady || kueueworkload.IsAdmitted(got) {
+				continue
+			}
+			admitWorkload(t, cli, got)
+			if anyReplicaMidReplacement(t, cli) {
+				admittedMidReplacement = true
+			}
+		}
+
+		current := true
+		for _, image := range rolloutImages(t, cli) {
+			current = current && image == "vllm/vllm-openai:v0.26.0"
+		}
+		wlsNow := rolloutWorkloads(t, cli)
+		allAdmitted := len(wlsNow) == 4
+		for i := range wlsNow {
+			allAdmitted = allAdmitted && kueueworkload.IsAdmitted(&wlsNow[i])
+		}
+		if current && len(rolloutImages(t, cli)) == 4 && allAdmitted {
+			assert.True(t, admittedMidReplacement,
+				"the rollout passed through a state where a sibling was admitted while another "+
+					"ordinal's predecessor was draining with its Workload deleted -- the window the "+
+					"departure rule exists for, and this loop's interleaving was built to reach it")
+			return
+		}
+	}
+
+	t.Fatal("the rollout did not complete within its rounds")
+}
+
+// anyReplicaMidReplacement reports whether some declared ordinal currently sits in the departure
+// window: a member draining while no Workload at all owns the ordinal's replicas.
+//
+// It reads through the production predicate rather than restating it, so what the flag observes is
+// the same judgement the verdict made.
+func anyReplicaMidReplacement(t *testing.T, cli ctrlcli.Client) bool {
+	t.Helper()
+
+	md := getModelDeployment(t, cli)
+	byGroup, liveByGroup, err := modelDeploymentReplicaGroups(context.Background(), cli, md)
+	require.NoError(t, err)
+
+	wlList := new(kueue.WorkloadList)
+	require.NoError(t, cli.List(context.Background(), wlList, ctrlcli.InNamespace("team-a")))
+
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		for ordinal := range int(role.Replicas) {
+			group := modelDeploymentReplicaGroupName(md, role.Name, ordinal)
+			if jointReplicaDepartingRollout(md, wlList.Items, byGroup[group], liveByGroup[group]) {
+				return true
+			}
+		}
+	}
+
+	return false
 }

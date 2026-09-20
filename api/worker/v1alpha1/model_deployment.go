@@ -274,17 +274,21 @@ type ModelDeploymentKVTransfer struct {
 // resource request at all: the accelerator half belongs in Resources and the rest is derived from
 // the InstanceType, and neither can be overridden here.
 //
-// EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Each role forms its
-// own Kueue pod group, whose members cannot leave one at a time, so that one group is rebuilt whole
-// while every sibling role keeps serving. A `replicas` change on this role does the same.
+// EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Every replica is a
+// Kueue pod group of its own, so they are replaced one at a time -- one per role per pass -- and
+// every sibling role keeps serving throughout. A `replicas` change rolls nothing at all: it adds or
+// removes instances, and every instance that stays keeps running, keeps the accelerators it was
+// admitted with and keeps whatever cache it holds.
 //
-// ADDING OR REMOVING A ROLE REACHES FURTHER THAN THE ROLE IT NAMES. A deployment whose roles are one
-// names that group after the DEPLOYMENT, and a deployment with more than one names each group after
-// its ROLE, so going from one role to two renames the first role's group and rebuilds it as well.
+// ADDING OR REMOVING A ROLE REACHES NO FURTHER THAN THE ROLE IT NAMES. A replica's group is named
+// from the deployment, the role and that replica's ordinal, and from nothing else -- not from how
+// many roles the deployment declares -- so a second role arriving leaves the first role's replicas
+// exactly where they were. Renaming a role is what moves that role's own replicas: each of its
+// ordinals derives a new group and is replaced.
 //
-// A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A REBUILD. The replica that left is replaced on
+// A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A ROLLOUT. The replica that left is replaced on
 // its own, under a new name, while its siblings keep serving — see
-// docs/reference/model-deployment.md under "One group per role" and "Rollout is a rolling
+// docs/reference/model-deployment.md under "One group per replica" and "Rollout is a rolling
 // replacement".
 type ModelDeploymentRole struct {
 	// Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.
@@ -317,17 +321,51 @@ type ModelDeploymentRole struct {
 	// +k8s:validation:enum=["server","prefill","decode"]
 	Kind ModelDeploymentRoleKind `json:"kind,omitempty" protobuf:"bytes,8,opt,name=kind,casttype=ModelDeploymentRoleKind"`
 
-	// Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of
-	// every role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.
+	// Replicas is how many independent serving instances this role runs. The instances are
+	// independent: each one starts, serves and is replaced on its own, and none of them depends on
+	// another being present.
 	//
-	// CHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod
-	// carries and which Kueue requires them all to agree on, so the operator deletes the group's Pods
-	// and recreates them under the new total rather than adding or trimming a few. A replica that
-	// leaves loses its cached blocks to its siblings.
+	// CHANGING THIS NUMBER ADDS OR REMOVES INSTANCES. Growing it creates new instances beside the
+	// ones already running; shrinking it removes some of them. The instances that survive are not
+	// restarted: they keep serving without interruption and keep whatever cache they hold.
+	//
+	// THE UPPER BOUND IS A LIMIT ON THIS OPERATOR, NOT ON KUBERNETES. A pass renders every instance
+	// this role declares before it writes any of them, so the number is a multiplier on the work one
+	// reconcile does; left open at the type's range, a single accepted field value is enough to
+	// exhaust the worker before the API server ever throttles the creates. The bound is set where no
+	// deployment anybody serves can reach it.
 	//
 	// +k8s:validation:default=1
 	// +k8s:validation:minimum=1
+	// +k8s:validation:maximum=1024
 	Replicas int32 `json:"replicas,omitempty" protobuf:"varint,2,opt,name=replicas"`
+
+	// ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they
+	// start together, they are replaced together, and none of them serves alone — the instance,
+	// not the Pod, is the unit that appears and disappears.
+	//
+	// THIS NUMBER IS FIXED AT CREATION AND CANNOT BE CHANGED. An instance's size is the shape of the
+	// instance, not a dial on it: the Pods a running instance is made of are not the Pods a different
+	// size asks for. Scaling is what replicas is for, and it leaves every running instance alone. To
+	// serve at a different size, create a deployment that declares it.
+	//
+	// ABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods
+	// is rendered with stable names and publishes the first Pod's address, this instance's size and
+	// each Pod's own rank to every container. What an engine does with those facts -- which
+	// parallelism it turns on, and over how many ranks -- stays the author's to say.
+	//
+	// THE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and
+	// Go forbids a field and a method sharing a name; the API field is size.
+	//
+	// THE UPPER BOUND IS THE SAME LIMIT REPLICAS CARRIES, AND IT MULTIPLIES WITH IT: this number is
+	// how many Pods one instance is rendered as, so a pass renders replicas times this many before it
+	// writes any of them. It is set far above the sizes an accelerator topology makes sense at, and
+	// far below the range that turns one accepted field value into an out-of-memory worker.
+	//
+	// +k8s:validation:default=1
+	// +k8s:validation:minimum=1
+	// +k8s:validation:maximum=64
+	ReplicaSize int32 `json:"size,omitempty" protobuf:"varint,15,opt,name=size"`
 
 	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
 	// It is what the queue-name entrance label is derived from.
@@ -337,7 +375,7 @@ type ModelDeploymentRole struct {
 	// +k8s:validation:maxLength=253
 	InstanceType string `json:"instanceType" protobuf:"bytes,3,name=instanceType"`
 
-	// Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED
+	// Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED
 	// FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.
 	//
 	// It carries only the ACCELERATOR half of a request, because that is the only half a workload
@@ -347,7 +385,7 @@ type ModelDeploymentRole struct {
 	// the container fields below either.
 	//
 	// InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
-	// a replica wants is a property of the model being served, so two deployments on one InstanceType
+	// a Pod wants is a property of the model being served, so two deployments on one InstanceType
 	// routinely want different counts.
 	Resources *ModelDeploymentRoleResources `json:"resources,omitempty" protobuf:"bytes,4,opt,name=resources"`
 
@@ -533,22 +571,23 @@ type ModelDeploymentAdditionalVolume struct {
 	HostPath *core.HostPathVolumeSource `json:"hostPath,omitempty" protobuf:"bytes,6,opt,name=hostPath"`
 }
 
-// ModelDeploymentRoleResources is what one replica of a role asks of an accelerator.
+// ModelDeploymentRoleResources is what one Pod of a role asks of an accelerator.
 //
 // It deliberately mirrors the accelerator fields of InstanceResources — the same names, the same
 // meanings — rather than inventing a second vocabulary for one request, and it deliberately omits
 // that type's CPU, RAM and LocalStorage, which are derived here rather than declared.
 type ModelDeploymentRoleResources struct {
-	// Accelerator is how many accelerator cards ONE REPLICA asks for.
+	// Accelerator is how many accelerator cards ONE POD asks for.
 	//
 	//   - Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and
 	//     on update alike, the same way an Instance's does. The value is written into the stored
 	//     object rather than applied at render time, so what was admitted is what can be read back.
 	//   - AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable
 	//     InstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is
-	//     the only role using that type, and refused when another role shares the type because the
-	//     resulting multi-PodSet Workload cannot be admitted by that queue.
-	//   - A replica meant to run without an accelerator belongs on an InstanceType that is not
+	//     the only role using that type, and refused when another role shares the type: replicas
+	//     asking for nothing the queue accounts in are admitted and run while that queue charges
+	//     them nothing, spending from the pool their siblings on that type are charged for.
+	//   - A Pod meant to run without an accelerator belongs on an InstanceType that is not
 	//     acceleratable, where CPU is what the queue accounts in.
 	Accelerator *resource.Quantity `json:"accelerator,omitempty" protobuf:"bytes,1,opt,name=accelerator"`
 
@@ -732,12 +771,25 @@ type ModelDeploymentRoleStatus struct {
 	// +required
 	Name string `json:"name" protobuf:"bytes,1,name=name"`
 
-	// Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Both are
-	// ALWAYS present: they are counted from a Pod list that succeeded, so a zero here is an observed
-	// zero. A failed list writes no status at all.
+	// Desired is how many INSTANCES the spec asks for, and Ready is how many of them are Ready. Both
+	// count instances rather than Pods, which is the same number only while an instance is one Pod: a
+	// role of two instances of four Pods reports two, and an instance is Ready only when every Pod it
+	// declares is. Both are ALWAYS present -- they are counted from a Pod list that succeeded, so a
+	// zero here is an observed zero. A failed list writes no status at all.
 	Desired int32 `json:"desired" protobuf:"varint,2,name=desired"`
 
 	Ready int32 `json:"ready" protobuf:"varint,3,name=ready"`
+
+	// QuotaReserved is how many of the role's replicas hold a quota reservation. Each replica is
+	// its own Kueue workload, so a role sits at any count between zero and Desired while capacity
+	// arrives — where a role that shared one workload passed all-or-nothing and this figure could
+	// not exist.
+	//
+	// ALWAYS PRESENT, AND ITS ZERO IS AN OBSERVED ONE: the figure is counted from Pod and Workload
+	// lists that succeeded, and a failed list writes no status at all rather than a zero, because
+	// "this pass could not see" and "no replica holds quota" call for opposite actions — one waits,
+	// the other investigates — and a zero written for both makes them the same reading.
+	QuotaReserved int32 `json:"quotaReserved" protobuf:"varint,7,name=quotaReserved"`
 
 	// Unmanaged is true when the role replaced the whole command line, so the operator synthesized
 	// no engine argument and no client environment for it. It is ALWAYS present, for the same reason
@@ -759,21 +811,30 @@ type ModelDeploymentRoleStatus struct {
 	// +k8s:validation:enum=["server","prefill","decode"]
 	Kind ModelDeploymentRoleKind `json:"kind" protobuf:"bytes,5,name=kind,casttype=ModelDeploymentRoleKind"`
 
-	// AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR
-	// credits.
+	// AssignedFlavors is the set of ResourceFlavors Kueue assigned to this role's replicas for
+	// their ACCELERATOR credits, deduplicated and sorted. It is a set because each replica is its
+	// own workload and Kueue assigns a flavor per workload, so two replicas of one role can carry
+	// different assignments — a state one PodSet per role could not produce.
 	//
-	//   - NOT ASSIGNED YET AND ASSIGNED ARE DIFFERENT FACTS, so a role waiting for quota reports no
-	//     flavor at all rather than an empty name, which would read as an assignment to a flavor
-	//     called "".
-	//   - Per role rather than per deployment, because Kueue assigns a flavor per PodSet and two
-	//     roles of one deployment can be assigned different ones.
+	//   - ABSENT MEANS NO ASSIGNED REPLICA NAMED A FLAVOR, rather than an empty list reading as an
+	//     assignment to nothing: "not assigned yet" and "assigned, but on a pool carrying no
+	//     accelerator names" are both that same fact here, and absent keeps them from reading as a
+	//     third thing.
+	//   - ONE ENTRY MEANS EVERY ASSIGNED REPLICA OF THE ROLE NAMES IT. SEVERAL ENTRIES MEAN THE
+	//     REPLICAS WERE ASSIGNED DIFFERENT FLAVORS, which is the signal to investigate rather than a
+	//     degraded form of one answer: WHICH replica carries which flavor is deliberately not here,
+	//     because the ordinal a per-replica answer would key on is the converger's internal slotting
+	//     rather than a promise this API makes, and a reader needing it reads the replicas' own Pods.
 	//   - AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather
 	//     than a gap in it. The answer is read through the same function the per-accelerator
 	//     admission gate uses, which speaks only of accelerator credits, so a role admitted on a pool
 	//     carrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept
 	//     identical on purpose: a flavor reported here that the gate would not fit against would be
 	//     worse than none.
-	AssignedFlavor *string `json:"assignedFlavor,omitempty" protobuf:"bytes,6,opt,name=assignedFlavor"`
+	//
+	// +optional
+	// +listType=atomic
+	AssignedFlavors []string `json:"assignedFlavors,omitempty" protobuf:"bytes,6,rep,name=assignedFlavors"`
 }
 
 // ModelDeploymentKVCacheStatus is the reuse domain this deployment attached to.

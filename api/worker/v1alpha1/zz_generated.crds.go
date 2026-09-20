@@ -4489,20 +4489,21 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Type:        "boolean",
 														},
 														"replicas": {
-															Description: "Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of\nevery role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.\nCHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod\ncarries and which Kueue requires them all to agree on, so the operator deletes the group's Pods\nand recreates them under the new total rather than adding or trimming a few. A replica that\nleaves loses its cached blocks to its siblings.",
+															Description: "Replicas is how many independent serving instances this role runs. The instances are\nindependent: each one starts, serves and is replaced on its own, and none of them depends on\nanother being present.\nCHANGING THIS NUMBER ADDS OR REMOVES INSTANCES. Growing it creates new instances beside the\nones already running; shrinking it removes some of them. The instances that survive are not\nrestarted: they keep serving without interruption and keep whatever cache they hold.\nTHE UPPER BOUND IS A LIMIT ON THIS OPERATOR, NOT ON KUBERNETES. A pass renders every instance\nthis role declares before it writes any of them, so the number is a multiplier on the work one\nreconcile does; left open at the type's range, a single accepted field value is enough to\nexhaust the worker before the API server ever throttles the creates. The bound is set where no\ndeployment anybody serves can reach it.",
 															Type:        "integer",
 															Format:      "int32",
 															Default: &v1.JSON{
 																Raw: []byte(`1`),
 															},
+															Maximum: ptr.To[float64](1024),
 															Minimum: ptr.To[float64](1),
 														},
 														"resources": {
-															Description: "Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED\nFIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload\ndecides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit\nresources scaled by the requested card count, so they are not expressible here at all — a\nstronger guarantee than refusing them, since a field that does not exist cannot be shadowed by\nthe container fields below either.\nInstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards\na replica wants is a property of the model being served, so two deployments on one InstanceType\nroutinely want different counts.",
+															Description: "Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED\nFIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload\ndecides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit\nresources scaled by the requested card count, so they are not expressible here at all — a\nstronger guarantee than refusing them, since a field that does not exist cannot be shadowed by\nthe container fields below either.\nInstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards\na Pod wants is a property of the model being served, so two deployments on one InstanceType\nroutinely want different counts.",
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"accelerator": {
-																	Description: "Accelerator is how many accelerator cards ONE REPLICA asks for.\n- Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and\non update alike, the same way an Instance's does. The value is written into the stored\nobject rather than applied at render time, so what was admitted is what can be read back.\n- AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable\nInstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is\nthe only role using that type, and refused when another role shares the type because the\nresulting multi-PodSet Workload cannot be admitted by that queue.\n- A replica meant to run without an accelerator belongs on an InstanceType that is not\nacceleratable, where CPU is what the queue accounts in.",
+																	Description: "Accelerator is how many accelerator cards ONE POD asks for.\n- Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and\non update alike, the same way an Instance's does. The value is written into the stored\nobject rather than applied at render time, so what was admitted is what can be read back.\n- AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable\nInstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is\nthe only role using that type, and refused when another role shares the type: replicas\nasking for nothing the queue accounts in are admitted and run while that queue charges\nthem nothing, spending from the pool their siblings on that type are charged for.\n- A Pod meant to run without an accelerator belongs on an InstanceType that is not\nacceleratable, where CPU is what the queue accounts in.",
 																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
 																	AnyOf: []v1.JSONSchemaProps{
 																		{
@@ -4536,6 +4537,16 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																},
 															},
 															Nullable: true,
+														},
+														"size": {
+															Description: "ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they\nstart together, they are replaced together, and none of them serves alone — the instance,\nnot the Pod, is the unit that appears and disappears.\nTHIS NUMBER IS FIXED AT CREATION AND CANNOT BE CHANGED. An instance's size is the shape of the\ninstance, not a dial on it: the Pods a running instance is made of are not the Pods a different\nsize asks for. Scaling is what replicas is for, and it leaves every running instance alone. To\nserve at a different size, create a deployment that declares it.\nABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods\nis rendered with stable names and publishes the first Pod's address, this instance's size and\neach Pod's own rank to every container. What an engine does with those facts -- which\nparallelism it turns on, and over how many ranks -- stays the author's to say.\nTHE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and\nGo forbids a field and a method sharing a name; the API field is size.\nTHE UPPER BOUND IS THE SAME LIMIT REPLICAS CARRIES, AND IT MULTIPLIES WITH IT: this number is\nhow many Pods one instance is rendered as, so a pass renders replicas times this many before it\nwrites any of them. It is set far above the sizes an accelerator topology makes sense at, and\nfar below the range that turns one accepted field value into an out-of-memory worker.",
+															Type:        "integer",
+															Format:      "int32",
+															Default: &v1.JSON{
+																Raw: []byte(`1`),
+															},
+															Maximum: ptr.To[float64](64),
+															Minimum: ptr.To[float64](1),
 														},
 													},
 												},
@@ -4749,17 +4760,24 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														"name",
 														"desired",
 														"ready",
+														"quotaReserved",
 														"unmanaged",
 														"kind",
 													},
 													Properties: map[string]v1.JSONSchemaProps{
-														"assignedFlavor": {
-															Description: "AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR\ncredits.\n- NOT ASSIGNED YET AND ASSIGNED ARE DIFFERENT FACTS, so a role waiting for quota reports no\nflavor at all rather than an empty name, which would read as an assignment to a flavor\ncalled \"\".\n- Per role rather than per deployment, because Kueue assigns a flavor per PodSet and two\nroles of one deployment can be assigned different ones.\n- AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather\nthan a gap in it. The answer is read through the same function the per-accelerator\nadmission gate uses, which speaks only of accelerator credits, so a role admitted on a pool\ncarrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept\nidentical on purpose: a flavor reported here that the gate would not fit against would be\nworse than none.",
-															Type:        "string",
-															Nullable:    true,
+														"assignedFlavors": {
+															Description: "AssignedFlavors is the set of ResourceFlavors Kueue assigned to this role's replicas for\ntheir ACCELERATOR credits, deduplicated and sorted. It is a set because each replica is its\nown workload and Kueue assigns a flavor per workload, so two replicas of one role can carry\ndifferent assignments — a state one PodSet per role could not produce.\n- ABSENT MEANS NO ASSIGNED REPLICA NAMED A FLAVOR, rather than an empty list reading as an\nassignment to nothing: \"not assigned yet\" and \"assigned, but on a pool carrying no\naccelerator names\" are both that same fact here, and absent keeps them from reading as a\nthird thing.\n- ONE ENTRY MEANS EVERY ASSIGNED REPLICA OF THE ROLE NAMES IT. SEVERAL ENTRIES MEAN THE\nREPLICAS WERE ASSIGNED DIFFERENT FLAVORS, which is the signal to investigate rather than a\ndegraded form of one answer: WHICH replica carries which flavor is deliberately not here,\nbecause the ordinal a per-replica answer would key on is the converger's internal slotting\nrather than a promise this API makes, and a reader needing it reads the replicas' own Pods.\n- AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather\nthan a gap in it. The answer is read through the same function the per-accelerator\nadmission gate uses, which speaks only of accelerator credits, so a role admitted on a pool\ncarrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept\nidentical on purpose: a flavor reported here that the gate would not fit against would be\nworse than none.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "string",
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
 														},
 														"desired": {
-															Description: "Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Both are\nALWAYS present: they are counted from a Pod list that succeeded, so a zero here is an observed\nzero. A failed list writes no status at all.",
+															Description: "Desired is how many INSTANCES the spec asks for, and Ready is how many of them are Ready. Both\ncount instances rather than Pods, which is the same number only while an instance is one Pod: a\nrole of two instances of four Pods reports two, and an instance is Ready only when every Pod it\ndeclares is. Both are ALWAYS present -- they are counted from a Pod list that succeeded, so a\nzero here is an observed zero. A failed list writes no status at all.",
 															Type:        "integer",
 															Format:      "int32",
 														},
@@ -4781,6 +4799,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														"name": {
 															Description: "Name is the role this entry describes.",
 															Type:        "string",
+														},
+														"quotaReserved": {
+															Description: "QuotaReserved is how many of the role's replicas hold a quota reservation. Each replica is\nits own Kueue workload, so a role sits at any count between zero and Desired while capacity\narrives — where a role that shared one workload passed all-or-nothing and this figure could\nnot exist.\nALWAYS PRESENT, AND ITS ZERO IS AN OBSERVED ONE: the figure is counted from Pod and Workload\nlists that succeeded, and a failed list writes no status at all rather than a zero, because\n\"this pass could not see\" and \"no replica holds quota\" call for opposite actions — one waits,\nthe other investigates — and a zero written for both makes them the same reading.",
+															Type:        "integer",
+															Format:      "int32",
 														},
 														"ready": {
 															Type:   "integer",

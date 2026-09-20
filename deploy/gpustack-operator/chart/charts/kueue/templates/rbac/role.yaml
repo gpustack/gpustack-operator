@@ -71,23 +71,58 @@ rules:
       - watch
   - apiGroups:
       - admissionregistration.k8s.io
+    resourceNames:
+      - '{{ include "kueue.fullname" . }}-mutating-webhook-configuration'
+    resources:
+      - mutatingwebhookconfigurations
+    verbs:
+      - get
+      - update
+  - apiGroups:
+      - admissionregistration.k8s.io
     resources:
       - mutatingwebhookconfigurations
       - validatingwebhookconfigurations
     verbs:
-      - get
       - list
-      - update
       - watch
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resourceNames:
+      - '{{ include "kueue.fullname" . }}-validating-webhook-configuration'
+    resources:
+      - validatingwebhookconfigurations
+    verbs:
+      - get
+      - update
   - apiGroups:
       - apiextensions.k8s.io
     resources:
       - customresourcedefinitions
     verbs:
-      - get
       - list
-      - update
       - watch
+  - apiGroups:
+      - apiextensions.k8s.io
+    resourceNames:
+      - clusterprofiles.multicluster.x-k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - get
+  - apiGroups:
+      - apiextensions.k8s.io
+    resourceNames:
+      - clusterqueues.kueue.x-k8s.io
+      - cohorts.kueue.x-k8s.io
+      - localqueues.kueue.x-k8s.io
+      - multikueueclusters.kueue.x-k8s.io
+      - workloads.kueue.x-k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - get
+      - update
   - apiGroups:
       - apps
     resources:
@@ -189,7 +224,13 @@ rules:
       - kubeflow.org
     resources:
       - jaxjobs
+      - mpijobs
+      - paddlejobs
+      - pytorchjobs
+      - tfjobs
+      - xgboostjobs
     verbs:
+      - delete
       - get
       - list
       - patch
@@ -220,21 +261,6 @@ rules:
       - get
       - patch
       - update
-  - apiGroups:
-      - kubeflow.org
-    resources:
-      - mpijobs
-      - paddlejobs
-      - pytorchjobs
-      - tfjobs
-      - xgboostjobs
-    verbs:
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
   - apiGroups:
       - kueue.x-k8s.io
     resources:
@@ -405,6 +431,7 @@ rules:
     resources:
       - trainjobs
     verbs:
+      - delete
       - get
       - list
       - patch

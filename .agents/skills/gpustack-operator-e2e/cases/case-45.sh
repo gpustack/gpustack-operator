@@ -92,8 +92,30 @@ record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0
 
 # Pick an InstanceType if the caller did not name one. Any of them will do: no row here schedules a
 # replica, so the accelerator the type describes is never asked for.
+# The first InstanceType A DEPLOYMENT CAN ACTUALLY NAME, which is not the same as the first one the
+# API returns.
+#
+# THE LIST COMES BACK SORTED BY NAME AND CARRIES TYPES ON THEIR WAY OUT. Case 68 creates its own
+# `case68-nowhere` and deletes it without waiting, and that name sorts before an ordinary derived
+# type -- so a case running straight after it picks a type that is already terminating. Naming one
+# is refused at admission, and the run then dies at fixture time for a reason that has nothing to do
+# with what it measures. Inactive is excluded for the mirror reason: a deployment on one is admitted
+# and then never scheduled, so the case waits out every timeout it has.
+usable_instance_type() {
+  kubectl get instancetypes.worker.gpustack.ai \
+    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}{"\n"}{end}' \
+    2>/dev/null \
+    | while IFS='|' read -r name deleting inactive; do
+        [ -n "$name" ] || continue
+        [ -z "$deleting" ] || continue
+        [ "$inactive" = true ] && continue
+        echo "$name"
+        break
+      done
+}
+
 if [ -z "$IT" ]; then
-  IT="$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  IT="$(usable_instance_type)"
 fi
 if [ -z "$IT" ]; then
   echo "[case-45] no InstanceType in the cluster; run case-1 first" >&2
@@ -155,6 +177,19 @@ refuses() {
   fi
 }
 
+# The mirror of `refuses`, for a row whose point is that a value is NOT rejected. It carries the same
+# empty-output trap for the same reason: "created" must be observed, because a row that passes on no
+# output at all reports an acceptance nothing produced.
+accepts() {
+  local check="$1" role_extra="$2" kv_extra="$3" out
+  out="$(manifest "$role_extra" "$kv_extra" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
+  if [ -n "$out" ] && [ -z "${out##*created*}" ]; then
+    record PASS "$check" "accepted by both the schema and the webhook"
+  else
+    record FAIL "$check" "wanted an acceptance, got: $(echo "$out" | cut -c1-160)"
+  fi
+}
+
 # Row 0. Without this every row below is meaningless.
 base_out="$(manifest "" "" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
 # The same empty-output trap as in `refuses`, and it matters most here: this row is what licenses
@@ -170,11 +205,18 @@ fi
 
 # --- webhook rows: the manifest is schema-complete, so the webhook is what answers ---
 
-refuses "two roles are refused, naming the spec that introduces them" \
-  "multiple roles are not supported by this version" \
-  "  - name: decode
-    instanceType: ${IT}
-    replicas: 1" ""
+# A SECOND ROLE IS NO LONGER REFUSED, so the row that asserted it is gone rather than inverted. What
+# replaced it lives in case-51: its row 0 applies a two-role deployment and requires it to be
+# ACCEPTED, which is the same fact asserted from the side that now holds. Keeping a refusal row here
+# would have it fail against a correct operator, and keeping an acceptance row would duplicate a
+# baseline another case already licenses its whole table on.
+
+# THE SIZE CAP IS GONE, AND THE ROW IS INVERTED RATHER THAN DELETED. It used to assert a refusal
+# worded as a missing capability -- deliberately, so that the message would stop being true at the
+# same moment the limit did. That day came: a role's instance may span several Pods, so the value
+# this row sends is now the ordinary case and the assertion is that nothing refuses it.
+accepts "a role asking for more than one Pod per instance is accepted" \
+  "    size: 2" ""
 
 refuses "an owned argument in extraArgs is refused" \
   "is set by the operator for engine" \
@@ -411,6 +453,42 @@ fi
 # now blocked by a CONTROL that this case cannot host. Only the second kind moves to another case.
 record SKIP "the unregistered domain costs the replicas their connector and nothing else" \
   "deferred: needs a READY Binding as the control, which needs a live Mooncake backend. T14 has landed, so the claim now discriminates — but not inside a case whose every deployment is unregistered"
+
+# --- the two rows that need a STORED object, because they are about an edit ---
+#
+# Every refusal above is a create refused by `--dry-run=server`, which has nothing to compare
+# against. Freezing a field is a rule about the difference between two versions of one object, so it
+# cannot fire on a create at all and no dry run reaches it. These two patch the deployment that is
+# still standing.
+#
+# THE PAIR IS THE ROW. `replicas` and `size` sit side by side in the same struct and are edited
+# through the same patch shape, so a webhook that refused both -- or a patch that failed for a
+# reason having nothing to do with either -- reads exactly like a correct one through the refusal
+# alone. The acceptance is what says the instrument can still say yes.
+if [ "$nobind_ready" = yes ]; then
+  size_out="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai case45-nobind --type=json \
+    -p '[{"op":"replace","path":"/spec/roles/0/size","value":2}]' 2>&1 | tr '\n' ' ')"
+  if [ -n "$size_out" ] && [ -z "${size_out##*roles\[0\].size*}" ]; then
+    record PASS "an edit to a role's size is refused, naming the field" \
+      "refused at spec.roles[0].size: every member of a running instance was built for the rank layout the old value described"
+  else
+    record FAIL "an edit to a role's size is refused, naming the field" \
+      "wanted a refusal naming roles[0].size, got: $(echo "$size_out" | cut -c1-160)"
+  fi
+
+  replicas_out="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai case45-nobind --type=json \
+    -p '[{"op":"replace","path":"/spec/roles/0/replicas","value":2}]' 2>&1 | tr '\n' ' ')"
+  if [ -n "$replicas_out" ] && [ -z "${replicas_out##*patched*}" ]; then
+    record PASS "the control: an edit to a role's replicas is accepted" \
+      "patched, so the refusal above is this rule answering rather than the whole struct being frozen"
+  else
+    record FAIL "the control: an edit to a role's replicas is accepted" \
+      "wanted the patch to be accepted, got: $(echo "$replicas_out" | cut -c1-160)"
+  fi
+else
+  record SKIP "an edit to a role's size is refused, naming the field" \
+    "the subject deployment was never created, so there is no stored object to edit"
+fi
 
 kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai case45-nobind \
   --wait=true --timeout=60s >/dev/null 2>&1

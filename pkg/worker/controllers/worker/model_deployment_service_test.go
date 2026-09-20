@@ -70,7 +70,8 @@ func TestRenderModelDeploymentService_IsOneClusterIPForEveryReplica(t *testing.T
 	assert.True(t, modelDeploymentOwns(svc, getModelDeployment(t, cli)))
 }
 
-// TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide is T7's shape.
+// TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide covers which Services exist and
+// what each of them fronts.
 //
 // WHY A P/D DEPLOYMENT NEEDS THIS AT ALL: the two roles are deliberately different configurations,
 // so an address resolving to "whichever replica" is an address for neither of them — a decoder has
@@ -158,13 +159,47 @@ func TestModelDeploymentService_RemovingARoleRemovesItsService(t *testing.T) {
 		"the removed role's Service goes with it")
 }
 
-// TestModelDeploymentService_SurvivesTheGroupRebuild pins the one interaction between T4 and T7.
+// TestModelDeploymentService_AReplicaServiceIsCreatedAndReclaimedWithItsReplica runs the whole
+// convergence rather than the renderer, because the question here is about the prune path: a
+// headless Service is derived from an ordinal, so scaling down has to reclaim the ones whose
+// ordinals the role no longer reaches.
 //
-// A replicas change deletes every Pod of the group and creates none until they are gone. A Service
-// rebuilt alongside them would drop its allocated ClusterIP, so every client that resolved the name
-// would be talking to an address nothing answers on -- for a change that was only ever about how
-// many replicas there are.
-func TestModelDeploymentService_SurvivesTheGroupRebuild(t *testing.T) {
+// THE SCALE-UP HALF IS THE CONTROL. Without it "the Services went away" is satisfied by a
+// convergence that never created them, which is the failure this case would otherwise report as a
+// pass.
+func TestModelDeploymentService_AReplicaServiceIsCreatedAndReclaimedWithItsReplica(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 2
+		md.Spec.Roles[0].Replicas = 3
+	})
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"qwen", "qwen-server", "qwen-server-r0", "qwen-server-r1", "qwen-server-r2",
+	}, serviceNames(t, cli), "each replica is published behind one headless Service of its own")
+
+	scaled := getModelDeployment(t, cli)
+	scaled.Spec.Roles[0].Replicas = 1
+	require.NoError(t, cli.Update(context.Background(), scaled))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"qwen", "qwen-server", "qwen-server-r0"}, serviceNames(t, cli),
+		"the ordinals the role no longer reaches take their addresses with them")
+}
+
+// TestModelDeploymentService_SurvivesAScale pins the one interaction between the Service and a
+// replicas change.
+//
+// A replicas change now trims or grows the affected role's ordinals and touches nothing else, but
+// the Service's obligation is unchanged: a scale must move its endpoints and leave the object
+// alone. A Service rebuilt alongside the replicas would drop its allocated ClusterIP, so every
+// client that resolved the name would be talking to an address nothing answers on -- for a change
+// that was only ever about how many replicas there are.
+func TestModelDeploymentService_SurvivesAScale(t *testing.T) {
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -175,8 +210,8 @@ func TestModelDeploymentService_SurvivesTheGroupRebuild(t *testing.T) {
 	grown.Spec.Roles[0].Replicas = 3
 	require.NoError(t, cli.Update(context.Background(), grown))
 
-	// The rebuild pass: the moved role's group is emptied and nothing is built back until it is
-	// gone, while the sibling role's Pods stay exactly where they were.
+	// The scaled role gains its third ordinal beside the two that stay, and the sibling role's Pods
+	// are nobody's cost -- a deployment is never left without replicas at all.
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	surviving := 0
@@ -188,7 +223,7 @@ func TestModelDeploymentService_SurvivesTheGroupRebuild(t *testing.T) {
 	require.Equal(t, 2, surviving, "the sibling role's Pods stay exactly where they were")
 
 	assert.Equal(t, []string{"qwen", "qwen-decode", "qwen-prefill"}, serviceNames(t, cli),
-		"a deployment with no replicas still has its addresses")
+		"a deployment mid-scale still has its addresses")
 	after := getModelDeploymentService(t, cli)
 	assert.Equal(t, before.UID, after.UID)
 	assert.Equal(t, before.ResourceVersion, after.ResourceVersion)
@@ -210,7 +245,77 @@ func TestRenderModelDeploymentService_SelectsExactlyTheRolesPods(t *testing.T) {
 		"a selector that followed the InstanceType would orphan every replica already running")
 }
 
-// TestRenderModelDeploymentService_Port covers both readings of F9's rule, including that the
+// TestRenderModelDeploymentServices_AboveOneMemberAddsAHeadlessServicePerReplica covers what a role
+// of multi-Member replicas is published as, and each assertion is aimed at a different way it could
+// be wrong.
+func TestRenderModelDeploymentServices_AboveOneMemberAddsAHeadlessServicePerReplica(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 2
+		md.Spec.Roles[0].Replicas = 3
+	})
+
+	svcs := renderModelDeploymentServices(md, nil)
+	names := make([]string, 0, len(svcs))
+	byName := make(map[string]*core.Service, len(svcs))
+	for _, svc := range svcs {
+		names = append(names, svc.Name)
+		byName[svc.Name] = svc
+	}
+
+	// ONE PER REPLICA, not one per role and not one per member.
+	assert.Equal(t, []string{
+		"qwen", "qwen-server", "qwen-server-r0", "qwen-server-r1", "qwen-server-r2",
+	}, names)
+
+	replica := byName["qwen-server-r0"]
+	require.NotNil(t, replica)
+	assert.Equal(t, core.ClusterIPNone, replica.Spec.ClusterIP,
+		"a ClusterIP would load-balance between members, which is the one thing a rank must not get")
+	assert.True(t, replica.Spec.PublishNotReadyAddresses,
+		"a member cannot become ready until it can reach the peers this record publishes")
+
+	// IT SELECTS ITS OWN REPLICA. Without the ordinal term every replica's Service fronts every
+	// member of the role, and a collective forms across instance boundaries -- which serves wrong
+	// answers rather than failing.
+	assert.Equal(t, "0", replica.Spec.Selector[modelDeploymentReplicaOrdinalLabel])
+	assert.Equal(t, "1", byName["qwen-server-r1"].Spec.Selector[modelDeploymentReplicaOrdinalLabel])
+	assert.NotContains(t, replica.Spec.Selector, modelDeploymentMemberIndexLabel,
+		"a replica's Service publishes ALL its members; narrowing to the leader would hide the peers")
+
+	// AND THE ROLE'S OWN SERVICE FRONTS ONLY LEADERS, because the other members serve no API.
+	assert.Equal(t, "0", byName["qwen-server"].Spec.Selector[modelDeploymentMemberIndexLabel])
+	assert.Equal(t, "0", byName["qwen"].Spec.Selector[modelDeploymentMemberIndexLabel])
+}
+
+// TestRenderModelDeploymentServices_AtSizeOneIsUnchanged is the control for the case above: the
+// shape that existed before multi-Member replicas must be untouched, asserted by comparison rather
+// than by reading the new code's intent.
+func TestRenderModelDeploymentServices_AtSizeOneIsUnchanged(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 3 })
+
+	svcs := renderModelDeploymentServices(md, nil)
+	names := make([]string, 0, len(svcs))
+	for _, svc := range svcs {
+		names = append(names, svc.Name)
+	}
+	assert.Equal(t, []string{"qwen", "qwen-server"}, names,
+		"a role of single-Member replicas gets no headless Service: there is nobody to address")
+
+	for _, svc := range svcs {
+		assert.NotContains(t, svc.Spec.Selector, modelDeploymentMemberIndexLabel,
+			"%s: single-Member replicas carry no member-index label, so a term on it selects nothing",
+			svc.Name)
+	}
+
+	// The endpoints still reach a rendered replica, which is what makes the absences above mean
+	// "unchanged" rather than "empty".
+	pod := renderOne(t, md, newRenderInstanceType())
+	for k, v := range svcs[0].Spec.Selector {
+		assert.Equal(t, v, pod.Labels[k], "the replica must carry selector label %s", k)
+	}
+}
+
+// TestRenderModelDeploymentService_Port covers both readings of the port rule, including that the
 // Service and the container behind it can never name different ports — they read one render.
 func TestRenderModelDeploymentService_Port(t *testing.T) {
 	testCases := []struct {
@@ -449,7 +554,7 @@ func TestModelDeploymentEndpointReadsEveryFlagTheEngineGets(t *testing.T) {
 			"cannot see it")
 }
 
-// TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService is F9's third acceptance. The
+// TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService pins what a scale owes it. The
 // Service holds an allocated ClusterIP that every client which resolved the name is still using, so
 // a scale must move its endpoints and leave the object alone.
 func TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService(t *testing.T) {
@@ -465,26 +570,22 @@ func TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService(t *testing.T
 	scaled.Spec.Roles[0].Replicas = 2
 	require.NoError(t, cli.Update(context.Background(), scaled))
 
-	// A replicas change rebuilds the group, so the scale takes two passes: the first deletes every
-	// Pod, the second creates the new set. The Service must survive BOTH -- the pass that leaves the
-	// deployment with no replicas at all is the one most likely to decide it has nothing to front.
+	// A replicas change trims the two highest ordinals in ONE pass -- no Pod that stays is deleted,
+	// no total any Pod declares moves, and nothing about the Service's Selector changes hands. The
+	// pass that removes replicas is the one most likely to decide it has nothing to front, which is
+	// what the assertions below are about.
 	*writes = modelDeploymentWrites{}
 	_, err = reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
-	require.Empty(t, replicaNames(t, cli), "the rebuild pass creates nothing")
-	assert.Zero(t, writes.creates, "and it recreates no Service either")
+	require.Len(t, replicaNames(t, cli), 2, "the trim is done in the same pass")
+	assert.Zero(t, writes.creates, "a trim creates nothing -- and no Service either")
+	assert.Equal(t, 2, writes.deletes, "the only deletes are the two departing replicas")
 
-	*writes = modelDeploymentWrites{}
-	_, err = reconcileModelDeployment(t, cli)
-	require.NoError(t, err)
-
-	require.Len(t, replicaNames(t, cli), 2, "the replicas moved")
 	after := getModelDeploymentService(t, cli)
 	assert.Equal(t, before.UID, after.UID)
 	assert.Equal(t, before.ResourceVersion, after.ResourceVersion,
 		"and the Service was not touched at all")
-	assert.Equal(t, 2, writes.creates, "the only creates are the two replicas")
 }
 
 // TestAlignModelDeploymentService covers what convergence corrects and what it must leave alone.

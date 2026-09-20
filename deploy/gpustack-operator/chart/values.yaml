@@ -433,7 +433,7 @@ migrate:
   # the image it does run.
   image: {}
 
-# -- [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.4).
+# -- [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.9).
 # @default -- see the `kueue.*` keys below
 kueue:
   # -- Deploy the bundled Kueue.
@@ -482,7 +482,7 @@ kueue:
         repository: docker.io/gpustack/mirrored-kueue
         # -- Kueue controller manager image tag, stated rather than inherited so a subchart
         # bump cannot move the image without the diff showing it.
-        tag: v0.18.4
+        tag: v0.18.9
         # @schema
         # enum: [Always, IfNotPresent, Never]
         # @schema

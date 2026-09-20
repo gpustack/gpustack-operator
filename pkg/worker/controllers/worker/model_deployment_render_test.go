@@ -2,6 +2,9 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -1215,8 +1218,8 @@ func TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput(t *testing.T) {
 	}
 }
 
-// TestRenderModelDeploymentPod_ConfigChangeMovesTheSpecHash is the rollout property T14 exists for,
-// and the one a ConfigMap carrier could not have delivered.
+// TestRenderModelDeploymentPod_ConfigChangeMovesTheSpecHash is the rollout property a ConfigMap
+// carrier could not have delivered.
 //
 // A ConfigMap reaches a Pod as a NAME, so re-rendering its contents leaves core.PodSpec
 // byte-identical while the hash's subject is {Labels, Annotations, PodSpec}. The hash would not
@@ -1593,6 +1596,538 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 				"the startup gate carries the load window that readiness must not have to tolerate")
 			assert.Greater(t, c.LivenessProbe.FailureThreshold, c.ReadinessProbe.FailureThreshold,
 				"a restart throws away a loaded model, so it must cost more than losing readiness")
+		})
+	}
+}
+
+// TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender pins the WHOLE rendered
+// Pod -- serialized and digested, not field-picked -- for one input off every branch of the
+// renderer. The other cases in this file assert the fields they exist for, so a refactor of the
+// render path could drop a field no case reads and every one of them would stay green; this is the
+// case that cannot, because it compares the bytes of everything at once.
+//
+// THE ORIGINAL DIGESTS WERE CAPTURED FROM THE RENDERER AS IT STOOD BEFORE IT WAS SPLIT into a
+// template half and a stamp half, and that split had to reproduce every one of them exactly. The
+// table has been RE-BASELINED twice since, each time for a rendering change that was intended: once
+// for the per-replica groups, where the stamp began naming a (role, ordinal) group, declaring a
+// total of one and writing the ordinal label; and once when the ordinal label's key took the
+// modeldeployment prefix the role-kind label and the spec-hash annotation already carry, so that one
+// reader looking for this deployment's own keys finds all of them under one prefix. Every digest
+// here moved by intent rather than by drift. Each case renders ORDINAL ZERO -- the composite's zero value --
+// which is the one ordinal a digest can name without the table growing a dimension. To re-baseline
+// after an intended rendering change: empty the table, run this case, and pin the digests the
+// failures print.
+func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
+	pinned := map[string]string{
+		"a sole server role": "08f52247437b4925743d5b85ca010ac92f368391830cb5919e5f70fd6afd20c4",
+		"a sole server role with a synthesized cache connector":                              "2cb69c356d261024050512e2dcfdc297fdd914c96afd4d7c45aefde826b86098",
+		"a take-over role carrying a connector it must be given no part of":                  "42167cb00627d2d60bf26037123022df6e5a87973cdd5f40c15bf8123f7563a0",
+		"a direct decoder with a native routing sidecar":                                     "b4f7264275ec32c44c8ac81ec5e37a687ed092e0fb438d331e6f27d2477ea5c2",
+		"a direct decoder with a classic routing sidecar":                                    "1eb4e27a1f76ecd9ee7aa00ff11be477c525c6b767811ed3c427e5e18f5944cd",
+		"a role naming no image, synthesized from the observed hardware":                     "27b030d0cabb28c902f2be94112a313a4d51dab96c62f91bd650e09d3a0b9d7b",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "6f3b9d8fc490e9c9b35446813b2616ba917e7e7031e483e1cdee6cd26759bcbb",
+		"the prefill role of a two-role deployment":                                          "29cc6963fec2503f0921a99b38256c9e9e0086a99d4ff399f913ba8c16fea959",
+		"the decode role of a two-role deployment":                                           "6179eb90c879011839f4d422b2e4654795738e64c5d2c272e4440c51eca4a442",
+	}
+
+	// newPinnedInput builds the render input the way the reconciler does: the deployment and its
+	// role as one object, the InstanceType resolved beside it. Every case calls its builder again
+	// for a second render rather than reusing one Pod, so a digest also states that two renders of
+	// one input agree -- reusing an object would state nothing a copy had not already said.
+	newPinnedInput := func(
+		t *testing.T, roleIndex int, mutate ...func(*workercore.ModelDeployment),
+	) ModelDeploymentRenderInput {
+		t.Helper()
+
+		md := newRenderDeployment(mutate...)
+
+		return ModelDeploymentRenderInput{
+			Deployment:   md,
+			Role:         &md.Spec.Roles[roleIndex],
+			InstanceType: newRenderInstanceType(),
+		}
+	}
+
+	synthesizedConnector := func(t *testing.T) ModelDeploymentConnectorRender {
+		t.Helper()
+
+		conn, err := SynthesizeModelDeploymentConnector(
+			connectorInput(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA))
+		require.NoError(t, err)
+
+		return conn
+	}
+
+	testCases := []struct {
+		name  string
+		input func(*testing.T) ModelDeploymentRenderInput
+	}{
+		{
+			name:  "a sole server role",
+			input: func(t *testing.T) ModelDeploymentRenderInput { return newPinnedInput(t, 0) },
+		},
+		{
+			name: "a sole server role with a synthesized cache connector",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				in := newPinnedInput(t, 0)
+				in.Connector = synthesizedConnector(t)
+
+				return in
+			},
+		},
+		{
+			name: "a take-over role carrying a connector it must be given no part of",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				in := newPinnedInput(t, 0, func(md *workercore.ModelDeployment) {
+					md.Spec.Roles[0].Command = []string{"/bin/my-server", "--flag"}
+				})
+				in.Connector = synthesizedConnector(t)
+
+				return in
+			},
+		},
+		{
+			name: "a direct decoder with a native routing sidecar",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				in := newPinnedInput(t, 0, func(md *workercore.ModelDeployment) {
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+					md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{
+						Protocol: core.ProtocolTCP, Port: 8000,
+					}}
+				})
+				in.Connector = ModelDeploymentConnectorRender{
+					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+				}
+				in.NativeSidecar = true
+
+				return in
+			},
+		},
+		{
+			name: "a direct decoder with a classic routing sidecar",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				in := newPinnedInput(t, 0, func(md *workercore.ModelDeployment) {
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+					md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{
+						Protocol: core.ProtocolTCP, Port: 8000,
+					}}
+				})
+				in.Connector = ModelDeploymentConnectorRender{
+					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+				}
+				in.NativeSidecar = false
+
+				return in
+			},
+		},
+		{
+			name: "a role naming no image, synthesized from the observed hardware",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				return newPinnedInput(t, 0, func(md *workercore.ModelDeployment) {
+					md.Spec.Roles[0].Image = ""
+				})
+			},
+		},
+		{
+			name: "a TLS-listening role with declared ports, privileges, a runtime class and a volume",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				in := newPinnedInput(t, 0, func(md *workercore.ModelDeployment) {
+					md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{
+						Protocol: core.ProtocolTCP, Port: 9000,
+					}}
+					md.Spec.Roles[0].ExtraArgs = []string{"--ssl-certfile", "/etc/tls/tls.crt"}
+					md.Spec.Roles[0].Privileged = true
+					md.Spec.Roles[0].AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{{
+						MountPath: "/models",
+						HostPath:  &core.HostPathVolumeSource{Path: "/mnt/models"},
+					}}
+				})
+				in.RuntimeClassName = "nvidia"
+
+				return in
+			},
+		},
+		{
+			name: "the prefill role of a two-role deployment",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				return newPinnedInput(t, 0, twoRoleDeploymentMutations()...)
+			},
+		},
+		{
+			name: "the decode role of a two-role deployment",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				return newPinnedInput(t, 1, twoRoleDeploymentMutations()...)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod, err := renderModelDeploymentPod(context.Background(), tc.input(t))
+			require.NoError(t, err)
+
+			encoded, err := json.Marshal(pod)
+			require.NoError(t, err)
+			sum := sha256.Sum256(encoded)
+			digest := hex.EncodeToString(sum[:])
+
+			want, ok := pinned[tc.name]
+			if !ok {
+				t.Fatalf("no pinned digest for %q; the digest this build produces is %s -- pin it in the table", tc.name, digest)
+			}
+			assert.Equal(t, want, digest)
+		})
+	}
+}
+
+// twoRoleDeploymentMutations turns the single-role fixture into a prefill/decode pair, keeping the
+// second role on the same InstanceType so both halves render rather than one failing to size.
+func twoRoleDeploymentMutations() []func(*workercore.ModelDeployment) {
+	return []func(*workercore.ModelDeployment){
+		func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Name = "prefill"
+			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+		},
+		func(md *workercore.ModelDeployment) {
+			md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+				Name:         "decode",
+				Replicas:     2,
+				InstanceType: "h20-8x",
+				Kind:         workercore.ModelDeploymentRoleKindDecode,
+				Image:        "vllm/vllm-openai:v0.25.1",
+			})
+		},
+	}
+}
+
+// TestRenderModelDeploymentPod_TemplateCarriesNoGroupMetadataOrHash states the boundary the split
+// exists to enforce: the template half renders what a role's spec states and NOTHING that names one
+// replica's group membership or fingerprint, and the stamp half is what puts those on.
+//
+// BOTH HALVES ARE NEEDED OR THE CASE PROVES NOTHING. "The template lacks these keys" is true of a
+// template that renders nothing at all, so beside the absences stand presences: the template's own
+// output carries the metadata it IS responsible for, and the same Pod -- stamped -- carries all
+// four keys it is not. A per-replica value leaking into the template is also silent: it renders a
+// wrong Pod rather than erroring, which is why the boundary is asserted here rather than left to
+// placement.
+//
+// The Kueue keys are spelled literally rather than read off the constants because a constant that
+// drifted would satisfy an assertion built from it while the real key rode through the template.
+func TestRenderModelDeploymentPod_TemplateCarriesNoGroupMetadataOrHash(t *testing.T) {
+	md := newRenderDeployment()
+	role := &md.Spec.Roles[0]
+
+	template, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+		Deployment:   md,
+		Role:         role,
+		InstanceType: newRenderInstanceType(),
+	})
+	require.NoError(t, err)
+
+	assert.NotContains(t, template.Labels, "kueue.x-k8s.io/pod-group-name")
+	assert.NotContains(t, template.Labels, modelDeploymentReplicaOrdinalLabel)
+	assert.NotContains(t, template.Annotations, "kueue.x-k8s.io/pod-group-total-count")
+	assert.NotContains(t, template.Annotations, "kueue.x-k8s.io/role-hash")
+	assert.NotContains(t, template.Annotations, modelDeploymentPodSpecHashAnnotation)
+
+	// The positive baseline for the absences above: this is a rendered template, not an empty one,
+	// and it carries the metadata of its own -- the identity labels, the resource note a watch
+	// filters on, the controller reference that makes the Pod ours.
+	assert.Equal(t, "qwen-server-", template.GenerateName)
+	require.Len(t, template.Spec.Containers, 1)
+	require.Len(t, template.OwnerReferences, 1)
+	assert.True(t, systemmeta.MatchResource(template, ModelDeploymentResourceType))
+
+	stampModelDeploymentPod(template, md, role, 0, 0)
+
+	assert.Equal(t, modelDeploymentReplicaGroupName(md, role.Name, 0),
+		template.Labels["kueue.x-k8s.io/pod-group-name"],
+		"a replica's group is its own: the name is derived for its (role, ordinal) alone")
+	assert.Equal(t, "1", template.Annotations["kueue.x-k8s.io/pod-group-total-count"],
+		"the group declares one member: the replica the stamp names")
+	assert.Equal(t, "0", template.Labels[modelDeploymentReplicaOrdinalLabel],
+		"the ordinal is stamped beside the membership it derives")
+	assert.Equal(t, "server", template.Annotations["kueue.x-k8s.io/role-hash"],
+		"the role hash stays the role's own name")
+	assert.Contains(t, template.Annotations, modelDeploymentPodSpecHashAnnotation)
+}
+
+// TestStampModelDeploymentPod_AboveOneMemberNamesAndAddressesEachMember covers what the stamp does
+// once a replica is more than one Pod, and the assertions are chosen so that each one fails for a
+// different reason.
+//
+// THE MEMBERS MUST SHARE A GROUP AND DIFFER IN NOTHING ELSE THE RENDER CONTROLS. Sharing the group
+// is what makes them one admission; differing only in name, hostname and member index is what keeps
+// the template comparable, which is the Boundaries invariant at this size.
+func TestStampModelDeploymentPod_AboveOneMemberNamesAndAddressesEachMember(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 3
+	})
+	role := &md.Spec.Roles[0]
+
+	stamp := func(ordinal, member int) *core.Pod {
+		t.Helper()
+
+		pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: role, InstanceType: newRenderInstanceType(),
+		})
+		require.NoError(t, err)
+		stampModelDeploymentPod(pod, md, role, ordinal, member)
+
+		return pod
+	}
+
+	leader, worker := stamp(0, 0), stamp(0, 1)
+
+	// The name is DERIVED, which is what lets a sibling address it before it exists. GenerateName
+	// is cleared with it: a Pod carrying both would be named by the API server and the derived name
+	// would be the one nobody could reach.
+	assert.Equal(t, "qwen-server-r0-m0", leader.Name)
+	assert.Equal(t, "qwen-server-r0-m1", worker.Name)
+	assert.Empty(t, leader.GenerateName)
+
+	// hostname and subdomain are what make the name resolvable, and the subdomain is the SAME for
+	// both -- it names the replica's headless Service, which is the thing they are published behind.
+	assert.Equal(t, "qwen-server-r0-m0", leader.Spec.Hostname)
+	assert.Equal(t, "qwen-server-r0-m1", worker.Spec.Hostname)
+	assert.Equal(t, "qwen-server-r0", leader.Spec.Subdomain)
+	assert.Equal(t, leader.Spec.Subdomain, worker.Spec.Subdomain)
+
+	// ONE GROUP, DECLARING ALL THREE. This is the assertion that makes them one admission rather
+	// than three, and the total is the role's size rather than the count of members stamped so far.
+	assert.Equal(t, leader.Labels["kueue.x-k8s.io/pod-group-name"],
+		worker.Labels["kueue.x-k8s.io/pod-group-name"],
+		"members of one replica share its group: they are admitted together or not at all")
+	assert.Equal(t, "3", leader.Annotations["kueue.x-k8s.io/pod-group-total-count"])
+	assert.Equal(t, "3", worker.Annotations["kueue.x-k8s.io/pod-group-total-count"])
+	assert.Equal(t, "server", leader.Annotations["kueue.x-k8s.io/role-hash"],
+		"the role hash names the PodSet, so it stays the role's -- the member index is not in it")
+	assert.Equal(t, leader.Annotations["kueue.x-k8s.io/role-hash"],
+		worker.Annotations["kueue.x-k8s.io/role-hash"])
+
+	// The index is a LABEL, because a Service selector has to be able to match the leader and a
+	// selector cannot express "the Pod whose name ends in -m0".
+	assert.Equal(t, "0", leader.Labels[modelDeploymentMemberIndexLabel])
+	assert.Equal(t, "1", worker.Labels[modelDeploymentMemberIndexLabel])
+
+	// A SECOND REPLICA SHARES NOTHING OF THE FIRST'S IDENTITY, which is Goal 1 at this size: its
+	// members are named apart and its group is its own, so neither replica's admission touches the
+	// other's.
+	second := stamp(1, 0)
+	assert.Equal(t, "qwen-server-r1-m0", second.Name)
+	assert.Equal(t, "qwen-server-r1", second.Spec.Subdomain)
+	assert.NotEqual(t, leader.Labels["kueue.x-k8s.io/pod-group-name"],
+		second.Labels["kueue.x-k8s.io/pod-group-name"])
+}
+
+// TestStampModelDeploymentPod_MembersOfAReplicaDifferOnlyInTheirIdentity is the Boundaries invariant
+// stated at the size where it is least obvious.
+//
+// THE CONTAINER SPEC IS WHERE A RANK LAYOUT WOULD LEAK IN, and the whole reason the member index
+// travels as a label is that a renderer writing it into env instead would make two members of one
+// replica hash differently -- and every member would then read as a pending rollout, forever, with
+// nothing erroring. So the comparison is on the serialized PodSpec with the two per-member fields
+// blanked: anything else that differs is a defect this case exists to name.
+func TestStampModelDeploymentPod_MembersOfAReplicaDifferOnlyInTheirIdentity(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 4
+	})
+	role := &md.Spec.Roles[0]
+
+	specOf := func(member int) string {
+		t.Helper()
+
+		pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: role, InstanceType: newRenderInstanceType(),
+		})
+		require.NoError(t, err)
+		stampModelDeploymentPod(pod, md, role, 0, member)
+
+		// The two fields the stamp is ALLOWED to vary per member. Blanking them is what makes the
+		// comparison discriminating rather than vacuous: without it the test would be asserting
+		// that two different Pods are different.
+		pod.Spec.Hostname = ""
+
+		encoded, err := json.Marshal(pod.Spec)
+		require.NoError(t, err)
+
+		return string(encoded)
+	}
+
+	first := specOf(0)
+	for member := 1; member < 4; member++ {
+		assert.Equal(t, first, specOf(member),
+			"member %d's PodSpec differs from the leader's beyond its hostname: "+
+				"a per-member value has leaked into the render", member)
+	}
+}
+
+// renderStampedMember is one member of one replica, rendered and stamped the way the converger does.
+func renderStampedMember(
+	t *testing.T, md *workercore.ModelDeployment, ordinal, member int,
+) *core.Pod {
+	t.Helper()
+
+	pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+	})
+	require.NoError(t, err)
+	stampModelDeploymentPod(pod, md, &md.Spec.Roles[0], ordinal, member)
+
+	return pod
+}
+
+// mainContainerEnv is the main container's environment, keyed by name. It fails rather than returns
+// empty when there is no main container: an assertion over a map nobody filled passes for "the
+// variable is absent" and for "the container this test is about was renamed".
+func mainContainerEnv(t *testing.T, pod *core.Pod) map[string]core.EnvVar {
+	t.Helper()
+
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name != modelDeploymentMainContainerName {
+			continue
+		}
+		env := make(map[string]core.EnvVar, len(pod.Spec.Containers[i].Env))
+		for _, e := range pod.Spec.Containers[i].Env {
+			env[e.Name] = e
+		}
+
+		return env
+	}
+	require.FailNow(t, "the rendered Pod carries no main container")
+
+	return nil
+}
+
+// TestStampModelDeploymentPod_AMultiMemberInstancePublishesItsRankLayout is the rank layout an
+// instance of several Pods hands its engine: who to talk to, how many there are, and which one this
+// is.
+//
+// THE INDEX IS ASSERTED AS A fieldRef AND NEVER AS A VALUE, which is the half a test reading only
+// the resolved rank would miss. A literal index would satisfy "the container knows its rank" while
+// making the container spec a per-member document -- and the invariant that one template describes a
+// whole replica is what the sibling case above measures.
+func TestStampModelDeploymentPod_AMultiMemberInstancePublishesItsRankLayout(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 3
+	})
+
+	env := mainContainerEnv(t, renderStampedMember(t, md, 2, 1))
+
+	assert.Equal(t, "qwen-server-r2-m0.qwen-server-r2",
+		env[modelDeploymentLeaderAddressEnv].Value,
+		"the leader address names member zero of THIS replica under its own headless Service")
+	assert.Equal(t, "3", env[modelDeploymentReplicaSizeEnv].Value,
+		"the size is the role's, not the deployment's replica count")
+
+	index := env[modelDeploymentMemberIndexEnv]
+	assert.Empty(t, index.Value,
+		"the index is read from the label rather than written in, so no literal belongs here")
+	require.NotNil(t, index.ValueFrom, "the index carries no source at all")
+	require.NotNil(t, index.ValueFrom.FieldRef, "the index's source is not a downward-API fieldRef")
+	assert.Equal(t, "metadata.labels['"+modelDeploymentMemberIndexLabel+"']",
+		index.ValueFrom.FieldRef.FieldPath,
+		"the fieldRef names a different key than the one the stamp writes, so it resolves to nothing")
+
+	// THE LABEL THE fieldRef POINTS AT HAS TO BE THERE. The kubelet fails the Pod on a fieldRef to a
+	// label that does not exist, so the two halves are one fact and a test of either alone passes
+	// while the Pod cannot start.
+	assert.Equal(t, "1", renderStampedMember(t, md, 2, 1).Labels[modelDeploymentMemberIndexLabel],
+		"the member index label the fieldRef reads is missing or holds the wrong member")
+}
+
+// TestStampModelDeploymentPod_ASingleMemberInstancePublishesNoRankLayout states the rule the pinned
+// digest enforces but does not explain: at size one there is no collective, so there is no rank.
+//
+// It is not redundant with that digest. The digest fails on ANY difference and names none of them,
+// so it reports "the render moved" where this reports which promise was broken.
+func TestStampModelDeploymentPod_ASingleMemberInstancePublishesNoRankLayout(t *testing.T) {
+	env := mainContainerEnv(t, renderStampedMember(t, newRenderDeployment(), 0, 0))
+
+	for _, name := range modelDeploymentRankEnvNames {
+		assert.NotContains(t, env, name,
+			"a single-Pod instance carries %s, which no engine can act on and which moves the "+
+				"fingerprint of every deployment that never asked for a multi-Pod instance", name)
+	}
+}
+
+// TestRenderModelDeploymentPodTemplate_RendersTwoReplicasOfOneRoleIdentical is the invariant that
+// keeps replica identity out of the render path: two replicas of one role receive the SAME
+// template.
+//
+// THE INPUT IS THE ONLY ROAD A REPLICA'S IDENTITY COULD TAKE, and it carries none today -- the
+// render takes no ordinal and no name -- so "two replicas of one role" is the same fixture rendered
+// twice, from freshly built inputs the way two reconcile passes would build them. The comparison is
+// on serialized bytes rather than picked fields, because a difference in a field no assertion reads
+// is exactly the difference this case exists to catch.
+func TestRenderModelDeploymentPodTemplate_RendersTwoReplicasOfOneRoleIdentical(t *testing.T) {
+	testCases := []struct {
+		name  string
+		input func(*testing.T) ModelDeploymentRenderInput
+	}{
+		{
+			name: "a server role",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				md := newRenderDeployment()
+
+				return ModelDeploymentRenderInput{
+					Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				}
+			},
+		},
+		{
+			name: "a direct decoder with a native routing sidecar",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+					md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{
+						Protocol: core.ProtocolTCP, Port: 8000,
+					}}
+				})
+
+				return ModelDeploymentRenderInput{
+					Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+					Connector: ModelDeploymentConnectorRender{
+						Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+					},
+					NativeSidecar: true,
+				}
+			},
+		},
+		{
+			name: "a take-over role",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.Roles[0].Command = []string{"/bin/my-server", "--flag"}
+				})
+
+				return ModelDeploymentRenderInput{
+					Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				}
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			first, err := renderModelDeploymentPodTemplate(context.Background(), tc.input(t))
+			require.NoError(t, err)
+			second, err := renderModelDeploymentPodTemplate(context.Background(), tc.input(t))
+			require.NoError(t, err)
+
+			// The baseline the comparison needs: the template rendered a Pod, or equality below
+			// would hold between two empty objects and prove nothing.
+			require.Len(t, first.Spec.Containers, 1)
+
+			firstJSON, err := json.Marshal(first)
+			require.NoError(t, err)
+			secondJSON, err := json.Marshal(second)
+			require.NoError(t, err)
+
+			assert.Equal(t, string(firstJSON), string(secondJSON))
 		})
 	}
 }

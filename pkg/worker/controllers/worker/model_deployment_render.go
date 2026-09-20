@@ -81,6 +81,25 @@ const (
 	modelDeploymentDefaultPortName = "http"
 	// A managed decoder's routing proxy owns the serving port, while vLLM listens behind it here.
 	modelDeploymentInternalPort int32 = 8200
+	// modelDeploymentMainContainerName is the container the role's own image and command run in,
+	// and the only one a rank belongs to: every other container a Pod here carries is this
+	// operator's, and joins no collective.
+	modelDeploymentMainContainerName = "main"
+
+	// modelDeploymentLeaderAddressEnv, modelDeploymentReplicaSizeEnv and
+	// modelDeploymentMemberIndexEnv publish the rank layout of an instance that spans several Pods.
+	// They appear only above size one, so a single-Pod instance renders exactly as it did before
+	// the field existed.
+	//
+	// THEY ARE OWNED FOR EVERY ENGINE, unlike the connector's keys, because they describe the
+	// Kubernetes shape the Pod was rendered in rather than anything one engine understands. The
+	// ownership is not a preference: a user entry of the same name would be merged by VALUE onto an
+	// entry that carries a fieldRef instead, and an EnvVar holding both is rejected by the API
+	// server -- so an unowned key here turns a legal deployment into one that cannot render.
+	modelDeploymentLeaderAddressEnv = "GPUSTACK_REPLICA_LEADER_ADDRESS"
+	modelDeploymentReplicaSizeEnv   = "GPUSTACK_REPLICA_SIZE"
+	modelDeploymentMemberIndexEnv   = "GPUSTACK_MEMBER_INDEX"
+
 	// modelDeploymentEngineHostArg and modelDeploymentEnginePortArg are the two flags that decide
 	// where an engine listens. They are FILLED RATHER THAN OWNED: a role that passes either one
 	// keeps its own value, which is the rule the non-Kubernetes worker applies to the same two flags.
@@ -222,6 +241,19 @@ type ModelDeploymentRenderInput struct {
 	// cluster's version rather than the render guessing, because the field is DROPPED without an
 	// error below 1.29, and a Pod rendered with it there never leaves Init.
 	NativeSidecar bool
+	// Ordinal is the replica this render is for, stamped into the group metadata. The template
+	// half never reads it -- only the stamp does -- and the zero value renders the first replica,
+	// which is what a caller with no particular replica in mind gets.
+	Ordinal int
+
+	// Member is which Pod of that replica this render is for, counting from zero. It is stamped,
+	// never templated, for the same reason Ordinal is: the template is what every Pod of the role
+	// shares, and a value naming one Pod inside it would make two members of one replica hash
+	// differently and read as a permanent rollout.
+	//
+	// The zero value is the leader, which is what a caller with no particular member in mind gets
+	// and is also the only member a replica of size one has.
+	Member int
 }
 
 // modelDeploymentSelectorLabels is what fronts a role's replicas: the identity of the deployment and
@@ -238,11 +270,37 @@ func modelDeploymentSelectorLabels(
 
 // renderModelDeploymentPod renders one replica.
 //
+// It composes the two halves a replica's Pod is built in: the template, which produces everything
+// the role's spec states, and the stamp, which puts the Kueue group metadata and the spec-hash
+// fingerprint on afterwards. The boundary is the load-bearing part -- the template is what every
+// replica of a role shares, so nothing that names one member may be produced inside it.
+//
 // It returns an error rather than a best-effort Pod whenever the request cannot be sized — an
 // InstanceType whose accelerator detail has not been computed yet, a role with no image. Falling
 // back to a whole-card or an empty request would produce a Pod that runs and charges the wrong
 // quota, which is the failure this whole path exists to avoid.
 func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput) (*core.Pod, error) {
+	pod, err := renderModelDeploymentPodTemplate(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+
+	stampModelDeploymentPod(pod, in.Deployment, in.Role, in.Ordinal, in.Member)
+
+	return pod, nil
+}
+
+// renderModelDeploymentPodTemplate renders the whole of a replica's Pod that its role's spec
+// states: the labels, the annotations, the PodSpec and every container in it.
+//
+// IT PRODUCES NOTHING THAT VARIES FROM ONE REPLICA OF A ROLE TO THE NEXT, and that is the property
+// the split into a template and a stamp exists to keep checkable: the Kueue group metadata and the
+// spec-hash fingerprint are stamped on afterwards, because a per-replica group name differs between
+// the members of one role, and a value naming one member leaking into this function would render
+// each replica a different Pod with nothing erroring anywhere. The connector's PodAnnotations are
+// written here rather than in the stamp because they carry the pool's endpoint and domain, which
+// every replica of the role shares.
+func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRenderInput) (*core.Pod, error) {
 	md, role := in.Deployment, in.Role
 
 	// A STATED IMAGE ALWAYS WINS, and synthesis is the fallback rather than the rule: it is how a
@@ -369,7 +427,7 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 	}
 
 	mainC := core.Container{
-		Name:            "main",
+		Name:            modelDeploymentMainContainerName,
 		Image:           image,
 		ImagePullPolicy: role.ImagePullPolicy,
 		Command:         command,
@@ -444,32 +502,12 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 	})
 	kubemeta.ControlOnWithoutBlock(pod, md, workercore.SchemeGroupVersionKind("ModelDeployment"))
 
-	// The Kueue group metadata, which is what makes the replicas of one role ONE Workload rather
-	// than one Workload each. It goes on here, before the fingerprint, for the same reason the
-	// connector's annotations do: the group's declared total is one of the values a spec change
-	// moves, and a fingerprint blind to it would leave every replica declaring a size the deployment
-	// no longer has.
-	//
-	// The labels and the annotations are applied together because the group's own type returns them
-	// together -- a Pod carrying the membership label without the total count joins a group whose
-	// size Kueue cannot learn, and no Workload is composed at all.
-	group := ModelDeploymentPodGroup(md, role)
-	for k, v := range group.Labels {
-		pod.Labels[k] = v
-	}
-	if pod.Annotations == nil {
-		pod.Annotations = make(map[string]string, len(group.Annotations)+1)
-	}
-	for k, v := range group.Annotations {
-		pod.Annotations[k] = v
-	}
-
-	// THE CONNECTOR'S ANNOTATIONS GO ON BEFORE THE FINGERPRINT, and the order is the whole reason
-	// this carrier works. The client configuration lives in one of these annotations rather than in
-	// a ConfigMap, and the fingerprint below covers {Labels, Annotations, PodSpec} -- so changing
-	// the pool endpoint or the domain moves the hash and the replicas are recreated to pick it up.
-	// Moving this after the fingerprint would leave the hash blind to the configuration and every
-	// replica holding a stale one, with nothing failing.
+	// THE CONNECTOR'S ANNOTATIONS ARE TEMPLATE OUTPUT, AND THE FINGERPRINT THE STAMP WRITES OVER
+	// THIS POD IS THE WHOLE REASON THE CARRIER WORKS. The client configuration lives in one of
+	// these annotations rather than in a ConfigMap, and the fingerprint covers {Labels, Annotations,
+	// PodSpec} -- so changing the pool endpoint or the domain moves the hash and the replicas are
+	// recreated to pick it up. Stamping them after that fingerprint instead would leave the hash
+	// blind to the configuration and every replica holding a stale one, with nothing failing.
 	//
 	// Gated on the same take-over check as the volume that projects them: a role that replaced the
 	// command line gets no part of the connector, and half of it would be worse than none.
@@ -482,14 +520,122 @@ func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput
 		}
 	}
 
+	return pod, nil
+}
+
+// stampModelDeploymentPod puts the Kueue group metadata on a rendered replica and then writes the
+// spec-hash fingerprint, in that order. The fingerprint covers the labels and annotations it finds
+// on the Pod, so writing it before the group metadata would leave it blind to a change that moves
+// only the group -- a replica whose role was renamed would keep its old fingerprint and never be
+// seen as outdated.
+func stampModelDeploymentPod(
+	pod *core.Pod, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	ordinal, member int,
+) {
+	// THE NAME IS DERIVED RATHER THAN GENERATED, above size one, and that is what the whole
+	// multi-Member shape rests on: a member cannot join a collective it cannot address, and a Pod
+	// created by GenerateName has no name any sibling can predict. Every reader -- this renderer,
+	// the converger, a sibling's entrypoint -- derives the same string from the same four values
+	// without reading anything.
+	//
+	// AT SIZE ONE THE NAME STAYS GENERATED, deliberately. A replica's identity is obtained from its
+	// ordinal label rather than from its name, so naming single-Member replicas would buy nothing
+	// and would cost the one thing GenerateName gives: a create that cannot collide with a Pod of
+	// the same ordinal still draining, which is exactly the state the converger's create gate waits
+	// out. Above one the collision is unavoidable -- the address IS the name -- and the gate is
+	// what handles it instead.
+	if modelDeploymentRoleSize(role) > 1 {
+		pod.Name = modelDeploymentMemberName(md, role.Name, ordinal, member)
+		pod.GenerateName = ""
+
+		// hostname and subdomain are what turn that name into a DNS record: the headless Service
+		// named here publishes <hostname>.<subdomain> for every Pod that names it, which is
+		// core/v1 behavior owing nothing to any controller.
+		pod.Spec.Hostname = pod.Name
+		pod.Spec.Subdomain = modelDeploymentReplicaServiceName(md, role.Name, ordinal)
+
+		stampModelDeploymentRankEnv(pod, md, role, ordinal)
+	}
+
+	// The Kueue group metadata, which is what makes a replica's admission unit that replica alone:
+	// the group name is derived per (role, ordinal), so each Pod joins its own one-member group.
+	// It goes on before the fingerprint below, for the same reason the connector's annotations do:
+	// the group name and the ordinal are two of the values a spec change or a scale moves, and a
+	// fingerprint blind to them would leave every replica declaring a membership the deployment no
+	// longer asks for.
+	//
+	// The labels and the annotations are applied together because the group's own type returns them
+	// together -- a Pod carrying the membership label without the total count joins a group whose
+	// size Kueue cannot learn, and no Workload is composed at all.
+	group := ModelDeploymentPodGroup(md, role, ordinal, member)
+	for k, v := range group.Labels {
+		pod.Labels[k] = v
+	}
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string, len(group.Annotations)+1)
+	}
+	for k, v := range group.Annotations {
+		pod.Annotations[k] = v
+	}
+
 	// The fingerprint is written last so that it covers everything above it, and it is read back on
 	// every pass to decide whether a running replica was built from the current spec.
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string, 1)
 	}
 	pod.Annotations[modelDeploymentPodSpecHashAnnotation] = modelDeploymentPodSpecHash(pod)
+}
 
-	return pod, nil
+// stampModelDeploymentRankEnv publishes the three facts a member needs to join its collective: who
+// the leader is, how many members there are, and which one this is.
+//
+// IT PUBLISHES FACTS AND COMPOSES NO ARGUMENT. Which parallelism an engine turns on, and over how
+// many ranks, stays the author's to say: the member count is a product of degrees that cannot be
+// decomposed from one number, so a formula here would be a guess that runs instead of an error.
+//
+// THE INDEX COMES THROUGH THE DOWNWARD API RATHER THAN AS A LITERAL, and that is what keeps one
+// template per ReplicaGroup: every member's container declares the same `fieldRef`, so the three
+// entries are byte-identical across the members of a replica and only the label the stamp already
+// wrote differs. Writing the index as a literal would work -- a live Pod is compared against the
+// render of its own member index, not its replica's -- but it would make the container spec a
+// per-member document, and the Boundaries invariant that one template describes a whole replica is
+// worth more than the two lines it saves.
+//
+// ONLY THE MAIN CONTAINER IS STAMPED. The routing proxy is this operator's own sidecar and joins no
+// collective; giving it ranks would describe a membership nothing acts on.
+//
+// A ROLE THAT TOOK OVER ITS COMMAND LINE IS STAMPED TOO, which is where the connector's rule does
+// NOT carry over. The connector's entries name a config file the operator also wrote, so a take-over
+// argv that never reads it has no use for them; these describe the cluster the Pod is running in, and
+// an entrypoint composing its own launch is exactly what needs them.
+func stampModelDeploymentRankEnv(
+	pod *core.Pod, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, ordinal int,
+) {
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name != modelDeploymentMainContainerName {
+			continue
+		}
+		pod.Spec.Containers[i].Env = append(pod.Spec.Containers[i].Env,
+			core.EnvVar{
+				Name: modelDeploymentLeaderAddressEnv,
+				Value: modelDeploymentMemberName(
+					md, role.Name, ordinal, modelDeploymentLeaderMemberIndex) +
+					"." + modelDeploymentReplicaServiceName(md, role.Name, ordinal),
+			},
+			core.EnvVar{
+				Name:  modelDeploymentReplicaSizeEnv,
+				Value: strconv.Itoa(modelDeploymentRoleSize(role)),
+			},
+			core.EnvVar{
+				Name: modelDeploymentMemberIndexEnv,
+				ValueFrom: &core.EnvVarSource{FieldRef: &core.ObjectFieldSelector{
+					FieldPath: "metadata.labels['" + modelDeploymentMemberIndexLabel + "']",
+				}},
+			},
+		)
+
+		return
+	}
 }
 
 func modelDeploymentCommandPort(command []string) (int32, error) {
@@ -877,8 +1023,9 @@ func modelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
 //
 // WITHOUT IT SUCH A REPLICA HAS NO RECOVERY PATH. Losing readiness only withdraws it from the
 // Service; the Pod keeps running, keeps the accelerators Kueue admitted it with, and this controller
-// deletes a replica only when the group is rebuilt, when the spec no longer names it, or when its
-// rendered spec changed -- never because it stopped answering.
+// deletes a replica only when the deployment is torn down, when the spec no longer names its role,
+// when a scale-down sheds its ordinal, or when its rendered spec changed -- never because it
+// stopped answering.
 //
 // A TAKE-OVER ROLE GETS NEITHER, for the reason the command, the connector volumes and the client
 // environment above it are also withheld: the operator did not build that command line, so it cannot

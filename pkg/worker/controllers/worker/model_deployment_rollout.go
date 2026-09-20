@@ -5,10 +5,12 @@ import (
 	"strings"
 
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
 
 // ModelDeploymentConditionReplicasUpToDate reports whether the running replicas match what the
@@ -70,9 +72,9 @@ type modelDeploymentRollout struct {
 	//
 	// It is what separates "nothing was outdated" from "nothing was looked at", and those are the
 	// same zero everywhere else in this record. A pass reaches the status write able to vouch for
-	// nothing more often than it looks: a rebuild that deletes every member without comparing, a
-	// teardown, and the pass between a rollout's delete and its create, where the names are still
-	// held by terminating replicas so the creates do not land either.
+	// nothing more often than it looks: a teardown, and the pass between a rollout's delete and its
+	// create, where the names are still held by terminating replicas so the creates do not land
+	// either.
 	//
 	// A create counts because the Pod it just issued was rendered from this pass's own desired state,
 	// which is a stronger claim than a hash comparison rather than a weaker one. Leaving it out would
@@ -90,14 +92,14 @@ type modelDeploymentRollout struct {
 //
 // A record that can vouch for no replica reports Unknown. It does NOT leave the stored value alone,
 // and the difference is the whole point: leaving it alone keeps whatever the last answering pass
-// wrote, which after a steady deployment is an authoritative True. A group-shape edit then deletes
-// every replica without vouching for one, and the object goes on saying every replica matches the
-// render while none exists.
+// wrote, which after a steady deployment is an authoritative True. A teardown then deletes every
+// replica without vouching for one, and the object goes on saying every replica matches the render
+// while none exists.
 //
-// Three passes arrive here -- a teardown, a whole-group rebuild, and the pass between a rollout's
-// delete and its create while the names are still taken -- and all three are moments when the
-// replicas are least current, so the stale answer is wrong in exactly the state it is read in.
-// Unknown is the same shape CacheAttached already uses for a reading it could not take.
+// Two passes arrive here -- a teardown, and the pass between a rollout's delete and its create
+// while the names are still taken -- and both are moments when the replicas are least current, so
+// the stale answer is wrong in exactly the state it is read in. Unknown is the same shape
+// CacheAttached already uses for a reading it could not take.
 //
 // THE PASS'S DECISION AND THE OBSERVED COUNT ANSWER TOGETHER, and the order they are asked in is
 // the ranking of causes. A held rollout outranks everything, because nothing else can be acted on
@@ -107,7 +109,7 @@ type modelDeploymentRollout struct {
 // current and the count is still short, which no spec change explains.
 func observeModelDeploymentRollout(
 	holder, md *workercore.ModelDeployment, pods []core.Pod,
-	wlByGroup map[string]*kueue.Workload, groupOfRole map[string]string, rollout *modelDeploymentRollout,
+	wlByReplica map[types.UID]*kueue.Workload, rollout *modelDeploymentRollout,
 ) {
 	// The test is on the record rather than at the call site, because "vouched for nothing" is a
 	// property of what the pass found and every caller would otherwise have to remember it.
@@ -119,7 +121,7 @@ func observeModelDeploymentRollout(
 		return
 	}
 
-	missing, missingRoles := modelDeploymentReplicasMissing(md, pods, wlByGroup, groupOfRole)
+	missing, missingWhere := modelDeploymentReplicasMissing(md, pods, wlByReplica)
 
 	switch {
 	case rollout.held > 0:
@@ -129,17 +131,18 @@ func observeModelDeploymentRollout(
 		// here. Naming a change the user may not have made would be wrong far more often than right,
 		// so the consequence is stated conditionally and the reader is pointed at the store.
 		//
-		// AND IT NAMES THE CLASS RATHER THAN "a spec edit", which is wider than this guard. An edit
-		// to the replica counts or the role set moves the group annotations, so the group resizes
-		// and takes the rebuild branch, which deletes every replica before this guard is reached:
-		// that edit proceeds during an outage. What waits is an edit that changes a replica's
-		// rendered Pod while leaving the group's shape alone.
+		// AND IT NAMES THE CLASS RATHER THAN "a spec edit", which is wider than this guard. What the
+		// guard holds is a difference on a replica that EXISTS: the ordinals a scale-up adds are
+		// created during the outage too, without a connector, because a replica that does not exist
+		// yet cannot be given an address that does not exist yet either. What waits is an edit that
+		// changes a running replica's rendered Pod -- and it waits whole, because there is no
+		// group-shape edit left that could carry it past the guard.
 		ModelDeploymentConditionReplicasUpToDate.False(holder, modelDeploymentReasonRolloutHeldByCache, fmt.Sprintf(
 			"%d of %d replicas differ from what this pass rendered and were left in place: the KV "+
 				"cache connection could not be resolved, and recreating them on that alone would "+
 				"rebuild every replica whenever the store blinks. Until it resolves, an edit that "+
-				"changes a replica's rendered Pod without changing the group's shape waits with "+
-				"them -- withheld rather than dropped, and it rolls out once the connection returns",
+				"changes a running replica's rendered Pod waits with them -- withheld rather than "+
+				"dropped, and it rolls out once the connection returns",
 			rollout.held, rollout.outdated))
 	case rollout.outdated > 0:
 		// DELETED, NOT ALL OF THEM AT ONCE. The rollout turns over one replica per role per pass,
@@ -165,16 +168,23 @@ func observeModelDeploymentRollout(
 		// once the replacement exists the pass falls through to the branch below, which writes a
 		// verdict that is not this one.
 		ModelDeploymentConditionReplicasUpToDate.False(holder, modelDeploymentReasonRolloutInProgress, fmt.Sprintf(
-			"%d of the declared replicas are being replaced by the rollout in flight, from the "+
-				"groups of roles %s: the last replica built from the earlier spec has gone, and the "+
-				"pass that finds it gone creates its replacement",
-			missing, strings.Join(missingRoles, ", ")))
+			"%d of the declared replicas are being replaced by the rollout in flight: %s. The last "+
+				"replica built from the earlier spec has gone, and the pass that finds it gone "+
+				"creates its replacement",
+			missing, strings.Join(missingWhere, "; ")))
 	case missing > 0:
-		// NOBODY CHANGED THE SPEC. Every replica this pass could compare matched the render, so the
-		// shortfall is not a rollout's doing, and the message has to say that much, because the
-		// alternative readings both misdirect: RolloutInProgress sends the reader to diff a spec
-		// that did not change, and UpToDate reads exactly like the steady state while the deployment
-		// is serving below its declared count.
+		// NOTHING THIS PASS COMPARED DIFFERED, so the shortfall is not a rollout this pass can see,
+		// and the message has to say that much, because the alternative readings both misdirect:
+		// RolloutInProgress sends the reader to diff a spec that may not have changed, and UpToDate
+		// reads exactly like the steady state while the deployment is serving below its declared
+		// count.
+		//
+		// THE CLAIM RESTS ON WHAT WAS COMPARED, NOT ON THE SPEC. An earlier wording said "nothing
+		// changed the spec" as though this axis could know that; it cannot -- a scale-up whose
+		// create has not landed arrives here looking exactly like a departure, because the replica
+		// that would tell the two apart is the one that is absent. The honest statement is the
+		// observable one, and the branch below modelDeploymentReplicasMissing records the boundary
+		// in full.
 		//
 		// IT STOPS THERE AND DOES NOT SAY WHY THEY LEFT, which an earlier wording did. "They left on
 		// their own" is a claim about a cause this axis never observed, and it is wrong in a case
@@ -185,12 +195,11 @@ func observeModelDeploymentRollout(
 		// side. The quota condition reports that one, and this message points at it instead of
 		// competing with it.
 		ModelDeploymentConditionReplicasUpToDate.False(holder, modelDeploymentReasonReplacementInProgress, fmt.Sprintf(
-			"%d of the declared replicas are missing, from the groups of roles %s, while every "+
-				"surviving replica matches what this pass rendered: no rollout is in flight, because "+
-				"nothing changed the spec. What removed them is not this condition's to say -- a "+
-				"preemption reports itself on the quota condition -- and the pass creates each "+
-				"replacement as Kueue asks for it",
-			missing, strings.Join(missingRoles, ", ")))
+			"%d of the declared replicas are missing: %s. Every replica this pass could compare "+
+				"matched what it rendered, so no rollout is in flight. What removed them is not "+
+				"this condition's to say -- a preemption reports itself on the quota condition -- "+
+				"and each replacement is created once its ordinal holds no member",
+			missing, strings.Join(missingWhere, "; ")))
 	default:
 		ModelDeploymentConditionReplicasUpToDate.True(holder, modelDeploymentReasonUpToDate,
 			"every replica matches what this pass rendered")
@@ -216,40 +225,114 @@ func modelDeploymentRolloutWasInProgress(holder *workercore.ModelDeployment) boo
 }
 
 // modelDeploymentReplicasMissing measures how far the deployment sits below the counts its roles
-// declare, and names the roles that are short.
+// declare, and names each empty slot so the verdict it feeds speaks of replicas rather than of a
+// role-level shortfall count.
 //
-// ONLY A GROUP WHOSE WORKLOAD KUEUE HAS COMPOSED COUNTS, and that test is what separates a
-// replacement from a beginning. Kueue composes a Workload for a group once it has seen its declared
-// total, so a group with a Workload and a missing replica has LOST one, while a group with no
-// Workload is still assembling the first set it ever had -- initial creation is not the replacement
-// of anything. Counting both would report every deployment's first passes as replacements, and
-// counting neither is the old answer, which read a lost replica exactly like the steady state.
+// WHAT IT DISTINGUISHES: which ordinals of which role are empty. A slot is named by the ordinal
+// label, the same identity the converger creates and removes by, so "role prefill replica 1" names
+// the exact slot that is short rather than a count over the role.
 //
-// A REBUILD EXCLUDES ITSELF. A resizing group's Workload is deleted by the pass that tears it down,
-// so the roles of a scale change fall out of this count on their own and come back as the new
-// groups' first creation rather than as replacements.
+// WHAT IT CANNOT DISTINGUISH, and no single pass can: whether an empty slot was ever filled. The
+// evidence left with the replica -- its Pod, and with it the ownership every workload resolution
+// reads -- so a slot whose replica departed and a slot the spec grew into yesterday's count produce
+// the same observation. The shapes that meet there: a scale-up whose create has not landed, a
+// top-slot replica that left on its own, and a workload deleted by hand all read as one empty slot
+// beside replicas that still have workloads.
+//
+// HOW THE INDISTINGUISHABLE IS CLASSIFIED: by the role-level proxy "any replica of this role,
+// departing ones included, still has a workload behind it". While that holds, an empty slot reads
+// as a departure -- so the scale-up window above reports replacement rather than assembly, and only
+// the previous pass's verdict (modelDeploymentRolloutWasInProgress) can upgrade the reading to a
+// rollout. When it does not hold, the role is still assembling the first set it ever had and its
+// shortfall is excluded entirely: initial creation is not the replacement of anything, and counting
+// it would report every deployment's first passes as replacements.
+//
+// THE EMPTY SLOTS ARE FILLED LOWEST FIRST AND ONLY AS MANY AS THE COUNT IS SHORT, which is the
+// same arithmetic the converger creates them by: a role carrying a replica with no ordinal still
+// counts that replica against the shortfall without claiming any slot for it.
+//
+// A ROLE SCALED AWAY EXCLUDES ITSELF. Its workloads are deleted by the pass that sweeps its Pods,
+// so it falls out of this count on its own and never reads as a replacement.
 func modelDeploymentReplicasMissing(
 	md *workercore.ModelDeployment, pods []core.Pod,
-	wlByGroup map[string]*kueue.Workload, groupOfRole map[string]string,
+	wlByReplica map[types.UID]*kueue.Workload,
 ) (int, []string) {
+	// LIVE COUNTS REPLICAS, NOT PODS, and it has to: the shortfall below subtracts it from a
+	// DECLARED count, which is in replicas. Tallying Pods makes `short` negative for any role whose
+	// replicas hold more than one member, so the branch never fires and a genuinely missing replica
+	// goes unnamed. At one member per replica the two tallies are the same number, which is why
+	// this read as a Pod count for as long as that was true.
+	//
+	// A REPLICA COUNTS AS LIVE WHETHER OR NOT IT IS COMPLETE, which is the opposite of what the
+	// quota condition asks and correct for a different question: this one is "is a slot empty", and
+	// a slot holding a half-built replica is not empty. The incompleteness is the rollout's to
+	// repair, and it is reported by the condition that owns that reading.
 	live := make(map[string]int, len(md.Spec.Roles))
-	for i := range pods {
-		if pods[i].DeletionTimestamp == nil {
-			live[modelDeploymentPodRole(&pods[i])]++
+	occupied := make(map[string]map[int]bool, len(md.Spec.Roles))
+	for _, view := range modelDeploymentGroupPodsByReplica(pods) {
+		live[view.Role]++
+		if !view.Seated {
+			continue
 		}
+		if occupied[view.Role] == nil {
+			occupied[view.Role] = make(map[int]bool)
+		}
+		occupied[view.Role][view.Ordinal] = true
 	}
 
 	missing := 0
-	var roles []string
+	var where []string
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		short := int(role.Replicas) - live[role.Name]
-		if short <= 0 || wlByGroup[groupOfRole[role.Name]] == nil {
+		declared := int(role.Replicas)
+		short := declared - live[role.Name]
+		if short <= 0 || !modelDeploymentRoleEverAssembled(role.Name, pods, wlByReplica) {
 			continue
 		}
+
+		var ordinals []int
+		for ordinal := 0; ordinal < declared && len(ordinals) < short; ordinal++ {
+			if !occupied[role.Name][ordinal] {
+				ordinals = append(ordinals, ordinal)
+			}
+		}
 		missing += short
-		roles = append(roles, role.Name)
+		where = append(where, modelDeploymentNameReplicas(role.Name, ordinals))
 	}
 
-	return missing, roles
+	return missing, where
+}
+
+// modelDeploymentRoleEverAssembled reports whether any replica of the role, departing ones
+// included, still has a workload behind it.
+//
+// IT IS A PROXY RATHER THAN A RECORD, and its limit is the boundary the missing-count comment
+// states: it says the role assembled before, not that the empty slot ever existed. Departing
+// replicas count, because a workload holding one is still observable ownership and its deletion --
+// the converger's, during a replacement -- is exactly the moment the proxy must not flip.
+func modelDeploymentRoleEverAssembled(
+	role string, pods []core.Pod, wlByReplica map[types.UID]*kueue.Workload,
+) bool {
+	for i := range pods {
+		if modelDeploymentPodRole(&pods[i]) == role && wlByReplica[pods[i].UID] != nil {
+			return true
+		}
+	}
+
+	return false
+}
+
+// modelDeploymentNameReplicas renders one role's empty slots as a verdict fragment:
+// "role prefill replica 1", "role prefill replicas 1, 2".
+func modelDeploymentNameReplicas(role string, ordinals []int) string {
+	digits := make([]string, 0, len(ordinals))
+	for _, ordinal := range ordinals {
+		digits = append(digits, strconvx.Itoa(ordinal))
+	}
+	noun := "replica"
+	if len(ordinals) > 1 {
+		noun = "replicas"
+	}
+
+	return fmt.Sprintf("role %s %s %s", role, noun, strings.Join(digits, ", "))
 }

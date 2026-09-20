@@ -43,44 +43,62 @@ func podGroupDeployment(mutate ...func(*workercore.ModelDeployment)) *workercore
 	return md
 }
 
-// TestModelDeploymentPodGroup covers what every Pod of a role's group carries.
+// TestModelDeploymentPodGroup covers what every Pod of a role's replica carries.
 func TestModelDeploymentPodGroup(t *testing.T) {
 	md := podGroupDeployment()
 
-	prefill := ModelDeploymentPodGroup(md, &md.Spec.Roles[0])
-	decode := ModelDeploymentPodGroup(md, &md.Spec.Roles[1])
+	prefill := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0, 0)
+	decode := ModelDeploymentPodGroup(md, &md.Spec.Roles[1], 0, 0)
 
+	// TWO REPLICAS NEVER SHARE A GROUP, whatever the axis that separates them: a role is one, and
+	// within one role the ordinal is another. Two replicas of one role sharing a name are one group
+	// to Kueue, and each then waits for the other's Pods.
 	assert.NotEqual(t, prefill.Labels[kueuepodconst.GroupNameLabel],
 		decode.Labels[kueuepodconst.GroupNameLabel],
-		"one role is one group: two roles sharing a name are one group to Kueue, and neither "+
-			"reaches its declared total")
+		"a role is one axis of separation: two roles sharing a name are one group to Kueue")
 
-	assert.Equal(t, "2", prefill.Annotations[kueuepodconst.GroupTotalCountAnnotation],
-		"the total is the role's own declared count -- the group is that role and nobody else, even "+
-			"where two roles share one instanceType")
-	assert.Equal(t, "2", decode.Annotations[kueuepodconst.GroupTotalCountAnnotation])
+	first := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0, 0)
+	second := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 1, 0)
+	assert.NotEqual(t, first.Labels[kueuepodconst.GroupNameLabel],
+		second.Labels[kueuepodconst.GroupNameLabel],
+		"the ordinal is the other: two replicas of ONE role are two groups, or the group waits "+
+			"for Pods that are never coming")
 
-	assert.Equal(t, "prefill", prefill.Annotations[kueuepodconst.RoleHashAnnotation])
+	assert.Equal(t, "1", first.Annotations[kueuepodconst.GroupTotalCountAnnotation],
+		"the group is this replica and nobody else's, so its total is one whatever the role "+
+			"declares -- and a replicas change moves no total any member carries")
+	assert.Equal(t, "1", second.Annotations[kueuepodconst.GroupTotalCountAnnotation])
+	assert.Equal(t, "1", decode.Annotations[kueuepodconst.GroupTotalCountAnnotation])
+
+	assert.Equal(t, "prefill", first.Annotations[kueuepodconst.RoleHashAnnotation])
 	assert.Equal(t, "decode", decode.Annotations[kueuepodconst.RoleHashAnnotation])
 
-	// The group adds NO label of its own naming the role. The renderer's selector labels already
-	// carry it, so a second selectable carrier would be a second answer to one question -- asserted
-	// here rather than left implicit, because adding one is the kind of edit that looks harmless.
-	assert.Equal(t, []string{kueuepodconst.GroupNameLabel}, slices.Sorted(maps.Keys(prefill.Labels)),
-		"the group contributes exactly one label: membership")
+	// THE GROUP CARRIES EXACTLY TWO LABELS: membership and ordinal. A third selectable carrier of
+	// the replica's identity would be a second answer to one question -- the ordinal label already
+	// exists for the readers that need it, so asserting the exact key set here is what keeps a
+	// second one from being added by an edit that looks harmless.
+	assert.ElementsMatch(t,
+		[]string{modelDeploymentReplicaOrdinalLabel, kueuepodconst.GroupNameLabel},
+		slices.Collect(maps.Keys(first.Labels)),
+		"the group contributes exactly two labels: ordinal and membership")
 
 	// THE GROUP CARRIES EXACTLY THREE ANNOTATIONS. A fourth would be a second fingerprint of the
-	// shape beside the total, and the total is the role's count already -- the per-role share an
-	// earlier shape stamped beside it went with that shape, and this is what keeps it gone.
+	// shape beside the total, and the total is fixed at one already.
 	assert.Equal(t, []string{
 		kueuepodconst.GroupServingAnnotationKey,
 		kueuepodconst.GroupTotalCountAnnotation,
 		kueuepodconst.RoleHashAnnotation,
-	}, slices.Sorted(maps.Keys(prefill.Annotations)),
+	}, slices.Sorted(maps.Keys(first.Annotations)),
 		"membership, total and PodSet name travel as one value")
 
+	// THE ORDINAL LABEL IS THE PLAIN DIGITS, because it is the one per-replica value read back: the
+	// group name is never parsed, and a reader that wanted the ordinal out of it would be the
+	// coupling this label exists to make unnecessary.
+	assert.Equal(t, "0", first.Labels[modelDeploymentReplicaOrdinalLabel])
+	assert.Equal(t, "1", second.Labels[modelDeploymentReplicaOrdinalLabel])
+
 	assert.Equal(t, kueuepodconst.GroupServingAnnotationValue,
-		prefill.Annotations[kueuepodconst.GroupServingAnnotationKey],
+		first.Annotations[kueuepodconst.GroupServingAnnotationKey],
 		"an inference deployment never finishes; without this Kueue reclaims the quota of a Pod "+
 			"that reached Succeeded while the deployment is still meant to be serving")
 }
@@ -101,8 +119,8 @@ func TestModelDeploymentPodGroup_RoleHashIsTheRoleName(t *testing.T) {
 		}
 	})
 
-	left := ModelDeploymentPodGroup(md, &md.Spec.Roles[0])
-	right := ModelDeploymentPodGroup(md, &md.Spec.Roles[1])
+	left := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0, 0)
+	right := ModelDeploymentPodGroup(md, &md.Spec.Roles[1], 0, 0)
 
 	assert.NotEqual(t,
 		left.Annotations[kueuepodconst.RoleHashAnnotation],
@@ -120,7 +138,7 @@ func TestModelDeploymentPodGroup_RoleHashIsTheRoleName(t *testing.T) {
 func TestModelDeploymentPodGroup_FastAdmissionIsAbsent(t *testing.T) {
 	md := podGroupDeployment()
 
-	group := ModelDeploymentPodGroup(md, &md.Spec.Roles[0])
+	group := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0, 0)
 
 	assert.NotContains(t, group.Annotations, kueuepodconst.GroupFastAdmissionAnnotationKey,
 		"setting %q admits a group from its first Pod alone, short of the total it declares",
@@ -129,67 +147,93 @@ func TestModelDeploymentPodGroup_FastAdmissionIsAbsent(t *testing.T) {
 		"and it must not arrive as a label either")
 }
 
-// TestModelDeploymentPodGroupName covers both forms of the group's identity.
-func TestModelDeploymentPodGroupName(t *testing.T) {
-	// 64 characters: one past what a label value takes, and well within what an object name does.
-	overLong := strings.Repeat("a", 64)
+// TestModelDeploymentReplicaGroupName covers the derivation's one obligation and its one form.
+func TestModelDeploymentReplicaGroupName(t *testing.T) {
+	md := podGroupDeployment()
 
-	testCases := []struct {
-		name   string
-		md     *workercore.ModelDeployment
-		want   string
-		hashed bool
-	}{
-		{
-			// The readable form is kept where it fits, because this label is the first thing an
-			// operator greps for.
-			name: "name_fits_a_label_value",
-			md:   podGroupDeployment(),
-			want: "qwen-72b",
-		},
-		{
-			name: "name_too_long_for_a_label_value",
-			md: podGroupDeployment(func(md *workercore.ModelDeployment) {
-				md.Name = overLong
-			}),
-			hashed: true,
-		},
-	}
+	got := modelDeploymentReplicaGroupName(md, "prefill", 0)
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := modelDeploymentPodGroupName(tc.md)
+	assert.Empty(t, validation.IsValidLabelValue(got),
+		"the name is a label value and, because Kueue names the group's Workload after it verbatim, "+
+			"an object name too: it owes the RFC 1123 subdomain charset whatever else it owes")
+	assert.True(t, strings.HasPrefix(got, modelDeploymentPodGroupNamePrefix),
+		"the name is always the derived form, so it always carries the prefix that says so: %s", got)
+	assert.NotContains(t, got, "qwen-72b",
+		"no readable spelling rides along -- the prefix and the digest are the whole name")
+}
 
-			assert.Empty(t, validation.IsValidLabelValue(got),
-				"whichever form is taken, the result must be a legal label value: it is a label")
+// TestModelDeploymentReplicaGroupName_HashCoversTheNamespace pins what the hash is taken over.
+//
+// The group name is only ever compared against other Pods' group names, so two deployments sharing
+// a name in two namespaces must not derive alike -- their Pods would read as one group, and each
+// would then be waiting for the other's replicas.
+func TestModelDeploymentReplicaGroupName_HashCoversTheNamespace(t *testing.T) {
+	here := podGroupDeployment()
+	there := podGroupDeployment(func(md *workercore.ModelDeployment) { md.Namespace = "team-b" })
 
-			if !tc.hashed {
-				assert.Equal(t, tc.want, got)
+	assert.NotEqual(t,
+		modelDeploymentReplicaGroupName(here, "prefill", 0),
+		modelDeploymentReplicaGroupName(there, "prefill", 0))
+}
 
-				return
-			}
+// TestModelDeploymentReplicaGroupName_ShapeIndependentOfRoleCount covers the property the
+// sole-role branch used to break: a first role's replicas name their groups identically whether
+// that role is the only one or one of several, so gaining or losing a SIBLING ROLE moves no group
+// name and turns nothing over.
+func TestModelDeploymentReplicaGroupName_ShapeIndependentOfRoleCount(t *testing.T) {
+	one := podGroupDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles = md.Spec.Roles[:1]
+	})
+	two := podGroupDeployment()
 
-			assert.True(t, strings.HasPrefix(got, modelDeploymentPodGroupNamePrefix),
-				"an over-long name falls back to the hashed form, got %q", got)
-			assert.NotContains(t, got, tc.md.Name)
-		})
+	for ordinal := range one.Spec.Roles[0].Replicas {
+		assert.Equalf(t,
+			modelDeploymentReplicaGroupName(one, "prefill", int(ordinal)),
+			modelDeploymentReplicaGroupName(two, "prefill", int(ordinal)),
+			"ordinal %d: a role's group names are its own, not a function of how many roles the "+
+				"deployment declares beside it", ordinal)
 	}
 }
 
-// TestModelDeploymentPodGroupName_HashCoversTheNamespace pins what the hash is taken over.
+// TestModelDeploymentReplicaGroupName_UniqueAcrossTheDeployment pins the set property a per-replica
+// derivation owes: no two replicas of the deployment may share a group, on any axis.
+func TestModelDeploymentReplicaGroupName_UniqueAcrossTheDeployment(t *testing.T) {
+	md := twoTypeDeployment()
+
+	seen := sets.New[string]()
+	for i := range md.Spec.Roles {
+		for ordinal := range md.Spec.Roles[i].Replicas {
+			seen.Insert(modelDeploymentReplicaGroupName(md, md.Spec.Roles[i].Name, int(ordinal)))
+		}
+	}
+	assert.Equal(t, 5, seen.Len(),
+		"two roles declaring 2 and 3 form five replicas, and every one of them is its own group")
+}
+
+// TestModelDeploymentPodOrdinal covers the reader the converger keys on.
 //
-// The group name is only ever compared against other Pods' group names, so two deployments sharing a
-// name in two namespaces must not hash alike -- their Pods would read as one group, and each would
-// then be short of a total that counts the other's replicas.
-func TestModelDeploymentPodGroupName_HashCoversTheNamespace(t *testing.T) {
-	overLong := strings.Repeat("a", 64)
+// THE ABSENCE IS AN ANSWER: a Pod rendered before the per-replica groups carried no ordinal label,
+// and reading one out of it -- a zero, a guess -- would adopt it onto a slot it never held. The
+// converger treats an ordinal-less Pod as outdated instead, which is the turnover that ends with
+// the Pod replaced by one that carries the label.
+func TestModelDeploymentPodOrdinal(t *testing.T) {
+	meta := ModelDeploymentPodGroup(podGroupDeployment(), &podGroupDeployment().Spec.Roles[0], 3, 0)
 
-	here := podGroupDeployment(func(md *workercore.ModelDeployment) { md.Name = overLong })
-	there := podGroupDeployment(func(md *workercore.ModelDeployment) {
-		md.Name, md.Namespace = overLong, "team-b"
-	})
+	stamped := &core.Pod{}
+	stamped.Labels = meta.Labels
+	ordinal, ok := modelDeploymentPodOrdinal(stamped)
+	assert.True(t, ok)
+	assert.Equal(t, 3, ordinal)
 
-	assert.NotEqual(t, modelDeploymentPodGroupName(here), modelDeploymentPodGroupName(there))
+	for _, label := range []string{"", "-1", "not-a-number", "3.0"} {
+		pod := &core.Pod{}
+		if label != "" {
+			pod.Labels = map[string]string{modelDeploymentReplicaOrdinalLabel: label}
+		}
+		ordinal, ok := modelDeploymentPodOrdinal(pod)
+		assert.Falsef(t, ok, "label %q must not read as an ordinal", label)
+		assert.Zero(t, ordinal)
+	}
 }
 
 // TestModelDeploymentPodGroupTotalCount covers the count each group declares: its own role's,
@@ -474,209 +518,87 @@ func TestModelDeploymentPodGroups_NamesAreUniqueAndStable(t *testing.T) {
 	assert.NotEqual(t, first[0].Name, modelDeploymentPodGroups(elsewhere)[0].Name)
 }
 
-// TestModelDeploymentPodGroups_ASoleGroupKeepsTheReadableName pins that the one-role shape keeps the
-// name it always had. The fixtures assert this through the rendered Pod; this asserts it on the
-// function, so a failure says which of the two moved.
-func TestModelDeploymentPodGroups_ASoleGroupKeepsTheReadableName(t *testing.T) {
-	groups := modelDeploymentPodGroups(podGroupDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles = md.Spec.Roles[:1]
-	}))
-
-	require.Len(t, groups, 1)
-	assert.Equal(t, "qwen-72b", groups[0].Name, "a one-role deployment keeps the deployment's own name")
-
-	// Every multi-role deployment does not -- on ONE instanceType exactly as on several -- and the
-	// reason is collision rather than taste: a readable composite would share a namespace with
-	// deployment names.
-	for _, md := range []*workercore.ModelDeployment{podGroupDeployment(), twoTypeDeployment()} {
+// TestModelDeploymentPodGroups_ANamesAreAlwaysDerived pins the property the sole-role branch used to
+// break: a role's join-key name is derived the same way whether it is the only role or one of
+// several. The key is carried by no Pod -- it joins the status paths -- but a key that moved with
+// the role count would rename the first role's key when a sibling arrived, and a key that moves
+// under its consumers is worse than one that was always opaque.
+func TestModelDeploymentPodGroups_ANamesAreAlwaysDerived(t *testing.T) {
+	for _, md := range []*workercore.ModelDeployment{
+		podGroupDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles = md.Spec.Roles[:1] }),
+		podGroupDeployment(),
+		twoTypeDeployment(),
+	} {
 		for _, g := range modelDeploymentPodGroups(md) {
-			assert.True(t, strings.HasPrefix(g.Name, modelDeploymentPodGroupNamePrefix),
+			assert.Truef(t, strings.HasPrefix(g.Name, modelDeploymentPodGroupNamePrefix),
 				"a derived name carries the prefix that says it was derived: %s", g.Name)
 		}
 	}
+
+	// AND THE NAME IS THE ROLE'S OWN, not a function of the company it keeps: the sole-role
+	// deployment and the two-role one derive the same key for the same first role.
+	sole := podGroupDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles = md.Spec.Roles[:1] })
+	assert.Equal(t,
+		modelDeploymentPodGroups(sole)[0].Name,
+		modelDeploymentPodGroups(podGroupDeployment())[0].Name,
+		"gaining a sibling role renames nothing")
 }
 
-// TestModelDeploymentPodGroup_StampsTheRolesOwnGroup covers what reaches a Pod when there are two
-// groups: each role's replicas must carry THEIR group's name and THEIR group's total.
+// TestModelDeploymentPodGroup_StampsTheRolesOwnGroup covers what reaches a Pod: each replica must
+// carry ITS OWN group's name, on both axes that separate replicas.
 func TestModelDeploymentPodGroup_StampsTheRolesOwnGroup(t *testing.T) {
 	md := twoTypeDeployment()
 
-	prefill := ModelDeploymentPodGroup(md, &md.Spec.Roles[0])
-	decode := ModelDeploymentPodGroup(md, &md.Spec.Roles[1])
+	prefill := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0, 0)
+	decode := ModelDeploymentPodGroup(md, &md.Spec.Roles[1], 0, 0)
 
 	assert.NotEqual(t, prefill.Labels[kueuepodconst.GroupNameLabel],
 		decode.Labels[kueuepodconst.GroupNameLabel],
-		"two roles are two groups: a role's replicas carry that role's name and never a sibling's")
+		"two roles are two axes of separation: a role's replicas carry that role's slots and never "+
+			"a sibling's")
 
-	assert.Equal(t, "2", prefill.Annotations[kueuepodconst.GroupTotalCountAnnotation],
-		"a group claiming another role's count waits for Pods that are never coming")
-	assert.Equal(t, "3", decode.Annotations[kueuepodconst.GroupTotalCountAnnotation])
+	assert.Equal(t, "1", prefill.Annotations[kueuepodconst.GroupTotalCountAnnotation],
+		"a group claiming another replica's count waits for Pods that are never coming")
+	assert.Equal(t, "1", decode.Annotations[kueuepodconst.GroupTotalCountAnnotation])
 
-	// The role hash stays the role's name and does not gain the type: Kueue groups PodSets by it and
-	// status reads it to attribute a Pod.
+	// The role hash stays the role's name and does not gain the type or the ordinal: Kueue groups
+	// PodSets by it and status reads it to attribute a Pod.
 	assert.Equal(t, "prefill", prefill.Annotations[kueuepodconst.RoleHashAnnotation])
 	assert.Equal(t, "decode", decode.Annotations[kueuepodconst.RoleHashAnnotation])
 }
 
-// TestModelDeploymentGroupsResizing covers the predicate the converge loop reads.
+// TestModelDeploymentPodSpecHash_CoversTheGroupNameAndOrdinal is the mechanical pin the per-replica
+// split stands on: the fingerprint covers the labels, the group name among them, so two ordinals of
+// one role hash differently and a replica is current only against the render of its own slot.
 //
-// EACH POD IS JUDGED AGAINST ITS OWN GROUP'S TOTAL. Against the deployment-wide sum a two-group
-// deployment reads as resizing on every pass forever -- a rebuild loop rather than a wrong number,
-// and one that nothing reports.
-//
-// THE ANSWER IS A SET, AND WHICH GROUPS ARE IN IT IS THE ASSERTION. A predicate that named every
-// group whenever any one moved would pass a test asserting only "something is resizing", while
-// restarting roles that nothing asked to restart.
-func TestModelDeploymentGroupsResizing(t *testing.T) {
-	// A REPLICA AS THE RENDERER WOULD HAVE PRODUCED IT, taken from the same function that stamps the
-	// group metadata onto a real Pod rather than from literals written here.
-	//
-	// THE FORMAT OF THESE ANNOTATIONS IS OWNED BY NEITHER SIDE OF THE PAIR THIS TEST EXERCISES. The
-	// renderer formats the total, and the predicate below formats what it expects, in two separate
-	// expressions that agree today by coincidence. With literals in this fixture, a renderer that
-	// changed the format would keep its own tests green -- they would be updated with it -- while
-	// this one went on comparing the old spelling, and both halves would pass while the reconciler
-	// rebuilt every group on every pass forever. Coverage shows both sides covered, and mutating
-	// either implementation goes red; only changing the FORMAT slips through, because the format has
-	// no owner. Sourcing the fixture from the renderer gives it one.
-	//
-	// The disagreeing cases perturb a rendered replica rather than hand-building one, so what they
-	// vary is visible as a difference from what the spec asks for.
-	rendered := func(md *workercore.ModelDeployment, roleName string) core.Pod {
-		var role *workercore.ModelDeploymentRole
-		for i := range md.Spec.Roles {
-			if md.Spec.Roles[i].Name == roleName {
-				role = &md.Spec.Roles[i]
-			}
-		}
-		require.NotNil(t, role, "no role %q on this fixture deployment", roleName)
+// THE HASH IS WHAT KEEPS A SCALE-UP FROM ROLLING THE SURVIVORS: a role grown from two to three
+// renders ordinals 0 and 1 exactly as before, and only a hash that covered the per-replica group
+// name can say so. An implementation hashing the template alone -- the thing every replica of a role
+// shares -- would return one hash for all three, call the two running replicas current against a
+// render that names a different group, and pass every count-shaped assertion in this file.
+func TestModelDeploymentPodSpecHash_CoversTheGroupNameAndOrdinal(t *testing.T) {
+	md := newRenderDeployment()
+	role := &md.Spec.Roles[0]
 
-		meta := ModelDeploymentPodGroup(md, role)
-		p := core.Pod{}
-		p.Labels = map[string]string{modelDeploymentLabelKeyComponent: roleName}
-		for k, v := range meta.Labels {
-			p.Labels[k] = v
-		}
-		p.Annotations = map[string]string{}
-		for k, v := range meta.Annotations {
-			p.Annotations[k] = v
-		}
-
-		return p
-	}
-
-	// perturbed renders the replica and then overrides one annotation, which is how a Pod that
-	// disagrees with the spec arises in a cluster: it was rendered against an earlier spec.
-	perturbed := func(p core.Pod, key, value string) core.Pod {
-		if value == "" {
-			delete(p.Annotations, key)
-		} else {
-			p.Annotations[key] = value
-		}
-
-		return p
-	}
-
-	// A replica of a role the deployment no longer declares: it was rendered when the role existed,
-	// so everything about it is as the renderer left it and only its role is now unknown.
-	renamedRole := func(p core.Pod, role string) core.Pod {
-		p.Labels[modelDeploymentLabelKeyComponent] = role
-
-		return p
-	}
-
-	// The one-role shape the sole-group cases render from: its single group keeps the readable
-	// deployment name, which is what the want values below use.
-	sole := podGroupDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles = md.Spec.Roles[:1]
-	})
-
-	// The single-type two-role shape the sibling cases render from. It is built once so that a case
-	// whose deployment has MOVED ON still renders its replicas from the shape they were created
-	// under, which is what a Pod disagreeing with its spec actually is.
-	one := podGroupDeployment()
-	oneGroups := modelDeploymentPodGroups(one)
-	require.Len(t, oneGroups, 2)
-	prefillName := oneGroups[0].Name
-
-	// The two-type shape's group names are hashes, so the cases name them through the function that
-	// derives them rather than by writing a hash into the test.
-	two := twoTypeDeployment()
-	twoGroups := modelDeploymentPodGroups(two)
-	require.Len(t, twoGroups, 2)
-	prefillGroup := twoGroups[0].Name
-
-	cases := []struct {
-		name string
-		md   *workercore.ModelDeployment
-		pods []core.Pod
-		want []string
-	}{
-		{
-			// The one-role baseline: a sole group whose Pod carries its total is not resizing.
-			name: "one_role_agreeing",
-			md:   sole,
-			pods: []core.Pod{rendered(sole, "prefill")},
-		},
-		{
-			// Two roles on ONE type both agreeing: neither group is resizing, and the deployment-wide
-			// sum would match neither group's total if it were read instead.
-			name: "each_role_agreeing_on_one_type",
-			md:   one,
-			pods: []core.Pod{rendered(one, "prefill"), rendered(one, "decode")},
-		},
-		{
-			// THE CASE THE DEPLOYMENT-WIDE SUM FAILS: each Pod carries its own group's total, and a
-			// predicate reading the sum of both groups matches neither.
-			name: "two_groups_agreeing",
-			md:   two,
-			pods: []core.Pod{rendered(two, "prefill"), rendered(two, "decode")},
-		},
-		{
-			// ONLY THE GROUP THAT MOVED. The sibling agrees with its own total and must be left alone;
-			// a boolean predicate would restart it too.
-			name: "two_groups_one_moved",
-			md:   two,
-			pods: []core.Pod{
-				perturbed(rendered(two, "prefill"), kueuepodconst.GroupTotalCountAnnotation, "9"),
-				rendered(two, "decode"),
-			},
-			want: []string{prefillGroup},
-		},
-		{
-			// ONE ROLE'S COUNT MOVED, ON ONE TYPE, under a deployment-wide sum that did not: prefill
-			// went 2 to 1 while decode kept its two, so only prefill's group is resizing. This is the
-			// redistribution the per-role share annotation used to exist for; one role per group
-			// makes the total carry it alone.
-			name: "one_roles_count_moved_leaves_the_sibling_alone",
-			md: podGroupDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Roles[0].Replicas = 1
-			}),
-			pods: []core.Pod{rendered(one, "prefill"), rendered(one, "decode")},
-			want: []string{prefillName},
-		},
-		{
-			name: "a_pod_predating_the_annotations",
-			md:   sole,
-			pods: []core.Pod{
-				perturbed(rendered(sole, "prefill"), kueuepodconst.GroupTotalCountAnnotation, ""),
-			},
-			want: []string{"qwen-72b"},
-		},
-		{
-			// The rename catch: no total moves, no count moves, and the predicate still has to come
-			// down on the group the departed role's Pods are sitting in.
-			name: "a_pod_of_a_role_the_deployment_no_longer_has",
-			md:   sole,
-			pods: []core.Pod{renamedRole(rendered(sole, "prefill"), "gone")},
-			want: []string{"qwen-72b"},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.ElementsMatch(t, tc.want,
-				sets.List(modelDeploymentGroupsResizing(tc.md, tc.pods)))
+	stamp := func(ordinal int) *core.Pod {
+		pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: role, InstanceType: newRenderInstanceType(),
 		})
+		require.NoError(t, err)
+		stampModelDeploymentPod(pod, md, role, ordinal, 0)
+
+		return pod
 	}
+
+	first, second := stamp(0), stamp(1)
+	assert.NotEqual(t,
+		first.Annotations[modelDeploymentPodSpecHashAnnotation],
+		second.Annotations[modelDeploymentPodSpecHashAnnotation],
+		"two ordinals of one role are two renders: their group names differ and the hash says so")
+
+	again := stamp(0)
+	assert.Equal(t,
+		first.Annotations[modelDeploymentPodSpecHashAnnotation],
+		again.Annotations[modelDeploymentPodSpecHashAnnotation],
+		"the same ordinal renders the same hash, or no running replica would ever read as current")
 }

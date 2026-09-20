@@ -7457,7 +7457,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRole is one engine role and its replicas.\n\nReplicas, InstanceType and Resources are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to admission and scheduling — Kueue PodSet counts, flavor selection and the request the queue accounts — so a container field able to shadow any of them would make the admission feasibility check read a ledger that does not match reality. That is why the container fields below carry no resource request at all: the accelerator half belongs in Resources and the rest is derived from the InstanceType, and neither can be overridden here.\n\nEDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Each role forms its own Kueue pod group, whose members cannot leave one at a time, so that one group is rebuilt whole while every sibling role keeps serving. A `replicas` change on this role does the same.\n\nADDING OR REMOVING A ROLE REACHES FURTHER THAN THE ROLE IT NAMES. A deployment whose roles are one names that group after the DEPLOYMENT, and a deployment with more than one names each group after its ROLE, so going from one role to two renames the first role's group and rebuilds it as well.\n\nA DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A REBUILD. The replica that left is replaced on its own, under a new name, while its siblings keep serving — see docs/reference/model-deployment.md under \"One group per role\" and \"Rollout is a rolling replacement\".",
+				Description: "ModelDeploymentRole is one engine role and its replicas.\n\nReplicas, InstanceType and Resources are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to admission and scheduling — Kueue PodSet counts, flavor selection and the request the queue accounts — so a container field able to shadow any of them would make the admission feasibility check read a ledger that does not match reality. That is why the container fields below carry no resource request at all: the accelerator half belongs in Resources and the rest is derived from the InstanceType, and neither can be overridden here.\n\nEDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Every replica is a Kueue pod group of its own, so they are replaced one at a time -- one per role per pass -- and every sibling role keeps serving throughout. A `replicas` change rolls nothing at all: it adds or removes instances, and every instance that stays keeps running, keeps the accelerators it was admitted with and keeps whatever cache it holds.\n\nADDING OR REMOVING A ROLE REACHES NO FURTHER THAN THE ROLE IT NAMES. A replica's group is named from the deployment, the role and that replica's ordinal, and from nothing else -- not from how many roles the deployment declares -- so a second role arriving leaves the first role's replicas exactly where they were. Renaming a role is what moves that role's own replicas: each of its ordinals derives a new group and is replaced.\n\nA DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A ROLLOUT. The replica that left is replaced on its own, under a new name, while its siblings keep serving — see docs/reference/model-deployment.md under \"One group per replica\" and \"Rollout is a rolling replacement\".",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"name": {
@@ -7481,8 +7481,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"replicas": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Replicas is how many Pods this role runs. They are NOT independent Workloads: every replica of every role joins one Kueue pod group, so the deployment is admitted as a unit or not at all.\n\nCHANGING THIS NUMBER REBUILDS THE GROUP. It moves the total the group declares, which every Pod carries and which Kueue requires them all to agree on, so the operator deletes the group's Pods and recreates them under the new total rather than adding or trimming a few. A replica that leaves loses its cached blocks to its siblings.",
+							Description: "Replicas is how many independent serving instances this role runs. The instances are independent: each one starts, serves and is replaced on its own, and none of them depends on another being present.\n\nCHANGING THIS NUMBER ADDS OR REMOVES INSTANCES. Growing it creates new instances beside the ones already running; shrinking it removes some of them. The instances that survive are not restarted: they keep serving without interruption and keep whatever cache they hold.\n\nTHE UPPER BOUND IS A LIMIT ON THIS OPERATOR, NOT ON KUBERNETES. A pass renders every instance this role declares before it writes any of them, so the number is a multiplier on the work one reconcile does; left open at the type's range, a single accepted field value is enough to exhaust the worker before the API server ever throttles the creates. The bound is set where no deployment anybody serves can reach it.",
 							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](1024),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"size": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they start together, they are replaced together, and none of them serves alone — the instance, not the Pod, is the unit that appears and disappears.\n\nTHIS NUMBER IS FIXED AT CREATION AND CANNOT BE CHANGED. An instance's size is the shape of the instance, not a dial on it: the Pods a running instance is made of are not the Pods a different size asks for. Scaling is what replicas is for, and it leaves every running instance alone. To serve at a different size, create a deployment that declares it.\n\nABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods is rendered with stable names and publishes the first Pod's address, this instance's size and each Pod's own rank to every container. What an engine does with those facts -- which parallelism it turns on, and over how many ranks -- stays the author's to say.\n\nTHE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and Go forbids a field and a method sharing a name; the API field is size.\n\nTHE UPPER BOUND IS THE SAME LIMIT REPLICAS CARRIES, AND IT MULTIPLIES WITH IT: this number is how many Pods one instance is rendered as, so a pass renders replicas times this many before it writes any of them. It is set far above the sizes an accelerator topology makes sense at, and far below the range that turns one accepted field value into an out-of-memory worker.",
+							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](64),
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
@@ -7499,7 +7509,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"resources": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Resources is what one replica of this role asks of an accelerator, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\n\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit resources scaled by the requested card count, so they are not expressible here at all — a stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by the container fields below either.\n\nInstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards a replica wants is a property of the model being served, so two deployments on one InstanceType routinely want different counts.",
+							Description: "Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\n\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit resources scaled by the requested card count, so they are not expressible here at all — a stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by the container fields below either.\n\nInstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards a Pod wants is a property of the model being served, so two deployments on one InstanceType routinely want different counts.",
 							Ref:         ref(v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName()),
 						},
 					},
@@ -7667,12 +7677,12 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRoleResources is what one replica of a role asks of an accelerator.\n\nIt deliberately mirrors the accelerator fields of InstanceResources — the same names, the same meanings — rather than inventing a second vocabulary for one request, and it deliberately omits that type's CPU, RAM and LocalStorage, which are derived here rather than declared.",
+				Description: "ModelDeploymentRoleResources is what one Pod of a role asks of an accelerator.\n\nIt deliberately mirrors the accelerator fields of InstanceResources — the same names, the same meanings — rather than inventing a second vocabulary for one request, and it deliberately omits that type's CPU, RAM and LocalStorage, which are derived here rather than declared.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"accelerator": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Accelerator is how many accelerator cards ONE REPLICA asks for.\n\n  - Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and\n    on update alike, the same way an Instance's does. The value is written into the stored\n    object rather than applied at render time, so what was admitted is what can be read back.\n  - AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable\n    InstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is\n    the only role using that type, and refused when another role shares the type because the\n    resulting multi-PodSet Workload cannot be admitted by that queue.\n  - A replica meant to run without an accelerator belongs on an InstanceType that is not\n    acceleratable, where CPU is what the queue accounts in.",
+							Description: "Accelerator is how many accelerator cards ONE POD asks for.\n\n  - Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and\n    on update alike, the same way an Instance's does. The value is written into the stored\n    object rather than applied at render time, so what was admitted is what can be read back.\n  - AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable\n    InstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is\n    the only role using that type, and refused when another role shares the type: replicas\n    asking for nothing the queue accounts in are admitted and run while that queue charges\n    them nothing, spending from the pool their siblings on that type are charged for.\n  - A Pod meant to run without an accelerator belongs on an InstanceType that is not\n    acceleratable, where CPU is what the queue accounts in.",
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
@@ -7727,7 +7737,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 					},
 					"desired": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Desired is how many Pods the spec asks for, and Ready is how many of them are Ready. Both are ALWAYS present: they are counted from a Pod list that succeeded, so a zero here is an observed zero. A failed list writes no status at all.",
+							Description: "Desired is how many INSTANCES the spec asks for, and Ready is how many of them are Ready. Both count instances rather than Pods, which is the same number only while an instance is one Pod: a role of two instances of four Pods reports two, and an instance is Ready only when every Pod it declares is. Both are ALWAYS present -- they are counted from a Pod list that succeeded, so a zero here is an observed zero. A failed list writes no status at all.",
 							Default:     0,
 							Type:        []string{"integer"},
 							Format:      "int32",
@@ -7738,6 +7748,14 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 							Default: 0,
 							Type:    []string{"integer"},
 							Format:  "int32",
+						},
+					},
+					"quotaReserved": {
+						SchemaProps: spec.SchemaProps{
+							Description: "QuotaReserved is how many of the role's replicas hold a quota reservation. Each replica is its own Kueue workload, so a role sits at any count between zero and Desired while capacity arrives — where a role that shared one workload passed all-or-nothing and this figure could not exist.\n\nALWAYS PRESENT, AND ITS ZERO IS AN OBSERVED ONE: the figure is counted from Pod and Workload lists that succeeded, and a failed list writes no status at all rather than a zero, because \"this pass could not see\" and \"no replica holds quota\" call for opposite actions — one waits, the other investigates — and a zero written for both makes them the same reading.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
 						},
 					},
 					"unmanaged": {
@@ -7757,15 +7775,28 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 							Enum:        []interface{}{"decode", "prefill", "server"},
 						},
 					},
-					"assignedFlavor": {
+					"assignedFlavors": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
 						SchemaProps: spec.SchemaProps{
-							Description: "AssignedFlavor is the ResourceFlavor Kueue assigned to this role's PodSet for its ACCELERATOR credits.\n\n  - NOT ASSIGNED YET AND ASSIGNED ARE DIFFERENT FACTS, so a role waiting for quota reports no\n    flavor at all rather than an empty name, which would read as an assignment to a flavor\n    called \"\".\n  - Per role rather than per deployment, because Kueue assigns a flavor per PodSet and two\n    roles of one deployment can be assigned different ones.\n  - AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather\n    than a gap in it. The answer is read through the same function the per-accelerator\n    admission gate uses, which speaks only of accelerator credits, so a role admitted on a pool\n    carrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept\n    identical on purpose: a flavor reported here that the gate would not fit against would be\n    worse than none.",
-							Type:        []string{"string"},
-							Format:      "",
+							Description: "AssignedFlavors is the set of ResourceFlavors Kueue assigned to this role's replicas for their ACCELERATOR credits, deduplicated and sorted. It is a set because each replica is its own workload and Kueue assigns a flavor per workload, so two replicas of one role can carry different assignments — a state one PodSet per role could not produce.\n\n  - ABSENT MEANS NO ASSIGNED REPLICA NAMED A FLAVOR, rather than an empty list reading as an\n    assignment to nothing: \"not assigned yet\" and \"assigned, but on a pool carrying no\n    accelerator names\" are both that same fact here, and absent keeps them from reading as a\n    third thing.\n  - ONE ENTRY MEANS EVERY ASSIGNED REPLICA OF THE ROLE NAMES IT. SEVERAL ENTRIES MEAN THE\n    REPLICAS WERE ASSIGNED DIFFERENT FLAVORS, which is the signal to investigate rather than a\n    degraded form of one answer: WHICH replica carries which flavor is deliberately not here,\n    because the ordinal a per-replica answer would key on is the converger's internal slotting\n    rather than a promise this API makes, and a reader needing it reads the replicas' own Pods.\n  - AN ADMITTED ROLE MAY STILL REPORT NOTHING HERE, and that is the field's contract rather\n    than a gap in it. The answer is read through the same function the per-accelerator\n    admission gate uses, which speaks only of accelerator credits, so a role admitted on a pool\n    carrying no accelerator names a flavor for `cpu` and nothing here. The two answers are kept\n    identical on purpose: a flavor reported here that the gate would not fit against would be\n    worse than none.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
 						},
 					},
 				},
-				Required: []string{"name", "desired", "ready", "unmanaged", "kind"},
+				Required: []string{"name", "desired", "ready", "quotaReserved", "unmanaged", "kind"},
 			},
 		},
 	}
