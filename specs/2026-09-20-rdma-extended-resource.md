@@ -545,6 +545,17 @@ allocation actually crossing the boundary:
   the implementation the Risks section names: one that counts live allocations in process and flips
   the sibling family's tokens `Unhealthy`, halving the node's capacity with nothing to show for it.
 
+**Where this is exercised, and what does not count.** The pair lives in **T6**'s test file, not
+T5's, because only there does a real `Allocate` exist; at T5 a call to it errors and the row would
+pass by the allocation never happening. T5 instead carries an **allocation-state-invariance** pair:
+two `ListAndWatch` calls with a fabricated `Devices.status` hold, an in-process reservation and a
+live-pod sweep varying between them, asserting byte-identical responses. That is deliberately the
+case this section rejects **as F6's criterion** — and it is kept for a different one: it fails
+against an implementation that consults any existing hold register at all, which is the imported
+cross-mode rule, one step upstream of the wrongness F6 names. It is not a substitute. **A green T5
+suite says nothing about F6**, and neither does any test that calls the RDMA `Allocate` before T6
+exists.
+
 #### F7 — `preflight` reports the TopologyManager policy
 
 The preflight document gains a node-level section reporting what this node's kubelet is configured to
@@ -901,7 +912,7 @@ A spike that cannot reach the uncertainty would be a task that is green by const
 - [x] **T3 · The endpoint vocabulary, the mode judgment and the NUMA resolution**
       Blocked by: None
       Owns: `pkg/deviceplugin/rdma_endpoint.go`, `pkg/deviceplugin/rdma_endpoint_test.go`
-      Acceptance: [F2](#f2--the-mode-judgment)'s three rows; the advertisement predicate (an
+      Acceptance: [F2](#f2--the-mode-judgment)'s four rows; the advertisement predicate (an
       endpoint with no RDMA device name is not one); and [F3](#f3--the-numa-hint)'s cases including
       the two-interface sibling row. Pure functions over one `DeviceInterface`: no I/O, no ledger
       read.
@@ -922,9 +933,14 @@ A spike that cannot reach the uncertainty would be a task that is green by const
       Gate: review
       Acceptance: [F1](#f1--the-four-servers-and-where-they-hang)'s counts **and its paired zero
       rows**; [F4](#f4--the-link-gate-with-its-positive-baseline)'s four health rows including both
-      positive baselines and the nil-link row; [F6](#f6--no-cross-mode-exclusion-is-introduced)'s
-      allocate-then-advertise pair; and two consecutive calls over an unchanged inventory returning
-      byte-identical responses. `NewRDMAServer` is the only new exported symbol.
+      positive baselines and the nil-link row; **the allocation-state-invariance pair** — two calls
+      whose reconciler-held allocation state differs between them (a `Devices.status` hold naming
+      the endpoint, an in-process reservation, a live-pod sweep) returning byte-identical
+      responses with every token `Healthy`; and two consecutive calls over an unchanged inventory
+      returning byte-identical responses. `NewRDMAServer` is the only new exported symbol.
+      ⚠️ [F6](#f6--no-cross-mode-exclusion-is-introduced)'s pair is **not** here and cannot be: at
+      T5 the RDMA server has no `Allocate`, so a call errors, nothing crosses the boundary, and the
+      row would pass by the allocation never happening. It belongs to T6.
       Verify: `go test ./pkg/deviceplugin/...`
 
 - [ ] **T6 · The RDMA server: Allocate and the container response**
@@ -934,7 +950,11 @@ A spike that cannot reach the uncertainty would be a task that is green by const
       verbs device **and not a sibling's**; the connection-manager device appears once per response
       however many endpoints were granted; the environment variable names the granted devices; an
       unknown or unparseable token is refused rather than silently dropped. Devices are injected one
-      at a time, never by directory.
+      at a time, never by directory. **Plus [F6](#f6--no-cross-mode-exclusion-is-introduced)'s
+      allocate-then-advertise pair** — an RDMA `Shared` `Allocate`, then the `Sliced` server's
+      `ListAndWatch` still advertising that endpoint `Healthy`, and the mirror with the modes
+      swapped. It lands here rather than in T5 because only here does a real `Allocate` exist; the
+      code it guards is still T5's.
       Verify: `go test ./pkg/deviceplugin/...`
 
 - [ ] **T7 · Wire the allocator**
