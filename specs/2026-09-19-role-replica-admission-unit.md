@@ -1,15 +1,13 @@
 # Spec: Role Replica Admission Unit
 
-Status: Built
-Blocked on: nothing. All seventeen tasks are delivered, the unit suite and both lint targets are
-green, and the multi-Member shape is measured on a real cluster rather than argued — case 79 passes
-on all twelve rows and the regression set beside it is green. What is left is the pull request.
-The first half — one replica as the admission unit — is built and has been run end to end on a live
-two-node cluster: cases 1, 45, 49, 50, 51, 61 and 68 all execute, and every failure that round
-produced was in the suite rather than in the operator (assertions still written for one Workload per
-role, three waits whose predicate was expanded before the wait began, and one status read taken a
-reconcile too early). Those are fixed. What is owed is the second half: a role's replica may still
-only be one Pod, and the field that says otherwise is validated to `1`.
+Status: Shipped
+All seventeen tasks are delivered, on both halves. One replica is the admission unit, so a replica
+count change adds or removes exactly the replicas it names and leaves every other one running; and a
+replica may span several fate-sharing Pods, which `size` declares and the render, the webhook and the
+status each carry. The unit suite and both lint targets are green, and the multi-Member shape is
+measured on a live two-node cluster rather than argued — case 79 passes on all twelve rows, with
+cases 1, 45, 49, 50, 51, 61, 68 and 78 green beside it. The repairs recorded under Known Gaps landed
+after that cluster round and are covered by unit cases rather than by it.
 Type: Feature
 
 ## Summary
