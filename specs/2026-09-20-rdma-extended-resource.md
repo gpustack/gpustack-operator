@@ -865,7 +865,7 @@ construction.
       of the extracted code rather than of a copy.
       Verify: `go test ./pkg/deviceplugin/...`
 
-- [ ] **T2 · The four resource names**
+- [x] **T2 · The four resource names**
       Blocked by: None
       Owns: `pkg/nodefeature/rdma.go`, `pkg/nodefeature/rdma_test.go`
       Gate: review
