@@ -951,7 +951,7 @@ A spike that cannot reach the uncertainty would be a task that is green by const
       row would pass by the allocation never happening. It belongs to T6.
       Verify: `go test ./pkg/deviceplugin/...`
 
-- [ ] **T6 · The RDMA server: Allocate and the container response**
+- [x] **T6 · The RDMA server: Allocate and the container response**
       Blocked by: T4, T5
       Owns: `pkg/deviceplugin/rdma_allocate.go`, `pkg/deviceplugin/rdma_allocate_test.go`
       Acceptance: [F5](#f5--the-allocation-response) — the response injects the granted endpoint's
