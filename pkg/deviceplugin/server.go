@@ -79,7 +79,7 @@ func (s *ResourceServer) ListAndWatch(_ *Empty, srv grpc.ServerStreamingServer[L
 
 	// Send the initial ListAndWatch response.
 	s.Logger.Info("sending initial list and watch response")
-	err := waitx.PollUntilContextCancel(ctx, 2*time.Second, true, func(ctx context.Context) error {
+	err := waitx.RetryUntilSuccess(ctx, 2*time.Second, true, func(ctx context.Context) error {
 		resp, err := s.getListAndWatchResponse(ctx)
 		if err != nil {
 			// Returned rather than swallowed. This poll ends on a nil return, so logging and

@@ -249,7 +249,7 @@ const detectEveryNMonitorRounds = 40
 func (d *Detector) Start(ctx context.Context) error {
 	holdUntilFirstDetected := !d.noFastFailed && d.manufacturers.Len() == 1
 
-	return waitx.UntilContextCancel(ctx, d.monitorPeriod, true, func(ctx context.Context) error {
+	return waitx.RepeatUntilContextCancel(ctx, d.monitorPeriod, true, func(ctx context.Context) error {
 		logger.V(2).Info("detecting")
 
 		devicesGrpList, unmeasuredByDetect := d.DetectAccelerator(ctx)
@@ -311,7 +311,7 @@ func (d *Detector) Start(ctx context.Context) error {
 		// detecting again, so the floor below measures time since the last detect rather than since
 		// the process started.
 		rounds := 0
-		_ = waitx.UntilContextCancel(ctx, d.monitorPeriod, true, func(ctx context.Context) error {
+		_ = waitx.RepeatUntilContextCancel(ctx, d.monitorPeriod, true, func(ctx context.Context) error {
 			logger.V(3).Info("monitoring")
 
 			metricsGrpList, unmeasuredByMonitor := d.MonitorAccelerator(ctx)
@@ -352,7 +352,7 @@ func (d *Detector) Start(ctx context.Context) error {
 			if unmeasuredByDetect.Len() != 0 {
 				logger.Info("a detect pass could not measure, going to detect again",
 					"manufacturers", unmeasuredByDetect.UnsortedList())
-				return waitx.ErrCanceled
+				return waitx.ErrStopRetrying
 			}
 
 			// Compare the current devices with the previous devices,
@@ -365,7 +365,7 @@ func (d *Detector) Start(ctx context.Context) error {
 			// device set that DID shrink, and still takes it round.
 			if !measuredDeviceKeys(deviceKeys, unmeasuredByMonitor).Equal(curDeviceKeys) {
 				logger.Info("changed, going to detect again")
-				return waitx.ErrCanceled
+				return waitx.ErrStopRetrying
 			}
 
 			// The interface record is compared here too, on the MONITOR cadence, because
@@ -381,7 +381,7 @@ func (d *Detector) Start(ctx context.Context) error {
 			detected, detectedErr := DetectInterfaces()
 			if interfacesChanged(d.reportedInterfaces, d.reportedInterfacesKnown, detected, detectedErr) {
 				logger.Info("network interfaces changed, going to detect again")
-				return waitx.ErrCanceled
+				return waitx.ErrStopRetrying
 			}
 
 			// Everything above is edge-triggered, and the two edges it watches are the only ones a
@@ -401,7 +401,7 @@ func (d *Detector) Start(ctx context.Context) error {
 			rounds++
 			if rounds >= detectEveryNMonitorRounds {
 				logger.V(1).Info("detect period elapsed, going to detect again")
-				return waitx.ErrCanceled
+				return waitx.ErrStopRetrying
 			}
 			return nil
 		})

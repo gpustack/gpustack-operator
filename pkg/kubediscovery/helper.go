@@ -183,7 +183,7 @@ func GetAPIResourceForGVK(
 // WaitUntilConnected waits until the Kubernetes to be connected,
 // or returns an error if the context is canceled.
 func WaitUntilConnected(ctx context.Context, discoveryCli discovery.DiscoveryInterface) error {
-	return waitx.PollUntilContextCancel(ctx, time.Second, true,
+	return waitx.RetryUntilSuccess(ctx, time.Second, true,
 		func(ctx context.Context) error {
 			err := IsConnected(ctx, discoveryCli)
 			if err != nil {
@@ -197,7 +197,7 @@ func WaitUntilConnected(ctx context.Context, discoveryCli discovery.DiscoveryInt
 // WaitUntilConnectedWithRestConfig is similar to WaitUntilConnected,
 // accepts rest.Config as input.
 func WaitUntilConnectedWithRestConfig(ctx context.Context, cfg *rest.Config) error {
-	return waitx.PollUntilContextCancel(ctx, time.Second, true,
+	return waitx.RetryUntilSuccess(ctx, time.Second, true,
 		func(ctx context.Context) error {
 			err := IsConnectedWithRestConfig(ctx, cfg)
 			if err != nil {

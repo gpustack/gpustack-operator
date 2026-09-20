@@ -48,7 +48,7 @@ spec:
 func InstallNodeDevicesAdmissionCheck(ctx context.Context) error {
 	restCfg := system.LoopbackKubeRestConfig.Get()
 
-	err := waitx.PollUntilContextTimeout(ctx,
+	err := waitx.RetryUntilSuccessWithTimeout(ctx,
 		nodeDevicesAdmissionCheckInterval, nodeDevicesAdmissionCheckTimeout, true,
 		func(ctx context.Context) error {
 			err := kubeappyaml.Apply(ctx, nodeDevicesAdmissionCheckYAML, restCfg)
@@ -106,7 +106,7 @@ spec:
 func InstallModelDeploymentJointAdmissionCheck(ctx context.Context) error {
 	restCfg := system.LoopbackKubeRestConfig.Get()
 
-	err := waitx.PollUntilContextTimeout(ctx,
+	err := waitx.RetryUntilSuccessWithTimeout(ctx,
 		nodeDevicesAdmissionCheckInterval, nodeDevicesAdmissionCheckTimeout, true,
 		func(ctx context.Context) error {
 			err := kubeappyaml.Apply(ctx, modelDeploymentJointAdmissionCheckYAML, restCfg)

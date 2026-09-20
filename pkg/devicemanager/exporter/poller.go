@@ -155,7 +155,7 @@ func (p *Poller) Start(ctx context.Context) error {
 		return nil
 	}
 
-	return waitx.UntilContextCancel(ctx, p.period, true, func(ctx context.Context) error {
+	return waitx.RepeatUntilContextCancel(ctx, p.period, true, func(ctx context.Context) error {
 		p.poll(ctx)
 		return nil
 	})

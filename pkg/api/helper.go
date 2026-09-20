@@ -136,7 +136,7 @@ func InstallCRDs(ctx context.Context, cli kubernetes.Interface, crdGetters []CRD
 func EnsureCRDs(ctx context.Context, cli kubernetes.Interface, crdGetters []CRDGetter) error {
 	crds := MergeCRDs(crdGetters)
 
-	return waitx.UntilContextCancel(ctx, ensureInterval, false,
+	return waitx.RepeatUntilContextCancel(ctx, ensureInterval, false,
 		func(ctx context.Context) error {
 			err := restoreCRDs(ctx, cli, crds)
 			if err != nil {
@@ -262,7 +262,7 @@ func InstallServices(ctx context.Context, cli kubernetes.Interface, svc apireg.S
 func EnsureServices(ctx context.Context, cli kubernetes.Interface, svc apireg.ServiceReference, ca []byte, getters []ServiceGetter) error {
 	svcs := MergeServices(svc, ca, getters)
 
-	return waitx.UntilContextCancel(ctx, ensureInterval, false,
+	return waitx.RepeatUntilContextCancel(ctx, ensureInterval, false,
 		func(ctx context.Context) error {
 			err := restoreServices(ctx, cli, svcs)
 			if err != nil {
@@ -367,7 +367,7 @@ func IsServicesReady(ctx context.Context, cli kubernetes.Interface, getters []Se
 // WaitForServicesReady waits for the api services to be ready, polling every 2 seconds and giving up
 // after 30 seconds, in which case it returns the last failure of the run.
 func WaitForServicesReady(ctx context.Context, cli kubernetes.Interface, getters []ServiceGetter) error {
-	return waitx.PollUntilContextTimeout(ctx, 2*time.Second, 30*time.Second, false,
+	return waitx.RetryUntilSuccessWithTimeout(ctx, 2*time.Second, 30*time.Second, false,
 		func(ctx context.Context) error {
 			return IsServicesReady(ctx, cli, getters)
 		})
