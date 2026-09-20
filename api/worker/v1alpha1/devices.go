@@ -178,9 +178,9 @@ type (
 	// cross-reference. Recording a higher level's fact on each device also matches RoCE above, which
 	// belongs to the card rather than to the accelerator.
 	//
-	// Only the Ascend detector fills this today. The fields below say which manufacturer publishes
-	// each, so that an empty value is readable as "this generation has none" rather than as a hole:
-	// what a manufacturer's driver does not report, its detector cannot record.
+	// The Ascend and NVIDIA detectors fill this today. The fields below say which manufacturer
+	// publishes each, so that an empty value is readable as "this generation has none" rather than
+	// as a hole: what a manufacturer's driver does not report, its detector cannot record.
 	//
 	// Not every interconnect fits. Cambricon's MLU-Link publishes no domain identity at all, only
 	// per-link remote information, so it describes an edge list and is not recorded here.
@@ -206,6 +206,10 @@ type (
 		// the vendor's own rank table spans machines with; and never for a `server-16p` or
 		// `server-32p`. Publishing a marker would give two unrelated machines one domain, and this
 		// field is compared across workers.
+		//
+		// NVIDIA withholds the whole record rather than this field: the cluster uuid identifies
+		// nothing until the accelerator has finished registering with the fabric manager, and that
+		// manufacturer publishes nothing else to carry beside it.
 		ID string `json:"id" yaml:"id" protobuf:"bytes,2,name=id"`
 
 		// Type is the domain's shape, as a word rather than a vendor number — `pod-1d`, `pod-2d`,
