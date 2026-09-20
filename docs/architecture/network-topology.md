@@ -203,9 +203,18 @@ reading the shape alone would cost a real super server the domain it is in.
 | Manufacturer | Concept | What it reports | Recorded today |
 |---|---|---|---|
 | Ascend A5 (950) | super pod, over the UB fabric | domain id, shape, member count, server index, rack, per-accelerator endpoints | Yes |
-| NVIDIA | NVLink / MNNVL domain | fabric cluster uuid, clique id | No — the record is designed for it, the detector does not fill it |
-| AMD | XGMI hive | hive id | No — same |
+| NVIDIA | NVLink / MNNVL domain | fabric cluster uuid, clique id | Yes — once the fabric manager has registered the accelerator, and not before |
+| AMD | XGMI hive | hive id | No — the record is designed for it, the detector does not fill it |
 | Cambricon | MLU-Link | **no domain identity at all**, only per-link remote information | No — it describes an *edge list*, which this record cannot hold |
+
+**On NVIDIA the record appears only after registration completes.** The driver reports a registration
+state beside the two identifiers, and the fabric manager is what fills those in. A generation with no
+fabric, one that has not started registering and one still negotiating have no cluster assigned yet;
+an ordinary card answers the query with the not-supported state and zeros. Publishing that would give
+every machine in that state one shared domain — and this id is compared across machines.
+
+A registration that completed with an error, and an all-zero cluster uuid, are refused on the same
+grounds: neither identifies a cluster.
 
 **RoCE is unreadable on Ascend A5, by construction.** `topology.roce` is always absent there, and that
 is not a gap to fill: the dcmi V2 API that generation serves declares no device-IP and no
@@ -223,13 +232,19 @@ the `endpoints` above instead.
 
 | Label | Value | For |
 |---|---|---|
-| `feature.gpustack.ai/fabric.domain` | `<kind>-<id>`, e.g. `ub-7` | a selector pinning "same domain" |
+| `feature.gpustack.ai/fabric.domain` | `<kind>-<id>`, and `<kind>-<id>-<clique>` where the manufacturer partitions a domain — `ub-7`, `nvlink-<32 hex>-1` | a selector pinning "same domain" |
 | `feature.gpustack.ai/fabric.members` | the member count | informational |
 
 The kind is inside the **value**, not just the key, because a bare `7` could name an Ascend super pod
 and an AMD hive alike. `fabric.domain` is withheld unless **every** accelerator on the node reports
 the same domain: a node whose accelerators sit in different domains has no single answer, and
 publishing one of them would advertise co-location the hardware does not offer.
+
+The clique is in the value for that same reason one level down. Two NVIDIA accelerators sharing a
+cluster uuid but not the clique inside it are on one fabric and still cannot address each other, so
+naming the cluster alone would promise co-location to the nodes on the far side of a partition —
+which is exactly where this value is compared. A manufacturer reporting no clique keeps the two-part
+form.
 
 `fabric.members` needs that and a nonzero count every accelerator agrees on, so it can be absent
 where `fabric.domain` is present: a manufacturer that names a domain without sizing it, or two cards
@@ -252,8 +267,9 @@ leaves the labels as published.
 kubectl get devices <node> -o json |
   jq '[.spec.groups[].accelerators[] | {id, fabric: .topology.fabric}]'
 
-# which nodes are in one Ascend super pod
+# which nodes are in one Ascend super pod, and which are in one NVLink clique
 kubectl get nodes -l feature.gpustack.ai/fabric.domain=ub-7
+kubectl get nodes -l feature.gpustack.ai/fabric.domain=nvlink-5b0e112233445566778899aabbccddef-1
 
 # the inventory and every link verdict, for one node
 kubectl get devices <node> -o jsonpath='{.spec.interfaces}' | jq
