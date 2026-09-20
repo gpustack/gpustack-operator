@@ -334,7 +334,12 @@ func standInForKueue(t *testing.T, cli ctrlcli.Client, admit bool) {
 		}
 		group := pod.Labels[kueuepodconst.GroupNameLabel]
 		if composed[group] == nil {
-			require.NoError(t, cli.Create(ctx, admittedReplicaWorkload(&pod, admit)))
+			// RECORDED AS COMPOSED, so the rest of the group adopts it below rather than trying to
+			// create a second object under the same name. A group holds one Workload however many
+			// members it has, and without this the stand-in could only ever serve groups of one.
+			wl := admittedReplicaWorkload(&pod, admit)
+			require.NoError(t, cli.Create(ctx, wl))
+			composed[group] = wl
 
 			continue
 		}
@@ -1227,10 +1232,14 @@ func TestModelDeploymentReconciler_ATemplateEditRollsOneReplicaAtATime(t *testin
 }
 
 // TestModelDeploymentReconciler_TheCreateGateReadsTheAPIServer pins where the create gate's
-// existence read goes. The read decides whether this pass creates, it answers about an object the
-// informer cache may not have seen -- a persisted create whose response was lost -- and the pass
-// is woken by Pod events, so the read goes to the API server rather than a cache that would just
-// repeat the list the gate is checking against.
+// existence read goes, AND HOW MANY OF THEM IT COSTS. The read decides whether this pass creates, it
+// answers about an object the informer cache may not have seen -- a persisted create whose response
+// was lost -- and the pass is woken by Pod events, so the read goes to the API server rather than a
+// cache that would just repeat the list the gate is checking against.
+//
+// THE COUNT IS PART OF THE CONTRACT because these reads bypass the cache: one per role, whatever
+// number of ordinals that role is short. A read per ordinal is the same answer at N times the cost,
+// billed again on every requeue for as long as a departure takes to drain.
 type countingAPIReader struct {
 	ctrlcli.Reader
 	lists int
@@ -1250,12 +1259,13 @@ func TestModelDeploymentReconciler_TheCreateGateReadsTheAPIServer(t *testing.T) 
 	reader := &countingAPIReader{Reader: cli}
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: reader}
 
-	// The first pass reads each missing ordinal on the API server before creating for it: the
-	// group a first create would double-populate is exactly the one this read has to find empty.
+	// The first pass reads the role ONCE on the API server before creating for either of its two
+	// missing ordinals: the groups a first create would double-populate are exactly the ones this
+	// read has to find empty, and one list of the role answers for every one of them.
 	_, err := reconcileModelDeploymentWith(t, r)
 	require.NoError(t, err)
-	assert.Equal(t, 2, reader.lists,
-		"each missing ordinal is read once on the API server before its create")
+	assert.Equal(t, 1, reader.lists,
+		"one API-server read per role, not one per missing ordinal: this role is short two")
 
 	// A settled pass reads nothing through the API server: every ordinal is accounted for and
 	// no role is rolling.

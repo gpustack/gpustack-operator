@@ -334,15 +334,22 @@ func TestModelDeployment_RoleSetChangeSweepsTheRemovedRoleAlone(t *testing.T) {
 	}
 }
 
-// TestModelDeployment_AnOrdinalLessPreExistingPodRollsOutRatherThanBeingAdopted covers the upgrade
-// path: every Pod this operator rendered before the per-replica groups carries no ordinal label,
-// and the pass after the upgrade meets a deployment full of them.
+// TestModelDeployment_AnOrdinalLessPreExistingPodRollsOutRatherThanBeingAdopted covers a Pod that
+// carries no ordinal label while holding a Workload of its own.
 //
 // SUCH A POD IS NOT ANY SLOT'S TO CLAIM -- adopting it onto an ordinal it never carried would key
 // the hash comparison on a guess -- so it is judged outdated instead and turns over on the ordinary
 // rollout cadence: one per pass, the count healing between departures, and the replacements arrive
 // carrying the label. The alternative the cadence rules out is tearing them all out at once, which
-// is an outage the upgrade does not need to be.
+// is an outage the turnover does not need to be.
+//
+// WHAT THIS DOES NOT COVER IS A ROLE WHOSE PODS SHARE ONE WORKLOAD, which is the other side of the
+// same arithmetic and has a case of its own: a Pod holding a Workload nobody else answers to makes
+// the admitted count LONG against the declared one, and Pods pooled under a single Workload make it
+// short. Both are the correspondence breaking rather than two defects, and both are repaired by the
+// same exception -- so this case cannot tell on its own whether that exception is wired up, because
+// its own numbers happen to agree. TestModelDeployment_ARoleWhosePodsShareOneWorkloadIsRepaired is
+// the one that fails when it is not.
 func TestModelDeployment_AnOrdinalLessPreExistingPodRollsOutRatherThanBeingAdopted(t *testing.T) {
 	ctx := context.Background()
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
@@ -405,6 +412,87 @@ func TestModelDeployment_AnOrdinalLessPreExistingPodRollsOutRatherThanBeingAdopt
 	}
 
 	t.Fatal("the ordinal-less pods never turned over onto the per-replica groups")
+}
+
+// TestModelDeployment_ARoleWhosePodsShareOneWorkloadIsRepaired covers the whole pre-per-replica
+// shape rather than the missing ordinal alone: no Pod carries an ordinal, and ONE group -- named
+// after the role -- holds all of them, so the role's Pods answer to a single Workload.
+//
+// THE ROLLOUT GUARD CANNOT READ THAT SHAPE, and the arithmetic is why. It holds until every
+// declared replica holds an admitted Workload, counting Workloads on one side and replicas on the
+// other; a Pod that claims no ordinal is a replica to neither count. Sharing one Workload makes the
+// count short -- two Pods, one admission, two declared -- while a Pod holding one of its own makes
+// it long, and either way the comparison is against a number the role can never reach. The removal
+// that would repair it is gated behind the same comparison, so the role settles into a state it
+// cannot leave and every later edit to it is silently dropped.
+//
+// THE ASSERTION IS THAT THE ROLE RECOVERS WITHOUT HELP. What repairs it is that a Pod claiming no
+// ordinal is turned over WITHOUT waiting for the guard, on the same terms as a replica short of its
+// members: neither can ever be admitted as a declared replica, so waiting on that admission is
+// waiting for something that cannot arrive.
+func TestModelDeployment_ARoleWhosePodsShareOneWorkloadIsRepaired(t *testing.T) {
+	ctx := context.Background()
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaNames(t, cli), 4)
+	standInForKueue(t, cli, true)
+
+	// Rewrite decode into the pre-per-replica shape, and take the per-replica Workloads with it:
+	// the groups they were composed for no longer exist, and leaving them standing would let the
+	// guard count admissions no Pod answers to.
+	perReplica := sets.New[string]()
+	for _, pod := range replicaPods(t, cli) {
+		if modelDeploymentPodRole(&pod) != "decode" {
+			continue
+		}
+		perReplica.Insert(pod.Labels[kueuepodconst.GroupNameLabel])
+		aged := pod.DeepCopy()
+		delete(aged.Labels, modelDeploymentReplicaOrdinalLabel)
+		aged.Labels[kueuepodconst.GroupNameLabel] = "qwen-decode"
+		require.NoError(t, cli.Update(ctx, aged))
+	}
+	require.Equal(t, 2, perReplica.Len(), "decode started as two replicas in two groups")
+
+	wlList := new(kueue.WorkloadList)
+	require.NoError(t, cli.List(ctx, wlList, ctrlcli.InNamespace("team-a")))
+	for i := range wlList.Items {
+		if perReplica.Has(wlList.Items[i].Name) {
+			require.NoError(t, cli.Delete(ctx, &wlList.Items[i]))
+		}
+	}
+	// One admitted Workload for the one group the role now holds -- which is the shape, and the
+	// number the guard reads as a single admission against two declared replicas.
+	standInForKueue(t, cli, true)
+
+	for pass := range 12 {
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err, "pass %d", pass)
+		standInForKueue(t, cli, true)
+
+		require.Equal(t, 2, replicaRoleCounts(t, cli)["prefill"],
+			"pass %d: the sibling role is nobody's cost", pass)
+
+		seated := 0
+		for _, pod := range replicaPods(t, cli) {
+			if modelDeploymentPodRole(&pod) != "decode" {
+				continue
+			}
+			if _, ok := modelDeploymentPodOrdinal(&pod); ok {
+				seated++
+			} else {
+				seated = -len(replicaPods(t, cli))
+			}
+		}
+		if seated == 2 {
+			return
+		}
+	}
+
+	t.Fatal("the role never left the shared-workload shape: no path replaces a Pod that claims no " +
+		"ordinal while the guard compares an admission count it can never reach, and the same " +
+		"comparison gates the removal that would repair it")
 }
 
 // TestModelDeployment_GroupIsIdempotent pins that the rebuild predicate does not fire on a spec that
@@ -1108,4 +1196,48 @@ func TestModelDeployment_ARolesScaleDoesNotDelayAnotherRolesRepair(t *testing.T)
 	assert.Equal(t, map[string]int{"decode": 2, "prefill": 3}, replicaRoleCounts(t, cli),
 		"decode's missing ordinal is created in this pass and prefill's third with it; holding "+
 			"either would leave a role short of its own count for a scale it has nothing to do with")
+}
+
+// TestModelDeployment_AReplicaShortOneMemberIsRepaired is the state a ReplicaGroup reaches when one
+// of its Members is lost and the others are not: a create that failed after a sibling succeeded, a
+// node that took one Pod, an eviction.
+//
+// IT IS THE ONE STATE NOTHING ELSE REACHES. A whole replica disappearing is an empty ordinal, which
+// the create gate fills; a replica that is merely outdated is a whole group the rollout turns over.
+// This is neither: the ordinal is occupied, so no create is owed, and the group is incomplete, so
+// Kueue composes NO Workload for it -- which is exactly what any guard reading "is this role fully
+// admitted" cannot see past.
+//
+// THE ASSERTION IS THAT THE ROLE RECOVERS WITHOUT HELP, and it is written over repeated passes
+// rather than one, because a level-based converger is allowed to take more than one pass to reach a
+// state. What it is not allowed to do is settle into one it cannot leave.
+func TestModelDeployment_AReplicaShortOneMemberIsRepaired(t *testing.T) {
+	ctx := context.Background()
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaPods(t, cli), 2, "the instance is two Members before anything is lost")
+
+	// Lose ONE member. Deleted outright rather than marked terminating, because the question is what
+	// the converger does about a Member that is gone and an ordinal that is still occupied.
+	pods := replicaPods(t, cli)
+	require.NoError(t, cli.Delete(ctx, &pods[1]))
+	require.Len(t, replicaPods(t, cli), 1, "exactly one Member is left standing")
+
+	// Several passes, because repair may legitimately take more than one -- a replacement can be
+	// created only once the replica it belongs to has finished leaving.
+	for range 8 {
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+	}
+
+	assert.Len(t, replicaPods(t, cli), 2,
+		"the role never returned to two Members: an ordinal holding one Member of two is owed no "+
+			"create, and the rollout that was to repair it cannot run while the incomplete group "+
+			"has no admitted Workload -- so the role serves nothing and no later spec edit can roll")
 }

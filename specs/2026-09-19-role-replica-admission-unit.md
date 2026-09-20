@@ -1609,6 +1609,38 @@ property of a model deployment, so the field would be answered by copying whatev
 
 ## Known Gaps
 
+### ✅ A ReplicaGroup short of one Member is replaced whole, and does not wait on the rollout guard
+
+**Status: FIXED.** The incomplete-replica exception in the convergence loop's rollout.
+
+A ReplicaGroup can lose one Member and keep the rest: a `Create` that fails after a sibling
+succeeded, a node that takes one Pod, an eviction that reaches one of several. Three mechanisms meet
+in that state, and two of them point the wrong way.
+
+The create gate is owed nothing — an ordinal holding even one Member is occupied, so `missing` is
+zero and no Member is created beside the survivors. That is correct on its own terms: a fresh Member
+would join a group Kueue has already refused. The completeness check does condemn the replica, which
+is also correct. What is left is the rollout, and it is guarded on every declared replica holding an
+**admitted** Workload — a guard that exists to spend admitted capacity one replica at a time.
+
+⛔ **An incomplete replica has no admitted capacity to spend, and cannot acquire any.** Kueue
+composes no Workload at all for a group short of its declared total, so the replica contributes zero
+to that count forever. Without the exception the role is stuck in both directions at once: the
+broken instance is never replaced, **and no later spec edit rolls either**, because the guard can
+never hold again for that role. An operator changing the image would watch the change be accepted
+and silently not happen.
+
+So a replica short of its Members is turned over **whole and immediately**, ahead of any replica
+that is merely outdated. It is the one case where the guard's reasoning inverts: there is nothing
+serving to strip and no reservation to trade, and waiting is not caution but a deadlock. Replacing
+the whole group rather than filling the gap is AC8.10's rule, for AC8.10's reason — the survivors
+hold a group Kueue will neither admit nor release.
+
+The guard keeps its force everywhere else, which is asserted rather than assumed: widening the
+exception to fire unconditionally turns five cases red, among them
+`TestModelDeploymentReconciler_TheRolloutGuardCountsAdmittedReplicas` and
+`TestModelDeploymentReconciler_ATemplateEditRollsOneReplicaAtATime`.
+
 ### ✅ A replica deleted by anything other than this operator held its ordinal forever
 
 **Status: FIXED.** `releaseModelDeploymentStrandedWorkloads` in the convergence loop.
@@ -1719,6 +1751,38 @@ is the reason now written beside the rule.
 ⚠️ **Both reasons were found by scanning, not by a test.** Every rule of this webhook whose comment
 named a PodSet, a shared Workload or a group was re-read against the per-replica shape; nothing
 failed, and nothing would have. A rule whose reason has gone false still passes every test it has.
+
+### ✅ A Pod claiming no ordinal never converged, whichever Workload owned it
+
+**Status: FIXED.** The same exception in the convergence loop's rollout, widened to cover it.
+
+The rollout guard reads admitted **Workloads** on one side and declared **replicas** on the other. A
+Pod carrying no ordinal label seats no replica, so whatever Workload owns it answers for no declared
+slot, and the correspondence the comparison rests on is gone. It fails in both directions. One
+Workload per role — the shape the admission unit has above this spec's narrowing — makes the count
+short: three Pods, one admission, three declared. A Pod holding a Workload of its own makes it long:
+a full role plus one such Pod counts one more admission than the role declares. Either way
+`admitted == declared` can never hold again for that role.
+
+⛔ **The removal that would repair it is gated behind the same comparison**, so nothing reaches the
+state to fix it. The create gate is owed nothing either — such a Pod is credited against the declared
+count there — and the surplus path does not fire while the role holds no more Pods than it declares.
+The role sits unconverged and **every later edit to it is accepted and silently does nothing**.
+
+So a Pod claiming no ordinal is turned over on the same terms as a ReplicaGroup short of its Members,
+and for the same reason: neither can ever be admitted as a declared replica, so waiting on that
+admission is waiting for something that cannot arrive. One leaves per pass, the create gate fills the
+ordinal behind it, and the role reaches the per-replica shape without a hand.
+
+`TestModelDeployment_ARoleWhosePodsShareOneWorkloadIsRepaired` walks the whole pre-per-replica shape
+— no ordinals, one group named for the role — and fails in **12 passes** against the narrower
+exception, which is what makes it a gate rather than a description.
+
+⚠️ **The shared-Workload half costs an outage for the role.** Its Pods answer to one Workload, so the
+first departure deletes the Workload the survivors are holding and Kueue stops them; the passes that
+follow rebuild the role from empty. That is the price of the shape, not of the repair — the
+alternative is the silent unconverged state above, where a deployment serves, accepts edits and
+applies none of them with no condition naming the cause.
 
 ## Open Questions
 
