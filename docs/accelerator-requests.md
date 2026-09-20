@@ -16,6 +16,8 @@ able to request the device-plugin resources.
 - [The resource keys](#the-resource-keys)
 - [Worked example per family](#worked-example-per-family)
 - [The request rules](#the-request-rules)
+- [The RDMA keys, beside the accelerator families](#the-rdma-keys-beside-the-accelerator-families)
+- [Co-locating an accelerator and an RDMA interface](#co-locating-an-accelerator-and-an-rdma-interface)
 - [Requesting through the Instance API](#requesting-through-the-instance-api)
 - [Pre-release breaks](#pre-release-breaks)
 - [Limitations](#limitations)
@@ -293,6 +295,85 @@ spec:                                                       # rejected
 A native sidecar belongs to neither container group, so its claim would overlap every later init
 container *and* every app container — the exact double-consumption rule 1 exists to prevent, with no
 group to move it out of.
+
+## The RDMA keys, beside the accelerator families
+
+An RDMA interface is requested through four node-level keys that sit beside the accelerator
+families, not inside them: a network interface belongs to the node rather than to a manufacturer,
+so no `<base>` applies. The mechanism — which interface serves which key, and what a grant hands
+the container — is [Network Topology](./architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)'s;
+the request rules are here.
+
+All four are served by the device plugin, and a request names what it wants one of:
+
+| Key | A request asks for |
+|---|---|
+| `device.gpustack.ai/rdma` | whole interfaces |
+| `device.gpustack.ai/rdma.shared` | concurrent uses of an interface |
+| `device.gpustack.ai/rdma.sliced` | concurrent uses of an interface |
+| `device.gpustack.ai/rdma.partitioned` | virtual functions |
+
+What a quantity of each key means, how many tokens an endpoint carries, which allocation mode each
+key belongs to, and why the two pooled keys do not decrement each other, are stated once with the
+mechanism — [the RDMA resource keys](./architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves).
+There are no `.units` keys on this side: nothing is webhook-derived, and the value you set is the
+value that schedules.
+
+**The keys are not an accelerator family.** The family classifier returns none for them, so the
+seven rules above neither apply to them nor can be violated by them — an accelerator family and an
+RDMA key in one Pod is legal. The same blindness reaches Kueue: an RDMA request contributes nothing
+to a Workload's demand, no flavor or quota can be expressed for it, and over-subscription surfaces
+as Pods that do not schedule rather than as a queue that waits.
+
+Neither a node without an RDMA-capable interface nor an endpoint whose link the node judged
+`failed` carries allocatable tokens — what each one advertises is on
+[the mechanism page](./architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)
+— so a request for these keys never schedules onto them.
+
+A grant injects the endpoint's own verbs character device, the node-level connection-manager device
+where the host has one, and `NCCL_IB_HCA` naming the granted devices. That set is evidenced for
+RoCE and for nothing else — see
+[what an allocation hands over](./architecture/network-topology.md#what-an-allocation-hands-over).
+
+**Shared accelerator and RDMA interface in one container** — the shape a co-located workload uses:
+
+```yaml
+resources:
+  limits:
+    nvidia.com/gpu.shared: "1"
+    device.gpustack.ai/rdma.shared: "1"     # one concurrent use of one RDMA interface
+```
+
+## Co-locating an accelerator and an RDMA interface
+
+A container that requests an accelerator and an RDMA interface together is granted both on one NUMA
+node — the kubelet aligns resources that publish NUMA hints, and both sides publish them — but only
+when every condition below holds. Outside these conditions nothing aligns the two, and no error
+says so.
+
+- **Both requests sit in the same container.** The kubelet aligns per container by default, so an
+  accelerator in one container and an RDMA interface in another are aligned by nothing.
+- **Both resources publish a hint.** The accelerator's whole-device modes do; an accelerator
+  partition token does not — it names no accelerator — so a partition profile paired with
+  `rdma.partitioned` is aligned to the RDMA side alone and is NOT covered, even though both are
+  allocatable in the same container. An RDMA endpoint whose affinity the kernel did not report
+  publishes none either.
+- **The node's kubelet runs `restricted` or `single-numa-node`.** It is node-level kubelet
+  configuration this operator cannot change, and what each of the four policies does with a hint is
+  in [the preflight runbook](./operation/preflight.md#reading-the-result), which is also where you
+  read the policy a given node runs.
+- **The alignment's unit is the NUMA node** — see
+  [the RDMA resource keys](./architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)
+  for why a shared PCIe switch is finer than a hint can express.
+
+What is NOT guaranteed is the node itself: the scheduler selects by quantities and cannot see
+inside a node's topology, so a node whose totals suffice but whose devices sit on two NUMA nodes is
+selected and the container is then refused at admission — and a Pod refused that way is not
+rescheduled onto another node.
+
+`device-manager preflight` reports the node's TopologyManager policy as a `topology` section, read
+from the kubelet's own configuration files; `unknown` means no readable source named one, never a
+guess of the default. See [Preflight Operations](./operation/preflight.md).
 
 ## Requesting through the `Instance` API
 

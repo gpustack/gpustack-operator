@@ -271,7 +271,7 @@ func TestReportDoesNotFailOnABrokenLink(t *testing.T) {
 	err := Report(&buf, device.PreflightGroupList{{
 		Manufacturer: "nvidia",
 		Detection:    device.PreflightDetection{State: device.PreflightStateOK, Accelerators: 1},
-	}}, network)
+	}}, network, TopologyReport{})
 	if err != nil {
 		t.Fatalf("a broken RDMA link failed the pass: %v", err)
 	}

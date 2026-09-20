@@ -251,8 +251,8 @@ func (h *hostExec) ResolveRuntime(ctx context.Context, want string) (*hostRuntim
 	return nil, fmt.Errorf("%w: probed %s", errNoHostRuntime, strings.Join(hostRuntimes, ", "))
 }
 
-// kubeletCRISources are the places a kubelet's CRI endpoint is looked for, in order, relative to the
-// host root. The first place that names one answers.
+// kubeletConfigSources are the places this node's kubelet configuration is looked for, in order,
+// relative to the host root. The first place that names the setting being read answers.
 //
 // The standard paths come before the distribution one because a machine that has hosted more than
 // one distribution can carry both: a kubelet reading the standard path reads it whatever else is on
@@ -263,29 +263,97 @@ func (h *hostExec) ResolveRuntime(ctx context.Context, want string) (*hostRuntim
 // exists at all and the endpoint is a drop-in at
 // var/lib/rancher/k3s/agent/etc/kubelet.conf.d/00-k3s-defaults.conf. Matching the distribution name
 // rather than listing it keeps this from being a guess about any particular one.
-var kubeletCRISources = []struct{ pattern, key string }{
-	{"var/lib/kubelet/kubeadm-flags.env", "--container-runtime-endpoint="},
-	{"var/lib/kubelet/config.yaml", "containerRuntimeEndpoint:"},
-	{"var/lib/rancher/*/agent/etc/kubelet.conf.d/*.conf", "containerRuntimeEndpoint:"},
+//
+// flags marks the file carrying the kubelet's command line rather than its YAML configuration,
+// which is what decides which of a setting's two spellings appears in it.
+var kubeletConfigSources = []struct {
+	pattern string
+	flags   bool
+}{
+	{"var/lib/kubelet/kubeadm-flags.env", true},
+	{"var/lib/kubelet/config.yaml", false},
+	{"var/lib/rancher/*/agent/etc/kubelet.conf.d/*.conf", false},
 }
 
-// kubeletCRIEndpoint returns the CRI endpoint this node's kubelet is configured against.
+// kubeletSetting names one kubelet setting in both the spellings its configuration uses: the flag
+// on the kubelet's command line, and the field in its YAML. A reading needs both, because which
+// one appears depends on the file it is read from rather than on the setting.
+type kubeletSetting struct{ flag, field string }
+
+// key returns the spelling this setting takes in a source of the given form.
+func (s kubeletSetting) key(flags bool) string {
+	if flags {
+		return s.flag
+	}
+	return s.field
+}
+
+var (
+	// criEndpointSetting is the runtime this node's kubelet talks to.
+	criEndpointSetting = kubeletSetting{
+		flag:  "--container-runtime-endpoint=",
+		field: "containerRuntimeEndpoint:",
+	}
+	// topologyPolicySetting is the placement guarantee this node's kubelet demands before it
+	// admits a container asking for NUMA-affine devices.
+	topologyPolicySetting = kubeletSetting{
+		flag:  "--topology-manager-policy=",
+		field: "topologyManagerPolicy:",
+	}
+)
+
+// kubeletReading is what one pass over this node's kubelet configuration established about one
+// setting. At most one of its outcomes holds, and what each one means is the caller's to decide:
+// the CRI read refuses a host it cannot interpret, because it drives what preflight measures; the
+// topology read degrades to unknown and says why, because it drives nothing.
+type kubeletReading struct {
+	// Value is the setting's value and Found reports whether a source named one. A reading with
+	// no error and no conflict and Found false means every source was searched and none carries
+	// the setting, which is "this host has nothing to say" rather than an answer.
+	Value string
+	Found bool
+	// UnreadablePath names a configuration file that matched a pattern but could not be read, and
+	// UnreadableErr says why. A match that cannot be read may be the one that decides, so it ends
+	// the reading rather than being skipped: skipping it would answer as though every file had
+	// been searched.
+	UnreadablePath string
+	UnreadableErr  error
+	// UnsearchablePattern names a source whose search could not run at all, and UnsearchableErr
+	// says why. It is kept apart from the unreadable pair because nothing was matched and no file
+	// was opened: reporting it as a configuration that could not be read sends whoever is
+	// diagnosing it looking for a permissions problem on a file that was never there.
+	UnsearchablePattern string
+	UnsearchableErr     error
+	// Conflict carries the differing values when two directories under ConflictPattern name the
+	// setting differently. Two distribution trees on one machine are two configurations and only
+	// one belongs to the kubelet that is running, so neither value is taken.
+	Conflict        []string
+	ConflictPattern string
+}
+
+// readKubeletSetting reads one setting out of this node's kubelet configuration under root.
 //
 // Read from the kubelet's own files rather than from its process, because this container shares no
 // PID namespace with the host and the files are reachable through the mounted host root either way.
-// None of the places read is universal -- a distribution is free to keep it elsewhere -- and the
-// caller treats "not found" as "this host has nothing to say", not as an error.
+// None of the places read is universal -- a distribution is free to keep its configuration
+// elsewhere -- so finding nothing is an outcome of its own rather than a failure.
 //
-// It errors, rather than choosing, when two directories under one source disagree. Two distribution
-// trees on one machine are two configurations and only one belongs to the kubelet that is running;
-// taking either would drive preflight against a socket that node's workloads may never touch, and
-// would do it silently. Saying so instead drops the affected steps to being emitted, which is the
-// answer a node nothing here can read already gets.
-func (h *hostExec) kubeletCRIEndpoint() (endpoint string, found bool, err error) {
-	for _, src := range kubeletCRISources {
-		matches, globErr := filepath.Glob(filepath.Join(h.root, src.pattern))
+// Every reading of a kubelet setting goes through here, so that two readings cannot drift apart
+// about where a kubelet keeps its configuration, what a repeated setting means, or when two
+// directories are a conflict rather than an override. Adding a setting is a kubeletSetting, not a
+// second reader.
+func readKubeletSetting(root string, setting kubeletSetting) kubeletReading {
+	for _, src := range kubeletConfigSources {
+		matches, globErr := filepath.Glob(filepath.Join(root, src.pattern))
 		if globErr != nil {
-			continue
+			// The patterns are constants, so this needs a root that is itself a malformed
+			// pattern. Continuing would leave the caller reporting that every source was
+			// searched and none carried the setting, which would be false: this one was never
+			// looked at.
+			return kubeletReading{
+				UnsearchablePattern: filepath.Join(root, src.pattern),
+				UnsearchableErr:     globErr,
+			}
 		}
 
 		// Grouped by directory, because the two levels mean different things: files within one are a
@@ -298,17 +366,9 @@ func (h *hostExec) kubeletCRIEndpoint() (endpoint string, found bool, err error)
 		for _, path := range matches {
 			body, readErr := os.ReadFile(path)
 			if readErr != nil {
-				// The same answer a conflict gets, for the same reason. These patterns name the
-				// kubelet's own configuration paths rather than a general tree, so a match that
-				// cannot be read may be the one that decides -- and skipping it falls through to
-				// the probe order, which picks a runtime by what is installed rather than by what
-				// this node's kubelet talks to. On a node whose kubelet uses containerd and which
-				// also carries docker, that silently measures a runtime no workload here uses.
-				return "", false, fmt.Errorf(
-					"this host carries a kubelet configuration at %s that could not be read, so "+
-						"which runtime its kubelet talks to cannot be established: %w", path, readErr)
+				return kubeletReading{UnreadablePath: path, UnreadableErr: readErr}
 			}
-			value, ok := valueAfter(string(body), src.key)
+			value, ok := valueAfter(string(body), setting.key(src.flags))
 			if !ok {
 				continue
 			}
@@ -329,15 +389,53 @@ func (h *hostExec) kubeletCRIEndpoint() (endpoint string, found bool, err error)
 		case 0:
 			continue
 		case 1:
-			return answers[0], true, nil
+			return kubeletReading{Value: answers[0], Found: true}
 		default:
-			return "", false, fmt.Errorf(
-				"this host names more than one kubelet CRI endpoint under %s (%s), and only one of them "+
-					"belongs to the kubelet that is running: name the runtime with --runtime",
-				src.pattern, strings.Join(answers, ", "))
+			return kubeletReading{Conflict: answers, ConflictPattern: src.pattern}
 		}
 	}
-	return "", false, nil
+	return kubeletReading{}
+}
+
+// kubeletCRIEndpoint returns the CRI endpoint this node's kubelet is configured against.
+//
+// The caller treats "not found" as "this host has nothing to say", not as an error.
+//
+// It errors, rather than choosing, when two directories under one source disagree. Two distribution
+// trees on one machine are two configurations and only one belongs to the kubelet that is running;
+// taking either would drive preflight against a socket that node's workloads may never touch, and
+// would do it silently. Saying so instead drops the affected steps to being emitted, which is the
+// answer a node nothing here can read already gets.
+func (h *hostExec) kubeletCRIEndpoint() (endpoint string, found bool, err error) {
+	reading := readKubeletSetting(h.root, criEndpointSetting)
+	switch {
+	case reading.UnsearchableErr != nil:
+		// The same answer an unreadable file gets, worded for what happened: the search itself
+		// could not run, which takes a host root that is a malformed pattern rather than a file
+		// anything failed to open.
+		return "", false, fmt.Errorf(
+			"the kubelet configuration search under %s could not run, so which runtime its "+
+				"kubelet talks to cannot be established: %w",
+			reading.UnsearchablePattern, reading.UnsearchableErr)
+	case reading.UnreadableErr != nil:
+		// The same answer a conflict gets, for the same reason. These patterns name the kubelet's
+		// own configuration paths rather than a general tree, so a match that cannot be read may
+		// be the one that decides -- and skipping it falls through to the probe order, which picks
+		// a runtime by what is installed rather than by what this node's kubelet talks to. On a
+		// node whose kubelet uses containerd and which also carries docker, that silently measures
+		// a runtime no workload here uses.
+		return "", false, fmt.Errorf(
+			"this host carries a kubelet configuration at %s that could not be read, so "+
+				"which runtime its kubelet talks to cannot be established: %w",
+			reading.UnreadablePath, reading.UnreadableErr)
+	case reading.Conflict != nil:
+		return "", false, fmt.Errorf(
+			"this host names more than one kubelet CRI endpoint under %s (%s), and only one of them "+
+				"belongs to the kubelet that is running: name the runtime with --runtime",
+			reading.ConflictPattern, strings.Join(reading.Conflict, ", "))
+	default:
+		return reading.Value, reading.Found, nil
+	}
 }
 
 // valueAfter returns the token following key in body, stripped of the quoting and the scheme either

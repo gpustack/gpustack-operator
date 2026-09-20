@@ -48,10 +48,13 @@ is *allowed* (that is `admission.md`).
 **Owns** — the `Devices.spec.interfaces` inventory and why enumeration starts at the interface rather
 than the bus, the sysfs read discipline, `pciRootId` (the outermost bridge) against `pciSwitches`, the
 three RDMA link states and why an unreadable file is never `failed`, the existential aggregation into
-`rdma.capable`, the withhold-by-removal mechanism, and the distance vocabulary's unreachable levels.
+`rdma.capable`, the withhold-by-removal mechanism, the distance vocabulary's unreachable levels, and
+the RDMA extended resources — the four keys and what a quantity means, the mode judgment, the link
+gate into health, the NUMA hint, and what an allocation hands over.
 
-**Never** — the accelerator side of the ledger (`device-discovery.md`), or how a node label reaches a
-flavor selector (`scheduling-chain.md`). Cross-link both.
+**Never** — the accelerator side of the ledger (`device-discovery.md`), how a node label reaches a
+flavor selector (`scheduling-chain.md`), or the request rules an RDMA key obeys
+(`accelerator-requests.md`). Cross-link all three.
 
 ## `docs/architecture/scheduling-chain.md` (stages 3–4)
 
@@ -158,7 +161,19 @@ and this page should link to it instead.
 
 **Owns** — the normative contract: the two families, every resource key, a worked example per family,
 the seven request rules with an accepted and a rejected example each, the `Instance` API form,
-pre-release breaks, limitations.
+pre-release breaks, limitations, and the RDMA keys' request rules — the keys sitting outside the
+family rules, the same-container requirement and the TopologyManager prerequisite for co-location.
+
+**Not** — what a quantity of an RDMA key means, how many tokens an endpoint carries, or which
+allocation mode a key belongs to. That is the mechanism, and `network-topology.md` owns it; this
+page links there. Both pages name the four keys, because a reader here needs them to write a
+request, but this page's table says only what a request asks for — a reviewer found the two tables
+restating each other while the prose between them claimed the fact was stated once, so keep this
+one to the one column that is the request contract.
+
+**Not** — what each TopologyManager policy does with a hint. `docs/operation/preflight.md` owns
+that, beside the report that says which policy a node runs; this page states the prerequisite and
+links there.
 
 **Never** — implementation. A rule's *enforcement point* is a link to `admission.md`.
 

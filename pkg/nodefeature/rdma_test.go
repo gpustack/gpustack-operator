@@ -454,3 +454,106 @@ func TestRDMANumaNodesIsValidBeforeSanitizing(t *testing.T) {
 			"valid label value before it is sanitized, not after", got, sanitized)
 	}
 }
+
+// TestGetRDMAResourceName pins the four keys as literal strings.
+//
+// A key is a contract a consumer outside this repository sets a request from: what a quantity
+// means is decided by which key it is requested under. Every want below is written out in full
+// rather than composed from the constants the implementation composes from — a test that rebuilt
+// a name from the same pieces would pass against a wrong piece, because it would be built from it.
+func TestGetRDMAResourceName(t *testing.T) {
+	testCases := []struct {
+		name string
+		mode workercore.DeviceAllocationMode
+		want core.ResourceName
+	}{
+		{
+			// The whole-function key: one physical function, exclusively.
+			name: "exclusive is the whole-function key",
+			mode: workercore.DeviceAllocationModeExclusive,
+			want: "device.gpustack.ai/rdma",
+		},
+		{
+			name: "shared is one concurrent use of one HCA",
+			mode: workercore.DeviceAllocationModeShared,
+			want: "device.gpustack.ai/rdma.shared",
+		},
+		{
+			// The same contract as shared under its own key: an HCA has no quota to enforce, so
+			// sliced is shared, spelled the way a workload spells a sliced accelerator.
+			name: "sliced is shared under its own key",
+			mode: workercore.DeviceAllocationModeSliced,
+			want: "device.gpustack.ai/rdma.sliced",
+		},
+		{
+			name: "partitioned is one virtual function per token",
+			mode: workercore.DeviceAllocationModePartitioned,
+			want: "device.gpustack.ai/rdma.partitioned",
+		},
+		{
+			// Visibility names no key: a visibility allocation must name the endpoint another
+			// container of the same Pod holds, and no RDMA allocation record is written to
+			// answer that from.
+			name: "visibility has no key",
+			mode: workercore.DeviceAllocationModeVisibility,
+			want: "",
+		},
+		{
+			// The unknown mode must not silently become the whole-function key.
+			name: "an unknown mode has no key",
+			mode: workercore.DeviceAllocationModeNone,
+			want: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := GetRDMAResourceName(tc.mode); got != tc.want {
+				t.Errorf("GetRDMAResourceName(%s) = %q, want %q", tc.mode, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRDMAResourceNamesOutsideAcceleratorFamilies pins the other half of the keys' contract:
+// the accelerator admission rules never see them, so a container may ask for an accelerator
+// and an RDMA interface together.
+//
+// The four names are literals for the reason the test above gives. The last two rows are
+// positive controls, and they are deliberately not written the same way as each other: the
+// accelerator control is DERIVED, because its base "nvidia.com/gpu" can be overridden by an
+// environment variable, so a literal one can be falsified by the environment the test runs
+// in — and the control only asks whether the classifier still classifies a real accelerator
+// key, so it should track whatever that key currently is. The visibility control stays a
+// literal, because it resolves through the known-manufacturer table, which no environment
+// variable moves. Do not "fix" the inconsistency; it is the point.
+func TestRDMAResourceNamesOutsideAcceleratorFamilies(t *testing.T) {
+	testCases := []struct {
+		name string
+		in   core.ResourceName
+		want ResourceFamily
+	}{
+		{"the whole-function key", "device.gpustack.ai/rdma", ResourceFamilyNone},
+		{"the shared key", "device.gpustack.ai/rdma.shared", ResourceFamilyNone},
+		{"the sliced key", "device.gpustack.ai/rdma.sliced", ResourceFamilyNone},
+		{"the partitioned key", "device.gpustack.ai/rdma.partitioned", ResourceFamilyNone},
+		{
+			name: "an accelerator key still classifies",
+			in: GetAcceleratableResourceName(
+				ManufacturerNVIDIA, workercore.DeviceAllocationModeShared),
+			want: ResourceFamilyShared,
+		},
+		{
+			name: "a visibility key still classifies",
+			in:   "device.gpustack.ai/nvidia.visibility",
+			want: ResourceFamilyVisibility,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ResourceFamilyOf(tc.in); got != tc.want {
+				t.Errorf("ResourceFamilyOf(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

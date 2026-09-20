@@ -12,6 +12,8 @@
 - [`pciRootId` is the outermost bridge; `pciSwitches` is the tighter fact](#pcirootid-is-the-outermost-bridge-pciswitches-is-the-tighter-fact)
 - [The RDMA link is checked, because a bound device is not a working link](#the-rdma-link-is-checked-because-a-bound-device-is-not-a-working-link)
 - [The three node labels, and what a label can carry](#the-three-node-labels-and-what-a-label-can-carry)
+- [The RDMA resource keys, and what each endpoint serves](#the-rdma-resource-keys-and-what-each-endpoint-serves)
+- [What an allocation hands over](#what-an-allocation-hands-over)
 - [The scale-up fabric is a second network, and a different shape](#the-scale-up-fabric-is-a-second-network-and-a-different-shape)
 - [Reading it yourself](#reading-it-yourself)
 
@@ -155,6 +157,123 @@ The `rdma.numa` set is joined with an **underscore**, not a comma: a comma is no
 character and it does not fail validation — the sanitizer every label value passes through drops it
 silently, so `{0,1}` would publish as `01` and read as node 01.
 
+## The RDMA resource keys, and what each endpoint serves
+
+The facts above make an RDMA endpoint visible. Four device-plugin resources make one allocatable:
+the interface inventory decides which endpoints each key serves, the link verdict decides their
+health, and every token carries its endpoint's NUMA affinity.
+
+The keys, named by `GetRDMAResourceName` (`pkg/nodefeature/rdma.go`), are node-level and carry no
+manufacturer — a network interface belongs to the node rather than to a vendor:
+
+| key | allocation mode | `1` means | tokens per endpoint |
+|---|---|---|---|
+| `device.gpustack.ai/rdma` | exclusive | one whole interface | 1 |
+| `device.gpustack.ai/rdma.shared` | shared | one concurrent use of one interface | 10 |
+| `device.gpustack.ai/rdma.sliced` | sliced | one concurrent use of one interface | 10 |
+| `device.gpustack.ai/rdma.partitioned` | partitioned | one SR-IOV virtual function | 1 per virtual function |
+
+The mode is **read off the node, never chosen** (`pkg/deviceplugin/rdma_endpoint.go`):
+
+| the interface is… | it serves | its endpoints are |
+|---|---|---|
+| an SR-IOV physical function with virtual functions configured | `partitioned` only | each of its virtual functions |
+| anything else — a physical function with none configured, or not a physical function | `exclusive`, `shared`, `sliced` | the interface itself |
+
+A physical function with virtual functions configured does not also serve the whole-function modes:
+the node was put into that state before the Device Manager started, and nothing here can change it
+at run time. Being a physical function and having virtual functions configured are separate facts
+in the record, and both are read — either alone sends a record the other distinguishes into the
+wrong branch.
+
+An endpoint with no bound RDMA device name is advertised in no mode at all: the name is what an
+allocation resolves to a character device, so an endpoint without one has nothing to hand over. A
+node whose RDMA tree exists but could not be read produces exactly that shape — an `unverified`
+record with no device — and advertises zero.
+
+The link verdict above gates health, not existence (`pkg/deviceplugin/rdma_server.go`): `ok`,
+`unverified` and no record at all advertise `Healthy`; `failed` advertises the endpoint's tokens
+`Unhealthy`. No verdict is not a verdict of failure — an endpoint reaches this gate only by carrying
+a bound device, so a missing link record is the `unverified` case arriving by a different route.
+
+**A `failed` endpoint keeps its tokens rather than dropping them.** The kubelet checkpoints the
+exact device IDs it offered a container, and withdrawing an advertised ID strands that checkpoint.
+The holder keeps its allocation while new Pods are granted none — and a container that restarts
+while the link is down cannot re-establish its allocation, because the checkpoint check requires
+every offered ID still healthy. It stays stuck until the link heals.
+
+Every advertised token carries a `TopologyInfo` naming its endpoint's own NUMA node. A virtual
+function falls back to its parent's affinity when its own is blank — a blank reading is the kernel
+declining to answer — and when neither answers, **no hint is attached rather than one naming node
+0**: under `single-numa-node` the hint decides admission, so a stand-in value would place a
+container against a proximity nobody measured.
+
+A hint's unit is the NUMA node; a shared PCIe switch is finer than a hint can express (see
+[`pciRootId` above](#pcirootid-is-the-outermost-bridge-pciswitches-is-the-tighter-fact)).
+
+The `partitioned` family is the one place an RDMA token publishes a hint where its accelerator
+counterpart publishes none: an RDMA partition token names exactly one virtual function, whose
+affinity a hint can honor, while an accelerator partition token names no accelerator at all. What
+that means for a request pairing the two is stated with the request rules
+([Accelerator Requests](../accelerator-requests.md#co-locating-an-accelerator-and-an-rdma-interface)).
+
+`.shared` and `.sliced` draw on the same interfaces and do not decrement each other: one interface
+can serve ten shared holders and ten sliced holders at once.
+
+> **Why** — an RDMA interface's multiple queue pairs are how the hardware is meant to be used, with
+> the isolation done by firmware and kernel, so several processes on one is ordinary use rather than
+> oversubscription. The token count is a scheduling knob, not a hardware limit, and nothing is
+> injected or intercepted to enforce it.
+
+Nothing an allocation does is written down: no entry in `Devices.status`, no Pod annotation, no
+in-process reservation. Every response is recomputed from `Devices.spec.interfaces[]`, so a fact
+the detector has since corrected cannot survive into a response built from an older one. The cost
+is that no cluster-level view maps a Pod to the interface it holds — the container itself is the
+record, through its injected device nodes and its `NCCL_IB_HCA` value.
+
+One server per mode registers its key with kubelet, started once by `Allocator.Start` beside the
+per-manufacturer allocators rather than by the detected-manufacturer loop, which is keyed on a fact
+a network interface does not have (`pkg/devicemanager/allocator/rdma/`). Every node the Device
+Manager serves on Linux runs the servers, accelerator or not, so a node with no RDMA-capable
+interface registers all four keys with zero devices.
+
+Zero advertisement is level-based, not an absence: a `ListAndWatch` re-reads the inventory, so a
+device that appears when a driver loads is picked up by the next pass with no second mechanism for
+the same fact. The `--no-shared`, `--no-sliced` and `--no-partitioned` switches drop the matching
+families; exclusive is ungated.
+
+## What an allocation hands over
+
+A granted token is resolved back to its endpoint in `Devices.spec.interfaces[]` at allocation
+time, and the response hands the container three things
+(`pkg/deviceplugin/rdma_allocate.go`):
+
+- the endpoint's own verbs character device, resolved from its RDMA device name;
+- the node-level connection-manager device (`rdma_cm`), once per response however many endpoints
+  were granted, and only where the host has one;
+- `NCCL_IB_HCA`, naming the granted RDMA devices, comma-joined.
+
+The verbs device is resolved through two sysfs layouts, in order
+(`pkg/deviceplugin/rdma_devices.go`): `class/infiniband_verbs/uverbsN` matched by its `ibdev`
+attribute, then the `infiniband_verbs` directory under the RDMA device's own hardware parent.
+
+> **Why that second path** — a class device sits at `<parent>/<class>/<name>`, never directly under
+> the parent, the same rule that puts the RDMA device at `<parent>/infiniband/<name>`.
+
+A name that resolves under neither fails the allocation naming both layouts — a single hard-coded
+path that is wrong on one distribution fails exactly like a host that has no RDMA at all.
+
+Devices are injected one endpoint at a time, never the whole `/dev/infiniband` directory: injecting
+a directory hands every container every adapter on the node, and degrades to handing it none with
+no error. A granted token that parses to no endpoint of the family is refused rather than silently
+dropped.
+
+Two limits, stated rather than omitted. The injected set is evidenced for RoCE and for nothing
+else — no reading behind this repository says what a classic InfiniBand fabric additionally needs,
+so a container on such a host can be granted an endpoint, open it, and still fail inside its own
+transport library. And the two layouts above are exercised against fixture trees; which one a live
+host answers through has not been read yet.
+
 ## The scale-up fabric is a second network, and a different shape
 
 Everything above is the node's *Ethernet* view: interfaces the kernel enumerates, and RDMA over them.
@@ -281,6 +400,11 @@ kubectl get devices <node> -o json |
   jq '[.spec.interfaces[] | (., (.virtualFunctions // [])[])]
       | map(select(.rdma or .link)) | map({name, pciBusId, rdmaDevice, link})'
 
+# the four RDMA resource keys and their healthy-token counts on one node — partitioned counts
+# virtual functions; shared and sliced count ten per whole-function endpoint
+kubectl get node <node> -o json |
+  jq '.status.allocatable | with_entries(select(.key | contains("gpustack.ai/rdma")))'
+
 # which nodes a flavor pinning the gate would select
 kubectl get nodes -l feature.gpustack.ai/rdma.capable=true
 ```
@@ -292,6 +416,7 @@ to check when a flavor stops selecting a node that still has the hardware.
 
 **See also** — [Device Discovery](device-discovery.md) (the accelerator side of the same ledger) ·
 [Scheduling Chain](scheduling-chain.md) (how a node label reaches a flavor selector) ·
+[Accelerator Requests](../accelerator-requests.md) (the request rules the RDMA keys obey) ·
 [Preflight Operations](../operation/preflight.md) (the same link check, before anything is installed)
 
 **Next** → [Scheduling Chain](scheduling-chain.md) — how these labels become ResourceFlavors.
