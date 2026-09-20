@@ -224,6 +224,25 @@ func askingGroupWorkload(pods []core.Pod, asking bool) *kueue.Workload {
 	return wl
 }
 
+// replicaGroupWorkload composes the Workload Kueue builds for ONE replica's group: named after the
+// group verbatim, and owned by that replica alone.
+//
+// IT IS THE SHAPE EVERY GROUP THIS OPERATOR RENDERS HAS, and askingGroupWorkload cannot express it:
+// that one pools every Pod it is given under a single name, so a case built on it always leaves a
+// member standing beside a departing one. A group of one has no such sibling, which is the whole of
+// what makes a departure from it unrecoverable.
+func replicaGroupWorkload(name string, pods ...core.Pod) *kueue.Workload {
+	wl := &kueue.Workload{}
+	wl.Name, wl.Namespace, wl.UID = name, "team-a", types.UID("wl-"+name)
+	for i := range pods {
+		wl.OwnerReferences = append(wl.OwnerReferences, meta.OwnerReference{
+			APIVersion: "v1", Kind: "Pod", Name: pods[i].Name, UID: pods[i].UID,
+		})
+	}
+
+	return wl
+}
+
 // setGroupAsk flips the replacement ask on the stored Workload, standing in for the Kueue pass that
 // would write it: nothing in this tree runs Kueue, and the ask is its answer to a departure.
 func setGroupAsk(t *testing.T, cli ctrlcli.Client, asking bool) {

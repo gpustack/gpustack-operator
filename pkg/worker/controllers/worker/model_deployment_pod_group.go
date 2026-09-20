@@ -6,6 +6,8 @@ import (
 
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -218,6 +220,68 @@ func (r *ModelDeploymentReconciler) deleteModelDeploymentGroupWorkload(
 	for _, wl := range wls {
 		if err = r.Client.Delete(ctx, wl); err != nil && !kerrors.IsNotFound(err) {
 			return fmt.Errorf("delete workload %s: %w", wl.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// releaseModelDeploymentStrandedWorkloads deletes the Workload of a replica that is on its way out
+// with no member of its group left standing.
+//
+// IT EXISTS BECAUSE A DEPARTURE THIS OPERATOR DID NOT INITIATE HAS NOTHING TO DELETE THE WORKLOAD.
+// Every path this operator drives -- teardown, a role disappearing, a scale-down, a rollout
+// replacement -- deletes the Workload of the replica it removes. A replica removed by a hand, a node
+// drain or an eviction has no such path, and a serving group's finalizer is released by nothing but
+// its Workload being deleted. Without this the Pod stays terminating behind the finalizer, its
+// Workload stays admitted holding quota, the ordinal stays occupied, and the create gate never opens
+// for it: no replacement is ever made and it takes a hand to recover.
+//
+// NEITHER TERMINAL PHASE RECOVERS ON ITS OWN, and they fail differently, which is why the remedy is
+// here rather than at the create gate. A container killed for exceeding its grace period reaches
+// Failed, which Kueue counts as INACTIVE, so a replacement created beside it would push the group
+// over its total and Kueue would finalize the dead member -- that one could have been left to the
+// create gate. A container that exits cleanly on SIGTERM reaches Succeeded, which Kueue counts as
+// ACTIVE, so the same replacement is the excess member and Kueue deletes the REPLACEMENT instead,
+// again and again. Deleting the Workload is the one remedy that covers both.
+//
+// THE LIVE MEMBERS ARE WHAT MAKE IT SAFE. Kueue answers a deleted Workload by stopping the whole
+// group, so this deletes only a Workload that owns no Pod still standing; a group with a member
+// still serving is left alone even while a sibling of it drains. One replica per group is the shape
+// this operator renders, which is what makes the two readings coincide here, but the condition is
+// written about the members rather than about the count so that a group ever holding more than one
+// is not stopped by this path.
+//
+// Absence is success, on the terms deleteModelDeploymentGroupWorkload states: a pass that runs after
+// a previous one already deleted the Workload finds nothing, and that is the state this wants.
+func (r *ModelDeploymentReconciler) releaseModelDeploymentStrandedWorkloads(
+	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
+) error {
+	departing := make([]core.Pod, 0, len(pods))
+	standing := sets.New[types.UID]()
+	for i := range pods {
+		if pods[i].DeletionTimestamp != nil {
+			departing = append(departing, pods[i])
+
+			continue
+		}
+		standing.Insert(pods[i].UID)
+	}
+	if len(departing) == 0 {
+		return nil
+	}
+
+	wls, err := r.findModelDeploymentGroupWorkloads(ctx, md, departing)
+	if err != nil {
+		return err
+	}
+
+	for _, wl := range wls {
+		if modelDeploymentWorkloadOwnsAny(wl, standing) {
+			continue
+		}
+		if err = r.Client.Delete(ctx, wl); err != nil && !kerrors.IsNotFound(err) {
+			return fmt.Errorf("delete stranded workload %s: %w", wl.Name, err)
 		}
 	}
 

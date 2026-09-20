@@ -706,6 +706,125 @@ func TestModelDeployment_NoDepartureLeavesTheWorkloadAlone(t *testing.T) {
 	assert.Len(t, replicaNames(t, cli), 4)
 }
 
+// TestModelDeployment_AReplicaNothingHereSentAwayGetsItsWorkloadReleased covers the departure that
+// no path of this operator's own initiates: a hand deleting the Pod, a node drain, an eviction.
+//
+// THE FIXTURE IS ONE WORKLOAD PER REPLICA, and that is what the cases above cannot express. They
+// pool every Pod under a single Workload, so a member is always left standing beside the departing
+// one and a Workload is always still meaningful. A group of one has no such sibling: its Workload
+// outlives the group it was composed for, owning nothing but a Pod that is trying to leave.
+//
+// WITHOUT THE RELEASE THE ORDINAL IS HELD INDEFINITELY, and neither terminal phase recovers on its
+// own. Measured on a live cluster: a Pod deleted this way was still present, finalizered, with its
+// Workload still admitted 100 seconds later; a container killed past its grace period reaches
+// Failed, which Kueue counts as inactive, while one exiting cleanly on SIGTERM reaches Succeeded,
+// which Kueue counts as ACTIVE -- and a replacement created beside that one is the excess member
+// Kueue deletes, so waiting it out and creating around it both fail. Deleting the Workload is what
+// releases the finalizer, and it is the only remedy that covers both phases.
+func TestModelDeployment_AReplicaNothingHereSentAwayGetsItsWorkloadReleased(t *testing.T) {
+	ctx := context.Background()
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaPods(t, cli), 2)
+
+	// THE UIDs ARE STAMPED BECAUSE THE FAKE CLIENT ASSIGNS NONE, and an ownerReference matches on
+	// one. Two Pods carrying no UID are one Pod to every reader of a Workload's owners, so the
+	// stranded Workload and the surviving replica's would be indistinguishable and this case could
+	// not fail whatever the reconciler did.
+	for _, pod := range replicaPods(t, cli) {
+		stamped := pod.DeepCopy()
+		stamped.UID = types.UID("uid-" + pod.Name)
+		require.NoError(t, cli.Update(ctx, stamped))
+	}
+	pods := replicaPods(t, cli)
+
+	for i := range pods {
+		require.NoError(t, cli.Create(ctx,
+			replicaGroupWorkload(pods[i].Labels[kueuepodconst.GroupNameLabel], pods[i])))
+	}
+
+	// The replica leaves the way a hand or a drain takes it: the delete lands, Kueue's finalizer
+	// holds the Pod, and nothing of this operator's own was what asked for it.
+	departing := pods[0].DeepCopy()
+	departing.Finalizers = []string{kueuepodconst.PodFinalizer}
+	require.NoError(t, cli.Update(ctx, departing))
+	require.NoError(t, cli.Delete(ctx, departing))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.True(t, kerrors.IsNotFound(cli.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: "team-a", Name: pods[0].Labels[kueuepodconst.GroupNameLabel],
+	}, new(kueue.Workload))),
+		"the stranded Workload is deleted: it owns nobody still standing, and deleting it is the "+
+			"only thing that releases the finalizer holding the ordinal")
+
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: "team-a", Name: pods[1].Labels[kueuepodconst.GroupNameLabel],
+	}, new(kueue.Workload)),
+		"the surviving replica's Workload is untouched: Kueue stops the group of a deleted "+
+			"Workload, so a member still serving is one this path must never reach")
+
+	// Kueue releases the finalizer once the Workload is gone, on its own clock, and the ordinal
+	// reads empty to the create gate.
+	released := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: pods[0].Name}, released))
+	released.Finalizers = nil
+	require.NoError(t, cli.Update(ctx, released))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Len(t, replicaNames(t, cli), 2,
+		"the replacement lands on the freed ordinal, which is what the release bought")
+}
+
+// TestModelDeployment_AWorkloadWithAMemberStillStandingSurvivesADeparture is the other half of the
+// release above, and the only shape that can tell the two apart: ONE Workload owning a departing
+// member AND a standing one.
+//
+// The release deletes a Workload that owns nobody still standing. In the case above every Workload
+// owns exactly one Pod, so that condition is false for every Workload it could reach and the case
+// cannot see whether it is read at all. Here it is the whole question -- and Kueue answers a deleted
+// Workload by stopping its group, so deleting this one would take a serving member down to free the
+// ordinal of a member already gone.
+//
+// THE UIDs ARE STAMPED FOR THE REASON THE CASE ABOVE STAMPS THEM, and it matters more here: with
+// none, the standing member is read through an empty UID that the departing member carries too, so
+// the guard would answer correctly for a reason that has nothing to do with anybody standing.
+func TestModelDeployment_AWorkloadWithAMemberStillStandingSurvivesADeparture(t *testing.T) {
+	ctx := context.Background()
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaPods(t, cli), 2)
+
+	for _, pod := range replicaPods(t, cli) {
+		stamped := pod.DeepCopy()
+		stamped.UID = types.UID("uid-" + pod.Name)
+		require.NoError(t, cli.Update(ctx, stamped))
+	}
+	pods := replicaPods(t, cli)
+
+	require.NoError(t, cli.Create(ctx, replicaGroupWorkload("shared-group", pods...)))
+
+	departing := pods[0].DeepCopy()
+	departing.Finalizers = []string{kueuepodconst.PodFinalizer}
+	require.NoError(t, cli.Update(ctx, departing))
+	require.NoError(t, cli.Delete(ctx, departing))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	require.NoError(t, cli.Get(ctx,
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: "shared-group"}, new(kueue.Workload)),
+		"the Workload stays while a member of it is still standing: deleting it would stop that "+
+			"member too, which is a serving replica paying for a departed one")
+}
+
 // TestModelDeployment_RedistributingReplicasMovesEachRolesOwnOrdinals is the case a type-keyed
 // group cannot survive.
 //

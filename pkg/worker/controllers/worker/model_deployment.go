@@ -328,6 +328,16 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		}
 	}
 
+	// A replica already leaving when this pass began was sent away by something other than this
+	// operator: a hand deleting the Pod, a node drain, an eviction. None of those deletes the
+	// replica's Workload, and a serving group's finalizer is released by nothing else -- so without
+	// this the ordinal is held by a Pod that can never leave, and the create gate below never opens
+	// for it. The deletes above cover only what this pass itself sent away.
+	if err = r.releaseModelDeploymentStrandedWorkloads(ctx, md, actual); err != nil {
+		logger.Error(err, "release the workloads of replicas nothing here sent away")
+		return ctrl.Result{}, err
+	}
+
 	// The convergence itself, one role at a time, and THE COUNT MOVES BEFORE THE CURRENCY: a role
 	// short of its declared count does not roll its outdated members in the same breath, because
 	// deleting from a set that is already short widens exactly the gap the create gate below is
