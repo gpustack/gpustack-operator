@@ -556,6 +556,14 @@ cross-mode rule, one step upstream of the wrongness F6 names. It is not a substi
 suite says nothing about F6**, and neither does any test that calls the RDMA `Allocate` before T6
 exists.
 
+**Both halves of that substitute pair are load-bearing, and this was measured rather than
+reasoned.** An implementation consulting the `Devices.status` ledger is caught **only** by the
+`Healthy` clause: the fabricated hold is there from the first call, so both responses are equally
+unhealthy and the byte-identical clause passes. An implementation consulting the in-process
+reservation is caught by both, because that state changes between the calls. Equality discriminates
+state that **changes between** the calls; `Healthy` discriminates state present **from the start**.
+Dropping either as redundant blinds the pair to one of the two.
+
 #### F7 — `preflight` reports the TopologyManager policy
 
 The preflight document gains a node-level section reporting what this node's kubelet is configured to
@@ -927,7 +935,7 @@ A spike that cannot reach the uncertainty would be a task that is green by const
       lets all of this run on the platform this is written on.
       Verify: `go test ./pkg/deviceplugin/...`
 
-- [ ] **T5 · The RDMA server: ListAndWatch**
+- [x] **T5 · The RDMA server: ListAndWatch**
       Blocked by: T1, T2, T3
       Owns: `pkg/deviceplugin/rdma_server.go`, `pkg/deviceplugin/rdma_server_test.go`
       Gate: review
