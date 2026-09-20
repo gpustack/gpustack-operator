@@ -863,10 +863,15 @@ and blocks what needs it. T2, T3, T4 and T8 depend on nothing and on each other'
 so five tasks are unblocked at the start.
 
 **No proof-of-concept task is ordered.** The one item of uncertain feasibility is the sysfs layout
-T4 reads, and it cannot be settled without hardware this plan does not have — so it is routed to
-[Verification](#verification) as R0 and mitigated in T4's own acceptance (two layouts, and an error
-that names both). A spike that cannot reach the uncertainty would be a task that is green by
-construction.
+T4 reads, and it cannot be settled without hardware this plan does not have. It is mitigated in
+T4's own acceptance (two layouts, and an error that names both), and it is settled on a real host
+by **R2**, not by R0: R0 is a correspondence between the device *names* a host lists and the names
+the record carries, and says nothing about where a verbs node lives. R2 opens the injected node and
+requires `ibv_devinfo` to report **the granted device**, which is what a wrong resolution fails.
+⚠️ Even R2 leaves a residue: it proves the resolution answered on the host it ran on, through
+whichever of the two layouts that host presents, and **cannot say which one answered** — so a pass
+does not retire the other layout, and neither layout is retired by any reading this plan can take.
+A spike that cannot reach the uncertainty would be a task that is green by construction.
 
 - [x] **T1 · Extract the serving lifecycle**
       Blocked by: None
@@ -902,7 +907,7 @@ construction.
       read.
       Verify: `go test ./pkg/deviceplugin/...`
 
-- [ ] **T4 · Resolve an RDMA device name to its character device**
+- [x] **T4 · Resolve an RDMA device name to its character device**
       Blocked by: None
       Owns: `pkg/deviceplugin/rdma_devices.go`, `pkg/deviceplugin/rdma_devices_test.go`
       Acceptance: resolves a device name to its verbs node under a fixture root through **two**
