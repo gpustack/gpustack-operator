@@ -422,17 +422,34 @@ not the other.
 C1's table, implemented as a pure function over one `DeviceInterface`, with no I/O and no ledger
 read.
 
-Acceptance — **three inputs, one case each**, because the three are what C1 distinguishes:
+Acceptance — **four inputs, one case each**: the three C1 distinguishes, plus one that is the only
+thing standing between this judgment and a simplification all three would pass.
 
 | input | `Exclusive`/`Shared`/`Sliced` | `Partitioned` |
 |---|---|---|
 | `sriov: true` with two virtual functions | advertises nothing | advertises two endpoints |
 | `sriov: true` with no virtual functions | advertises the interface | advertises nothing |
 | `sriov: false` | advertises the interface | advertises nothing |
+| `sriov: false` with virtual functions present | advertises the interface | advertises nothing |
 
-The middle row is the one that is easy to lose: it is the state `devices.go:349-352` exists to keep
-distinct, and an implementation deriving the branch from `len(virtualFunctions)` alone passes the
-first and third rows while collapsing it into the third.
+The judgment reads two facts, and one row guards each. **Neither row guards the other's fact** —
+measured, by mutating the implementation and running the rows:
+
+- The **middle row** catches a branch reading `SRIOV` and ignoring the count: that implementation
+  sends a physical function with no virtual functions into `Partitioned`, where it has nothing to
+  offer.
+- The **fourth row** catches a branch reading the count and ignoring `SRIOV`. **The first three
+  rows do not.** Under a `len(virtualFunctions) > 0` branch all three produce identical output,
+  because none of them pairs `sriov: false` with virtual functions. Run that mutation against the
+  three rows alone and nothing goes red.
+
+The fourth input is not reachable on a real node: `VirtualFunctions` is documented as "this
+physical function's virtual functions, NESTED here" (`devices.go:354-359`), so a record that is not
+a physical function does not carry any. That is the reason the row is needed, not a reason to drop
+it — on reachable data the two branches are indistinguishable, so reading `SRIOV` here buys no
+behaviour, only the refusal to collapse a distinction the record deliberately keeps
+(`devices.go:349-352`). Without this row nothing in the suite stops a later reader from deleting
+that read as redundant, and the deletion would be invisible.
 
 #### F3 — the NUMA hint
 
@@ -876,7 +893,7 @@ construction.
       returns `ResourceFamilyNone` for all four.
       Verify: `go test ./pkg/nodefeature/...`
 
-- [ ] **T3 · The endpoint vocabulary, the mode judgment and the NUMA resolution**
+- [x] **T3 · The endpoint vocabulary, the mode judgment and the NUMA resolution**
       Blocked by: None
       Owns: `pkg/deviceplugin/rdma_endpoint.go`, `pkg/deviceplugin/rdma_endpoint_test.go`
       Acceptance: [F2](#f2--the-mode-judgment)'s three rows; the advertisement predicate (an
