@@ -1,9 +1,9 @@
 # Spec: Role Replica Admission Unit
 
-Status: Building
-Blocked on: the multi-Pod instance render path, which this spec now carries rather than defers. Its
-substrate is settled and measured (F8, T10), `size` is already immutable and legal above one (T11),
-and what is open is the rendering and the converger behind it (T12, T13).
+Status: Built
+Blocked on: nothing. All seventeen tasks are delivered, the unit suite and both lint targets are
+green, and the multi-Member shape is measured on a real cluster rather than argued — case 79 passes
+on all twelve rows and the regression set beside it is green. What is left is the pull request.
 The first half — one replica as the admission unit — is built and has been run end to end on a live
 two-node cluster: cases 1, 45, 49, 50, 51, 61 and 68 all execute, and every failure that round
 produced was in the suite rather than in the operator (assertions still written for one Workload per
@@ -147,9 +147,8 @@ replicas drain and the other two keep serving uninterrupted.
 
 #### Story 3
 
-As an operator adding a second role to a deployment that had only one, I want the existing role's
-replicas left alone, so that introducing disaggregation does not take the currently serving role
-offline.
+As an operator removing a role from a disaggregated deployment, I want the roles I keep left alone,
+so that retiring one half does not take the other half offline.
 
 #### Story 4
 
@@ -208,9 +207,12 @@ Every replica joins a group of its own. The group's declared total is always `1`
   Workload Admitted and holding quota forever, with its Pod stuck Terminating behind the finalizer.
   The delete accounting in the test counts **by object kind** — one Pod delete and one Workload
   delete per removed replica — because a test counting deletes alone passes against the leak.
-- **AC1.6** Adding a second role to a single-role deployment: the first role's Pods are the same
-  objects afterwards, and the deployment never passes through a state where that role's Pods sit
-  in two different groups.
+- **AC1.6** Removing a role leaves every surviving role's Pods as the same objects, and the
+  deployment never passes through a state where one role's Pods sit in two different groups.
+  **The role set is identity**, so removal is the only direction the API offers: a stored deployment
+  cannot gain a role, and an operator who wants one creates a second deployment. The mechanism
+  underneath is what makes the survivor safe — a role's group names are derived per `(role,
+  ordinal)` and never from how many roles exist, so no sibling's departure can rename them.
 
 #### F2 — Group names no longer depend on how many roles exist
 
@@ -549,9 +551,12 @@ Three further readings came out of the same cluster, and each one moved a decisi
 
 ### Notes / Constraints / Caveats
 
-**Kueue version.** The cluster runs the chart pinned in `hack/deps.sh`, **Kueue v0.18.4**. The
+**Kueue version.** The cluster runs the chart pinned in `hack/deps.sh`, **Kueue v0.18.9**. The
 `sigs.k8s.io/kueue` module in `go.mod` is `v0.17.1` and is the compile-time library only.
-Capabilities below were read from the v0.18.4 sources.
+
+Every capability and measurement below names the version it was read on, and those numbers are
+provenance rather than a claim about the pin: a reading taken against **v0.18.4** stays labelled
+v0.18.4. Where the two versions differ, Known Gaps says so, and the remedies stand on both.
 
 **Why the current design cannot grow a group.** In Kueue's plain-Pod integration, once a Workload
 exists the comparison that decides whether it still matches reads the Workload's own PodSet counts
@@ -1171,7 +1176,12 @@ implementation.
       across the Members of a group and across two groups of one role, which is the Boundaries
       invariant at the new size, and that the member-index label is the only thing separating two
       Members. `pod-group-total-count` becomes `size` instead of the constant `1`.
-      Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestRenderModelDeployment' -v`
+      The three rank variables are owned on every engine, because a user entry of one of those names
+      would be merged by value onto the entry carrying the `fieldRef`, and an `EnvVar` holding both
+      a value and a source is refused by the API server. The case proving the index asserts it **as
+      a `fieldRef` and never as a resolved value**: a literal index would satisfy "the container
+      knows its rank" while making the container spec a per-Member document.
+      Verify: `go test ./pkg/worker/controllers/worker/ -run 'Test(Render|Stamp)ModelDeployment' -v`
 
 - [x] **T13 · The converger creates, compares and replaces at ReplicaGroup granularity**
       Blocked by: T12
@@ -1214,18 +1224,29 @@ implementation.
       Workload-holds-finalizer cycle is broken exactly as it is for single-Member groups.
       Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestModelDeployment(Status|Rollout)' -v`
 
-- [ ] **T16 · End-to-end: a multi-Member deployment, and a scale that leaves it alone**
+- [x] **T16 · End-to-end: a multi-Member deployment, and a scale that leaves it alone**
       Blocked by: T12, T13, T14, T15
       Owns: `.agents/skills/gpustack-operator-e2e/cases/case-79.sh`,
       `.agents/skills/gpustack-operator-e2e/SKILL.md`
       Acceptance: A new case deploys a role at `size: 2, replicas: 1`, and asserts: one Workload
-      with one PodSet of **two**; both Members gated until the group is admitted, then both
-      admitted together; the role's Service holding exactly one endpoint; each Member resolving the
-      leader's DNS name. It then scales `replicas` to 2 and asserts the first ReplicaGroup's Member
-      UIDs are unchanged while a second ReplicaGroup appears — Story 7, and the row that only e2e
-      can carry. Case 45 gains the `size` immutability refusal; its size-above-one refusal row
+      with one PodSet of **two**; the role's Service holding exactly one endpoint while the
+      instance's own holds both; each Member resolving the leader's DNS name; and the rank layout
+      reaching the container. It then scales `replicas` to 2 and asserts the first ReplicaGroup's
+      Member UIDs are unchanged while a second ReplicaGroup appears — Story 7, and the row that only
+      e2e can carry. Case 45 gains the `size` immutability refusal; its size-above-one refusal row
       becomes an acceptance.
+      ⛔ **The gated window itself is deliberately NOT asserted**, and the case header carries the
+      reason: both Members are scheduling-gated for a window seconds wide on an idle pool, so a poll
+      that caught it would pass or fail on how busy the cluster was, and one that missed it would
+      report a pass. What is asserted instead is the state that window exists to produce — one
+      Workload whose single PodSet declares two — which Kueue can only have reached by waiting for
+      both Members to exist. NOT closed by polling for a gated Pod, nor by reading a Member's
+      scheduling gates after the fact, since an admitted Member has none left to read.
       Verify: `bash .agents/skills/gpustack-operator-e2e/cases/case-79.sh <NS>`
+      ⓘ **Measured on a two-node cluster carrying this operator: all rows PASS**, the DNS row
+      included — a Member resolves its leader at the name derived before either Pod exists. The
+      regression set (45, 49, 50, 51, 61, 68, 78) runs beside it and is green. What that round
+      found in the harness is recorded under the Test Plan.
 
 - [x] **T17 · Documentation for the multi-Member shape**
       Blocked by: T12, T13, T14, T15
@@ -1308,9 +1329,11 @@ Per task:
 - **T4** — `size` defaults to 1; a `size` other than 1 is refused with a message naming the missing
   capability; `make generate` leaves the tree clean.
 - **T5** — scale-up 2→3 and scale-down 2→1 leave surviving Pods as the same objects, asserted by a
-  marker the renderer never writes; exactly one Delete for a 2→1; a single-role deployment gaining
-  a second role leaves the first role's Pods untouched and never places one role's Pods in two
-  groups; every rendered Pod declares total count 1 and carries its ordinal label; group names are
+  marker the renderer never writes; exactly one Delete for a 2→1; removing a role from a two-role
+  deployment leaves the survivor's Pods untouched and never places one role's Pods in two groups
+  (the adding direction is refused at admission, see AC1.6, so it has no converger case and the
+  shared mechanism is covered by the group-name derivation below instead); every rendered Pod
+  declares total count 1 and carries its ordinal label; group names are
   identical whether the deployment has one role or two; two deployments of one name in two
   namespaces derive different group names.
 - **T6** — `Ready` only when every replica has reserved; `Pending` otherwise and never `Retry`; an
@@ -1382,6 +1405,27 @@ a different controller a reconcile later), and one stale comment in the operator
 that no longer exists. ⚠️ **The suite's own instruments failing is the expected shape of this
 round** — the assertions were written against the design this spec replaces, so a green first run
 would have been the surprising outcome and the reason to distrust the suite.
+
+⭐ **The second round ran against an operator built from this branch, and found the same shape
+again.** Case 79 passes on all twelve rows and the regression set beside it is green, so the
+operator is measured rather than argued. The three failures were all in the harness, and all three
+were one defect: **a bash variable name that silently swallowed an assignment.**
+
+Two of them made a check unable to fail or unable to pass, which is why neither had ever been seen.
+`GROUPS` is a bash builtin array of the caller's unix groups and discards what is written to it, so
+case 79 compared a group id against 1. `ROWS` was the results accumulator in case 49 and a scalar
+assignment to it wrote element zero, erasing every row already recorded while `FAILS` kept its
+count — a failure there would have printed a number and no row naming it.
+
+The third is a race rather than a name: case 78 read the ClusterQueue off a Workload that existed
+but was not yet admitted, so its two quota rows had never executed. They now do, and report the
+charge moving by exactly one replica in each direction and returning in full.
+
+⚠️ **None of the three is caught by anything.** `shellcheck` reports the first as SC2178 plus
+SC2128, but this repository never runs it: `# shellcheck disable=` directives appear throughout
+`hack/`, and no target invokes the tool. Every `.sh` under `.agents/skills/` — 132 of them — has
+therefore only ever been checked by being executed. Wiring a shell lint in is its own change and
+its own set of findings, so it is recorded here rather than done inside this one.
 
 > Cross-check findings are folded in below once the independent review returns.
 

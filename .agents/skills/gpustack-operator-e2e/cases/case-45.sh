@@ -432,6 +432,42 @@ fi
 record SKIP "the unregistered domain costs the replicas their connector and nothing else" \
   "deferred: needs a READY Binding as the control, which needs a live Mooncake backend. T14 has landed, so the claim now discriminates — but not inside a case whose every deployment is unregistered"
 
+# --- the two rows that need a STORED object, because they are about an edit ---
+#
+# Every refusal above is a create refused by `--dry-run=server`, which has nothing to compare
+# against. Freezing a field is a rule about the difference between two versions of one object, so it
+# cannot fire on a create at all and no dry run reaches it. These two patch the deployment that is
+# still standing.
+#
+# THE PAIR IS THE ROW. `replicas` and `size` sit side by side in the same struct and are edited
+# through the same patch shape, so a webhook that refused both -- or a patch that failed for a
+# reason having nothing to do with either -- reads exactly like a correct one through the refusal
+# alone. The acceptance is what says the instrument can still say yes.
+if [ "$nobind_ready" = yes ]; then
+  size_out="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai case45-nobind --type=json \
+    -p '[{"op":"replace","path":"/spec/roles/0/size","value":2}]' 2>&1 | tr '\n' ' ')"
+  if [ -n "$size_out" ] && [ -z "${size_out##*roles\[0\].size*}" ]; then
+    record PASS "an edit to a role's size is refused, naming the field" \
+      "refused at spec.roles[0].size: every member of a running instance was built for the rank layout the old value described"
+  else
+    record FAIL "an edit to a role's size is refused, naming the field" \
+      "wanted a refusal naming roles[0].size, got: $(echo "$size_out" | cut -c1-160)"
+  fi
+
+  replicas_out="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai case45-nobind --type=json \
+    -p '[{"op":"replace","path":"/spec/roles/0/replicas","value":2}]' 2>&1 | tr '\n' ' ')"
+  if [ -n "$replicas_out" ] && [ -z "${replicas_out##*patched*}" ]; then
+    record PASS "the control: an edit to a role's replicas is accepted" \
+      "patched, so the refusal above is this rule answering rather than the whole struct being frozen"
+  else
+    record FAIL "the control: an edit to a role's replicas is accepted" \
+      "wanted the patch to be accepted, got: $(echo "$replicas_out" | cut -c1-160)"
+  fi
+else
+  record SKIP "an edit to a role's size is refused, naming the field" \
+    "the subject deployment was never created, so there is no stored object to edit"
+fi
+
 kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai case45-nobind \
   --wait=true --timeout=60s >/dev/null 2>&1
 

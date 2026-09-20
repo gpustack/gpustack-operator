@@ -54,6 +54,15 @@ fi
 BINDING="${E2E_MD_BINDING:-case51-no-such-binding}"
 IT="${E2E_MD_INSTANCE_TYPE:-}"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
+# The second image exists only to be DIFFERENT from the first: the control row below changes it to
+# move the rendered Pod, and never runs it long enough to care what it does. It must still be a real
+# image, because a replica that cannot pull is a replica that never replaces its predecessor.
+CONTROL_IMAGE="${E2E_MD_CONTROL_IMAGE:-registry.k8s.io/pause:3.9}"
+if [ "$CONTROL_IMAGE" = "$IMAGE" ]; then
+  echo "[case-51] E2E_MD_IMAGE and E2E_MD_CONTROL_IMAGE are the same image, so the control row" >&2
+  echo "          would change nothing and report a rebuild that never happened" >&2
+  exit 2
+fi
 
 FAILS=0
 ROWS=()
@@ -246,7 +255,7 @@ refuses "a kind outside the enum is refused BY THE SCHEMA" \
     instanceType: ${IT}
     replicas: 1"
 
-# --- the controller: a replicas change replaces nobody, a role rename replaces everybody ---
+# --- the controller: a replicas change replaces nobody, an image change replaces everybody ---
 
 REBUILD_MD=case51-rebuild
 
@@ -397,33 +406,33 @@ fi
 
 # THE CONTROL, AND WITHOUT IT THE ROW ABOVE PROVES NOTHING. "The UIDs did not change" is also what a
 # broken observation reports -- a role_uids that silently returned the same string twice, a patch
-# that never applied -- so the same instrument has to be shown reporting the other value. Renaming a
-# role derives a new group name for every one of its ordinals, so every replica of it IS replaced,
-# while the sibling role is still expected to sit untouched.
-RENAMED_BEFORE="$(role_uids decode)"
-kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai "$REBUILD_MD" --type=merge \
-  -p '{"spec":{"roles":[{"name":"prefill","kind":"prefill","instanceType":"'"$IT"'","replicas":2,'"$TPL"'},{"name":"decoder","kind":"decode","instanceType":"'"$IT"'","replicas":1,'"$TPL"'}]}}' \
-  >/dev/null 2>&1
+# that never applied -- so the same instrument has to be shown reporting the other value.
+#
+# THE CONTROL IS AN IMAGE CHANGE, NOT A ROLE RENAME. A rename would replace every replica of the
+# renamed role, which is the reading this row wants, but no rename ever reaches the converger: the
+# role set is part of a deployment's identity and admission refuses any edit to it, in either
+# direction. A control the API rejects is a control that never runs, and a row that records SKIP
+# leaves the assertion above resting on an instrument nobody watched answer twice.
+#
+# An image change is refused by nothing, moves the rendered Pod, and therefore rolls every replica
+# of the role it names -- one at a time, which is why this waits for the whole role to turn over
+# rather than for a single Pod.
+CONTROL_BEFORE="$(role_uids decode)"
+CONTROL_PATCH="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai "$REBUILD_MD" --type=json \
+  -p '[{"op":"replace","path":"/spec/roles/1/image","value":"'"$CONTROL_IMAGE"'"}]' 2>&1)"
 
-RENAME_DONE=no
-for _ in $(seq 1 45); do
-  [ "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${REBUILD_MD},app.kubernetes.io/component=decoder" \
-    --no-headers 2>/dev/null | grep -c . || true)" = 1 ] && { RENAME_DONE=yes; break; }
+CONTROL_DONE=no
+for _ in $(seq 1 90); do
+  [ "$(surviving "$CONTROL_BEFORE" decode)" = 0 ] && { CONTROL_DONE=yes; break; }
   sleep 2
 done
 
-if [ "$RENAME_DONE" != yes ]; then
-  record SKIP "the control: a role rename DOES replace that role's replicas" \
-    "the renamed role never reached its replica, so the instrument was never shown reporting a change"
+if [ "$CONTROL_DONE" = yes ]; then
+  record PASS "the control: an image change DOES replace that role's replicas" \
+    "none of the old decode UIDs survived the image change, so the reading above is the instrument answering rather than failing to look"
 else
-  still="$(surviving "$RENAMED_BEFORE" decode)"
-  if [ "$still" = 0 ]; then
-    record PASS "the control: a role rename DOES replace that role's replicas" \
-      "none of the old decode UIDs survived, so the reading above is the instrument answering rather than failing to look"
-  else
-    record FAIL "the control: a role rename DOES replace that role's replicas" \
-      "${still} old decode UID(s) still present: this instrument cannot tell a replacement from a survivor, so the row above is unproven"
-  fi
+  record FAIL "the control: an image change DOES replace that role's replicas" \
+    "$(surviving "$CONTROL_BEFORE" decode) of the old decode UID(s) outlived an image change, so this instrument cannot tell a replacement from a survivor and the row above is unproven. patch said: ${CONTROL_PATCH:0:200}"
 fi
 
 # Results.
