@@ -1840,7 +1840,7 @@ func TestRenderModelDeploymentPod_TemplateCarriesNoGroupMetadataOrHash(t *testin
 	require.Len(t, template.OwnerReferences, 1)
 	assert.True(t, systemmeta.MatchResource(template, ModelDeploymentResourceType))
 
-	stampModelDeploymentPod(template, md, role, 0)
+	stampModelDeploymentPod(template, md, role, 0, 0)
 
 	assert.Equal(t, modelDeploymentReplicaGroupName(md, role.Name, 0),
 		template.Labels["kueue.x-k8s.io/pod-group-name"],
@@ -1852,6 +1852,205 @@ func TestRenderModelDeploymentPod_TemplateCarriesNoGroupMetadataOrHash(t *testin
 	assert.Equal(t, "server", template.Annotations["kueue.x-k8s.io/role-hash"],
 		"the role hash stays the role's own name")
 	assert.Contains(t, template.Annotations, modelDeploymentPodSpecHashAnnotation)
+}
+
+// TestStampModelDeploymentPod_AboveOneMemberNamesAndAddressesEachMember covers what the stamp does
+// once a replica is more than one Pod, and the assertions are chosen so that each one fails for a
+// different reason.
+//
+// THE MEMBERS MUST SHARE A GROUP AND DIFFER IN NOTHING ELSE THE RENDER CONTROLS. Sharing the group
+// is what makes them one admission; differing only in name, hostname and member index is what keeps
+// the template comparable, which is the Boundaries invariant at this size.
+func TestStampModelDeploymentPod_AboveOneMemberNamesAndAddressesEachMember(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 3
+	})
+	role := &md.Spec.Roles[0]
+
+	stamp := func(ordinal, member int) *core.Pod {
+		t.Helper()
+
+		pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: role, InstanceType: newRenderInstanceType(),
+		})
+		require.NoError(t, err)
+		stampModelDeploymentPod(pod, md, role, ordinal, member)
+
+		return pod
+	}
+
+	leader, worker := stamp(0, 0), stamp(0, 1)
+
+	// The name is DERIVED, which is what lets a sibling address it before it exists. GenerateName
+	// is cleared with it: a Pod carrying both would be named by the API server and the derived name
+	// would be the one nobody could reach.
+	assert.Equal(t, "qwen-server-r0-m0", leader.Name)
+	assert.Equal(t, "qwen-server-r0-m1", worker.Name)
+	assert.Empty(t, leader.GenerateName)
+
+	// hostname and subdomain are what make the name resolvable, and the subdomain is the SAME for
+	// both -- it names the replica's headless Service, which is the thing they are published behind.
+	assert.Equal(t, "qwen-server-r0-m0", leader.Spec.Hostname)
+	assert.Equal(t, "qwen-server-r0-m1", worker.Spec.Hostname)
+	assert.Equal(t, "qwen-server-r0", leader.Spec.Subdomain)
+	assert.Equal(t, leader.Spec.Subdomain, worker.Spec.Subdomain)
+
+	// ONE GROUP, DECLARING ALL THREE. This is the assertion that makes them one admission rather
+	// than three, and the total is the role's size rather than the count of members stamped so far.
+	assert.Equal(t, leader.Labels["kueue.x-k8s.io/pod-group-name"],
+		worker.Labels["kueue.x-k8s.io/pod-group-name"],
+		"members of one replica share its group: they are admitted together or not at all")
+	assert.Equal(t, "3", leader.Annotations["kueue.x-k8s.io/pod-group-total-count"])
+	assert.Equal(t, "3", worker.Annotations["kueue.x-k8s.io/pod-group-total-count"])
+	assert.Equal(t, "server", leader.Annotations["kueue.x-k8s.io/role-hash"],
+		"the role hash names the PodSet, so it stays the role's -- the member index is not in it")
+	assert.Equal(t, leader.Annotations["kueue.x-k8s.io/role-hash"],
+		worker.Annotations["kueue.x-k8s.io/role-hash"])
+
+	// The index is a LABEL, because a Service selector has to be able to match the leader and a
+	// selector cannot express "the Pod whose name ends in -m0".
+	assert.Equal(t, "0", leader.Labels[modelDeploymentMemberIndexLabel])
+	assert.Equal(t, "1", worker.Labels[modelDeploymentMemberIndexLabel])
+
+	// A SECOND REPLICA SHARES NOTHING OF THE FIRST'S IDENTITY, which is Goal 1 at this size: its
+	// members are named apart and its group is its own, so neither replica's admission touches the
+	// other's.
+	second := stamp(1, 0)
+	assert.Equal(t, "qwen-server-r1-m0", second.Name)
+	assert.Equal(t, "qwen-server-r1", second.Spec.Subdomain)
+	assert.NotEqual(t, leader.Labels["kueue.x-k8s.io/pod-group-name"],
+		second.Labels["kueue.x-k8s.io/pod-group-name"])
+}
+
+// TestStampModelDeploymentPod_MembersOfAReplicaDifferOnlyInTheirIdentity is the Boundaries invariant
+// stated at the size where it is least obvious.
+//
+// THE CONTAINER SPEC IS WHERE A RANK LAYOUT WOULD LEAK IN, and the whole reason the member index
+// travels as a label is that a renderer writing it into env instead would make two members of one
+// replica hash differently -- and every member would then read as a pending rollout, forever, with
+// nothing erroring. So the comparison is on the serialized PodSpec with the two per-member fields
+// blanked: anything else that differs is a defect this case exists to name.
+func TestStampModelDeploymentPod_MembersOfAReplicaDifferOnlyInTheirIdentity(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 4
+	})
+	role := &md.Spec.Roles[0]
+
+	specOf := func(member int) string {
+		t.Helper()
+
+		pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: role, InstanceType: newRenderInstanceType(),
+		})
+		require.NoError(t, err)
+		stampModelDeploymentPod(pod, md, role, 0, member)
+
+		// The two fields the stamp is ALLOWED to vary per member. Blanking them is what makes the
+		// comparison discriminating rather than vacuous: without it the test would be asserting
+		// that two different Pods are different.
+		pod.Spec.Hostname = ""
+
+		encoded, err := json.Marshal(pod.Spec)
+		require.NoError(t, err)
+
+		return string(encoded)
+	}
+
+	first := specOf(0)
+	for member := 1; member < 4; member++ {
+		assert.Equal(t, first, specOf(member),
+			"member %d's PodSpec differs from the leader's beyond its hostname: "+
+				"a per-member value has leaked into the render", member)
+	}
+}
+
+// renderStampedMember is one member of one replica, rendered and stamped the way the converger does.
+func renderStampedMember(
+	t *testing.T, md *workercore.ModelDeployment, ordinal, member int,
+) *core.Pod {
+	t.Helper()
+
+	pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+	})
+	require.NoError(t, err)
+	stampModelDeploymentPod(pod, md, &md.Spec.Roles[0], ordinal, member)
+
+	return pod
+}
+
+// mainContainerEnv is the main container's environment, keyed by name. It fails rather than returns
+// empty when there is no main container: an assertion over a map nobody filled passes for "the
+// variable is absent" and for "the container this test is about was renamed".
+func mainContainerEnv(t *testing.T, pod *core.Pod) map[string]core.EnvVar {
+	t.Helper()
+
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name != modelDeploymentMainContainerName {
+			continue
+		}
+		env := make(map[string]core.EnvVar, len(pod.Spec.Containers[i].Env))
+		for _, e := range pod.Spec.Containers[i].Env {
+			env[e.Name] = e
+		}
+
+		return env
+	}
+	require.FailNow(t, "the rendered Pod carries no main container")
+
+	return nil
+}
+
+// TestStampModelDeploymentPod_AMultiMemberInstancePublishesItsRankLayout is the rank layout an
+// instance of several Pods hands its engine: who to talk to, how many there are, and which one this
+// is.
+//
+// THE INDEX IS ASSERTED AS A fieldRef AND NEVER AS A VALUE, which is the half a test reading only
+// the resolved rank would miss. A literal index would satisfy "the container knows its rank" while
+// making the container spec a per-member document -- and the invariant that one template describes a
+// whole replica is what the sibling case above measures.
+func TestStampModelDeploymentPod_AMultiMemberInstancePublishesItsRankLayout(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 3
+	})
+
+	env := mainContainerEnv(t, renderStampedMember(t, md, 2, 1))
+
+	assert.Equal(t, "qwen-server-r2-m0.qwen-server-r2",
+		env[modelDeploymentLeaderAddressEnv].Value,
+		"the leader address names member zero of THIS replica under its own headless Service")
+	assert.Equal(t, "3", env[modelDeploymentReplicaSizeEnv].Value,
+		"the size is the role's, not the deployment's replica count")
+
+	index := env[modelDeploymentMemberIndexEnv]
+	assert.Empty(t, index.Value,
+		"the index is read from the label rather than written in, so no literal belongs here")
+	require.NotNil(t, index.ValueFrom, "the index carries no source at all")
+	require.NotNil(t, index.ValueFrom.FieldRef, "the index's source is not a downward-API fieldRef")
+	assert.Equal(t, "metadata.labels['"+modelDeploymentMemberIndexLabel+"']",
+		index.ValueFrom.FieldRef.FieldPath,
+		"the fieldRef names a different key than the one the stamp writes, so it resolves to nothing")
+
+	// THE LABEL THE fieldRef POINTS AT HAS TO BE THERE. The kubelet fails the Pod on a fieldRef to a
+	// label that does not exist, so the two halves are one fact and a test of either alone passes
+	// while the Pod cannot start.
+	assert.Equal(t, "1", renderStampedMember(t, md, 2, 1).Labels[modelDeploymentMemberIndexLabel],
+		"the member index label the fieldRef reads is missing or holds the wrong member")
+}
+
+// TestStampModelDeploymentPod_ASingleMemberInstancePublishesNoRankLayout states the rule the pinned
+// digest enforces but does not explain: at size one there is no collective, so there is no rank.
+//
+// It is not redundant with that digest. The digest fails on ANY difference and names none of them,
+// so it reports "the render moved" where this reports which promise was broken.
+func TestStampModelDeploymentPod_ASingleMemberInstancePublishesNoRankLayout(t *testing.T) {
+	env := mainContainerEnv(t, renderStampedMember(t, newRenderDeployment(), 0, 0))
+
+	for _, name := range modelDeploymentRankEnvNames {
+		assert.NotContains(t, env, name,
+			"a single-Pod instance carries %s, which no engine can act on and which moves the "+
+				"fingerprint of every deployment that never asked for a multi-Pod instance", name)
+	}
 }
 
 // TestRenderModelDeploymentPodTemplate_RendersTwoReplicasOfOneRoleIdentical is the invariant that

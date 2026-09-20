@@ -430,11 +430,11 @@ func validateModelDeploymentRoleIdentity(md, old *workercore.ModelDeployment) fi
 // every living instance the wrong shape at once, with no intermediate state in which the deployment
 // is serving. What the reader needs is the field that does move, so the message names replicas.
 //
-// FREEZING IT ALSO KEEPS ONE NUMBER UNDER ONE WRITER. An instance renders as a StatefulSet whose own
-// replica count is this size, and Kueue's StatefulSet integration derives a pod group's declared
-// total from that count. A count that never moves cannot be read as two different totals by two
-// controllers; a count that moves would relocate the defect rather than fix it -- a group's declared
-// total changing while the group is running, one layer further down than where it used to be.
+// FREEZING IT ALSO KEEPS ONE NUMBER UNDER ONE WRITER. The size is the group's declared total, the
+// member count the operator creates, and the rank count it publishes to every container; all three
+// are derived from this one field on every pass. A count that never moves cannot be read as two
+// different totals by two readers, and a count that moved would change a group's declared total
+// while the group is running -- which Kueue answers by stopping every member it already admitted.
 func validateModelDeploymentRoleIdentityFields(
 	rolePath *field.Path, role, was *workercore.ModelDeploymentRole,
 ) field.ErrorList {

@@ -384,6 +384,29 @@ func TestValidateModelDeployment(t *testing.T) {
 			})),
 		},
 		{
+			// The rank keys are owned WHATEVER THE ENGINE, because they describe the Pod's shape
+			// rather than anything an engine reads by name. Refusing them is not tidiness: the
+			// index is rendered as a fieldRef, a user entry of that name would be merged onto it by
+			// value, and an EnvVar carrying both a value and a source is refused by the API server
+			// -- so an unowned key here turns a legal deployment into one that cannot render.
+			name: "env_rank_key_is_owned_on_every_engine",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang, role(func(r *workercore.ModelDeploymentRole) {
+				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "GPUSTACK_MEMBER_INDEX", Value: "0"}}
+			})),
+			wantMessage: "GPUSTACK_MEMBER_INDEX",
+		},
+		{
+			// Owned at size one as well, where nothing renders it. A rule that switched on with a
+			// field value would let the key through on create and refuse it only once an instance
+			// was widened -- and `size` is frozen, so that edit is a new deployment away.
+			name: "env_rank_key_is_owned_at_size_one",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.ReplicaSize = 1
+				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "GPUSTACK_REPLICA_SIZE", Value: "8"}}
+			})),
+			wantMessage: "GPUSTACK_REPLICA_SIZE",
+		},
+		{
 			// A role that took over the command line is refused too, because the renderer drops
 			// owned keys unconditionally. Admission and rendering must agree on the set: whichever
 			// way they disagree, the result is a value the user wrote and nothing reads.

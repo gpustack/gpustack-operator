@@ -158,6 +158,38 @@ func TestModelDeploymentService_RemovingARoleRemovesItsService(t *testing.T) {
 		"the removed role's Service goes with it")
 }
 
+// TestModelDeploymentService_AReplicaServiceIsCreatedAndReclaimedWithItsReplica runs the whole
+// convergence rather than the renderer, because the question here is about the prune path: a
+// headless Service is derived from an ordinal, so scaling down has to reclaim the ones whose
+// ordinals the role no longer reaches.
+//
+// THE SCALE-UP HALF IS THE CONTROL. Without it "the Services went away" is satisfied by a
+// convergence that never created them, which is the failure this case would otherwise report as a
+// pass.
+func TestModelDeploymentService_AReplicaServiceIsCreatedAndReclaimedWithItsReplica(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 2
+		md.Spec.Roles[0].Replicas = 3
+	})
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"qwen", "qwen-server", "qwen-server-r0", "qwen-server-r1", "qwen-server-r2",
+	}, serviceNames(t, cli), "each replica is published behind one headless Service of its own")
+
+	scaled := getModelDeployment(t, cli)
+	scaled.Spec.Roles[0].Replicas = 1
+	require.NoError(t, cli.Update(context.Background(), scaled))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"qwen", "qwen-server", "qwen-server-r0"}, serviceNames(t, cli),
+		"the ordinals the role no longer reaches take their addresses with them")
+}
+
 // TestModelDeploymentService_SurvivesAScale pins the one interaction between the Service and a
 // replicas change.
 //
@@ -210,6 +242,76 @@ func TestRenderModelDeploymentService_SelectsExactlyTheRolesPods(t *testing.T) {
 	}
 	assert.NotContains(t, svc.Spec.Selector, kueuectrlconst.QueueLabel,
 		"a selector that followed the InstanceType would orphan every replica already running")
+}
+
+// TestRenderModelDeploymentServices_AboveOneMemberAddsAHeadlessServicePerReplica covers what a role
+// of multi-Member replicas is published as, and each assertion is aimed at a different way it could
+// be wrong.
+func TestRenderModelDeploymentServices_AboveOneMemberAddsAHeadlessServicePerReplica(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 2
+		md.Spec.Roles[0].Replicas = 3
+	})
+
+	svcs := renderModelDeploymentServices(md, nil)
+	names := make([]string, 0, len(svcs))
+	byName := make(map[string]*core.Service, len(svcs))
+	for _, svc := range svcs {
+		names = append(names, svc.Name)
+		byName[svc.Name] = svc
+	}
+
+	// ONE PER REPLICA, not one per role and not one per member.
+	assert.Equal(t, []string{
+		"qwen", "qwen-server", "qwen-server-r0", "qwen-server-r1", "qwen-server-r2",
+	}, names)
+
+	replica := byName["qwen-server-r0"]
+	require.NotNil(t, replica)
+	assert.Equal(t, core.ClusterIPNone, replica.Spec.ClusterIP,
+		"a ClusterIP would load-balance between members, which is the one thing a rank must not get")
+	assert.True(t, replica.Spec.PublishNotReadyAddresses,
+		"a member cannot become ready until it can reach the peers this record publishes")
+
+	// IT SELECTS ITS OWN REPLICA. Without the ordinal term every replica's Service fronts every
+	// member of the role, and a collective forms across instance boundaries -- which serves wrong
+	// answers rather than failing.
+	assert.Equal(t, "0", replica.Spec.Selector[modelDeploymentReplicaOrdinalLabel])
+	assert.Equal(t, "1", byName["qwen-server-r1"].Spec.Selector[modelDeploymentReplicaOrdinalLabel])
+	assert.NotContains(t, replica.Spec.Selector, modelDeploymentMemberIndexLabel,
+		"a replica's Service publishes ALL its members; narrowing to the leader would hide the peers")
+
+	// AND THE ROLE'S OWN SERVICE FRONTS ONLY LEADERS, because the other members serve no API.
+	assert.Equal(t, "0", byName["qwen-server"].Spec.Selector[modelDeploymentMemberIndexLabel])
+	assert.Equal(t, "0", byName["qwen"].Spec.Selector[modelDeploymentMemberIndexLabel])
+}
+
+// TestRenderModelDeploymentServices_AtSizeOneIsUnchanged is the control for the case above: the
+// shape that existed before multi-Member replicas must be untouched, asserted by comparison rather
+// than by reading the new code's intent.
+func TestRenderModelDeploymentServices_AtSizeOneIsUnchanged(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 3 })
+
+	svcs := renderModelDeploymentServices(md, nil)
+	names := make([]string, 0, len(svcs))
+	for _, svc := range svcs {
+		names = append(names, svc.Name)
+	}
+	assert.Equal(t, []string{"qwen", "qwen-server"}, names,
+		"a role of single-Member replicas gets no headless Service: there is nobody to address")
+
+	for _, svc := range svcs {
+		assert.NotContains(t, svc.Spec.Selector, modelDeploymentMemberIndexLabel,
+			"%s: single-Member replicas carry no member-index label, so a term on it selects nothing",
+			svc.Name)
+	}
+
+	// The endpoints still reach a rendered replica, which is what makes the absences above mean
+	// "unchanged" rather than "empty".
+	pod := renderOne(t, md, newRenderInstanceType())
+	for k, v := range svcs[0].Spec.Selector {
+		assert.Equal(t, v, pod.Labels[k], "the replica must carry selector label %s", k)
+	}
 }
 
 // TestRenderModelDeploymentService_Port covers both readings of F9's rule, including that the

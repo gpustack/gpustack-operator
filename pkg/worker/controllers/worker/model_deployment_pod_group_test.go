@@ -47,8 +47,8 @@ func podGroupDeployment(mutate ...func(*workercore.ModelDeployment)) *workercore
 func TestModelDeploymentPodGroup(t *testing.T) {
 	md := podGroupDeployment()
 
-	prefill := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0)
-	decode := ModelDeploymentPodGroup(md, &md.Spec.Roles[1], 0)
+	prefill := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0, 0)
+	decode := ModelDeploymentPodGroup(md, &md.Spec.Roles[1], 0, 0)
 
 	// TWO REPLICAS NEVER SHARE A GROUP, whatever the axis that separates them: a role is one, and
 	// within one role the ordinal is another. Two replicas of one role sharing a name are one group
@@ -57,8 +57,8 @@ func TestModelDeploymentPodGroup(t *testing.T) {
 		decode.Labels[kueuepodconst.GroupNameLabel],
 		"a role is one axis of separation: two roles sharing a name are one group to Kueue")
 
-	first := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0)
-	second := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 1)
+	first := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0, 0)
+	second := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 1, 0)
 	assert.NotEqual(t, first.Labels[kueuepodconst.GroupNameLabel],
 		second.Labels[kueuepodconst.GroupNameLabel],
 		"the ordinal is the other: two replicas of ONE role are two groups, or the group waits "+
@@ -119,8 +119,8 @@ func TestModelDeploymentPodGroup_RoleHashIsTheRoleName(t *testing.T) {
 		}
 	})
 
-	left := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0)
-	right := ModelDeploymentPodGroup(md, &md.Spec.Roles[1], 0)
+	left := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0, 0)
+	right := ModelDeploymentPodGroup(md, &md.Spec.Roles[1], 0, 0)
 
 	assert.NotEqual(t,
 		left.Annotations[kueuepodconst.RoleHashAnnotation],
@@ -138,7 +138,7 @@ func TestModelDeploymentPodGroup_RoleHashIsTheRoleName(t *testing.T) {
 func TestModelDeploymentPodGroup_FastAdmissionIsAbsent(t *testing.T) {
 	md := podGroupDeployment()
 
-	group := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0)
+	group := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0, 0)
 
 	assert.NotContains(t, group.Annotations, kueuepodconst.GroupFastAdmissionAnnotationKey,
 		"setting %q admits a group from its first Pod alone, short of the total it declares",
@@ -217,7 +217,7 @@ func TestModelDeploymentReplicaGroupName_UniqueAcrossTheDeployment(t *testing.T)
 // converger treats an ordinal-less Pod as outdated instead, which is the turnover that ends with
 // the Pod replaced by one that carries the label.
 func TestModelDeploymentPodOrdinal(t *testing.T) {
-	meta := ModelDeploymentPodGroup(podGroupDeployment(), &podGroupDeployment().Spec.Roles[0], 3)
+	meta := ModelDeploymentPodGroup(podGroupDeployment(), &podGroupDeployment().Spec.Roles[0], 3, 0)
 
 	stamped := &core.Pod{}
 	stamped.Labels = meta.Labels
@@ -549,8 +549,8 @@ func TestModelDeploymentPodGroups_ANamesAreAlwaysDerived(t *testing.T) {
 func TestModelDeploymentPodGroup_StampsTheRolesOwnGroup(t *testing.T) {
 	md := twoTypeDeployment()
 
-	prefill := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0)
-	decode := ModelDeploymentPodGroup(md, &md.Spec.Roles[1], 0)
+	prefill := ModelDeploymentPodGroup(md, &md.Spec.Roles[0], 0, 0)
+	decode := ModelDeploymentPodGroup(md, &md.Spec.Roles[1], 0, 0)
 
 	assert.NotEqual(t, prefill.Labels[kueuepodconst.GroupNameLabel],
 		decode.Labels[kueuepodconst.GroupNameLabel],
@@ -585,7 +585,7 @@ func TestModelDeploymentPodSpecHash_CoversTheGroupNameAndOrdinal(t *testing.T) {
 			Deployment: md, Role: role, InstanceType: newRenderInstanceType(),
 		})
 		require.NoError(t, err)
-		stampModelDeploymentPod(pod, md, role, ordinal)
+		stampModelDeploymentPod(pod, md, role, ordinal, 0)
 
 		return pod
 	}

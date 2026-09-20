@@ -376,14 +376,25 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// A POD WITH NO ORDINAL CLAIMS NO SLOT. It was rendered before the per-replica groups
 		// existed; it is kept for now and judged below, where no hash this pass computes can match
 		// it, so it turns over on the ordinary rollout cadence instead of being torn out at once.
+		// THE COUNTS BELOW ARE IN TWO DIFFERENT UNITS, and keeping them apart is what makes a role
+		// of multi-Member replicas arithmetically the same as one of single-Member replicas.
+		// `declared` counts REPLICAS, which is what the spec states and what a scale moves.
+		// `declaredPods` counts the Pods those replicas are made of, which is what a list of live
+		// Pods can be compared against. At size one the two are equal, which is why every decision
+		// here reads identically for the shape that existed before this one.
+		size := modelDeploymentRoleSize(role)
+		declaredPods := declared * size
+
 		removed := make([]*core.Pod, 0)
 		kept := make([]*core.Pod, 0, len(live))
 		occupied := make(map[int]bool, declared)
+		orphans := 0
 		for _, pod := range live {
 			ordinal, ok := modelDeploymentPodOrdinal(pod)
 			switch {
 			case !ok:
 				kept = append(kept, pod)
+				orphans++
 			case ordinal >= declared:
 				removed = append(removed, pod)
 			default:
@@ -402,7 +413,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// nothing separates, which is determinism rather than meaning. Each departing replica takes
 		// its Workload with it: leaving the excess standing would have Kueue evict a member of its
 		// own choosing on every pass.
-		if surplus := len(kept) - declared; surplus > 0 {
+		if surplus := len(kept) - declaredPods; surplus > 0 {
 			shedSurplus := modelDeploymentSurplusReplicas(kept, want, surplus)
 			removed = append(removed, shedSurplus...)
 			kept = slices.DeleteFunc(kept, func(pod *core.Pod) bool {
@@ -448,22 +459,69 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// able to answer at all, and a pass that answers "nothing outdated" without having got here
 		// is reporting that it looked, not what it found.
 		//
-		// THE HASH IS THE ORDINAL'S OWN, because the group name -- and with it the fingerprint --
-		// is derived per (role, ordinal): a replica is current only against the render of its own
-		// slot, which is what keeps a scale-up from rolling the survivors and a slot swap from
-		// passing unnoticed.
-		var outdated []*core.Pod
+		// THE HASH IS THE SEAT'S OWN, because the group name -- and with it the fingerprint -- is
+		// derived per (role, ordinal): a Pod is current only against the render of its own seat,
+		// which is what keeps a scale-up from rolling the survivors and a slot swap from passing
+		// unnoticed.
+		//
+		// THE VERDICT IS THE REPLICA'S, NOT THE POD'S, and that is not a rounding of the same
+		// answer. A replica's members share one Kueue group and are admitted as one; Kueue holds a
+		// deleted member of an admitted group until that group's Workload goes, and deleting that
+		// Workload stops the surviving members anyway. So replacing one member of a replica is not
+		// a cheaper rollout than replacing the replica -- it is the same operation with a window in
+		// the middle where the deployment is serving from a group that cannot be repaired. One
+		// member reading outdated therefore condemns its replica, and the counts this feeds are in
+		// replicas so that a role of two replicas of four Pods reports two things that can roll,
+		// not eight.
+		outdatedByOrdinal := make(map[int]bool, len(kept))
+		orphaned := make([]*core.Pod, 0, orphans)
 		for _, pod := range kept {
-			rollout.accounted++
-
 			ordinal, ok := modelDeploymentPodOrdinal(pod)
-			if ok && pod.Annotations[modelDeploymentPodSpecHashAnnotation] ==
-				want[ordinal].Annotations[modelDeploymentPodSpecHashAnnotation] {
+			if !ok {
+				// A Pod claiming no ordinal belongs to no replica, so it is its own unit of
+				// rollout -- which is what it already was before replicas had members.
+				rollout.accounted++
+				rollout.outdated++
+				orphaned = append(orphaned, pod)
+
 				continue
 			}
 
-			rollout.outdated++
-			outdated = append(outdated, pod)
+			member := modelDeploymentPodMemberIndex(pod)
+			members := want[ordinal]
+			if member < len(members) &&
+				pod.Annotations[modelDeploymentPodSpecHashAnnotation] ==
+					members[member].Annotations[modelDeploymentPodSpecHashAnnotation] {
+				continue
+			}
+
+			outdatedByOrdinal[ordinal] = true
+		}
+
+		// A REPLICA SHORT OF ITS MEMBERS IS OUTDATED TOO, and nothing above notices it: every Pod
+		// that IS there can carry the current fingerprint while the replica is still missing a
+		// member, and a replica Kueue cannot compose a Workload for is not one the deployment is
+		// serving from. It is condemned on the same terms as one carrying a stale render, which
+		// keeps the repair path single.
+		seen := make(map[int]int, len(occupied))
+		for _, pod := range kept {
+			if ordinal, ok := modelDeploymentPodOrdinal(pod); ok {
+				seen[ordinal]++
+			}
+		}
+		for ordinal := range occupied {
+			if seen[ordinal] != size {
+				outdatedByOrdinal[ordinal] = true
+			}
+		}
+
+		outdated := orphaned
+		for ordinal := range occupied {
+			rollout.accounted++
+			if outdatedByOrdinal[ordinal] {
+				rollout.outdated++
+				outdated = append(outdated, modelDeploymentReplicaMembers(kept, ordinal)...)
+			}
 		}
 
 		if connection == nil && md.Status.KVCache != nil && len(outdated) > 0 {
@@ -517,7 +575,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// New replicas are still created below, without a connector: a replica that does not
 			// exist yet cannot be given an address that does not exist yet either.
 			logger.V(3).Info("no connection this pass; leaving the replicas as built", "role", role.Name)
-			rollout.held += len(outdated)
+			// Counted in REPLICAS, matching rollout.outdated above: `outdated` is a list of the
+			// Pods to delete, and a multi-Member replica contributes several of them to it, so its
+			// length is the wrong unit for a figure that reports how many instances are waiting.
+			rollout.held += len(outdatedByOrdinal) + len(orphaned)
 			outdated = nil
 		}
 
@@ -557,13 +618,29 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			}
 
 			if admitted := modelDeploymentAdmittedReplicas(workloads, live); admitted == declared {
+				// THE WHOLE REPLICA TURNS OVER, not the member that was picked. The pick names one
+				// Pod, and that Pod's replica is what departs: its members hold one Kueue group,
+				// so a delete of some of them leaves a group Kueue will not admit and will not
+				// release, and the Workload delete below would stop the rest regardless.
 				pod := modelDeploymentHighestOrdinalReplica(outdated)
-				logger.Info("recreating replica built from an earlier spec", "pod", pod.Name)
-				if err = r.Client.Delete(ctx, pod); err != nil && !kerrors.IsNotFound(err) {
-					logger.Error(err, "delete outdated replica", "pod", pod.Name)
-					return ctrl.Result{}, err
+				departing := []*core.Pod{pod}
+				if ordinal, ok := modelDeploymentPodOrdinal(pod); ok {
+					departing = modelDeploymentReplicaMembers(outdated, ordinal)
 				}
-				if err = r.deleteModelDeploymentGroupWorkload(ctx, md, []core.Pod{*pod}); err != nil {
+
+				logger.Info("recreating replica built from an earlier spec",
+					"pod", pod.Name, "members", len(departing))
+				departed := make([]core.Pod, 0, len(departing))
+				for _, member := range departing {
+					if err = r.Client.Delete(ctx, member); err != nil && !kerrors.IsNotFound(err) {
+						logger.Error(err, "delete outdated replica member", "pod", member.Name)
+						return ctrl.Result{}, err
+					}
+					departed = append(departed, *member)
+				}
+				// One call for the whole replica: its members share a single Workload, so this is
+				// one delete however many of them there were.
+				if err = r.deleteModelDeploymentGroupWorkload(ctx, md, departed); err != nil {
 					logger.Error(err, "delete the departing replica's workload", "pod", pod.Name)
 					return ctrl.Result{}, err
 				}
@@ -597,7 +674,12 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// THE MISSING ORDINALS ARE FILLED LOWEST FIRST, and only as many as the count is short: a
 		// role short by one with two ordinals free -- a pre-per-replica pod still serving among
 		// them -- creates the lower slot and lets the surplus pod's own departure settle the other.
-		if missing := declared - len(kept); missing > 0 {
+		// IN REPLICAS, NOT PODS. A role short of its declared count is short of whole instances, and
+		// `kept` is a list of Pods -- at size one they are the same number, which is why this read
+		// as len(kept) for as long as a replica was a Pod. An ordinal that is occupied at all counts
+		// as present here even if it is short a member; the rollout above is what repairs that,
+		// because filling the gap in place would seat a member in a group Kueue already refused.
+		if missing := declared - len(occupied) - orphans; missing > 0 {
 			for ordinal := 0; ordinal < declared && len(createOrdinals[role.Name]) < missing; ordinal++ {
 				if occupied[ordinal] {
 					continue
@@ -639,21 +721,34 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		for _, ordinal := range createOrdinals[role.Name] {
-			// One fresh object per replica: the template is every replica of the role's, stamped
-			// for its own ordinal, and the API server names each instance separately.
-			pod := desired[role.Name][ordinal].DeepCopy()
-			if err = r.Client.Create(ctx, pod); err != nil {
-				logger.Error(err, "create replica", "role", role.Name, "ordinal", ordinal)
-				if createErr == nil {
-					createErr = err
-				}
+			// EVERY MEMBER OF THE REPLICA IS ISSUED, AND A FAILURE ON ONE DOES NOT ABANDON THE REST.
+			// The members share one Kueue group whose declared total is the replica's size, and
+			// Kueue composes no Workload at all until that many exist -- so a replica left short is
+			// a replica whose members sit gated with nothing naming a cause. Issuing the rest costs
+			// nothing when the failure was transient and is the only way out when it was not.
+			for _, want := range desired[role.Name][ordinal] {
+				// One fresh object per member: the template is every Pod of the role's, stamped for
+				// its own ordinal and member index.
+				pod := want.DeepCopy()
+				if err = r.Client.Create(ctx, pod); err != nil {
+					logger.Error(err, "create replica member",
+						"role", role.Name, "ordinal", ordinal,
+						"member", pod.Labels[modelDeploymentMemberIndexLabel])
+					if createErr == nil {
+						createErr = err
+					}
 
-				continue
+					continue
+				}
+				logger.Info("created replica member", "pod", pod.Name)
 			}
-			logger.Info("created replica", "pod", pod.Name)
 			// A replica this pass just rendered and created is current by construction, so the pass
 			// can answer for it. Without this a deployment's first pass could not answer at all, and
 			// its second pass would write a status for a spec nobody changed.
+			//
+			// IT COUNTS THE REPLICA AND NOT ITS MEMBERS, because the rollout figures this feeds are
+			// about instances: a role of two replicas of four Pods each is two things that can be
+			// outdated, not eight.
 			rollout.accounted++
 		}
 	}
@@ -851,20 +946,30 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentOwnedChildren(
 	})
 }
 
-// renderModelDeploymentPods renders the deployment's desired replicas: one Pod per (role, ordinal),
+// renderModelDeploymentPods renders the deployment's desired replicas: the members of one replica,
 // keyed by role name and then by ordinal.
 //
 // ONE RENDER PER ORDINAL rather than one per role: the spec declares a count of replicas and names
 // none of them, but the ordinals it implies -- zero through count minus one -- each carry group
 // metadata of their own, and the spec-hash fingerprint covers it. Two ordinals of one role therefore
 // hash differently, and the converge loop compares a live Pod against the render of ITS ordinal,
-// which is what keeps a scale-up from rolling the survivors. The render itself is still one template
-// per role stamped per ordinal -- the template is every replica of the role's, and nothing that
-// names one member may be produced inside it.
+// which is what keeps a scale-up from rolling the survivors.
+//
+// A REPLICA IS A SLICE BECAUSE A REPLICA MAY BE SEVERAL PODS, and the slice is ordered by member
+// index so that entry zero is the leader. Every entry shares the replica's Kueue group -- one
+// Workload, one admission, all members or none -- so the slice is a unit the converger creates,
+// compares and deletes whole. It is never partially applied: Kueue holds a deleted member of an
+// admitted group on the API server until the group's Workload goes, and deleting that Workload
+// stops the surviving members anyway, so a half-replica is not a state this operator can reach on
+// purpose or recover from by halves.
+//
+// The render is still ONE TEMPLATE PER ROLE, stamped per member -- the template is every Pod of the
+// role's, and nothing that names one replica or one member may be produced inside it. What separates
+// two members is what the stamp writes: a name, a hostname and an index label.
 func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	ctx context.Context, md *workercore.ModelDeployment,
 	connection *ModelDeploymentConnectorInput,
-) (map[string]map[int]*core.Pod, error) {
+) (map[string]map[int][]*core.Pod, error) {
 	// The overcommit setting is the Instance path's, deliberately: it decides how a declared
 	// resource becomes a request, and this renderer derives the same values the Instance webhook
 	// does. A second knob for one translation would let the two disagree on one cluster.
@@ -875,7 +980,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	clusterVersion := system.LoopbackKubeVersion.Get()
 	nativeSidecar := kubediscovery.SupportsFeature(&clusterVersion, kubediscovery.FeatureNativeSidecar)
 
-	desired := make(map[string]map[int]*core.Pod, len(md.Spec.Roles))
+	desired := make(map[string]map[int][]*core.Pod, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 
@@ -936,11 +1041,16 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			return nil, err
 		}
 
-		rolePods := make(map[int]*core.Pod, role.Replicas)
+		size := modelDeploymentRoleSize(role)
+		rolePods := make(map[int][]*core.Pod, role.Replicas)
 		for ordinal := range int(role.Replicas) {
-			pod := template.DeepCopy()
-			stampModelDeploymentPod(pod, md, role, ordinal)
-			rolePods[ordinal] = pod
+			members := make([]*core.Pod, 0, size)
+			for member := range size {
+				pod := template.DeepCopy()
+				stampModelDeploymentPod(pod, md, role, ordinal, member)
+				members = append(members, pod)
+			}
+			rolePods[ordinal] = members
 		}
 		desired[role.Name] = rolePods
 	}
@@ -995,8 +1105,11 @@ func (r *ModelDeploymentReconciler) modelDeploymentOrdinalTaken(
 			// The group name rather than the ordinal label. Both are derived from the same
 			// (role, ordinal) and select the same Pods on anything this operator renders today,
 			// so the choice is about what the question means: the group is the unit Kueue counts
-			// members in, and what this read has to answer is whether creating here would put a
-			// second member in a group that declares one.
+			// members in, and what this read has to answer is whether ANY member of this replica's
+			// group is still on the server. Any is the right threshold at every size -- a group
+			// short of its declared total is one Kueue composes no Workload for, so seating a new
+			// member beside a straggler produces a replica that never gets admitted rather than
+			// one that is merely crowded.
 			kueuepodconst.GroupNameLabel: modelDeploymentReplicaGroupName(md, role, ordinal),
 		})
 	if err != nil {
@@ -1040,20 +1153,43 @@ func modelDeploymentAdmittedReplicas(workloads []kueue.Workload, pods []*core.Po
 	return admitted
 }
 
-// modelDeploymentSurplusReplicas picks which members of an over-counted role leave: the Pods that
-// claim no ordinal first, then the members a slot holds beyond its one seat, at most `surplus` of
+// modelDeploymentSurplusReplicas picks which Pods of an over-counted role leave: the Pods that
+// claim no ordinal first, then the Pods a seat holds beyond its one occupant, at most `surplus` of
 // them.
 //
-// A SEAT KEEPS THE MEMBER ITS CURRENT RENDER DESCRIBES -- the one whose fingerprint matches what
-// the role renders for that ordinal -- because that is the member a replacement would build
-// anyway, and shedding it would only schedule the same churn for the next pass. The greatest name
-// decides between members nothing separates, which is determinism rather than meaning: the name is
-// the API server's own assignment, stable across passes, and nothing else about two members of one
-// slot tells them apart. A Pod with no ordinal leaves before any seated member because every
-// seated one is accounted for by the declared count.
-func modelDeploymentSurplusReplicas(kept []*core.Pod, want map[int]*core.Pod, surplus int) []*core.Pod {
+// A SEAT IS AN (ORDINAL, MEMBER) PAIR rather than an ordinal, because a replica of size n has n
+// seats and each of them holds exactly one Pod. At size one the two readings coincide, which is
+// why this generalisation leaves the single-Member decisions untouched: there is one seat per
+// ordinal and it is the leader's.
+//
+// A SEAT KEEPS THE POD ITS CURRENT RENDER DESCRIBES -- the one whose fingerprint matches what the
+// role renders for that seat -- because that is the Pod a replacement would build anyway, and
+// shedding it would only schedule the same churn for the next pass. The greatest name decides
+// between occupants nothing separates, which is determinism rather than meaning: the name is
+// stable across passes, and nothing else about two occupants of one seat tells them apart. A Pod
+// with no ordinal leaves before any seated one because every seated Pod is accounted for by the
+// declared count.
+// modelDeploymentReplicaMembers is every live Pod seated on one ordinal, which is what a replica is
+// once it may have more than one member. The order is the caller's list order and carries no
+// meaning: a replica leaves as a whole, so nothing downstream picks between its members.
+func modelDeploymentReplicaMembers(pods []*core.Pod, ordinal int) []*core.Pod {
+	members := make([]*core.Pod, 0, 1)
+	for _, pod := range pods {
+		if at, ok := modelDeploymentPodOrdinal(pod); ok && at == ordinal {
+			members = append(members, pod)
+		}
+	}
+
+	return members
+}
+
+func modelDeploymentSurplusReplicas(
+	kept []*core.Pod, want map[int][]*core.Pod, surplus int,
+) []*core.Pod {
+	type seat struct{ ordinal, member int }
+
 	var shed []*core.Pod
-	byOrdinal := make(map[int][]*core.Pod, len(kept))
+	bySeat := make(map[seat][]*core.Pod, len(kept))
 	for _, pod := range kept {
 		ordinal, ok := modelDeploymentPodOrdinal(pod)
 		if !ok {
@@ -1061,18 +1197,28 @@ func modelDeploymentSurplusReplicas(kept []*core.Pod, want map[int]*core.Pod, su
 
 			continue
 		}
-		byOrdinal[ordinal] = append(byOrdinal[ordinal], pod)
+		bySeat[seat{ordinal, modelDeploymentPodMemberIndex(pod)}] = append(
+			bySeat[seat{ordinal, modelDeploymentPodMemberIndex(pod)}], pod)
 	}
 
-	for ordinal, members := range byOrdinal {
-		if len(members) < 2 {
+	for at, occupants := range bySeat {
+		if len(occupants) < 2 {
 			continue
 		}
-		slices.SortFunc(members, func(a, b *core.Pod) int {
-			am := a.Annotations[modelDeploymentPodSpecHashAnnotation] ==
-				want[ordinal].Annotations[modelDeploymentPodSpecHashAnnotation]
-			bm := b.Annotations[modelDeploymentPodSpecHashAnnotation] ==
-				want[ordinal].Annotations[modelDeploymentPodSpecHashAnnotation]
+		// The render of THIS seat, or nothing when the seat is one the role no longer describes --
+		// a member index beyond the declared size, left by a Pod of some earlier shape. Absence is
+		// carried as its own flag rather than as an empty string, because a Pod carrying no
+		// fingerprint at all -- one built by a hand -- would otherwise compare EQUAL to it and be
+		// kept as the seat's current occupant. Nothing matches an absent render, so those occupants
+		// sort by name alone and the seat still sheds down to one.
+		wantHash, described := "", false
+		if members := want[at.ordinal]; at.member < len(members) {
+			wantHash = members[at.member].Annotations[modelDeploymentPodSpecHashAnnotation]
+			described = true
+		}
+		slices.SortFunc(occupants, func(a, b *core.Pod) int {
+			am := described && a.Annotations[modelDeploymentPodSpecHashAnnotation] == wantHash
+			bm := described && b.Annotations[modelDeploymentPodSpecHashAnnotation] == wantHash
 			if am != bm {
 				if am {
 					return -1
@@ -1083,7 +1229,7 @@ func modelDeploymentSurplusReplicas(kept []*core.Pod, want map[int]*core.Pod, su
 
 			return strings.Compare(b.Name, a.Name)
 		})
-		shed = append(shed, members[1:]...)
+		shed = append(shed, occupants[1:]...)
 	}
 
 	// Highest ordinal first, so two passes over the same state shed in the same order and the
