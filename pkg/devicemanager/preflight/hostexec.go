@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -175,9 +176,9 @@ const networkWarning = "this container does not share the host's network namespa
 // docker-first, and every container answer would describe a path no workload ever takes.
 //
 // A host that gives no such answer -- the bare machine this command is designed for, before a
-// cluster exists, or a distribution that keeps its kubelet configuration somewhere neither file
-// below covers -- falls through to the probe order, which is the honest answer there: whatever can
-// start a container.
+// cluster exists, or a distribution that keeps its kubelet configuration somewhere none of the
+// places read covers -- falls through to the probe order, which is the honest answer there:
+// whatever can start a container.
 //
 // want overrides both, including with a name the host does not carry: the no-runtime path has to
 // stay exercisable, since it is the path that falls back to emitting the command rather than
@@ -252,8 +253,54 @@ func (h *hostExec) ResolveRuntime(ctx context.Context, want string) (*hostRuntim
 	return nil, fmt.Errorf("%w: probed %s", errNoHostRuntime, strings.Join(hostRuntimes, ", "))
 }
 
-// kubeletConfigSources are the places this node's kubelet configuration is looked for, in order,
-// relative to the host root. The first place that names the setting being read answers.
+// kubeletConfigSource is one place a kubelet setting is read from, under the host root.
+//
+// pattern is matched with filepath.Glob; path names one exact place. Exactly one of the two is set,
+// and which one says where the place came from: a pattern is this report looking for a kubelet's
+// configuration, while a path is the kubelet having said where its own is. A path is not globbed
+// because it is not a search, and because a glob answers a name that is not on disk with no matches
+// -- which would report a kubelet that named a file we could not find as a kubelet that set nothing.
+//
+// flags marks a source carrying the kubelet's command line rather than its YAML configuration,
+// which is what decides which of a setting's two spellings appears in it.
+//
+// dropInDir marks a source naming the kubelet's drop-in directory rather than a file in it. Such a
+// source is walked, for the reason kubeletDropInFiles gives: the files that decide a node's policy
+// are usually not the directory's direct children.
+type kubeletConfigSource struct {
+	pattern   string
+	path      string
+	flags     bool
+	dropInDir bool
+}
+
+// where names this source in a message: the path the kubelet gave, or the pattern it was looked for
+// with.
+func (s kubeletConfigSource) where() string {
+	if s.path != "" {
+		return s.path
+	}
+	return s.pattern
+}
+
+// resolve returns the places under root this source covers.
+func (s kubeletConfigSource) resolve(root string) ([]string, error) {
+	if s.path != "" {
+		return []string{filepath.Join(root, s.path)}, nil
+	}
+	return filepath.Glob(filepath.Join(root, s.pattern))
+}
+
+// kubeletConfigSources are the places a kubelet configuration is looked for when no kubelet is
+// running here to name its own, in order, relative to the host root. The first place that names the
+// setting being read answers.
+//
+// They are a fallback and not the first word, because a file at one of these paths is only this
+// node's kubelet configuration if this node's kubelet reads it, and a running kubelet says which
+// file that is. Reading them regardless is what reported a policy out of a file the kubelet never
+// opened on a node whose kubelet had been pointed elsewhere and which carried a different file here
+// too. What is left for them is the host with no kubelet command line to read: the machine that has
+// not joined a cluster yet, and the distribution that embeds the kubelet in its own agent process.
 //
 // The standard paths come before the distribution one because a machine that has hosted more than
 // one distribution can carry both: a kubelet reading the standard path reads it whatever else is on
@@ -264,21 +311,170 @@ func (h *hostExec) ResolveRuntime(ctx context.Context, want string) (*hostRuntim
 // exists at all and the endpoint is a drop-in at
 // var/lib/rancher/k3s/agent/etc/kubelet.conf.d/00-k3s-defaults.conf. Matching the distribution name
 // rather than listing it keeps this from being a guess about any particular one.
-//
-// flags marks the file carrying the kubelet's command line rather than its YAML configuration,
-// which is what decides which of a setting's two spellings appears in it.
-//
-// dropInDir marks a source naming the kubelet's drop-in directory rather than a file in it. Such a
-// source is walked, for the reason kubeletDropInFiles gives: the files that decide a node's policy
-// are usually not the directory's direct children.
-var kubeletConfigSources = []struct {
-	pattern   string
-	flags     bool
-	dropInDir bool
-}{
+var kubeletConfigSources = []kubeletConfigSource{
 	{pattern: "var/lib/kubelet/kubeadm-flags.env", flags: true},
 	{pattern: "var/lib/kubelet/config.yaml"},
 	{pattern: "var/lib/rancher/*/agent/etc/kubelet.conf.d", dropInDir: true},
+}
+
+// kubeletNamedSources are the places the running kubelet's own command line names, in the order the
+// answer is taken from them.
+//
+// The drop-in directory comes before the file because the kubelet loads the file and then merges the
+// directory over it, so where both name a setting the directory's value is the one in force.
+//
+// They replace kubeletConfigSources rather than being added in front of them. A kubelet that named
+// its configuration has said where all of it is, and a file anywhere else belongs to a kubelet that
+// is not running here -- so falling through to a standard path when these do not carry the setting
+// would answer out of a file this node's kubelet demonstrably never opens.
+func kubeletNamedSources(argv []string) []kubeletConfigSource {
+	var sources []kubeletConfigSource
+	if dir, ok := kubeletFlagValue(argv, kubeletConfigDirFlag); ok {
+		sources = append(sources, kubeletConfigSource{path: dir, dropInDir: true})
+	}
+	if file, ok := kubeletFlagValue(argv, kubeletConfigFlag); ok {
+		sources = append(sources, kubeletConfigSource{path: file})
+	}
+	return sources
+}
+
+const (
+	// kubeletExecutable is the name the host's own kubelet runs under, compared against the base
+	// name of its command line's first word. A distribution that embeds the kubelet in its agent
+	// process runs nothing by this name, and that is a node with no kubelet command line rather
+	// than a reading that failed.
+	kubeletExecutable = "kubelet"
+	// kubeletConfigFlag and kubeletConfigDirFlag are the flags a kubelet names its own
+	// configuration with: one file, and one directory whose drop-ins are merged over that file.
+	kubeletConfigFlag    = "--config"
+	kubeletConfigDirFlag = "--config-dir"
+	// hostProcDir is the host's own process table, relative to the host root.
+	hostProcDir = "proc"
+	// kubeletCommandLinePlace is how the kubelet's command line is named in an account of where
+	// this pass looked. It is not spelled as a path on purpose: a reader given one would go looking
+	// for a file that does not exist.
+	kubeletCommandLinePlace = "the kubelet's own command line"
+)
+
+// hostKubeletCommandLine returns the command line of the kubelet running on this host, and whether
+// one is running at all.
+//
+// The kubelet's command line is the only thing that says where this node's kubelet configuration is:
+// --config names the file it loaded, --config-dir the drop-ins merged over that file, and a
+// distribution is free to put either anywhere. Reading a standard path instead reads whichever file
+// happens to sit there, which on a node whose kubelet was pointed elsewhere is a different file,
+// free to say something else -- measured on a node carrying both, with different contents.
+//
+// The host's process table is reachable because the host root is bind-mounted with the mounts under
+// it, which brings the host's own procfs along; it is what networkNamespaceShared reads the host's
+// PID 1 through. A root brought in without them carries no process table, and that is an error
+// rather than a fall back to the standard paths, because falling back is what read the wrong file.
+//
+// The lowest PID answers on a host that somehow carries more than one kubelet. A directory listing
+// is in name order, which for PIDs is not the order they started in, so taking the first listed
+// would make the answer depend on how many processes the host happens to be running.
+func hostKubeletCommandLine(root string) (argv []string, running bool, err error) {
+	procDir := filepath.Join(root, hostProcDir)
+	// A directory that is not there and one carrying no process are the same answer, because they
+	// are the same mistake seen from two sides: the host's procfs did not come with its root. Only
+	// the wording separates them, and the error carries what it was.
+	notVisible := func(cause error) error {
+		return fmt.Errorf("the host's process table is not visible at %s, so the kubelet this "+
+			"node runs cannot be identified: mount the host's root with the mounts under it, so "+
+			"that the host's own /proc comes with it: %w", procDir, cause)
+	}
+
+	entries, err := os.ReadDir(procDir)
+	if err != nil {
+		return nil, false, notVisible(err)
+	}
+
+	var (
+		processes int
+		lowest    int
+		found     []string
+	)
+	for _, entry := range entries {
+		pid, pidErr := strconv.Atoi(entry.Name())
+		if pidErr != nil || pid <= 0 {
+			continue
+		}
+		processes++
+		if found != nil && pid > lowest {
+			continue
+		}
+		body, readErr := os.ReadFile(filepath.Join(procDir, entry.Name(), "cmdline"))
+		if readErr != nil {
+			// A process that ended between the listing and this read is skipped rather than
+			// reported: what could not be read is not a kubelet configuration, and the process it
+			// belonged to is gone either way.
+			//
+			// Any other failure is the process table being withheld rather than a process
+			// disappearing -- a procfs mounted so that command lines cannot be read refuses every
+			// one of them -- and it ends the reading instead. Skipping those would leave a host
+			// running a kubelet reported as running none, and the standard paths are then read on
+			// exactly the node whose kubelet was pointed elsewhere, which is the wrong-file
+			// reading this reader exists to prevent. A command line that was refused may also be
+			// the kubelet's own, so which kubelet is running is unestablished either way.
+			if errors.Is(readErr, fs.ErrNotExist) {
+				continue
+			}
+			return nil, false, notVisible(readErr)
+		}
+		words := commandLineWords(body)
+		if len(words) == 0 || filepath.Base(words[0]) != kubeletExecutable {
+			continue
+		}
+		found, lowest = words, pid
+	}
+	if processes == 0 {
+		return nil, false, notVisible(errors.New("it lists no process"))
+	}
+	return found, found != nil, nil
+}
+
+// commandLineWords splits a process's command line into its words. The kernel separates them with
+// NUL and ends the last one with it too, so the split leaves a trailing empty word to drop.
+func commandLineWords(body []byte) []string {
+	var words []string
+	for word := range strings.SplitSeq(string(body), "\x00") {
+		if word != "" {
+			words = append(words, word)
+		}
+	}
+	return words
+}
+
+// kubeletFlagValue returns the value a kubelet command line gives flag, in both spellings a command
+// line uses: --flag=value and --flag value. The last occurrence answers, which is the one the
+// kubelet's own flag parsing keeps.
+//
+// The name is matched whole rather than as a prefix, because --config is a prefix of --config-dir: a
+// prefix match would take the drop-in directory for the configuration file, and then fail to read a
+// directory as YAML, on exactly the nodes that set both.
+//
+// A flag with nothing after it is absent rather than a value, for the reason valueAfter gives. Here
+// it is what would name the host root itself as the kubelet's configuration file.
+func kubeletFlagValue(argv []string, flag string) (string, bool) {
+	var (
+		value string
+		found bool
+	)
+	for i, arg := range argv {
+		var token string
+		switch {
+		case strings.HasPrefix(arg, flag+"="):
+			token = strings.TrimPrefix(arg, flag+"=")
+		case arg == flag && i+1 < len(argv):
+			token = argv[i+1]
+		default:
+			continue
+		}
+		if token = kubeletSettingValue(token); token != "" {
+			value, found = token, true
+		}
+	}
+	return value, found
 }
 
 // kubeletDropInExtension is the suffix a kubelet merges out of its drop-in directory. It ignores
@@ -329,6 +525,13 @@ func (s kubeletSetting) key(flags bool) string {
 	return s.field
 }
 
+// name returns the flag without the separator the file spellings carry, which is how a command
+// line's own words spell it: a file puts the value after the separator, a command line puts it in
+// the same word or the next one.
+func (s kubeletSetting) name() string {
+	return strings.TrimSuffix(s.flag, "=")
+}
+
 var (
 	// criEndpointSetting is the runtime this node's kubelet talks to.
 	criEndpointSetting = kubeletSetting{
@@ -362,7 +565,9 @@ type kubeletReading struct {
 	// UnsearchablePattern names a source whose search could not run or could not finish, and
 	// UnsearchableErr says why. It is kept apart from the unreadable pair because no configuration
 	// file was opened: reporting it as a configuration that could not be read sends whoever is
-	// diagnosing it looking for a permissions problem on a file that was never reached.
+	// diagnosing it looking for a permissions problem on a file that was never reached. The host's
+	// process table is one of these, and the most likely one: without it there is no way to tell
+	// which kubelet is running or what it was started against.
 	UnsearchablePattern string
 	UnsearchableErr     error
 	// Conflict carries the differing values when two of the configurations ConflictPattern
@@ -371,22 +576,61 @@ type kubeletReading struct {
 	// taken.
 	Conflict        []string
 	ConflictPattern string
+	// Searched names the places this pass looked, in the order it looked, and is set only on a
+	// reading that found nothing. It is what turns "nothing" into an account of what nothing
+	// covered; the outcomes above name the one place they stopped at instead.
+	Searched []string
+	// CommandLineRead reports whether a kubelet was running here for its own command line to be
+	// read. It separates two unknowns a caller has to word differently: a kubelet that named its
+	// configuration and set nothing in it anywhere, and a host running no kubelet at all, where one
+	// started later may still be given the setting on a command line nothing has seen yet.
+	CommandLineRead bool
 }
 
 // readKubeletSetting reads one setting out of this node's kubelet configuration under root.
 //
-// Read from the kubelet's own files rather than from its process, because this container shares no
-// PID namespace with the host and the files are reachable through the mounted host root either way.
-// None of the places read is universal -- a distribution is free to keep its configuration
-// elsewhere -- so finding nothing is an outcome of its own rather than a failure.
+// Which configuration that is comes from the running kubelet's own command line, read out of the
+// host's process table: --config names the file it loaded, --config-dir the drop-ins merged over
+// that file, and a flag on the command line overrides both, because the kubelet re-parses its
+// command line after reading them. The standard paths are read only where no kubelet is running to
+// name one, since a file at a standard path on a node whose kubelet reads another is a different
+// configuration and free to say something else.
+//
+// None of this is universal -- a distribution that embeds the kubelet runs no kubelet command line
+// at all, and one is free to keep its configuration anywhere -- so finding nothing is an outcome of
+// its own rather than a failure. Not being able to see the host's processes is not one of those: it
+// leaves which kubelet is running unestablished, so it ends the reading instead.
 //
 // Every reading of a kubelet setting goes through here, so that two readings cannot drift apart
 // about where a kubelet keeps its configuration, what a repeated setting means, or when two
 // configurations are a conflict rather than an override. Adding a setting is a kubeletSetting, not a
 // second reader.
 func readKubeletSetting(root string, setting kubeletSetting) kubeletReading {
-	for _, src := range kubeletConfigSources {
-		matches, globErr := filepath.Glob(filepath.Join(root, src.pattern))
+	argv, running, cmdErr := hostKubeletCommandLine(root)
+	if cmdErr != nil {
+		return kubeletReading{
+			UnsearchablePattern: filepath.Join(root, hostProcDir),
+			UnsearchableErr:     cmdErr,
+		}
+	}
+
+	sources := kubeletConfigSources
+	searched := make([]string, 0, len(sources)+1)
+	if running {
+		// Taken before anything the command line names, because the kubelet re-parses its command
+		// line after loading its configuration file and merging its drop-ins: a setting spelled
+		// here is the one in force whatever those say.
+		if value, ok := kubeletFlagValue(argv, setting.name()); ok {
+			return kubeletReading{Value: value, Found: true}
+		}
+		sources = kubeletNamedSources(argv)
+		searched = append(searched, kubeletCommandLinePlace)
+	}
+
+	for _, src := range sources {
+		searched = append(searched, src.where())
+
+		matches, globErr := src.resolve(root)
 		if globErr != nil {
 			// The patterns are constants, so this needs a root that is itself a malformed
 			// pattern. Continuing would leave the caller reporting that every source was
@@ -453,10 +697,10 @@ func readKubeletSetting(root string, setting kubeletSetting) kubeletReading {
 		case 1:
 			return kubeletReading{Value: answers[0], Found: true}
 		default:
-			return kubeletReading{Conflict: answers, ConflictPattern: src.pattern}
+			return kubeletReading{Conflict: answers, ConflictPattern: src.where()}
 		}
 	}
-	return kubeletReading{}
+	return kubeletReading{Searched: searched, CommandLineRead: running}
 }
 
 // kubeletCRIEndpoint returns the CRI endpoint this node's kubelet is configured against.
@@ -472,9 +716,13 @@ func (h *hostExec) kubeletCRIEndpoint() (endpoint string, found bool, err error)
 	reading := readKubeletSetting(h.root, criEndpointSetting)
 	switch {
 	case reading.UnsearchableErr != nil:
-		// The same answer an unreadable file gets, worded for what happened: the search itself
-		// could not run, which takes a host root that is a malformed pattern rather than a file
-		// anything failed to open.
+		// The same answer an unreadable file gets, worded for what happened: no configuration file
+		// was opened, because the search could not run at all. A host root brought in without the
+		// host's process table is what produces it -- the kubelet that is running cannot be
+		// identified, so neither can the configuration it reads. Falling through to the probe
+		// order instead would pick a runtime by what is installed, which on a node carrying docker
+		// beside a containerd-talking kubelet measures a runtime no workload here uses. Naming the
+		// runtime with --runtime is the way past it, and is checked before this.
 		return "", false, fmt.Errorf(
 			"the kubelet configuration search under %s could not run, so which runtime its "+
 				"kubelet talks to cannot be established: %w",
@@ -529,12 +777,21 @@ func valueAfter(body, key string) (string, bool) {
 		if len(fields) == 0 {
 			continue
 		}
-		token := strings.TrimPrefix(strings.Trim(fields[0], `"'`), "unix://")
-		if token != "" {
+		if token := kubeletSettingValue(fields[0]); token != "" {
 			value, found = token, true
 		}
 	}
 	return value, found
+}
+
+// kubeletSettingValue strips the quoting and the scheme a kubelet setting's value may be wrapped
+// in, so that a value read off a command line and the same value read out of a file come back as
+// one string.
+//
+// The CRI endpoint is the case that makes it matter: the socket it names is handed to a containerd
+// CLI as an address, and a unix:// in front of it names a file that is not there.
+func kubeletSettingValue(token string) string {
+	return strings.TrimPrefix(strings.Trim(token, `"'`), "unix://")
 }
 
 // runtimeForEndpoint maps a CRI endpoint onto the host CLI that speaks to it, and the socket to point

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -18,6 +19,12 @@ import (
 
 // fakeHostRoot builds a directory that passes the host-root check, optionally carrying extra files
 // -- a containerd socket, say -- named relative to the root.
+//
+// It carries a process table holding the host's own init and no kubelet, which is what every case
+// below means unless it plants one: a host whose processes can be read and that is running no
+// kubelet, so the kubelet configuration is looked for in the places a distribution keeps it. A root
+// with no process table at all is a different host, and the cases that mean it take this one away
+// again.
 func fakeHostRoot(t *testing.T, extra ...string) string {
 	t.Helper()
 
@@ -25,12 +32,25 @@ func fakeHostRoot(t *testing.T, extra ...string) string {
 	for _, marker := range hostRootMarkers {
 		require.NoError(t, os.MkdirAll(filepath.Join(root, marker), 0o755))
 	}
+	writeHostProcess(t, root, 1, "/sbin/init")
 	for _, name := range extra {
 		path := filepath.Join(root, name)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, nil, 0o600))
 	}
 	return root
+}
+
+// writeHostProcess plants one process in a fixture host root's process table, spelled the way the
+// kernel spells it: the words are separated by NUL and the last one ends in it too, which is the
+// shape the reader has to survive.
+func writeHostProcess(t *testing.T, root string, pid int, argv ...string) {
+	t.Helper()
+
+	dir := filepath.Join(root, "proc", strconv.Itoa(pid))
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "cmdline"),
+		[]byte(strings.Join(argv, "\x00")+"\x00"), 0o644))
 }
 
 // scriptedHost returns a host exec whose commands are answered from a table keyed by the full argv,
@@ -821,6 +841,69 @@ func TestHostExec_ResolveRuntime_AnUnreadableKubeletConfigIsNotSilentlySkipped(t
 	assert.Contains(t, err.Error(), "config.yaml", "the reader is not told which file it was")
 }
 
+// Without the host's own process table there is no way to tell which kubelet is running or which
+// configuration it was started against, and the standard paths are a guess: a file at one of them
+// belongs to this node's kubelet only if this node's kubelet reads it. Answering from one anyway,
+// or falling through to the probe order, drives every container step against a daemon this node's
+// workloads may never touch — and does it silently, which is the one shape that cannot be caught by
+// reading the report.
+func TestHostExec_ResolveRuntime_RefusesAHostRootWithNoProcessTable(t *testing.T) {
+	root := fakeHostRoot(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(root, "proc", "1")))
+	// A standard path naming containerd, and docker installed: the two answers this must not give.
+	path := filepath.Join(root, "var/lib/kubelet/config.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path,
+		[]byte("containerRuntimeEndpoint: unix:///run/containerd/containerd.sock\n"), 0o644))
+	host, _ := scriptedHost(root, map[string]string{"sh -c command -v docker": "/usr/bin/docker"})
+
+	_, err := host.ResolveRuntime(context.Background(), "")
+
+	require.Error(t, err, "a host whose kubelet could not be identified was driven anyway")
+	assert.ErrorIs(t, err, errNoHostRuntime, "the affected steps fall back to being emitted")
+	assert.Contains(t, err.Error(), "process table",
+		"the reader is not told that it is the host mount, not the kubelet, that is missing")
+}
+
+// A process table that lists processes but refuses their command lines is the same host as one with
+// no process table: which kubelet is running is unestablished. Reading it as "no kubelet is running"
+// is worse than reading nothing, because that is the one answer that falls through to the standard
+// paths -- and a file there belongs to this node's kubelet only if this node's kubelet reads it.
+func TestHostExec_ResolveRuntime_RefusesAProcessTableThatWithholdsCommandLines(t *testing.T) {
+	root := fakeHostRoot(t)
+	// A command line that cannot be read, spelled so that the refusal does not depend on which
+	// user runs the test: a directory in the file's place fails every read with the same error.
+	require.NoError(t, os.RemoveAll(filepath.Join(root, "proc", "1", "cmdline")))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "proc", "1", "cmdline"), 0o755))
+	// A standard path naming containerd, and docker installed: the two answers this must not give.
+	path := filepath.Join(root, "var/lib/kubelet/config.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path,
+		[]byte("containerRuntimeEndpoint: unix:///run/containerd/containerd.sock\n"), 0o644))
+	host, _ := scriptedHost(root, map[string]string{"sh -c command -v docker": "/usr/bin/docker"})
+
+	_, err := host.ResolveRuntime(context.Background(), "")
+
+	require.Error(t, err, "a command line that could not be read was read as no kubelet running")
+	assert.ErrorIs(t, err, errNoHostRuntime, "the affected steps fall back to being emitted")
+	assert.Contains(t, err.Error(), "process table",
+		"the reader is not told that it is the process table, not the kubelet, that is missing")
+}
+
+// --runtime is the way past a host whose kubelet cannot be identified, and it has to keep working
+// there: it is checked before the kubelet is consulted at all, so an operator who knows what their
+// node runs is never blocked by a reading that could not be taken.
+func TestHostExec_ResolveRuntime_NamedRuntimeNeedsNoProcessTable(t *testing.T) {
+	root := fakeHostRoot(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(root, "proc", "1")))
+	host, _ := scriptedHost(root, map[string]string{"sh -c command -v docker": "/usr/bin/docker"})
+
+	rt, err := host.ResolveRuntime(context.Background(), "docker")
+
+	require.NoError(t, err)
+	assert.Equal(t, "docker", rt.Name)
+}
+
 // Two files in one drop-in directory are one configuration, applied in name order — that is not a
 // conflict, and treating it as one would refuse a node that is perfectly well configured.
 func TestHostExec_ResolveRuntime_OneTreeWithTwoDropInsIsNotAConflict(t *testing.T) {
@@ -844,7 +927,10 @@ func TestHostExec_ResolveRuntime_OneTreeWithTwoDropInsIsNotAConflict(t *testing.
 
 func TestHostExec_ResolveRuntime_FollowsTheKubelet(t *testing.T) {
 	testCases := []struct {
-		name        string
+		name string
+		// kubelet is the command line of a kubelet running on the fixture host, empty for a host
+		// running none.
+		kubelet     []string
 		kubeletFile string
 		kubeletBody string
 		// extra carries further kubelet files, keyed by path, for the cases where one file is not
@@ -855,6 +941,34 @@ func TestHostExec_ResolveRuntime_FollowsTheKubelet(t *testing.T) {
 		wantSocket  string
 		wantErrSays string
 	}{
+		{
+			// The endpoint has to come out of the file this node's kubelet loaded, not out of
+			// whichever file sits at a standard path: a node carrying both, with different
+			// contents, drives every container step against a daemon no workload on it uses --
+			// which the report says nothing about, because the wrong file was read successfully.
+			name:        "the endpoint comes from the file the kubelet named, not the standard path",
+			kubelet:     []string{"/usr/bin/kubelet", "--config=/opt/kubelet/config.yaml"},
+			kubeletFile: "opt/kubelet/config.yaml",
+			kubeletBody: "containerRuntimeEndpoint: unix:///run/k3s/containerd/containerd.sock\n",
+			extra: map[string]string{
+				"var/lib/kubelet/config.yaml": "containerRuntimeEndpoint: unix:///var/run/dockershim.sock\n",
+			},
+			has:      []string{"docker", "nerdctl"},
+			wantName: "nerdctl", wantSocket: "/run/k3s/containerd/containerd.sock",
+		},
+		{
+			// A kubelet re-parses its command line after loading its configuration, so the flag is
+			// the endpoint in force whatever the file it named says.
+			name: "an endpoint on the kubelet's command line overrides the file it named",
+			kubelet: []string{
+				"/usr/bin/kubelet", "--config=/opt/kubelet/config.yaml",
+				"--container-runtime-endpoint=unix:///run/k3s/containerd/containerd.sock",
+			},
+			kubeletFile: "opt/kubelet/config.yaml",
+			kubeletBody: "containerRuntimeEndpoint: unix:///var/run/dockershim.sock\n",
+			has:         []string{"docker", "nerdctl"},
+			wantName:    "nerdctl", wantSocket: "/run/k3s/containerd/containerd.sock",
+		},
 		{
 			name:        "a kubeadm node's flag file decides it",
 			kubeletFile: "var/lib/kubelet/kubeadm-flags.env",
@@ -969,6 +1083,9 @@ func TestHostExec_ResolveRuntime_FollowsTheKubelet(t *testing.T) {
 				path := filepath.Join(root, rel)
 				require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 				require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+			}
+			if len(tc.kubelet) > 0 {
+				writeHostProcess(t, root, 2, tc.kubelet...)
 			}
 
 			answers := map[string]string{}
