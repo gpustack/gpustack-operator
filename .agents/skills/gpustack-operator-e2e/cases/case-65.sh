@@ -242,7 +242,11 @@ for node in $NODES; do
   if ! printf '%s\n' "$out" | grep -qx WRITABLE; then
     PREP_OK=0
     echo "[case-65] SKIP: node $node has no writable host directory at $HOST_PATH (probe waited up to $PROBE_TIMEOUT)"
-    echo "  prep on each node: mkfs.xfs /dev/nvme1n1 && mkdir -p $HOST_PATH && mount /dev/nvme1n1 $HOST_PATH && chmod 0777 $HOST_PATH"
+    echo "  prep on each node: mkdir -p $HOST_PATH, then format and mount a spare disk there and chmod 0777 it."
+    echo "  IDENTIFY that disk PER NODE, with lsblk, and read which name carries the root filesystem."
+    echo "  This line names no device because NVMe names are not stable even between identical nodes:"
+    echo "  measured across five nodes of one cluster, one name was the spare disk on three of them,"
+    echo "  the root volume on a fourth, and absent on a fifth. Formatting a copied name erases a node."
     break
   fi
   PREPARED_NODES="$PREPARED_NODES $node"
@@ -267,6 +271,11 @@ spec:
     protocol: TCP
   connection:
     managed:
+      # Required by the schema, and empty is the shape this case wants: one leader process, no
+      # election. Omitting the key is refused at apply, which the host-directory gate above used to
+      # hide -- that gate exits 0, so on any cluster without the directory this case reported
+      # nothing rather than reporting that it could not build its own fixture.
+      leader: {}
       members:
         - nodeSelector: {kubernetes.io/os: linux}
           medium: DRAM

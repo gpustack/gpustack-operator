@@ -47,9 +47,12 @@
 #              - the Pool reaches Ready and the Binding reaches Ready, its domain name being the
 #                tenant id;
 #              - registered: the same client's put returns 0 and the exact payload reads back;
-#              - teardown drain: the client's remove of the key returns 0 -- a domain that still
-#                holds objects holds the Pool's deletion open-ended (measured: the Pool sits in
-#                Deleting until the domain drains), so the case drains what it wrote.
+#              - teardown drain: the client's remove of the key reports removed, retrying past
+#                OBJECT_HAS_LEASE (-706) within a deadline and counting OBJECT_NOT_FOUND (-704)
+#                as removed -- a domain that still holds objects holds the Pool's deletion
+#                open-ended (measured: the Pool sits in Deleting until the domain drains), so the
+#                case drains what it wrote. Graded on one call this row failed on a lease that had
+#                not expired yet, which is the timing and not the drain.
 #
 # Cleanup:     Trap deletes the Binding, the Pool, the backend, the RoleBinding in <NS> and the
 #              tenant namespace, in that order, all without waiting (a held deletion must not hang
@@ -120,7 +123,7 @@ trap teardown EXIT
 # between the two puts is the ledger, which is the case's whole point. The tenant rides the
 # KEYWORD tenant_id= -- see the header for why the positional slot cannot carry it.
 cat >"$CLIENT_SCRIPT" <<'PY'
-import os, sys, uuid
+import os, sys, time, uuid
 from mooncake.store import MooncakeDistributedStore
 
 action, key = sys.argv[1], sys.argv[2]
@@ -137,7 +140,20 @@ if action == "put":
     got = s.get(key)
     print("GET match=%s len=%d" % (got == val, len(got) if got else -1), flush=True)
 elif action == "remove":
-    print("REMOVE rc=%d" % s.remove(key), flush=True)
+    # Retried past OBJECT_HAS_LEASE (-706) rather than graded on one call. The same read that lets
+    # the ledger refuse an unregistered tenant also holds the object until its lease expires, and
+    # that TTL is a master startup parameter, so one attempt grades the timing instead of the drain.
+    # OBJECT_NOT_FOUND (-704) counts as removed: already gone is the outcome this row wants.
+    # The deadline is what keeps a master that never releases from hanging the case instead of
+    # returning a verdict.
+    deadline, attempts, rc = time.time() + 60, 0, -1
+    while time.time() < deadline:
+        attempts += 1
+        rc = s.remove(key)
+        if rc != -706:
+            break
+        time.sleep(3)
+    print("REMOVE rc=%d attempts=%d" % (rc, attempts), flush=True)
 PY
 
 # wait_for polls one jsonpath until it equals what is wanted, and prints the LAST value seen, so a
@@ -360,7 +376,11 @@ fi
 # registered tenant can manage its objects, not only create them.
 DRAIN_OUT="$(client_run remove)"
 DRAIN_REMOVE="$(client_field "$DRAIN_OUT" "REMOVE")"
-if [ "$DRAIN_REMOVE" = "rc=0" ]; then
+# The client reports "rc=<code> attempts=<n>", so the verdict reads the code and the message keeps
+# the count: a drain that took several passes is a pass, and one that took many says so.
+# -704 is removed, not failed -- see the client for why both codes end the loop.
+DRAIN_RC="${DRAIN_REMOVE%% *}"
+if [ "$DRAIN_RC" = "rc=0" ] || [ "$DRAIN_RC" = "rc=-704" ]; then
   record PASS "the teardown drain removes the key (an held domain blocks pool deletion)" \
     "remove=${DRAIN_REMOVE} for key ${KEY}; the trap's ordered deletes can now flow"
 else
