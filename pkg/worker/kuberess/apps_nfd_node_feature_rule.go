@@ -107,7 +107,7 @@ func InstallCPUInfoNodeFeatureRule(ctx context.Context, manufacturers []string) 
 
 	restCfg := system.LoopbackKubeRestConfig.Get()
 
-	err = waitx.PollUntilContextTimeout(ctx,
+	err = waitx.RetryUntilSuccessWithTimeout(ctx,
 		cpuInfoNodeFeatureRuleInterval, cpuInfoNodeFeatureRuleTimeout, true,
 		func(ctx context.Context) error {
 			err := kubeappyaml.Apply(ctx, content, restCfg)

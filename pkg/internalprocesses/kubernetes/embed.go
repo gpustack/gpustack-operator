@@ -183,7 +183,7 @@ func (Embedded) Start(ctx context.Context) error {
 }
 
 func (Embedded) GetConfig(ctx context.Context) (string, *rest.Config, error) {
-	err := waitx.PollUntilContextTimeout(ctx, time.Second, 300*time.Second, true,
+	err := waitx.RetryUntilSuccessWithTimeout(ctx, time.Second, 300*time.Second, true,
 		func(ctx context.Context) error {
 			if osx.ExistsFile(embeddedKubeConfigPath) {
 				return nil

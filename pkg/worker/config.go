@@ -139,7 +139,7 @@ func (c *Config) Apply(ctx context.Context) (*Worker, error) {
 		}
 	}
 	if c.Serve.ServerCert.CertKey.KeyFile == "" {
-		err = waitx.PollUntilContextTimeout(ctx, time.Second, 30*time.Second, true,
+		err = waitx.RetryUntilSuccessWithTimeout(ctx, time.Second, 30*time.Second, true,
 			func(ctx context.Context) error {
 				for _, ns := range []string{
 					kuberess.SystemNamespaceName,
