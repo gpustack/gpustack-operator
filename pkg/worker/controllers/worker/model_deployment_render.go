@@ -358,7 +358,12 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		gradable   bool
 		enginePort = modelDeploymentServicePort(role).ContainerPort
 	)
-	directDecode := !takeOver && in.Connector.KVTransfer &&
+	// READ OFF THE PROXY'S OWN FLAG, not off the transfer leg. Every admitted router-and-engine
+	// pair carries a transfer leg, and only one of them fronts its decoder with a proxy; deriving
+	// this from the leg would put that router's proxy on the other two, where it would wait on a
+	// header nothing writes. The kind is still checked here because the flag is set per role and
+	// this is where the port it takes is moved.
+	directDecode := !takeOver && in.Connector.RoutingSidecar &&
 		ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindDecode
 	if directDecode {
 		enginePort = modelDeploymentInternalPort
@@ -469,7 +474,8 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		},
 	}
 	if directDecode {
-		sidecar := renderModelDeploymentRoutingSidecar(ctx, role, enginePort, scheme, in.NativeSidecar)
+		sidecar := renderModelDeploymentRoutingSidecar(
+			ctx, role, enginePort, scheme, md.Spec.Engine.Name, in.NativeSidecar)
 		if in.NativeSidecar {
 			pod.Spec.InitContainers = []core.Container{sidecar}
 		} else {
@@ -659,19 +665,49 @@ func modelDeploymentCommandPort(command []string) (int32, error) {
 	return 0, fmt.Errorf("%s is missing", modelDeploymentEnginePortArg)
 }
 
+// renderModelDeploymentRoutingSidecar builds the decode Pod's routing proxy. Which handshake it
+// speaks follows the ENGINE, because the connector is how the sidecar asks the prefiller's
+// bootstrap registry for transfer endpoints and each engine serves a different one: the value
+// names a connector the sidecar dispatches on, not a flavor of one protocol.
+//
+// THE BOOTSTRAP PORT IS ONE VALUE WRITTEN AT BOTH ENDS. The prefiller names it in its own launch
+// argument, rendered by the inject package from its constant, and the sidecar reads it here. Under
+// mooncake the port travels as a flag; under SGLang it cannot, because the sidecar's SGLang port
+// is a process-wide constant with no flag at all, overridable only through the
+// SGLANG_BOOTSTRAP_PORT environment variable (llm-d/llm-d-router@v0.10.0
+// `pkg/sidecar/proxy/connector_sglang.go:38-50`). Both ends read the same constant, so a pair
+// cannot disagree about where the registry lives.
 func renderModelDeploymentRoutingSidecar(
 	ctx context.Context,
 	role *workercore.ModelDeploymentRole, enginePort int32, engineScheme core.URIScheme,
-	native bool,
+	engine string, native bool,
 ) core.Container {
 	externalPort := modelDeploymentServicePort(role)
 	args := []string{
 		fmt.Sprintf("--port=%d", externalPort.ContainerPort),
 		fmt.Sprintf("--model-server-port=%d", enginePort),
-		"--kv-connector=mooncake",
-		fmt.Sprintf("--mooncake-bootstrap-port=%d", inject.VLLMMooncakeBootstrapPort),
-		"--secure-proxy=false",
 	}
+	env := []core.EnvVar{{
+		Name: "POD_IP",
+		ValueFrom: &core.EnvVarSource{FieldRef: &core.ObjectFieldSelector{
+			FieldPath: "status.podIP",
+		}},
+	}}
+	// The connector value is the sidecar's own constant vocabulary (llm-d/llm-d-router@v0.10.0
+	// `pkg/sidecar/constants/constants.go`, KVConnectorSGLang beside KVConnectorMooncake), so it
+	// is spelled here rather than derived from anything the engine names.
+	if engine == workercore.ModelDeploymentEngineSGLang {
+		args = append(args, "--kv-connector=sglang")
+		env = append(env, core.EnvVar{
+			Name:  "SGLANG_BOOTSTRAP_PORT",
+			Value: strconv.Itoa(int(inject.SGLangBootstrapPort)),
+		})
+	} else {
+		args = append(args,
+			"--kv-connector=mooncake",
+			fmt.Sprintf("--mooncake-bootstrap-port=%d", inject.VLLMMooncakeBootstrapPort))
+	}
+	args = append(args, "--secure-proxy=false")
 	if engineScheme == core.URISchemeHTTPS {
 		args = append(args, "--enable-tls=decoder", "--tls-insecure-skip-verify=decoder")
 	}
@@ -695,12 +731,7 @@ func renderModelDeploymentRoutingSidecar(
 			Name: externalPort.Name, Protocol: core.ProtocolTCP,
 			ContainerPort: externalPort.ContainerPort,
 		}},
-		Env: []core.EnvVar{{
-			Name: "POD_IP",
-			ValueFrom: &core.EnvVarSource{FieldRef: &core.ObjectFieldSelector{
-				FieldPath: "status.podIP",
-			}},
-		}},
+		Env: env,
 		SecurityContext: &core.SecurityContext{
 			AllowPrivilegeEscalation: ptr.To(false),
 			RunAsNonRoot:             ptr.To(true),

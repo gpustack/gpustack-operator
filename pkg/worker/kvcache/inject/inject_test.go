@@ -259,6 +259,124 @@ func TestRender_SGLangCarriesTheResolvedConnection(t *testing.T) {
 	assert.Nil(t, device.ValueFrom, "empty and written, not omitted")
 }
 
+// TestRender_SGLangDisaggregationRendersBothHalves pins the arguments, the port and the
+// annotation a disaggregated pair renders, with LITERAL strings rather than the constants: the
+// names travel to upstream engines and routers, and an assertion built from the constant under
+// test would pass whatever the constant held.
+//
+// The store leg is asserted by presence alone here -- the cases above own its every variable --
+// so what this case states is that the two legs COMPOSE rather than replace each other.
+func TestRender_SGLangDisaggregationRendersBothHalves(t *testing.T) {
+	testCases := []struct {
+		name string
+		role Role
+		// wantArgs is the whole argument list, so an argument that disappears or one that
+		// appears on the wrong half fails by equality rather than by going unnoticed.
+		wantArgs        []string
+		wantPorts       []core.ContainerPort
+		wantAnnotations map[string]string
+	}{
+		{
+			name: "prefill",
+			role: RolePrefill,
+			wantArgs: []string{
+				"--hicache-storage-backend", "mooncake",
+				"--disaggregation-mode", "prefill",
+				"--disaggregation-transfer-backend", "mooncake",
+				"--disaggregation-bootstrap-port", "8998",
+			},
+			wantPorts: []core.ContainerPort{
+				{Name: "bootstrap", Protocol: core.ProtocolTCP, ContainerPort: 8998},
+			},
+			wantAnnotations: map[string]string{"sglang.ai/bootstrap-port": "8998"},
+		},
+		{
+			name: "decode",
+			role: RoleDecode,
+			wantArgs: []string{
+				"--hicache-storage-backend", "mooncake",
+				"--disaggregation-mode", "decode",
+				"--disaggregation-transfer-backend", "mooncake",
+			},
+			wantPorts:       nil,
+			wantAnnotations: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(Input{
+				Engine: EngineSGLang, Role: tc.role, Connection: testConnection(),
+				Disaggregated: true, KVTransfer: true,
+			})
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.wantArgs, result.Args)
+			assert.Equal(t, tc.wantPorts, result.Ports)
+			assert.Equal(t, tc.wantAnnotations, result.PodAnnotations)
+			assert.True(t, result.KVTransfer, "the rendered transfer arm is reported")
+			assert.Equal(t, "kvcache-master.gpustack-system.svc:50051",
+				envValue(t, result.Env, "MOONCAKE_MASTER").Value,
+				"the disaggregation leg composes with the store leg rather than replacing it")
+		})
+	}
+}
+
+// TestRender_SGLangSplitFollowsTheRoleAndThePair pins the agreement between the side that
+// ADMITS a role and the side that RENDERS it.
+//
+// Admission asks SupportsRole, which is answered per engine and role and carries no notion of a
+// transfer leg. A renderer that additionally required the leg would therefore refuse a shape
+// admission had already stored, and the refusal would surface in the reconciler rather than on the
+// write the user could still correct. So the split follows the role and the declared pair, and
+// asking for the leg as well changes nothing about what comes out.
+func TestRender_SGLangSplitFollowsTheRoleAndThePair(t *testing.T) {
+	for _, role := range []Role{RolePrefill, RoleDecode} {
+		t.Run(string(role), func(t *testing.T) {
+			paired, err := Render(Input{
+				Engine: EngineSGLang, Role: role, Connection: testConnection(), Disaggregated: true,
+			})
+			require.NoError(t, err, "the support table admits this role, so the renderer must render it")
+			assert.Contains(t, paired.Args, "--disaggregation-mode")
+			assert.Contains(t, paired.Args, string(role))
+			assert.True(t, paired.KVTransfer, "the rendered transfer arm is reported")
+
+			withLeg, err := Render(Input{
+				Engine: EngineSGLang, Role: role, Connection: testConnection(),
+				Disaggregated: true, KVTransfer: true,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, paired, withLeg,
+				"the leg is implied by the role on this engine, so asking for it adds nothing")
+		})
+	}
+}
+
+// TestRender_SGLangLoneHalfRendersNoSplit is the pair term's discriminator: a half of an undeclared
+// pair is routed undivided by every router, and the engine agrees here rather than starting in half
+// mode to wait on a counterpart nothing assigns. The store client still renders -- it is role-blind
+// -- which is what keeps a half declared to feed a shared pool contributing to it.
+func TestRender_SGLangLoneHalfRendersNoSplit(t *testing.T) {
+	for _, role := range []Role{RolePrefill, RoleDecode} {
+		t.Run(string(role), func(t *testing.T) {
+			result, err := Render(Input{
+				Engine: EngineSGLang, Role: role, Connection: testConnection(),
+			})
+			require.NoError(t, err)
+
+			assert.NotContains(t, result.Args, "--disaggregation-mode",
+				"a half of no pair starts no split")
+			assert.NotContains(t, result.Args, "--disaggregation-bootstrap-port")
+			assert.NotContains(t, result.Args, "--disaggregation-transfer-backend")
+			assert.Empty(t, result.Ports, "no registry is served, so no port is opened")
+			assert.Empty(t, result.PodAnnotations, "no registry is served, so nothing is advertised")
+			assert.False(t, result.KVTransfer)
+			assert.Contains(t, result.Args, "--hicache-storage-backend",
+				"the store client is role-blind and renders for a lone half all the same")
+		})
+	}
+}
+
 // TestRender_TenantGoesToEveryEngineThatReadsOne pins the vehicle each engine uses for the reuse
 // domain. The vLLM family reads tenant_id from its file; SGLang reads MOONCAKE_TENANT_ID.
 func TestRender_TenantGoesToEveryEngineThatReadsOne(t *testing.T) {
@@ -487,8 +605,11 @@ func TestRender_Refusals(t *testing.T) {
 			want:  ReasonConnectionIncomplete,
 		},
 		{
-			name:  "role on sglang",
-			input: Input{Engine: EngineSGLang, Role: RolePrefill, Connection: testConnection()},
+			// The kinds themselves are admitted now; a value outside the role set is what still
+			// refuses, and it refuses in the renderer's own vocabulary check rather than at the
+			// funnel, because the funnel asks no question about the role.
+			name:  "unknown role on sglang",
+			input: Input{Engine: EngineSGLang, Role: "both", Connection: testConnection()},
 			want:  ReasonRoleUnsupported,
 		},
 		{
@@ -565,8 +686,11 @@ func TestRender_TransportIsCheckedAtTheFunnel(t *testing.T) {
 // An admission handler refuses a role by asking the table, and the container is configured by
 // asking Render. If the two disagreed, one direction would refuse a role that renders fine and the
 // other would admit a role that cannot be rendered at all -- and neither would fail anywhere else.
-// The vLLM branch is where a disagreement could actually appear: renderSGLang reads the table, while
-// vllmKVRole maps the roles in its own switch.
+//
+// THE INPUT IS THE ONE ADMISSION HAS, which is a role and a connection and no transfer leg: the
+// leg is derived later, by the operator, from the router in front of the deployment. A case that
+// handed some engine a leg the admission handler cannot know about would report agreement on an
+// input the disagreement never occurs on.
 //
 // The pairs are enumerated from Engines() and the whole role set rather than listed, so an engine
 // added to the package without a table entry fails here instead of silently reporting false.
@@ -622,11 +746,12 @@ func TestRender_RefusesAHalfConnection(t *testing.T) {
 	}
 }
 
-// TestRender_RefusesKVTransferOnEnginesThatDropIt covers the capabilities only vLLM renders.
+// TestRender_TransferLegAndEventsFollowTheEngine covers which engine each capability renders on.
 //
-// The positive baseline matters more than the refusals: without it a renderer that refused every
-// engine would pass this test, and the whole point is that vLLM must still be accepted.
-func TestRender_RefusesKVTransferOnEnginesThatDropIt(t *testing.T) {
+// The positive baselines matter more than the refusals: without them a renderer that refused
+// every engine would pass this test, and the whole point is which engines must still be accepted.
+// Direct transfer is vLLM's and SGLang's; KV event publishing stays vLLM's alone.
+func TestRender_TransferLegAndEventsFollowTheEngine(t *testing.T) {
 	store := Connection{MasterAddress: "master:50051", Protocol: "tcp"}
 	cases := []struct {
 		name     string
@@ -635,16 +760,31 @@ func TestRender_RefusesKVTransferOnEnginesThatDropIt(t *testing.T) {
 		direct   bool
 		publish  bool
 		accepted bool
+		wantErr  string
 	}{
-		{name: "sglang cannot render direct transfer", engine: EngineSGLang, direct: true},
-		{name: "sglang cannot publish KV events", engine: EngineSGLang, publish: true},
+		{
+			// The transfer leg without a half to carry it: a shared member has nothing to pair.
+			name:   "sglang transfer without a role is refused",
+			engine: EngineSGLang, direct: true,
+			wantErr: "pairs a prefill half with a decode half",
+		},
+		{
+			name: "sglang cannot publish KV events", engine: EngineSGLang, publish: true,
+			wantErr: "moves nothing",
+		},
 		{
 			name:   "vllm-ascend cannot render direct transfer",
 			engine: EngineVLLMAscend, role: RolePrefill, direct: true,
+			wantErr: "moves nothing",
 		},
 		{
 			name: "vllm renders both", engine: EngineVLLM, role: RolePrefill,
 			direct: true, publish: true, accepted: true,
+		},
+		{
+			// The transfer leg is SGLang's too now, carried by its disaggregation arguments.
+			name: "sglang renders direct transfer", engine: EngineSGLang, role: RolePrefill,
+			direct: true, accepted: true,
 		},
 		{
 			// The baseline that makes the refusals mean something: SGLang is still a supported
@@ -671,7 +811,7 @@ func TestRender_RefusesKVTransferOnEnginesThatDropIt(t *testing.T) {
 				return
 			}
 			require.Error(t, err, "a capability the renderer drops must be refused, not ignored")
-			assert.Contains(t, err.Error(), "moves nothing")
+			assert.Contains(t, err.Error(), c.wantErr)
 		})
 	}
 }

@@ -5700,6 +5700,16 @@ func (m *ModelDeploymentRouter) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.DisaggregationThresholdTokens != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.DisaggregationThresholdTokens))
+		i--
+		dAtA[i] = 0x40
+	}
+	if m.RequestTimeoutSeconds != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.RequestTimeoutSeconds))
+		i--
+		dAtA[i] = 0x38
+	}
 	if len(m.ImagePullSecrets) > 0 {
 		for iNdEx := len(m.ImagePullSecrets) - 1; iNdEx >= 0; iNdEx-- {
 			{
@@ -8160,6 +8170,12 @@ func (m *ModelDeploymentRouter) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
+	if m.RequestTimeoutSeconds != nil {
+		n += 1 + sovGenerated(uint64(*m.RequestTimeoutSeconds))
+	}
+	if m.DisaggregationThresholdTokens != nil {
+		n += 1 + sovGenerated(uint64(*m.DisaggregationThresholdTokens))
+	}
 	return n
 }
 
@@ -9886,6 +9902,8 @@ func (this *ModelDeploymentRouter) String() string {
 		`ExtraArgs:` + fmt.Sprintf("%v", this.ExtraArgs) + `,`,
 		`ImagePullPolicy:` + fmt.Sprintf("%v", this.ImagePullPolicy) + `,`,
 		`ImagePullSecrets:` + repeatedStringForImagePullSecrets + `,`,
+		`RequestTimeoutSeconds:` + valueToStringGenerated(this.RequestTimeoutSeconds) + `,`,
+		`DisaggregationThresholdTokens:` + valueToStringGenerated(this.DisaggregationThresholdTokens) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -27744,6 +27762,46 @@ func (m *ModelDeploymentRouter) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestTimeoutSeconds", wireType)
+			}
+			var v int32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.RequestTimeoutSeconds = &v
+		case 8:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field DisaggregationThresholdTokens", wireType)
+			}
+			var v int32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.DisaggregationThresholdTokens = &v
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

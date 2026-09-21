@@ -69,7 +69,7 @@ diagnose_router() {
   k -n "$NS" get deployment "${MD}-router" -o yaml >&2 || true
   k -n "$NS" get configmap "${MD}-router" -o yaml >&2 || true
   k -n "$NS" get pods \
-    -l "modeldeployment.gpustack.ai/router=llm-d,app.kubernetes.io/instance=${MD}" \
+    -l "modeldeployment.gpustack.ai/router=llm-d-router,app.kubernetes.io/instance=${MD}" \
     -o yaml >&2 || true
   for container in envoy epp; do
     echo "[case-71] ${container} current log" >&2
@@ -95,7 +95,7 @@ spec:
     poolRef:
       name: case71-no-such-binding
   router:
-    name: llm-d
+    name: llm-d-router
   roles:
   - name: prefill
     kind: prefill
@@ -119,7 +119,7 @@ for _ in $(seq 1 "$((SETTLE / 3))"); do
 done
 
 if [ "$ready" != yes ]; then
-  waiting="$(k -n "$NS" get pods -l "modeldeployment.gpustack.ai/router=llm-d,app.kubernetes.io/instance=${MD}" \
+  waiting="$(k -n "$NS" get pods -l "modeldeployment.gpustack.ai/router=llm-d-router,app.kubernetes.io/instance=${MD}" \
     -o jsonpath='{range .items[*].status.containerStatuses[*]}{.name}{"="}{.state.waiting.reason}{" "}{end}' 2>/dev/null)"
   case "$waiting" in
     *ErrImagePull*|*ImagePullBackOff*|*InvalidImageName*)
@@ -128,7 +128,7 @@ if [ "$ready" != yes ]; then
       ;;
     *)
       echo "FAIL | router readiness and endpoint | router did not become Ready within ${SETTLE}s; waiting=[${waiting:-none}]" >&2
-      k -n "$NS" get pods -l "modeldeployment.gpustack.ai/router=llm-d,app.kubernetes.io/instance=${MD}" >&2 || true
+      k -n "$NS" get pods -l "modeldeployment.gpustack.ai/router=llm-d-router,app.kubernetes.io/instance=${MD}" >&2 || true
       diagnose_router
       exit 1
       ;;
@@ -147,7 +147,7 @@ echo
 echo "== case-71: router readiness and endpoint =="
 if [ "$got" = "$want" ]; then
   pod="$(k -n "$NS" get pods \
-    -l "modeldeployment.gpustack.ai/router=llm-d,app.kubernetes.io/instance=${MD}" \
+    -l "modeldeployment.gpustack.ai/router=llm-d-router,app.kubernetes.io/instance=${MD}" \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
   envoy_restarts="$(k -n "$NS" get pod "$pod" \
     -o jsonpath='{.status.containerStatuses[?(@.name=="envoy")].restartCount}' 2>/dev/null)"

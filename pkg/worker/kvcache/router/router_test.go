@@ -21,8 +21,8 @@ func TestRenderLLMD_IsDeterministicAcrossRoleOrder(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, left, right)
-	assert.Contains(t, left, "modeldeployment.gpustack.ai/role-kind")
-	assert.NotContains(t, left, "replicas")
+	assert.Contains(t, left.Document, "modeldeployment.gpustack.ai/role-kind")
+	assert.NotContains(t, left.Document, "replicas")
 }
 
 func TestRender_RefusesAnUnknownRouter(t *testing.T) {
@@ -30,8 +30,118 @@ func TestRender_RefusesAnUnknownRouter(t *testing.T) {
 	require.EqualError(t, err, `unsupported router "unknown"`)
 }
 
+// TestRender_RefusesARendererThatFillsNeitherHalf pins the refusal on the shape a newly added
+// renderer arrives in. A function that returns its zero value compiles and renders nothing, and
+// without this rule the caller would mount an empty document and start the router anyway.
+//
+// The renderer is registered here rather than declared beside the real ones because a permanently
+// registered empty router would be reachable from the API, and the point is to catch one that is
+// being written rather than to ship one.
+func TestRender_RefusesARendererThatFillsNeitherHalf(t *testing.T) {
+	const name = "fills-neither"
+	// It fills the command, so the refusal this pins is the one under test rather than the missing
+	// command that every renderer needs whichever half it fills.
+	renderers[name] = func(Input) (Output, error) { return Output{Command: []string{"x"}}, nil }
+	t.Cleanup(func() { delete(renderers, name) })
+
+	_, err := Render(name, Input{})
+	require.EqualError(t, err,
+		`router "fills-neither" rendered neither a configuration document nor arguments`)
+}
+
+// TestRender_RefusesARendererThatFillsBothHalves pins the other half of the same rule. A router
+// reads one of the two and ignores the other, so a renderer that fills both hands a user
+// configuration that nothing applies and nothing reports.
+func TestRender_RefusesARendererThatFillsBothHalves(t *testing.T) {
+	const name = "fills-both"
+	renderers[name] = func(Input) (Output, error) {
+		return Output{Command: []string{"x"}, Document: "a: b", Arguments: []string{"--port=8000"}}, nil
+	}
+	t.Cleanup(func() { delete(renderers, name) })
+
+	_, err := Render(name, Input{})
+	require.EqualError(t, err,
+		`router "fills-both" rendered both a configuration document and arguments`)
+}
+
+// TestEveryRegisteredRendererFillsExactlyOneHalf holds every renderer actually registered to the
+// rule, so a router added later is covered without anyone remembering to add a case.
+//
+// It calls the renderer DIRECTLY rather than through Render, and that is the whole point of the
+// case: Render refuses a wrong shape, so a test that went through it would fail on the error and
+// never reach this assertion, leaving an assertion that cannot fail standing beside a rule nothing
+// checks independently of its own guard.
+func TestEveryRegisteredRendererFillsExactlyOneHalf(t *testing.T) {
+	// The input is complete rather than minimal, because a renderer that refuses an incomplete one
+	// would report a missing half it was never given the chance to fill.
+	input := Input{
+		Roles: []Role{{
+			Kind:         "server",
+			RoleLabelKey: "modeldeployment.gpustack.ai/role-kind",
+			Selector:     map[string]string{"app.kubernetes.io/instance": "qwen"},
+		}},
+		Namespace:      "team-a",
+		EndpointLabels: map[string]string{"app.kubernetes.io/instance": "qwen"},
+		ListenPort:     8081,
+		MetricsPort:    9090,
+		DiscoveryPort:  8000,
+	}
+	for name, render := range renderers {
+		t.Run(name, func(t *testing.T) {
+			output, err := render(input)
+			require.NoError(t, err)
+
+			hasDocument := output.Document != ""
+			hasArguments := len(output.Arguments) != 0
+			assert.NotEqual(t, hasDocument, hasArguments,
+				"a router is configured by a document or by arguments, never by both and never by neither")
+		})
+	}
+}
+
+// TestEveryRegisteredRendererNamesItsOwnBinary holds the half that the exactly-one rule above does
+// not reach. One image carries all three programs and declares no entrypoint, so a renderer that
+// fills its configuration half correctly and leaves the command empty produces a container whose
+// first flag is read as the program name -- which fails as "executable file not found", naming the
+// flag rather than the omission. Asserting the arguments alone passes over exactly that.
+//
+// The expected names are written out per router rather than read back from the table, so that a
+// table edit which points two routers at one program is a failure here instead of agreeing with
+// itself.
+func TestEveryRegisteredRendererNamesItsOwnBinary(t *testing.T) {
+	want := map[string]string{
+		LLMD:   "epp",
+		VLLM:   "vllm-router",
+		SGLang: "sgl-model-gateway",
+	}
+	require.Len(t, want, len(renderers), "every registered router needs a binary named here")
+
+	input := Input{
+		Roles: []Role{{
+			Kind:         "server",
+			RoleLabelKey: "modeldeployment.gpustack.ai/role-kind",
+			Selector:     map[string]string{"app.kubernetes.io/instance": "qwen"},
+		}},
+		Namespace:      "team-a",
+		EndpointLabels: map[string]string{"app.kubernetes.io/instance": "qwen"},
+		ListenPort:     8081,
+		MetricsPort:    9090,
+		DiscoveryPort:  8000,
+	}
+	for name, binary := range want {
+		t.Run(name, func(t *testing.T) {
+			output, err := Render(name, input)
+			require.NoError(t, err)
+
+			assert.Equal(t, []string{binary}, output.Command)
+			// A path would tie the image to one layout; the program only has to be on PATH.
+			assert.NotContains(t, output.Command[0], "/", "the command is a bare program name")
+		})
+	}
+}
+
 func TestRenderLLMD_CarriesTheMetricsContract(t *testing.T) {
-	config, err := Render(LLMD, Input{
+	rendered, err := Render(LLMD, Input{
 		Roles: []Role{{Kind: "server", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"}},
 		Metrics: Metrics{
 			Engine:             "vllm",
@@ -42,6 +152,7 @@ func TestRenderLLMD_CarriesTheMetricsContract(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	config := rendered.Document
 
 	assert.Contains(t, config, "vllm:num_requests_waiting")
 	assert.Contains(t, config, "vllm:num_requests_running")
@@ -50,7 +161,7 @@ func TestRenderLLMD_CarriesTheMetricsContract(t *testing.T) {
 }
 
 func TestRenderLLMD_CarriesTheKVEventsContract(t *testing.T) {
-	config, err := Render(LLMD, Input{
+	rendered, err := Render(LLMD, Input{
 		Roles: []Role{
 			{Kind: "prefill", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"},
 			{Kind: "decode", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"},
@@ -64,6 +175,7 @@ func TestRenderLLMD_CarriesTheKVEventsContract(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	config := rendered.Document
 
 	assert.Contains(t, config, "precise-prefix-cache-producer")
 	assert.Contains(t, config, "topicFilter: kv@")
@@ -81,7 +193,7 @@ func TestRenderLLMD_CarriesTheKVEventsContract(t *testing.T) {
 }
 
 func TestRenderLLMD_NoDecodeRoleMeansNoPublisherExclusion(t *testing.T) {
-	config, err := Render(LLMD, Input{
+	rendered, err := Render(LLMD, Input{
 		Roles: []Role{
 			{Kind: "server", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"},
 		},
@@ -89,6 +201,7 @@ func TestRenderLLMD_NoDecodeRoleMeansNoPublisherExclusion(t *testing.T) {
 		KVEvents:  KVEvents{Engine: "vllm", Port: 5557, ReplayPort: 5558, Topic: "kv@"},
 	})
 	require.NoError(t, err)
+	config := rendered.Document
 
 	assert.Contains(t, config, "precise-prefix-cache-producer")
 	assert.NotContains(t, config, "!=decode",
@@ -96,11 +209,12 @@ func TestRenderLLMD_NoDecodeRoleMeansNoPublisherExclusion(t *testing.T) {
 }
 
 func TestRenderLLMD_DecodeDoesNotScorePrefixOverlap(t *testing.T) {
-	config, err := Render(LLMD, Input{Roles: []Role{
+	output, err := Render(LLMD, Input{Roles: []Role{
 		{Kind: "prefill", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"},
 		{Kind: "decode", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"},
 	}})
 	require.NoError(t, err)
+	config := output.Document
 
 	var rendered struct {
 		SchedulingProfiles []struct {
@@ -126,11 +240,12 @@ func TestRenderLLMD_DecodeDoesNotScorePrefixOverlap(t *testing.T) {
 }
 
 func TestRenderLLMD_EveryProfileCanPickAnEndpoint(t *testing.T) {
-	config, err := Render(LLMD, Input{Roles: []Role{
+	output, err := Render(LLMD, Input{Roles: []Role{
 		{Kind: "prefill", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"},
 		{Kind: "decode", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"},
 	}})
 	require.NoError(t, err)
+	config := output.Document
 
 	var rendered struct {
 		SchedulingProfiles []struct {

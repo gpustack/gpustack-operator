@@ -264,9 +264,10 @@ func TestValidateModelDeployment(t *testing.T) {
 			wantMessage: "cannot be combined with another kind",
 		},
 		{
-			// SGLang's store configuration has no prefill/decode equivalent, so the refusal names
-			// the engine: the kind is legal, and this engine is what has no term for it.
-			name: "role_kind_unsupported_by_engine",
+			// SGLang renders the split as its own disaggregation arguments, so this pair is now
+			// admitted. The row is kept as the witness: the rule below still stands, and this is
+			// what says it stopped answering for this engine.
+			name: "role_kind_prefill_and_decode_on_sglang",
 			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
 				role(func(r *workercore.ModelDeploymentRole) {
 					r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
@@ -275,7 +276,19 @@ func TestValidateModelDeployment(t *testing.T) {
 					r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
 				}),
 			),
-			wantMessage: `engine "sglang" has no rendering term for kind "prefill"`,
+		},
+		{
+			// The rule that used to refuse the row above, on the shape it still answers for: a kind
+			// no renderer has a term for. The schema's enum keeps this value off the API, so the
+			// object is built here in Go -- which is also how an engine added to the renderer
+			// without a support-table entry would reach the rule, and is why it is kept.
+			name: "role_kind_with_no_rendering_term",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name, r.Kind = "router", "router"
+				}),
+			),
+			wantMessage: `has no rendering term for kind "router"`,
 		},
 		{
 			// The same engine with the kind it does render is accepted, so the case above fails for
@@ -529,6 +542,16 @@ func TestValidateModelDeployment(t *testing.T) {
 			wantMessage: "spec.router.extraArgs[0]",
 		},
 		{
+			// The other half of the east-west boundary. Asserted beside the case above rather than
+			// left to it, because the two flags are refused together and a catalog that lost one of
+			// them would still pass every assertion the other one carries.
+			name: "router_metrics_endpoint_auth_is_owned",
+			md: routedModelDeployment(func(r *workercore.ModelDeploymentRouter) {
+				r.ExtraArgs = []string{"--metrics-endpoint-auth=true"}
+			}),
+			wantMessage: "spec.router.extraArgs[0]",
+		},
+		{
 			name: "router_extra_args_unowned_key",
 			md: routedModelDeployment(func(r *workercore.ModelDeploymentRouter) {
 				r.ExtraArgs = []string{"--zap-log-level=debug"}
@@ -541,7 +564,7 @@ func TestValidateModelDeployment(t *testing.T) {
 				md.Spec.Engine.Name = "engine-without-metrics"
 				return md
 			}(),
-			wantMessage: `metric "queued requests" required by router "llm-d" is unavailable on engine "engine-without-metrics"`,
+			wantMessage: `metric "queued requests" required by router "llm-d-router" is unavailable on engine "engine-without-metrics"`,
 		},
 		{
 			name: "router_roles_use_different_serving_ports",
@@ -600,13 +623,53 @@ func TestValidateModelDeployment(t *testing.T) {
 			wantMessage: `role "server" declares port 5558, which the operator reserves`,
 		},
 		{
+			// The bootstrap server runs on the PREFILLER, so that is the role the port is reserved
+			// on. The pair below it is what says the reservation follows the listener.
 			name: "router_role_declares_mooncake_bootstrap_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
+				return md
+			}(),
+			wantMessage: `role "server" declares port 8998, which the operator reserves`,
+		},
+		{
+			// A server role binds no bootstrap listener -- the transfer leg is rendered on the two
+			// halves alone -- so the same declaration is an ordinary port. Reserving it here would
+			// refuse a port nothing uses.
+			name: "router_server_role_declares_the_bootstrap_port",
 			md: func() *workercore.ModelDeployment {
 				md := routedModelDeployment(nil)
 				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
 				return md
 			}(),
+		},
+		{
+			// The mirror on the other engine, which the vLLM-only rule released: SGLang renders its
+			// own bootstrap registry on any prefiller, under any router.
+			name: "sglang_prefill_role_declares_the_bootstrap_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Router.Name = workercore.ModelDeploymentRouterSGLang
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
+				return md
+			}(),
 			wantMessage: `role "server" declares port 8998, which the operator reserves`,
+		},
+		{
+			// And a decoder on that engine does not serve the registry, so it is released there.
+			name: "sglang_decode_role_declares_the_bootstrap_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Router.Name = workercore.ModelDeploymentRouterSGLang
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
+				return md
+			}(),
 		},
 		{
 			// The reserved ports are vLLM's synthesized listeners; on another engine nothing binds
@@ -2373,4 +2436,269 @@ func TestModelDeploymentWebhook_SeveralInstanceTypesNeedTheBarrier(t *testing.T)
 		assert.Empty(t, validateModelDeploymentBarrierIsInstallable(context.Background(), one),
 			"one group is admitted as a unit by Kueue without help from this barrier")
 	})
+}
+
+// TestValidateModelDeploymentRouter_EngineMatched pins the pairing table, both directions.
+//
+// THE REFUSAL AND THE ACCEPTANCE ARE ONE CASE because either alone is consistent with a rule that
+// answers the wrong question: a refusal on its own passes for a handler that refuses the router
+// value outright, and an acceptance on its own passes for one with no rule at all.
+func TestValidateModelDeploymentRouter_EngineMatched(t *testing.T) {
+	cases := []struct {
+		name        string
+		engine      string
+		router      string
+		wantMessage string
+	}{
+		{
+			name:   "the picker takes vllm",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			router: workercore.ModelDeploymentRouterLLMD,
+		},
+		{
+			// Upstream carries a handshake connector and a metrics configuration for each engine,
+			// which is what makes this one value admitted with both.
+			name:   "the picker takes sglang too",
+			engine: workercore.ModelDeploymentEngineSGLang,
+			router: workercore.ModelDeploymentRouterLLMD,
+		},
+		{
+			name:   "the vllm router takes its own engine",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			router: workercore.ModelDeploymentRouterVLLM,
+		},
+		{
+			name:        "the vllm router does not front another project's engine",
+			engine:      workercore.ModelDeploymentEngineSGLang,
+			router:      workercore.ModelDeploymentRouterVLLM,
+			wantMessage: `router "vllm-router" does not front engine "sglang"`,
+		},
+		{
+			name:   "the gateway takes its own engine",
+			engine: workercore.ModelDeploymentEngineSGLang,
+			router: workercore.ModelDeploymentRouterSGLang,
+		},
+		{
+			// The mirror of the row above it, which is what says the table is a match rather than a
+			// list of routers that happen to be refused with one engine.
+			name:        "the gateway does not front another project's engine",
+			engine:      workercore.ModelDeploymentEngineVLLM,
+			router:      workercore.ModelDeploymentRouterSGLang,
+			wantMessage: `router "sglang-gateway" does not front engine "vllm"`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			md := modelDeployment(c.engine)
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: c.router}
+
+			errs := validateModelDeploymentRouter(md)
+			if c.wantMessage == "" {
+				for _, err := range errs {
+					assert.NotContains(t, err.Error(), "does not front engine",
+						"this pair is admitted, so the pairing rule must not be what answers")
+				}
+
+				return
+			}
+			require.NotEmpty(t, errs)
+			assert.True(t, errsContain(errs.ToAggregate().Error(), c.wantMessage),
+				"the refusal names both sides; got %q", errs.ToAggregate().Error())
+		})
+	}
+}
+
+// TestValidateModelDeploymentRouter_OwnedArgumentsArePerRouter is what keeps the catalog from being
+// read as one list shared by every value.
+//
+// The two routers derive different flags, so the same argument is refused in front of one and
+// accepted in front of the other. A case that only asserted the refusal would pass for a handler
+// that refused the flag for every router, which would reject a name the other router has no
+// opinion about.
+func TestValidateModelDeploymentRouter_OwnedArgumentsArePerRouter(t *testing.T) {
+	cases := []struct {
+		name    string
+		router  string
+		arg     string
+		refused bool
+		engine  string
+	}{
+		{
+			name: "a bind address the vllm router derives", router: workercore.ModelDeploymentRouterVLLM,
+			arg: "--host=127.0.0.1", refused: true, engine: workercore.ModelDeploymentEngineVLLM,
+		},
+		{
+			name: "the connector the vllm router derives", router: workercore.ModelDeploymentRouterVLLM,
+			arg: "--kv-connector=nixl", refused: true, engine: workercore.ModelDeploymentEngineVLLM,
+		},
+		{
+			name:   "the same bind address in front of the picker, which has no such flag",
+			router: workercore.ModelDeploymentRouterLLMD, arg: "--host=127.0.0.1", refused: false,
+			engine: workercore.ModelDeploymentEngineVLLM,
+		},
+		{
+			name: "a flag neither derives", router: workercore.ModelDeploymentRouterVLLM,
+			arg: "--log-level=debug", refused: false, engine: workercore.ModelDeploymentEngineVLLM,
+		},
+		{
+			// The disaggregation switch is spelled per project, so each catalog owns its own
+			// spelling and neither owns the other's. A shared list would refuse a flag the router
+			// in front has no concept of, and let through the one it does.
+			name: "the gateway's own disaggregation switch", router: workercore.ModelDeploymentRouterSGLang,
+			arg: "--pd-disaggregation", refused: true, engine: workercore.ModelDeploymentEngineSGLang,
+		},
+		{
+			name:   "the vllm router's spelling of it, in front of the gateway",
+			router: workercore.ModelDeploymentRouterSGLang, arg: "--vllm-pd-disaggregation",
+			refused: false, engine: workercore.ModelDeploymentEngineSGLang,
+		},
+		{
+			// The gateway has no transfer-connector flag at all, so this names nothing it reads.
+			name:   "the connector flag the gateway does not have",
+			router: workercore.ModelDeploymentRouterSGLang, arg: "--kv-connector=mooncake",
+			refused: false, engine: workercore.ModelDeploymentEngineSGLang,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			md := modelDeployment(c.engine)
+			md.Spec.Router = &workercore.ModelDeploymentRouter{
+				Name: c.router, ExtraArgs: []string{c.arg},
+			}
+
+			errs := validateModelDeploymentRouter(md)
+			owned := false
+			for _, err := range errs {
+				if errsContain(err.Error(), "is set by the operator for router") {
+					owned = true
+				}
+			}
+			assert.Equal(t, c.refused, owned,
+				"the catalog is keyed by router; got %v", errs)
+		})
+	}
+}
+
+// TestValidateModelDeploymentServiceNamesAreDistinct_RouterClaimsItsOwnName covers the collision the
+// set did not enumerate: every router value renders its objects under `<deployment>-router`, which
+// is exactly the name a role called "router" derives for itself.
+func TestValidateModelDeploymentServiceNamesAreDistinct_RouterClaimsItsOwnName(t *testing.T) {
+	withRouter := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) { r.Name = "router" }))
+	withRouter.Spec.Router = &workercore.ModelDeploymentRouter{
+		Name: workercore.ModelDeploymentRouterLLMD,
+	}
+
+	errs := validateModelDeploymentServiceNamesAreDistinct(withRouter)
+	require.NotEmpty(t, errs, "the role and the router derive one name")
+	assert.True(t, errsContain(errs.ToAggregate().Error(), "the Service fronting the managed router"),
+		"the refusal names what it collides with; got %q", errs.ToAggregate().Error())
+
+	// The same role without a router is legal, which is what says the claim follows the router
+	// rather than the role's name being reserved outright.
+	withoutRouter := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) { r.Name = "router" }))
+	assert.Empty(t, validateModelDeploymentServiceNamesAreDistinct(withoutRouter),
+		"nothing claims that name when no router is asked for")
+}
+
+// TestValidateModelDeploymentRouter_MetricsTableIsThePickersAlone pins the gate on both halves of
+// the reason it exists.
+//
+// The table feeds one router's metrics extractor; the other two score on their own observations.
+// The refusal it produces names the router from the RENDERER PACKAGE'S OWN CONSTANT rather than
+// from the object, so a call left unconditional would tell a user who asked for the gateway that
+// `llm-d-router` requires a metric — a router they never named. Asserting the message's absence is
+// therefore the assertion, not merely that admission passed.
+func TestValidateModelDeploymentRouter_MetricsTableIsThePickersAlone(t *testing.T) {
+	// An engine the table has no row for, so the gate is the only thing that can decide the answer.
+	const unknownEngine = "an-engine-with-no-metrics-row"
+
+	t.Run("the picker is refused, naming itself", func(t *testing.T) {
+		md := modelDeployment(unknownEngine)
+		md.Spec.Router = &workercore.ModelDeploymentRouter{
+			Name: workercore.ModelDeploymentRouterLLMD,
+		}
+
+		errs := validateModelDeploymentRouter(md)
+		require.NotEmpty(t, errs)
+		assert.True(t, errsContain(errs.ToAggregate().Error(), "required by router"),
+			"the picker's precondition is what answers; got %q", errs.ToAggregate().Error())
+	})
+
+	for _, name := range []string{
+		workercore.ModelDeploymentRouterVLLM,
+		workercore.ModelDeploymentRouterSGLang,
+	} {
+		t.Run("the "+name+" never reaches it", func(t *testing.T) {
+			md := modelDeployment(unknownEngine)
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: name}
+
+			for _, err := range validateModelDeploymentRouter(md) {
+				assert.NotContains(t, err.Error(), "required by router",
+					"this router reads no engine metrics, so its user must not be told another "+
+						"router's requirement")
+				assert.NotContains(t, err.Error(), workercore.ModelDeploymentRouterLLMD,
+					"nothing may name a router the object did not")
+			}
+		})
+	}
+}
+
+// TestValidateModelDeploymentRouter_ThresholdIsThePickersAlone pins the refusal and, in the same
+// case, the acceptance it is a refusal relative to.
+//
+// The field is meaningful where a scheduler decides per request whether to split one; the other two
+// routers have no such decision, so a value there would be legal to write and render nothing. The
+// accepted rows are what keep this from passing for a handler that refuses the field outright, and
+// the explicit zero is a row of its own because zero is a value upstream defines rather than an
+// absent field spelled differently.
+func TestValidateModelDeploymentRouter_ThresholdIsThePickersAlone(t *testing.T) {
+	cases := []struct {
+		name      string
+		router    string
+		engine    string
+		threshold *int32
+		refused   bool
+	}{
+		{
+			name: "the picker takes it", router: workercore.ModelDeploymentRouterLLMD,
+			engine: workercore.ModelDeploymentEngineVLLM, threshold: ptr.To(int32(8)),
+		},
+		{
+			name:   "and takes an explicit zero, which disables splitting",
+			router: workercore.ModelDeploymentRouterLLMD,
+			engine: workercore.ModelDeploymentEngineVLLM, threshold: ptr.To(int32(0)),
+		},
+		{
+			name: "the vllm router has no such decision", router: workercore.ModelDeploymentRouterVLLM,
+			engine: workercore.ModelDeploymentEngineVLLM, threshold: ptr.To(int32(8)),
+			refused: true,
+		},
+		{
+			name: "nor does the gateway", router: workercore.ModelDeploymentRouterSGLang,
+			engine: workercore.ModelDeploymentEngineSGLang, threshold: ptr.To(int32(8)),
+			refused: true,
+		},
+		{
+			name: "an absent field is refused nowhere", router: workercore.ModelDeploymentRouterVLLM,
+			engine: workercore.ModelDeploymentEngineVLLM,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			md := modelDeployment(c.engine)
+			md.Spec.Router = &workercore.ModelDeploymentRouter{
+				Name: c.router, DisaggregationThresholdTokens: c.threshold,
+			}
+
+			refused := false
+			for _, err := range validateModelDeploymentRouter(md) {
+				if errsContain(err.Error(), "has no prompt-token threshold to set") {
+					refused = true
+				}
+			}
+			assert.Equal(t, c.refused, refused)
+		})
+	}
 }

@@ -163,7 +163,7 @@ deployment declaring one would render a role nothing downstream can reach.
 Without `spec.router`, `kind` adds the role discriminator to the engine's shared-store connector and
 nothing pairs the two roles.
 
-With the managed `llm-d` router, what a native vLLM role runs depends on whether `spec.kvCache` is
+With the managed `llm-d-router`, what a native vLLM role runs depends on whether `spec.kvCache` is
 set, and the two shapes are different documents rather than one with a field toggled:
 
 | `spec.kvCache` | Connector rendered | What carries the blocks |
@@ -202,7 +202,7 @@ spec:
     name: vllm
     version: "0.27.1"
   router:
-    name: llm-d                          # required to pair the roles; the only value today
+    name: llm-d-router                 # required to pair the roles; takes either engine
   roles:
     - name: prefill
       kind: prefill
@@ -267,9 +267,64 @@ replicas route alike.
 
 `spec.router.extraArgs` takes additional flags for the router process. A flag the operator derives
 itself is **refused rather than merged**, so one setting has one source. The owned catalog is keyed by
-router; for `llm-d` it is `--endpoint-selector`, `--endpoint-target-ports`, `--config-file`,
-`--secure-serving`, `--grpc-health-port` and `--metrics-endpoint-auth`, and the refusal names the flag
-and the router.
+router, and the refusal names the flag and the router.
+
+For `llm-d-router` it is `--endpoint-selector`, `--endpoint-target-ports`, `--config-file`,
+`--secure-serving`, `--grpc-health-port` and `--metrics-endpoint-auth`.
+
+`vllm-router` and `sglang-gateway` take their whole configuration on the command line, so their
+catalogs are wider: the two bind addresses and their ports, the four service-discovery flags and
+each project's own spelling of the disaggregation switch. Only `vllm-router` names a transfer
+connector; the gateway has no such flag, because its transfer backend is the engine's.
+
+A router is also **engine-matched**, and a pair outside this table is refused naming both sides:
+
+| `spec.router.name` | Engines it fronts | Shape it renders |
+| --- | --- | --- |
+| `llm-d-router` | `vllm`, `sglang` | An endpoint picker behind a proxy, configured by a mounted document |
+| `vllm-router` | `vllm` | One process, configured entirely by its command line |
+| `sglang-gateway` | `sglang` | One process, configured entirely by its command line |
+
+`llm-d-router` takes both engines because upstream carries a handshake connector and a metrics
+configuration for each. The other two are each one project's router for that project's own engine,
+and admitting a cross pairing would be a claim this repository has not measured.
+
+### The two router fields
+
+`spec.router.requestTimeoutSeconds` is how long the router waits for a reply. **Leaving it out does
+not mean one thing across the three.** It renders nothing, so each router keeps its own upstream
+default: **one day** under `llm-d-router`, whose proxy carries the timeout, against **half an hour**
+under the two configured by their command line — a factor of forty-eight.
+
+Setting it is what makes a declaration survive a change of router. Zero is refused: it would mean
+"wait forever" under the proxy and nothing in particular under the other two.
+
+`spec.router.disaggregationThresholdTokens` is how many prompt tokens **not already in a prefix
+cache** make a request worth splitting between a prefiller and a decoder; below it the decode replica
+serves the whole request itself. Unset renders the value the picker already used.
+
+**Zero disables splitting entirely** rather than meaning "always split" — the decider returns "do not
+disaggregate" on a zero threshold before reading anything else — and it is accepted because it is a
+value upstream defines. It is **refused** on the other two routers rather than ignored: they have no
+per-request decision to threshold, and a field that is legal to write and renders nothing is a shape
+this API has rejected before.
+
+The proxy under `llm-d-router` also writes **one access log**: a JSON object per request on the
+container's standard output, carrying the response code, the response flags, the response code
+details, the duration, the endpoint the picker selected, the method, the path, the request id and the
+byte counts. It is not a field — the gap it fills is that nothing is logged at all, so there is no
+value to choose. The other two routers log whatever their own flags say.
+
+**Two of those are a boundary rather than a derived value.** The router runs with
+`--secure-serving=false` and `--metrics-endpoint-auth=false`, and upstream defaults both to **true**.
+The inversion is deliberate: a router manages **east-west** traffic, picking which replica of this
+deployment serves a request already inside the cluster. TLS and caller authentication are
+**north-south** concerns, owned by the gateway that admits traffic into the cluster.
+
+Where those two flags sit, neither protects anything. `--secure-serving` puts TLS on the endpoint
+picker's ext_proc gRPC server, whose only client is the Envoy container **in the same Pod** dialing
+`127.0.0.1`. `--metrics-endpoint-auth` guards the picker's own `/metrics`, scraped in-cluster. So
+there is no field for either, and neither is reachable through `extraArgs`.
 
 ### The direct transfer's transport
 
@@ -288,8 +343,13 @@ than at admission.
 It is **declared, not discovered, and not gated**. The set an engine accepts belongs to the mooncake
 build inside the engine's own image — a HIP-compiled build makes `hip` a working transport — so the
 operator passes the value through verbatim, and a value the build rejects fails that container at
-startup. It is read only on the direct-transfer leg (the managed `llm-d` router in front of native
-vLLM prefill/decode roles); on every other shape it is accepted and renders nothing.
+startup.
+
+It is read on the direct-transfer leg, which every **admitted router-and-engine pair** renders on its
+`prefill` and `decode` roles off Ascend — a prefiller that cannot hand a decoder its blocks is not
+disaggregated under any router. What differs per pair is the handshake, not whether there is a leg:
+Mooncake's bootstrap server under native vLLM, SGLang's own registry under SGLang. On every other
+shape the field is accepted and renders nothing.
 
 On Ascend the field has no consumer even beyond that gate: vllm-ascend's point-to-point connectors
 (its own family — `MooncakeConnectorV1`, not the native name) initialize their transfer engine with
@@ -486,7 +546,7 @@ Ownership is per **(engine, key)**: a key one engine owns is an ordinary user ar
 | Engine | Owned arguments | Owned environment |
 |---|---|---|
 | `vllm` | `--kv-transfer-config`, `--kv-events-config` | `MOONCAKE_CONFIG_PATH`, `VLLM_MOONCAKE_BOOTSTRAP_PORT` |
-| `sglang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config` | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
+| `sglang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config`, `--disaggregation-mode`, `--disaggregation-transfer-backend`, `--disaggregation-bootstrap-port` | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
 
 One `vllm` row covers **both backends**. The owned keys follow the engine while only the connector
 name follows the accelerator backend, so an Ascend pool and an NVIDIA pool running `vllm` own exactly

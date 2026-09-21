@@ -112,9 +112,12 @@ var engineRoleSupport = map[Engine][]Role{
 	// kv_producer and kv_consumer.
 	EngineVLLM:       {RoleNone, RolePrefill, RoleDecode},
 	EngineVLLMAscend: {RoleNone, RolePrefill, RoleDecode},
-	// SGLang's store configuration has no prefill/decode equivalent, so the only role it renders is
-	// the absence of one.
-	EngineSGLang: {RoleNone},
+	// SGLang's store client is role-blind, but its disaggregation arguments carry both roles, so
+	// all three render. The two kinds' ONLY rendering is the disaggregation one -- a kind asked
+	// for without the point-to-point leg is refused by the renderer rather than rendered as a
+	// store member wearing a label, which would be a container that looks configured and pairs
+	// with nothing.
+	EngineSGLang: {RoleNone, RolePrefill, RoleDecode},
 }
 
 // SupportsRole reports whether the engine's rendering has a term for the role.
@@ -153,6 +156,19 @@ type Input struct {
 
 	// Role is the prefill/decode role, RoleNone when the caller declared none.
 	Role Role
+
+	// Disaggregated reports whether the deployment declaring this role declares BOTH halves of a
+	// prefill/decode pair.
+	//
+	// IT GATES THE ENGINE'S OWN SPLIT MODE, because the role alone cannot: a deployment holding one
+	// half has no pair to hand blocks to, so an engine started in half mode waits on a counterpart
+	// nothing mints while whatever routes it sends whole requests -- two layers of one object
+	// answering "is this a split" differently. The routers made the same move first: their renderer
+	// enters disaggregation only with both selectors present and routes a lone half as the undivided
+	// shape, and this field is that rule reaching the engine side. The cost is stated rather than
+	// hidden: a deployment deliberately declaring one half to feed a shared store runs that engine
+	// undivided now, where it used to start as one half of a pair that was never declared.
+	Disaggregated bool
 
 	// Domain is the reuse domain the Binding declared. A non-empty value is emitted by every engine
 	// that carries a tenant identity; an empty one — a master that holds no tenant ledger — renders

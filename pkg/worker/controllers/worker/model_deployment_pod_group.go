@@ -187,17 +187,22 @@ func ModelDeploymentPodGroup(
 		kueuepodconst.GroupNameLabel:       modelDeploymentReplicaGroupName(md, role.Name, ordinal),
 		modelDeploymentReplicaOrdinalLabel: strconvx.Itoa(ordinal),
 	}
-	// THE MEMBER INDEX IS WRITTEN ONLY WHERE IT DISTINGUISHES SOMETHING, and the reason is that a
-	// replica of one member renders the Pod it rendered before this label existed -- byte for byte,
-	// which a test pins. Adding a label every single-Member replica would carry would move every
-	// one of their fingerprints and roll every deployment on the cluster on the pass this landed,
-	// to record an index that has exactly one possible value.
+	// THE MEMBER INDEX IS WRITTEN ON EVERY MEMBER AT EVERY SIZE. The Pods that answer the API are
+	// the ones of index zero -- one member per replica, which at size one is the replica's only
+	// Pod -- and a label selector is a conjunction, so it can name that set only through a label
+	// every member carries. Withholding the index from single-Member replicas would leave the set
+	// expressible as "no index at all or index zero", a union no selector states. Narrowing the
+	// selector to the roles that have several members is no escape either: discovery filters by
+	// kind rather than by role, so two server roles of different sizes share one selector, and the
+	// index-zero term would empty every single-Member role in it.
 	//
-	// Readers get that value anyway: modelDeploymentPodMemberIndex answers with the leader's index
-	// when the label is absent, which is what the label would have said.
-	if modelDeploymentRoleSize(role) > 1 {
-		labels[modelDeploymentMemberIndexLabel] = strconvx.Itoa(member)
-	}
+	// THE COST IS ONE ROLL OF EVERY DEPLOYMENT IN THE CLUSTER, accepted rather than avoided:
+	// writing the label moves the fingerprint of every single-Member replica, so the release
+	// carrying this re-creates each of them once, and the pinned render digests move with it by
+	// their own re-baselining procedure. What the label records is no longer an index with exactly
+	// one possible value -- it is the one fact that makes the answering set selectable, which is
+	// what changes the trade.
+	labels[modelDeploymentMemberIndexLabel] = strconvx.Itoa(member)
 
 	return ModelDeploymentPodGroupMeta{
 		Labels: labels,
@@ -347,13 +352,16 @@ func modelDeploymentReplicaIsComplete(view modelDeploymentReplicaView, size int)
 // modelDeploymentPodDescription names a Pod the way its own shape makes true: a replica when a
 // replica is one Pod, and a member of one when it is not.
 //
-// IT READS THE LABEL RATHER THAN THE SPEC, because the caller of a message is reporting on a Pod
-// that exists and the spec may already describe something else -- and because a Pod that predates
-// multi-member replicas is a replica whatever the spec now says. The label is present exactly when
-// the Pod was rendered as one member of several, which is exactly when calling it a replica is
-// wrong.
+// IT READS THE POD'S OWN GROUP TOTAL RATHER THAN THE SPEC, because the caller of a message is
+// reporting on a Pod that exists and the spec may already describe something else -- and because a
+// Pod that predates multi-member replicas is a replica whatever the spec now says. The member index
+// label can no longer tell the two apart: it is written on every member at every size, so reading
+// it would call every single-Pod replica a member. The group total is the value that still
+// separates the shapes, and a Pod carrying no total at all is a replica, which is what a Pod from
+// before the totals existed is.
 func modelDeploymentPodDescription(pod *core.Pod) string {
-	if _, ok := pod.Labels[modelDeploymentMemberIndexLabel]; ok {
+	total, err := strconvx.Atoi[int](pod.Annotations[kueuepodconst.GroupTotalCountAnnotation])
+	if err == nil && total > 1 {
 		return "member " + pod.Name
 	}
 
@@ -365,10 +373,11 @@ func modelDeploymentPodDescription(pod *core.Pod) string {
 // IT DEFAULTS TO THE LEADER RATHER THAN REPORTING ABSENCE, which is the opposite of the ordinal
 // above, and the asymmetry is deliberate. A missing ordinal means the Pod belongs to no replica the
 // converger can name, so guessing one would adopt it onto a slot it never held. A missing member
-// index means something narrower: every replica rendered before multi-Member groups existed has
-// exactly one Pod, and that Pod is its replica's only member -- which is the leader. Reading it as
-// the leader is therefore what the label would have said, and treating those Pods as unplaceable
-// would turn every existing single-Member replica into a rollout on the pass this label landed.
+// index means something narrower: the label is written on every member, so its absence marks a Pod
+// rendered before that became the rule, and the replicas rendered without it were exactly the
+// single-Member ones -- whose one Pod is the leader. Reading it as the leader is therefore what the
+// label would have said, and treating those Pods as unplaceable would turn every deployment that
+// predates the rule into a rollout on the pass it landed.
 func modelDeploymentPodMemberIndex(pod *core.Pod) int {
 	member, err := strconvx.Atoi[int](pod.Labels[modelDeploymentMemberIndexLabel])
 	if err != nil || member < 0 {

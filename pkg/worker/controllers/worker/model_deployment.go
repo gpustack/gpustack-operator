@@ -1064,7 +1064,9 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 		//
 		kvTransfer := modelDeploymentUsesKVTransfer(md, role, instType.Status.Detail.Manufacturer)
 		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, instType.Status.Detail.Manufacturer)
-		if connection != nil || kvTransfer || publishKVEvents {
+		routingSidecar := modelDeploymentFrontsDecodeWithSidecar(
+			md, role, instType.Status.Detail.Manufacturer)
+		if connection != nil || kvTransfer || publishKVEvents || routingSidecar {
 			roleConnection := ModelDeploymentConnectorInput{}
 			if connection != nil {
 				roleConnection = *connection
@@ -1076,6 +1078,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			// than two copies of one, which is what the atomic admission of the pair is FOR.
 			roleConnection.Kind = role.Kind
 			roleConnection.KVTransfer = kvTransfer
+			roleConnection.RoutingSidecar = routingSidecar
 			if md.Spec.KVTransfer != nil {
 				roleConnection.KVTransferProtocol = md.Spec.KVTransfer.Protocol
 			}

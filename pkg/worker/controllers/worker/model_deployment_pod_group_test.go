@@ -73,14 +73,28 @@ func TestModelDeploymentPodGroup(t *testing.T) {
 	assert.Equal(t, "prefill", first.Annotations[kueuepodconst.RoleHashAnnotation])
 	assert.Equal(t, "decode", decode.Annotations[kueuepodconst.RoleHashAnnotation])
 
-	// THE GROUP CARRIES EXACTLY TWO LABELS: membership and ordinal. A third selectable carrier of
-	// the replica's identity would be a second answer to one question -- the ordinal label already
-	// exists for the readers that need it, so asserting the exact key set here is what keeps a
-	// second one from being added by an edit that looks harmless.
+	// THE GROUP CARRIES EXACTLY THREE LABELS: membership, ordinal and member index. The ordinal is
+	// the group's ONLY carrier of the replica's identity -- a second selectable label answering
+	// "which replica" would be a second answer to one question, and asserting the exact key set
+	// here is what keeps one from being added by an edit that looks harmless. The member index is
+	// outside that rule because it answers a different question, "which member of the replica",
+	// which no other label carries; a further label answering the ordinal's question must still be
+	// stopped by this assertion.
 	assert.ElementsMatch(t,
-		[]string{modelDeploymentReplicaOrdinalLabel, kueuepodconst.GroupNameLabel},
+		[]string{
+			modelDeploymentReplicaOrdinalLabel,
+			modelDeploymentMemberIndexLabel,
+			kueuepodconst.GroupNameLabel,
+		},
 		slices.Collect(maps.Keys(first.Labels)),
-		"the group contributes exactly two labels: ordinal and membership")
+		"the group contributes exactly three labels: ordinal, membership and member index")
+
+	// THE MEMBER INDEX IS ON THE MEMBERS OF EVERY REPLICA, WHATEVER ITS SIZE, and this fixture is
+	// where the rule is least obvious: its roles declare no size, so this group is a replica of one
+	// member, and that member is the leader. The label is what lets one equality term in a
+	// discovery selector name the Pods that answer the API at every size.
+	assert.Equal(t, "0", first.Labels[modelDeploymentMemberIndexLabel],
+		"a replica of one member carries its leader's index rather than no index at all")
 
 	// THE GROUP CARRIES EXACTLY THREE ANNOTATIONS. A fourth would be a second fingerprint of the
 	// shape beside the total, and the total is fixed at one already.
@@ -145,6 +159,51 @@ func TestModelDeploymentPodGroup_FastAdmissionIsAbsent(t *testing.T) {
 		kueuepodconst.GroupFastAdmissionAnnotationKey)
 	assert.NotContains(t, group.Labels, kueuepodconst.GroupFastAdmissionAnnotationKey,
 		"and it must not arrive as a label either")
+}
+
+// TestModelDeploymentPodDescriptionFollowsTheReplicasOwnShape pins what a Pod is called in a
+// message: a replica when its replica is one Pod, a member of one when it is not.
+//
+// THE MEMBER INDEX LABEL IS NOT THE DISCRIMINATOR, although it looks like one: it is written on
+// every member at every size, so a reader keyed on its presence would call every single-Pod replica
+// a member -- the first row below is exactly that Pod. The group total is the value that still
+// separates the shapes, and a Pod from before either value existed reads as a replica, which is
+// what it is.
+func TestModelDeploymentPodDescriptionFollowsTheReplicasOwnShape(t *testing.T) {
+	testCases := []struct {
+		name string
+		pod  core.Pod
+		want string
+	}{
+		{
+			name: "a replica of one member carries the index and is still a replica",
+			pod: core.Pod{ObjectMeta: meta.ObjectMeta{
+				Name:        "qwen",
+				Labels:      map[string]string{modelDeploymentMemberIndexLabel: "0"},
+				Annotations: map[string]string{kueuepodconst.GroupTotalCountAnnotation: "1"},
+			}},
+			want: "replica qwen",
+		},
+		{
+			name: "a member of several is a member",
+			pod: core.Pod{ObjectMeta: meta.ObjectMeta{
+				Name:        "qwen-server-r0-m1",
+				Labels:      map[string]string{modelDeploymentMemberIndexLabel: "1"},
+				Annotations: map[string]string{kueuepodconst.GroupTotalCountAnnotation: "3"},
+			}},
+			want: "member qwen-server-r0-m1",
+		},
+		{
+			name: "a Pod rendered before the label or the total existed is a replica",
+			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: "qwen"}},
+			want: "replica qwen",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, modelDeploymentPodDescription(&tc.pod))
+		})
+	}
 }
 
 // TestModelDeploymentReplicaGroupName covers the derivation's one obligation and its one form.
