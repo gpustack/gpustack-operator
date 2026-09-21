@@ -370,8 +370,9 @@ selected and the container is then refused at admission — and a Pod refused th
 rescheduled onto another node.
 
 `device-manager preflight` reports the node's TopologyManager policy as a `topology` section, read
-from the kubelet's own configuration files; `unknown` means no readable source named one, never a
-guess of the default. See [Preflight Operations](./operation/preflight.md).
+off the running kubelet's own command line and the configuration it names; `unknown` means no
+readable source named one, never a guess of the default. See
+[Preflight Operations](./operation/preflight.md).
 
 ## Requesting through the `Instance` API
 

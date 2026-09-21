@@ -9,9 +9,10 @@ import (
 )
 
 // TopologyPolicyUnknown is what the report says when no readable kubelet configuration names a
-// topology manager policy. It is deliberately not the kubelet's own default, none: the policy can
-// also arrive on the kubelet's command line, in a place none of the sources below reads, and a
-// default reported as if it had been read is a measurement nobody took.
+// topology manager policy. It is deliberately not the kubelet's own default, none: a host running
+// no kubelet has no command line to read the policy off, and a host whose configuration could not
+// be reached has not been read at all, so a default reported as if it had been read is a
+// measurement nobody took.
 const TopologyPolicyUnknown = "unknown"
 
 type (
@@ -30,10 +31,10 @@ type (
 		// stands, so the reading is only worth what its time claims.
 		Timestamp time.Time `json:"timestamp" yaml:"timestamp"`
 		// Policy is the TopologyManager policy this node's kubelet is configured with, in the
-		// kubelet's own words, read out of its configuration files. It is
-		// TopologyPolicyUnknown when nothing readable names one, and never the kubelet's
-		// default: the policy may be set where none of the files shows, and an unread value
-		// degrades to unknown rather than to one that asserts something.
+		// kubelet's own words, read off its command line and out of the configuration that
+		// command line names. It is TopologyPolicyUnknown when nothing readable names one, and
+		// never the kubelet's default: an unread value degrades to unknown rather than to one
+		// that asserts something.
 		Policy string `json:"policy" yaml:"policy"`
 		// Depth is how far the answer was taken, and it is always declared: the policy is read
 		// out of the kubelet's own configuration, and nothing is run against the running kubelet
@@ -82,7 +83,10 @@ func topologyReport(root string, now time.Time) TopologyReport {
 	case reading.UnsearchableErr != nil:
 		// Worded for what happened: no file was matched or opened, so calling this a
 		// configuration that could not be read would point at a permissions problem that is
-		// not there. It takes a host root that is itself a malformed pattern.
+		// not there. A host root brought in without the host's process table is what produces
+		// it, and the unknown is the point: the standard paths would answer, and the answer
+		// would be whichever file happens to sit at one rather than the one this node's kubelet
+		// reads.
 		return unknownTopology(now, fmt.Sprintf(
 			"the kubelet configuration search under %s could not run, so which topology "+
 				"manager policy its kubelet runs is unknown rather than defaulted: %s",
@@ -112,16 +116,23 @@ func topologyReport(root string, now time.Time) TopologyReport {
 		}
 
 	default:
-		patterns := make([]string, 0, len(kubeletConfigSources))
-		for _, src := range kubeletConfigSources {
-			patterns = append(patterns, src.pattern)
+		// Two unknowns worded apart, because what would answer them differs. Where a kubelet is
+		// running, the places listed are the ones it named and the list is complete: the policy is
+		// not set, and the reader has nowhere else to look. Where none is running, the places are
+		// where a kubelet configuration is kept rather than where this node's kubelet reads, and a
+		// kubelet started here can still be given a policy on a command line nothing has seen.
+		places := strings.Join(reading.Searched, ", ")
+		if reading.CommandLineRead {
+			return unknownTopology(now, fmt.Sprintf(
+				"nothing this node's kubelet reads its configuration from (%s) names a topology "+
+					"manager policy, so its default is not reported either: that would be a "+
+					"value nobody read", places))
 		}
 		return unknownTopology(now, fmt.Sprintf(
-			"none of the places this report reads the kubelet's configuration (%s, the last one "+
-				"walked) names a topology manager policy; the kubelet may still run one set on "+
-				"its command line, which none of them shows, so its default is not reported "+
-				"either: that would be a value nobody read",
-			strings.Join(patterns, ", ")))
+			"no kubelet is running here to name where its configuration is, and none of the "+
+				"places one is kept (%s, the last one walked) names a topology manager policy; a "+
+				"kubelet started here may still be given one on its command line, so its default "+
+				"is not reported either: that would be a value nobody read", places))
 	}
 }
 

@@ -232,16 +232,28 @@ host's — the *Host cross-check* column below says which is which.
 | `--host-root` | where the host's root filesystem is mounted into this container. Defaults to `/host` |
 | `--runtime` | the host container runtime to drive, overriding what was resolved. One of `docker`, `nerdctl`, `ctr`; anything else is refused before the pass starts, so a typo is a usage error rather than a run that quietly established nothing. An escape hatch: one of the three that the host does not carry drops every container step to being emitted |
 
-**The runtime is resolved from the kubelet's own CRI endpoint** wherever the host states one, read
-from `/var/lib/kubelet/kubeadm-flags.env` or `/var/lib/kubelet/config.yaml` through the mounted host
-root. That is what starts a container on this node in production, and reproducing production is the
-point.
+**The runtime is resolved from the kubelet's own CRI endpoint** wherever the host states one. That
+is what starts a container on this node in production, and reproducing production is the point.
+
+**Which configuration states it comes from the running kubelet's own command line**, found in the
+host's process table through the mounted host root: `--config` names the file it loaded,
+`--config-dir` the drop-ins merged over that file, and an endpoint on the command line itself
+overrides both.
+
+A host with no kubelet running — a machine before it joins a cluster, or a distribution that embeds
+the kubelet in its agent process — has no such command line. Then
+`/var/lib/kubelet/kubeadm-flags.env`, `/var/lib/kubelet/config.yaml` and the distribution's own
+`kubelet.conf.d` tree are read instead, in that order.
 
 > **Why not simply probe** — a host carrying both `docker` and `containerd`, with a kubelet talking
 > to `containerd`, would be probed `docker`-first and every container answer would then describe a
 > path no workload takes. A host that states no endpoint — a bare machine before a cluster exists,
 > or a distribution keeping that configuration elsewhere — falls through to probing `docker`, then
 > `nerdctl`, then `ctr`.
+
+**A host root mounted without the host's `/proc` refuses instead of probing.** Nothing there can say
+which kubelet is running, and the paths above are only this node's kubelet's if this node's kubelet
+reads them. Every container step drops to being emitted; `--runtime` names a runtime past it.
 
 ## What the command starts, writes and removes
 
@@ -547,7 +559,7 @@ surface. A section with no rows carries a `note` saying which of the two reasons
 enumeration failed, or the node has no RDMA hardware.
 
 The `topology` section names the TopologyManager policy this node's kubelet is configured with,
-read out of the kubelet's own configuration — the same three places the CRI endpoint is read from.
+read off the same command line and out of the same configuration the CRI endpoint is read from.
 
 It matters because the policy decides what the kubelet does with the NUMA hint a device plugin
 publishes: `single-numa-node` and `restricted` gate admission on it, `best-effort` admits a
@@ -556,10 +568,15 @@ misaligned placement anyway, and `none` discards it. So a request pairing an acc
 lands them on one NUMA node only where the policy enforces it.
 
 **A policy that no readable configuration names is reported as `unknown`, never as the kubelet's
-default.** The policy can also be set by a command-line flag none of those files shows, so
-reporting `none` because nothing was found would publish a value nobody read. An `unknown` always
-carries a `note` saying which of the three reasons applies: no file named one, a file could not be
-read, or two distribution trees name different policies.
+default.** Reporting `none` because nothing was found would publish a value nobody read. An
+`unknown` always carries a `note` saying which of the four reasons applies: nothing the kubelet
+reads named one, a file could not be read, two distribution trees name different policies, or the
+host's process table was not visible.
+
+**That last one reports "not read", not a value.** Without the host's `/proc` nothing can say which
+kubelet is running or which file it loaded, and a file at a standard path is this node's kubelet's
+only if this node's kubelet reads it — so the section says it could not look, rather than naming the
+policy of whichever file happened to sit there.
 
 **The exit code is non-zero only for an `unavailable` accelerator answer.** A capability this
 generation does not declare, a manufacturer nothing is checked for, a node carrying none of its

@@ -28,21 +28,121 @@ func writeKubeletFiles(t *testing.T, root string, files map[string]string, unrea
 	}
 }
 
-// The policy is a fact about the kubelet, and the three places a kubelet keeps its configuration
-// are the only places this report claims to have looked. Each has to answer when it carries the
-// key, and none answering has to read as a question left open -- never as the kubelet's default,
-// which would be a value nobody read.
+// The policy is a fact about the kubelet, so the places this report claims to have looked are the
+// places that kubelet named. Each has to answer when it carries the key, and none answering has to
+// read as a question left open -- never as the kubelet's default, which would be a value nobody
+// read.
 func TestTopologyReport(t *testing.T) {
 	now := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
 
 	testCases := []struct {
-		name       string
-		files      map[string]string
-		unreadable string
-		wantPolicy string
+		name string
+		// kubelet is the command line of a kubelet running on the fixture host, empty for a host
+		// running none. otherKubelet is a second one, planted at a higher PID that sorts before
+		// the first by name.
+		kubelet      []string
+		otherKubelet []string
+		// noProcessTable takes the fixture's process table away, which is the shape of a host root
+		// brought into the container without the mounts below it.
+		noProcessTable bool
+		files          map[string]string
+		unreadable     string
+		wantPolicy     string
 		// wantNote is a substring; empty means the report must carry no note.
 		wantNote string
 	}{
+		{
+			// The node this was measured on: its kubelet was started against a configuration file
+			// of the distribution's own choosing, and a different file, with different contents,
+			// also sat at the standard path. Reading the standard path there reports a policy out
+			// of a file this node's kubelet never opened -- so the file the kubelet named is read
+			// and the one it did not is not read at all. The name is deliberately one no list of
+			// standard paths could hold: a reader that answers this by learning one more path has
+			// not learned where to look, only where to look twice.
+			name:    "the file the kubelet names is read, and the standard path it does not use is not",
+			kubelet: []string{"/usr/bin/kubelet", "--config=/opt/kubelet/config.yaml"},
+			files: map[string]string{
+				"opt/kubelet/config.yaml":     "topologyManagerPolicy: single-numa-node\n",
+				"var/lib/kubelet/config.yaml": "topologyManagerPolicy: none\n",
+			},
+			wantPolicy: "single-numa-node",
+		},
+		{
+			// The kubelet re-parses its command line after loading its configuration file, so a
+			// policy spelled there is the one in force whatever the file says. This is also the
+			// spelling with a space rather than an equals sign, which a command line uses and a
+			// configuration file has no form of.
+			name: "a policy on the kubelet's command line overrides the file it named",
+			kubelet: []string{
+				"/usr/bin/kubelet", "--config", "/opt/kubelet/config.yaml",
+				"--topology-manager-policy=restricted",
+			},
+			files:      map[string]string{"opt/kubelet/config.yaml": "topologyManagerPolicy: none\n"},
+			wantPolicy: "restricted",
+		},
+		{
+			// The kubelet merges its drop-in directory over its configuration file, so the
+			// directory's answer is the one in force. Reading the file first would report a policy
+			// the kubelet has already been told to ignore.
+			name: "the drop-in directory the kubelet names overrides the file it names",
+			kubelet: []string{
+				"/usr/bin/kubelet", "--config=/opt/kubelet/config.yaml",
+				"--config-dir=/opt/kubelet/conf.d",
+			},
+			files: map[string]string{
+				"opt/kubelet/config.yaml":           "topologyManagerPolicy: none\n",
+				"opt/kubelet/conf.d/10-numa.conf":   "topologyManagerPolicy: single-numa-node\n",
+				"var/lib/kubelet/kubeadm-flags.env": `KUBELET_KUBEADM_ARGS="--topology-manager-policy=best-effort"`,
+			},
+			wantPolicy: "single-numa-node",
+		},
+		{
+			// A kubelet given no configuration file reads none, so a file at the standard path is a
+			// file it never opens. Answering out of it would publish a policy this node's kubelet
+			// is demonstrably not running.
+			name:       "a kubelet configured by flags alone is not answered out of the standard path",
+			kubelet:    []string{"/usr/bin/kubelet", "--kubeconfig=/etc/kubernetes/kubelet.conf"},
+			files:      map[string]string{"var/lib/kubelet/config.yaml": "topologyManagerPolicy: restricted\n"},
+			wantPolicy: TopologyPolicyUnknown,
+			wantNote:   "command line",
+		},
+		{
+			// Without the host's own process table there is no way to tell which kubelet is running
+			// or what it was started against, and the standard paths are exactly the guess that
+			// reads the wrong file. An unknown that says so is the answer; a policy read from a
+			// file nobody established the kubelet uses is not.
+			name:           "a host root without the host's process table reports nothing rather than a guess",
+			noProcessTable: true,
+			files:          map[string]string{"var/lib/kubelet/config.yaml": "topologyManagerPolicy: restricted\n"},
+			wantPolicy:     TopologyPolicyUnknown,
+			wantNote:       "process",
+		},
+		{
+			// Two kubelets on one host is a host to fix, but the reading still has to be the same
+			// on every pass. A directory listing of the process table is in name order, which puts
+			// PID 10 before PID 2, so the lowest PID answers rather than the first listed -- the
+			// host's own kubelet is started by its init, before anything a workload could add.
+			name:         "the lowest PID answers where a host carries more than one kubelet",
+			kubelet:      []string{"/usr/bin/kubelet", "--config=/opt/kubelet/first.yaml"},
+			otherKubelet: []string{"/usr/bin/kubelet", "--config=/opt/kubelet/second.yaml"},
+			files: map[string]string{
+				"opt/kubelet/first.yaml":  "topologyManagerPolicy: single-numa-node\n",
+				"opt/kubelet/second.yaml": "topologyManagerPolicy: none\n",
+			},
+			wantPolicy: "single-numa-node",
+		},
+		{
+			// A distribution that embeds the kubelet in its own agent process runs nothing called
+			// kubelet, so there is no command line to read and the places such a distribution keeps
+			// its configuration are what answers. Refusing to read them would report unknown on
+			// every node of the kind this report was fixed for once already.
+			name: "a host running no kubelet process still reads where a distribution keeps one",
+			files: map[string]string{
+				"var/lib/rancher/rke2/agent/etc/kubelet.conf.d/20-cli-config-dir/10-topology.conf": "topologyManagerPolicy: " +
+					"single-numa-node\n",
+			},
+			wantPolicy: "single-numa-node",
+		},
 		{
 			name: "a kubeadm node's flag file names the policy",
 			files: map[string]string{
@@ -190,6 +290,15 @@ func TestTopologyReport(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := fakeHostRoot(t)
 			writeKubeletFiles(t, root, tc.files, tc.unreadable)
+			if len(tc.kubelet) > 0 {
+				writeHostProcess(t, root, 2, tc.kubelet...)
+			}
+			if len(tc.otherKubelet) > 0 {
+				writeHostProcess(t, root, 10, tc.otherKubelet...)
+			}
+			if tc.noProcessTable {
+				require.NoError(t, os.RemoveAll(filepath.Join(root, "proc", "1")))
+			}
 
 			got := topologyReport(root, now)
 
