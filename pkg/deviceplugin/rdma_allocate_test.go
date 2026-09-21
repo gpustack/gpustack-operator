@@ -134,7 +134,7 @@ func TestRDMAServer_Allocate(t *testing.T) {
 			ifaces: []workercore.DeviceInterface{
 				wholeFunctionIface("ib0", "0", "mlx5_0", nil),
 			},
-			ids:       []string{"ib0:ib0:160000", "ib0:ib0:0000"},
+			ids:       []string{"ib0:ib0:0001", "ib0:ib0:0000"},
 			verbs:     map[string]string{"mlx5_0": "uverbs1"},
 			nodes:     []string{"uverbs1", "rdma_cm"},
 			wantPaths: []string{"uverbs1", "rdma_cm"},
@@ -358,7 +358,11 @@ func TestRDMAServer_Allocate_RefusesARequestWithNoContainer(t *testing.T) {
 func TestRDMAServer_Allocate_NoCrossModeExclusion(t *testing.T) {
 	const nodeName = "node-rdma-cross"
 
-	runHalf := func(t *testing.T, allocating, watching workercore.DeviceAllocationMode) {
+	// wantWatchingTokens is passed in rather than computed from rdmaPoolSizeOf, which would let
+	// the assertion agree with the production function by construction and stop discriminating.
+	runHalf := func(
+		t *testing.T, allocating, watching workercore.DeviceAllocationMode, wantWatchingTokens int,
+	) {
 		t.Helper()
 
 		f := newRdmaAllocateFixture(t)
@@ -389,7 +393,7 @@ func TestRDMAServer_Allocate_NoCrossModeExclusion(t *testing.T) {
 		// The pre-allocation advertisement is the baseline the next one is judged against.
 		select {
 		case resp := <-sent:
-			require.Len(t, resp.Devices, nodefeature.SharedResourceMaxSize)
+			require.Len(t, resp.Devices, wantWatchingTokens)
 			for _, d := range resp.Devices {
 				require.Equal(t, deviceplugin.Healthy, d.Health)
 			}
@@ -411,7 +415,7 @@ func TestRDMAServer_Allocate_NoCrossModeExclusion(t *testing.T) {
 
 		select {
 		case resp := <-sent:
-			require.Len(t, resp.Devices, nodefeature.SharedResourceMaxSize,
+			require.Len(t, resp.Devices, wantWatchingTokens,
 				"the endpoint keeps its full token count after the sibling family allocated it")
 			for _, d := range resp.Devices {
 				require.Equal(t, deviceplugin.Healthy, d.Health,
@@ -423,11 +427,17 @@ func TestRDMAServer_Allocate_NoCrossModeExclusion(t *testing.T) {
 		}
 	}
 
-	t.Run("a shared allocation leaves the sliced advertisement healthy", func(t *testing.T) {
-		runHalf(t, workercore.DeviceAllocationModeShared, workercore.DeviceAllocationModeSliced)
+	// The pair is Exclusive against Shared, which is what the whole-function endpoint serves now
+	// that the sliced key is retired. It is a sharper pair than the one it replaces: those two
+	// families advertised the same token count, so a half that watched the wrong server saw the
+	// number it expected anyway. These two differ, so the count is also evidence of which family
+	// was observed.
+	t.Run("an exclusive allocation leaves the shared advertisement healthy", func(t *testing.T) {
+		runHalf(t, workercore.DeviceAllocationModeExclusive, workercore.DeviceAllocationModeShared,
+			nodefeature.RDMAEndpointPoolSize)
 	})
-	t.Run("a sliced allocation leaves the shared advertisement healthy", func(t *testing.T) {
-		runHalf(t, workercore.DeviceAllocationModeSliced, workercore.DeviceAllocationModeShared)
+	t.Run("a shared allocation leaves the exclusive advertisement healthy", func(t *testing.T) {
+		runHalf(t, workercore.DeviceAllocationModeShared, workercore.DeviceAllocationModeExclusive, 1)
 	})
 }
 
@@ -491,4 +501,49 @@ func TestRDMAServer_Allocate_WritesNothing(t *testing.T) {
 	rec.reservationsMutex.RLock()
 	defer rec.reservationsMutex.RUnlock()
 	assert.Empty(t, rec.reservations, "the allocation recorded an in-process reservation")
+}
+
+// TestRDMAServer_AdvertisedIDsAllocate closes the loop the rest of this file leaves open: every
+// other case hands Allocate an ID written by hand, so both sides of the contract are authored here
+// and a numbering that advertised strings the allocation path cannot resolve would pass them all.
+// This one takes the IDs the server actually advertises and allocates with them.
+//
+// It covers the whole pool rather than a sample. The interesting index is not the first -- 0000 is
+// the one value the old scheme and the new one agree on -- so a case built from one token would
+// have passed before the renumbering as well.
+func TestRDMAServer_AdvertisedIDsAllocate(t *testing.T) {
+	const nodeName = "node-rdma-roundtrip"
+
+	for _, mode := range rdmaServedModes {
+		t.Run(mode.String(), func(t *testing.T) {
+			f := newRdmaAllocateFixture(t)
+			f.mapVerbs("mlx5_0", "uverbs1")
+			f.mapVerbs("mlx5_1", "uverbs2")
+			f.writeNode("uverbs1")
+			f.writeNode("uverbs2")
+			f.writeNode("rdma_cm")
+
+			// One interface of each shape, so every mode has an endpoint to advertise.
+			rec := &DevicesReconciler{NodeName: nodeName, Client: nodeFixture(rdmaDevices(nodeName,
+				wholeFunctionIface("ib0", "0", "mlx5_0", nil),
+				sriovPF("pf0", "0", rdmaVF("vf0", "0", "mlx5_1", nil)),
+			))}
+			s := rdmaTestServer(t, mode, rec)
+
+			resp, err := s.getListAndWatchResponse(context.Background())
+			require.NoError(t, err)
+			require.NotEmpty(t, resp.Devices, "mode %s advertises nothing, so nothing is exercised", mode)
+
+			for _, dev := range resp.Devices {
+				token, err := ParseResourceToken(dev.ID)
+				require.NoError(t, err, "the advertised ID %q does not parse", dev.ID)
+
+				out, err := s.Allocate(context.Background(), allocateRequest(dev.ID))
+				require.NoError(t, err, "the advertised ID %q does not allocate", dev.ID)
+				require.Len(t, out.ContainerResponses, 1)
+				assert.NotEmpty(t, out.ContainerResponses[0].Envs,
+					"the grant for %q named no RDMA device", token.Resource)
+			}
+		})
+	}
 }

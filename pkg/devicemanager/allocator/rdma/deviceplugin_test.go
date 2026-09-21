@@ -53,7 +53,6 @@ func TestNew_ServerSet(t *testing.T) {
 			want: []workercore.DeviceAllocationMode{
 				workercore.DeviceAllocationModeExclusive,
 				workercore.DeviceAllocationModeShared,
-				workercore.DeviceAllocationModeSliced,
 				workercore.DeviceAllocationModePartitioned,
 			},
 		},
@@ -62,12 +61,15 @@ func TestNew_ServerSet(t *testing.T) {
 			opts: device.AllocatorOptions{NoShared: true},
 			want: []workercore.DeviceAllocationMode{
 				workercore.DeviceAllocationModeExclusive,
-				workercore.DeviceAllocationModeSliced,
 				workercore.DeviceAllocationModePartitioned,
 			},
 		},
 		{
-			name: "--no-sliced drops only the sliced server",
+			// Kept, and inverted: the flag used to remove a server here and now removes nothing,
+			// because the family it names is retired. Asserting the no-op is what makes that
+			// observable -- dropping the case would leave the flag's behavior on this allocator
+			// unstated, and a sliced server reappearing would satisfy an empty expectation.
+			name: "--no-sliced drops nothing, the family it named is retired",
 			opts: device.AllocatorOptions{NoSliced: true},
 			want: []workercore.DeviceAllocationMode{
 				workercore.DeviceAllocationModeExclusive,
@@ -81,7 +83,6 @@ func TestNew_ServerSet(t *testing.T) {
 			want: []workercore.DeviceAllocationMode{
 				workercore.DeviceAllocationModeExclusive,
 				workercore.DeviceAllocationModeShared,
-				workercore.DeviceAllocationModeSliced,
 			},
 		},
 		{

@@ -169,7 +169,7 @@ func (s *rdmaServer) getListAndWatchResponse(ctx context.Context) (*ListAndWatch
 			if ep.Link != nil && ep.Link.State == workercore.DeviceInterfaceLinkStateFailed {
 				health = deviceplugin.Unhealthy
 			}
-			for _, id := range ep.Resource.DeviceIDs(s.AllocationMode, rdmaPoolSizeOf(s.AllocationMode)) {
+			for _, id := range rdmaDeviceIDs(ep.Resource, s.AllocationMode) {
 				// The partition family carries a NUMA hint too, where the accelerator partition
 				// pool carries none: an RDMA partition token names exactly one virtual function,
 				// whose affinity a hint can honor, while an accelerator partition token names no
@@ -185,15 +185,40 @@ func (s *rdmaServer) getListAndWatchResponse(ctx context.Context) (*ListAndWatch
 	return resp, nil
 }
 
-// rdmaPoolSizeOf returns the token count one endpoint advertises in the mode: the shared
-// concurrency ceiling for the pooled families, and one token for the exclusive ones. The two
-// pooled families publish the same ceiling over the same HCAs — several processes on one HCA is
-// ordinary use, with the isolation done by firmware and kernel, so the token count is a
-// scheduling knob rather than a hardware limit.
+// rdmaDeviceIDs returns the interchangeable tokens one endpoint advertises in the mode.
+//
+// Deliberately not Resource.DeviceIDs. That method's shared branch numbers its tokens by
+// accelerator ledger units — stepping by the global denominator divided by the accelerator share
+// count — because an accelerator token has to carry how much of an accelerator it is, and it
+// ignores any size its caller passes. An RDMA token carries no such quantity: the allocation path
+// resolves a token to the endpoint it names and never reads its index, and it deduplicates by
+// endpoint, so a second token on one endpoint is a second claim on the same thing.
+//
+// Routing the RDMA families through that method therefore did two wrong things at once. It made
+// the advertised count the accelerator share count whatever this file asked for, and it published
+// indices that look like unit offsets into a ledger RDMA does not have.
+func rdmaDeviceIDs(res Resource, mode workercore.DeviceAllocationMode) []string {
+	size := rdmaPoolSizeOf(mode)
+	prefix := res.String() + ":"
+
+	ids := make([]string, 0, size)
+	for i := int32(0); i < size; i++ {
+		ids = append(ids, prefix+padIndex(uint64(i)))
+	}
+	return ids
+}
+
+// rdmaPoolSizeOf returns the token count one endpoint advertises in the mode: the concurrency
+// ceiling for the shared family, and one token for the families where a token is a whole thing.
+//
+// The ceiling is RDMA's own number rather than the accelerator one it used to borrow. That
+// constant counts how many owners an accelerator can be split among, which is a statement about
+// accelerators; nothing about an HCA followed from it, and sharing the symbol made the two look
+// like one fact that had to move together.
 func rdmaPoolSizeOf(mode workercore.DeviceAllocationMode) int32 {
 	switch mode {
-	case workercore.DeviceAllocationModeShared, workercore.DeviceAllocationModeSliced:
-		return int32(nodefeature.SharedResourceMaxSize)
+	case workercore.DeviceAllocationModeShared:
+		return int32(nodefeature.RDMAEndpointPoolSize)
 	default:
 		return 1
 	}

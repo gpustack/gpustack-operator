@@ -64,23 +64,54 @@ const (
 // node rather than to a vendor.
 const rdmaResourceNameBase = VisibilityResourceNamePrefix + "rdma"
 
+// RDMAEndpointPoolSize is how many concurrent holders one RDMA endpoint is advertised for in the
+// shared family.
+//
+// The figure is taken from the ecosystem this replaces rather than invented here: the shared-RDMA
+// device plugin an operator would otherwise install ships 63 as the documented default in its
+// vendor's own deployment guide, so a workload written against that plugin meets no tighter
+// ceiling here. 64 is that number at the next power of two, which is the shape the rest of this
+// package's sizes take.
+//
+// What it is not:
+//
+//   - Not a hardware limit. An HCA carries far more queue pairs than this, and several processes
+//     using one at once is ordinary RDMA practice, with the isolation done by the firmware and the
+//     kernel rather than by how many tokens kubelet was handed. The reference default is a
+//     configuration choice too, which is why matching it is a compatibility argument and not a
+//     physical one.
+//   - Not a quota. These keys are node-level resources the quota chain never classifies as an
+//     accelerator family, so nothing downstream reads this number into a capacity or an admission
+//     decision.
+//
+// Raising it costs nothing but permitting more containers onto one endpoint, which is what an
+// endpoint is for. Deriving it from a machine's shape is the thing to avoid: a figure reached by
+// multiplying one node's card count stops being right on the next node, and it fails silently, the
+// endpoint simply ceasing to be schedulable partway up a denser machine.
+const RDMAEndpointPoolSize = 64
+
 // GetRDMAResourceName returns the node-level RDMA resource key the given allocation mode is
-// served under: "device.gpustack.ai/rdma", "device.gpustack.ai/rdma.shared",
-// "device.gpustack.ai/rdma.sliced" and "device.gpustack.ai/rdma.partitioned". The mode
-// suffixes are the accelerator families' own, so a request for a sliced accelerator and a
-// sliced RDMA interface spells both requests the same way. It returns "" for Visibility: a
-// visibility allocation names an endpoint another container of the same Pod holds, and no
-// RDMA allocation record is written to answer that from, so the mode is unserved rather
-// than half-served. None and any unrecognized mode likewise return "", because an unknown
-// mode must not silently name the whole-function key.
+// served under. There are three: "device.gpustack.ai/rdma", "device.gpustack.ai/rdma.shared"
+// and "device.gpustack.ai/rdma.partitioned".
+//
+// Sliced names no key, and that absence is the deliberate part. It once returned a ".sliced"
+// key whose contract was word for word the shared one, over the same HCAs, with the two not
+// decrementing each other. Two keys over one pool is not what two extended resources mean to a
+// scheduler: one endpoint then admitted a full complement of holders under each name, so the
+// ceiling either key appeared to set was not a ceiling at all. The symmetry it bought -- letting
+// a workload spell its RDMA request with the same suffix as its accelerator request -- did not
+// pay for a number that does not hold.
+//
+// Visibility names none either, for a different reason: a visibility allocation names an
+// endpoint another container of the same Pod holds, and no RDMA allocation record is written to
+// answer that from, so the mode is unserved rather than half-served. None and any unrecognized
+// mode likewise return "", because an unknown mode must not silently name the whole-function key.
 func GetRDMAResourceName(mode workercore.DeviceAllocationMode) core.ResourceName {
 	switch mode {
 	case workercore.DeviceAllocationModeExclusive:
 		return rdmaResourceNameBase
 	case workercore.DeviceAllocationModeShared:
 		return rdmaResourceNameBase + SharedResourceNameSuffix
-	case workercore.DeviceAllocationModeSliced:
-		return rdmaResourceNameBase + SlicedResourceNameSuffix
 	case workercore.DeviceAllocationModePartitioned:
 		return rdmaResourceNameBase + PartitionedResourceNameSuffix
 	default:

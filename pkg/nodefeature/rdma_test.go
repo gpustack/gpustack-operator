@@ -1,6 +1,8 @@
 package nodefeature
 
 import (
+	"slices"
+	"sort"
 	"testing"
 
 	core "k8s.io/api/core/v1"
@@ -479,11 +481,12 @@ func TestGetRDMAResourceName(t *testing.T) {
 			want: "device.gpustack.ai/rdma.shared",
 		},
 		{
-			// The same contract as shared under its own key: an HCA has no quota to enforce, so
-			// sliced is shared, spelled the way a workload spells a sliced accelerator.
-			name: "sliced is shared under its own key",
+			// Retired, and asserted as empty rather than dropped from the table: a case that is
+			// deleted stops being able to disagree with anything, and this one is what says the
+			// mode reaches no key at all rather than reaching the whole-function one.
+			name: "sliced names no key",
 			mode: workercore.DeviceAllocationModeSliced,
-			want: "device.gpustack.ai/rdma.sliced",
+			want: "",
 		},
 		{
 			name: "partitioned is one virtual function per token",
@@ -527,6 +530,41 @@ func TestGetRDMAResourceName(t *testing.T) {
 // key, so it should track whatever that key currently is. The visibility control stays a
 // literal, because it resolves through the known-manufacturer table, which no environment
 // variable moves. Do not "fix" the inconsistency; it is the point.
+// TestRDMAResourceNameSurfaceIsExactlyThree pins the whole key surface as a SET, swept over every
+// allocation mode the enum has, so a key that comes back fails here. Deleting the assertion that
+// named the retired key would not have done that: an absent assertion forbids nothing, and the
+// cheapest way to reintroduce the key is to add its case back and notice nothing.
+//
+// The sweep is over the enum rather than a list written here, so a mode added later that quietly
+// names a key also lands in this set and fails until somebody decides it belongs.
+func TestRDMAResourceNameSurfaceIsExactlyThree(t *testing.T) {
+	allModes := []workercore.DeviceAllocationMode{
+		workercore.DeviceAllocationModeNone,
+		workercore.DeviceAllocationModeExclusive,
+		workercore.DeviceAllocationModeShared,
+		workercore.DeviceAllocationModeSliced,
+		workercore.DeviceAllocationModePartitioned,
+		workercore.DeviceAllocationModeVisibility,
+	}
+
+	var got []string
+	for _, mode := range allModes {
+		if name := GetRDMAResourceName(mode); name != "" {
+			got = append(got, string(name))
+		}
+	}
+	sort.Strings(got)
+
+	want := []string{
+		"device.gpustack.ai/rdma",
+		"device.gpustack.ai/rdma.partitioned",
+		"device.gpustack.ai/rdma.shared",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("the RDMA key surface is %v, want exactly %v", got, want)
+	}
+}
+
 func TestRDMAResourceNamesOutsideAcceleratorFamilies(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -535,7 +573,10 @@ func TestRDMAResourceNamesOutsideAcceleratorFamilies(t *testing.T) {
 	}{
 		{"the whole-function key", "device.gpustack.ai/rdma", ResourceFamilyNone},
 		{"the shared key", "device.gpustack.ai/rdma.shared", ResourceFamilyNone},
-		{"the sliced key", "device.gpustack.ai/rdma.sliced", ResourceFamilyNone},
+		// Not a key this operator serves any more. It stays in this table because its suffix is
+		// the one most likely to be mistaken: ".sliced" is in the fixed-suffix list the classifier
+		// walks, so of the RDMA-shaped names this is the one that would classify wrongly first.
+		{"a name ending in the sliced suffix", "device.gpustack.ai/rdma.sliced", ResourceFamilyNone},
 		{"the partitioned key", "device.gpustack.ai/rdma.partitioned", ResourceFamilyNone},
 		{
 			name: "an accelerator key still classifies",

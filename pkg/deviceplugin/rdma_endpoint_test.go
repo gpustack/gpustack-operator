@@ -11,12 +11,11 @@ import (
 )
 
 // The mode judgment's whole-function branch serves three modes, and a case that holds for one of
-// them must hold for all three: an interface in the partitioned state advertises nothing under any
-// of them, and a whole-function interface advertises itself under all of them.
+// them must hold for both: an interface in the partitioned state advertises nothing under either
+// of them, and a whole-function interface advertises itself under both.
 var rdmaWholeFunctionModes = []workercore.DeviceAllocationMode{
 	workercore.DeviceAllocationModeExclusive,
 	workercore.DeviceAllocationModeShared,
-	workercore.DeviceAllocationModeSliced,
 }
 
 func TestRDMAEndpointsModeJudgment(t *testing.T) {
