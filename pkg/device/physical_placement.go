@@ -105,6 +105,17 @@ func SelectPartitionPlacements(candidates []PartitionCandidate, count int) ([]Pa
 	return selections, true
 }
 
+// PartitionCandidateFull reports whether every legal placement of the requested profile on this
+// accelerator overlaps something already occupied, which is the one reason SelectPartitionPlacements
+// passes over an accelerator it was given. It exists so a caller can say WHY a placement was refused
+// without reimplementing the interval arithmetic that decided it: a second implementation of the
+// overlap rule would be free to disagree with this one, and the message would then describe a
+// decision nobody made.
+func PartitionCandidateFull(candidate PartitionCandidate) bool {
+	_, ok := lowestFreePlacement(candidate.Possible, candidate.Occupied)
+	return !ok
+}
+
 // lowestFreePlacement returns the first legal placement that overlaps nothing occupied.
 // Possible is in the accelerator's capability order, which the detector emits by ascending
 // start.

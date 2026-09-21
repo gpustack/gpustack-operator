@@ -17,6 +17,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
@@ -426,6 +427,21 @@ const (
 	migRebound
 )
 
+// String names the outcome for the allocation record below. The three are not interchangeable to a
+// reader diagnosing a partition that later could not be opened: a created one was carved by this
+// call, a bound one was already on the accelerator, and a rebound one is a prior allocation's that
+// this call only named again.
+func (o migReserveOutcome) String() string {
+	switch o {
+	case migBound:
+		return "bound"
+	case migRebound:
+		return "rebound"
+	default:
+		return "created"
+	}
+}
+
 // reserveMigInstance is the per-accelerator MIG allocation core, run under the accelerator's
 // lock. It writes the ownership marker inside the critical section, rolling back a just-created
 // instance if the marker write fails, and the returned outcome tells the caller's rollback exactly
@@ -626,6 +642,15 @@ func (s *server) ActuatePhysicalSliced(
 			return nil, err
 		}
 		results = append(results, cardResult{card: cardUUID, inst: inst, outcome: outcome})
+		// Record what was granted, not merely that something was. The identity leaves this process
+		// as an environment value the container engine resolves on its own, so when the engine then
+		// refuses to resolve it, this is the only place that says which partition was named, on which
+		// accelerator, and whether it was carved here or already existed — which is what separates a
+		// partition destroyed after the grant from one the engine cannot address.
+		s.Logger.Info("granted a hardware partition",
+			"pod", kubemeta.GetNamespacedNameKey(pod), "container", ctr.Name,
+			"card", cardUUID, "profile", profile, "outcome", outcome.String(),
+			"giID", inst.GiID, "ciID", inst.CiID, "placement", inst.Placement, "migUUID", inst.UUID)
 		res := resourceForAccelerator(devs, cardUUID)
 		placements[res] = []workercore.AcceleratorPlacement{{Start: inst.Placement.Start, Length: inst.Placement.Length}}
 		ids[res] = inst.UUID

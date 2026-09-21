@@ -709,3 +709,291 @@ func TestReclaim_FailsClosedWhenTheLockedRereadFails(t *testing.T) {
 	_, err := parseMarker(markerPath("pod-dead", "c", testGPUUUID0))
 	require.NoError(t, err, "the marker is kept, so the next pass can retry")
 }
+
+// TestReclaim_RecordsTheDestroyedPartitionIdentity pins the other half of the same trail: a
+// partition that vanishes between the grant and the container start is either one this loop
+// destroyed or one the container engine cannot address, and only a destroy that names the identity
+// it tore down can tell those apart. Both sweeps are covered, because they answer different
+// questions about the fault -- a dead owner's record versus a partition nothing claimed.
+func TestReclaim_RecordsTheDestroyedPartitionIdentity(t *testing.T) {
+	cases := []struct {
+		name string
+		seed func(t *testing.T, drv *fakeMigDriver) string
+	}{
+		{
+			name: "a dead pod's partition",
+			seed: func(t *testing.T, drv *fakeMigDriver) string {
+				t.Helper()
+				inst := migInstance{
+					GiID: 3, CiID: 4, ComputeSlices: 1,
+					Placement: migPlacement{Start: 0, Length: 2}, UUID: "MIG-dead-owner",
+				}
+				drv.seedLive(testGPUUUID0, inst)
+				require.NoError(t, writeMarker(markerPath("pod-gone", "c", testGPUUUID0), migMarker{
+					PodUID: "pod-gone", Container: "c", Card: testGPUUUID0, Profile: "1g.10gb",
+					GiID: inst.GiID, CiID: inst.CiID, MigUUID: inst.UUID,
+					ComputeSlices: 1, Start: 0, Length: 2,
+				}))
+				return inst.UUID
+			},
+		},
+		{
+			name: "a marker-less partition on a drained card",
+			seed: func(_ *testing.T, drv *fakeMigDriver) string {
+				inst := migInstance{
+					GiID: 9, CiID: 9, ComputeSlices: 1,
+					Placement: migPlacement{Start: 4, Length: 2}, UUID: "MIG-no-owner",
+				}
+				drv.seedLive(testGPUUUID0, inst)
+				return inst.UUID
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			drv := newFakeMigDriver()
+			want := c.seed(t, drv)
+
+			var lines []string
+			logger := funcr.New(func(prefix, args string) {
+				lines = append(lines, prefix+args)
+			}, funcr.Options{})
+			r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logger, noClaims)
+
+			for i := 0; i < reclaimMaxMisses; i++ {
+				r.reconcile(nil)
+			}
+			require.Len(t, drv.destroyed, 1, "the partition is destroyed")
+
+			joined := strings.Join(lines, "\n")
+			assert.Contains(t, joined, want, "the destroyed partition identity is recorded")
+			assert.Contains(t, joined, testGPUUUID0, "the accelerator it was destroyed on is recorded")
+		})
+	}
+}
+
+// TestReclaim_SameSlotRebuildNotDestroyedUnderStaleMarker covers the one shape the id-reuse guard
+// above cannot see. A MIG-device UUID is name-based -- derived from the parent accelerator and the
+// instance's own identity -- so a partition destroyed and another created at the SAME placement
+// carries the SAME identifier, and the slot pick is deterministic (lowest free first), which makes
+// re-taking a just-freed slot the ordinary case rather than a corner. The predecessor's marker then
+// matches the successor on every field the identity check has, however often the accelerator is
+// re-read under the lock: the successor reproduces the whole identity.
+//
+// TestReclaim_StaleMarkerGiIdReuseNotDestroyed is the deliberate contrast: it gives the reused id a
+// different slot AND a different UUID, so it exercises the identity check where it carries
+// information. This one exercises it where it carries none.
+//
+// The timing is the measured one. The predecessor's record has already spent its debounce, and the
+// successor's marker lands one pass before the destroy -- a third of a second, on the node this was
+// found on. The two cases differ only in whether the successor has reached the pass's live pod-UID
+// set by then. It routinely has not: that set is captured when the pass opens and is built from an
+// informer, so deciding ownership through it would read a current record through a stale filter,
+// which is why ownership here is decided by the markers alone.
+// TestReclaim_TwoDeadRecordsOnOneGiIdStillEndInADestroy is the supersession guard's convergence
+// claim, asserted rather than argued. Two records claiming one gpu-instance id are each superseded by
+// the other, so a guard that only looked at "does somebody else claim this id" could drop both and
+// destroy neither, stranding the partition on an accelerator that never drains — the orphan sweep
+// only runs on a drained one, so nothing downstream would collect it.
+//
+// It converges because the decision is retaken from disk under the accelerator lock: dropping the
+// first record is visible to the pass that acts on the second, which then finds itself the only
+// claimant and destroys on the ordinary path. The second case keeps another pod's live partition on
+// the same accelerator, because that is the shape where a leak would be permanent.
+func TestReclaim_TwoDeadRecordsOnOneGiIdStillEndInADestroy(t *testing.T) {
+	const sharedUUID = "MIG-contested"
+	slot := migPlacement{Start: 0, Length: 2}
+	claim := func(podUID string) migMarker {
+		return migMarker{
+			PodUID: podUID, Container: "c", Card: testGPUUUID0, Profile: "1g.10gb",
+			GiID: 1, CiID: 1, MigUUID: sharedUUID,
+			ComputeSlices: 1, Start: slot.Start, Length: slot.Length,
+		}
+	}
+
+	for _, c := range []struct {
+		name        string
+		alsoLivePod bool // a second pod holding its own partition on the same accelerator
+	}{
+		{name: "the contested accelerator holds nothing else"},
+		{name: "another pod's live partition keeps the accelerator from draining", alsoLivePod: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			drv := newFakeMigDriver()
+			drv.seedLive(testGPUUUID0, migInstance{
+				GiID: 1, CiID: 1, ComputeSlices: 1, Placement: slot, UUID: sharedUUID,
+			})
+			require.NoError(t, writeMarker(markerPath("pod-a", "c", testGPUUUID0), claim("pod-a")))
+			require.NoError(t, writeMarker(markerPath("pod-b", "c", testGPUUUID0), claim("pod-b")))
+
+			var live []string
+			if c.alsoLivePod {
+				other := migMarker{
+					PodUID: "pod-live", Container: "c", Card: testGPUUUID0, Profile: "1g.10gb",
+					GiID: 2, CiID: 2, MigUUID: "MIG-live", ComputeSlices: 1, Start: 2, Length: 2,
+				}
+				drv.seedLive(testGPUUUID0, migInstance{
+					GiID: 2, CiID: 2, ComputeSlices: 1,
+					Placement: migPlacement{Start: 2, Length: 2}, UUID: "MIG-live",
+				})
+				require.NoError(t, writeMarker(markerPath("pod-live", "c", testGPUUUID0), other))
+				live = []string{"pod-live"}
+			}
+
+			r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
+			for i := 0; i < reclaimMaxMisses*2+2; i++ {
+				r.reconcile(live)
+			}
+
+			assert.Contains(t, drv.destroyed, migInstance{
+				GiID: 1, CiID: 1, ComputeSlices: 1, Placement: slot, UUID: sharedUUID,
+			}, "the contested partition must not survive both records being dropped")
+			for _, p := range []string{"pod-a", "pod-b"} {
+				_, err := parseMarker(markerPath(p, "c", testGPUUUID0))
+				assert.Error(t, err, p+"'s record is retired")
+			}
+			if c.alsoLivePod {
+				assert.NotContains(t, drv.destroyed, migInstance{
+					GiID: 2, CiID: 2, ComputeSlices: 1,
+					Placement: migPlacement{Start: 2, Length: 2}, UUID: "MIG-live",
+				}, "the live pod's own partition is untouched")
+			}
+		})
+	}
+}
+
+// TestReclaim_CorruptMarkerHoldsTheDestroyItMightOwn asserts the supersession guard honors the
+// corrupt list the marker scan returns alongside the parseable entries. A corrupt file's contents are
+// unreadable, so the gpu instance it claimed cannot be recovered and no per-instance check can see it;
+// only holding the accelerator covers the case where that claim is the one superseding the record
+// being reclaimed.
+//
+// The third case is the one that keeps the guard from being useless in the other direction: a pod's
+// OWN corrupt marker is not somebody else's claim, and counting it would leave that pod's partitions
+// unreclaimable for as long as its own bad file sits there.
+func TestReclaim_CorruptMarkerHoldsTheDestroyItMightOwn(t *testing.T) {
+	cases := []struct {
+		name string
+		// corruptPod owns the corrupt file; corruptCard is the accelerator its NAME names.
+		corruptPod  string
+		corruptCard string
+		wantDestroy bool
+	}{
+		{
+			name:        "another pod's corrupt marker on this card holds the destroy",
+			corruptPod:  "pod-other",
+			corruptCard: testGPUUUID0,
+			wantDestroy: false,
+		},
+		{
+			name:        "a corrupt marker naming no accelerator holds this card too",
+			corruptPod:  "pod-other",
+			corruptCard: "",
+			wantDestroy: false,
+		},
+		{
+			name:        "the reclaimed pod's own corrupt marker does not hold its own destroy",
+			corruptPod:  "pod-dead",
+			corruptCard: testGPUUUID0,
+			wantDestroy: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			drv := newFakeMigDriver()
+			slot := migPlacement{Start: 0, Length: 2}
+			drv.seedLive(testGPUUUID0, migInstance{
+				GiID: 1, CiID: 1, ComputeSlices: 1, Placement: slot, UUID: "MIG-held",
+			})
+			require.NoError(t, writeMarker(markerPath("pod-dead", "c", testGPUUUID0), migMarker{
+				PodUID: "pod-dead", Container: "c", Card: testGPUUUID0, Profile: "1g.10gb",
+				GiID: 1, CiID: 1, MigUUID: "MIG-held",
+				ComputeSlices: 1, Start: slot.Start, Length: slot.Length,
+			}))
+			// A second container dir, so the corrupt file never overwrites the record above.
+			writeCorruptMarker(t, deviceplugin.PodWorkDir(c.corruptPod, "c2"), markerFileName(c.corruptCard))
+
+			// The claiming pod has to be LIVE for its corrupt file to still be there when the
+			// debounce elapses: the loop retires a corrupt marker whose pod is gone, so a dead
+			// claimant's file disappears before the destroy it is supposed to hold back is reached.
+			var live []string
+			if c.corruptPod != "pod-dead" {
+				live = []string{c.corruptPod}
+			}
+
+			r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
+			for i := 0; i < reclaimMaxMisses+1; i++ {
+				r.reconcile(live)
+			}
+
+			if c.wantDestroy {
+				assert.NotEmpty(t, drv.destroyed, "the pod's own corrupt file must not shield its partitions")
+				return
+			}
+			assert.Empty(t, drv.destroyed, "a partition a corrupt claim may own is never destroyed")
+			_, err := parseMarker(markerPath("pod-dead", "c", testGPUUUID0))
+			require.NoError(t, err, "the record is kept so a later pass can find the partition again")
+		})
+	}
+}
+
+func TestReclaim_SameSlotRebuildNotDestroyedUnderStaleMarker(t *testing.T) {
+	const sameUUID = "MIG-6deb82ec-name-based"
+	slot := migPlacement{Start: 0, Length: 2}
+	marker := func(podUID string) migMarker {
+		return migMarker{
+			PodUID: podUID, Container: "c", Card: testGPUUUID0, Profile: "1g.10gb",
+			GiID: 1, CiID: 1, MigUUID: sameUUID,
+			ComputeSlices: 1, Start: slot.Start, Length: slot.Length,
+		}
+	}
+
+	cases := []struct {
+		name string
+		// live is the pod-UID set of the pass that acts on the predecessor's record.
+		live []string
+	}{
+		{
+			name: "the successor is in the pass's live set",
+			live: []string{"pod-new"},
+		},
+		{
+			name: "the successor has not reached the pass's live set yet",
+			live: nil,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			drv := newFakeMigDriver()
+			drv.seedLive(testGPUUUID0, migInstance{
+				GiID: 1, CiID: 1, ComputeSlices: 1, Placement: slot, UUID: sameUUID,
+			})
+			// The predecessor's record spends its debounce while its Pod is gone.
+			require.NoError(t, writeMarker(markerPath("pod-dead", "c", testGPUUUID0), marker("pod-dead")))
+			r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
+			for i := 0; i < reclaimMaxMisses-1; i++ {
+				r.reconcile(nil)
+			}
+			require.Empty(t, drv.destroyed, "nothing is reclaimed before the debounce")
+
+			// The successor takes the slot the predecessor's record still names, and writes its own
+			// marker inside the accelerator lock -- the record that is already true.
+			require.NoError(t, writeMarker(markerPath("pod-new", "c", testGPUUUID0), marker("pod-new")))
+
+			r.reconcile(c.live)
+
+			assert.Empty(t, drv.destroyed, "a partition another pod's marker claims is never destroyed")
+			_, err := parseMarker(markerPath("pod-new", "c", testGPUUUID0))
+			require.NoError(t, err, "the successor's marker is intact")
+			_, err = parseMarker(markerPath("pod-dead", "c", testGPUUUID0))
+			require.Error(t, err, "the superseded marker is dropped, so the decision is not retaken every pass")
+		})
+	}
+}
