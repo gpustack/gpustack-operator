@@ -382,6 +382,50 @@ variable "registry_mirrors" {
   }
 }
 
+variable "kubelet_config_dropins" {
+  # KubeletConfiguration drop-in files for every node, keyed by file name: each value is the YAML
+  # content of one drop-in (apiVersion kubelet.config.k8s.io/v1beta1, kind KubeletConfiguration).
+  # This is how settings that exist only as KubeletConfiguration fields (e.g.
+  # topologyManagerPolicy) reach the kubelet; kubelet-arg alone carries only command-line flags.
+  #
+  # The files land in a directory the module owns at /etc/rancher/{rke2,k3s}/kubelet.conf.d, and
+  # the node's config.yaml gets a kubelet-arg entry pointing the kubelet's config-dir at it. At
+  # startup the distribution copies that directory into its own kubelet.conf.d tree, ordered after
+  # the defaults it generates, so these values win.
+  #
+  # NOT written to the managed directory /var/lib/rancher/{rke2,k3s}/agent/etc/kubelet.conf.d
+  # directly: the distribution regenerates that tree on every agent start (it rewrites its own
+  # defaults file there), so a file dropped into it is not guaranteed to survive.
+  #
+  # Empty (the default) writes nothing and adds no kubelet-arg, exactly as before. A map going
+  # from non-empty back to empty removes the directory rather than leaving it behind, for the same
+  # reason registries.yaml is removed when empty: a stale drop-in would keep applying a setting
+  # the caller has since dropped.
+  #
+  # Changing a set value REINSTALLS the node: the value is tracked in the install triggers, the
+  # same pattern as registry_mirrors, so a change replaces the node resource and the replacement
+  # uninstalls first -- etcd goes with it, and everything deployed in the cluster has to be
+  # re-applied afterwards.
+  description = "KubeletConfiguration drop-in files for every node, keyed by file name with the YAML content as the value, written to the module-owned /etc/rancher/{rke2,k3s}/kubelet.conf.d and referenced by a config-dir kubelet-arg in the node's config.yaml. Empty writes nothing. Changing a set value reinstalls the node and wipes the cluster's etcd data; re-apply whatever the cluster runs afterwards."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    # Keys become file names on the node, spliced into a shell command: no path components, no
+    # characters a shell would reinterpret. The .conf suffix is required because the drop-in merge
+    # reads only *.conf -- any other name would be written and then silently ignored.
+    condition     = alltrue([for name in keys(var.kubelet_config_dropins) : can(regex("^[A-Za-z0-9._-]+\\.conf$", name))])
+    error_message = "kubelet_config_dropins keys must be plain file names ending in .conf, made of [A-Za-z0-9._-] (each key becomes a file on the node, and the drop-in merge reads only *.conf)."
+  }
+
+  validation {
+    # Values are written to the node verbatim; empty content parses as an empty config and would
+    # only mask a caller's mistake.
+    condition     = alltrue([for content in values(var.kubelet_config_dropins) : length(trimspace(content)) > 0])
+    error_message = "kubelet_config_dropins values must be non-empty KubeletConfiguration YAML; drop the key instead of giving it empty content."
+  }
+}
+
 variable "switch_kube_context" {
   # The cluster is merged into ~/.kube/config either way; this only decides whether a
   # bare kubectl points at it afterwards. Set it to false while another cluster is

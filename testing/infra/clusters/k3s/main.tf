@@ -206,6 +206,34 @@ locals {
   })
   write_registries_yaml = length(local.registry_mirrors) == 0 ? "sudo rm -f /etc/rancher/k3s/registries.yaml" : "sudo mkdir -p /etc/rancher/k3s && printf '%s' '${local.registries_yaml}' | sudo tee /etc/rancher/k3s/registries.yaml > /dev/null || exit 1"
 
+  # The module-owned kubelet drop-in directory, NOT the distribution-managed
+  # /var/lib/rancher/k3s/agent/etc/kubelet.conf.d: that tree is regenerated on every agent start,
+  # so a file dropped into it may not survive. The config.yaml written below points the kubelet's
+  # config-dir here instead; at startup the distribution copies this directory into the managed
+  # tree, ordered after its generated defaults, so these values win. See the variable for the full
+  # reasoning.
+  kubelet_dropins_dir = "/etc/rancher/k3s/kubelet.conf.d"
+
+  # Everything else is passed to the installer as flags, but a kubelet-arg has to reach the
+  # service on EVERY start, so it is written as a config.yaml -- k3s reads it on every start,
+  # servers and agents alike, and merges it under the install flags. The file carries only this
+  # one key. config-dir, not --config-dir: kubelet-arg values take no flag prefix.
+  kubelet_config_yaml = yamlencode({ "kubelet-arg" = ["config-dir=${local.kubelet_dropins_dir}"] })
+
+  # Same write-or-remove shape as write_registries_yaml above, and for the same reason: files left
+  # behind after the map goes empty would keep feeding the kubelet settings the caller has since
+  # dropped. The whole directory is rewritten rather than file-by-file, so a renamed key leaves no
+  # stale file behind, and the config.yaml that points at it is removed with it. Contents are
+  # base64-encoded for the trip: the YAML is the caller's text spliced into a single-quoted
+  # command, and an encoded blob cannot break the quoting. The trailing `|| exit 1` matches
+  # write_registries_yaml: this is spliced into an inline list that deliberately runs without
+  # `set -e`.
+  write_kubelet_config_dropins = length(var.kubelet_config_dropins) == 0 ? "sudo rm -rf '${local.kubelet_dropins_dir}'; sudo rm -f /etc/rancher/k3s/config.yaml" : "${join(" && ", concat(
+    ["sudo rm -rf '${local.kubelet_dropins_dir}'", "sudo mkdir -p '${local.kubelet_dropins_dir}'"],
+    [for name, content in var.kubelet_config_dropins : "echo '${base64encode(content)}' | base64 -d | sudo tee '${local.kubelet_dropins_dir}/${name}' > /dev/null"],
+    ["printf '%s' '${local.kubelet_config_yaml}' | sudo tee /etc/rancher/k3s/config.yaml > /dev/null"],
+  ))} || exit 1"
+
   # How the installer is obtained, and what it is told about downloading. With a cache the step
   # above has already put that release's own binary in place and pinned a copy of the installer, so
   # INSTALL_K3S_SKIP_DOWNLOAD=true leaves the install with nothing to fetch -- and because the same
@@ -310,6 +338,7 @@ resource "null_resource" "server_init" {
     var.mirror == "" ? {} : { mirror = var.mirror },
     local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
     length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
+    length(var.kubelet_config_dropins) == 0 ? {} : { kubelet_config_dropins = jsonencode(var.kubelet_config_dropins) },
   )
 
   lifecycle {
@@ -373,6 +402,9 @@ resource "null_resource" "server_init" {
       # Written here for the same reason the staging above is: the reclaim removed
       # /etc/rancher/k3s, and the installer starts the service that reads this file.
       local.write_registries_yaml,
+      # Same window again: the installer's service start is what copies the drop-in directory
+      # (and reads the config.yaml pointing at it) into the managed tree.
+      local.write_kubelet_config_dropins,
       "${local.install_prefix} ${local.install_sh} server --cluster-init --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} ${local.tls_san_flags[local.first_server.host]} --https-listen-port ${var.server_https_listen_port} --service-node-port-range ${var.service_node_port_range} ${local.node_internal_ip_flag[local.first_server.host]} ${local.node_external_ip_flag[local.first_server.host]} ${local.advertise_flag[local.first_server.host]}${local.system_default_registry_flag} || exit 1",
       local.version_assert,
     ]
@@ -431,6 +463,7 @@ resource "null_resource" "server_join" {
     var.mirror == "" ? {} : { mirror = var.mirror },
     local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
     length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
+    length(var.kubelet_config_dropins) == 0 ? {} : { kubelet_config_dropins = jsonencode(var.kubelet_config_dropins) },
   )
 
   lifecycle {
@@ -483,6 +516,9 @@ resource "null_resource" "server_join" {
       # Written here for the same reason the staging above is: the reclaim removed
       # /etc/rancher/k3s, and the installer starts the service that reads this file.
       local.write_registries_yaml,
+      # Same window again: the installer's service start is what copies the drop-in directory
+      # (and reads the config.yaml pointing at it) into the managed tree.
+      local.write_kubelet_config_dropins,
       "${local.install_prefix} ${local.install_sh} server --server ${local.server_url} --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} ${local.tls_san_flags[each.value.host]} --https-listen-port ${var.server_https_listen_port} --service-node-port-range ${var.service_node_port_range} ${local.node_internal_ip_flag[each.value.host]} ${local.node_external_ip_flag[each.value.host]} ${local.advertise_flag[each.value.host]}${local.system_default_registry_flag} || exit 1",
       local.version_assert,
     ]
@@ -537,6 +573,7 @@ resource "null_resource" "agent" {
     # already in state from before the key existed.
     var.mirror == "" ? {} : { mirror = var.mirror },
     length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
+    length(var.kubelet_config_dropins) == 0 ? {} : { kubelet_config_dropins = jsonencode(var.kubelet_config_dropins) },
   )
 
   lifecycle {
@@ -589,6 +626,9 @@ resource "null_resource" "agent" {
       # Written here for the same reason the staging above is: the reclaim removed
       # /etc/rancher/k3s, and the installer starts the service that reads this file.
       local.write_registries_yaml,
+      # Same window again: the installer's service start is what copies the drop-in directory
+      # (and reads the config.yaml pointing at it) into the managed tree.
+      local.write_kubelet_config_dropins,
       "${local.install_prefix} K3S_URL='${local.server_url}' ${local.install_sh} agent ${local.node_internal_ip_flag[each.value.host]} ${local.node_external_ip_flag[each.value.host]} || exit 1",
       local.version_assert,
     ]
