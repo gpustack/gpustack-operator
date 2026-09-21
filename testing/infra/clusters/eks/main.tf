@@ -136,12 +136,15 @@ locals {
     {
       for name, types in var.gpu_instance_types :
       "gpu-${name}" => {
-        ami_type     = "AL2023_x86_64_NVIDIA"
+        ami_type = "AL2023_x86_64_NVIDIA"
+        # desired_size REACHES AWS ONLY ON CREATE. The module this delegates to declares
+        # ignore_changes on scaling_config[0].desired_size, so terraform will not move a
+        # group that already exists: lowering this to zero on a running group plans only
+        # the max_size line below, which leaves max under desired. Park an idle group with
+        # `aws eks update-nodegroup-config --scaling-config desiredSize=0` instead, which
+        # is drift-free precisely because the attribute is ignored here.
         desired_size = var.gpu_node_count
-        # EKS accepts a desired size of zero but refuses a maximum below one, so a
-        # count of zero parks the group at no nodes rather than failing the apply.
-        # That is what lets an idle group cost nothing without being destroyed and
-        # recreated, which would take the placement group and its subnet with it.
+        # EKS refuses a maximum below one, so a count of zero still has to ask for one.
         max_size           = max(var.gpu_node_count, 1)
         min_size           = 0
         instance_types     = types
