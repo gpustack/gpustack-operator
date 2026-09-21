@@ -628,10 +628,18 @@ register, tracker or matrix holding them elsewhere and nobody is carrying them: 
 to know whether a row has been answered has to ask whoever holds the hardware, and an unanswered row
 looks exactly like one nobody has looked at, because that is what it is.
 
-They are unrun because the free fleet does not cover this feature's core path: the local cluster has
-consumer NVIDIA cards and no RDMA, and the one free environment with real RDMA is an Ascend pair,
-which is the wrong manufacturer for this work. What the rows need is one host carrying both an RDMA
-NIC and NVIDIA accelerators. Standing one up is not this change's to do.
+Most of them have since been answered, and [Readings](#readings) records what each one read. They
+were answered on the very fleet the paragraph that used to stand here ruled out, and the way it
+ruled it out is worth keeping rather than deleting. It said the free environment with real RDMA
+carried the wrong manufacturer's accelerators, and picked the host by manufacturer. All but two of
+these rows do not read the accelerator's manufacturer at all: R0, R1, R4 and R5 read the RDMA side's
+shape and counts, R6 reads the kubelet's own configuration, and R3 needs an accelerator and an RDMA
+device on one NUMA node without caring whose accelerator it is. The two genuinely out of that
+fleet's reach are R3b, which needs an accelerator that can be partitioned, and R7, which needs
+InfiniBand rather than RoCE -- and InfiniBand is not a manufacturer question either.
+
+The general form is that a row's host requirement is whatever that row reads, and deriving it from
+the feature's subject instead is how a fleet gets ruled out for a property no row depends on.
 
 Each row states what to read, what the value must be, and **what does not count as passing** — the
 last column being the one that makes a row a criterion rather than an invitation to look around.
@@ -683,6 +691,54 @@ four issues rather than assumed:
   pass against it is the one outcome that would retire the question wrongly.
 - **R3b shares R3's boot** on any host whose accelerators can be put into a partitioning mode. It
   costs one extra Pod and answers a question no unit test reaches.
+
+#### Readings
+
+Taken on a single-node RKE2 cluster standing on an aarch64 Ascend host: eight accelerators spread
+over eight NUMA nodes, and two RoCE adapters both attached to one of them. The paragraph above was
+written before these, and still reads as though every row were open; what it still buys is the
+reasoning for R7 and for the three EFA issues, which these readings do not touch.
+
+| # | Result | What it read |
+|---|---|---|
+| R0 | Answered, twice | The ledger held thirty-two interfaces and exactly two carried an `rdmaDevice` -- the same two the host's RDMA subsystem lists, which is the correspondence the row asks for rather than a non-empty list. Configuring virtual functions and re-reading put all six endpoints in the ledger with none missing, which is the first time the disjunction's virtual-function branch has been exercised anywhere |
+| R1 | Answered, twice | The counts matched the formula, and then the exclusion did: inducing a `failed` link verdict on one of the two endpoints dropped `rdma` from two to one. That is the first time the exclusion clause has run outside a fixture |
+| R2 | Answered, both ways | An unprivileged Pod mounting nothing by hand was granted an endpoint and opened its `uverbs` node. The paired negative refused the same Pod without the request with `EPERM` -- while the device node's own mode bits read `crw-rw-rw-`, which is what makes the refusal the cgroup's and not the file's |
+| R3 | Answered, both ways | A request the topology could not satisfy was refused with `TopologyAffinityError`, and a smaller one was admitted. The boundary is what makes this a reading rather than a coincidence: the host carries eight accelerators but only two on the RDMA devices' NUMA node, and the refusal appeared between asking for two and asking for three |
+| R4 | Answered | The `failed` endpoint's tokens stayed in `capacity` and left `allocatable`. Both halves are needed: advertised-and-unhealthy and never-advertised are indistinguishable in `allocatable` alone, and only `capacity` separates them |
+| R5 | Answered | With four virtual functions configured, `rdma.partitioned` was four and the three whole-function keys counted that physical function zero times |
+| R6 | **Failed** | See below |
+| R3b | Unanswerable here | This host's accelerators have no partitioning mode, so the row's own last column applies: a run that cannot put a partition and an endpoint in one container tests nothing in either direction |
+| R7 | Unanswerable here | RoCE, as the row anticipated |
+
+R1's numbers were read before the change that retired `.sliced` and gave the shared key a ceiling of
+RDMA's own, so the C2 table above and those numbers describe the same code at different times. Two
+things were confirmed on the same host afterwards: the shared key's count moved to the new ceiling,
+which is the running code identifying itself; and `.sliced` **went to zero rather than disappearing**
+-- an extended resource that has entered a node's status is not removed when the plugin stops
+serving it. That is the observable shape of having no upgrade handling, and no unit test reaches it
+because it is a property of the node object's history rather than of the code.
+
+**R6 failed, and the defect is in this repository rather than on the host.** The node's kubelet was
+running `single-numa-node` -- confirmed twice over, by `TopologyAffinityError` firing in R3 and by
+the kubelet's own `configz` naming the policy -- while preflight reported `unknown`. The cause was
+that the drop-in source was matched with a pattern that does not cross a directory separator, and
+the distributions that embed the kubelet regenerate their managed tree on every start, so they offer
+callers a directory of their own and copy its contents into a **subdirectory** of the tree preflight
+reads. A node configured the way its distribution documents was therefore the node whose policy
+could not be read. The reader now walks that tree, and groups files by tree rather than by
+directory, because a subdirectory there is the same configuration and not a competing one.
+
+The row stays **unanswered** rather than becoming a pass. What has been established is that the old
+behaviour was wrong and the new behaviour is right against fixtures; nobody has re-read preflight on
+a host whose kubelet is running a policy since. Recording it as passed would credit the fix with a
+reading nobody took.
+
+The row's last column did not catch this, and the way it missed is worth stating where the next
+criterion gets written. It admits `unknown` "only where the policy is set somewhere none of them
+reads", which sorts hosts into set-where-we-read and set-elsewhere. This host was a third kind: set
+in the very tree the reader names, one level deeper than it looked. A criterion phrased as a
+partition of cases is only as good as the cases it imagined.
 
 ### Notes / Constraints / Caveats
 

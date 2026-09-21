@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -266,13 +267,53 @@ func (h *hostExec) ResolveRuntime(ctx context.Context, want string) (*hostRuntim
 //
 // flags marks the file carrying the kubelet's command line rather than its YAML configuration,
 // which is what decides which of a setting's two spellings appears in it.
+//
+// dropInDir marks a source naming the kubelet's drop-in directory rather than a file in it. Such a
+// source is walked, for the reason kubeletDropInFiles gives: the files that decide a node's policy
+// are usually not the directory's direct children.
 var kubeletConfigSources = []struct {
-	pattern string
-	flags   bool
+	pattern   string
+	flags     bool
+	dropInDir bool
 }{
-	{"var/lib/kubelet/kubeadm-flags.env", true},
-	{"var/lib/kubelet/config.yaml", false},
-	{"var/lib/rancher/*/agent/etc/kubelet.conf.d/*.conf", false},
+	{pattern: "var/lib/kubelet/kubeadm-flags.env", flags: true},
+	{pattern: "var/lib/kubelet/config.yaml"},
+	{pattern: "var/lib/rancher/*/agent/etc/kubelet.conf.d", dropInDir: true},
+}
+
+// kubeletDropInExtension is the suffix a kubelet merges out of its drop-in directory. It ignores
+// every other file there, so reading one would report a value the kubelet never applied.
+const kubeletDropInExtension = ".conf"
+
+// kubeletDropInFiles lists the files a kubelet pointed at dir merges, in the order it merges them.
+//
+// Walked rather than globbed because the kubelet walks. It reads every .conf below the directory,
+// subdirectories included, and the subdirectories are where an administrator's own configuration
+// lands: a distribution embedding the kubelet does not let callers write into this tree, because it
+// regenerates it on every start, and instead offers a flag naming a directory of the caller's own,
+// whose contents it copies into a subdirectory here. A pattern matching only the direct children
+// therefore sees the distribution's generated defaults and never the settings that override them,
+// which is the shape that reports a node as having no policy while its kubelet is running one.
+//
+// The walk is also what keeps the order right. Later files override earlier ones, and the kubelet's
+// order is the traversal order of this same standard-library walk rather than a sort of the names,
+// so walking reproduces it exactly instead of approximating it.
+func kubeletDropInFiles(dir string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(entry.Name()) != kubeletDropInExtension {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 // kubeletSetting names one kubelet setting in both the spellings its configuration uses: the flag
@@ -318,15 +359,16 @@ type kubeletReading struct {
 	// been searched.
 	UnreadablePath string
 	UnreadableErr  error
-	// UnsearchablePattern names a source whose search could not run at all, and UnsearchableErr
-	// says why. It is kept apart from the unreadable pair because nothing was matched and no file
-	// was opened: reporting it as a configuration that could not be read sends whoever is
-	// diagnosing it looking for a permissions problem on a file that was never there.
+	// UnsearchablePattern names a source whose search could not run or could not finish, and
+	// UnsearchableErr says why. It is kept apart from the unreadable pair because no configuration
+	// file was opened: reporting it as a configuration that could not be read sends whoever is
+	// diagnosing it looking for a permissions problem on a file that was never reached.
 	UnsearchablePattern string
 	UnsearchableErr     error
-	// Conflict carries the differing values when two directories under ConflictPattern name the
-	// setting differently. Two distribution trees on one machine are two configurations and only
-	// one belongs to the kubelet that is running, so neither value is taken.
+	// Conflict carries the differing values when two of the configurations ConflictPattern
+	// matches name the setting differently. Two distribution trees on one machine are two
+	// configurations and only one belongs to the kubelet that is running, so neither value is
+	// taken.
 	Conflict        []string
 	ConflictPattern string
 }
@@ -340,7 +382,7 @@ type kubeletReading struct {
 //
 // Every reading of a kubelet setting goes through here, so that two readings cannot drift apart
 // about where a kubelet keeps its configuration, what a repeated setting means, or when two
-// directories are a conflict rather than an override. Adding a setting is a kubeletSetting, not a
+// configurations are a conflict rather than an override. Adding a setting is a kubeletSetting, not a
 // second reader.
 func readKubeletSetting(root string, setting kubeletSetting) kubeletReading {
 	for _, src := range kubeletConfigSources {
@@ -356,33 +398,53 @@ func readKubeletSetting(root string, setting kubeletSetting) kubeletReading {
 			}
 		}
 
-		// Grouped by directory, because the two levels mean different things: files within one are a
-		// single drop-in configuration applied in name order, so the later overrides the earlier;
-		// separate directories are separate configurations, and a difference between them is a
-		// conflict rather than an override. Glob returns sorted paths, so the within-group order is
-		// already the kubelet's own.
-		byDir := map[string]string{}
-		var dirs []string
-		for _, path := range matches {
-			body, readErr := os.ReadFile(path)
-			if readErr != nil {
-				return kubeletReading{UnreadablePath: path, UnreadableErr: readErr}
+		// Grouped by match, because a match is one configuration and the pattern's matches are
+		// several: every file a drop-in directory holds is merged into a single configuration, the
+		// later overriding the earlier, while separate distribution trees are separate
+		// configurations and a difference between them is a conflict rather than an override.
+		//
+		// Grouping by the directory a file sits in would look equivalent and is not. A drop-in
+		// directory's subdirectories belong to the same configuration as its root -- the kubelet
+		// merges the whole tree in one pass -- so splitting on directory turns an override into a
+		// conflict and reports a well-configured node as one whose setting cannot be established.
+		byUnit := map[string]string{}
+		var units []string
+		for _, match := range matches {
+			files := []string{match}
+			if src.dropInDir {
+				walked, walkErr := kubeletDropInFiles(match)
+				if walkErr != nil {
+					// The walk covers one configuration, so a tree it could not finish leaves
+					// this source half-searched. Reported as unsearchable rather than carried on
+					// from, because continuing would answer as though the whole tree had been
+					// read and the files it could not reach may be the ones that decide.
+					return kubeletReading{
+						UnsearchablePattern: match,
+						UnsearchableErr:     walkErr,
+					}
+				}
+				files = walked
 			}
-			value, ok := valueAfter(string(body), setting.key(src.flags))
-			if !ok {
-				continue
+			for _, path := range files {
+				body, readErr := os.ReadFile(path)
+				if readErr != nil {
+					return kubeletReading{UnreadablePath: path, UnreadableErr: readErr}
+				}
+				value, ok := valueAfter(string(body), setting.key(src.flags))
+				if !ok {
+					continue
+				}
+				if _, seen := byUnit[match]; !seen {
+					units = append(units, match)
+				}
+				byUnit[match] = value
 			}
-			dir := filepath.Dir(path)
-			if _, seen := byDir[dir]; !seen {
-				dirs = append(dirs, dir)
-			}
-			byDir[dir] = value
 		}
 
 		var answers []string
-		for _, dir := range dirs {
-			if !slices.Contains(answers, byDir[dir]) {
-				answers = append(answers, byDir[dir])
+		for _, unit := range units {
+			if !slices.Contains(answers, byUnit[unit]) {
+				answers = append(answers, byUnit[unit])
 			}
 		}
 		switch len(answers) {
@@ -401,7 +463,7 @@ func readKubeletSetting(root string, setting kubeletSetting) kubeletReading {
 //
 // The caller treats "not found" as "this host has nothing to say", not as an error.
 //
-// It errors, rather than choosing, when two directories under one source disagree. Two distribution
+// It errors, rather than choosing, when two configurations under one source disagree. Two distribution
 // trees on one machine are two configurations and only one belongs to the kubelet that is running;
 // taking either would drive preflight against a socket that node's workloads may never touch, and
 // would do it silently. Saying so instead drops the affected steps to being emitted, which is the
