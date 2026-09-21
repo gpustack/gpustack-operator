@@ -71,8 +71,8 @@ func (p *Preflighter) PreflightTopology() TopologyReport {
 //
 // It reads through readKubeletSetting, the one reader of this node's kubelet configuration, so
 // that this reading and the CRI endpoint's cannot drift apart about where a kubelet keeps its
-// configuration, what a repeated setting means, or when two directories are a conflict rather than
-// an override. What differs is the stakes, and that is what this function owns: the CRI read
+// configuration, what a repeated setting means, or when two configurations are a conflict rather
+// than an override. What differs is the stakes, and that is what this function owns: the CRI read
 // drives what preflight measures and so refuses a host it cannot interpret, while this one drives
 // nothing and degrades to unknown, saying why in the note.
 func topologyReport(root string, now time.Time) TopologyReport {
@@ -117,9 +117,10 @@ func topologyReport(root string, now time.Time) TopologyReport {
 			patterns = append(patterns, src.pattern)
 		}
 		return unknownTopology(now, fmt.Sprintf(
-			"none of the kubelet configuration files this report reads (%s) names a topology manager "+
-				"policy; the kubelet may still run one set on its command line, which none of them "+
-				"shows, so its default is not reported either: that would be a value nobody read",
+			"none of the places this report reads the kubelet's configuration (%s, the last one "+
+				"walked) names a topology manager policy; the kubelet may still run one set on "+
+				"its command line, which none of them shows, so its default is not reported "+
+				"either: that would be a value nobody read",
 			strings.Join(patterns, ", ")))
 	}
 }

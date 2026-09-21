@@ -80,6 +80,61 @@ func TestTopologyReport(t *testing.T) {
 			wantPolicy: "restricted",
 		},
 		{
+			// The shape the distributions actually produce. Their managed tree is regenerated on
+			// every start, so an administrator is not offered a file in it to edit but a flag
+			// naming a directory of their own, whose contents the distribution copies into a
+			// subdirectory here. The setting that decides the node therefore sits one level below
+			// the generated defaults -- and a node configured the way its distribution documents
+			// is exactly the node this has to answer for.
+			name: "a drop-in the distribution copied into a subdirectory names the policy",
+			files: map[string]string{
+				"var/lib/rancher/rke2/agent/etc/kubelet.conf.d/00-rke2-defaults.conf": "kind: KubeletConfiguration\n",
+				"var/lib/rancher/rke2/agent/etc/kubelet.conf.d/20-cli-config-dir/10-topology.conf": "topologyManagerPolicy: " +
+					"single-numa-node\n",
+			},
+			wantPolicy: "single-numa-node",
+		},
+		{
+			// One tree is one configuration however deep its files sit: the kubelet merges the
+			// whole tree in a single pass, the later file overriding the earlier. Reading the
+			// subdirectory as a second configuration would turn this override into a conflict and
+			// report a node that is configured exactly as documented as one whose policy cannot be
+			// established -- which is why the fix is where the files are grouped and not only
+			// which files are matched.
+			name: "a subdirectory drop-in overrides the tree's defaults rather than conflicting with them",
+			files: map[string]string{
+				"var/lib/rancher/rke2/agent/etc/kubelet.conf.d/00-rke2-defaults.conf": "topologyManagerPolicy: none\n",
+				"var/lib/rancher/rke2/agent/etc/kubelet.conf.d/20-cli-config-dir/10-topology.conf": "topologyManagerPolicy: " +
+					"single-numa-node\n",
+			},
+			wantPolicy: "single-numa-node",
+		},
+		{
+			// Two trees stay two configurations whatever depth their files sit at. Grouping by
+			// tree is what keeps this a conflict; grouping by the directory a file happens to sit
+			// in would put these two in separate groups for the wrong reason and get the right
+			// answer by accident.
+			name: "two distribution trees conflict even when one answers from a subdirectory",
+			files: map[string]string{
+				"var/lib/rancher/k3s/agent/etc/kubelet.conf.d/00.conf":                    "topologyManagerPolicy: restricted\n",
+				"var/lib/rancher/rke2/agent/etc/kubelet.conf.d/20-cli-config-dir/10.conf": "topologyManagerPolicy: best-effort\n",
+			},
+			wantPolicy: TopologyPolicyUnknown,
+			wantNote:   "more than one topology manager policy",
+		},
+		{
+			// The kubelet merges .conf out of this tree and skips everything else, so a policy
+			// read from any other file is one it never applied. Walking the tree makes this the
+			// reader's own decision rather than a side effect of the pattern it matched on.
+			name: "a file the kubelet would not merge is not read",
+			files: map[string]string{
+				"var/lib/rancher/rke2/agent/etc/kubelet.conf.d/20-cli-config-dir/10-topology.yaml": "topologyManagerPolicy: " +
+					"single-numa-node\n",
+			},
+			wantPolicy: TopologyPolicyUnknown,
+			wantNote:   "command line",
+		},
+		{
 			// The standard file is read before the distribution drop-in for the reason the CRI
 			// reader reads it first: a kubelet reading the standard path reads it whatever else is
 			// on disk, while a drop-in means something only to the distribution that wrote it.
