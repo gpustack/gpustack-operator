@@ -12,9 +12,10 @@ node groups, and point your local kubeconfig at it.
   ingress rule (`TCP/22` from `0.0.0.0/0`) and an egress rule (allow all).
 - Creates a `nebius_mk8s_v1_cluster` with a public control-plane endpoint.
 - Creates a `cpu` `nebius_mk8s_v1_node_group` (shaped by `cpu_instance_types`,
-  `cpu_node_count` nodes in it), plus one `gpu-<name>` group per
-  `gpu_instance_types` key, one node each (every node gets
-  cloud-init injecting an SSH user + key, same idiom as `computes/nebius`).
+  `cpu_node_count` nodes in it, and omitted altogether at `cpu_node_count = 0`),
+  plus one `gpu-<name>` group per `gpu_instance_types` key, one node each (every
+  node gets cloud-init injecting an SSH user + key, same idiom as
+  `computes/nebius`).
 - Gives each **GPU** group's nodes a public IPv4 so they can be reached over SSH
   (`public_ip`, default `true`); the CPU group takes none unless
   `cpu_instance_types.public_ip` asks for one. See
@@ -36,6 +37,10 @@ node groups, and point your local kubeconfig at it.
 - Buys a GPU node group from **preemptible** capacity when its
   `gpu_instance_types` entry sets `preemptible = true`. See
   [Preemptible nodes](#preemptible-nodes).
+- Attaches a GPU node group to an **InfiniBand fabric** when its
+  `gpu_instance_types` entry names one in `infiniband_fabric`, creating a
+  `nebius_compute_v1_gpu_cluster` per such group. This is what puts RDMA devices
+  on the node. See [InfiniBand fabrics](#infiniband-fabrics).
 - After apply, runs `nebius mk8s cluster get-credentials` to merge the cluster
   into `~/.kube/config` as a new context, which becomes the current one (unless
   `switch_kube_context=false`); on destroy it removes that
@@ -86,6 +91,43 @@ Set `mig` explicitly on a group to override the derivation. Do that as soon as
 Nebius adds a partitionable platform this list does not know about: the default
 would be `false`, auto-repair would stay on, and the first MIG switch would
 **shut the node down**.
+
+## InfiniBand fabrics
+
+A GPU node has no RDMA devices unless its group joined an InfiniBand fabric. Set
+`infiniband_fabric` on the `gpu_instance_types` entry and the module creates a
+`nebius_compute_v1_gpu_cluster` for that group and attaches its nodes to it.
+Without it the accelerators are still there; the interconnect is not.
+
+Two properties of the API shape how this can be used.
+
+**A node joins a fabric only when it is created.** There is no attaching one
+afterwards, so a group that will need RDMA must be created with the fabric
+already named. Adding it later replaces the group.
+
+**Attachment is allowed by the preset, not by the platform.** On one and the
+same accelerator, the whole-node preset permits it and the single-card preset
+does not — the single-card preset carves up a host whose interconnect stays with
+the host. REQUIRED: read the flag from the API rather than inferring it from the
+preset's name.
+
+```bash
+nebius compute platform list --parent-id <project-id> --format json \
+  | jq -r '.items[] | .metadata.name as $p
+           | .spec.presets[] | "\($p) \(.name) \(.allow_gpu_clustering)"'
+```
+
+Fabric names are region-scoped, and there is no call that lists them. A name the
+region does not have is refused outright:
+
+```text
+code = NotFound desc = no infiniband fabric found with name = "<fabric>"
+```
+
+That refusal is the useful case: a typo fails the apply instead of quietly
+producing a group without RDMA. Clusters are quota'd per region by
+`compute.gpucluster.count`, which counts clusters rather than nodes; read it the
+same way as the address quota in [Public addresses](#public-addresses).
 
 ## Preemptible nodes
 
@@ -277,8 +319,8 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 | `node_boot_disk_size_gb` | Node boot disk size, in GiB, for every node group (per-group override: `boot_disk_size_gb` in `gpu_instance_types`) | `100` |
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
 | `cpu_instance_types` | Instance type for the CPU node group: `{platform, preset, os, public_ip (optional)}`. `public_ip` defaults to `false`; `true` gives the node an SSH-reachable public IPv4 at one public-address quota unit ([public addresses](#public-addresses)). | `{ platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }` |
-| `cpu_node_count` | Number of nodes in the CPU node group; GPU groups are one node each, so this is the module's only multi-node knob. With `cpu_instance_types.public_ip`, costs one public-address quota unit per node ([public addresses](#public-addresses)) | `1` |
-| `gpu_instance_types` | GPU node groups keyed by group name (each becomes `gpu-<name>`): `{platform, preset, os (optional), drivers_preset (optional), preemptible (optional), mig (optional), public_ip (optional), boot_disk_size_gb (optional)}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; `preemptible` defaults to `false` ([preemptible nodes](#preemptible-nodes)); `mig` defaults to whether the platform supports MIG ([groups that cannot be partitioned](#groups-that-cannot-be-partitioned)); `public_ip` defaults to `true`, so the node is SSH-reachable, at one public-address quota unit per node ([public addresses](#public-addresses)); `boot_disk_size_gb` overrides `node_boot_disk_size_gb` for the group — set it (e.g. `400`) on groups that pull inference-engine images, which overflow the 100 GiB default into kubelet disk pressure. | `{ h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" } }` |
+| `cpu_node_count` | Number of nodes in the CPU node group; GPU groups are one node each, so this is the module's only multi-node knob. `0` drops the CPU group entirely, which a region holding `compute.instance.non-gpu.vcpu` at zero requires. With `cpu_instance_types.public_ip`, costs one public-address quota unit per node ([public addresses](#public-addresses)) | `1` |
+| `gpu_instance_types` | GPU node groups keyed by group name (each becomes `gpu-<name>`): `{platform, preset, os (optional), drivers_preset (optional), preemptible (optional), mig (optional), public_ip (optional), boot_disk_size_gb (optional), infiniband_fabric (optional)}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; `preemptible` defaults to `false` ([preemptible nodes](#preemptible-nodes)); `mig` defaults to whether the platform supports MIG ([groups that cannot be partitioned](#groups-that-cannot-be-partitioned)); `public_ip` defaults to `true`, so the node is SSH-reachable, at one public-address quota unit per node ([public addresses](#public-addresses)); `boot_disk_size_gb` overrides `node_boot_disk_size_gb` for the group — set it (e.g. `400`) on groups that pull inference-engine images, which overflow the 100 GiB default into kubelet disk pressure; `infiniband_fabric` attaches the group to that fabric, which is what gives its nodes RDMA devices, and requires a preset whose `allow_gpu_clustering` is true ([InfiniBand fabrics](#infiniband-fabrics)). | `{ h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" } }` |
 | `switch_kube_context` | Let `get-credentials` leave this cluster current; `false` restores the previous context | `true` |
 
 ## Outputs

@@ -101,14 +101,18 @@ variable "cpu_instance_types" {
 # that adds a member to a running set -- gets them here rather than by buying accelerator capacity
 # it will not use. Combined with cpu_instance_types.public_ip, the quota cost is one address per
 # node rather than one for the group (see README).
+#
+# Zero drops the group instead of sizing it to nothing. Some regions sell accelerator capacity
+# alone and hold compute.instance.non-gpu.vcpu at zero, where a CPU node cannot be created at all
+# and asking for one fails the apply rather than costing a little extra.
 variable "cpu_node_count" {
-  description = "Number of nodes in the CPU node group (GPU groups are one node each)."
+  description = "Number of nodes in the CPU node group (GPU groups are one node each). Zero drops the CPU group altogether, which is what a region holding compute.instance.non-gpu.vcpu at zero requires."
   type        = number
   default     = 1
 
   validation {
-    condition     = var.cpu_node_count > 0 && var.cpu_node_count == floor(var.cpu_node_count)
-    error_message = "cpu_node_count must be a positive whole number."
+    condition     = var.cpu_node_count >= 0 && var.cpu_node_count == floor(var.cpu_node_count)
+    error_message = "cpu_node_count must be a whole number, zero or greater."
   }
 }
 
@@ -131,7 +135,7 @@ variable "cpu_node_count" {
 # it to false on a GPU group nobody logs in to; the CPU group has its own flag, off by default
 # (see README).
 variable "gpu_instance_types" {
-  description = "GPU node groups keyed by group name (each becomes gpu-<name>). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG; public_ip defaults to true, giving the nodes an SSH-reachable public IPv4 at the cost of one public-address quota unit each; boot_disk_size_gb overrides var.node_boot_disk_size_gb for the group -- set it (e.g. 400) on groups that pull inference-engine images, which overflow the 100 GiB module default into kubelet disk pressure."
+  description = "GPU node groups keyed by group name (each becomes gpu-<name>). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG; public_ip defaults to true, giving the nodes an SSH-reachable public IPv4 at the cost of one public-address quota unit each; boot_disk_size_gb overrides var.node_boot_disk_size_gb for the group -- set it (e.g. 400) on groups that pull inference-engine images, which overflow the 100 GiB module default into kubelet disk pressure; infiniband_fabric attaches the group to an InfiniBand fabric, which is what gives its nodes RDMA devices, and requires a preset whose allow_gpu_clustering is true."
   type = map(object({
     platform       = string
     preset         = string
@@ -140,6 +144,21 @@ variable "gpu_instance_types" {
     preemptible    = optional(bool, false)
     mig            = optional(bool)
     public_ip      = optional(bool, true)
+    # Name of the physical InfiniBand fabric to attach the group's nodes to, which is what puts
+    # RDMA devices on the node. Unset (the default) leaves the group without them.
+    #
+    # Only a preset whose `allow_gpu_clustering` is true can be attached, and that is a property of
+    # the preset rather than of the platform: on the same accelerator, the whole-node preset allows
+    # it and the single-card preset does not. Ask the API which is which rather than guessing from
+    # the name:
+    #
+    #   nebius compute platform list --parent-id <project> --format json \
+    #     | jq -r '.items[] | .metadata.name as $p
+    #              | .spec.presets[] | "\($p) \(.name) \(.allow_gpu_clustering)"'
+    #
+    # Fabric names are region-scoped, and a node can only join a fabric when it is created -- there
+    # is no adding one afterwards -- so a group that needs RDMA must be created with it set.
+    infiniband_fabric = optional(string)
     # Per-group override of var.node_boot_disk_size_gb. GPU nodes that pull inference-engine
     # images need far more than the 100 GiB module default -- one such image is tens of GiB,
     # and it shares the boot disk with the container runtime's layers, so a disk that is big

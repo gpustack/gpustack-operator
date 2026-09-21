@@ -24,8 +24,11 @@ locals {
   mig_platforms = ["gpu-h100-sxm", "gpu-h200-sxm", "gpu-b200-sxm", "gpu-b200-sxm-a", "gpu-b300-sxm"]
 
   node_groups = merge(
+    # Omitted entirely at cpu_node_count = 0. Some regions sell accelerator capacity alone and hold
+    # compute.instance.non-gpu.vcpu at zero; there a plain node is not a small extra cost but a
+    # failed apply, and the accelerator tests never needed one.
     {
-      cpu = {
+      for name in(var.cpu_node_count > 0 ? ["cpu"] : []) : name => {
         instance_type = { platform = var.cpu_instance_types.platform, preset = var.cpu_instance_types.preset }
         os            = var.cpu_instance_types.os
         preemptible   = false
@@ -33,9 +36,10 @@ locals {
         # Defaults to false: the accelerator tests drive GPU nodes, not this one, and a public
         # address is a quota'd resource (vpc.ipv4-address.public.count). Turn it on for the one
         # workflow that needs inbound reach -- building images on the node itself.
-        public_ip  = var.cpu_instance_types.public_ip
-        node_count = var.cpu_node_count
-        gpu        = null
+        public_ip         = var.cpu_instance_types.public_ip
+        node_count        = var.cpu_node_count
+        gpu               = null
+        infiniband_fabric = null
         # The CPU group pulls no engine images, so it never outgrows the module-wide default.
         boot_disk_size_gb = null
       }
@@ -61,6 +65,9 @@ locals {
         # and the tests that need several nodes need plain ones, which is what cpu_node_count buys.
         node_count = 1
         gpu        = { drivers_preset = coalesce(cfg.drivers_preset, data.external.gpu_compat[name].result.drivers_preset) }
+        # Null unless the group asked for a fabric. A fabric is what puts RDMA devices on the node,
+        # and it can only be joined at creation time, so this cannot be added to a running group.
+        infiniband_fabric = cfg.infiniband_fabric
         # Null falls through to var.node_boot_disk_size_gb in the boot_disk block below.
         boot_disk_size_gb = cfg.boot_disk_size_gb
       }
@@ -258,6 +265,26 @@ resource "nebius_mk8s_v1_cluster" "this" {
   }
 }
 
+# One GPU cluster per node group that named a fabric. The cluster resource is the handle that binds
+# nodes to a physical InfiniBand fabric, and joining one is what puts RDMA devices on the node --
+# without it the accelerators are there but the interconnect is not. Every node in a cluster shares
+# its fabric, so a group that wants a different one gets its own cluster rather than a shared one.
+#
+# The resource itself allocates no hardware -- the nodes attached to it do -- but it is quota'd
+# per region by compute.gpucluster.count, which counts clusters rather than nodes. A fabric name
+# the region does not have is rejected outright ("no infiniband fabric found with name"), so a
+# typo fails the apply rather than producing a group without RDMA.
+resource "nebius_compute_v1_gpu_cluster" "this" {
+  for_each = {
+    for name, group in local.node_groups : name => group
+    if group.infiniband_fabric != null
+  }
+
+  parent_id         = var.project_id
+  name              = "${local.cluster_name}-${each.key}"
+  infiniband_fabric = each.value.infiniband_fabric
+}
+
 resource "nebius_mk8s_v1_node_group" "this" {
   for_each  = local.node_groups
   parent_id = nebius_mk8s_v1_cluster.this.id
@@ -312,6 +339,13 @@ resource "nebius_mk8s_v1_node_group" "this" {
 
     gpu_settings = each.value.gpu != null ? {
       drivers_preset = each.value.gpu.drivers_preset
+    } : null
+
+    # Attaching the group to its fabric. The API accepts this only at creation, and only for a
+    # preset whose allow_gpu_clustering is true -- a single-card preset carves up a host whose
+    # interconnect stays with the host, so it cannot be attached however the fabric is named.
+    gpu_cluster = each.value.infiniband_fabric != null ? {
+      id = nebius_compute_v1_gpu_cluster.this[each.key].id
     } : null
   }
 
