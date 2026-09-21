@@ -707,7 +707,7 @@ reasoning for R7 and for the three EFA issues, which these readings do not touch
 | R3 | Answered, both ways | A request the topology could not satisfy was refused with `TopologyAffinityError`, and a smaller one was admitted. The boundary is what makes this a reading rather than a coincidence: the host carries eight accelerators but only two on the RDMA devices' NUMA node, and the refusal appeared between asking for two and asking for three |
 | R4 | Answered | The `failed` endpoint's tokens stayed in `capacity` and left `allocatable`. Both halves are needed: advertised-and-unhealthy and never-advertised are indistinguishable in `allocatable` alone, and only `capacity` separates them |
 | R5 | Answered | With four virtual functions configured, `rdma.partitioned` was four and the three whole-function keys counted that physical function zero times |
-| R6 | **Failed** | See below |
+| R6 | Failed, then answered after the fix | See below |
 | R3b | Unanswerable here | This host's accelerators have no partitioning mode, so the row's own last column applies: a run that cannot put a partition and an endpoint in one container tests nothing in either direction |
 | R7 | Unanswerable here | RoCE, as the row anticipated |
 
@@ -729,10 +729,27 @@ reads. A node configured the way its distribution documents was therefore the no
 could not be read. The reader now walks that tree, and groups files by tree rather than by
 directory, because a subdirectory there is the same configuration and not a competing one.
 
-The row stays **unanswered** rather than becoming a pass. What has been established is that the old
-behaviour was wrong and the new behaviour is right against fixtures; nobody has re-read preflight on
-a host whose kubelet is running a policy since. Recording it as passed would credit the fix with a
-reading nobody took.
+**The row was then answered by re-reading it on the same host.** The kubelet was put back on
+`single-numa-node` through the path that exposed the defect -- a drop-in in a caller-owned directory,
+which the distribution copies into a subdirectory of its managed tree -- and preflight was run from an
+image whose `org.opencontainers.image.revision` label matches the commit carrying the fix. It reports:
+
+```yaml
+topology:
+    policy: single-numa-node
+    depth: declared
+```
+
+with no note, where a note is present exactly when the policy is unknown. The reading is a pass in
+both directions rather than in one: the same host, configured the same way, reported `unknown` before
+the fix and reports the policy after it, so the criterion has information at both of its values.
+
+Two things the run does not establish, stated because the output invites reading more into it. The
+pass was taken from a Pod that failed overall -- its accelerator detection found nothing, having been
+given no device access -- which says nothing about the topology section, since that section is read
+from files and never touches an accelerator. And the image was verified by its revision label rather
+than by its tag: a tag can be repointed, and an image ID only says the image is not the previous one,
+not which commit it carries.
 
 The row's last column did not catch this, and the way it missed is worth stating where the next
 criterion gets written. It admits `unknown` "only where the policy is set somewhere none of them
