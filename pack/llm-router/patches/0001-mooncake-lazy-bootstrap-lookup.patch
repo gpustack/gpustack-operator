@@ -1,0 +1,209 @@
+Make the Mooncake engine-id lookup lazy, so prefill/decode disaggregation works
+under Kubernetes service discovery.
+
+THE DEFECT: mooncake_prefill_info -- the map from a prefill worker's base URL
+to its Mooncake bootstrap address and per-dp-rank engine ids -- is filled in
+exactly one place: VllmPDRouter::new iterates the STATIC --prefill URL list in
+its direct-URL branch and queries each entry's bootstrap server once, at
+construction (src/routers/http/vllm_pd_router.rs). Under Kubernetes service
+discovery that construction path receives an empty static list -- src/server.rs
+builds the router with empty prefill and decode lists and no discovery address
+-- because workers arrive later, through the watcher in src/service_discovery.rs,
+whose add_prefill_server calls never touch the map. The map therefore stays
+empty for the life of the process. Every per-request lookup in
+get_mooncake_info then misses, logs "No Mooncake bootstrap info for prefill
+..., decode will proceed without kv_transfer_params", and the decode request
+goes out with no kv_transfer_params at all. The vLLM decoder requires
+remote_engine_id, remote_bootstrap_addr and transfer_id together before it
+will pull KV blocks, so the transfer never starts -- and nothing fails loudly:
+the request is served by the decoder alone, and disaggregation silently does
+not happen.
+
+A second defect rides with the first: even where the static list is non-empty,
+one query at construction means a prefiller that restarts under a new engine id
+is never re-read.
+
+THE FIX: the lookup becomes lazy and per prefill URL. On a cache miss,
+get_mooncake_info resolves that prefiller's bootstrap address -- host parsed
+from the prefill URL, port read from the worker registry, which already carries
+the bootstrap port that Kubernetes discovery stored from the Pod's
+vllm.ai/bootstrap-port annotation, falling back to 8998 (the construction
+path's own default) -- queries the bootstrap server, and caches the result
+under the prefill URL. A failure is not cached, so the next request retries;
+that same miss-and-retry is what picks up a prefiller that restarted at the
+same URL, and remove_prefill_server now drops the entry so a new owner of the
+URL is re-queried rather than trusted from the previous owner's entry. The
+retry budget of query_mooncake_bootstrap becomes a parameter: construction
+keeps its original 30 attempts, while the request path uses 3 (about three
+seconds of backoff) rather than parking a request behind minutes of retries.
+This mirrors the shape the llm-d router's sidecar already uses for the same
+handshake -- query the bootstrap server inside the request handler, against the
+prefill address at hand (llm-d/llm-d-router@v0.10.0,
+pkg/sidecar/proxy/connector_mooncake.go).
+
+AGAINST: vllm-project/router v0.1.15 (commit
+1fbcde7443d75b36befb61bc081f64c2a1f13a4b), the pin named by
+VLLM_ROUTER_VERSION in pack/llm-router/Dockerfile. The defect is present in the
+same shape on that project's default branch at the time of writing. The image
+build applies this patch with git apply, which fails loudly on a pin whose
+hunks no longer match, so a version bump that absorbs or breaks the patch is
+detected at build time rather than in a cluster.
+
+UPSTREAM REPORT: NOT YET FILED, and this sentence is where its URL goes. It is
+written this way rather than left out because a patch whose report is merely
+intended reads, a year later, exactly like one whose report was filed and
+ignored. Filing it is what makes carrying this patch a decision with an exit
+rather than a fork; until then the exit is named and not yet taken.
+
+TO REFRESH after a pin bump: clone the new pin, git apply this patch, resolve
+any rejects, regenerate with git diff, and keep this header on top.
+
+diff --git a/src/routers/http/vllm_pd_router.rs b/src/routers/http/vllm_pd_router.rs
+index 8e40aed..e392f3a 100644
+--- a/src/routers/http/vllm_pd_router.rs
++++ b/src/routers/http/vllm_pd_router.rs
+@@ -96,13 +96,14 @@ fn build_prefill_request_builder(
+ 
+ impl VllmPDRouter {
+     /// Query the Mooncake bootstrap server on a prefill node to get engine_id per dp_rank.
+-    /// Retries with backoff since the prefill server may not be ready at router startup.
++    /// Retries with backoff; the caller picks the budget, since construction can afford to
++    /// wait out a prefiller that is still starting while a request path cannot.
+     async fn query_mooncake_bootstrap(
+         client: &reqwest::Client,
+         bootstrap_addr: &str,
++        max_retries: u32,
+     ) -> Result<HashMap<usize, String>, String> {
+         let url = format!("{}/query", bootstrap_addr);
+-        let max_retries = 30;
+         let mut backoff_secs = 1u64;
+ 
+         for attempt in 1..=max_retries {
+@@ -324,12 +325,26 @@ impl VllmPDRouter {
+         })
+     }
+ 
+-    /// Look up Mooncake prefill info for a given prefill URL and dp_rank
++    /// Look up Mooncake prefill info for a given prefill URL and dp_rank.
++    ///
++    /// The map is filled lazily here rather than only at construction: construction
++    /// iterates the static --prefill list, which is empty under Kubernetes service
++    /// discovery because workers arrive through the watcher afterwards, so the map
++    /// would otherwise stay empty for the life of the process and every decode
++    /// request would leave without kv_transfer_params.
+     async fn get_mooncake_info(
+         &self,
+         prefill_url: &str,
+         dp_rank: Option<usize>,
+     ) -> Option<(String, String)> {
++        let cached = self
++            .mooncake_prefill_info
++            .lock()
++            .await
++            .contains_key(prefill_url);
++        if !cached {
++            self.query_and_cache_mooncake_info(prefill_url).await;
++        }
+         let info = self.mooncake_prefill_info.lock().await;
+         if let Some(prefill_info) = info.get(prefill_url) {
+             let rank = dp_rank.unwrap_or(0);
+@@ -344,6 +359,79 @@ impl VllmPDRouter {
+         None
+     }
+ 
++    /// Query one prefiller's Mooncake bootstrap server and cache the result under
++    /// the prefiller's URL.
++    ///
++    /// The bootstrap port comes from the worker registry, where Kubernetes service
++    /// discovery stored the Pod's bootstrap-port annotation when it registered the
++    /// worker; it falls back to 8998, the same default the construction path uses.
++    /// A failure is NOT cached, so the next request retries - which is also what
++    /// picks up a prefiller that restarted with a new engine id at the same URL.
++    /// Concurrent misses may query twice; both write the same value.
++    async fn query_and_cache_mooncake_info(&self, prefill_url: &str) -> Option<()> {
++        let parsed = match url::Url::parse(prefill_url) {
++            Ok(parsed) => parsed,
++            Err(e) => {
++                warn!(
++                    "Cannot parse prefill URL '{}' for Mooncake bootstrap query: {}",
++                    prefill_url, e
++                );
++                return None;
++            }
++        };
++        let host = match parsed.host() {
++            // Bracket an IPv6 literal so the address stays valid once a port is appended.
++            Some(url::Host::Ipv6(addr)) => format!("[{}]", addr),
++            Some(url::Host::Domain(domain)) => domain.to_string(),
++            Some(url::Host::Ipv4(addr)) => addr.to_string(),
++            None => {
++                warn!(
++                    "Prefill URL '{}' has no host for Mooncake bootstrap query",
++                    prefill_url
++                );
++                return None;
++            }
++        };
++        let bootstrap_port = self
++            .pd_router
++            .worker_registry
++            .get_prefill_workers()
++            .iter()
++            .find(|w| w.base_url() == prefill_url)
++            .and_then(|w| match w.worker_type() {
++                WorkerType::Prefill { bootstrap_port } => bootstrap_port,
++                _ => None,
++            })
++            .unwrap_or(8998);
++        let bootstrap_addr = format!("http://{}:{}", host, bootstrap_port);
++
++        match Self::query_mooncake_bootstrap(&self.http_client, &bootstrap_addr, 3).await {
++            Ok(dp_engine_ids) => {
++                info!(
++                    "Lazily queried Mooncake bootstrap at {} for prefill {}: {} dp ranks found",
++                    bootstrap_addr,
++                    prefill_url,
++                    dp_engine_ids.len()
++                );
++                self.mooncake_prefill_info.lock().await.insert(
++                    prefill_url.to_string(),
++                    MooncakePrefillInfo {
++                        bootstrap_addr,
++                        dp_engine_ids,
++                    },
++                );
++                Some(())
++            }
++            Err(e) => {
++                warn!(
++                    "Failed to query Mooncake bootstrap for prefill {}: {}",
++                    prefill_url, e
++                );
++                None
++            }
++        }
++    }
++
+     /// Generate vLLM-specific request ID with prefill/decode addressing
+     fn generate_vllm_request_id(prefill_addr: &str, decode_addr: &str) -> String {
+         let uuid = Uuid::new_v4().to_string().replace('-', "");
+@@ -1625,7 +1713,7 @@ impl VllmPDRouter {
+                         "Querying Mooncake bootstrap at {} for prefill {}",
+                         bootstrap_addr, base_url
+                     );
+-                    match Self::query_mooncake_bootstrap(&http_client, &bootstrap_addr).await {
++                    match Self::query_mooncake_bootstrap(&http_client, &bootstrap_addr, 30).await {
+                         Ok(dp_engine_ids) => {
+                             info!(
+                                 "Got Mooncake engine_ids for {}: {:?}",
+@@ -1683,6 +1771,10 @@ impl VllmPDRouter {
+     /// Remove a prefill server from the router
+     /// Delegates to the underlying PdRouterBase
+     pub async fn remove_prefill_server(&self, url: &str) -> Result<String, PDRouterError> {
++        // Drop the cached Mooncake bootstrap info as well: a prefiller that later
++        // comes up at this same URL must be queried, not served the previous
++        // owner's engine ids.
++        self.mooncake_prefill_info.lock().await.remove(url);
+         self.pd_router.remove_prefill_server(url).await
+     }
+ 
