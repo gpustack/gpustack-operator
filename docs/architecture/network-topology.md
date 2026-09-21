@@ -159,7 +159,7 @@ silently, so `{0,1}` would publish as `01` and read as node 01.
 
 ## The RDMA resource keys, and what each endpoint serves
 
-The facts above make an RDMA endpoint visible. Four device-plugin resources make one allocatable:
+The facts above make an RDMA endpoint visible. Three device-plugin resources make one allocatable:
 the interface inventory decides which endpoints each key serves, the link verdict decides their
 health, and every token carries its endpoint's NUMA affinity.
 
@@ -169,8 +169,7 @@ manufacturer — a network interface belongs to the node rather than to a vendor
 | key | allocation mode | `1` means | tokens per endpoint |
 |---|---|---|---|
 | `device.gpustack.ai/rdma` | exclusive | one whole interface | 1 |
-| `device.gpustack.ai/rdma.shared` | shared | one concurrent use of one interface | 10 |
-| `device.gpustack.ai/rdma.sliced` | sliced | one concurrent use of one interface | 10 |
+| `device.gpustack.ai/rdma.shared` | shared | one concurrent use of one interface | 64 |
 | `device.gpustack.ai/rdma.partitioned` | partitioned | one SR-IOV virtual function | 1 per virtual function |
 
 The mode is **read off the node, never chosen** (`pkg/deviceplugin/rdma_endpoint.go`):
@@ -178,7 +177,7 @@ The mode is **read off the node, never chosen** (`pkg/deviceplugin/rdma_endpoint
 | the interface is… | it serves | its endpoints are |
 |---|---|---|
 | an SR-IOV physical function with virtual functions configured | `partitioned` only | each of its virtual functions |
-| anything else — a physical function with none configured, or not a physical function | `exclusive`, `shared`, `sliced` | the interface itself |
+| anything else — a physical function with none configured, or not a physical function | `exclusive`, `shared` | the interface itself |
 
 A physical function with virtual functions configured does not also serve the whole-function modes:
 the node was put into that state before the Device Manager started, and nothing here can change it
@@ -217,13 +216,15 @@ affinity a hint can honor, while an accelerator partition token names no acceler
 that means for a request pairing the two is stated with the request rules
 ([Accelerator Requests](../accelerator-requests.md#co-locating-an-accelerator-and-an-rdma-interface)).
 
-`.shared` and `.sliced` draw on the same interfaces and do not decrement each other: one interface
-can serve ten shared holders and ten sliced holders at once.
-
-> **Why** — an RDMA interface's multiple queue pairs are how the hardware is meant to be used, with
-> the isolation done by firmware and kernel, so several processes on one is ordinary use rather than
-> oversubscription. The token count is a scheduling knob, not a hardware limit, and nothing is
-> injected or intercepted to enforce it.
+> **Why** one interface serves many shared holders — its multiple queue pairs are how the hardware
+> is meant to be used, with the isolation done by firmware and kernel, so several processes on one
+> is ordinary use rather than oversubscription. The count is a scheduling knob, not a hardware
+> limit, and nothing is injected or intercepted to enforce it.
+>
+> It matches the default the ecosystem's own shared-RDMA device plugin ships, so a workload written
+> against that plugin meets no tighter limit here. There is one pooled key rather than two because
+> two would draw on the same interfaces without decrementing each other, leaving neither count a
+> ceiling.
 
 Nothing an allocation does is written down: no entry in `Devices.status`, no Pod annotation, no
 in-process reservation. Every response is recomputed from `Devices.spec.interfaces[]`, so a fact
@@ -235,11 +236,11 @@ One server per mode registers its key with kubelet, started once by `Allocator.S
 per-manufacturer allocators rather than by the detected-manufacturer loop, which is keyed on a fact
 a network interface does not have (`pkg/devicemanager/allocator/rdma/`). Every node the Device
 Manager serves on Linux runs the servers, accelerator or not, so a node with no RDMA-capable
-interface registers all four keys with zero devices.
+interface registers all three keys with zero devices.
 
 Zero advertisement is level-based, not an absence: a `ListAndWatch` re-reads the inventory, so a
 device that appears when a driver loads is picked up by the next pass with no second mechanism for
-the same fact. The `--no-shared`, `--no-sliced` and `--no-partitioned` switches drop the matching
+the same fact. The `--no-shared` and `--no-partitioned` switches drop the matching
 families; exclusive is ungated.
 
 ## What an allocation hands over
@@ -400,8 +401,8 @@ kubectl get devices <node> -o json |
   jq '[.spec.interfaces[] | (., (.virtualFunctions // [])[])]
       | map(select(.rdma or .link)) | map({name, pciBusId, rdmaDevice, link})'
 
-# the four RDMA resource keys and their healthy-token counts on one node — partitioned counts
-# virtual functions; shared and sliced count ten per whole-function endpoint
+# the three RDMA resource keys and their healthy-token counts on one node — partitioned counts
+# virtual functions; shared counts 64 per whole-function endpoint
 kubectl get node <node> -o json |
   jq '.status.allocatable | with_entries(select(.key | contains("gpustack.ai/rdma")))'
 

@@ -298,24 +298,22 @@ group to move it out of.
 
 ## The RDMA keys, beside the accelerator families
 
-An RDMA interface is requested through four node-level keys that sit beside the accelerator
+An RDMA interface is requested through three node-level keys that sit beside the accelerator
 families, not inside them: a network interface belongs to the node rather than to a manufacturer,
 so no `<base>` applies. The mechanism — which interface serves which key, and what a grant hands
 the container — is [Network Topology](./architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)'s;
 the request rules are here.
 
-All four are served by the device plugin, and a request names what it wants one of:
+All three are served by the device plugin, and a request names what it wants one of:
 
 | Key | A request asks for |
 |---|---|
 | `device.gpustack.ai/rdma` | whole interfaces |
 | `device.gpustack.ai/rdma.shared` | concurrent uses of an interface |
-| `device.gpustack.ai/rdma.sliced` | concurrent uses of an interface |
 | `device.gpustack.ai/rdma.partitioned` | virtual functions |
 
-What a quantity of each key means, how many tokens an endpoint carries, which allocation mode each
-key belongs to, and why the two pooled keys do not decrement each other, are stated once with the
-mechanism — [the RDMA resource keys](./architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves).
+What a quantity of each key means, how many tokens an endpoint carries, and which allocation mode
+each key belongs to, are stated once with the mechanism — [the RDMA resource keys](./architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves).
 There are no `.units` keys on this side: nothing is webhook-derived, and the value you set is the
 value that schedules.
 

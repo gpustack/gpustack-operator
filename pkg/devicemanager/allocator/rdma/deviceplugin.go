@@ -43,9 +43,9 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	if !opts.NoShared {
 		modes = append(modes, workercore.DeviceAllocationModeShared)
 	}
-	if !opts.NoSliced {
-		modes = append(modes, workercore.DeviceAllocationModeSliced)
-	}
+	// No Sliced entry, and no NoSliced switch to read: the RDMA family serves no sliced key, so
+	// there is nothing for that switch to turn off. Offering the mode here would build a server
+	// whose resource name is empty, which newServers drops anyway.
 	if !opts.NoPartitioned {
 		modes = append(modes, workercore.DeviceAllocationModePartitioned)
 	}

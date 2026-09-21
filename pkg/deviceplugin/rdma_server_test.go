@@ -32,7 +32,6 @@ import (
 var rdmaServedModes = []workercore.DeviceAllocationMode{
 	workercore.DeviceAllocationModeExclusive,
 	workercore.DeviceAllocationModeShared,
-	workercore.DeviceAllocationModeSliced,
 	workercore.DeviceAllocationModePartitioned,
 }
 
@@ -130,12 +129,6 @@ func TestNewRDMAServer(t *testing.T) {
 			wantSocket: "rdma.shared.sock",
 		},
 		{
-			name:       "sliced registers the sliced key and its own socket",
-			mode:       workercore.DeviceAllocationModeSliced,
-			wantName:   "device.gpustack.ai/rdma.sliced",
-			wantSocket: "rdma.sliced.sock",
-		},
-		{
 			name:       "partitioned registers the partitioned key and its own socket",
 			mode:       workercore.DeviceAllocationModePartitioned,
 			wantName:   "device.gpustack.ai/rdma.partitioned",
@@ -185,8 +178,7 @@ func TestRDMAServer_ListAndWatch_Counts(t *testing.T) {
 			},
 			wantCounts: map[workercore.DeviceAllocationMode]int{
 				workercore.DeviceAllocationModeExclusive:   2,
-				workercore.DeviceAllocationModeShared:      2 * nodefeature.SharedResourceMaxSize,
-				workercore.DeviceAllocationModeSliced:      2 * nodefeature.SharedResourceMaxSize,
+				workercore.DeviceAllocationModeShared:      2 * nodefeature.RDMAEndpointPoolSize,
 				workercore.DeviceAllocationModePartitioned: 0,
 			},
 		},
@@ -203,7 +195,6 @@ func TestRDMAServer_ListAndWatch_Counts(t *testing.T) {
 			wantCounts: map[workercore.DeviceAllocationMode]int{
 				workercore.DeviceAllocationModeExclusive:   0,
 				workercore.DeviceAllocationModeShared:      0,
-				workercore.DeviceAllocationModeSliced:      0,
 				workercore.DeviceAllocationModePartitioned: 2,
 			},
 		},
@@ -248,32 +239,25 @@ func TestRDMAServer_ListAndWatch_Counts(t *testing.T) {
 		assert.Equal(t, []string{"ib0:ib0:0000", "eth1:eth1:0000"}, ids(t, workercore.DeviceAllocationModeExclusive))
 		assert.Equal(t, []string{"pf0:vf0:0000", "pf0:vf1:0000"}, ids(t, workercore.DeviceAllocationModePartitioned))
 
-		// The exact ten IDs one endpoint advertises in the shared family: the index steps by the
-		// shared-owner stride, not by one, and kubelet matches the exact string it was offered.
+		// The shared family's IDs are a FLAT sequence, one per token, and that is the half worth
+		// asserting: they used to step by the accelerator ledger's unit stride because they came
+		// from the accelerator id builder, and an RDMA token carries no units to step over. The
+		// second element is what separates the two schemes -- 0001 under this one, 160000 under
+		// the old -- so it is checked by value rather than left to the count.
 		shared := ids(t, workercore.DeviceAllocationModeShared)
-		ib0 := make([]string, 0, nodefeature.SharedResourceMaxSize)
+		ib0 := make([]string, 0, nodefeature.RDMAEndpointPoolSize)
 		for _, id := range shared {
 			if strings.HasPrefix(id, "ib0:") {
 				ib0 = append(ib0, id)
 			}
 		}
-		assert.Equal(t, []string{
-			"ib0:ib0:0000", "ib0:ib0:160000", "ib0:ib0:320000", "ib0:ib0:480000", "ib0:ib0:640000",
-			"ib0:ib0:800000", "ib0:ib0:960000", "ib0:ib0:1120000", "ib0:ib0:1280000", "ib0:ib0:1440000",
-		}, ib0)
+		require.Len(t, ib0, nodefeature.RDMAEndpointPoolSize)
+		assert.Equal(t, []string{"ib0:ib0:0000", "ib0:ib0:0001", "ib0:ib0:0002"}, ib0[:3])
+		assert.Equal(t, "ib0:ib0:0063", ib0[len(ib0)-1])
 
-		// The sliced family counts the same ceiling as flat indices instead.
-		sliced := ids(t, workercore.DeviceAllocationModeSliced)
-		eth1 := make([]string, 0, nodefeature.SharedResourceMaxSize)
-		for _, id := range sliced {
-			if strings.HasPrefix(id, "eth1:") {
-				eth1 = append(eth1, id)
-			}
-		}
-		assert.Equal(t, []string{
-			"eth1:eth1:0000", "eth1:eth1:0001", "eth1:eth1:0002", "eth1:eth1:0003", "eth1:eth1:0004",
-			"eth1:eth1:0005", "eth1:eth1:0006", "eth1:eth1:0007", "eth1:eth1:0008", "eth1:eth1:0009",
-		}, eth1)
+		// Distinct, because kubelet keys its checkpoint on the string: a repeated ID silently
+		// collapses two tokens into one and the count above would not notice.
+		assert.Len(t, sets.New(ib0...), len(ib0), "the shared family advertises a repeated device ID")
 	})
 }
 
@@ -323,7 +307,7 @@ func TestRDMAServer_ListAndWatch_ZeroPair(t *testing.T) {
 			&workercore.DeviceInterfaceLink{State: workercore.DeviceInterfaceLinkStateUnverified})))}
 	resp, err := rdmaTestServer(t, workercore.DeviceAllocationModeShared, rec).getListAndWatchResponse(context.Background())
 	require.NoError(t, err)
-	require.Len(t, resp.Devices, nodefeature.SharedResourceMaxSize)
+	require.Len(t, resp.Devices, nodefeature.RDMAEndpointPoolSize)
 	for _, d := range resp.Devices {
 		assert.Equal(t, deviceplugin.Healthy, d.Health)
 	}
@@ -377,7 +361,7 @@ func TestRDMAServer_ListAndWatch_LinkGate(t *testing.T) {
 
 			wantCounts := map[workercore.DeviceAllocationMode]int{
 				workercore.DeviceAllocationModeExclusive: 1,
-				workercore.DeviceAllocationModeShared:    nodefeature.SharedResourceMaxSize,
+				workercore.DeviceAllocationModeShared:    nodefeature.RDMAEndpointPoolSize,
 			}
 			for mode, wantCount := range wantCounts {
 				resp, err := rdmaTestServer(t, mode, rec).getListAndWatchResponse(context.Background())
@@ -425,7 +409,7 @@ func TestRDMAServer_ListAndWatch_Topology(t *testing.T) {
 		devices := sharedOver(t,
 			wholeFunctionIface("ib0", "0", "mlx5_0", nil),
 			wholeFunctionIface("eth1", "1", "rxe0_eth1", nil))
-		require.Len(t, devices, 2*nodefeature.SharedResourceMaxSize)
+		require.Len(t, devices, 2*nodefeature.RDMAEndpointPoolSize)
 		for _, d := range devices {
 			want := int64(1)
 			if strings.HasPrefix(d.ID, "ib0:") {
@@ -505,11 +489,11 @@ func TestRDMAServer_ListAndWatch_IgnoresAllocationState(t *testing.T) {
 
 	rec := &DevicesReconciler{NodeName: nodeName, Client: nodeFixture(devs)}
 	shared := rdmaTestServer(t, workercore.DeviceAllocationModeShared, rec)
-	sliced := rdmaTestServer(t, workercore.DeviceAllocationModeSliced, rec)
+	exclusive := rdmaTestServer(t, workercore.DeviceAllocationModeExclusive, rec)
 
 	beforeShared, err := shared.getListAndWatchResponse(context.Background())
 	require.NoError(t, err)
-	beforeSliced, err := sliced.getListAndWatchResponse(context.Background())
+	beforeExclusive, err := exclusive.getListAndWatchResponse(context.Background())
 	require.NoError(t, err)
 
 	// ...an in-process reservation of the same shape, which also fires the notifier broadcast...
@@ -523,15 +507,15 @@ func TestRDMAServer_ListAndWatch_IgnoresAllocationState(t *testing.T) {
 
 	afterShared, err := shared.getListAndWatchResponse(context.Background())
 	require.NoError(t, err)
-	afterSliced, err := sliced.getListAndWatchResponse(context.Background())
+	afterExclusive, err := exclusive.getListAndWatchResponse(context.Background())
 	require.NoError(t, err)
 
 	assert.Equal(t, beforeShared, afterShared, "the ledger hold changed the shared advertisement")
-	assert.Equal(t, beforeSliced, afterSliced, "the reservation or the sweep changed the sliced advertisement")
+	assert.Equal(t, beforeExclusive, afterExclusive, "the reservation or the sweep changed the exclusive advertisement")
 	for _, d := range afterShared.Devices {
 		assert.Equal(t, deviceplugin.Healthy, d.Health)
 	}
-	for _, d := range afterSliced.Devices {
+	for _, d := range afterExclusive.Devices {
 		assert.Equal(t, deviceplugin.Healthy, d.Health)
 	}
 }
@@ -674,7 +658,7 @@ func TestRDMAServer_ListAndWatch_SendsUpdateOnBroadcast(t *testing.T) {
 	// The initial response lands before any broadcast does.
 	select {
 	case resp := <-sent:
-		require.Len(t, resp.Devices, nodefeature.SharedResourceMaxSize)
+		require.Len(t, resp.Devices, nodefeature.RDMAEndpointPoolSize)
 	case <-time.After(15 * time.Second):
 		t.Fatal("no initial list and watch response")
 	}
@@ -690,7 +674,7 @@ func TestRDMAServer_ListAndWatch_SendsUpdateOnBroadcast(t *testing.T) {
 	broadcast()
 	select {
 	case resp := <-sent:
-		require.Len(t, resp.Devices, nodefeature.SharedResourceMaxSize)
+		require.Len(t, resp.Devices, nodefeature.RDMAEndpointPoolSize)
 	case <-time.After(15 * time.Second):
 		t.Fatal("no list and watch response after the broadcast")
 	}
@@ -710,12 +694,12 @@ func TestRDMAServer_ListAndWatch_SendsUpdateOnBroadcast(t *testing.T) {
 	assert.Zero(t, len(rec.notifiers), "the stream kept its subscription after returning")
 }
 
-// TestRDMAServer_Start_RegistersAllFourSockets proves the four servers and an accelerator
+// TestRDMAServer_Start_RegistersEverySocket proves the three RDMA servers and an accelerator
 // neighbor can serve the one plugin directory at once: each registers its own resource under its
 // own socket, and a socket collision would fail a generation's listen and with it the
 // registration. The resource names are asserted as literals, never recomposed from the constants
-// the implementation uses.
-func TestRDMAServer_Start_RegistersAllFourSockets(t *testing.T) {
+// the implementation uses, so a key that changes shape has to be changed here too.
+func TestRDMAServer_Start_RegistersEverySocket(t *testing.T) {
 	const nodeName = "node-rdma-reg"
 
 	dir := pluginDir(t)
@@ -760,12 +744,14 @@ func TestRDMAServer_Start_RegistersAllFourSockets(t *testing.T) {
 	}
 
 	// The accelerator neighbor sharing the directory. Its socket is a manufacturer's, so its
-	// presence beside the four is what makes the collision check meaningful.
+	// presence beside the RDMA ones is what makes the collision check meaningful.
 	startResourceServer(t, kubeSocket)
 
+	wantRegistrations := len(rdmaServedModes) + 1
 	require.Eventually(t, func() bool {
-		return len(kubelet.registrations()) == 5
-	}, 15*time.Second, 50*time.Millisecond, "the four RDMA servers and the accelerator neighbour never all registered")
+		return len(kubelet.registrations()) == wantRegistrations
+	}, 15*time.Second, 50*time.Millisecond,
+		"the RDMA servers and the accelerator neighbour never all registered")
 
 	// Stopping one server exercises the lifecycle contract an aggregator holds: Stop ends the
 	// serving loop, and a Start that was canceled by nothing but the Stop returns cleanly.
@@ -782,7 +768,6 @@ func TestRDMAServer_Start_RegistersAllFourSockets(t *testing.T) {
 	wantNames := sets.New(
 		"device.gpustack.ai/rdma",
 		"device.gpustack.ai/rdma.shared",
-		"device.gpustack.ai/rdma.sliced",
 		"device.gpustack.ai/rdma.partitioned",
 		"nvidia.com/gpu.sliced",
 	)
@@ -793,5 +778,5 @@ func TestRDMAServer_Start_RegistersAllFourSockets(t *testing.T) {
 		gotEndpoints.Insert(req.GetEndpoint())
 	}
 	assert.Equal(t, wantNames, gotNames)
-	assert.Len(t, gotEndpoints, 5, "each server must own its own socket beside kubelet's")
+	assert.Len(t, gotEndpoints, 4, "each server must own its own socket beside kubelet's")
 }

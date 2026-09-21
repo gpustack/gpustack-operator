@@ -50,8 +50,8 @@ func endpointOf(iface *workercore.DeviceInterface, endpoint string) Resource {
 // virtual function one endpoint: the node was put into that partitioned state before this process
 // started and nothing here can change it at run time, so the interface does not also serve the
 // whole-function modes. Every other interface — a physical function with zero virtual functions
-// configured, or not a physical function at all — serves Exclusive, Shared and Sliced, itself the
-// one endpoint.
+// configured, or not a physical function at all — serves Exclusive and Shared, itself the one
+// endpoint.
 //
 // Being a physical function and having virtual functions configured are separate facts in the
 // record, and both are read: deciding the branch from the virtual-function count alone would send
@@ -89,8 +89,7 @@ func rdmaEndpoints(iface *workercore.DeviceInterface, mode workercore.DeviceAllo
 		return endpoints
 
 	case workercore.DeviceAllocationModeExclusive,
-		workercore.DeviceAllocationModeShared,
-		workercore.DeviceAllocationModeSliced:
+		workercore.DeviceAllocationModeShared:
 		if partitioned || iface.RDMADevice == "" {
 			return nil
 		}
