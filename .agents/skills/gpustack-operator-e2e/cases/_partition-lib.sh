@@ -578,6 +578,40 @@ pod_unexpected_admission() {
   [ "${r:-0}" = 0 ] && echo "" || echo "$r"
 }
 
+# pod_failure_shape <pod> — WHERE a failed Pod failed, which UnexpectedAdmissionError alone cannot
+# say. Prints one of:
+#
+#   admission  no allocation record was ever written, so the plugin refused before actuating anything.
+#              This is the shape UnexpectedAdmissionError reports.
+#   start      an allocation record exists and names hardware, but no container ever started. The
+#              plugin granted a device the runtime could not then resolve.
+#   exit       an allocation record exists and a container ran and then exited non-zero. The workload's
+#              own failure, not the device path's.
+#   none       the Pod is not in a terminal failure.
+#   ?          the Pod could not be read; a caller must not fold this into "it did not happen".
+#
+# The distinction is load-bearing and was measured: a reclaim that destroys a partition an allocation
+# has just granted produces "start", and produces ZERO UnexpectedAdmissionError events, because the
+# admission succeeded. A check counting only that event reports a clean run while every replacement is
+# dying. Counting failures without saying where they happened cannot separate "the node advertised room
+# it did not have" from "the room was granted and then taken away".
+pod_failure_shape() {
+  kubectl -n default get pod "$1" -o json 2>/dev/null | ANNO="$ANNO" python3 -c "
+import json,sys,os
+try: o=json.load(sys.stdin)
+except Exception: print('?'); sys.exit(0)
+st=o.get('status',{})
+if st.get('phase') not in ('Failed',): print('none'); sys.exit(0)
+ann=(o.get('metadata',{}).get('annotations',{}) or {}).get(os.environ['ANNO'],'')
+if not ann: print('admission'); sys.exit(0)
+for cs in st.get('containerStatuses',[]) or []:
+    t=(cs.get('state',{}) or {}).get('terminated',{}) or {}
+    # startedAt is set once the runtime has the container running; a create that failed never sets it.
+    if t and not t.get('startedAt'): print('start'); sys.exit(0)
+print('exit')
+" || echo "?"
+}
+
 # workload_refusal <pod> — the Pod's own Kueue Workload verdict, when an AdmissionCheck has actually
 # rendered one: "admission-check(<name>/<state>)" for Retry or Rejected, empty otherwise. This is the
 # product saying "I refuse to admit this", so it is conclusive the moment it appears.

@@ -16,6 +16,13 @@
 #              The guarantee is CONSTRUCTIVE, not lucky: each family's token pool is advertised only by
 #              the cards that can serve it, and the partition family's Allocate picks the card itself.
 #              So the case runs several rounds and requires every one of them to place correctly.
+#              What the rounds do NOT cover: each one waits for the cards to go idle before the next
+#              begins, so a round never asks for a slot whose predecessor is still being reclaimed.
+#              That is deliberate -- placement is what is under test here, and starting a round inside
+#              the reclaim window would make it fail for a reason that has nothing to do with the card
+#              populations. It does mean repetition here buys sampling, not extra coverage: reuse of a
+#              just-freed slot belongs to case-31, and this case stayed green throughout a defect that
+#              destroyed every such reuse.
 # Environment: A reachable cluster whose active context is the GPU cluster, a node with at least TWO
 #              nvidia cards of one model where at least one card can be put into a partitioning mode,
 #              AND SSH to that node (sudo nvidia-smi) supplied via MIG_NODE_SSH=<user@host>. It EXITS 2
