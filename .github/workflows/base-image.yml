@@ -19,6 +19,7 @@ on:
         required: true
         type: choice
         options:
+          - llm-router
           - mirrored-mooncake
           - ssh-server
           - thead-ppu-devel
@@ -139,8 +140,11 @@ jobs:
           #
           #   - mirrored-mooncake: compiles the store from source for two architectures, and the
           #     parallelism is bounded by memory rather than by cores.
+          #   - llm-router: compiles three routers from three separate upstream sources, two of them
+          #     Rust release builds, so it is the sum of three from-source builds rather than one.
           #
           case "${INPUT_REPOSITORY}" in
+            llm-router) HEAVY="true" ;;
             mirrored-mooncake) HEAVY="true" ;;
           esac
           CHANGED="$(git show --name-only --format='' HEAD)"
