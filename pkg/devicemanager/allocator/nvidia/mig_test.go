@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
@@ -801,4 +803,38 @@ func TestMigMarker_LegacyJSONRoundTrip(t *testing.T) {
 				"the vocabulary rename must not have reached the on-disk format")
 		})
 	}
+}
+
+// TestActuatePhysicalSliced_RecordsTheGrantedPartitionIdentity pins that an allocation says which
+// partition it handed the container. The identity travels to the container as an environment value
+// and nowhere else, so when the container engine then refuses to resolve it there is no record of
+// what was granted, by which accelerator, or whether it was freshly carved or adopted — and the two
+// possible faults, a partition destroyed after the grant and one the engine cannot address, are
+// told apart by exactly that.
+func TestActuatePhysicalSliced_RecordsTheGrantedPartitionIdentity(t *testing.T) {
+	const profile = "1g.10gb"
+	redirectLogicalSliceDirs(t)
+	drv := newFakeMigDriver()
+	drv.possible[testGPUUUID0] = evenSlots()
+
+	var lines []string
+	logger := funcr.New(func(prefix, args string) {
+		lines = append(lines, prefix+args)
+	}, funcr.Options{})
+	s := &server{ResourceServer: deviceplugin.ResourceServer{Logger: logger}, mig: drv}
+
+	devs := migDevices(profile, 1, 2, testGPUUUID0)
+	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "ns", UID: types.UID("pod-1")}}
+	ctr := &core.Container{Name: "c"}
+	allocated := map[deviceplugin.Resource]int32{{Group: "h100", Device: testGPUUUID0}: 200000}
+
+	out, err := s.ActuatePhysicalSliced(context.Background(), pod, ctr, devs, allocated, profile)
+	require.NoError(t, err)
+	granted := out.IDs[deviceplugin.Resource{Group: "h100", Device: testGPUUUID0}]
+	require.NotEmpty(t, granted)
+
+	joined := strings.Join(lines, "\n")
+	assert.Contains(t, joined, granted, "the granted partition identity is recorded")
+	assert.Contains(t, joined, testGPUUUID0, "the accelerator it was carved on is recorded")
+	assert.Contains(t, joined, "created", "how the partition was obtained is recorded")
 }

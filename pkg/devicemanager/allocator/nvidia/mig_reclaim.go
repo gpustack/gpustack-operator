@@ -235,9 +235,14 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 }
 
 // destroyPod tears down one dead pod's partitions: for each marker, destroy the GPU instance
-// (under that accelerator's lock) and remove only that marker file. Three guards precede the destroy:
+// (under that accelerator's lock) and remove only that marker file. Four guards precede the destroy:
 //   - attribution self-check — if a running Pod claims the placement, the marker is
 //     mis-attributed (a dead pod's marker over a live pod's instance), so it is never destroyed;
+//   - ownership check — if another Pod's marker claims the GI id, this Pod's record has been
+//     superseded and only that record is dropped. It is the guard that holds when a freed slot is
+//     re-taken, where every identity field below is reproduced; it is applied inside the
+//     accelerator's lock, over markers re-scanned there, because a marker is written synchronously
+//     while the claims the self-check above reads reach this loop through an informer;
 //   - process check — a partition running a process is left alone, marker and all, so a later pass
 //     finds it again;
 //   - identity check — the GI id must still carry the instance the marker recorded, compared
@@ -317,6 +322,20 @@ func (r *reclaimer) destroyPod(uid string, entries []markerEntry, claims map[str
 // group, so nothing outside this loop can change the accelerator between the markers — only this
 // loop's own destroys do, and each marker is verified against the identity it recorded rather than
 // against the residue of a sibling's destroy.
+//
+// The markers are re-scanned inside the lock too, and a GPU instance another Pod's marker claims is
+// never destroyed. That guard, not the identity check below, is what holds when a freed slot is
+// re-taken: the slot pick is deterministic (lowest free first) and a MIG-device UUID is name-based,
+// so the partition created at a just-freed slot carries the same ids, the same placement AND the
+// same identifier as the one that left it — every field the identity check has, however often the
+// accelerator is re-read here. Only a second claim on the id tells the two apart.
+//
+// That claim is read from the markers and from nothing else. The annotation-derived claims the
+// caller checked reach this loop through an informer, and so does the pass's live pod-UID set, while
+// a marker is written synchronously by the Allocate that took the partition, under this same
+// accelerator lock. Reading the re-scanned markers through either of the other two would be reading
+// a current record through a stale filter — measured at a third of a second between an allocation
+// writing its marker and this loop acting on the record it superseded.
 func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []markerEntry) (done bool, blocked error) {
 	unlock := lockCard(card)
 	defer unlock()
@@ -327,12 +346,28 @@ func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []mar
 			"podUID", uid, "card", card, "partitions", len(entries))
 		return false, nil
 	}
+	scanned, corrupt := scanMarkers(r.podsDir)
+	if supersedingCorruptOnCard(corrupt, r.podsDir, card, uid) {
+		// A corrupt record may be the very claim that supersedes this pod's, and nothing in it can be
+		// read to say which gpu instance it names. Holding the whole accelerator for this pass is the
+		// only sound answer: destroying anything here risks tearing down a partition that record owns.
+		// Not an error — the hold clears once the reclaim loop retires the file, which it does on the
+		// evidence that the pod its path names is gone.
+		r.logger.Info("reclaim: a corrupt marker on this card may claim one of these instances, holding the card for this pass",
+			"podUID", uid, "card", card, "partitions", len(entries))
+		return false, nil
+	}
+	superseded := supersedingGiIDsOnCard(scanned, card, uid)
 
 	done = true
 	for i := range entries {
 		m := entries[i].marker
 		inst, present := findLiveGi(instances, m.GiID)
 		switch {
+		case present && superseded[m.GiID]:
+			r.logger.Info("reclaim: another pod's marker owns this gpu instance, dropping the superseded marker without destroy",
+				"podUID", uid, "card", card, "giID", m.GiID, "migUUID", m.MigUUID,
+				"placement", migPlacement{Start: m.Start, Length: m.Length})
 		case present && !inst.matchesMarker(m):
 			r.logger.Info("reclaim: gpu-instance id reused by a different instance, dropping stale marker without destroy",
 				"podUID", uid, "card", card, "giID", m.GiID,
@@ -357,6 +392,13 @@ func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []mar
 				r.logger.Error(derr, "reclaim: destroy gpu instance", "podUID", uid, "card", card, "giID", m.GiID)
 				continue
 			}
+			// Name the identity that was torn down, not only the accelerator it sat on. A partition
+			// that vanishes between an allocation and the container's start is either one this loop
+			// destroyed or one the container engine could not address, and matching this identity
+			// against the one the allocation recorded is what tells those two apart.
+			r.logger.Info("reclaim: destroyed a dead pod's partition",
+				"podUID", uid, "card", card, "giID", m.GiID, "ciID", m.CiID, "migUUID", m.MigUUID,
+				"placement", migPlacement{Start: m.Start, Length: m.Length})
 		}
 		// The instance is destroyed, was already gone, or belongs to somebody else: drop the marker.
 		if !r.removeMarker(entries[i].path) {
@@ -439,10 +481,78 @@ func findLiveGi(instances []migInstance, giID uint32) (migInstance, bool) {
 	return migInstance{}, false
 }
 
-// matchesMarker reports whether a live instance is still the one a marker recorded. The identity
-// string alone would do against a self-consistent driver; the placement sits beside it as an
-// inconsistency trap, since an instance matching one while contradicting the other is exactly the
-// unprovable state a destroy must refuse rather than resolve.
+// supersedingGiIDsOnCard returns the GPU-instance ids on the accelerator that some OTHER Pod's
+// marker claims, given the Pod whose records are being reclaimed. A second claim on one id means the
+// record being acted on is no longer the current one: markers are written by the Allocate that takes
+// a partition, so the id was handed out again after this Pod's record was written.
+//
+// Liveness is deliberately not a term here. Whether the other Pod is still running is that Pod's own
+// reclaim decision, taken under its own debounce with its own evidence; asking it here would mean
+// reading the pass's live pod-UID set, which is captured when the pass opens and comes from an
+// informer, so an allocation that has just written its marker is routinely missing from it. Ownership
+// would then be decided by a current record read through a stale filter. This reads the markers only,
+// and they are written synchronously under the same accelerator lock this runs beneath.
+//
+// It converges rather than leaking: the Pod being processed always drops its own superseded record,
+// so two records claiming one id cannot both survive a pass, and the last one standing is destroyed
+// on the ordinary path.
+func supersedingGiIDsOnCard(entries []markerEntry, cardUUID, reclaimingPodUID string) map[uint32]bool {
+	claimed := make(map[uint32]bool)
+	for i := range entries {
+		m := entries[i].marker
+		if m.Card == cardUUID && m.PodUID != reclaimingPodUID {
+			claimed[m.GiID] = true
+		}
+	}
+	return claimed
+}
+
+// supersedingCorruptOnCard reports whether a corrupt marker could be a claim, by a pod other than the
+// one being reclaimed, on something this accelerator holds. It is the unreadable half of the question
+// supersedingGiIDsOnCard answers from the parseable markers, and it has to be asked separately: a
+// corrupt file's contents are gone, so the gpu-instance id it named cannot be recovered and no
+// per-instance guard can be built from it. Only a per-accelerator hold covers it.
+//
+// The path is still evidence even when the contents are not. It names the accelerator and the pod, so
+// three cases separate:
+//
+//   - the path names no accelerator: the scope of what is unknown is itself unknown, so it counts
+//     against every accelerator, exactly as adoption and the drained verdict already treat it;
+//   - the path names this accelerator and another pod, or no pod at all: it may be the record that
+//     supersedes this one, so the destroy is held;
+//   - the path names this accelerator and the pod being reclaimed: its own unreadable record is not
+//     somebody else's claim, and counting it would let a pod's own corrupt file keep its partitions
+//     from ever being reclaimed.
+func supersedingCorruptOnCard(corrupt []string, podsDir, cardUUID, reclaimingPodUID string) bool {
+	for _, p := range corrupt {
+		card, ok := cardFromMarkerPath(p)
+		if !ok {
+			return true
+		}
+		if card != cardUUID {
+			continue
+		}
+		if owner, ok := podUIDFromMarkerPath(podsDir, p); !ok || owner != reclaimingPodUID {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesMarker reports whether a live instance carries the identity a marker recorded. It tells a
+// GPU-instance id NVML handed to a DIFFERENT partition from one still holding the recorded partition,
+// and nothing more.
+//
+// It cannot tell a partition apart from its own successor at the same placement, and neither field
+// helps: a MIG-device UUID is name-based — derived from the parent accelerator and the instance's own
+// identity — so a destroy followed by a create at the same slot yields the same string, and the
+// placement is equal for the same reason rather than as a check on it. Whether the instance found is
+// the one that was granted is therefore not an identity question at all; supersedingGiIDsOnCard
+// answers it, by asking whether another pod's marker has since claimed the id.
+//
+// The recorded identifier's own type says this too, on AllocatedPhysicalID: treat it as a fast way to
+// find the partition, never as proof that the one found is the one that was granted. This function is
+// the find; it is not the proof.
 func (in migInstance) matchesMarker(m migMarker) bool {
 	return in.UUID == m.MigUUID &&
 		in.Placement.Start == m.Start &&
@@ -612,6 +722,12 @@ func (r *reclaimer) destroyOrphans(missKey, card string, orphans []migInstance) 
 			r.logger.Error(derr, "reclaim: destroy orphan gpu instance on drained card", "card", card, "giID", inst.GiID)
 			continue
 		}
+		// Named for the same reason a dead pod's destroy is: this sweep takes partitions no record
+		// claims, so it is the one that can take a partition an allocation has just granted but
+		// whose marker this pass did not see.
+		r.logger.Info("reclaim: destroyed a marker-less partition on a drained card",
+			"card", card, "giID", inst.GiID, "ciID", inst.CiID, "migUUID", inst.UUID,
+			"placement", inst.Placement)
 		destroyed++
 	}
 

@@ -10,12 +10,17 @@
 #              annotations, so a deleted Pod's slot reappears in the per-profile key and in the healthy
 #              token count the moment the Pod is gone — while the reclaimer only destroys the instance
 #              after several consecutive absent sightings on its resync cadence. A replacement
-#              scheduled inside that window meets an instance that still exists and is still bound, so
-#              it can neither adopt nor place it, and its allocation fails closed. The containment is
-#              that the request is retried and the window closes on its own; the failure mode worth
-#              catching is a request that NEVER converges. So this case deletes a partition Pod, asks
-#              for the same profile again immediately, retries the way a controller would, and records
-#              how long convergence took and how many attempts it cost.
+#              scheduled inside that window meets an instance that still exists, and what it then gets
+#              is MEASURED here rather than assumed: the allocation may be refused, or it may be
+#              granted that very instance which the reclaimer then destroys underneath the starting
+#              container. Both cost a retry, they are told apart by WHERE the attempt died, and only
+#              the first raises an UnexpectedAdmissionError -- the second leaves that count at zero.
+#              So this case records the shape of every failed attempt, not just how many there were.
+#              The containment is that the request is retried and the window closes on its own; the
+#              failure mode worth catching is a request that NEVER converges. So this case deletes a
+#              partition Pod, asks for the same profile again immediately, retries the way a controller
+#              would, and records how long convergence took, how many attempts it cost, and where each
+#              failed attempt died.
 # Environment: A reachable cluster whose active context is the GPU cluster, an nvidia node with at
 #              least one card that can be put into a hardware partitioning mode, AND SSH to that node
 #              (sudo nvidia-smi) supplied via MIG_NODE_SSH=<user@host>. It EXITS 2 (input required)
@@ -90,6 +95,12 @@ delpod "$A"
 T0="$(date +%s)"
 ATTEMPTS=0
 UAE=0
+# Where the failed attempts died, tallied separately from UAE. A grant that is destroyed under the
+# starting container raises no admission event, so UAE stays 0 through exactly the failure this window
+# is most likely to produce; without this tally the run reads as clean.
+SHAPE_ADMISSION=0
+SHAPE_START=0
+SHAPE_OTHER=0
 OK=0
 WINNER=""
 while [ "$(( $(date +%s) - T0 ))" -lt "$BOUND" ]; do
@@ -107,7 +118,14 @@ while [ "$(( $(date +%s) - T0 ))" -lt "$BOUND" ]; do
   n="$(pod_unexpected_admission "$R")"
   [ -n "$n" ] && UAE=$((UAE + n))
   [ "$OK" = 1 ] && break
-  echo "[case-31]   attempt ${ATTEMPTS} did not run (phase=$(phase "$R"), held: $(held_reason "$R")) — retrying"
+  # Read the shape ONCE: the Pod is live and a second read can answer differently.
+  shape="$(pod_failure_shape "$R")"
+  case "$shape" in
+    admission) SHAPE_ADMISSION=$((SHAPE_ADMISSION + 1)) ;;
+    start)     SHAPE_START=$((SHAPE_START + 1)) ;;
+    *)         SHAPE_OTHER=$((SHAPE_OTHER + 1)) ;;
+  esac
+  echo "[case-31]   attempt ${ATTEMPTS} did not run (phase=$(phase "$R"), where=${shape}, held: $(held_reason "$R")) — retrying"
   delpod "$R"
   sleep 5
 done
@@ -119,7 +137,7 @@ if [ "$OK" = 1 ]; then
 else
   record FAIL "the replacement converges without intervention" "no same-profile replacement reached Running within ${BOUND}s over ${ATTEMPTS} attempt(s) — the window is supposed to close on its own"
 fi
-record PASS "OBSERVED: cost of the reclaim window" "attempts=${ATTEMPTS}, elapsed=${ELAPSED}s, terminal allocation failures along the way=${UAE} (a first attempt that runs immediately means the window was already closed on this cadence)"
+record PASS "OBSERVED: cost of the reclaim window" "attempts=${ATTEMPTS}, elapsed=${ELAPSED}s, refused before actuating=${SHAPE_ADMISSION} (UnexpectedAdmissionError events=${UAE}), granted then destroyed under the container=${SHAPE_START}, other=${SHAPE_OTHER} (a first attempt that runs immediately means the window was already closed on this cadence; a non-zero 'granted then destroyed' means the window handed out a partition it went on to reclaim, which no admission counter records)"
 
 part_results "A same-profile replacement scheduled inside the reclaim window"
 
@@ -128,15 +146,18 @@ echo "---- fold back into the spec: reclaim-window replacement ----"
 echo "profile          : ${MID}"
 echo "attempts         : ${ATTEMPTS}"
 echo "elapsed          : ${ELAPSED}s (bound ${BOUND}s)"
-echo "terminal failures: ${UAE} UnexpectedAdmissionError event(s) across the attempts"
+echo "refused          : ${SHAPE_ADMISSION} attempt(s) never actuated (${UAE} UnexpectedAdmissionError event(s))"
+echo "granted then lost: ${SHAPE_START} attempt(s) were given a partition no container could then start on"
 echo "converged        : $([ "$OK" = 1 ] && echo yes || echo NO)"
 echo "-------------------------------------------------------------"
 
 if [ "$FAILS" -ne 0 ]; then
   echo
   echo "FAILED ${FAILS} check(s). The accounting frees a partition on Pod deletion while the reclaimer destroys"
-  echo "the instance a few resync passes later; a replacement inside that window fails closed and is retried,"
-  echo "and the window must close on its own. Diagnose:"
+  echo "the instance a few resync passes later; a replacement inside that window is retried, and the window must"
+  echo "close on its own. Read the shape line above before diagnosing: an attempt refused before actuating and an"
+  echo "attempt granted a partition that was then destroyed under it are different faults in different code."
+  echo "Diagnose:"
   echo "  ${MIG_NODE_SSH} sudo nvidia-smi mig -lgi"
   echo "  kubectl -n ${NS} logs ds/${DM_DS} --tail=300 | grep -i reclaim"
   echo "  kubectl get devices ${GPU_NODE} -o json | jq '.status.groups[].accelerators[] | {id, allocatedProfiles, remainingProfiles}'"

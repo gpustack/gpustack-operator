@@ -976,7 +976,7 @@ func (s *ResourceServer) candidateFeasible(
 				// there is nothing to test it against.
 				return true
 			}
-			candidates, _ := s.partitionCandidates(devs, occupied, profile)
+			candidates, _, _ := s.partitionCandidates(devs, occupied, profile)
 			_, placeable := device.SelectPartitionPlacements(candidates, 1)
 			return placeable
 		}
@@ -994,8 +994,9 @@ func (s *ResourceServer) partitionCandidates(
 	devs *workercore.Devices,
 	occupied Placements,
 	profile string,
-) ([]device.PartitionCandidate, map[string]Resource) {
+) ([]device.PartitionCandidate, map[string]Resource, []partitionExclusion) {
 	var candidates []device.PartitionCandidate
+	var excluded []partitionExclusion
 	byID := make(map[string]Resource)
 	for i := range devs.Spec.Groups {
 		grp := &devs.Spec.Groups[i]
@@ -1004,17 +1005,32 @@ func (s *ResourceServer) partitionCandidates(
 		}
 		for j := range grp.Accelerators {
 			acc := &grp.Accelerators[j]
-			if !device.IsPartitioned(acc.Status) || acc.Status.Unhealthy {
+			// An accelerator in no partitioning mode is outside this family's population rather
+			// than a rejected member of it, so it is passed over without a reason, exactly as the
+			// family's ListAndWatch passes over it.
+			if !device.IsPartitioned(acc.Status) {
+				continue
+			}
+			if acc.Status.Unhealthy {
+				excluded = append(excluded, partitionExclusion{Device: acc.ID, Reason: "is unhealthy"})
 				continue
 			}
 			possible := profilePlacements(acc.Status.PhysicalSliced.Profiles, profile)
 			if len(possible) == 0 {
+				excluded = append(excluded, partitionExclusion{
+					Device: acc.ID,
+					Reason: fmt.Sprintf("offers no placement for profile %q", profile),
+				})
 				continue
 			}
 			res := Resource{Group: grp.ID, Device: acc.ID}
 			// An accelerator another mode holds is not a candidate: the cross-mode invariant would
 			// reject the allocation right after the decision.
-			if held, _ := s.cardHeldInOtherMode(devs, res); held {
+			if held, mode := s.cardHeldInOtherMode(devs, res); held {
+				excluded = append(excluded, partitionExclusion{
+					Device: acc.ID,
+					Reason: fmt.Sprintf("is held in %s mode", mode),
+				})
 				continue
 			}
 			byID[res.String()] = res
@@ -1025,7 +1041,51 @@ func (s *ResourceServer) partitionCandidates(
 			})
 		}
 	}
-	return candidates, byID
+	return candidates, byID, excluded
+}
+
+// partitionExclusion records one partitioned accelerator a placement decision could not use, and
+// the state that kept it out.
+type partitionExclusion struct {
+	// Device is the accelerator's own id, which is what an operator has in hand on the node.
+	Device string
+	// Reason reads as the predicate of a sentence whose subject is the accelerator.
+	Reason string
+}
+
+// partitionRefusalDetail renders the state of every partitioned accelerator behind a refusal: the
+// ones the selector was never offered, with the check that kept them out, and the ones it was
+// offered, with what left them unusable.
+//
+// It exists because every cause reaches the identical verdict while taking a different repair — free
+// the accelerator's holder, fix the request or the detection that disagree about the profile, free an
+// instance — so a message carrying only the verdict sends its reader to the hardware, which will
+// agree with none of them and looks idle in the most misleading case. It is built only on the refusal
+// path, so the walk costs an allocation nothing.
+func partitionRefusalDetail(
+	candidates []device.PartitionCandidate, byID map[string]Resource, excluded []partitionExclusion,
+) string {
+	if len(candidates) == 0 && len(excluded) == 0 {
+		return "no accelerator on this node is in a partitioning mode"
+	}
+
+	parts := make([]string, 0, len(candidates)+len(excluded))
+	for i := range excluded {
+		parts = append(parts, excluded[i].Device+" "+excluded[i].Reason)
+	}
+	for i := range candidates {
+		id := byID[candidates[i].ID].Device
+		if device.PartitionCandidateFull(candidates[i]) {
+			parts = append(parts, fmt.Sprintf("%s every legal placement overlaps an occupied interval (occupied %v)",
+				id, candidates[i].Occupied))
+			continue
+		}
+		// One selection takes at most one instance per accelerator, so an accelerator with room to
+		// spare still cannot absorb a second instance of the same request.
+		parts = append(parts, id+" has a free placement but holds at most one instance of one request")
+	}
+
+	return strings.Join(parts, "; ")
 }
 
 // profilePlacements returns an accelerator's legal placements for one partition profile, or nil
@@ -1124,15 +1184,16 @@ func (s *ResourceServer) choosePartitionCards(
 		cardTokens, placements = priorPartitionTokens(prior)
 	}
 	if cardTokens == nil {
-		candidates, byID := s.partitionCandidates(d.Devices, occupied, profile)
+		candidates, byID, excluded := s.partitionCandidates(d.Devices, occupied, profile)
 		selections, placed := device.SelectPartitionPlacements(candidates, len(deviceIDs))
 		if !placed {
+			detail := partitionRefusalDetail(candidates, byID, excluded)
 			s.Logger.Error(nil, "no card can host the requested partition profile",
 				"pod", kubemeta.GetNamespacedNameKey(d.Pod), "profile", profile,
-				"instances", len(deviceIDs))
+				"instances", len(deviceIDs), "candidates", len(candidates), "cards", detail)
 			return nil, nil, unitsPerToken, grpcstatus.Errorf(grpccodes.ResourceExhausted,
-				"no card on this node can host %d instance(s) of partition profile %q",
-				len(deviceIDs), profile)
+				"no card on this node can host %d instance(s) of partition profile %q: %s",
+				len(deviceIDs), profile, detail)
 		}
 		cardTokens, placements = partitionTokens(selections, byID)
 	}

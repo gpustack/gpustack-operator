@@ -4459,3 +4459,68 @@ func TestResourceServer_Retire_LeavesALaterGenerationAlone(t *testing.T) {
 		t.Error("Start did not return after its context was canceled")
 	}
 }
+
+// TestResourceServer_ChoosePartitionCards_RefusalNamesEachCardsReason pins what a partition
+// refusal has to say. Every reachable cause reaches the same verdict — an accelerator another
+// mode holds, one that offers no such profile, one already carved to capacity — and they need
+// different repairs: delete the holder, fix the request or the detection, free an instance. A
+// message carrying only the verdict sends a reader to the hardware, which will agree with none of
+// them, so each examined accelerator is named together with the state it was in.
+func TestResourceServer_ChoosePartitionCards_RefusalNamesEachCardsReason(t *testing.T) {
+	const nodeName = "node-partition-refusal"
+	const profile = "1g.10gb"
+
+	slot := func(start, length int32) workercore.AcceleratorPlacement {
+		return workercore.AcceleratorPlacement{Start: start, Length: length}
+	}
+	heldDevices := func() *workercore.Devices {
+		devs := partitionedDevices(nodeName, partitionedCard("dev-0", 0, profile, slot(0, 2)))
+		devs.Status = workercore.DevicesStatus{Groups: []workercore.DevicesAllocationGroup{{
+			ID:           "grp-0",
+			Manufacturer: nodefeature.ManufacturerNVIDIA,
+			Accelerators: []workercore.AcceleratorAllocation{
+				{ID: "dev-0", Mode: workercore.DeviceAllocationModeExclusive},
+			},
+		}}}
+		return devs
+	}
+
+	cases := []struct {
+		name     string
+		devices  *workercore.Devices
+		occupied Placements
+		want     []string
+	}{
+		{
+			name:    "an accelerator another mode holds",
+			devices: heldDevices(),
+			want:    []string{"dev-0", "held in Exclusive mode"},
+		},
+		{
+			name:    "an accelerator that does not offer the profile",
+			devices: partitionedDevices(nodeName, partitionedCard("dev-0", 0, "7g.80gb", slot(0, 8))),
+			want:    []string{"dev-0", `offers no placement for profile "1g.10gb"`},
+		},
+		{
+			name:     "an accelerator carved to capacity",
+			devices:  partitionedDevices(nodeName, partitionedCard("dev-0", 0, profile, slot(0, 2))),
+			occupied: Placements{{Group: "grp-0", Device: "dev-0"}: {slot(0, 8)}},
+			want:     []string{"dev-0", "every legal placement overlaps an occupied interval"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pod := partitionPod(nodeName, "p", "uid-p", profile, 0)
+			rec := &DevicesReconciler{NodeName: nodeName, Client: nodeFixture(c.devices, pod)}
+			s := partitionServer(rec, stubResponder{})
+
+			d := &_AllocationDecision{Pod: pod, Container: &pod.Spec.Containers[0], Devices: c.devices}
+			_, _, _, err := s.choosePartitionCards(d, c.occupied, []string{"grp-0:dev-0:0000"}, 1, false)
+			require.Error(t, err)
+			for _, want := range c.want {
+				assert.Contains(t, err.Error(), want)
+			}
+		})
+	}
+}
