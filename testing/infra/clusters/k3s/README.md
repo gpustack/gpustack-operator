@@ -496,6 +496,7 @@ Things the module does not do:
 | `mirror` | Where the cache is filled from: `""` (github.com / get.k3s.io) or `cn` (rancher-mirror.rancher.cn); requires `image_archives_dir` | `""` |
 | `system_default_registry` | `--system-default-registry` on the server installs, e.g. `registry.rancher.cn`; a host[:port], no path; the k3s agent has no such flag. Unset follows `mirror`; `""` passes nothing | unset (`cn` derives `registry.rancher.cn`) |
 | `registry_mirrors` | Per-registry mirror endpoints written to the node's `registries.yaml`, tried in order. Unset follows `mirror`; `{}` writes no file | unset (`cn` derives community docker.io proxies) |
+| `kubelet_config_dropins` | `KubeletConfiguration` drop-in files (file name -> YAML content) written to a module-owned directory and merged through a `config-dir` kubelet-arg in the node's config; `{}` writes nothing. Changing a set value reinstalls the node and wipes etcd | `{}` |
 | `switch_kube_context` | Let the merged context become the current one; `false` restores the previous one | `true` |
 
 ## Outputs

@@ -331,6 +331,35 @@ locals {
   })
   write_registries_yaml = length(local.registry_mirrors) == 0 ? "sudo rm -f /etc/rancher/rke2/registries.yaml" : "printf '%s' '${local.registries_yaml}' | sudo tee /etc/rancher/rke2/registries.yaml > /dev/null"
 
+  # The module-owned kubelet drop-in directory, NOT the distribution-managed
+  # /var/lib/rancher/rke2/agent/etc/kubelet.conf.d: that tree is regenerated on every agent start,
+  # so a file dropped into it may not survive. The config.yaml kubelet-arg below points the
+  # kubelet's config-dir here instead; at startup the distribution copies this directory into the
+  # managed tree, ordered after its generated defaults, so these values win. See the variable for
+  # the full reasoning.
+  kubelet_dropins_dir = "/etc/rancher/rke2/kubelet.conf.d"
+
+  # kubelet-arg carrying the config-dir is an Agent/Runtime setting, valid on servers and agents
+  # alike, so it goes into every node's config.yaml. An empty map writes no key, exactly as
+  # before.
+  kubelet_arg_lines = length(var.kubelet_config_dropins) == 0 ? [] : [
+    "kubelet-arg:",
+    # config-dir, not --config-dir: kubelet-arg values take no flag prefix.
+    "  - config-dir=${local.kubelet_dropins_dir}",
+  ]
+
+  # Same write-or-remove shape as write_registries_yaml above, and for the same reason: a
+  # directory left behind after the map goes empty would keep feeding the kubelet settings the
+  # caller has since dropped. The whole directory is rewritten rather than file-by-file, so a
+  # renamed key leaves no stale file behind. Contents are base64-encoded for the trip: the YAML is
+  # the caller's text spliced into a single-quoted command, and an encoded blob cannot break the
+  # quoting. Like write_registries_yaml here this carries no `|| exit 1`: it is spliced into the
+  # same `set -e` heredoc.
+  write_kubelet_config_dropins = length(var.kubelet_config_dropins) == 0 ? "sudo rm -rf '${local.kubelet_dropins_dir}'" : join("\n", concat(
+    ["sudo rm -rf '${local.kubelet_dropins_dir}' && sudo mkdir -p '${local.kubelet_dropins_dir}'"],
+    [for name, content in var.kubelet_config_dropins : "echo '${base64encode(content)}' | base64 -d | sudo tee '${local.kubelet_dropins_dir}/${name}' > /dev/null"],
+  ))
+
   # An Agent/Runtime setting per the RKE2 reference, valid on servers and agents alike, so it
   # goes into every node's config.yaml. Empty means the key is not written, exactly as before.
   # The value is double-quoted: a bracketed IPv6 literal is otherwise a YAML flow sequence.
@@ -346,6 +375,7 @@ locals {
   first_server_config = join("\n", concat(
     ["token: ${random_string.token.result}"],
     local.server_common,
+    local.kubelet_arg_lines,
     local.tls_san_lines[local.first_server.host],
     local.node_internal_ip_lines[local.first_server.host],
     local.external_ip_lines[local.first_server.host],
@@ -356,6 +386,7 @@ locals {
   server_join_config = { for host, s in local.join_servers : host => join("\n", concat(
     ["token: ${random_string.token.result}", "server: ${local.join_url}"],
     local.server_common,
+    local.kubelet_arg_lines,
     local.tls_san_lines[host],
     local.node_internal_ip_lines[host],
     local.external_ip_lines[host],
@@ -368,6 +399,7 @@ locals {
   agent_config = { for host, a in local.agent_hosts : host => join("\n", concat(
     ["token: ${random_string.token.result}", "server: ${local.join_url}"],
     local.system_default_registry_lines,
+    local.kubelet_arg_lines,
     local.node_internal_ip_lines[host],
     local.external_ip_lines[host],
   )) }
@@ -462,6 +494,7 @@ resource "null_resource" "server_init" {
     var.mirror == "" ? {} : { mirror = var.mirror },
     local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
     length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
+    length(var.kubelet_config_dropins) == 0 ? {} : { kubelet_config_dropins = jsonencode(var.kubelet_config_dropins) },
   )
 
   lifecycle {
@@ -542,6 +575,9 @@ resource "null_resource" "server_init" {
         printf '%s\n' '${local.first_server_config}' | sudo tee /etc/rancher/rke2/config.yaml > /dev/null
         # Beside it and before the start, which is when RKE2 reads the mirror endpoints.
         ${local.write_registries_yaml}
+        # The drop-in directory the config's config-dir kubelet-arg points at, also before the
+        # start: that is when its contents are copied into the managed tree.
+        ${local.write_kubelet_config_dropins}
         # Put the node's own password back before the service starts; see local.node_password_save.
         ${local.node_password_restore}
       EOT
@@ -619,6 +655,7 @@ resource "null_resource" "server_join" {
     var.mirror == "" ? {} : { mirror = var.mirror },
     local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
     length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
+    length(var.kubelet_config_dropins) == 0 ? {} : { kubelet_config_dropins = jsonencode(var.kubelet_config_dropins) },
   )
 
   lifecycle {
@@ -684,6 +721,9 @@ resource "null_resource" "server_join" {
         printf '%s\n' '${local.server_join_config[each.value.host]}' | sudo tee /etc/rancher/rke2/config.yaml > /dev/null
         # Beside it and before the start, which is when RKE2 reads the mirror endpoints.
         ${local.write_registries_yaml}
+        # The drop-in directory the config's config-dir kubelet-arg points at, also before the
+        # start: that is when its contents are copied into the managed tree.
+        ${local.write_kubelet_config_dropins}
         # Put the node's own password back before the service starts; see local.node_password_save.
         ${local.node_password_restore}
       EOT
@@ -747,6 +787,7 @@ resource "null_resource" "agent" {
     var.mirror == "" ? {} : { mirror = var.mirror },
     local.system_default_registry == "" ? {} : { system_default_registry = local.system_default_registry },
     length(local.registry_mirrors) == 0 ? {} : { registry_mirrors = jsonencode(local.registry_mirrors) },
+    length(var.kubelet_config_dropins) == 0 ? {} : { kubelet_config_dropins = jsonencode(var.kubelet_config_dropins) },
   )
 
   lifecycle {
@@ -811,6 +852,9 @@ resource "null_resource" "agent" {
         printf '%s\n' '${local.agent_config[each.value.host]}' | sudo tee /etc/rancher/rke2/config.yaml > /dev/null
         # Beside it and before the start, which is when RKE2 reads the mirror endpoints.
         ${local.write_registries_yaml}
+        # The drop-in directory the config's config-dir kubelet-arg points at, also before the
+        # start: that is when its contents are copied into the managed tree.
+        ${local.write_kubelet_config_dropins}
         # Put the node's own password back before the service starts; see local.node_password_save.
         ${local.node_password_restore}
       EOT
