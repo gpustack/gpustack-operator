@@ -113,7 +113,7 @@ zero VFs configured" and "not a PF at all" are two states and not one.
   to be rewritten.
 - **No cross-mode exclusion.** The accelerator side reports a card held in another mode as
   `Unhealthy` (`pkg/deviceplugin/server.go:202-222`), because a card handed to an opposite-mode Pod
-  fails `Allocate` permanently. **That does not transfer.** `Shared` and `Sliced` serving the same
+  fails `Allocate` permanently. **That does not transfer.** `Exclusive` and `Shared` serving the same
   HCA is the correct semantics, so importing the rule would manufacture a conflict that does not
   exist. The only exclusion that remains is `Partitioned` against the rest, and it is decided by the
   hardware rather than by bookkeeping — see [C1](#c1--the-mode-is-read-off-the-node-never-chosen).
@@ -142,7 +142,7 @@ Per interface in `Devices.spec.interfaces[]`, exactly one of two branches applie
 | the interface is… | it serves | its endpoints are |
 |---|---|---|
 | `sriov == true` **and** `len(virtualFunctions) > 0` | `Partitioned` only | each of its virtual functions |
-| anything else — a physical function with zero virtual functions configured, or not a physical function at all | `Exclusive`, `Shared`, `Sliced` | the interface itself |
+| anything else — a physical function with zero virtual functions configured, or not a physical function at all | `Exclusive`, `Shared` — and NEVER `Sliced`, which names no key at all ([C2](#c2--the-resource-names-and-what-1-means-in-each)) | the interface itself |
 
 A physical function that has virtual functions configured does **not** also serve the whole-function
 modes. That is the one exclusion this feature keeps, and it is kept because the hardware already
@@ -161,31 +161,52 @@ no virtual functions into `Partitioned`, where it has nothing to offer.
 | key | `1` means | tokens per endpoint |
 |---|---|---|
 | `device.gpustack.ai/rdma` | one whole physical function, exclusively | 1 |
-| `device.gpustack.ai/rdma.shared` | one concurrent use of one HCA | `nodefeature.SharedResourceMaxSize` |
-| `device.gpustack.ai/rdma.sliced` | **the same as `.shared`, word for word** | `nodefeature.SharedResourceMaxSize` |
+| `device.gpustack.ai/rdma.shared` | one concurrent use of one HCA | `nodefeature.RDMAEndpointPoolSize` |
 | `device.gpustack.ai/rdma.partitioned` | one SR-IOV virtual function, exclusively | 1 per virtual function |
 
-The prefix is the one this operator already owns for resources it advertises itself —
-`nodefeature.VisibilityResourceNamePrefix` (`pkg/nodefeature/knowns.go:87-95`) is
-`device.gpustack.ai/`, and `device.gpustack.ai/nvidia.visibility` is its existing inhabitant. The
-suffixes mirror the accelerator families so that a workload asking for a sliced accelerator and a
-sliced RDMA interface spells both requests the same way.
+Three keys, and that count is itself part of the contract. The prefix is the one this operator
+already owns for resources it advertises itself — `nodefeature.VisibilityResourceNamePrefix`
+(`pkg/nodefeature/knowns.go:87-95`) is `device.gpustack.ai/`, and
+`device.gpustack.ai/nvidia.visibility` is its existing inhabitant. The suffixes are the accelerator
+families' own, but **the mirror is deliberately incomplete**: `Sliced` names no key here, and the
+next paragraph is the whole of why.
 
-**`.shared` and `.sliced` draw on the same HCAs and do not decrement each other.** One HCA can
-therefore carry `SharedResourceMaxSize` shared holders and `SharedResourceMaxSize` sliced holders at
-once. This is stated here, in the contract, because it reads like a defect and is not one: queue-pair
-concurrency is how an HCA works, the isolation is the firmware's and the kernel's, and the token
-count is a scheduling knob rather than a hardware limit. `Sliced` on the RDMA side is `Shared` with a
-different key, per the ruling that the two enums stay aligned; there is no quota to enforce and
-therefore nothing to inject.
+**`Sliced` names no key, and that absence is the contract rather than an omission.**
+`device.gpustack.ai/rdma.sliced` did exist, with a contract word for word `.shared`'s, over the same
+HCAs, the two not decrementing each other. The overlap was defended in this section as intended:
+queue-pair concurrency is how an HCA works, the isolation is the firmware's and the kernel's, and a
+token count is a scheduling knob rather than a hardware limit. Every clause of that defence is still
+true, and it still does not carry the design — because two keys over one pool is not what two
+extended resources mean to a scheduler. One endpoint then admitted a full complement of holders
+under each name at once, so **the ceiling either key appeared to set was not a ceiling at all**. The
+symmetry it bought — a workload spelling its RDMA request with the same suffix as its accelerator
+request — did not pay for a number that does not hold.
+
+REQUIRED of anyone proposing the key back: say which pool the two keys decrement. "The same pool,
+independently" is the arrangement that was withdrawn, for the reason just given. "The same pool,
+jointly" needs a ledger, and [C5](#c5--nothing-is-written-to-devices) is why there is none.
+Restating the overlap as intended is not a new argument; it is the one this section used to make.
+
+**The shared key's ceiling is RDMA's own number, not the accelerator one it first borrowed.**
+`nodefeature.SharedResourceMaxSize` counts how many owners an accelerator can be split among, which
+is a statement about accelerators; nothing about an HCA follows from it, and sharing the symbol made
+two unrelated figures look like one fact that had to move together.
+`nodefeature.RDMAEndpointPoolSize` (`pkg/nodefeature/rdma.go:67-91`) is 64, picked so a workload
+written against the shared-RDMA device plugin these keys replace meets no tighter ceiling here —
+that plugin documents 63, and 64 is that number at the next power of two, which is the shape the
+rest of the package's sizes take. It is neither a hardware limit nor a quota: an HCA carries far
+more queue pairs than this, and by the invisibility stated below nothing downstream reads the figure
+into a capacity or an admission decision. Raising it costs nothing but admitting more containers
+onto one endpoint. Deriving it from a machine's shape is the thing to avoid: a figure reached by
+multiplying one node's card count stops being right on the next node, and it fails silently.
 
 **The keys are invisible to the accelerator admission rules, by two independent mechanisms.**
 `nodefeature.ResourceFamilyOf` (`pkg/nodefeature/knowns.go:603-630`) takes the
 `device.gpustack.ai/` branch first and returns from it, so a name under that prefix never reaches
 the suffix loop below; and that loop additionally requires the base to be a known accelerator
 resource name, which `device.gpustack.ai/rdma` is not. So the "one accelerator family per Pod" rule
-neither sees these keys nor can be made to. That is the intended outcome — asking for a shared
-accelerator and a sliced RDMA interface in one container is legal — and it is recorded because it is
+neither sees these keys nor can be made to. That is the intended outcome — asking for a sliced
+accelerator and a shared RDMA interface in one container is legal — and it is recorded because it is
 load-bearing and was measured rather than assumed. `ResourceFamilyOf` is the only **classifier**
 that consumes the prefix; `GetAcceleratableResourceName` (`pkg/nodefeature/knowns.go:338`) composes
 with it but decides nothing about a name handed to it.
@@ -377,17 +398,23 @@ whole interface or a share of one.
 
 ### Core Features & Acceptance Criteria
 
-#### F1 — the four servers, and where they hang
+#### F1 — the three servers, and where they hang
 
-Four device-plugin servers are registered per node, one per allocation mode, each serving the key
-[C2](#c2--the-resource-names-and-what-1-means-in-each) names. They are **not** keyed by
+Three device-plugin servers are registered per node — one per **key**
+[C2](#c2--the-resource-names-and-what-1-means-in-each) names, which is not the same as one per
+allocation mode: `Sliced` and `Visibility` are modes with no key, and a mode with no key gets no
+server. They are **not** keyed by
 manufacturer: a NIC belongs to the machine, and `Devices.spec.interfaces[]` already hangs on
 `DevicesSpec` for exactly that reason.
 
 - The servers live in a package of their own beside the vendor allocators, and are started once by
   `Allocator.Start` rather than by the detected-manufacturer loop, which is keyed on a fact RDMA does
-  not have. They are gated by the same `--no-shared`/`--no-sliced`/`--no-partitioned` switches the
-  vendor families honour.
+  not have. They are gated by the vendor families' switches minus one: `--no-shared` and
+  `--no-partitioned` drop their servers, `Exclusive` is ungated exactly as it is on the vendor side,
+  and **`--no-sliced` is not read here at all** — there is no sliced server for it to drop. The flag
+  stays accepted rather than becoming an error, and the allocator's server-set test asserts the
+  no-op rather than dropping the case, because an expectation left unstated is one a reappearing
+  sliced server would satisfy.
 - They are started on the platforms the vendor allocators are started on, through the same
   `allocator_linux.go` / `allocator_other.go` split. Starting them everywhere would make the device
   manager exit on a platform that today starts no allocator at all, because a failed `net.Listen` on
@@ -420,7 +447,7 @@ read.
 Acceptance — **four inputs, one case each**: the three C1 distinguishes, plus one that is the only
 thing standing between this judgment and a simplification all three would pass.
 
-| input | `Exclusive`/`Shared`/`Sliced` | `Partitioned` |
+| input | `Exclusive`/`Shared` | `Partitioned` |
 |---|---|---|
 | `sriov: true` with two virtual functions | advertises nothing | advertises two endpoints |
 | `sriov: true` with no virtual functions | advertises the interface | advertises nothing |
@@ -542,11 +569,23 @@ anything.
 So the criterion is phrased over the only observable a wrong implementation could read — the
 allocation actually crossing the boundary:
 
-- a case that performs an `Allocate` on the `Shared` server for one endpoint and then asserts that
-  the `Sliced` server's next `ListAndWatch` still advertises that endpoint `Healthy`, and the
-  mirror-image case with the two modes swapped. This needs no ledger, and it is what fails against
-  the implementation the Risks section names: one that counts live allocations in process and flips
-  the sibling family's tokens `Unhealthy`, halving the node's capacity with nothing to show for it.
+- a case that performs an `Allocate` on the `Exclusive` server for one endpoint and then asserts
+  that the `Shared` server's next `ListAndWatch` still advertises that endpoint at its **full token
+  count, every token `Healthy`**, and the mirror-image case with the two modes swapped. The
+  allocation must really succeed: an errored `Allocate` crosses no boundary and proves nothing. This
+  needs no ledger, and it is what fails against the implementation the Risks section names: one that
+  counts live allocations in process and flips the sibling family's tokens `Unhealthy`, halving the
+  node's capacity with nothing to show for it.
+
+**The pair is `Exclusive` against `Shared`, and naming it is not bookkeeping.** What this criterion
+guards is that two families pooling **one** endpoint do not decrement each other, and a whole-function
+endpoint is still served by two families — so the thing guarded outlived the pair that used to
+express it. The criterion was first written over `Shared` against `.sliced`, and retiring that key
+did not merely force a substitute, it produced a **sharper** one: those two families advertised the
+**same** token count, so a half that watched the wrong server read the number it expected anyway and
+would have passed on the mix-up. `Exclusive` advertises 1 and `Shared` advertises
+`RDMAEndpointPoolSize`, so the count is now evidence of **which** family was observed as well as of
+what it advertised. A later pair that restored equal counts would give that discrimination back.
 
 **Where this is exercised, and what does not count.** The pair lives in **T6**'s test file, not
 T5's, because only there does a real `Allocate` exist; at T5 a call to it errors and the row would
@@ -603,7 +642,7 @@ exit code is unchanged in every case.
 
 #### F8 — the documentation says what is now true
 
-- `docs/architecture/network-topology.md` gains the resource side of the RDMA story: the four keys,
+- `docs/architecture/network-topology.md` gains the resource side of the RDMA story: the three keys,
   the mode judgment, the link gate and the NUMA hint. That page already owns the interface inventory,
   the three link states and the `rdma.*` node labels, and it has the heading room.
 - `docs/accelerator-requests.md` gains the request rules: the keys, what a quantity means, the
@@ -647,12 +686,12 @@ last column being the one that makes a row a criterion rather than an invitation
 | # | Read | Passes when | Does NOT count as passing |
 |---|---|---|---|
 | R0 | `ls /sys/class/infiniband/` on the host, then `Devices.spec.interfaces[]` for the same names | every RDMA device the host lists appears as some interface's or virtual function's `rdmaDevice` | a non-empty `interfaces[]` on its own. R0 is a correspondence, and a list that names none of the host's devices is the failure it is looking for |
-| R1 | `kubectl get node <n> -o jsonpath='{.status.allocatable}'` | the four keys are present; counting only endpoints whose link verdict is not `failed`, `rdma` equals the number of whole-function endpoints, `rdma.shared` and `rdma.sliced` each equal that number times `SharedResourceMaxSize`, and `rdma.partitioned` equals the virtual-function count | the keys merely being present. The counts are the contract; a key at `0` on a host R0 found devices on is a failure, not a pass. ⚠️ Counting **every** endpoint is also a failure of the reading rather than of the code: allocatable counts healthy tokens only, so a host carrying one `failed` verdict makes the unconditioned formula wrong — that host is R4's, and R1 must be read with the exclusion applied |
+| R1 | `kubectl get node <n> -o jsonpath='{.status.allocatable}'` | the three keys [C2](#c2--the-resource-names-and-what-1-means-in-each) names are present; counting only endpoints whose link verdict is not `failed`, `rdma` equals the number of whole-function endpoints, `rdma.shared` equals that number times `RDMAEndpointPoolSize`, and `rdma.partitioned` equals the virtual-function count | the keys merely being present. The counts are the contract; a key at `0` on a host R0 found devices on is a failure, not a pass. ⚠️ Counting **every** endpoint is also a failure of the reading rather than of the code: allocatable counts healthy tokens only, so a host carrying one `failed` verdict makes the unconditioned formula wrong — that host is R4's, and R1 must be read with the exclusion applied. ⚠️ The shared multiplier is `RDMAEndpointPoolSize` and NEVER `SharedResourceMaxSize`: they are different constants for different things, and a reading taken against the accelerator one reports a correct host as failing. ⛔ A fourth key, `rdma.sliced`, at `0` neither passes nor fails this row — an extended resource that has entered a node's status is not removed when the plugin stops serving it, so a node that once ran the earlier code keeps the name. That same key at **non-zero** is a failure: something on the node is still serving it |
 | R2 | in a Pod requesting `device.gpustack.ai/rdma.shared: 1` and mounting nothing by hand: `ibv_devinfo`, and `open()` on the injected `/dev/infiniband/uverbs*` | the device opens and `ibv_devinfo` reports the granted device | an `open()` that succeeds in a **privileged** Pod, or in one that also carries a hostPath mount. Both bypass the cgroup rule this row exists to prove. The paired negative is required: the same Pod **without** the resource request must still be refused with `EPERM`, exactly as recorded in `#348` |
 | R3 | with the node's kubelet on `single-numa-node`, a Pod requesting **one whole accelerator** (`Exclusive`, `Shared` or `Sliced` — never a partition profile) and one RDMA endpoint in the **same container**: the granted accelerator's and endpoint's `numaAffinity` in `Devices.spec` | the two name the same NUMA node | a Pod that was admitted on a single-socket host, or on a host whose devices are all on one NUMA node anyway — there the two agree with the mechanism switched off. The row needs a host with devices on at least two NUMA nodes, and the paired reading is a request the topology cannot satisfy being **refused** with `TopologyAffinityError`. ⛔⛔ **A run using a partition profile does not count in either direction**: a partition token carries no hint, so the alignment is not being tested and the refusal can never fire — the row would pass by having nothing to disagree with. If such a run is what the hardware allows, R3 is **not answered** and must be recorded as such |
 | R3b | the same Pod shape, but requesting a **partition profile** alongside the RDMA endpoint | — | nothing. This row exists to **document** the gap, not to pass: the expected observation is that the Pod is admitted while the partition and the endpoint sit on different NUMA nodes, with no error anywhere. Recording it is how the limit stops being theoretical. A run that happens to land them on the same node proves nothing and must not be written up as a pass |
 | R4 | an interface whose `Devices.spec` link verdict is `failed`, against the node's allocatable count | that endpoint's tokens are advertised and unhealthy: the allocatable count excludes them | the endpoint simply being absent from `interfaces[]` — that is a detector outcome, not this gate. The row needs a `failed` verdict present in the record and the count still excluding it |
-| R5 | on a host with `sriov_numvfs > 0`: the four allocatable counts | `rdma.partitioned` equals the virtual-function count, and the three whole-function keys count that physical function **zero** times | a host with no virtual functions configured. That host exercises the other branch of C1 and says nothing about this one |
+| R5 | on a host with `sriov_numvfs > 0`: the three allocatable counts | `rdma.partitioned` equals the virtual-function count, and the **two** whole-function keys — `rdma` and `rdma.shared` — count that physical function **zero** times | a host with no virtual functions configured. That host exercises the other branch of C1 and says nothing about this one. ⚠️ Nor does `rdma.partitioned` alone: the zero on the other two keys is the half of C1 that this row is here for. ⚠️ And the zero is **per physical function, not per node** — a host that also carries a non-partitioned interface reports non-zero whole-function counts for that one, so on a mixed host the row is read against the partitioned function's contribution rather than against the node total |
 | R6 | `device-manager preflight` on the node, the `topology` section | it reports the policy the node's kubelet is actually running | a report of `unknown` on a node whose policy **is** discoverable from one of the three sources. `unknown` is a pass only where the policy is set somewhere none of them reads |
 | R7 | on a **classic InfiniBand** host (not RoCE, not EFA): a Pod granted one endpoint, running the transport its workload really uses, with every `open()` the library attempts traced | the transport installs and opens everything it needs from the injected set alone | ⛔ **a pass on a RoCE or EFA host**, which is every host the current fleet offers — that is the one reading this row cannot be answered by, since the whole question is what IB additionally needs. Also not a pass: `ibv_devinfo` succeeding. That exercises verbs and says nothing about the rest of the set. Until an IB host exists, R7 is **unanswered**, and [F5](#f5--the-allocation-response) says so rather than implying the set is complete |
 
@@ -702,11 +741,11 @@ reasoning for R7 and for the three EFA issues, which these readings do not touch
 | # | Result | What it read |
 |---|---|---|
 | R0 | Answered, twice | The ledger held thirty-two interfaces and exactly two carried an `rdmaDevice` -- the same two the host's RDMA subsystem lists, which is the correspondence the row asks for rather than a non-empty list. Configuring virtual functions and re-reading put all six endpoints in the ledger with none missing, which is the first time the disjunction's virtual-function branch has been exercised anywhere |
-| R1 | Answered, twice | The counts matched the formula, and then the exclusion did: inducing a `failed` link verdict on one of the two endpoints dropped `rdma` from two to one. That is the first time the exclusion clause has run outside a fixture |
+| R1 | Answered, twice | The counts matched the formula **as it then read** -- four keys, the shared multiplier still the accelerator constant -- and then the exclusion did: inducing a `failed` link verdict on one of the two endpoints dropped `rdma` from two to one. That is the first time the exclusion clause has run outside a fixture |
 | R2 | Answered, both ways | An unprivileged Pod mounting nothing by hand was granted an endpoint and opened its `uverbs` node. The paired negative refused the same Pod without the request with `EPERM` -- while the device node's own mode bits read `crw-rw-rw-`, which is what makes the refusal the cgroup's and not the file's |
 | R3 | Answered, both ways | A request the topology could not satisfy was refused with `TopologyAffinityError`, and a smaller one was admitted. The boundary is what makes this a reading rather than a coincidence: the host carries eight accelerators but only two on the RDMA devices' NUMA node, and the refusal appeared between asking for two and asking for three |
 | R4 | Answered | The `failed` endpoint's tokens stayed in `capacity` and left `allocatable`. Both halves are needed: advertised-and-unhealthy and never-advertised are indistinguishable in `allocatable` alone, and only `capacity` separates them |
-| R5 | Answered | With four virtual functions configured, `rdma.partitioned` was four and the three whole-function keys counted that physical function zero times |
+| R5 | Answered | With four virtual functions configured, `rdma.partitioned` was four and the whole-function keys counted that physical function zero times. The row as it then read named three such keys; the retirement of one leaves two, and the reading is unaffected because it turns on the count being zero rather than on how many keys carry it |
 | R6 | Failed, then answered after the fix | See below |
 | R3b | Unanswerable here | This host's accelerators have no partitioning mode, so the row's own last column applies: a run that cannot put a partition and an endpoint in one container tests nothing in either direction |
 | R7 | Unanswerable here | RoCE, as the row anticipated |
@@ -756,6 +795,83 @@ criterion gets written. It admits `unknown` "only where the policy is set somewh
 reads", which sorts hosts into set-where-we-read and set-elsewhere. This host was a third kind: set
 in the very tree the reader names, one level deeper than it looked. A criterion phrased as a
 partition of cases is only as good as the cases it imagined.
+
+#### Readings on a second host, carrying classic InfiniBand
+
+Taken on a single-node managed Kubernetes cluster standing on an x86_64 host: eight accelerators
+and eight classic InfiniBand adapters, spread over two NUMA nodes. It is the first host in reach
+whose adapters report an InfiniBand link layer rather than Ethernet, which is what R7 was waiting
+for. The accelerators support a hardware partitioning mode; no virtual functions are configured.
+
+The host's own attributes were read before anything else, because three of the rows turn on them:
+every adapter reports `link_layer=InfiniBand`, and the subsystem carries the management-datagram and
+subnet-manager device nodes that a RoCE host does not have.
+
+| # | Result | What it read |
+|---|---|---|
+| R0 | Answered, in a second environment | Eight adapters, eight interfaces carrying an `rdmaDevice`, names corresponding one for one, and the NUMA node recorded for each matching what the kernel reports for that adapter. The same ledger carries nineteen other interfaces -- container veths, the cluster overlay, loopback -- and none of them carries an `rdmaDevice`, which is the half that makes this a correspondence rather than a non-empty list |
+| R1 | Answered, against the current keys | Three keys served, the whole-function key at the endpoint count and the shared key at that count times the endpoint pool size. The partitioned key at zero agrees with the host having no virtual functions, so the two readings check each other |
+| R2 | Positive answered; the negative refused at a different layer | The granted Pod opened its `uverbs` node with `O_RDWR`, the errno taken from a system-call trace rather than inferred from a tool's exit status, and the verbs library named the granted adapter. **The negative refused with `ENOENT`, not `EPERM`**: the device directory is not in the container at all. The isolation is stricter, but the cgroup rule this row exists to prove is not what refused, because nothing needed it to |
+| R6 | Answered, after a second defect was found and fixed | See below |
+| R3 | Unanswerable here | The policy is the default, and this is a managed node whose kubelet is not ours to change. **And the topology would not carry the row even if it were**: accelerators and endpoints are split four and four across the same two NUMA nodes, so every accelerator shares a node with an endpoint and none does not. A request for one accelerator and one endpoint can always be satisfied, so the refusal the row pairs with can never fire |
+| R3b | Unanswerable here | It inherits R3's premise. With alignment switched off, "the partition and the endpoint sat on different NUMA nodes" is trivially true and records nothing |
+| R5 | Unanswerable here | Not a matter of configuration: the adapters expose no SR-IOV attributes at all, the count files being absent rather than zero. The adapters are passed through to this guest, so the capability is spent before the guest sees it |
+| R7 | **Answered** | See below |
+
+**R7 is answered, and this is the first time any machine has carried it.** A Pod granted one endpoint
+ran a real data transfer over it, then the collective-communication library a workload actually uses,
+with every `open()` traced throughout.
+
+The transfer moved data at line rate over the granted adapter. The library selected the InfiniBand
+network rather than sockets, enabled direct memory access between accelerator and adapter, and
+completed a collective. Across both, the only device nodes opened on the RDMA surface were the
+granted endpoints' own verbs nodes and the connection manager.
+
+The management-datagram and subnet-manager nodes, which this host carries and which a RoCE host does
+not, were **never opened, not once**, and nothing anywhere was refused. The environment variable
+naming the granted adapters was injected and correct, listing both when two endpoints were granted,
+while the connection manager stayed at one per response however many endpoints were granted.
+
+**So the injected set is sufficient on classic InfiniBand**, which the contract could previously
+state only for RoCE. The open question that recorded the gap is answered by the same reading.
+
+**One necessary condition belongs beside that answer, because it fails silently.** The response
+injects device nodes and an environment variable; it does not inject the userspace library. On an
+image without one, the collective library **fell back to TCP and reported success** -- no error, no
+warning, a completed job over the cluster network. That is the same silent half-grant this resource
+exists to end, one layer further out, and it is the container image's to fix rather than this
+feature's.
+
+**R6 exposed a second defect of the same family as the first, and it is fixed.** Preflight reported
+`unknown` while reading a file the kubelet does not load: this node's kubelet names its configuration
+on its command line, and the path it names is not one of the three the reader had. The file at the
+standard path **also exists, with different contents**, so the reader was not failing to find
+something -- it was answering out of the wrong file. The CRI endpoint is read the same way, and the
+two files disagree on it, so the runtime preflight drives could be decided by a file nothing loads.
+
+The reader now takes the running kubelet's own command line as the authority, using the file and the
+drop-in directory it names, with a flag on that command line overriding both, which is the order the
+kubelet applies. A host whose process table cannot be reached reports that it could not look rather
+than falling back to a path that may not be in force. A host with no kubelet process at all keeps the
+previous sources, because a distribution that embeds the kubelet in its agent has no such command
+line, and those paths are where it puts the configuration.
+
+Re-read on the same host from an image carrying the fix, the section names the file the kubelet
+actually loads. The policy is still reported as unknown, and that is correct: nothing wrote a policy
+anywhere, and the row's own reasoning applies -- a default nobody wrote is a value nobody read.
+
+⚠️ That last point is a third case the row's wording does not cover. Its criterion splits `unknown`
+into "set where the reader looks" and "set somewhere it does not", and this node is neither: **the
+policy was never set at all.** The reading is a pass, but it is a pass by reasoning rather than by
+the row's own text, which is worth recording where the next reader will look.
+
+**An incidental reading that discriminates a plausible wrong implementation.** All eight of this
+host's IP-over-InfiniBand network interfaces are down and carry no address, while all eight RDMA
+ports are active. A link verdict taken from the network interface would therefore mark every endpoint
+`failed` and drop the allocatable counts to zero. The counts are the full eight and every verdict is
+`ok`, so the verdict is taken from the RDMA port, which is the correct source. On a host where the
+two agree, no reading can tell the two implementations apart.
+
 
 ### Notes / Constraints / Caveats
 
@@ -815,11 +931,12 @@ partition of cases is only as good as the cases it imagined.
 
 - **Always:** derive the mode from the node's recorded state; report a NUMA hint or none at all;
   state the strength of any claim about topology.
-- **Ask first:** any change to the four resource names or to what a quantity means — they are a
+- **Ask first:** any change to the three resource names, to how many there are, or to what a
+  quantity means — they are a
   contract a consumer outside this repository reads; any decision to start writing RDMA allocation
   state into `Devices`, since C5 is what several other decisions here lean on.
 - **Never:** write to `sriov_numvfs` or create a virtual function; normalize an unknown NUMA
-  affinity to node 0; introduce cross-mode exclusion between `Shared` and `Sliced`; describe the
+  affinity to node 0; introduce cross-mode exclusion between `Exclusive` and `Shared`; describe the
   NUMA-level guarantee as a GPUDirect RDMA correctness guarantee.
 
 ### Risks and Mitigations
@@ -829,8 +946,20 @@ partition of cases is only as good as the cases it imagined.
   *provenance* — that the value came from the interface record — rather than its presence.
 - **The link gate is tested only negatively** → "nothing is ever advertised" passes. Mitigated by
   F4's two positive rows being acceptance criteria rather than extra cases.
-- **A reader later "fixes" the shared/sliced overlap** → capacity silently halves. Mitigated by C2
-  stating the overlap as intended, with the hardware reason, in the contract a reader meets first.
+- **A reader later "fixes" the overlap between `rdma` and `rdma.shared`** → capacity silently
+  halves. The pair changed when `.sliced` was retired; the risk did not. One whole-function endpoint
+  is still advertised as one exclusive token **and** `RDMAEndpointPoolSize` shared ones, and the two
+  still do not decrement each other, so the reading that says "this is double-counting" is still
+  available and still wrong. Mitigated by
+  [C2](#c2--the-resource-names-and-what-1-means-in-each) stating what `1` means under each key and
+  by [F6](#f6--no-cross-mode-exclusion-is-introduced) asserting the non-exclusion behaviourally
+  rather than leaving it to the prose.
+- **A reader later adds `.sliced` back**, reading its absence as an oversight rather than a
+  decision → the ceiling every RDMA key advertises stops holding again, which is the defect that
+  retired it. This risk is new, and it exists because the previous one was resolved by deletion: an
+  absent thing leaves no code for a reader to find the reason in. Mitigated by C2 recording the
+  withdrawn design, the argument that was made for it, and why that argument did not carry — and by
+  stating what a proposal to restore the key has to answer before it is one.
 - **The lifecycle extraction changes registration behaviour** → every accelerator family breaks at
   once, on a node, in a way unit tests would not see. Mitigated by keeping the existing call
   signatures so the existing suite exercises the extracted code unchanged, and by confining the edit
@@ -906,9 +1035,9 @@ pkg/deviceplugin/
   rdma_server.go          # T5  ListAndWatch, and NewRDMAServer -- the one new exported symbol
   rdma_allocate.go        # T6  Allocate and the container response
 pkg/nodefeature/
-  rdma.go                 # T2  the four resource names, beside the rdma.* node labels
+  rdma.go                 # T2  the three resource names, beside the rdma.* node labels
 pkg/devicemanager/allocator/
-  rdma/deviceplugin.go    # T7  the device.Allocator owning the four servers, as a vendor does
+  rdma/deviceplugin.go    # T7  the device.Allocator owning the three servers, as a vendor does
                           #     — named as the vendor packages name theirs, not allocator.go
   allocator.go            # T7  starts it beside the per-manufacturer ones
   allocator_linux.go      # T7  the creator; allocator_other.go is its absent counterpart
@@ -1010,15 +1139,21 @@ which layout a live host answers through.
       of the extracted code rather than of a copy.
       Verify: `go test ./pkg/deviceplugin/...`
 
-- [x] **T2 · The four resource names**
+- [x] **T2 · The three resource names**
       Blocked by: None
       Owns: `pkg/nodefeature/rdma.go`, `pkg/nodefeature/rdma_test.go`
       Gate: review
-      Acceptance: a helper returns the four keys of [C2](#c2--the-resource-names-and-what-1-means-in-each)
-      per mode, and empty for the modes that have none. Each key is asserted **as a literal string**,
-      never recomposed from the constants the implementation uses — a test that rebuilds the name
-      from the same pieces cannot catch a wrong piece. A second case asserts `ResourceFamilyOf`
-      returns `ResourceFamilyNone` for all four.
+      Acceptance: a helper returns the three keys of [C2](#c2--the-resource-names-and-what-1-means-in-each)
+      per mode, and empty for every mode that has none — `Sliced` and `Visibility` among them. The
+      count is established by **sweeping every enum value** and requiring the non-empty results to be
+      exactly those three, not by checking the three in isolation: a fourth key returned for a mode
+      nobody thought to list is precisely what a per-mode check cannot see. Each key is asserted **as
+      a literal string**, never recomposed from the constants the implementation uses — a test that
+      rebuilds the name from the same pieces cannot catch a wrong piece. A second case asserts
+      `ResourceFamilyOf` returns `ResourceFamilyNone` for **four** names: the three served, plus the
+      retired `device.gpustack.ai/rdma.sliced`. That fourth row is deliberate and NEVER to be
+      deleted as a leftover — `.sliced` is in the fixed-suffix list the classifier walks, so of the
+      RDMA-shaped names it is the one that would classify wrongly first.
       Verify: `go test ./pkg/nodefeature/...`
 
 - [x] **T3 · The endpoint vocabulary, the mode judgment and the NUMA resolution**
@@ -1043,7 +1178,7 @@ which layout a live host answers through.
       Blocked by: T1, T2, T3
       Owns: `pkg/deviceplugin/rdma_server.go`, `pkg/deviceplugin/rdma_server_test.go`
       Gate: review
-      Acceptance: [F1](#f1--the-four-servers-and-where-they-hang)'s counts **and its paired zero
+      Acceptance: [F1](#f1--the-three-servers-and-where-they-hang)'s counts **and its paired zero
       rows**; [F4](#f4--the-link-gate-with-its-positive-baseline)'s four health rows including both
       positive baselines and the nil-link row; **the allocation-state-invariance pair** — two calls
       whose reconciler-held allocation state differs between them (a `Devices.status` hold naming
@@ -1063,9 +1198,11 @@ which layout a live host answers through.
       however many endpoints were granted; the environment variable names the granted devices; an
       unknown or unparseable token is refused rather than silently dropped. Devices are injected one
       at a time, never by directory. **Plus [F6](#f6--no-cross-mode-exclusion-is-introduced)'s
-      allocate-then-advertise pair** — an RDMA `Shared` `Allocate`, then the `Sliced` server's
-      `ListAndWatch` still advertising that endpoint `Healthy`, and the mirror with the modes
-      swapped. It lands here rather than in T5 because only here does a real `Allocate` exist; the
+      allocate-then-advertise pair** — an RDMA `Exclusive` `Allocate`, then the `Shared` server's
+      `ListAndWatch` still advertising that endpoint at its full token count with every token
+      `Healthy`, and the mirror with the modes swapped. The two counts differ (1 against
+      `RDMAEndpointPoolSize`), which is what makes each half evidence of the family it claims to
+      watch. It lands here rather than in T5 because only here does a real `Allocate` exist; the
       code it guards is still T5's.
       Verify: `go test ./pkg/deviceplugin/...`
 
@@ -1074,9 +1211,11 @@ which layout a live host answers through.
       Owns: `pkg/devicemanager/allocator/rdma/**`, `pkg/devicemanager/allocator/allocator.go`,
       `pkg/devicemanager/allocator/allocator_linux.go`,
       `pkg/devicemanager/allocator/allocator_other.go`
-      Acceptance: the four servers are constructed per the `--no-shared`/`--no-sliced`/
-      `--no-partitioned` switches and started once by `Allocator.Start`, following the existing
-      per-vendor server-set test. ⚠️ The one line in `allocator_linux.go` has **no gate on the
+      Acceptance: the three servers are constructed per `--no-shared` and `--no-partitioned`, with
+      `Exclusive` ungated, and started once by `Allocator.Start`, following the existing per-vendor
+      server-set test. `--no-sliced` keeps a case of its own asserting it drops **nothing** here:
+      deleting the case would leave the flag's behaviour on this allocator unstated, and a sliced
+      server reappearing satisfies an empty expectation. ⚠️ The one line in `allocator_linux.go` has **no gate on the
       development machine** and is first compiled by the container build; that is a stated
       limitation of this task, not something its Verify covers.
       Verify: `go test ./pkg/devicemanager/...`
@@ -1151,7 +1290,7 @@ repeated here.
 #### Integration tests
 
 One, and it earns its place: a case driving the RDMA server's `Start` against the fake kubelet the
-existing suite already stands up, asserting that **all four resource names register** and that each
+existing suite already stands up, asserting that **all three resource names register** and that each
 lands on its own socket. This is the only evidence that the lifecycle T1 extracts is genuinely
 shared — with `ResourceServer` as its sole caller, "shared by construction" is a claim nothing
 exercises.
@@ -1174,13 +1313,23 @@ is not merely unimplemented there but structurally unreachable. It would also le
 
 **Give RDMA its own allocation-mode enum.** Rejected by ruling, and it is the right ruling: a second
 enum means every consumer that reasons about modes has two vocabularies to map between, for a domain
-where four of the five values mean the same thing. The one value that does not map cleanly —
-`Visibility` — is handled by leaving it unimplemented and saying so, which costs one open question
-instead of a parallel type.
+where three of the five values carry straight across. The two that do not are handled by leaving
+them unserved and saying so, rather than by minting a type: `Sliced` by the decision
+[C2](#c2--the-resource-names-and-what-1-means-in-each) records, and `Visibility` by
+[Open Question 1](#1--visibility-is-not-implemented-and-c5-is-why). That is one settled decision and
+one open question, against a parallel vocabulary every consumer would have to learn.
 
 **Model `Sliced` as something other than `Shared`.** There is nothing for it to be. Slicing on the
 accelerator side is a quota enforced by an interception library; an HCA has no such quota to enforce,
 so a distinct `Sliced` implementation would be `Shared` with extra machinery that does nothing.
+
+**Model `Sliced` as `Shared` under a key of its own** — the compromise this section originally
+settled on, and **it too was withdrawn**. The outcome is not "`Sliced` behaves like `Shared`", it is
+that `Sliced` names no RDMA key at all; [C2](#c2--the-resource-names-and-what-1-means-in-each)
+carries the reasoning, and this entry exists so that a reader who gets as far as the paragraph above
+does not stop there and read a rejected alternative's runner-up as the current design. In short: two
+keys over one pool of HCAs meant neither key's count was a ceiling, and the request-spelling symmetry
+it bought did not pay for that.
 
 **Advertise one resource per HCA**, e.g. `device.gpustack.ai/rdma.mlx5_0`. Rejected: the key set
 would then differ per node, which a `ResourceFlavor` selector and a Kueue quota cannot express, and
