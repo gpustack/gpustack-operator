@@ -418,6 +418,8 @@ to check when a flavor stops selecting a node that still has the hardware.
 **See also** — [Device Discovery](device-discovery.md) (the accelerator side of the same ledger) ·
 [Scheduling Chain](scheduling-chain.md) (how a node label reaches a flavor selector) ·
 [Accelerator Requests](../accelerator-requests.md) (the request rules the RDMA keys obey) ·
+[RDMA Operations](../operation/rdma.md) (how many endpoints a workload asks for, and the kubelet
+policy that aligns them with its accelerators) ·
 [Preflight Operations](../operation/preflight.md) (the same link check, before anything is installed)
 
 **Next** → [Scheduling Chain](scheduling-chain.md) — how these labels become ResourceFlavors.

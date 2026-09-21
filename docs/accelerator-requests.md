@@ -304,6 +304,9 @@ so no `<base>` applies. The mechanism — which interface serves which key, and 
 the container — is [Network Topology](./architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)'s;
 the request rules are here.
 
+How many to ask for, and what a node must be configured with for the request to land well, is
+[RDMA Operations](./operation/rdma.md).
+
 All three are served by the device plugin, and a request names what it wants one of:
 
 | Key | A request asks for |
@@ -319,9 +322,11 @@ value that schedules.
 
 **The keys are not an accelerator family.** The family classifier returns none for them, so the
 seven rules above neither apply to them nor can be violated by them — an accelerator family and an
-RDMA key in one Pod is legal. The same blindness reaches Kueue: an RDMA request contributes nothing
-to a Workload's demand, no flavor or quota can be expressed for it, and over-subscription surfaces
-as Pods that do not schedule rather than as a queue that waits.
+RDMA key in one Pod is legal.
+
+The same blindness reaches Kueue, which therefore meters these keys not at all — what that costs a
+fleet, and what to do instead of a quota, is
+[RDMA Operations](./operation/rdma.md#kueue-does-not-meter-the-rdma-keys)'s.
 
 Neither a node without an RDMA-capable interface nor an endpoint whose link the node judged
 `failed` carries allocatable tokens — what each one advertises is on
@@ -359,7 +364,8 @@ says so.
 - **The node's kubelet runs `restricted` or `single-numa-node`.** It is node-level kubelet
   configuration this operator cannot change, and what each of the four policies does with a hint is
   in [the preflight runbook](./operation/preflight.md#reading-the-result), which is also where you
-  read the policy a given node runs.
+  read the policy a given node runs. No release sets one for you — [how to set it, and how to
+  confirm it took](./operation/rdma.md#enabling-numa-alignment-on-the-kubelet).
 - **The alignment's unit is the NUMA node** — see
   [the RDMA resource keys](./architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)
   for why a shared PCIe switch is finer than a hint can express.
@@ -488,6 +494,8 @@ accelerator's partitioning mode, plus a recorded enable → request → reclaim 
 node-wide and whose partitioned nodes serve no whole-card or sliced request at all) ·
 [T-Head MIG Operations](./operation/thead-mig.md) (the same runbook for T-Head's own
 partitioning) · [Admission](./architecture/admission.md) (where these keys are checked) ·
-[Device Discovery](./architecture/device-discovery.md#the-device-plugin-allocator) (where they are served)
+[Device Discovery](./architecture/device-discovery.md#the-device-plugin-allocator) (where they are
+served) · [RDMA Operations](./operation/rdma.md) (how many RDMA endpoints to ask for beside N
+accelerators, and the kubelet policy that aligns the two sides)
 
 **Next** → [Walkthrough](./walkthrough.md) — the same requests on a live cluster.

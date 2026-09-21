@@ -175,6 +175,10 @@ one to the one column that is the request contract.
 that, beside the report that says which policy a node runs; this page states the prerequisite and
 links there.
 
+**Not** — how many RDMA endpoints to ask for beside N accelerators, or how to configure a node so
+the two align. That is a how-to and `docs/operation/rdma.md` owns it; a reference page states the
+contract and does not teach.
+
 **Never** — implementation. A rule's *enforcement point* is a link to `admission.md`.
 
 ## `docs/walkthrough.md`
@@ -216,7 +220,9 @@ dependencies.
 availability, `preflight.md` — the one-container run that says what a bare node can detect, slice and
 manage — the NVIDIA MIG runbook, and `thead-mig.md` — MIG is T-Head's own word for its
 partitioning, as `hgml.GetMigMode()` and the `alibabacloud.com/ppu.partitioned.mig-<profile>` key both
-show, so the page is named for it too.
+show, so the page is named for it too. And `rdma.md`, which is a how-to on both sides of one
+workflow: the request a workload writes, and the kubelet policy an administrator sets so that
+request aligns — split apart, each half reads as a guarantee the other half withholds.
 
 **Rule** — a page with a `## Verify` block states the expected output of every command in it. These
 pages are exempt from the line cap: a runbook is as long as the hardware makes it.

@@ -11,6 +11,8 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
    workload.
 2. [Accelerator Requests](accelerator-requests.md) — the resource keys and the rules your Pod must obey.
 3. [Walkthrough](walkthrough.md) — the same steps on a real four-node cluster, with real output.
+4. [RDMA Operations](operation/rdma.md) — only if your workloads use RDMA: how many endpoints to ask
+   for beside N accelerators, and what the pairing does and does not guarantee.
 
 **I run the cluster** — what to configure, and what to do when hardware changes.
 
@@ -22,10 +24,12 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
    GPU Operator components to disable.
 6. [Preflight Operations](operation/preflight.md) — one container run that says what a node can
    detect, slice and manage, before anything is installed on it.
-7. [NVIDIA MIG Operations](operation/nvidia-mig.md), [T-Head MIG Operations](operation/thead-mig.md)
+7. [RDMA Operations](operation/rdma.md) — the kubelet topology policy to set before an accelerator
+   and an RDMA adapter land together, and how to confirm the node is running it.
+8. [NVIDIA MIG Operations](operation/nvidia-mig.md), [T-Head MIG Operations](operation/thead-mig.md)
    and [Hygon MIG Operations](operation/hygon-mig.md) —
    the runbook for enabling and disabling partitioning on a node.
-8. Upgrading: [Migrating to Bundled Subcharts](migration/to-subcharts.md) · [Migrating from
+9. Upgrading: [Migrating to Bundled Subcharts](migration/to-subcharts.md) · [Migrating from
    v0.5.x](migration/from-v0.5.md) · [Migration Troubleshooting](migration/troubleshooting.md) when it
    goes wrong.
 
@@ -72,6 +76,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [T-Head MIG Operations](operation/thead-mig.md) | Enabling/disabling T-Head's own MIG-named partitioning, the busy-mode-change prerequisite, and reboot recovery | operators | ~10 min |
 | [Hygon MIG Operations](operation/hygon-mig.md) | The same runbook for Hygon, whose mode is node-wide and whose partitioned nodes serve nothing else | operators | ~10 min |
 | [Preflight Operations](operation/preflight.md) | Verifying on a bare host what a node can detect, slice and manage: the command line for both runtimes, every mount and flag, what it starts and removes | operators | ~9 min |
+| [RDMA Operations](operation/rdma.md) | Which RDMA key to ask for and how many endpoints beside N accelerators, what a grant injects, the kubelet policy that aligns the two sides, and why no queue meters these keys | operators, users | ~12 min |
 | [Migrating to Bundled Subcharts](migration/to-subcharts.md) | The one-time ownership transfer from the runtime-installed releases | operators | ~9 min |
 | [Migrating from v0.5.x](migration/from-v0.5.md) | Upgrading across the scheduling-chain refactor | operators | ~5 min |
 | [Migration Troubleshooting](migration/troubleshooting.md) | Recovering from a wedged upgrade (worker CrashLoopBackOff) or a namespace stuck Terminating | operators | ~8 min |
