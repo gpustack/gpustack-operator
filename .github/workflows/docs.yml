@@ -95,6 +95,12 @@ jobs:
       # unreliable from US egress, and three rate-limited img.shields.io. The ignore list that would
       # make a corpus-wide gate green is worse to own than no gate. Under .github every URL is github.com.
       #
+      # That last sentence bounds which hosts are reached, NOT how reliably they answer. github.com
+      # serves a runner 503 under load: four of five URLs here came back 503 on three attempts running
+      # while all five answered 200 from a developer machine minutes later, and two runs started eight
+      # seconds apart made it worse by asking for the same URLs at once. A status that reports only the
+      # server's own state is therefore recorded as unverified instead of counted as a broken link.
+      #
       # Deliberately awk-free: the awk pinned above is onetrueawk to match check-docs.sh's portability
       # floor, and a step leaning on any awk behaviour would silently inherit that constraint too.
       - name: Check external links under .github
@@ -106,6 +112,7 @@ jobs:
           fi
           echo "Checking $(printf '%s\n' "${urls}" | wc -l | tr -d ' ') unique URL(s) under .github/**/*.md:"
           failed=""
+          unverified=""
           while IFS= read -r url; do
             [[ -n "${url}" ]] || continue
             # Retry a transient failure rather than turning the build red on one dropped connection.
@@ -124,14 +131,32 @@ jobs:
                 *) break ;;
               esac
             done
+            # The verdict, and it turns on what the status code is about. A 4xx other than 408/429 is
+            # the server saying the link is wrong, which is the whole point of this gate. A 408, a 429
+            # or a 5xx is the server saying something about ITSELF: it answered, so the host resolves
+            # and the route works, and the code carries nothing about whether the link is good.
+            # Exhausting the retries means only that this run never got to an answer, so failing the
+            # build on it would be a verdict reached on evidence that does not support one. Those are
+            # listed as unverified instead, loudly, so a run that checked nothing is visible rather
+            # than quietly green.
+            #
+            # 000 stays a failure. There curl got no answer at all, which is also what a domain that
+            # no longer exists produces, so the code does not clear the link the way a 5xx does.
             case "${code}" in
-              2??|3??) printf '  ok    %s  %s\n' "${code}" "${url}" ;;
-              *) printf '  FAIL  %s  %s\n' "${code}" "${url}"; failed="${failed}${code} ${url}"$'\n' ;;
+              2??|3??) printf '  ok          %s  %s\n' "${code}" "${url}" ;;
+              408|429|5??) printf '  unverified  %s  %s\n' "${code}" "${url}"; unverified="${unverified}${code} ${url}"$'\n' ;;
+              *) printf '  FAIL        %s  %s\n' "${code}" "${url}"; failed="${failed}${code} ${url}"$'\n' ;;
             esac
           done <<< "${urls}"
+          # Say how much of the gate did not run. A count of zero broken links means less when some
+          # links were never reached, and the difference is invisible unless it is printed.
+          if [[ -n "${unverified}" ]]; then
+            echo "Unverified this run -- $(printf '%s' "${unverified}" | wc -l | tr -d ' ') URL(s) whose server reported on itself, not on the link:"
+            printf '%s' "${unverified}"
+          fi
           # Report every broken URL, not just the first: a gate that names one of three costs three CI rounds.
           if [[ -n "${failed}" ]]; then
-            echo "Broken external link(s) under .github/**/*.md (not 2xx/3xx):"
+            echo "Broken external link(s) under .github/**/*.md:"
             printf '%s' "${failed}"
             exit 1
           fi
