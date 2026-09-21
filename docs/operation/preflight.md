@@ -567,6 +567,9 @@ misaligned placement anyway, and `none` discards it. So a request pairing an acc
 [RDMA interface](../architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)
 lands them on one NUMA node only where the policy enforces it.
 
+A node nobody configured runs `none` — [how to set a policy, and how to confirm the kubelet took
+it](rdma.md#enabling-numa-alignment-on-the-kubelet).
+
 **A policy that no readable configuration names is reported as `unknown`, never as the kubelet's
 default.** Reporting `none` because nothing was found would publish a value nobody read. An
 `unknown` always carries a `note` saying which of the four reasons applies: nothing the kubelet
