@@ -60,11 +60,25 @@ const (
 
 // renderSGLang produces the variables and the argument an SGLang container needs.
 //
-// It writes neither `mode` nor `local_buffer_size` in any spelling, and both omissions are measured
-// rather than overlooked: SGLang's reader has no key for either, and it hardcodes its own 16 MiB
+// It writes no `local_buffer_size` in any spelling, and that omission is measured rather than
+// overlooked: SGLang's reader has no key for it, and it hardcodes its own 16 MiB
 // `DEFAULT_LOCAL_BUFFER_SIZE` on both of its store-setup paths - `setup_dummy` and `setup`, not two
 // calls to the same function - each commented "Zero copy interface does not need local buffer"
-// (v0.5.18 `mooncake_store.py:28,464,514`). Emitting either would write something nothing reads.
+// (v0.5.18 `mooncake_store.py:28,464,514`). Emitting it would write something nothing reads.
+//
+// IT ALSO WRITES NO MODE, AND THAT ONE IS NOT MEASURED. This comment used to claim the reader has
+// no key for a mode in any spelling. It has one, under a name a search for "mode" does not find:
+// `load_from_env` binds `standalone_storage` from `MOONCAKE_STANDALONE_STORAGE`, and
+// `sglang.srt.environ` defaults it to `EnvBool(False)` (v0.5.18). So this renderer leaves SGLang in
+// a different store shape from the one it gives vLLM, whose annotation carries
+// `"mode":"standalone-store"` beside the same `"global_segment_size":0` - and `client_config.go`
+// says of that pair that the two are always written together.
+//
+// Whether writing it here is the repair is UNRESOLVED, which is why nothing is written. Setting
+// `MOONCAKE_STANDALONE_STORAGE=true` on a deployment moved the engine's failure rather than
+// clearing it: the store's warmup stopped being reached and `setup_dummy` raised a TypeError on
+// its own signature instead. Naming the gap is what this paragraph is for; closing it needs a
+// reading from an engine that gets past that call.
 //
 // `global_segment_size` IS written, because SGLang defaults it to "4gb" when absent (v0.5.18
 // `environ.py:704`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`) - the same trap vLLM has, so the same explicit
