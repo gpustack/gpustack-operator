@@ -38,7 +38,9 @@ Run as a **test-orchestration lead** (main agent) coordinating read-only **domai
 - `cases/case-N.sh <NS>` — one scenario each; ends in a `STATUS | CHECK | OBJECT` table, exits non-zero on any FAIL.
 - `cases/_partition-lib.sh` — sourced by the hardware-partition cases (24–32, 34) for node correlation, the `MIG_NODE_SSH` gate, profile/key discovery and pod plumbing. Not a case; never run it directly.
 - `cases/run-partition-block.sh <RAW_DIR> [NS] [CASES...]` — runs that family in its required order, writing each case's raw log and exit code. **Drive 24–32/34 with it rather than by hand**: the ordering is a real constraint and the block outlives a context, so a step held only in conversation is one a compaction drops.
-- `references/` — `drain-recycle.md` (per-case rationale + mock recipes), `packaged-image-deploy.md` (image-ref ↔ chart-values contract); shared `../_e2e-lib/references/{orchestration,troubleshooting}.md`.
+- `cases/_rdma-lib.sh` — sourced by the RDMA cases (80–84) for the precondition gate, the host-probe Pod and the ledger facts. Not a case; never run it directly.
+- `cases/run-rdma-block.sh [--report-only] <RAW_DIR> [NS] [CASES...]` — `--report-only` prints, without touching the cluster, which of those readings this cluster can answer and what each unmet requirement is missing. A run prints the same matrix, then each case's exit code **and whether its output carries `NOTHING WAS VERIFIED`** — which is how a skip is told from a pass, since both exit 0.
+- `references/` — `drain-recycle.md` (per-case rationale + mock recipes), `packaged-image-deploy.md` (image-ref ↔ chart-values contract), `rdma-host-shapes.md` (which host shape answers which RDMA reading, and the one nothing answers); shared `../_e2e-lib/references/{orchestration,troubleshooting}.md`.
 
 ## Cases (locked titles)
 
@@ -123,6 +125,11 @@ Each case is self-contained; its header (see **Case header contract**) states go
 | 77 | The multi-tenant ledger gate: an unregistered tenant's put is refused `-1701` while the client itself stays healthy, and a Pool+Binding whose `domain.name` is the tenant id admits the identical put; the tenant rides the keyword `tenant_id=` (the next positional slot is a TransferEngine pointer and raises), and the teardown drains the domain because a held domain blocks pool deletion open-ended | `pkg/worker/controllers/worker/kv_cache_pool.go` (the domain registration pass), `pkg/worker/kvcache/mooncake/**` (the master argv and lease render) | yes (confirm) | any (no GPU, no RDMA) + a registry the cluster can pull the Mooncake image from (`E2E_MOONCAKE_IMAGE`, CPU-capable, carrying the python client); the backend must be a replicated HA leader — the k8s:// master address and the probe's member Role exist only above one replica |
 | 78 | Scaling a role moves its queue's admitted quota by exactly one replica in each direction, and touches no replica it did not add or remove | `pkg/worker/controllers/worker/model_deployment{,_pod_group,_rollout}.go`, `api/worker/v1alpha1/model_deployment.go` | yes (confirm) | any (no GPU) + an InstanceType, the pool's entrance LocalQueue in `<NS>`, and room in the pool for three replicas of one role. Optionally `E2E_MD_INSTANCE_TYPE` / `E2E_MD_IMAGE` / `E2E_MD_SETTLE` |
 | 79 | An instance of several Pods is admitted as ONE Kueue group with one PodSet of `size`, each member addressable by a derived name behind a headless Service of its own, and the role's Service fronts only the leader; adding an instance leaves the first one's members untouched | `pkg/worker/controllers/worker/model_deployment{,_render,_pod_group,_service}.go`, `api/worker/v1alpha1/model_deployment.go` (`size`) | yes (confirm) | any (no GPU) + an InstanceType, the pool's entrance LocalQueue in `<NS>`, and room in the pool for FOUR Pods of it -- two instances of two. The image must carry a shell and `nslookup` or the two DNS rows SKIP, which is why it defaults to busybox rather than pause. Optionally `E2E_MD_INSTANCE_TYPE` / `E2E_MD_IMAGE` / `E2E_MD_SETTLE` |
+| 80 | The node advertises exactly the RDMA endpoints its inventory says it has, sized per mode | `pkg/deviceplugin/rdma_{server,devices,endpoint}.go`, `pkg/nodefeature/rdma.go`, `pkg/devicemanager/detector/network*.go` | yes (confirm) | a node running a device manager with at least one RDMA endpoint. The correspondence and SR-IOV checks additionally need a host-probe Pod mounting `/sys` read-only, which a `restricted` PodSecurity namespace refuses — there those checks skip and the count checks still run. The SR-IOV checks also need virtual functions configured and the unhealthy-token check a `failed` link already present; each skips individually and the case never induces either |
+| 81 | A granted RDMA endpoint opens inside an ordinary container, and an ungranted one does not | `pkg/deviceplugin/rdma_allocate.go`, `pkg/deviceplugin/rdma_endpoint.go` | yes (confirm) | as CASE 80 plus a WHOLE-FUNCTION endpoint (the shared key is served from those). The verbs half needs `E2E_RDMA_IMAGE` shipping `ibv_devinfo` — the image is probed, not trusted, and a plain base image makes that half skip naming the packages; the open() halves need only a shell, because `exec <>` is an open |
+| 82 | An accelerator and an RDMA endpoint in one container land on one NUMA node, or the container is refused | `pkg/deviceplugin/rdma_endpoint.go` (the NUMA hint), `pkg/deviceplugin/server.go` (the accelerator hint) | yes (confirm) | a node whose accelerators straddle its RDMA endpoints' NUMA nodes AND whose kubelet reports `single-numa-node` or `restricted` from its own configz, plus an accelerated InstanceType with an entrance LocalQueue. All three or the case answers nothing. The partition observation additionally needs a card already in a partitioning mode and is a RECORDING that can never pass — no machine yet satisfies its three properties at once |
+| 83 | Preflight reports the TopologyManager policy the node's kubelet is actually running | `pkg/devicemanager/preflight/topology*.go`, `pkg/devicemanager/preflight/hostexec.go` | yes (confirm) | any node running a device manager (the image is taken from that DaemonSet) plus a readable `nodes/proxy/configz`. No RDMA hardware needed — but the policy must have been SET BY SOMEBODY: the endpoint reports the effective configuration including defaults, so on a node nobody configured it says `none` while preflight correctly declines to publish a default nobody wrote, and that check SKIPS rather than failing. A node on `single-numa-node` or `restricted` is the one that answers it |
+| 84 | On classic InfiniBand, the injected set carries a real transport, not just verbs | `pkg/deviceplugin/rdma_allocate.go` (the injected device set) | yes (confirm) | an endpoint whose port `link_layer` reads `InfiniBand` — a RoCE or EFA host is a SKIP and not a pass, which is the whole gate — plus `E2E_RDMA_PERFTEST_IMAGE` shipping `ib_write_bw`, probed in the running container rather than trusted. It deliberately uses perftest and not a collective library: that library falls back to TCP and SUCCEEDS on an image lacking `ibverbs-providers`, so job success is not a transport reading |
 
 Each note below is something the **lead** must act on before or around a run. What a case *does* — its goal, environment, inputs, assertions and cleanup — lives in its own header, which the **Case header contract** below requires to be readable on its own; the index never restates it.
 
@@ -212,6 +219,54 @@ Each note below is something the **lead** must act on before or around a run. Wh
   `kube-node-lease` and **none in `gpustack-system`**, which is the namespace the Flow's `$NS` holds.
   A group in a namespace without one is created and then never admitted, which reads like a quota
   problem.
+- **CASES 80–84 are the RDMA family, and every one of them is gated on a host SHAPE rather than on a
+  vendor.** They share `cases/_rdma-lib.sh`; drive them with `cases/run-rdma-block.sh`, whose
+  `--report-only` mode answers "what can this machine tell me" before a run is committed to. There
+  is no ordering constraint between them — none changes node hardware and none leaves a baseline —
+  so the numeric order is used only because 80's failure explains every later one.
+  - **The gates are the deliverable, not the friction.** Every one of these cases would report a
+    clean run on a machine that cannot exercise the mechanism, unless it refuses to run there: NUMA
+    alignment passes vacuously on a single-socket host and under the `none` and `best-effort` policies, the
+    virtual-function counts pass as zero-equals-zero on a host with none configured, and a transport
+    reading taken on a RoCE adapter answers a different question from the one asked. So a
+    requirement here is a POSITIVE, DISCRIMINATING reading — a value that differs between a host
+    that can answer and one that cannot — and a case that does not find one **skips, printing
+    `NOTHING WAS VERIFIED` and naming per node what was missing**, rather than passing.
+  - **One reading no machine answers**, and it is now the only one: a hardware partition beside an
+    RDMA endpoint. It needs a partitionable accelerator, an ASYMMETRIC NUMA layout, and an enforcing
+    kubelet policy, all three on one machine; the two shapes measured hold complementary halves.
+    CASE 82 records it as a skip on every run; it is deliberately never written as a pass-when-
+    observed, because a partition token carries no NUMA hint and therefore nothing can disagree.
+  - **"Devices on two NUMA nodes" is not the alignment requirement.** The requirement is an
+    accelerator whose NUMA node carries NO endpoint, so that a request exists which the topology
+    cannot satisfy. A machine with an adapter per accelerator, split evenly over two NUMA nodes,
+    meets the first and fails the second: every accelerator sits beside an endpoint, so the refusal
+    half can never fire and the admitted half is vacuous. Measured — it is why CASE 82 skips there
+    rather than reporting a pass, and the policy being the visible knob is what makes the topology
+    condition easy to miss.
+  - Host properties written as readings rather than part numbers, the shapes to borrow or buy, and
+    what each machine measured so far could not answer → `references/rdma-host-shapes.md`.
+  - **An instrument that always answers is not thereby a criterion.** The kubelet's configuration
+    endpoint reports the EFFECTIVE configuration, defaults included, so it names a policy on every
+    node — including one nobody configured. Comparing preflight against it directly therefore failed
+    every unconfigured node, which is preflight doing the right thing (it will not publish a default
+    nobody wrote). CASE 83 now asserts only the direction the endpoint supports — a value that is
+    not the kubelet's default came from a source preflight must have found — and SKIPS where the
+    node is on the default. The same trap is worth looking for elsewhere: a source that cannot
+    return "nothing" cannot distinguish "unset" from "set where nobody looked".
+  - **An absent tool is not a reading.** CASES 81 and 84 probe the running container for
+    `ibv_devinfo` / `ib_write_bw` and skip naming the executable and its packages, rather than
+    recording `command not found` as a FAIL — a plain base image passed in `E2E_RDMA_IMAGE` would
+    otherwise put a verdict about the operator on a reading nobody took. The packages are named in
+    `references/rdma-host-shapes.md`, `ibverbs-providers` among them: without it a collective
+    library falls back to TCP and SUCCEEDS, which is why CASE 84 uses perftest, whose completing is
+    itself the reading.
+  - **CASES 80, 81 and 84 take an INDEPENDENT host reading through a probe Pod** that mounts `/sys`
+    read-only. Reading both sides of an inventory correspondence, or a link layer, out of the ledger
+    compares a value with itself. CASE 84 cannot proceed without it; 80 and 81 degrade, recording
+    the checks that needed it as skips and running the rest. That probe Pod is never the Pod a grant is measured in: a
+    privileged Pod, or one carrying a host mount, opens an RDMA device node whatever the device
+    cgroup says, and both are named in the criterion as things that do not count.
 - **A ModelDeployment's replicas cannot be deleted while their Workload lives.** Kueue holds a
   finalizer on every Pod of a group and releases it only when the group finishes or the Workload is
   deleted, and the group these render is annotated *serving* — which Kueue defines as never finished.
@@ -359,5 +414,6 @@ Re-check the credential first — a run this long outlives a short-lived cloud t
 - `../_e2e-lib/references/orchestration.md` — the shared multi-specialist flow: roles, phases, rendezvous rules, report layout, the context-checkpoint discipline (with a worked focus block), and the fix-and-retest loop.
 - `../_e2e-lib/references/cluster-provisioning.md` — where the cluster comes from: bring-your-own first, the three modalities and their cost asymmetry, the credential-is-a-teardown-dependency rule, node preparation, and the destroy obligation.
 - `references/drain-recycle.md` — why CASE 2–6 need a real cluster (the fake-client blind spots), the managed-toggle code path, and the accelerated mock recipes (fake accelerator NodeFeature + the phantom-node `Devices` ledger, patched on the **v1alpha1** CRD).
+- `references/rdma-host-shapes.md` — which host shape answers which RDMA reading, why each gate is written as a positive discriminating reading rather than as "the cluster has RDMA", the one reading no machine in reach answers, and the environment variables and image contents CASES 80–84 need. It also carries the **hardware tables to borrow or buy against**: every property stated as a command and the answer that qualifies, never as a part number, so the list survives a hardware refresh and matches what the cases' own gates read.
 - `references/manual-ssh-verification.md` — the manual pass CASE 21 cannot drive in CI: a real VS Code Remote-SSH session (workspace opens, integrated terminal in `main`) and an `sshfs` mount round-trip.
 - `../_e2e-lib/references/troubleshooting.md` — shared image/rollout/teardown failure modes.
