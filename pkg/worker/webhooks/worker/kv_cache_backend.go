@@ -145,8 +145,6 @@ func validateKVCacheBackendSpec(
 	}
 	errs = append(errs, validateKVCacheBackendConnection(
 		&kvcb.Spec, oldSpec, specPath.Child("connection"))...)
-	errs = append(errs, validateKVCacheBackendTransport(
-		kvcb, old, specPath.Child("transport"))...)
 
 	return errs
 }
@@ -216,67 +214,6 @@ func validateKVCacheBackendName(kvcb *workercore.KVCacheBackend) field.ErrorList
 	}
 
 	return nil
-}
-
-// validateKVCacheBackendTransport refuses a device resource name the API server would not take as a
-// resource list key.
-//
-// The schema bounds this value twice — a pattern and a length — and between them they express every
-// rule the API server applies EXCEPT one: a resource name's domain is limited to 253 characters as a
-// whole, and a regular expression cannot say that about a repeated group whose parts vary in length.
-// Labels of 63, 63, 63 and 62 characters are each inside their own limit and make a domain of 254, in
-// a value of 256 against a cap of 317, so the schema admits it. It then travels into the rendered
-// DaemonSet's resource list, where the API server refuses the whole object — a create error inside a
-// reconcile, with nothing on this object to say why the member group never came up. That is the same
-// shape validateKVCacheBackendName exists for.
-//
-// The bound is READ from the upstream predicate rather than restated as a number here, so it cannot
-// drift from the one the API server applies. It is the call the node selector's keys are already held
-// to below, which is not a coincidence: both end up as qualified names in a rendered Pod spec.
-//
-// A CREATE is judged whatever the protocol is, though only a host fabric renders the value. Checking
-// it only on the protocols that consume it would leave a bad name sitting admitted under TCP, which
-// is a worse place to find it than at the create that wrote it.
-//
-// AN UPDATE THAT LEAVES THE NAME WHERE IT WAS IS ADMITTED, and that exemption carries more weight
-// here than anywhere else in this file. A name this rule refuses is one whose backend never came
-// up — the DaemonSet was never created — so the object carrying it is precisely the object somebody
-// needs to DELETE. Deletion runs through an update: the reconciler removes the finalizer with one,
-// and refusing that would leave the object undeletable forever, stranded by the rule that was
-// supposed to spare its owner the failure in the first place.
-//
-// THE EXEMPTION'S OWN BLIND SPOT, which is the reason the protocol is read here at all. Switching to
-// a host fabric is what makes this name consequential, and that update touches the PROTOCOL rather
-// than the name — so an exemption asking only whether the value moved would carry a grandfathered
-// bad name into the first render that uses it, which is the failure this rule exists to prevent.
-// The name is therefore read again when a protocol change starts rendering it.
-//
-// Only that direction. Switching a host fabric OFF also moves the protocol, and it is how an
-// already-admitted bad name stops mattering: refusing it would close the way out of the very state
-// the case above describes.
-func validateKVCacheBackendTransport(
-	kvcb, old *workercore.KVCacheBackend, fldPath *field.Path,
-) field.ErrorList {
-	name := kvcb.Spec.Transport.DeviceResourceName
-	if name == "" {
-		return nil
-	}
-
-	if old != nil && old.Spec.Transport.DeviceResourceName == name {
-		wasRendered := mooncake.MemberProtocolIsHostFabric(mooncake.MemberProtocol(old))
-		isRendered := mooncake.MemberProtocolIsHostFabric(mooncake.MemberProtocol(kvcb))
-		if wasRendered || !isRendered {
-			return nil
-		}
-	}
-
-	msgs := validation.IsQualifiedName(name)
-	if len(msgs) == 0 {
-		return nil
-	}
-
-	return field.ErrorList{field.Invalid(fldPath.Child("deviceResourceName"), name,
-		"is not a resource name: "+strings.Join(msgs, "; "))}
 }
 
 // validateKVCacheBackendImage refuses a backend that names no image anywhere. The field is optional
@@ -870,9 +807,9 @@ func validateKVCacheBackendMemberHostPaths(
 		// group with none must meet it just the same.
 		if pathsOverlap(mountPath, mooncake.RDMADevicePath) {
 			errs = append(errs, field.Invalid(mountPathPath, mountPath,
-				"overlaps where a host-fabric group's device tree is mounted ("+mooncake.RDMADevicePath+
-					"), which this operator renders whenever the group's protocol is RDMA or EFA: "+
-					"declaring it here would collide with that mount the day the protocol changes"))
+				"overlaps where an EFA group's device tree is mounted ("+mooncake.RDMADevicePath+
+					"), and is refused under every protocol because the protocol is editable: "+
+					"declaring it here would collide with that mount the day the group becomes EFA"))
 			continue
 		}
 
@@ -1001,8 +938,8 @@ func validateKVCacheBackendLocalDisk(
 		// someone switched the backend to a host fabric. The device tree is the only mount either
 		// host fabric adds; an EFA member takes its libfabric from the image.
 		errs = append(errs, field.Invalid(pathPath, disk.Path, fmt.Sprintf(
-			"must not overlap %s, which the RDMA and EFA transports mount into the same container: "+
-				"one mount would shadow the other, and the transport can be switched to one after "+
+			"must not overlap %s, which the EFA transport mounts into the same container: "+
+				"one mount would shadow the other, and the transport can be switched to it after "+
 				"this path is set", mooncake.RDMADevicePath)))
 	}
 

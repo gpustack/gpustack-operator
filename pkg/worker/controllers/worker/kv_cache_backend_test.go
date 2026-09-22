@@ -1068,7 +1068,13 @@ func TestKVCacheBackendReconciler_ConvergesAFabricSwitch(t *testing.T) {
 	rdma := memberPod()
 	assert.True(t, rdma.HostNetwork, "switching to RDMA takes the host network")
 	assert.Equal(t, core.DNSClusterFirstWithHostNet, rdma.DNSPolicy)
-	require.Len(t, rdma.Volumes, 1, "and the device tree")
+	assert.Empty(t, rdma.Volumes,
+		"and no device tree: on RDMA the endpoint grant carries the verbs node the member opens, "+
+			"so the tree would only add the adapters it was not granted")
+	rdmaDevice := rdma.Containers[0].Resources.Limits["device.gpustack.ai/rdma.shared"]
+	assert.Equal(t, int64(1), rdmaDevice.Value(),
+		"switching to RDMA is what makes the member ask for an endpoint, and asking is what gets "+
+			"the device cgroup rule that lets it open one")
 	require.NotNil(t, rdma.Containers[0].SecurityContext)
 	assert.Len(t, rdma.Containers[0].SecurityContext.Capabilities.Add, 2)
 
@@ -1122,9 +1128,16 @@ func TestKVCacheBackendReconciler_ConvergesAnEFASwitch(t *testing.T) {
 
 	setProtocol("RDMA")
 	rdma := memberPod()
-	require.Len(t, rdma.Volumes, 1, "RDMA shares the base")
+	assert.Empty(t, rdma.Volumes,
+		"RDMA shares the host-network base and the capabilities, and NOT the mount: switching to "+
+			"it has to take the device tree back off on the same render, or the Pod keeps a tree "+
+			"that the protocol it now names does not ask for")
+	rdmaDevice := rdma.Containers[0].Resources.Limits["device.gpustack.ai/rdma.shared"]
+	assert.Equal(t, int64(1), rdmaDevice.Value(),
+		"and gains its own request in the same render")
 	assert.False(t, hasEFADevice(rdma),
-		"but not the EFA device request — it comes back off on the same render")
+		"while the EFA device request comes back off — one fabric's grant never survives into "+
+			"the other's")
 
 	setProtocol("TCP")
 	tcp := memberPod()
