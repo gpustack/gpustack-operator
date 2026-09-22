@@ -7,12 +7,14 @@ local kubeconfig at it.
 
 - Creates a VPC (public/private subnets, single NAT gateway) and an EKS cluster
   (default version `1.34`).
-- Creates two kinds of managed node groups:
-  - `cpu`: a CPU node group (`min = max = cpu_node_count`, default 1).
-  - `gpu-<name>`: one GPU node group per key in `gpu_instance_types`, using
-    the `AL2023_x86_64_NVIDIA` AMI, `desired = gpu_node_count` (default 1) and
-    `min = 0`. Set `gpu_node_count=0` to park a group at no nodes and raise it
-    again later without recreating the group.
+- Creates the managed node groups named by two maps:
+  - `cpu_instance_types`: CPU node groups (`min = max = desired = node_count`).
+  - `gpu_instance_types`: accelerator node groups (`desired = node_count`,
+    `max = node_count`, `min = 0`).
+  In both, the map key IS the node group name, and a group that should not
+  exist is an absent key rather than a zero count. Parking a live group at no
+  nodes is a cloud-side change, not a config value -- see `gpu_instance_types`
+  in the table below.
 - Installs common addons (`coredns`, `kube-proxy`, `vpc-cni`, `metrics-server`,
   `cert-manager`, `external-dns`, ...).
 - Tags every node group's instances/volumes/ENIs `DO_NOT_DELETE=true` so the
@@ -41,10 +43,11 @@ terraform init
 # Provision with the default GPU instances (g4dn)
 terraform apply
 
-# Or declare custom GPU node groups: each map key becomes a gpu-<key> group
+# Or declare custom node groups: the key IS the node group name, and the count
+# lives inside the group it counts
 terraform apply \
   -var='region=us-east-1' \
-  -var='gpu_instance_types={ g4dn = ["g4dn.xlarge","g4dn.12xlarge"], g5 = ["g5.xlarge"] }'
+  -var='gpu_instance_types={ gpu-g4dn = { instance_types = ["g4dn.xlarge","g4dn.12xlarge"], node_count = 1 }, gpu-g5 = { instance_types = ["g5.xlarge"], node_count = 2 } }'
 ```
 
 GPU instance selection reference:
@@ -55,8 +58,7 @@ EFA needs both variables set together, because the default CPU types do not supp
 ```bash
 terraform apply \
   -var='efa_enabled=true' \
-  -var='cpu_instance_types=["c5n.9xlarge"]' \
-  -var='cpu_node_count=2'
+  -var='cpu_instance_types={ cpu = { instance_types = ["c5n.9xlarge"], node_count = 2 } }'
 ```
 
 > **Cross-node EFA works only between nodes of the SAME node group here.** This module gives every
@@ -108,11 +110,9 @@ terraform destroy
 | `vpc_cidr` | VPC CIDR | `172.31.0.0/16` |
 | `name_prefix` | Cluster name prefix (a random suffix is appended) | `gpustack-eks` |
 | `release` | EKS version | `1.34` |
-| `cpu_instance_types` | Instance types for the CPU node group | `["c6a.4xlarge","c7a.4xlarge"]` |
-| `cpu_node_count` | Number of nodes in the CPU node group AT CREATE TIME. `0` drops the group entirely, the same as `clusters/nebius`. The same `desired_size` rule as `gpu_node_count` below applies to an edit against a live group | `1` |
+| `cpu_instance_types` | CPU node groups as a `map(object)`, keyed by node group name (the key IS the name; no prefix is added): `instance_types` (candidate types) and `node_count` (`min = max = desired = node_count`, AT CREATE TIME). A group that should not exist is an absent key, not a zero count. Terraform does NOT move `desired_size` on a group that already exists (the module ignores it) -- an edit moves only the bounds; resize or park a live group with `aws eks update-nodegroup-config --scaling-config desiredSize=N`, which is drift-free precisely because the attribute is ignored | `{ cpu = { instance_types = ["c6a.4xlarge","c7a.4xlarge"], node_count = 1 } }` |
 | `efa_enabled` | Enable EFA on the CPU and GPU node groups: an EFA launch template, **one cluster placement group per node group**, one private subnet (single availability zone, reached through the NAT gateway and therefore not over SSH), and the label `gpustack.ai/efa=true`. Every group takes that one private subnet on purpose, because RDMA does not reach across availability zones -- necessary, and NOT sufficient for cross-node EFA; see the warning under Usage. REQUIRES every type in `cpu_instance_types` and `gpu_instance_types` to be EFA-capable, which neither default is | `false` |
-| `gpu_instance_types` | GPU node groups as a `map(list(string))` keyed by group name | `{ g4dn = ["g4dn.xlarge","g4dn.12xlarge"] }` |
-| `gpu_node_count` | Nodes in each GPU node group AT CREATE TIME. Drives `desired_size`; `max_size` follows it but never drops below 1, which EKS refuses. Terraform does NOT move this on a group that already exists, because the module ignores changes to `desired_size` — an edit moves the bounds and leaves the node count where it was. Resize or park a live group with `aws eks update-nodegroup-config --scaling-config desiredSize=N`, which is drift-free precisely because the attribute is ignored | `1` |
+| `gpu_instance_types` | GPU node groups as a `map(object)`, keyed by node group name (the key IS the name; no prefix is added): `instance_types` (candidate types) and `node_count`. `desired = node_count` and `max = node_count` AT CREATE TIME, `min = 0`; a count of zero is not valid -- an absent key is how a group is not created. Terraform does NOT move `desired_size` on a group that already exists (the module ignores it) -- an edit moves only `max_size` and can leave `max` under `desired`; resize or park a live group with `aws eks update-nodegroup-config --scaling-config desiredSize=N`, which is drift-free precisely because the attribute is ignored | `{ gpu-g4dn = { instance_types = ["g4dn.xlarge","g4dn.12xlarge"], node_count = 1 } }` |
 | `node_boot_disk_type` | Node root volume EBS type/performance (`volume_type`, optional `iops`/`throughput`) | `{ volume_type = "gp3", iops = 3000, throughput = 125 }` |
 | `node_boot_disk_size_gb` | Node root (boot) volume size, in GiB | `100` |
 | `node_instance_store_count` | Instance-store (ephemeral NVMe) devices mapped on every node group; must not exceed each instance type's disk count (e.g. `i7ie.xlarge` has 1). The devices surface as `/dev/nvme1n1` and onward | `0` |

@@ -104,19 +104,19 @@ locals {
   node_group_tags = { DO_NOT_DELETE = "true" }
 
   node_groups = merge(
-    # Omitted entirely at cpu_node_count = 0, the same rule and the same spelling as
-    # clusters/nebius uses. On an accelerator-only cluster the plain node is not a small
-    # extra cost but a node nothing schedules onto, and a group of zero is not a way to
-    # express that here: desired_size is ignored on an existing group, so a group asked
-    # for and then emptied is a group that stays.
+    # A CPU group that should not exist is an absent key in cpu_instance_types, the
+    # same rule clusters/nebius uses. On an accelerator-only cluster the plain node is
+    # not a small extra cost but a node nothing schedules onto, and an empty group is
+    # not a way to express that here: desired_size is ignored on an existing group, so
+    # a group asked for and then emptied is a group that stays.
     {
-      for name in(var.cpu_node_count > 0 ? ["cpu"] : []) : name => {
+      for name, cfg in var.cpu_instance_types : name => {
         # https://docs.aws.amazon.com/eks/latest/APIReference/API_Nodegroup.html#AmazonEKS-Type-Nodegroup-amiType
         ami_type           = "AL2023_x86_64_STANDARD"
-        desired_size       = var.cpu_node_count
-        max_size           = var.cpu_node_count
-        min_size           = var.cpu_node_count
-        instance_types     = var.cpu_instance_types
+        desired_size       = cfg.node_count
+        max_size           = cfg.node_count
+        min_size           = cfg.node_count
+        instance_types     = cfg.instance_types
         key_name           = aws_key_pair.accessor.key_name
         tags               = local.node_group_tags
         labels             = var.efa_enabled ? { "gpustack.ai/efa" = "true" } : {}
@@ -139,20 +139,20 @@ locals {
       }
     },
     {
-      for name, types in var.gpu_instance_types :
-      "gpu-${name}" => {
+      for name, cfg in var.gpu_instance_types : name => {
         ami_type = "AL2023_x86_64_NVIDIA"
         # desired_size REACHES AWS ONLY ON CREATE. The module this delegates to declares
         # ignore_changes on scaling_config[0].desired_size, so terraform will not move a
-        # group that already exists: lowering this to zero on a running group plans only
-        # the max_size line below, which leaves max under desired. Park an idle group with
+        # group that already exists: lowering this on a running group plans only the
+        # max_size line below, which leaves max under desired. Park an idle group with
         # `aws eks update-nodegroup-config --scaling-config desiredSize=0` instead, which
         # is drift-free precisely because the attribute is ignored here.
-        desired_size = var.gpu_node_count
-        # EKS refuses a maximum below one, so a count of zero still has to ask for one.
-        max_size           = max(var.gpu_node_count, 1)
+        desired_size = cfg.node_count
+        # EKS refuses a maximum below one; the variable's validation keeps node_count at
+        # one or more, so max follows the count with no floor needed.
+        max_size           = cfg.node_count
         min_size           = 0
-        instance_types     = types
+        instance_types     = cfg.instance_types
         key_name           = aws_key_pair.accessor.key_name
         tags               = local.node_group_tags
         labels             = var.efa_enabled ? { "gpustack.ai/efa" = "true" } : {}

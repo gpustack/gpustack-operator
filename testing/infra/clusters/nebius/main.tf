@@ -24,20 +24,21 @@ locals {
   mig_platforms = ["gpu-h100-sxm", "gpu-h200-sxm", "gpu-b200-sxm", "gpu-b200-sxm-a", "gpu-b300-sxm"]
 
   node_groups = merge(
-    # Omitted entirely at cpu_node_count = 0. Some regions sell accelerator capacity alone and hold
-    # compute.instance.non-gpu.vcpu at zero; there a plain node is not a small extra cost but a
-    # failed apply, and the accelerator tests never needed one.
+    # A CPU group that should not exist is an absent key in cpu_instance_types. Some regions
+    # sell accelerator capacity alone and hold compute.instance.non-gpu.vcpu at zero; there a
+    # plain node is not a small extra cost but a failed apply, and the accelerator tests never
+    # needed one.
     {
-      for name in(var.cpu_node_count > 0 ? ["cpu"] : []) : name => {
-        instance_type = { platform = var.cpu_instance_types.platform, preset = var.cpu_instance_types.preset }
-        os            = var.cpu_instance_types.os
+      for name, cfg in var.cpu_instance_types : name => {
+        instance_type = { platform = cfg.platform, preset = cfg.preset }
+        os            = cfg.os
         preemptible   = false
         mig           = false
         # Defaults to false: the accelerator tests drive GPU nodes, not this one, and a public
         # address is a quota'd resource (vpc.ipv4-address.public.count). Turn it on for the one
         # workflow that needs inbound reach -- building images on the node itself.
-        public_ip         = var.cpu_instance_types.public_ip
-        node_count        = var.cpu_node_count
+        public_ip         = cfg.public_ip
+        node_count        = cfg.node_count
         gpu               = null
         infiniband_fabric = null
         # The CPU group pulls no engine images, so it never outgrows the module-wide default.
@@ -45,8 +46,7 @@ locals {
       }
     },
     {
-      for name, cfg in(var.gpu_node_count > 0 ? var.gpu_instance_types : {}) :
-      "gpu-${name}" => {
+      for name, cfg in var.gpu_instance_types : name => {
         instance_type = { platform = cfg.platform, preset = cfg.preset }
         os            = coalesce(cfg.os, data.external.gpu_compat[name].result.os)
         preemptible   = cfg.preemptible
@@ -60,11 +60,12 @@ locals {
         # guess it — and that inbound reach is what the public address buys. Turn it off per group
         # (`public_ip = false`) only for a GPU group nobody has to log in to.
         public_ip = cfg.public_ip
-        # Nodes per GPU group. Adding a key to gpu_instance_types and raising gpu_node_count are
-        # different purchases: a key buys a group with its own platform and preset, the count buys
-        # more nodes of the shape this group already names. Accelerator quota is granted per
-        # platform and preset, so a count above one can be refused where a second key would not be.
-        node_count = var.gpu_node_count
+        # Nodes per GPU group. Adding a key to gpu_instance_types and raising a group's
+        # node_count are different purchases: a key buys a group with its own platform and
+        # preset, the count buys more nodes of the shape this group already names. Accelerator
+        # quota is granted per platform and preset, so a count above one can be refused where a
+        # second key would not be.
+        node_count = cfg.node_count
         gpu        = { drivers_preset = coalesce(cfg.drivers_preset, data.external.gpu_compat[name].result.drivers_preset) }
         # Null unless the group asked for a fabric. A fabric is what puts RDMA devices on the node,
         # and it can only be joined at creation time, so this cannot be added to a running group.

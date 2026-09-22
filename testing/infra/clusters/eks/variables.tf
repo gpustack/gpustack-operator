@@ -31,30 +31,32 @@ variable "release" {
 }
 
 variable "cpu_instance_types" {
-  description = "Instance types for EKS CPU node group list, check with https://aws.amazon.com/ec2/pricing/on-demand/"
-  type        = list(string)
-  default     = ["c6a.4xlarge", "c7a.4xlarge"]
-}
-
-variable "cpu_node_count" {
-  # Same create-time rule as gpu_node_count below: min and max do follow an edit, but
-  # desired_size is ignored by the module, so an edit against a live group moves the
-  # bounds and leaves the node count where it was.
-  # SCHEDULED TO GO AWAY together with gpu_node_count below, which carries the reason:
-  # cpu_instance_types becomes a map of groups with the count inside each one, and "no
-  # group" becomes an absent key rather than a zero. Plan in issue #502.
+  # One map entry per CPU node group, and the KEY IS THE NODE GROUP NAME -- the module
+  # adds no prefix of its own, so renaming a key renames (replaces) the group, and
+  # keeping the same key across a reshape keeps the group's resource address. A group
+  # that should not exist is an absent key; there is no zero-count spelling, because a
+  # count of zero said the same thing the absent key already says.
   #
-  # Zero drops the group rather than creating an empty one, which is the rule
-  # clusters/nebius already carried. A group of zero would not express the same thing
-  # here anyway: desired_size is ignored on an existing group, so a group asked for and
-  # then emptied is a group that stays.
-  description = "Number of nodes in the CPU node group at CREATE time (min = max = this). Zero drops the group altogether, the same as clusters/nebius. Terraform does not move desired_size on an existing group; see gpu_node_count."
-  type        = number
-  default     = 1
+  # node_count REACHES AWS ONLY WHEN THE GROUP IS CREATED. The module this delegates to
+  # declares ignore_changes on scaling_config[0].desired_size, so an edit against a live
+  # group moves min and max but not the node count itself -- not up, and not down to
+  # park it. Resize or park a live group with `aws eks update-nodegroup-config
+  # --scaling-config desiredSize=N`, which is drift-free precisely because the attribute
+  # is ignored here. A group asked for and then emptied is a group that stays, which is
+  # why "no group" is an absent key rather than a count of zero.
+  description = "CPU node groups, keyed by node group name (the key IS the name; no prefix is added): candidate instance types for the group and its node count at CREATE time (min = max = desired = node_count; desired is ignored on a live group, see the comment here). Check types with https://aws.amazon.com/ec2/pricing/on-demand/"
+  type = map(object({
+    instance_types = list(string)
+    node_count     = number
+  }))
+  default = { cpu = { instance_types = ["c6a.4xlarge", "c7a.4xlarge"], node_count = 1 } }
 
   validation {
-    condition     = var.cpu_node_count >= 0 && var.cpu_node_count == floor(var.cpu_node_count)
-    error_message = "cpu_node_count must be a whole number, zero or greater."
+    condition = alltrue([
+      for cfg in values(var.cpu_instance_types) :
+      cfg.node_count >= 1 && cfg.node_count == floor(cfg.node_count)
+    ])
+    error_message = "node_count must be a whole number of at least 1, in every group. A group that should not exist is an absent key, not a count of zero."
   }
 }
 
@@ -96,38 +98,31 @@ variable "efa_availability_zone_index" {
 }
 
 variable "gpu_instance_types" {
-  # Keyed by group name so each GPU node group has a stable key (gpu-<name>).
-  # Adding a key is a +create only; editing a key's instance-type list replaces
-  # just that group, never rotating the others.
-  description = "Instance types per EKS GPU node group, keyed by group name; check with https://docs.aws.amazon.com/dlami/latest/devguide/gpu.html and https://aws.amazon.com/ec2/pricing/on-demand/"
-  type        = map(list(string))
-  default     = { g4dn = ["g4dn.xlarge", "g4dn.12xlarge"] }
-  # default     = { xlarge = ["g4dn.xlarge", "g5.xlarge"], xlarge-alt = ["g5.xlarge", "g6.xlarge"], large = ["g4dn.12xlarge", "g5.12xlarge"] }
-  # default     = { small = ["g4dn.xlarge", "g4dn.12xlarge", "g6.xlarge"], large = ["g4dn.12xlarge", "g5.12xlarge", "g6.12xlarge"] }
-  # default     = { g4dn = ["g4dn.xlarge", "g4dn.12xlarge"], g5 = ["g5.xlarge", "g5.12xlarge"], g6 = ["g6.xlarge", "g6.12xlarge"] }
-}
-
-variable "gpu_node_count" {
-  # THIS VARIABLE IS SCHEDULED TO GO AWAY, and anyone here to change it should read that
-  # plan first: the count belongs inside gpu_instance_types, beside the group shape it
-  # counts, because one number applied to every key is already wrong as soon as two keys
-  # describe different hardware. cpu_instance_types becomes a map of groups at the same
-  # time, so the two stop being spelled differently for no reason. clusters/nebius takes
-  # the same change in the same edit. The written-out plan, including the key-naming rule
-  # that keeps an existing cluster's resource addresses stable, is issue #502.
+  # Same rules as cpu_instance_types above: one map entry per GPU node group, the KEY IS
+  # THE NODE GROUP NAME with no prefix added, the count lives inside the group it counts,
+  # and an absent key is how a group is not created. Adding a key is a +create only;
+  # editing a key's instance-type list replaces just that group, never rotating the
+  # others. One number applied to every key (the shape this replaced) was wrong as soon
+  # as two keys described different hardware, which is why the count moved inside.
   #
-  # This value REACHES AWS ONLY WHEN THE GROUP IS CREATED. The module this delegates to
-  # declares ignore_changes on scaling_config[0].desired_size, so editing it against a
-  # group that already exists moves nothing -- not up, and not down to park it. An
-  # earlier version of this description promised both; main.tf carries the same
-  # correction beside the attribute itself.
-  description = "Number of nodes in each GPU node group at CREATE time (desired_size; max_size follows it but never drops below 1, which EKS refuses; min_size stays 0). Terraform does not move this on an existing group -- the module ignores changes to desired_size -- so resize or park a live group with `aws eks update-nodegroup-config --scaling-config desiredSize=N`, which is drift-free precisely because the attribute is ignored here."
-  type        = number
-  default     = 1
+  # node_count is CREATE-TIME ONLY in the same way as in cpu_instance_types:
+  # desired_size is ignored on an existing group, so an edit moves only max_size and can
+  # leave max under desired. Park or resize a live group with `aws eks
+  # update-nodegroup-config --scaling-config desiredSize=N`, which is drift-free
+  # precisely because the attribute is ignored here. min_size stays 0.
+  description = "GPU node groups, keyed by node group name (the key IS the name; no prefix is added): candidate instance types for the group and its node count at CREATE time (desired = node_count, ignored on a live group; max = node_count; min = 0; see the comment here). Check with https://docs.aws.amazon.com/dlami/latest/devguide/gpu.html and https://aws.amazon.com/ec2/pricing/on-demand/"
+  type = map(object({
+    instance_types = list(string)
+    node_count     = number
+  }))
+  default = { gpu-g4dn = { instance_types = ["g4dn.xlarge", "g4dn.12xlarge"], node_count = 1 } }
 
   validation {
-    condition     = var.gpu_node_count >= 0 && var.gpu_node_count == floor(var.gpu_node_count)
-    error_message = "gpu_node_count must be a whole number of at least 0."
+    condition = alltrue([
+      for cfg in values(var.gpu_instance_types) :
+      cfg.node_count >= 1 && cfg.node_count == floor(cfg.node_count)
+    ])
+    error_message = "node_count must be a whole number of at least 1, in every group. A group that should not exist is an absent key, not a count of zero."
   }
 }
 
