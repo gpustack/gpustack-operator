@@ -93,11 +93,73 @@ Keep API comments explicit about behavior and consequences, use protocol-derived
 
 ### Implementation Plan
 
-> TODO — completed by `my-plan`.
+- [x] **T1 · Add the member interface-count API**
+      Blocked by: None
+      Owns: `api/worker/v1alpha1/kv_cache_backend.go`
+      Gate: review
+      Acceptance: The member field satisfies the Core Features: it is optional, defaults to one,
+      accepts positive values, and documents the RDMA and EFA placement consequences.
+      Verify: `go test ./api/worker/v1alpha1/...`
+
+- [x] **T2 · Regenerate the API representations**
+      Blocked by: T1
+      Owns: `api/worker/v1alpha1/generated.pb.go`, `api/worker/v1alpha1/generated.proto`,
+      `api/worker/v1alpha1/zz_generated.crds.go`, `api/worker/zz_generated.openapi.go`,
+      `pkg/kubeclients/applyconfiguration/worker/v1alpha1/kvcachebackendmember.go`,
+      `pkg/kubeclients/applyconfiguration/worker/v1alpha1/kvcachebackendmembertransport.go`,
+      `pkg/kubeclients/applyconfiguration/worker/v1alpha1/kvcachebackendtransport.go`
+      Gate: None
+      Acceptance: The protobuf, CRD, OpenAPI, and apply-configuration representations carry the
+      member field and preserve its wire number and validation metadata.
+      Verify: `git diff --check eda33a4067dc245ef8e39d12d86d6e0ebb7cf655^ eda33a4067dc245ef8e39d12d86d6e0ebb7cf655 -- api/worker/v1alpha1/generated.pb.go api/worker/v1alpha1/generated.proto api/worker/v1alpha1/zz_generated.crds.go api/worker/zz_generated.openapi.go pkg/kubeclients/applyconfiguration/worker/v1alpha1/kvcachebackendmember.go pkg/kubeclients/applyconfiguration/worker/v1alpha1/kvcachebackendmembertransport.go pkg/kubeclients/applyconfiguration/worker/v1alpha1/kvcachebackendtransport.go`
+
+- [x] **T3 · Render the effective fabric resource and quantity**
+      Blocked by: T1, T2
+      Owns: `pkg/worker/kvcache/mooncake/member_workload.go`
+      Gate: None
+      Acceptance: An omitted or one-value RDMA count uses the shared resource at quantity one; an
+      RDMA value above one uses the exclusive resource at that quantity; EFA preserves its resource
+      family and quantity; non-host-fabric protocols request neither.
+      Verify: `go test ./pkg/worker/kvcache/mooncake/... -run '^TestFabricDeviceResource_NamesItsProtocols$'`
+
+- [x] **T4 · Cover the rendered-workload interface-count matrix**
+      Blocked by: T3
+      Owns: `pkg/worker/kvcache/mooncake/member_workload_test.go`
+      Gate: None
+      Acceptance: The rendered workload asserts resource key and quantity for omitted, one,
+      above-one, and non-host-fabric rows.
+      Verify: `go test ./pkg/worker/kvcache/mooncake/... -run '^TestMemberWorkload_FabricGrantFollowsTheProtocol$'`; changing the RDMA exclusive threshold from `> 1` to `> 2` turns the above-one row red on resource-key and quantity assertions without a compile error.
+
+- [x] **T5 · Document the interface-count behavior**
+      Blocked by: T1, T3
+      Owns: `docs/kv-cache/backend.md`
+      Gate: None
+      Acceptance: The backend documentation explains that a member's interface count selects its
+      resource quantity and that an RDMA count above one uses exclusive resources.
+      Verify: `make lint docs`
+
+- [x] **T6 · Record the shipped design and its protocol dependency**
+      Blocked by: T1, T2, T3, T4, T5
+      Owns: `specs/2026-09-22-fabric-device-by-protocol.md`,
+      `specs/2026-09-22-fabric-interface-count.md`
+      Gate: None
+      Acceptance: The specifications state the API, rendering, test coverage, and the preceding
+      protocol design's updated count-dependent behavior without changing the shipped scope.
+      Verify: `make lint docs`
 
 ### Test Plan
 
-> TODO — completed by `my-plan`.
+The rendered-workload matrix in `pkg/worker/kvcache/mooncake/member_workload_test.go` covers an
+omitted count, one interface, an RDMA count above one, and non-host-fabric protocols. It asserts the
+rendered resource key and quantity, so the renderer's defaulting and exclusive-RDMA threshold are
+checked at the DaemonSet boundary rather than only through a helper.
+
+The targeted matrix command is `go test ./pkg/worker/kvcache/mooncake/... -run
+'^TestMemberWorkload_FabricGrantFollowsTheProtocol$'`. As a mutation check, changing the renderer's
+exclusive threshold from `> 1` to `> 2` makes the above-one row fail on the resource-key and quantity
+assertions; it does not fail to compile. The narrow resource-name test,
+`go test ./pkg/worker/kvcache/mooncake/... -run '^TestFabricDeviceResource_NamesItsProtocols$'`,
+also retains direct coverage of protocol and RDMA-mode selection.
 
 ## Alternatives
 
