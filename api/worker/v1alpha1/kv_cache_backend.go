@@ -504,7 +504,8 @@ type KVCacheBackendTransport struct {
 	//   - A host fabric needs two things this API cannot check: the member image must carry the
 	//     runtime its transport links — the CANN toolkit for CANN, libfabric for EFA — and the NODE must run a
 	//     device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.
-	//     Which resource the member asks for follows from this value; see the entry below.
+	//     The effective protocol selects the fabric resource family; a member group's interface count
+	//     selects its quantity and, for RDMA, whether it uses shared or exclusive resources.
 	//   - RESPELLING THIS ENUM CARRIES A RESIDUAL RISK, knowingly accepted, on the same terms as
 	//     Medium's. The values were once Auto, TCP, RDMA, EFA, HIP and Ascend; HIP and Ascend are
 	//     gone, replaced by the toolchain names ROCM and CANN, and the rest changed case. An object
@@ -672,10 +673,24 @@ type KVCacheBackendMember struct {
 	// spec.transport.protocol for this group only. Left unset, the group inherits the backend's.
 	//
 	// The override exists for the one thing two media do not agree on: a VRAM group reaching its
-	// peers over a fabric while the DRAM group beside it stays on TCP. Everything else about the
-	// fabric — the device a host-fabric member asks for — stays backend-wide, since it describes
-	// the nodes' fabric rather than one group.
+	// peers over a fabric while the DRAM group beside it stays on TCP.
 	Transport *KVCacheBackendMemberTransport `json:"transport,omitempty" protobuf:"bytes,9,opt,name=transport"`
+
+	// FabricInterfaceCount is how many distinct host-fabric interfaces each member requires.
+	//
+	// Left unset, it defaults to one. An RDMA count of one asks for a shared resource; a count above
+	// one asks for exclusive resources, because a second shared token can be a second claim on the
+	// same endpoint and would otherwise satisfy a multi-interface request without an error.
+	//
+	// The count changes placement density: one member can use shared-token capacity, while a count
+	// above one limits a node to its endpoint count divided by the count.
+	//
+	// EFA advertises one resource per node, so an EFA count above one is unsatisfiable and the member
+	// stays Pending. That is the intended failure for a node that cannot serve the requested fabric.
+	//
+	// +k8s:validation:default=1
+	// +k8s:validation:minimum=1
+	FabricInterfaceCount int32 `json:"fabricInterfaceCount,omitempty" protobuf:"varint,13,opt,name=fabricInterfaceCount"`
 
 	// There is NO per-group device-resource field. A member's segment is one cudaMalloc on one
 	// device — measured upstream, the splits exist to stay under a transport's registration limit
@@ -776,9 +791,11 @@ type KVCacheBackendMemberHostPath struct {
 	ReadOnly bool `json:"readOnly,omitempty" protobuf:"varint,4,opt,name=readOnly"`
 }
 
-// KVCacheBackendMemberTransport is a member group's override of the backend's data plane. It
-// carries a protocol only: the device a host-fabric member asks for describes the nodes' fabric
-// rather than one group, so it stays on the backend.
+// KVCacheBackendMemberTransport is a member group's override of the backend's data plane.
+//
+// It carries the protocol only. FabricInterfaceCount stays alongside it on the member so a group
+// can select its own resource quantity and RDMA allocation mode even when it inherits the backend
+// protocol.
 type KVCacheBackendMemberTransport struct {
 	// Protocol is the transport this group's members are ASKED to use, with the same values and
 	// the same Auto-resolves-to-TCP rule as the backend's spec.transport.protocol, which this

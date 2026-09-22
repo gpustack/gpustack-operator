@@ -5,9 +5,11 @@ package v1alpha1
 // KVCacheBackendMemberTransportApplyConfiguration represents a declarative configuration of the KVCacheBackendMemberTransport type for use
 // with apply.
 //
-// KVCacheBackendMemberTransport is a member group's override of the backend's data plane. It
-// carries a protocol only: the device a host-fabric member asks for describes the nodes' fabric
-// rather than one group, so it stays on the backend.
+// KVCacheBackendMemberTransport is a member group's override of the backend's data plane.
+//
+// It carries the protocol only. FabricInterfaceCount stays alongside it on the member so a group
+// can select its own resource quantity and RDMA allocation mode even when it inherits the backend
+// protocol.
 type KVCacheBackendMemberTransportApplyConfiguration struct {
 	// Protocol is the transport this group's members are ASKED to use, with the same values and
 	// the same Auto-resolves-to-TCP rule as the backend's spec.transport.protocol, which this

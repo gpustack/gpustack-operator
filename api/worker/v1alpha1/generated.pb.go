@@ -3543,6 +3543,9 @@ func (m *KVCacheBackendMember) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i = encodeVarintGenerated(dAtA, i, uint64(m.FabricInterfaceCount))
+	i--
+	dAtA[i] = 0x68
 	i -= len(m.RuntimeClassName)
 	copy(dAtA[i:], m.RuntimeClassName)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.RuntimeClassName)))
@@ -7390,6 +7393,7 @@ func (m *KVCacheBackendMember) Size() (n int) {
 	}
 	l = len(m.RuntimeClassName)
 	n += 1 + l + sovGenerated(uint64(l))
+	n += 1 + sovGenerated(uint64(m.FabricInterfaceCount))
 	return n
 }
 
@@ -9276,6 +9280,7 @@ func (this *KVCacheBackendMember) String() string {
 		`SecurityContext:` + strings.Replace(fmt.Sprintf("%v", this.SecurityContext), "SecurityContext", "v11.SecurityContext", 1) + `,`,
 		`HostPaths:` + repeatedStringForHostPaths + `,`,
 		`RuntimeClassName:` + fmt.Sprintf("%v", this.RuntimeClassName) + `,`,
+		`FabricInterfaceCount:` + fmt.Sprintf("%v", this.FabricInterfaceCount) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -21198,6 +21203,25 @@ func (m *KVCacheBackendMember) Unmarshal(dAtA []byte) error {
 			}
 			m.RuntimeClassName = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
+		case 13:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field FabricInterfaceCount", wireType)
+			}
+			m.FabricInterfaceCount = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.FabricInterfaceCount |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

@@ -110,9 +110,9 @@ const (
 	memberProtocolRDMA = "rdma"
 	memberProtocolEFA  = "efa"
 
-	// efaDeviceResource is the extended resource AWS's EFA device plugin advertises, and what an
-	// EFA member asks for one of. EFA is AWS's own fabric and its plugin advertises exactly one
-	// name, so the protocol names the resource and nothing is declared.
+	// efaDeviceResource is the extended resource AWS's EFA device plugin advertises. EFA is AWS's own
+	// fabric and its plugin advertises exactly one name, so the protocol selects the resource family.
+	// The plugin advertises one unit per node, so an EFA member requesting more than one stays Pending.
 	//
 	// IT IS WHAT MAKES THE DEVICE OPENABLE. Mounting /dev/infiniband carries the device node into
 	// the container's mount namespace and does nothing else: the device cgroup still denies open(),
@@ -341,9 +341,10 @@ var memberProtocols = map[string]string{
 // the rest never leave the member's own network namespace, so none of them earns hostNetwork, the
 // capabilities or a device.
 //
-// Both of the two DO get a device request, each derived from the protocol by fabricDeviceResource,
-// so this predicate answers "is a device granted" as well. Only one of them also mounts the device
-// tree; RDMADevicePath says which and why.
+// Both of the two DO get a device request. The effective protocol selects its resource family and
+// the member's interface count selects its quantity and RDMA allocation mode, so this predicate
+// answers "is a device granted" as well. Only one of them also mounts the device tree;
+// RDMADevicePath says which and why.
 //
 // It is UNEXPORTED, and was not always: admission used to ask the same question, because the device
 // resource was declared on the object and a declared name is consequential only on these protocols.
@@ -520,7 +521,7 @@ func RenderMemberDaemonSet(
 		},
 	}
 
-	applyMemberFabric(ds, MemberProtocolForGroup(kvcb, member))
+	applyMemberFabric(ds, MemberProtocolForGroup(kvcb, member), member.FabricInterfaceCount)
 	applyMemberLocalDisk(ds, kvcb, member, group)
 	applyMemberHostPaths(ds, member)
 	// Last of the four, because it merges onto whatever the fabric path put there and so has to see
@@ -946,7 +947,7 @@ func memberResources(member workercore.KVCacheBackendMember) core.ResourceRequir
 //   - Every other path, including the Auto that resolved to tcp, is left exactly as rendered: no
 //     security context at all rather than an empty one, since an empty struct is an invitation to
 //     add a capability to it.
-func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
+func applyMemberFabric(ds *apps.DaemonSet, protocol string, interfaceCount int32) {
 	if !memberProtocolIsHostFabric(protocol) {
 		return
 	}
@@ -1005,7 +1006,7 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 	// that would put an empty key in the list, which is a request no node can satisfy and no
 	// message explains; skipping it leaves the member asking for no device, which is what the rest
 	// of this rendering already treats as the visible failure.
-	device := fabricDeviceResource(protocol)
+	device := fabricDeviceResource(protocol, interfaceCount)
 	if device == "" {
 		return
 	}
@@ -1014,7 +1015,10 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 		container.Resources.Limits = core.ResourceList{}
 	}
 
-	container.Resources.Limits[device] = *resource.NewQuantity(1, resource.DecimalSI)
+	if interfaceCount == 0 {
+		interfaceCount = 1
+	}
+	container.Resources.Limits[device] = *resource.NewQuantity(int64(interfaceCount), resource.DecimalSI)
 }
 
 // fabricDeviceResource is the extended resource one host-fabric protocol asks for, and it NAMES ITS
@@ -1030,13 +1034,16 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
 //
 // Deriving the RDMA name rather than writing it here keeps one spelling in the repository: the
 // Device Manager serves whatever GetRDMAResourceName returns, so a member asking for a literal
-// would stop matching the day that function's keys moved and nothing would report it. The SHARED
-// mode is the one to ask for: an endpoint carries one exclusive token and many shared ones, so a
-// fleet exhausts the exclusive key long before the shared one on the same hardware, and a member
-// wants a seat on an adapter rather than the whole adapter.
-func fabricDeviceResource(protocol string) core.ResourceName {
+// would stop matching the day that function's keys moved and nothing would report it. One interface
+// asks for the SHARED mode because a member wants a seat on an adapter rather than the whole
+// adapter. More than one asks for EXCLUSIVE mode because shared tokens can repeat one endpoint,
+// silently satisfying the quantity without granting distinct interfaces.
+func fabricDeviceResource(protocol string, interfaceCount int32) core.ResourceName {
 	switch protocol {
 	case memberProtocolRDMA:
+		if interfaceCount > 1 {
+			return nodefeature.GetRDMAResourceName(workercore.DeviceAllocationModeExclusive)
+		}
 		return nodefeature.GetRDMAResourceName(workercore.DeviceAllocationModeShared)
 	case memberProtocolEFA:
 		return efaDeviceResource

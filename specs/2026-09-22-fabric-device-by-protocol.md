@@ -101,9 +101,10 @@ keeps the mount unchanged here.
 
 ### Core Features & Acceptance Criteria
 
-**F1 — The protocol names the device.**
-`fabricDeviceResource` maps a resolved protocol to the one extended resource that protocol's members
-request. It **names both protocols explicitly and falls through to neither**: the pair it and
+**F1 — The protocol selects the fabric resource family.**
+`fabricDeviceResource` maps a resolved protocol and a member interface count to the extended resource
+that protocol's members request. The protocol selects the family; the count selects the quantity and,
+for RDMA, shared or exclusive allocation. It **names both protocols explicitly and falls through to neither**: the pair it and
 `memberProtocolIsHostFabric` agree on is correct today, and the file's own comments expect a third
 host fabric eventually, at which point a fallthrough would hand that fabric's members a seat on an
 RDMA adapter — silently, and with the wrong device. Naming them returns the empty resource instead,
@@ -113,14 +114,14 @@ matrix drives the renderer and therefore cannot reach that branch at all. The RD
 from
 `nodefeature.GetRDMAResourceName` rather than written a second time: the Device Manager serves
 whatever that function returns, so a literal here would stop matching the day those keys moved and
-nothing would report it. Acceptance: an `RDMA` group's container requests
-`device.gpustack.ai/rdma.shared` and an `EFA` group's requests `vpc.amazonaws.com/efa`, each
-exactly one, with no declaration anywhere on the object.
+nothing would report it. Acceptance: an `RDMA` group's default count requests
+`device.gpustack.ai/rdma.shared`, an RDMA count above one requests the exclusive key, and an `EFA`
+group requests `vpc.amazonaws.com/efa`, with the count declared on its member.
 
-**F2 — The SHARED mode is the one asked for.**
-An endpoint carries one exclusive token and many shared ones, so a fleet exhausts the exclusive key
-long before the shared one on the same hardware, and a member wants a seat on an adapter rather than
-the adapter. Acceptance: the key ends in `.shared`, asserted as a literal.
+**F2 — The count selects RDMA allocation mode.**
+An endpoint carries one exclusive token and many shared ones. A count of one uses the shared key,
+while a larger count uses the exclusive key because repeated shared tokens can resolve to one endpoint
+without an error. Acceptance: both keys are asserted as literals for their respective counts.
 
 **F3 — Only EFA mounts the device tree.**
 Acceptance: an `RDMA` group's pod template carries no volume whose `hostPath.path` is
@@ -182,6 +183,11 @@ making.
   adapters as RDMA endpoints — on such a host the ledger carries the interface with no `rdma` field
   and the three RDMA keys read zero — so an EFA host is served by AWS's plugin and its own name, and
   no attempt is made to unify the two.
+- **Allocation mode changes the observed contention shape.** Measured on a single-node cluster with
+  two whole-function RDMA endpoints: two host-network members each requesting one shared RDMA
+  resource and bound to the same host REST port were admitted; the second failed to bind with
+  `address already in use` and stopped. Under the exclusive key, the same pair exhausted the
+  endpoints first, so the second member stayed Pending and never reached the port.
 - **Admission keeps its unconditional device-tree rule.** `hostPaths[].mountPath` and
   `localDisks[].path` are still refused when they overlap `/dev/infiniband`, under every protocol
   including the ones that no longer mount it. The reason is unchanged and still holds: the protocol
@@ -191,7 +197,7 @@ making.
   unconditionally on both fabrics, BEFORE the early return that an RDMA group with no declared name
   took — so such a member took the host's network and requested nothing, and could land on any node
   the selector reached, fabric or not. Deriving the request removes that combination: every
-  host-fabric member now carries one, so the scheduler keeps it off nodes that advertise none.
+  host-fabric member now carries a fabric request, so the scheduler keeps it off nodes that advertise none.
   ⚠️ This is NOT the same as the mutual exclusion EFA has. There the key is advertised once per
   node, so a second member is refused; the RDMA shared key carries 64 tokens per endpoint, so a node
   admits many. Anyone reading the two as equivalent will over-read this.
@@ -250,12 +256,15 @@ docs/kv-cache/
 ### Code Style
 
 ```go
-// fabricDeviceResource is the extended resource one host-fabric protocol asks for, and it is a
-// total function over the pair memberProtocolIsHostFabric admits -- which is why applyMemberFabric
-// can index a resource list with its result.
-func fabricDeviceResource(protocol string) core.ResourceName {
+// fabricDeviceResource selects the resource family from the host-fabric protocol and the RDMA mode
+// from the member's interface count.
+func fabricDeviceResource(protocol string, interfaceCount int32) core.ResourceName {
 	if protocol == memberProtocolEFA {
 		return efaDeviceResource
+	}
+
+	if interfaceCount > 1 {
+		return nodefeature.GetRDMAResourceName(workercore.DeviceAllocationModeExclusive)
 	}
 
 	return nodefeature.GetRDMAResourceName(workercore.DeviceAllocationModeShared)
@@ -399,14 +408,9 @@ see `/sys/class/infiniband` at all. That does NOT affect the data plane — 25 G
 both ends in the pod netns — but it does mean any future design that reads adapter counters or
 enumerates devices FROM INSIDE the member depends on `hostNetwork` for that reason alone.
 
-**Whether the request should also bound how many members a node takes.** Requesting a device is what
-makes members mutually exclusive on a node, and that is invisible in this API: on an EFA host the
-key is advertised once per node, so a second backend's member goes `Pending` rather than colliding.
-The RDMA keys do NOT behave that way — the shared key carries 64 tokens per endpoint — so a node can
-host many RDMA members where it hosts exactly one EFA member. Nothing in this change decides that,
-and nothing says the two should agree; it is recorded because the member's REST port is derived per
-GROUP and not per backend, so two backends whose members land on one node meet on one host port.
-That collision is reachable on RDMA today and unmeasured.
+**Should the member REST port be derived per backend rather than per group?** The measured contention
+shape above exposes this remaining decision. Choosing the exclusive key does NOT answer it: that only
+moves the failure from a port collision to Pending and leaves the shared path exactly as it is.
 
 **Whether the object should say anything when its members cannot be placed.** F7 calls the Pending
 the "visible" failure, and it is — on the Pod. The `KVCacheBackend` itself reports nothing: no

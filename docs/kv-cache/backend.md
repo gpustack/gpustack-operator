@@ -299,7 +299,7 @@ against it: the metadata plane takes no configuration at all.
 
 One member group renders **one DaemonSet** over `members[].nodeSelector`. A member contributes *a
 node's* medium — that node's host memory or, on a VRAM group, its device memory, plus its host paths
-and on a host-fabric group one of that node's fabric devices — so its identity is the node, which
+and on a host-fabric group its requested number of fabric devices — so its identity is the node, which
 is what a DaemonSet expresses. Two groups may select the same node — a DRAM group and a VRAM group
 is the shape the second medium exists for — and each still renders its own DaemonSet.
 

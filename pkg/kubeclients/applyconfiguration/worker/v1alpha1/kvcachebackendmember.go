@@ -125,10 +125,20 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// spec.transport.protocol for this group only. Left unset, the group inherits the backend's.
 	//
 	// The override exists for the one thing two media do not agree on: a VRAM group reaching its
-	// peers over a fabric while the DRAM group beside it stays on TCP. Everything else about the
-	// fabric — the device a host-fabric member asks for — stays backend-wide, since it describes
-	// the nodes' fabric rather than one group.
+	// peers over a fabric while the DRAM group beside it stays on TCP.
 	Transport *KVCacheBackendMemberTransportApplyConfiguration `json:"transport,omitempty"`
+	// FabricInterfaceCount is how many distinct host-fabric interfaces each member requires.
+	//
+	// Left unset, it defaults to one. An RDMA count of one asks for a shared resource; a count above
+	// one asks for exclusive resources, because a second shared token can be a second claim on the
+	// same endpoint and would otherwise satisfy a multi-interface request without an error.
+	//
+	// The count changes placement density: one member can use shared-token capacity, while a count
+	// above one limits a node to its endpoint count divided by the count.
+	//
+	// EFA advertises one resource per node, so an EFA count above one is unsatisfiable and the member
+	// stays Pending. That is the intended failure for a node that cannot serve the requested fabric.
+	FabricInterfaceCount *int32 `json:"fabricInterfaceCount,omitempty"`
 	// SecurityContext is the member container's security context, merged ONTO the one the renderer
 	// derives from the group's effective protocol rather than replacing it.
 	//
@@ -270,6 +280,14 @@ func (b *KVCacheBackendMemberApplyConfiguration) WithLocalDisks(values ...*KVCac
 // If called multiple times, the Transport field is set to the value of the last call.
 func (b *KVCacheBackendMemberApplyConfiguration) WithTransport(value *KVCacheBackendMemberTransportApplyConfiguration) *KVCacheBackendMemberApplyConfiguration {
 	b.Transport = value
+	return b
+}
+
+// WithFabricInterfaceCount sets the FabricInterfaceCount field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the FabricInterfaceCount field is set to the value of the last call.
+func (b *KVCacheBackendMemberApplyConfiguration) WithFabricInterfaceCount(value int32) *KVCacheBackendMemberApplyConfiguration {
+	b.FabricInterfaceCount = &value
 	return b
 }
 

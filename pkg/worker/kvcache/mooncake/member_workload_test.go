@@ -1944,37 +1944,50 @@ func TestMemberWorkload_SurveyQuotesThePathAgainstTheShell(t *testing.T) {
 // keeps a later reader from inferring a coupling from the absence of one.
 func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 	const (
-		rdmaKey core.ResourceName = "device.gpustack.ai/rdma.shared"
-		efaKey  core.ResourceName = "vpc.amazonaws.com/efa"
+		rdmaSharedKey    core.ResourceName = "device.gpustack.ai/rdma.shared"
+		rdmaExclusiveKey core.ResourceName = "device.gpustack.ai/rdma"
+		efaKey           core.ResourceName = "vpc.amazonaws.com/efa"
 	)
 
 	cases := []struct {
-		name          string
-		protocol      string
-		groupProtocol string
-		medium        string
-		want          core.ResourceName
-		wantMount     bool
+		name           string
+		protocol       string
+		groupProtocol  string
+		medium         string
+		interfaceCount int32
+		want           core.ResourceName
+		wantCount      int64
+		wantMount      bool
 	}{
 		{
-			name:     "RDMA asks for the shared key this operator publishes, and mounts nothing",
+			name:     "an omitted interface count preserves the shared RDMA request",
 			protocol: "RDMA", medium: "DRAM",
-			want: rdmaKey,
+			want: rdmaSharedKey, wantCount: 1,
+		},
+		{
+			name:     "one interface asks for the shared RDMA key",
+			protocol: "RDMA", medium: "DRAM", interfaceCount: 1,
+			want: rdmaSharedKey, wantCount: 1,
+		},
+		{
+			name:     "multiple interfaces ask for exclusive RDMA resources",
+			protocol: "RDMA", medium: "DRAM", interfaceCount: 2,
+			want: rdmaExclusiveKey, wantCount: 2,
 		},
 		{
 			name:     "a VRAM group on RDMA is granted exactly what a DRAM one is",
 			protocol: "RDMA", medium: "VRAM",
-			want: rdmaKey,
+			want: rdmaSharedKey, wantCount: 1,
 		},
 		{
 			name:     "EFA asks for the name AWS's own plugin advertises, and keeps the tree",
 			protocol: "EFA", medium: "DRAM",
-			want: efaKey, wantMount: true,
+			want: efaKey, wantCount: 1, wantMount: true,
 		},
 		{
 			name:     "a group overriding the backend's TCP with RDMA is granted the fabric",
 			protocol: "TCP", groupProtocol: "RDMA", medium: "DRAM",
-			want: rdmaKey,
+			want: rdmaSharedKey, wantCount: 1,
 		},
 		{
 			name:     "a group overriding the backend's RDMA with TCP is granted nothing",
@@ -1995,6 +2008,7 @@ func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 			kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 				k.Spec.Transport.Protocol = c.protocol
 				k.Spec.Connection.Managed.Members[0].Medium = c.medium
+				k.Spec.Connection.Managed.Members[0].FabricInterfaceCount = c.interfaceCount
 				if c.groupProtocol != "" {
 					k.Spec.Connection.Managed.Members[0].Transport = &workercore.KVCacheBackendMemberTransport{Protocol: c.groupProtocol}
 				}
@@ -2003,12 +2017,11 @@ func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 			podSpec := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec
 			limits := podSpec.Containers[0].Resources.Limits
 
-			for _, key := range []core.ResourceName{rdmaKey, efaKey} {
+			for _, key := range []core.ResourceName{rdmaSharedKey, rdmaExclusiveKey, efaKey} {
 				got := limits[key]
 				if key == c.want {
-					assert.Equal(t, int64(1), got.Value(),
-						"one seat on one adapter is what a member asks for, and the device cgroup "+
-							"refuses the open until a plugin allocation adds the rule")
+					assert.Equal(t, c.wantCount, got.Value(),
+						"the request has to carry both the protocol's resource key and the declared interface count")
 					continue
 				}
 				assert.NotContains(t, limits, key,
@@ -2062,11 +2075,13 @@ func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 // function under test would assert nothing.
 func TestFabricDeviceResource_NamesItsProtocols(t *testing.T) {
 	cases := []struct {
-		name     string
-		protocol string
-		want     core.ResourceName
+		name           string
+		protocol       string
+		interfaceCount int32
+		want           core.ResourceName
 	}{
 		{name: "rdma asks for the shared key", protocol: "rdma", want: "device.gpustack.ai/rdma.shared"},
+		{name: "multiple RDMA interfaces ask for the exclusive key", protocol: "rdma", interfaceCount: 2, want: "device.gpustack.ai/rdma"},
 		{name: "efa asks for the name AWS's plugin advertises", protocol: "efa", want: "vpc.amazonaws.com/efa"},
 		{
 			name:     "a host fabric this function does not name is granted nothing, never RDMA's key",
@@ -2078,7 +2093,7 @@ func TestFabricDeviceResource_NamesItsProtocols(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.want, fabricDeviceResource(c.protocol),
+			assert.Equal(t, c.want, fabricDeviceResource(c.protocol, c.interfaceCount),
 				"a fallthrough here would hand an unnamed fabric the RDMA adapter it was never "+
 					"meant to hold, and nothing downstream would report the substitution")
 		})
