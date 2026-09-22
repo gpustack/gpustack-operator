@@ -84,6 +84,13 @@ func numberedRoles(n int) []workercore.ModelDeploymentRole {
 	return roles
 }
 
+// cards builds a resources block asking for n accelerator cards per member.
+func cards(n int64) *workercore.ModelDeploymentRoleResources {
+	return &workercore.ModelDeploymentRoleResources{
+		Accelerator: resource.NewQuantity(n, resource.DecimalSI),
+	}
+}
+
 func TestValidateModelDeployment(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -877,6 +884,372 @@ func TestValidateModelDeployment(t *testing.T) {
 				return md
 			}(),
 		},
+		{
+			name: "extra_args_parallel_degree_missing_value",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--max-model-len=8192", "--tensor-parallel-size"}
+				})),
+			wantMessage: "the --tensor-parallel-size declaration has no value",
+		},
+		{
+			name: "extra_args_parallel_degree_not_an_integer",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=two"}
+				})),
+			wantMessage: `the --tensor-parallel-size value "two" is not an integer`,
+		},
+		{
+			name: "extra_args_parallel_degree_out_of_range",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=99999999999999999999"}
+				})),
+			wantMessage: `the --tensor-parallel-size value "99999999999999999999" is out of range`,
+		},
+		{
+			name: "extra_args_parallel_degree_below_bound",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--pipeline-parallel-size=0"}
+				})),
+			wantMessage: "the --pipeline-parallel-size value 0 is below 1",
+		},
+		{
+			// The variable is vLLM's second spelling of the data-parallel degree, and it is on the
+			// books exactly when no flag drives data parallelism -- as here.
+			name: "extra_args_parallel_dp_env_malformed",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Env = []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "two"}}
+				})),
+			wantMessage: `the VLLM_DP_SIZE value "two" is not an integer`,
+		},
+		{
+			// The engine's own precedence resolves a doubly stated DP: the flag drives data
+			// parallelism, so the malformed variable is never read and costs nothing.
+			name: "extra_args_parallel_dp_env_shadowed_by_flag",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--data-parallel-size=2"}
+					r.Env = []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "two"}}
+				})),
+		},
+		{
+			// A take-over role's books are its command: a broken degree on the very line that
+			// runs is refused the same as a managed role's.
+			name: "extra_args_parallel_takeover_command_is_parsed",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Command = []string{
+						"python", "-m", "vllm.entrypoints.openai.api_server", "--tensor-parallel-size=two",
+					}
+				})),
+			wantMessage: `the --tensor-parallel-size value "two" is not an integer`,
+		},
+		{
+			// The inert extra arguments beside a take-over command are no stream at all: nobody
+			// parses them, not even to refuse them.
+			name: "extra_args_parallel_inert_beside_takeover_is_not_parsed",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Command = []string{"python", "-m", "vllm.entrypoints.openai.api_server"}
+					r.ExtraArgs = []string{"--tensor-parallel-size=two"}
+				})),
+		},
+		{
+			name: "parallel_width_fits_the_cards",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=2"}
+					r.Resources = cards(2)
+				})),
+		},
+		{
+			name: "parallel_width_exceeds_the_cards",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=2"}
+					r.Resources = cards(1)
+				})),
+			wantMessage: "the engine needs 2 per member",
+		},
+		{
+			// The width is per member: two members of one card each are not a two-card member.
+			name: "parallel_width_size_rescues_nothing",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=2"}
+					r.Resources = cards(1)
+					r.ReplicaSize = 2
+				})),
+			wantMessage: "does not rescue it",
+		},
+		{
+			name: "parallel_width_data_parallel_multiplies",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=2", "--data-parallel-size=2"}
+					r.Resources = cards(3)
+				})),
+			wantMessage: "3 cards cannot hold the width the role declares (tensor-parallel 2, data-parallel 2): the engine needs 4 per member",
+		},
+		{
+			name: "parallel_width_data_parallel_multiplies_admitted",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=2", "--data-parallel-size=2"}
+					r.Resources = cards(4)
+				})),
+		},
+		{
+			name: "parallel_width_pipeline_parallel_multiplies",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--pipeline-parallel-size=2"}
+					r.Resources = cards(1)
+				})),
+			wantMessage: "the engine needs 2 per member",
+		},
+		{
+			name: "parallel_width_sglang_pipeline_parallel_multiplies",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--pp-size=2"}
+					r.Resources = cards(1)
+				})),
+			wantMessage: "the engine needs 2 per member",
+		},
+		{
+			// Prefill context parallelism is not one of the modes that narrows the SGLang
+			// width, so the data-parallel width still multiplies beside it.
+			name: "parallel_width_sglang_prefill_cp_does_not_narrow",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=2", "--dp-size=2", "--enable-prefill-cp"}
+					r.Resources = cards(3)
+				})),
+			wantMessage: "the engine needs 4 per member",
+		},
+		{
+			// A declared zero local share is the engine's own sentinel for DP specified
+			// externally; the check reads it as undeclared, so the width still multiplies.
+			name: "parallel_width_declared_zero_local_still_multiplies",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{
+						"--tensor-parallel-size=2", "--data-parallel-size=2", "--data-parallel-size-local=0",
+					}
+					r.Resources = cards(3)
+				})),
+			wantMessage: "the engine needs 4 per member",
+		},
+		{
+			// A declared local share of one places exactly one DP rank on the member, so the
+			// width multiplies by one and the two cards hold the tensor pair.
+			name: "parallel_width_declared_local_share_of_one_multiplies_by_one",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{
+						"--tensor-parallel-size=2", "--data-parallel-size=2", "--data-parallel-size-local=1",
+					}
+					r.Resources = cards(2)
+				})),
+		},
+		{
+			// With no wiring flag, a declared local share is exactly the DP ranks this member
+			// runs: eight of them on a two-card member cannot start.
+			name: "parallel_width_declared_local_share_multiplies",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{
+						"--data-parallel-size=8", "--data-parallel-size-local=8",
+					}
+					r.Resources = cards(2)
+				})),
+			wantMessage: "2 cards cannot hold the width the role declares (data-parallel-local 8): the engine needs 8 per member",
+		},
+		{
+			name: "parallel_width_declared_local_share_admitted_when_it_fits",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{
+						"--tensor-parallel-size=2", "--data-parallel-size=2", "--data-parallel-size-local=2",
+					}
+					r.Resources = cards(4)
+				})),
+		},
+		{
+			// Degrees each inside the host int still overflow the product: the width pins one
+			// past the cards rather than wrap, and the refusal names no wrapped figure.
+			name: "parallel_width_overflowing_product_still_refuses",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{
+						"--tensor-parallel-size=4000000000", "--pipeline-parallel-size=3000000000",
+					}
+					r.Resources = cards(8)
+				})),
+			wantMessage: "the engine needs more than 8 per member",
+		},
+		{
+			name: "parallel_width_wiring_flag_silences",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=2", "--nnodes=2"}
+					r.Resources = cards(1)
+				})),
+		},
+		{
+			name: "parallel_width_prefill_context_parallel_multiplies",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=2", "--prefill-context-parallel-size=2"}
+					r.Resources = cards(3)
+				})),
+			wantMessage: "the engine needs 4 per member",
+		},
+		{
+			// Decode-context parallelism reuses the tensor-parallel ranks, so it adds no cards.
+			name: "parallel_width_decode_context_parallel_reuses_tp_ranks",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--decode-context-parallel-size=4"}
+					r.Resources = cards(1)
+				})),
+		},
+		{
+			// An explicit zero request is a value the user wrote; the check stays silent on it.
+			name: "parallel_width_zero_cards_stays_silent",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=2"}
+					r.Resources = cards(0)
+				})),
+		},
+		{
+			// A fractional card count is not a readable count of cards.
+			name: "parallel_width_fractional_cards_stay_silent",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=2"}
+					r.Resources = &workercore.ModelDeploymentRoleResources{
+						Accelerator: resource.NewMilliQuantity(1500, resource.DecimalSI),
+					}
+				})),
+		},
+		{
+			// The env spelling of the degree is on the same books, so it enters the width too.
+			name: "parallel_width_dp_env_is_on_the_books",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=2"}
+					r.Env = []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "2"}}
+					r.Resources = cards(3)
+				})),
+			wantMessage: "the engine needs 4 per member",
+		},
+		{
+			name: "parallel_width_sglang_data_parallel_multiplies",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=2", "--dp-size=2"}
+					r.Resources = cards(3)
+				})),
+			wantMessage: "the engine needs 4 per member",
+		},
+		{
+			// DP attention moves the data-parallel width inside the tensor world.
+			name: "parallel_width_sglang_dp_attention_narrows",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=2", "--dp-size=2", "--enable-dp-attention"}
+					r.Resources = cards(2)
+				})),
+		},
+		{
+			name: "parallel_width_sglang_dwdp_narrows",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=2", "--dp-size=2", "--dwdp-size=2"}
+					r.Resources = cards(2)
+				})),
+		},
+		{
+			name: "parallel_width_sglang_moe_dp_narrows",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=2", "--dp-size=2", "--moe-dp-size=2"}
+					r.Resources = cards(2)
+				})),
+		},
+		{
+			name: "parallel_width_sglang_attention_cp_narrows",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=2", "--dp-size=2", "--attn-cp-size=2"}
+					r.Resources = cards(2)
+				})),
+		},
+		{
+			name: "parallel_width_sglang_wiring_silences",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tp-size=2", "--dp-size=2", "--nnodes=2"}
+					r.Resources = cards(1)
+				})),
+		},
+		{
+			// A take-over role's books are its command, so a degree on that line enters the
+			// width exactly as a managed role's does.
+			name: "parallel_width_takeover_command_counts",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Command = []string{"/bin/my-server", "--tensor-parallel-size=2"}
+					r.Resources = cards(1)
+				})),
+			wantMessage: "the engine needs 2 per member",
+		},
+		{
+			// The inert extra arguments beside a take-over command enter no width.
+			name: "parallel_width_inert_args_beside_takeover_stay_silent",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Command = []string{"/bin/my-server"}
+					r.ExtraArgs = []string{"--tensor-parallel-size=2"}
+					r.Resources = cards(1)
+				})),
+		},
+		{
+			// A resources block that asks for no accelerator carries no card count to compare.
+			name: "parallel_width_nil_accelerator_stays_silent",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--tensor-parallel-size=2"}
+					r.Resources = &workercore.ModelDeploymentRoleResources{
+						AcceleratorSlicedMemoryPercentage: 50,
+					}
+				})),
+		},
+		{
+			// Expert parallelism is a mode in vLLM: it adds no ranks and never enters the product.
+			name: "parallel_width_vllm_expert_parallel_mode_adds_no_cards",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--enable-expert-parallel"}
+					r.Resources = cards(1)
+				})),
+		},
+		{
+			// SGLang's expert-parallel DEGREE is stored by the parse but is not part of the width.
+			name: "parallel_width_sglang_expert_parallel_adds_no_cards",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.ExtraArgs = []string{"--ep-size=4"}
+					r.Resources = cards(1)
+				})),
+		},
 	}
 
 	for _, tc := range testCases {
@@ -914,6 +1287,33 @@ func TestValidateModelDeployment_TwoRolesPassTheWholePath(t *testing.T) {
 
 func errsContain(aggregate, want string) bool {
 	return strings.Contains(aggregate, want)
+}
+
+// TestValidateModelDeploymentRoleExtraArgs_AnEngineWithNoTableAdmitsEverything pins the parse's
+// open world: an engine the table does not know parses to all ones without error, so its flags --
+// known or not -- stay the engine's own business.
+func TestValidateModelDeploymentRoleExtraArgs_AnEngineWithNoTableAdmitsEverything(t *testing.T) {
+	r := role(func(r *workercore.ModelDeploymentRole) {
+		r.ExtraArgs = []string{"--tensor-parallel-size", "2", "--such-a-flag"}
+	})
+
+	assert.Empty(t, validateModelDeploymentRoleExtraArgs(
+		"test-engine", &r, field.NewPath("spec", "roles").Index(0)))
+}
+
+// TestValidateModelDeploymentRoleParallelWidth_DoesNotRefuseTwice pins the silence rule: a
+// declaration the parse cannot read is the parse's refusal and only the parse's refusal -- the
+// width check has no books to multiply and adds no second error of its own.
+func TestValidateModelDeploymentRoleParallelWidth_DoesNotRefuseTwice(t *testing.T) {
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.ExtraArgs = []string{"--tensor-parallel-size=two"}
+			r.Resources = cards(1)
+		}))
+
+	errs := validateModelDeployment(md, nil)
+	require.Len(t, errs, 1, "the unreadable declaration is the parse's refusal alone")
+	assert.Contains(t, errs[0].Error(), "is not an integer")
 }
 
 // TestValidateModelDeploymentRoleAdditionalVolumes covers the three rules the field documentation

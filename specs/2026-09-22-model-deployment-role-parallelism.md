@@ -270,7 +270,7 @@ what keeps the parse both robust and forward-looking:
 - **The tables** — one per engine, from the inventory above. A row is one flag: every accepted
   spelling, its arity (degree flags take a value, mode flags take none), and its kind (degree,
   mode, wiring); the env table has the same shape keyed by variable name. The vLLM table serves
-  both vLLM-flavored engines; an engine with no table parses to the zero value without error.
+  both vLLM-flavored engines; an engine with no table parses to all ones without error.
   Adding an engine is adding a table, adding a flag is adding a row — nothing else in the parser
   changes.
 - **The parser** — `modelDeploymentDeclaredParallelism(engine, extraArgs, env)`, implementing
@@ -307,7 +307,7 @@ last-wins, a mode flag
 NOT consuming the next token, the pass-through rows (unknown flag, positional, empty entry),
 each error class, CLI-over-env and env-fallback DP precedence with the local-share corners, and
 a table-less engine parsing
-to the zero value.
+to all ones.
 
 **F2 — The Ascend leg renders both halves from both parses, in one change.**
 `renderModelDeploymentPods` (`pkg/worker/controllers/worker/model_deployment.go:1024-1116`)
@@ -344,38 +344,41 @@ operator. Acceptance: no sentence on the page still contradicts the contract; th
 caps hold.
 
 **F4 — Admission refuses books that cannot be read.**
-`validateModelDeploymentRoleExtraArgs` (`pkg/worker/webhooks/worker/model_deployment.go:1355`)
+`validateModelDeploymentRoleExtraArgs` (`pkg/worker/webhooks/worker/model_deployment.go:1365`)
 gains the parse's error classes as refusals, each naming the role and the flag: a known degree
 flag with a missing, non-integer, or sub-1 value, and a `VLLM_DP_SIZE` that is malformed while
-being the effective DP source. A doubly stated DP (flag and env) is NOT refused — the engine's
-own precedence resolves it and the relay follows the engine. One pair-level refusal is new: a
-managed role declaring a relay degree above 1 while the OPPOSITE prefill/decode role is command
-take-over. The take-over role has no rendered argv, so its half of the document can only be
-`1/1`; if its engine is actually narrower the deployment crash-loops on an assert that blames
-the declared numbers, and if wider it pulls a wrong layout — admission cannot know which, so it
-refuses, naming the take-over role as the unreadable half. A pair where BOTH roles are
-take-over keeps today's behavior: nothing is parsed, the document is `1/1`, and the contract
-governs. These refusals fire only where the args actually render — a take-over role's inert
-`extraArgs` is parsed by nobody and refused nothing, consistent with F3. The owned-key table
-(`ModelDeploymentOwnsArg`) is unchanged, and unknown flags stay admitted exactly as today:
-`vllm serve` owns rejecting what IT does not know. Acceptance: webhook cases, one per error
-class and one per take-over pairing, plus the admitted rows — an unknown flag, a take-over role
-carrying anything, a role on an engine with no table, a DP stated twice the engine's own way.
+being the effective DP source. The books read are the role's one argument stream
+(`ModelDeploymentRoleArgs`): a take-over role's Command is parsed exactly like a managed role's
+ExtraArgs — a broken degree on the very line that runs is refused the same way — while the
+inert ExtraArgs beside a Command are parsed by nobody and refused nothing, consistent with F3.
+A doubly stated DP (flag and env) is NOT refused — the engine's own precedence resolves it and
+the relay follows the engine. The owned-key table (`ModelDeploymentOwnsArg`) is unchanged, and
+unknown flags stay admitted exactly as today: `vllm serve` owns rejecting what IT does not know.
+Acceptance: webhook cases, one per error class, plus the admitted rows — an unknown flag, an
+inert ExtraArgs beside a take-over Command carrying anything, a role on an engine with no
+table, a DP stated twice the engine's own way.
 
 **F5 — `roles[].size` gets its first check, in the unambiguous subset.**
 Today size is whatever the author writes, and nothing ties it to the degrees — the issue names
 this as the parse's second payoff. The check is deliberately small, refusing only configurations
-that cannot start, from numbers the author already wrote. For a role whose args render (no
-take-over), with no multi-node wiring flag present, whose per-member accelerator request `C`
+that cannot start, from numbers the author already wrote. For a role with no multi-node wiring
+flag present, whose per-member accelerator request `C`
 (`roles[].resources.accelerator`) is a single readable count, compute the per-member engine
-width `R` from the parse: vLLM `R = TP × PP × PCP`, multiplied by DP ONLY when neither
-`--data-parallel-size-local` nor any `--data-parallel-*` wiring flag is declared — a declared
-local size or wiring means some of the DP width may live off this member, the table does not
-model placement, and the check stays silent (DCP reuses TP ranks; EP is a mode). SGLang
+width `R` from the parse: vLLM `R = TP × PP × PCP × DPW`, where `DPW` is the declared
+`--data-parallel-size-local` when one is written above zero — with no `--data-parallel-*`
+wiring flag present that share is exactly the DP ranks this member runs — else the full
+`--data-parallel-size`; a declared ZERO local size is the engine's own sentinel for DP
+specified externally, so it reads as undeclared and the full width still multiplies; any
+wiring flag means some of the DP width may live off this member, the table does not model
+placement, and the check stays silent (DCP reuses TP ranks; EP is a mode). SGLang
 `R = TP × PP × DP`, or `TP × PP` when DP attention, DWDP, MoE-DP or attention-CP says the width
-lives inside the TP world. `R > C` is refused, naming `R`, `C`, and the degrees it came from.
+lives inside the TP world. `R > C` is refused, naming `R`, `C`, and the degrees it came from —
+a product that overflows an int64 still refuses, pinning one past `C` rather than wrapping, and
+names no figure arithmetic cannot hold.
 Everything ambiguous stays silent: wiring flags present, a mode whose width semantics the table
-does not model, `C` unreadable or zero, a take-over role. The check never computes a "right"
+does not model, `C` unreadable or zero. The books are the role's one argument stream, so the
+inert ExtraArgs beside a take-over Command enter no width — the Command is that role's
+declaration. The check never computes a "right"
 size and never reads a pool: it is the author's own books, arithmetic, and a refusal only when
 the arithmetic cannot run. Acceptance: webhook cases for each refusal and each silence rule; a
 TP=2 role on a 2-card request is admitted, the same role on 1 card is refused, and `size`
@@ -498,13 +501,11 @@ docs/reference/
 
 ```go
 // ModelDeploymentDeclaredParallelism is the parallel shape one role's author wrote on the
-// books: the degree flags of the role's engine parsed from ExtraArgs, plus the one degree the
-// engine accepts as a literal environment entry. A degree nothing declares stays at its
+// books: the degree flags of the role's engine parsed from the role's own argument stream --
+// its ExtraArgs, or its Command when that replaces the line, never both -- plus the one degree
+// the engine accepts as a literal environment entry. A degree nothing declares stays at its
 // engine's own default of one -- the operator composes no degree of its own, because the
-// transfer document must agree with the engine, and only the author's numbers can be right. A
-// role whose command is taken over has no rendered argv, so it parses to all ones; a managed
-// opposite role declaring above one is refused at admission, because neither half of that
-// document could be read.
+// transfer document must agree with the engine, and only the author's numbers can be right.
 type ModelDeploymentDeclaredParallelism struct {
 	TensorParallel   int
 	PipelineParallel int
@@ -583,13 +584,14 @@ in Go comments; the vllm.go:156-161 comment is rewritten in the same change that
       Verify: `go test ./pkg/worker/controllers/worker/...`, and `make generate` leaving the tree
       clean.
 
-- [ ] **T4 · The admission rules**
+- [x] **T4 · The admission rules**
       Blocked by: T1
       Owns: `pkg/worker/webhooks/worker/model_deployment.go`,
       `pkg/worker/webhooks/worker/model_deployment_test.go`
       Gate: review
-      Acceptance: F4 and F5, one case per refusal and per silence rule; unknown flags, take-over
-      roles and table-less engines stay admitted; a doubly stated DP resolves the engine's way.
+      Acceptance: F4 and F5, one case per refusal and per silence rule; unknown flags, inert
+      ExtraArgs beside a take-over Command and table-less engines stay admitted; a doubly stated
+      DP resolves the engine's way.
       Verify: `go test ./pkg/worker/webhooks/worker/...`
 
 - [ ] **T5 · Repair the statements this work makes false**
@@ -640,8 +642,9 @@ Every added unit is covered inside its own task's suite:
 - `pkg/worker/kvcache/inject`: the render pins per declared pair, EVERY row asserting both blocks (the
   cross-side rule as a test property), a mutation filling only the local side shown red, the zero pair
   rendering `1/1`. Baseline 2026-09-22 — 89.0%.
-- `pkg/worker/webhooks/worker`: the F4 refusal matrix (each error class, both take-over pairings, the
-  admitted rows — unknown flag, take-over carrying anything, table-less engine, doubly stated DP) and the
+- `pkg/worker/webhooks/worker`: the F4 refusal matrix (each error class, the take-over Command
+  parsed as the role's books, the admitted rows — unknown flag, inert ExtraArgs beside a take-over
+  Command carrying anything, table-less engine, doubly stated DP) and the
   F5 matrix (each refusal, each silence rule, `size` rescuing nothing). Baseline 2026-09-22 — 91.4%.
 
 #### Integration tests
