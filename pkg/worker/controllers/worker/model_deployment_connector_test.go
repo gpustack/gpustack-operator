@@ -866,12 +866,11 @@ func TestModelDeploymentConnector_DeclaredDegreesLeaveTheNativeDocumentUntouched
 	}`, byRole["decode"])
 }
 
-// TestModelDeploymentConnector_TakeOverHalfResolvesToOne pins the unreadable half's shape. A
-// take-over role's extra arguments render nowhere, so they are parsed by nobody -- the inert
-// declaration below would fail the parse if anyone read it -- and its half of the document stays
-// the engine's own default. Admission refuses a NEW deployment this shape; a render that meets
-// one anyway states 1/1 for the half it cannot read rather than guessing.
-func TestModelDeploymentConnector_TakeOverHalfResolvesToOne(t *testing.T) {
+// TestModelDeploymentConnector_TakeOverHalfReadsOnlyItsCommand pins the stream selection on the
+// take-over half: the replaced command line is the half's books -- this one declares nothing, so
+// its block stays at the engine's own default -- while the inert extra arguments beside it are
+// parsed by nobody, the broken degree there least of all.
+func TestModelDeploymentConnector_TakeOverHalfReadsOnlyItsCommand(t *testing.T) {
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.KVCache = nil
 		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
@@ -899,6 +898,40 @@ func TestModelDeploymentConnector_TakeOverHalfResolvesToOne(t *testing.T) {
 	assert.JSONEq(t, `{
 		"kv_connector":"MooncakeConnectorV1","kv_role":"kv_producer","kv_port":8998,
 		"kv_connector_extra_config":{"prefill":{"tp_size":2,"dp_size":1},"decode":{"tp_size":1,"dp_size":1}}
+	}`, byRole["prefill"])
+}
+
+// TestModelDeploymentConnector_TakeOverCommandFillsItsHalf pins the take-over half's truth: a
+// degree written on the replaced command line is on the books, so it renders into the block the
+// managed half's document carries for that half. Claiming 1/1 beside a degree written on the very
+// line that runs would be the wrong answer that starts.
+func TestModelDeploymentConnector_TakeOverCommandFillsItsHalf(t *testing.T) {
+	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.KVCache = nil
+		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
+		md.Spec.Roles[1].Command = []string{"/bin/my-server", "--data-parallel-size", "3"}
+	})
+	cli := newModelDeploymentClient(md, ascendRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	byRole := map[string]string{}
+	for _, pod := range replicaPods(t, cli) {
+		role := modelDeploymentPodRole(&pod)
+		at := slices.Index(pod.Spec.Containers[0].Command, "--kv-transfer-config")
+		if role == "decode" {
+			assert.Less(t, at, 0, "a take-over role gets no part of the connector")
+			continue
+		}
+		require.GreaterOrEqual(t, at, 0, "%s carries no transfer configuration", pod.Name)
+		byRole[role] = pod.Spec.Containers[0].Command[at+1]
+	}
+
+	require.Len(t, byRole, 1)
+	assert.JSONEq(t, `{
+		"kv_connector":"MooncakeConnectorV1","kv_role":"kv_producer","kv_port":8998,
+		"kv_connector_extra_config":{"prefill":{"tp_size":2,"dp_size":1},"decode":{"tp_size":1,"dp_size":3}}
 	}`, byRole["prefill"])
 }
 

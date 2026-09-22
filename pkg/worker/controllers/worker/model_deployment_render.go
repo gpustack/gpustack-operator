@@ -1025,11 +1025,13 @@ func modelDeploymentDemandsClientCert(command []string, i int) bool {
 		mode != modelDeploymentEngineTLSClientAuthOptional
 }
 
-// modelDeploymentRoleArgs is the part of a replica's command line the ROLE contributes, which is the
-// only part that can carry a listen or a TLS flag.
+// ModelDeploymentRoleArgs is the part of a replica's command line the ROLE contributes, which is
+// the only part that can carry a listen or a TLS flag.
 //
 // It exists so that a caller with nothing but the spec -- the published endpoint is derived from the
-// spec alone -- reaches the same answer the rendered command line would give it.
+// spec alone -- reaches the same answer the rendered command line would give it. It is also the
+// stream the parallelism declaration parses: the engine reads exactly these tokens under either
+// tier, so the books and the document can never come from different command lines.
 //
 // IT IS A NARROWER LIST THAN THE RENDER SCANS, and the two agree only because of an invariant this
 // function cannot enforce: the engine's base argv and the connector's rendered arguments carry no
@@ -1040,7 +1042,7 @@ func modelDeploymentDemandsClientCert(command []string, i int) bool {
 // A take-over role contributes its whole argv and nothing else: the extra arguments are not appended
 // to a command the user replaced, so reading them here would describe a command line that is not
 // being run.
-func modelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
+func ModelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
 	if len(role.Command) > 0 {
 		return role.Command
 	}

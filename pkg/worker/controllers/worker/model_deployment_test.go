@@ -1396,9 +1396,10 @@ func TestModelDeploymentReconciler_ARolloutReplacesTheHighestOrdinalFirst(t *tes
 }
 
 // TestModelDeploymentDeclaredParallelismPair pins the resolution rules off the deployment's own
-// role list: the first role of a kind in declaration order wins (a rule this function owns rather
-// than borrows from admission), a take-over half is skipped without being parsed, a server kind's
-// books are read by nobody, and vLLM's environment-carried DP width reaches the pair.
+// role list: the first role of a kind in declaration order wins whichever tier it runs on (a rule
+// this function owns rather than borrows from admission), a take-over half's books are its command
+// while its inert extra arguments are read by nobody, a server kind's books are read by nobody,
+// and vLLM's environment-carried DP width reaches the pair.
 func TestModelDeploymentDeclaredParallelismPair(t *testing.T) {
 	testCases := []struct {
 		name    string
@@ -1433,20 +1434,25 @@ func TestModelDeploymentDeclaredParallelismPair(t *testing.T) {
 			},
 		},
 		{
-			name: "a take-over half is skipped, its inert arguments parsed by nobody",
+			// The command is the half's books and declares nothing, so the half is all ones;
+			// the inert extra arguments beside it are read by nobody -- the broken degree there
+			// would fail the parse if anyone did.
+			name: "a take-over half reads its command, its inert extra arguments parsed by nobody",
 			md: routedModelDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
 				md.Spec.Roles[1].Command = []string{"/bin/my-server", "--flag"}
 				md.Spec.Roles[1].ExtraArgs = []string{"--tensor-parallel-size", "banana"}
 			}),
-			// The zero half, exactly: the engine's own default of one is the renderer's mapping
-			// to make, not this resolver's to pre-fill.
 			want: inject.ParallelismPair{
 				Prefill: inject.Parallelism{TensorParallel: 2, DataParallel: 1},
+				Decode:  inject.Parallelism{TensorParallel: 1, DataParallel: 1},
 			},
 		},
 		{
-			name: "a take-over role does not consume its kind's first slot",
+			// First of the kind in declaration order wins, whatever tier it runs on: the
+			// take-over role's command is the half's books, and the later managed role's degree
+			// is never read.
+			name: "the first role of a kind wins whichever tier it runs on",
 			md: routedModelDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles[0].Command = []string{"/bin/my-server", "--flag"}
 				md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
@@ -1456,9 +1462,26 @@ func TestModelDeploymentDeclaredParallelismPair(t *testing.T) {
 				})
 			}),
 			want: inject.ParallelismPair{
-				Prefill: inject.Parallelism{TensorParallel: 2, DataParallel: 1},
+				Prefill: inject.Parallelism{TensorParallel: 1, DataParallel: 1},
 				Decode:  inject.Parallelism{TensorParallel: 1, DataParallel: 1},
 			},
+		},
+		{
+			name: "a take-over command carries the half's declared degrees",
+			md: routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[1].Command = []string{"/bin/my-server", "--data-parallel-size", "3"}
+			}),
+			want: inject.ParallelismPair{
+				Prefill: inject.Parallelism{TensorParallel: 1, DataParallel: 1},
+				Decode:  inject.Parallelism{TensorParallel: 1, DataParallel: 3},
+			},
+		},
+		{
+			name: "an unreadable degree in a take-over command names the role",
+			md: routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[1].Command = []string{"/bin/my-server", "--tensor-parallel-size"}
+			}),
+			wantErr: `role "decode"`,
 		},
 		{
 			name: "a server kind's books are read by nobody, not even to refuse them",

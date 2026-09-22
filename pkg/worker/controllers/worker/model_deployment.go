@@ -1141,33 +1141,30 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 }
 
 // modelDeploymentDeclaredParallelismPair resolves the parallel shape both halves of the
-// deployment's prefill/decode pair declared, reading each role's own books -- its extra
-// arguments and, for vLLM's data-parallel width, its literal environment.
+// deployment's prefill/decode pair declared, reading each role's own books -- its argument
+// stream and, for vLLM's data-parallel width, its literal environment.
 //
 // THE FIRST ROLE OF EACH KIND WINS, in declaration order. Admission already refuses a second
 // role of either kind, and this resolver still pins its own rule rather than lean on a check it
 // does not own: a render running past admission must still pick one half's books
-// deterministically. A kind with no role -- or with only a take-over one -- stays the zero
-// half, and a managed role declaring nothing parses to all ones; the renderer maps both to the
-// engine's own default of one.
+// deterministically. A kind with no role stays the zero half, and a role declaring nothing
+// parses to all ones; the renderer maps both to the engine's own default of one.
 //
-// A TAKE-OVER ROLE IS SKIPPED, NOT PARSED: its replaced command line means its extra arguments
-// render nowhere, so nobody may act on them -- not even to refuse them -- and its half stays
-// the zero value. The document then claims 1/1 for a half the operator cannot read, which is
-// why admission refuses a managed opposite half declaring above one.
+// A TAKE-OVER ROLE'S BOOKS ARE ITS COMMAND: the replaced argv is the only line that runs, so
+// it -- and never the inert extra arguments beside it -- is what the parse reads for that half.
+// A degree hidden inside a shell string, a script or a config file stays invisible, the
+// contract's accepted class; a degree written on the line itself is read exactly as a managed
+// role's is.
 //
-// A MANAGED ROLE WHOSE BOOKS CANNOT BE READ IS AN ERROR, never a silent 1/1: the same
-// declaration would keep the engine itself from starting, and rendering a default beside it
-// would trade the engine's loud refusal for a wrong block layout.
+// A ROLE WHOSE BOOKS CANNOT BE READ IS AN ERROR, never a silent 1/1: the same declaration
+// would keep the engine itself from starting, and rendering a default beside it would trade the
+// engine's loud refusal for a wrong block layout.
 func modelDeploymentDeclaredParallelismPair(md *workercore.ModelDeployment) (inject.ParallelismPair, error) {
 	var pair inject.ParallelismPair
 	var prefillSeen, decodeSeen bool
 
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		if len(role.Command) > 0 {
-			continue
-		}
 
 		var half *inject.Parallelism
 		switch ModelDeploymentEffectiveRoleKind(role) {
@@ -1187,7 +1184,8 @@ func modelDeploymentDeclaredParallelismPair(md *workercore.ModelDeployment) (inj
 			continue
 		}
 
-		declared, err := ParseModelDeploymentDeclaredParallelism(md.Spec.Engine.Name, role.ExtraArgs, role.Env)
+		declared, err := ParseModelDeploymentDeclaredParallelism(
+			md.Spec.Engine.Name, ModelDeploymentRoleArgs(role), role.Env)
 		if err != nil {
 			return pair, fmt.Errorf("role %q declares parallelism the operator cannot read: %w", role.Name, err)
 		}

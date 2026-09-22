@@ -133,14 +133,16 @@ books. That removes the dedup class of bug by construction.
 
 "On the books" has a precise meaning, and it is the whole contract:
 
-- **Recognized**: tokens in the role's `extraArgs` matching the engine's flag table, and — vLLM
-  only — a literal `VLLM_DP_SIZE` entry in the role's `env`.
+- **Recognized**: the tokens of the one argument stream the engine actually reads, matched
+  against the engine's flag table — the role's `extraArgs` for a managed role, its `command`
+  for a take-over one, never both, because the renderer appends nothing to a replaced command
+  line and `extraArgs` is inert beside one — plus, vLLM only, a literal `VLLM_DP_SIZE` entry in
+  the role's `env`.
 - **Not recognized**: everything else. Engine `--config` file contents, image-baked entrypoints,
-  engine-computed values, and — under command take-over (`roles[].command`) — nothing at all,
-  because take-over renders no operator argv and `extraArgs` is inert there. Parsing reads the
-  same argv the operator renders; where there is no rendered argv there is nothing to read and
-  the leg renders `1/1` — with the failure shapes the Summary states, and with the F4 refusal
-  for the one take-over pairing the operator can see coming.
+  engine-computed values, a take-over role's `extraArgs` list, and a degree hidden inside a
+  shell string or script the take-over argv merely invokes. Parsing reads the same tokens the
+  container runs; a degree reaching the engine by any other path is invisible and the leg
+  renders `1/1` — with the failure shapes the Summary states.
 - `env` needs no valueFrom exclusion: `ModelDeploymentEnvVar` is Name+Value by API shape
   (`api/worker/v1alpha1/model_deployment.go:527-534`), so every env entry is literal by
   construction. A ConfigMap or Secret cannot reach the role's environment through this API at
@@ -309,8 +311,9 @@ to the zero value.
 
 **F2 — The Ascend leg renders both halves from both parses, in one change.**
 `renderModelDeploymentPods` (`pkg/worker/controllers/worker/model_deployment.go:1024-1116`)
-resolves the pair: the prefill kind's parse and the decode kind's, read off `md.Spec.Roles`.
-Admission already refuses a second role of either kind (`validateModelDeploymentRoleKinds`),
+resolves the pair: the prefill kind's parse and the decode kind's, each read off its role's own
+argument stream (`ModelDeploymentRoleArgs` — `command` for a take-over role, `extraArgs`
+otherwise). Admission already refuses a second role of either kind (`validateModelDeploymentRoleKinds`),
 and the resolver still pins its own rule — declaration-order first — so a render never leans on
 a check it does not own; a half with no role or no declared degrees resolves to 1/1. The
 resolution runs only when the deployment declares both halves — a one-half deployment renders no
@@ -447,7 +450,7 @@ test shows the hash moves on BOTH roles when a declared degree changes on one.
 
 | Risk | Mitigation |
 |---|---|
-| The assert is document-local, so the contract is the only guard against a quiet mis-pull | Not a mitigation but the design: F3 states the assert's actual scope where users read it; the parse covers the whole on-book space so "the books" is never the hard way; and the one case the operator can SEE is unreadable — a take-over role opposite a declared one — is refused at admission (F4) |
+| The assert is document-local, so the contract is the only guard against a quiet mis-pull | Not a mitigation but the design: F3 states the assert's actual scope where users read it; the parse covers the whole on-book space so "the books" is never the hard way; and a take-over role's books are read off its own command line, so the document never claims 1/1 over a degree written on the line that runs |
 | The table drifts from the engine's spellings | Every row cites its upstream file:line and repo pin; a missed NEW flag degrades to off-book behavior (pass-through, `1/1`, the contract's failure shapes), never to a mis-rendered document |
 | A deployment sets parallelism off the books (config file, image default) | Off-book parallelism is invisible by design; the contract (F3) states the two failure shapes honestly — loud only when the document's decode exceeds its prefill, a wrong pull layout when symmetric. This predates the change: the parse only ADDS recognition, never removes it |
 | The parse diverges from argparse on an edge (value forms, last-wins, underscore, prefix abbreviation, `--` termination) | The semantics are copied from the two parsers' own sources and pinned by the spelling-matrix suite, one row per behavior; ambiguous prefixes pass through to the engine's own rejection, so divergence degrades loud, not quiet |

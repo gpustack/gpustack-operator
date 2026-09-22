@@ -11,13 +11,11 @@ import (
 )
 
 // ModelDeploymentDeclaredParallelism is the parallel shape one role's author wrote on the
-// books: the degree flags of the role's engine parsed from ExtraArgs, plus the one degree the
-// engine accepts as a literal environment entry. A degree nothing declares stays at its
+// books: the degree flags of the role's engine parsed from the role's own argument stream --
+// its ExtraArgs, or its Command when that replaces the line, never both -- plus the one degree
+// the engine accepts as a literal environment entry. A degree nothing declares stays at its
 // engine's own default of one -- the operator composes no degree of its own, because the
-// transfer document must agree with the engine, and only the author's numbers can be right. A
-// role whose command is taken over has no rendered argv, so it parses to all ones; a managed
-// opposite role declaring above one is refused at admission, because neither half of that
-// document could be read.
+// transfer document must agree with the engine, and only the author's numbers can be right.
 type ModelDeploymentDeclaredParallelism struct {
 	TensorParallel   int
 	PipelineParallel int
