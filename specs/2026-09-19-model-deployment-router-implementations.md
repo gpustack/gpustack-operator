@@ -1,10 +1,13 @@
 # Spec: ModelDeployment Router — Three Implementations, One Image, and a Configurable Surface
 
-Status: Built
-Blocked on: the two acceptance tasks that need a cluster. The external event this document waited on
-has happened — the image F9 describes is published, with both architectures, which is what unblocked
-the setting that names it. Every implementation task is complete; the Status word becomes `Shipped`
-before the pull request carrying it is opened.
+Status: Shipped
+Not covered by this document's own acceptance: T17 is met on both hardware shapes, both halves each.
+T18 is NOT, and the gap is recorded rather than rounded off — three of its twelve cases failed, one
+refused to run, and two of the four router-and-engine attribution rounds produced no transfer
+reading at all. T18's entry names each one and says what does not count as closing it. Two of the
+three failures had their cause repaired in a separate pull request that is now merged, and NO RERUN
+HAS HAPPENED: repairing the cause is not the same fact as the case passing, and only a rerun on a
+cluster settles which.
 Type: Feature
 
 > **One document for six pieces of work that cannot be DECIDED apart, and one of them ships first.**
@@ -1155,7 +1158,7 @@ reading decides whether any pairing can be accepted.
       to be split to stay inside the page's own five-line cap, which is the gate that catches an
       addition written as prose rather than as a table.
 
-- [ ] **T17 · Prove the reading before trusting it**
+- [x] **T17 · Prove the reading before trusting it**
       Blocked by: T2, T12, T14, T15b
       Gate: review
       Acceptance: the reading from T2 is taken after a forced transfer and reads as having happened,
@@ -1163,6 +1166,15 @@ reading decides whether any pairing can be accepted.
       reading that cannot say "no" cannot be trusted when it says "yes".
       Verify: the two readings, taken on the cluster shape that renders the transfer leg, recorded
       with the image tag under test.
+      DONE, and on BOTH hardware shapes rather than the one this task asked for. Each shape produced
+      the positive half and a negative half taken beside it in the same run, on an unchanged Pod
+      pair — the pair being unchanged is what makes the two halves comparable, and it was read off
+      the Pods themselves rather than assumed. The negative half is an ENTIRE LINE THAT DOES NOT
+      APPEAR, not a counter reading zero, and which of those two shapes a silent engine produces was
+      settled by measurement before either half was trusted. On the second shape the instrument was
+      checked a third way: the transfer counter is a process-wide running mean, so switching the leg
+      off DILUTES it rather than zeroing it, and the diluted values match the token arithmetic they
+      should. A reading that can only ever go up would have passed a naive check here.
 
 - [ ] **T18 · The cluster cases**
       Blocked by: T17, T16
@@ -1172,6 +1184,21 @@ reading decides whether any pairing can be accepted.
       no split is the exception and is named here so the rule is not read as covering it: it has no
       transfer to read and is accepted on the router having been the hop that answered.
       Verify: the end-to-end cases, run on the two cluster shapes the Test Plan names.
+      NOT DONE, and these are the readings rather than a summary of them. Twelve cases ran: eight
+      passed every check in their own table, ONE REFUSED TO RUN AT ALL, and three had at least one
+      check fail. The one that refused is counted here as outstanding and NEVER AS A PASS — its gate
+      exits zero, so a suite-level "all checks passed" covers a case that executed nothing.
+      Separately, the pairing rounds reached a verdict for two of the four router-and-engine
+      combinations; the two SGLang rounds produced NO TRANSFER READING IN EITHER DIRECTION, because
+      the engine died in its store warmup before a leg could be exercised, and the cause of that is
+      not established — one attempt at a fix MOVED the failure to a different call rather than
+      clearing it, which is not the same thing and is recorded as not the same thing.
+      WHAT DOES NOT CLOSE THIS: a green suite run whose green includes that skipped case; a rerun of
+      the three failing cases alone, since two of the three had their cause repaired elsewhere and a
+      rerun must show the repaired cases passing AND the third one still measured; a SGLang round
+      that answers requests correctly, since a pair with no leg between it answers correctly too; and
+      an attribution made from the set of files a fix touched, which is not the same evidence as
+      having rerun the case on the base it failed on.
 
 ### Test Plan
 
