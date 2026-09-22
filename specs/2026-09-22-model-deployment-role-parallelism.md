@@ -312,7 +312,11 @@ to the zero value.
 resolves the pair: the prefill kind's parse and the decode kind's, read off `md.Spec.Roles`.
 Admission already refuses a second role of either kind (`validateModelDeploymentRoleKinds`),
 and the resolver still pins its own rule — declaration-order first — so a render never leans on
-a check it does not own; a half with no role or no declared degrees resolves to 1/1. The pair
+a check it does not own; a half with no role or no declared degrees resolves to 1/1. The
+resolution runs only when the deployment declares both halves — a one-half deployment renders no
+transfer document, so the pair has no consumer and an unreadable declaration there stays the
+engine's own startup refusal rather than failing the reconcile of every unrelated field;
+admission refuses the same books on a new object all the same (F4). The pair
 travels `ModelDeploymentConnectorInput` → `inject.Input` → `renderVLLM`, whose Ascend leg fills
 the `Prefill` and `Decode` blocks from it instead of the inline literals at `vllm.go:247-248`.
 The document a prefill Pod carries and the one a decode Pod carries hold IDENTICAL blocks — as
@@ -399,6 +403,18 @@ test shows the hash moves on BOTH roles when a declared degree changes on one.
 - **The connector's assert is upstream's.** The prefill ≥ decode rule is vllm-ascend v0.23.0
   behavior cited at `vllm.go:157-158`; this change feeds the blocks and does not re-encode the
   rule, so an upstream that relaxes it does not meet a stale refusal here.
+- **vllm-ascend adds no CLI flags of its own** (verified at 5c0470d9 against
+  `vllm_ascend/` and the `additional_config.md` / feature-guide docs): every Ascend-specific
+  parallel knob — the fine-grained TP component degrees, SP MoE (`enable_flashcomm1`), DSA-CP,
+  shared-expert DP, KVPP — arrives inside the JSON value of the core `--additional-config`
+  flag, a path the parse does not read by contract (an opaque value, like an env from a
+  ConfigMap). The vLLM table therefore covers the Ascend engine's command line unchanged, and
+  those degrees stay invisible to the relay and the size check — safely: they shard within the
+  ranks the core TP/DP degrees already describe, so the document's tp/dp comparison is
+  unaffected. At 5c0470d9 the connector's block reader sits at
+  `kv_p2p/mooncake_connector.py:2214-2233` and also accepts optional `pp_size` /
+  `pp_layer_partition` keys (defaulting to 1), so the tp/dp-only document this change renders
+  stays valid there; relaying PP is a future consumer's key to add.
 - **DCP and PCP are parsed but not relayed.** The connector document has keys for tp and dp
   alone (`vllm.go:162-165`), and vllm-ascend v0.23.0 predates both context-parallel modes. They
   are in the table so the books stay readable and the size check stays honest — PCP expands the
@@ -549,7 +565,7 @@ in Go comments; the vllm.go:156-161 comment is rewritten in the same change that
       Verify: `go test ./pkg/worker/kvcache/inject/...`, and a mutation filling only the Prefill
       block turns a row red on the assertion.
 
-- [ ] **T3 · The pair is resolved and threaded**
+- [x] **T3 · The pair is resolved and threaded**
       Blocked by: T1, T2
       Owns: `pkg/worker/controllers/worker/model_deployment.go`,
       `pkg/worker/controllers/worker/model_deployment_connector.go`, their tests, the
@@ -577,7 +593,8 @@ in Go comments; the vllm.go:156-161 comment is rewritten in the same change that
       Blocked by: T2, T3, T4
       Owns: `docs/reference/model-deployment.md` alone — the code comments ride with T2/T3
       Acceptance: F3; no sentence still says the operator cannot see a role's parallelism or
-      that the leg renders `1/1` for every shape; the assert's document-local scope is stated.
+      that the leg renders `1/1` for every shape; the assert's document-local scope is stated,
+      and `--additional-config`'s JSON value is named as one of the invisible paths.
       The page's size caps hold.
       Verify: `make lint docs < /dev/null`
 

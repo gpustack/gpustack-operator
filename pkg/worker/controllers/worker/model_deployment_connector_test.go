@@ -12,6 +12,7 @@ import (
 	core "k8s.io/api/core/v1"
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
+	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
@@ -781,6 +782,124 @@ func TestModelDeploymentConnector_RoutedPairWithoutKVCacheUsesKVTransferOnly(t *
 		"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
 		"kv_connector_extra_config":{"mooncake_protocol":"tcp"}
 	}`, byRole["decode"])
+}
+
+// ascendRenderInstanceType is the render fixture's InstanceType with the pool's vendor flipped to
+// Ascend, which is what turns the same declared engine into the vLLM-Ascend renderer.
+func ascendRenderInstanceType() *worker.InstanceType {
+	return newRenderInstanceType(func(it *worker.InstanceType) {
+		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+	})
+}
+
+// TestModelDeploymentConnector_ParallelismReachesBothPodsOfThePair pins the threading end to end:
+// the degrees each role's author declared render into the parallel blocks of the transfer
+// document BOTH Pods carry, identically, because both roles synthesize from the one resolution.
+// The halves are declared differently on purpose, so a render handing either Pod only its own
+// role's books goes red on the other half's block rather than failing to compile.
+func TestModelDeploymentConnector_ParallelismReachesBothPodsOfThePair(t *testing.T) {
+	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.KVCache = nil
+		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
+		md.Spec.Roles[1].ExtraArgs = []string{"--tensor-parallel-size", "1", "--data-parallel-size", "2"}
+	})
+	cli := newModelDeploymentClient(md, ascendRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	type document struct {
+		KVRole string                    `json:"kv_role"`
+		Extra  map[string]map[string]int `json:"kv_connector_extra_config"`
+	}
+	docs := map[string]document{}
+	for _, pod := range replicaPods(t, cli) {
+		at := slices.Index(pod.Spec.Containers[0].Command, "--kv-transfer-config")
+		require.GreaterOrEqual(t, at, 0, "%s carries no transfer configuration", pod.Name)
+		var doc document
+		require.NoError(t, json.Unmarshal([]byte(pod.Spec.Containers[0].Command[at+1]), &doc))
+		docs[modelDeploymentPodRole(&pod)] = doc
+	}
+
+	require.Len(t, docs, 2)
+	want := map[string]map[string]int{
+		"prefill": {"tp_size": 2, "dp_size": 1},
+		"decode":  {"tp_size": 1, "dp_size": 2},
+	}
+	assert.Equal(t, want, docs["prefill"].Extra, "the prefill Pod carries both halves' declared shape")
+	assert.Equal(t, want, docs["decode"].Extra,
+		"identical blocks on both Pods -- only kv_role may differ")
+	assert.NotEqual(t, docs["prefill"].KVRole, docs["decode"].KVRole)
+}
+
+// TestModelDeploymentConnector_DeclaredDegreesLeaveTheNativeDocumentUntouched pins the negative
+// half of the contract on the vendor that has no keys for the degrees: the native vLLM leg's
+// document carries no parallel keys, so a pair declaring degrees renders exactly the document a
+// pair declaring none renders. The Ascend leg renders them because its connector asserts on
+// them; no other document may grow a key for them.
+func TestModelDeploymentConnector_DeclaredDegreesLeaveTheNativeDocumentUntouched(t *testing.T) {
+	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.KVCache = nil
+		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
+		md.Spec.Roles[1].ExtraArgs = []string{"--tensor-parallel-size", "2"}
+	})
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	byRole := map[string]string{}
+	for _, pod := range replicaPods(t, cli) {
+		at := slices.Index(pod.Spec.Containers[0].Command, "--kv-transfer-config")
+		require.GreaterOrEqual(t, at, 0, "%s carries no transfer configuration", pod.Name)
+		byRole[modelDeploymentPodRole(&pod)] = pod.Spec.Containers[0].Command[at+1]
+	}
+
+	require.Len(t, byRole, 2)
+	assert.JSONEq(t, `{
+		"kv_connector":"MooncakeConnector","kv_role":"kv_producer",
+		"kv_connector_extra_config":{"mooncake_protocol":"tcp"}
+	}`, byRole["prefill"])
+	assert.JSONEq(t, `{
+		"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
+		"kv_connector_extra_config":{"mooncake_protocol":"tcp"}
+	}`, byRole["decode"])
+}
+
+// TestModelDeploymentConnector_TakeOverHalfResolvesToOne pins the unreadable half's shape. A
+// take-over role's extra arguments render nowhere, so they are parsed by nobody -- the inert
+// declaration below would fail the parse if anyone read it -- and its half of the document stays
+// the engine's own default. Admission refuses a NEW deployment this shape; a render that meets
+// one anyway states 1/1 for the half it cannot read rather than guessing.
+func TestModelDeploymentConnector_TakeOverHalfResolvesToOne(t *testing.T) {
+	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.KVCache = nil
+		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
+		md.Spec.Roles[1].Command = []string{"/bin/my-server", "--flag"}
+		md.Spec.Roles[1].ExtraArgs = []string{"--tensor-parallel-size", "banana"}
+	})
+	cli := newModelDeploymentClient(md, ascendRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err, "a take-over role's inert arguments are parsed by nobody, not even to refuse them")
+
+	byRole := map[string]string{}
+	for _, pod := range replicaPods(t, cli) {
+		role := modelDeploymentPodRole(&pod)
+		at := slices.Index(pod.Spec.Containers[0].Command, "--kv-transfer-config")
+		if role == "decode" {
+			assert.Less(t, at, 0, "a take-over role gets no part of the connector")
+			continue
+		}
+		require.GreaterOrEqual(t, at, 0, "%s carries no transfer configuration", pod.Name)
+		byRole[role] = pod.Spec.Containers[0].Command[at+1]
+	}
+
+	require.Len(t, byRole, 1)
+	assert.JSONEq(t, `{
+		"kv_connector":"MooncakeConnectorV1","kv_role":"kv_producer","kv_port":8998,
+		"kv_connector_extra_config":{"prefill":{"tp_size":2,"dp_size":1},"decode":{"tp_size":1,"dp_size":1}}
+	}`, byRole["prefill"])
 }
 
 // TestSynthesizeModelDeploymentConnector_SGLangEnvironmentCarrier states the four properties that

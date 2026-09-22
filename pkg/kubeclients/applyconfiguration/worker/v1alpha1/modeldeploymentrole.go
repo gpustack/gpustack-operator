@@ -20,11 +20,17 @@ import (
 // resource request at all: the accelerator half belongs in Resources and the rest is derived from
 // the InstanceType, and neither can be overridden here.
 //
-// EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's. Every replica is a
-// Kueue pod group of its own, so they are replaced one at a time -- one per role per pass -- and
-// every sibling role keeps serving throughout. A `replicas` change rolls nothing at all: it adds or
-// removes instances, and every instance that stays keeps running, keeps the accelerators it was
-// admitted with and keeps whatever cache it holds.
+// EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's -- with one
+// exception. The declared parallel degrees of a prefill or decode role -- the degree flags in
+// ExtraArgs, and vLLM's VLLM_DP_SIZE environment entry -- are the one container field that can
+// render into a document BOTH roles carry: the vLLM-Ascend transfer leg writes the same
+// parallel blocks into both roles' Pods, so on that leg editing one role's degrees rewrites
+// the other role's Pods too, and the edit rolls the pair. Where no shared document renders
+// them, a degree edit stays this role's own like every other container-field edit: every
+// replica is a Kueue pod group of its own, so they are replaced one at a time -- one per role
+// per pass -- and every sibling role keeps serving throughout. A `replicas` change rolls
+// nothing at all: it adds or removes instances, and every instance that stays keeps running,
+// keeps the accelerators it was admitted with and keeps whatever cache it holds.
 //
 // ADDING OR REMOVING A ROLE REACHES NO FURTHER THAN THE ROLE IT NAMES. A replica's group is named
 // from the deployment, the role and that replica's ordinal, and from nothing else -- not from how

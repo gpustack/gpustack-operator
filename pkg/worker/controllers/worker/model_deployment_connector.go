@@ -91,6 +91,15 @@ type ModelDeploymentConnectorInput struct {
 	// the ModelDeployment. Empty renders the renderer's default. It is passed through verbatim:
 	// the accepted set belongs to the engine image's mooncake build, not to this operator.
 	KVTransferProtocol string
+
+	// Parallelism is the declared parallel shape of BOTH halves of the prefill/decode pair,
+	// resolved off each role's own books by the caller. It travels as one value because the
+	// transfer document asserts on the pair: two roles synthesizing from two resolutions could
+	// carry different blocks, and a block disagreeing with the engine it describes answers with
+	// a wrong block layout instead of a refusal. Only the document that asserts on it reads it
+	// -- the Ascend transfer leg's -- and the zero value renders the engine's own default of
+	// one on both sides there.
+	Parallelism inject.ParallelismPair
 }
 
 // TWO FIELDS THIS STRUCT USED TO CARRY ARE GONE, and neither is a capability that was lost.
@@ -434,6 +443,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		// The protocol is threaded rather than resolved here: the renderer owns the default, and
 		// a second default in this file would be two definitions of one fact.
 		KVTransferProtocol: in.KVTransferProtocol,
+		// The pair is threaded rather than resolved here for the same reason the role is: the
+		// resolution reads every role of the deployment, and synthesis sees one role's input.
+		Parallelism: in.Parallelism,
 	})
 	if err != nil {
 		return ModelDeploymentConnectorRender{}, err

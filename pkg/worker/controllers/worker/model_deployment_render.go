@@ -601,6 +601,10 @@ func stampModelDeploymentPod(
 // IT PUBLISHES FACTS AND COMPOSES NO ARGUMENT. Which parallelism an engine turns on, and over how
 // many ranks, stays the author's to say: the member count is a product of degrees that cannot be
 // decomposed from one number, so a formula here would be a guess that runs instead of an error.
+// The declared degrees ARE read elsewhere -- the transfer document's parallel blocks are parsed
+// out of the roles' own books, their extra arguments and, for vLLM's data-parallel width, a
+// literal VLLM_DP_SIZE entry -- but that read copies the author's numbers into another document
+// and changes none of the membership facts published here.
 //
 // THE INDEX COMES THROUGH THE DOWNWARD API RATHER THAN AS A LITERAL, and that is what keeps one
 // template per ReplicaGroup: every member's container declares the same `fieldRef`, so the three
