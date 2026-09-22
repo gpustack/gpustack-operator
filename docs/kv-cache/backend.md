@@ -399,13 +399,30 @@ wants it back says so in `protocol` rather than by leaving a field empty.
 
 **Only `EFA` mounts `/dev/infiniband`.** The RDMA grant carries the verbs character device of each
 endpoint it allocates, so mounting the tree beside it would add every adapter the member was **not**
-granted — visible, unopenable, and enumerated by the store on its way to skipping them. EFA keeps
-the mount because what AWS's plugin injects has not been read here, and the reading that would
-settle it needs an EFA Pod requesting the resource while mounting nothing.
+granted — visible, unopenable, and enumerated by the store on its way to skipping them.
+
+**EFA keeps the mount, and no longer because nothing has been read.** The reading exists: an EFA Pod
+requesting the resource and mounting nothing initialized the fabric and completed a cross-node
+transfer, and so did a rendered member with the mount patched out. AWS's plugin injects the device
+node it allocates, so the mount is redundant **under this plugin** — which is a property of that
+allocator rather than of EFA, and is why the mount stays until something asks for it to go.
 
 Nothing is mounted from a host EFA install — the libfabric an `EFA` member runs on is in the image.
-Storage-optimized families such as `i7ie` are not EFA-capable; check `fi_info -p efa` on the node
-before selecting one.
+
+EFA capability is a property of the instance size rather than of its family — the largest `i7ie`
+sizes carry it while every smaller one does not — so check the size about to run, with
+`fi_info -p efa` on the node or the instance type's own EFA field, never a family name.
+
+**Cross-node EFA REQUIRES both nodes in one cluster placement group.** One availability zone is
+necessary and not sufficient. Two nodes sharing a zone but in different placement groups complete
+the libfabric handshake — the endpoint pair is reported established — and then every work request
+hangs forever with the receiving adapter's byte counters at zero and no error on either side. The
+silence is the problem: it reads as a hung probe, not as a placement fault.
+
+Where nodes sit is outside this operator, so it belongs to whoever builds the cluster. A managed
+node group typically gets a placement group of its own, which makes "members of one pool spread
+across two groups" the default outcome rather than an unusual one — so a pool whose members are
+meant to reach each other should be pinned to node groups that share one.
 
 **The medium and the transport are independent.** A `DRAM` group is as entitled to a fabric as a
 `VRAM` one, and this rendering reads the medium nowhere: the protocol decides the network, the
