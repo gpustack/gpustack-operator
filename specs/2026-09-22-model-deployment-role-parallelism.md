@@ -538,7 +538,7 @@ in Go comments; the vllm.go:156-161 comment is rewritten in the same change that
       and an engine with no table both parse to all-ones without error.
       Verify: `go test ./pkg/worker/controllers/worker/...`
 
-- [ ] **T2 · The renderer learns both halves**
+- [x] **T2 · The renderer learns both halves**
       Blocked by: None — the pair type lives in `inject` (controllers imports inject, never the
       reverse), so this task does not touch T1's controller-side struct
       Owns: `pkg/worker/kvcache/inject/types.go`, `pkg/worker/kvcache/inject/vllm.go`,

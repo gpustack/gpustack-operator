@@ -156,12 +156,24 @@ type vllmConnectorExtraConfig struct {
 // vllmRoleParallelism is the per-half parallel shape vLLM-Ascend's point-to-point connector
 // ASSERTS on at worker start (`vllm_ascend/distributed/kv_transfer/kv_p2p/mooncake_connector.py:2066-2084`,
 // read at v0.23.0): a missing tp_size or dp_size under either key crashes the engine, and the
-// prefill value must be at least the decode one. The operator renders no parallelism flag, so an
-// engine it configured runs one device per Pod and the honest value is one; a role widened by
-// hand through ExtraArgs makes this wrong, which is a stated limit of the Ascend leg.
+// prefill tp_size must be at least the decode one -- a pair resolved with the decode tp wider is
+// refused at render rather than written into that crash. The ordering guards tp_size alone: the
+// dp_size values are asserted present and then never read again, so an asymmetric dp pair starts
+// fine and is the engine's to run, not ours to refuse. The values are the shape each role's
+// author declared, resolved off the role's own books by the caller; nothing here composes a
+// degree, so a role whose books say nothing renders the engine's own default of one.
 type vllmRoleParallelism struct {
 	TPSize int `json:"tp_size"`
 	DPSize int `json:"dp_size"`
+}
+
+// vllmParallelismBlock renders one side's block, the undeclared degrees mapped to the engines'
+// own default of one. Both blocks of a document come through here, so the two sides can only
+// ever differ by the pair value the caller resolved.
+func vllmParallelismBlock(p Parallelism) *vllmRoleParallelism {
+	p = p.orOne()
+
+	return &vllmRoleParallelism{TPSize: p.TensorParallel, DPSize: p.DataParallel}
 }
 
 type vllmKVEventsConfig struct {
@@ -239,13 +251,32 @@ func renderVLLM(in Input) (*Result, error) {
 			// kv_port (`kv_p2p/mooncake_connector.py:1936-1945`), so two different values send
 			// the decoder dialing ports nothing listens on. VLLMMooncakeBootstrapPort is that one
 			// value; admission already reserves it on a routed prefiller of either vendor.
+			// The prefill/decode blocks carry the shape BOTH roles declared, resolved by the
+			// caller off each role's own books. The connector asserts the numbers at worker
+			// start, and a block disagreeing with the engine it describes turns that refusal
+			// into a wrong block layout, so both blocks are filled from the one pair here,
+			// through the one helper -- a test row declares the halves differently so an edit
+			// feeding either block the wrong side fails an assertion, not the build.
+			//
+			// The connector also raises there on the PAIR when the prefill tp_size reads
+			// below the decode one, so that ordering is declined here rather than rendered
+			// into a crash-loop. The check covers tp_size alone and is this arm's alone:
+			// the native leg maps both directions, and refusing the ordering for every
+			// vLLM pair would break deployments the engine runs fine.
+			if prefill, decode := in.Parallelism.Prefill.orOne(), in.Parallelism.Decode.orOne(); prefill.TensorParallel < decode.TensorParallel {
+				return nil, newRefusal(ReasonRoleUnsupported,
+					"the vLLM-Ascend transfer leg requires the prefill tp_size to be at "+
+						"least the decode one, but the pair declares prefill %d and decode %d; "+
+						"narrow the decode role's tensor parallelism or widen the prefill role's",
+					prefill.TensorParallel, decode.TensorParallel)
+			}
 			direct = vllmTransferConfig{
 				KVConnector: vllmAscendTransferConnector,
 				KVRole:      kvRole,
 				KVPort:      VLLMMooncakeBootstrapPort,
 				KVConnectorExtraConfig: &vllmConnectorExtraConfig{
-					Prefill: &vllmRoleParallelism{TPSize: 1, DPSize: 1},
-					Decode:  &vllmRoleParallelism{TPSize: 1, DPSize: 1},
+					Prefill: vllmParallelismBlock(in.Parallelism.Prefill),
+					Decode:  vllmParallelismBlock(in.Parallelism.Decode),
 				},
 			}
 			// Both role containers mount the host driver tree, read-only. The leg's transport
