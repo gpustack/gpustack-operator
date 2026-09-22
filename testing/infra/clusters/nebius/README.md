@@ -11,14 +11,14 @@ node groups, and point your local kubeconfig at it.
 - Creates a security group (`nebius_vpc_v1_security_group`) with an SSH
   ingress rule (`TCP/22` from `0.0.0.0/0`) and an egress rule (allow all).
 - Creates a `nebius_mk8s_v1_cluster` with a public control-plane endpoint.
-- Creates a `cpu` `nebius_mk8s_v1_node_group` (shaped by `cpu_instance_types`,
-  `cpu_node_count` nodes in it, and omitted altogether at `cpu_node_count = 0`),
-  plus one `gpu-<name>` group per `gpu_instance_types` key, `gpu_node_count` nodes
-  in each and omitted altogether at `gpu_node_count = 0` (every node gets
-  cloud-init injecting an SSH user + key, same idiom as `computes/nebius`).
+- Creates one `nebius_mk8s_v1_node_group` per `cpu_instance_types` key and per
+  `gpu_instance_types` key — the key IS the group's name (`cpu`, `gpu-h100`,
+  ...), the entry's `node_count` sizes it, and a group that should not exist
+  is an absent key rather than a zero count (every node gets cloud-init
+  injecting an SSH user + key, same idiom as `computes/nebius`).
 - Gives each **GPU** group's nodes a public IPv4 so they can be reached over SSH
-  (`public_ip`, default `true`); the CPU group takes none unless
-  `cpu_instance_types.public_ip` asks for one. See
+  (`public_ip`, default `true`); the CPU group takes none unless its
+  `cpu_instance_types` entry's `public_ip` asks for one. See
   [Public addresses](#public-addresses).
 - On every **GPU** node, installs `gpustack-node-prep.service` — a boot-time
   oneshot that moves the image's vendor device-plugin **static Pod** manifest
@@ -187,7 +187,7 @@ your project's region, and treat any number you merely remember, including the
 two in this paragraph, as an illustration of the spread rather than a value.
 
 The **flag** is per group; the **address, and so the quota unit, is per node**. A group of N nodes with
-`public_ip = true` takes N addresses, so a CPU group that raises `cpu_node_count` and asks for an address
+`public_ip = true` takes N addresses, so a CPU group that raises its `node_count` and asks for an address
 takes one per node. Plan the quota per node, not per group, because that is what the provider charges.
 Only the groups that need an address take one:
 
@@ -273,16 +273,17 @@ overrides its own default on every later command in this directory, with nothing
 on the command line to hint at it. If you ever add to that snapshot, expect a
 plain `terraform apply` to keep rebuilding whatever shape it captured.
 
-The default `cpu_instance_types` (`cpu-e2`/`4vcpu-16gb`) and `gpu_instance_types`
-(a `h100` entry: `gpu-h100-sxm`/`1gpu-16vcpu-200gb`) provision one `cpu` node and
-one `gpu-h100` node. A GPU group needs only `platform` + `preset`; its `os` and
-`drivers_preset` are resolved automatically from the compatibility matrix for
-`release` (see below). Override `-var='cpu_instance_types={...}'` to reshape the
-CPU group or `-var='cpu_node_count=N'` to size it, or `-var='gpu_instance_types={...}'`
-to change, add, or remove GPU groups; each `gpu_instance_types` map key becomes
-that group's `gpu-<key>` name. A multi-node cluster comes from `cpu_node_count`:
-GPU groups are one node each, so a second accelerator node is a second
-`gpu_instance_types` entry.
+The default `cpu_instance_types` (one `cpu` entry: `cpu-e2`/`4vcpu-16gb`) and
+`gpu_instance_types` (one `gpu-h100` entry: `gpu-h100-sxm`/`1gpu-16vcpu-200gb`)
+provision one `cpu` node and one `gpu-h100` node. A GPU group needs only
+`platform` + `preset`; its `os` and `drivers_preset` are resolved automatically
+from the compatibility matrix for `release` (see below). Override
+`-var='cpu_instance_types={...}'` or `-var='gpu_instance_types={...}'` to
+change, add, or remove groups: in both variables the map key IS the group's
+name and `node_count` inside the entry sizes the group. More nodes of one shape
+come from that group's `node_count`; a second map entry buys different
+hardware, not a second node of the same shape. A group that should not exist is
+an absent key.
 
 A three-node cluster with one on-demand, MIG-capable H100 node, one preemptible
 L40S node (Intel host CPU, no MIG) and one CPU node:
@@ -291,14 +292,14 @@ L40S node (Intel host CPU, no MIG) and one CPU node:
 terraform apply \
   -var="project_id=$NEBIUS_PROJECT_ID" \
   -var='gpu_instance_types={
-          h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" },
-          l40s = { platform = "gpu-l40s-a",   preset = "1gpu-8vcpu-32gb", preemptible = true }
+          gpu-h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb", node_count = 1 },
+          gpu-l40s = { platform = "gpu-l40s-a",   preset = "1gpu-8vcpu-32gb", preemptible = true, node_count = 1 }
         }'
 ```
 
 Only `project_id` survives in `.last-apply.auto.tfvars.json`, so **re-apply with
 the same `-var='gpu_instance_types=...'`** — a bare `terraform apply` falls back
-to the single-`h100` default and destroys the `gpu-l40s` group. `terraform
+to the single-`gpu-h100` default and destroys the `gpu-l40s` group. `terraform
 destroy` needs no vars.
 
 Node groups don't expose per-node IPs in Terraform state, so reach individual
@@ -318,10 +319,8 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 | `ssh_public_key` | Path to the SSH public key injected into every node via cloud-init | `~/.ssh/id_rsa.pub` |
 | `node_boot_disk_size_gb` | Node boot disk size, in GiB, for every node group (per-group override: `boot_disk_size_gb` in `gpu_instance_types`) | `100` |
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
-| `cpu_instance_types` | Instance type for the CPU node group: `{platform, preset, os, public_ip (optional)}`. `public_ip` defaults to `false`; `true` gives the node an SSH-reachable public IPv4 at one public-address quota unit ([public addresses](#public-addresses)). | `{ platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }` |
-| `cpu_node_count` | Number of nodes in the CPU node group. `0` drops the CPU group entirely, which a region holding `compute.instance.non-gpu.vcpu` at zero requires. With `cpu_instance_types.public_ip`, costs one public-address quota unit per node ([public addresses](#public-addresses)) | `1` |
-| `gpu_node_count` | Number of nodes in EACH GPU node group; `0` drops the GPU groups entirely. Adding a `gpu_instance_types` key and raising this are different purchases — a key buys a group with its own platform and preset, this buys more nodes of a shape a group already names — and accelerator quota is granted per platform and preset, so a count above one can be refused where a second key would not be. Same name, type and default as `clusters/eks`, but unlike there an edit DOES resize a group that already exists | `1` |
-| `gpu_instance_types` | GPU node groups keyed by group name (each becomes `gpu-<name>`): `{platform, preset, os (optional), drivers_preset (optional), preemptible (optional), mig (optional), public_ip (optional), boot_disk_size_gb (optional), infiniband_fabric (optional)}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; `preemptible` defaults to `false` ([preemptible nodes](#preemptible-nodes)); `mig` defaults to whether the platform supports MIG ([groups that cannot be partitioned](#groups-that-cannot-be-partitioned)); `public_ip` defaults to `true`, so the node is SSH-reachable, at one public-address quota unit per node ([public addresses](#public-addresses)); `boot_disk_size_gb` overrides `node_boot_disk_size_gb` for the group — set it (e.g. `400`) on groups that pull inference-engine images, which overflow the 100 GiB default into kubelet disk pressure; `infiniband_fabric` attaches the group to that fabric, which is what gives its nodes RDMA devices, and requires a preset whose `allow_gpu_clustering` is true ([InfiniBand fabrics](#infiniband-fabrics)). | `{ h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" } }` |
+| `cpu_instance_types` | CPU node groups as a `map(object)` keyed by node group name (the key IS the name; no prefix is added): `{platform, preset, os, public_ip (optional), node_count}`. `public_ip` defaults to `false`; `true` gives each node an SSH-reachable public IPv4 at one public-address quota unit ([public addresses](#public-addresses)). `node_count` sizes the group — and unlike `clusters/eks`, an edit DOES resize a group that already exists. A group that should not exist is an absent key, not a zero count (the spelling a region holding `compute.instance.non-gpu.vcpu` at zero needs) | `{ cpu = { platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04", node_count = 1 } }` |
+| `gpu_instance_types` | GPU node groups as a `map(object)` keyed by node group name (the key IS the name; no prefix is added): `{platform, preset, os (optional), drivers_preset (optional), preemptible (optional), mig (optional), public_ip (optional), boot_disk_size_gb (optional), infiniband_fabric (optional), node_count}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; `preemptible` defaults to `false` ([preemptible nodes](#preemptible-nodes)); `mig` defaults to whether the platform supports MIG ([groups that cannot be partitioned](#groups-that-cannot-be-partitioned)); `public_ip` defaults to `true`, so the node is SSH-reachable, at one public-address quota unit per node ([public addresses](#public-addresses)); `boot_disk_size_gb` overrides `node_boot_disk_size_gb` for the group — set it (e.g. `400`) on groups that pull inference-engine images, which overflow the 100 GiB default into kubelet disk pressure; `infiniband_fabric` attaches the group to that fabric, which is what gives its nodes RDMA devices, and requires a preset whose `allow_gpu_clustering` is true ([InfiniBand fabrics](#infiniband-fabrics)); `node_count` sizes the group — a key buys a group with its own platform and preset, a count buys more nodes of a shape a group already names, and accelerator quota is granted per platform and preset, so a count above one can be refused where a second key would not be. Unlike `clusters/eks`, an edit DOES resize a group that already exists; a group that should not exist is an absent key | `{ gpu-h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb", node_count = 1 } }` |
 | `switch_kube_context` | Let `get-credentials` leave this cluster current; `false` restores the previous context | `true` |
 
 ## Outputs

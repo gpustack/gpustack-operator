@@ -75,10 +75,23 @@ variable "node_boot_disk_type" {
   }
 }
 
-# The CPU node group's shape, mirroring clusters/eks's cpu_instance_types. There is exactly one CPU
-# group -- unlike gpu_instance_types, which is keyed by group name -- but it is not therefore one
-# node: cpu_node_count sizes it. No image_family: unlike a standalone compute VM (computes/nebius),
+# The CPU node groups' shape, mirroring clusters/eks's cpu_instance_types: a map of
+# groups, each keyed by its node group name (the key IS the name; the module adds no
+# prefix of its own, so renaming a key replaces the group). There is usually exactly
+# one CPU group, but nothing structural asks for that, so it takes the same shape the
+# GPU side uses. No image_family: unlike a standalone compute VM (computes/nebius),
 # the mk8s node template picks its image from `os` alone for a driverless (CPU) platform.
+#
+# node_count sizes the group: a test that needs several plain nodes -- one that moves
+# data between them, or that adds a member to a running set -- gets them from one
+# group with a higher count rather than by buying accelerator capacity it will not
+# use. Combined with public_ip, the quota cost is one address per node rather than one
+# for the group (see README).
+#
+# A CPU group that should not exist is an absent key, not a count of zero. Some regions
+# sell accelerator capacity alone and hold compute.instance.non-gpu.vcpu at zero, where
+# a CPU node cannot be created at all and asking for one fails the apply rather than
+# costing a little extra.
 #
 # public_ip gives the node a public IPv4, which is what makes it reachable over SSH. It defaults
 # to false because the accelerator tests drive GPU nodes, not this one, and every address is
@@ -86,73 +99,29 @@ variable "node_boot_disk_type" {
 # workflow that does need inbound reach: building images on the node itself. Dropping the address
 # does not cost the node its outbound internet (see README), so pulls work either way.
 variable "cpu_instance_types" {
-  description = "Instance type for the CPU node group: platform/preset (see the region table above), os, and whether the node takes a public IPv4 (public_ip, default false; true makes it SSH-reachable at one public-address quota unit)."
-  type = object({
-    platform  = string
-    preset    = string
-    os        = string
-    public_ip = optional(bool, false)
-  })
-  default = { platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }
-}
-
-# How many nodes the CPU group runs. Every GPU group is one node, so this is the module's only
-# multi-node knob: a test that needs several plain nodes -- one that moves data between them, or
-# that adds a member to a running set -- gets them here rather than by buying accelerator capacity
-# it will not use. Combined with cpu_instance_types.public_ip, the quota cost is one address per
-# node rather than one for the group (see README).
-#
-# Zero drops the group instead of sizing it to nothing. Some regions sell accelerator capacity
-# alone and hold compute.instance.non-gpu.vcpu at zero, where a CPU node cannot be created at all
-# and asking for one fails the apply rather than costing a little extra.
-variable "cpu_node_count" {
-  # SCHEDULED TO GO AWAY together with gpu_node_count below, which carries the reason:
-  # cpu_instance_types becomes a map of groups with the count inside each one, and "no
-  # group" becomes an absent key rather than a zero. Plan in issue #502.
-  description = "Number of nodes in the CPU node group. Zero drops the group altogether, which is what a region holding compute.instance.non-gpu.vcpu at zero requires. Same name, type, default and zero-drops rule as clusters/eks."
-  type        = number
-  default     = 1
+  description = "CPU node groups, keyed by node group name (the key IS the name; no prefix is added): platform/preset (see the region table above), os, whether the node takes a public IPv4 (public_ip, default false; true makes it SSH-reachable at one public-address quota unit), and node_count (unlike clusters/eks, an edit resizes a group that already exists)."
+  type = map(object({
+    platform   = string
+    preset     = string
+    os         = string
+    public_ip  = optional(bool, false)
+    node_count = number
+  }))
+  default = { cpu = { platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04", node_count = 1 } }
 
   validation {
-    condition     = var.cpu_node_count >= 0 && var.cpu_node_count == floor(var.cpu_node_count)
-    error_message = "cpu_node_count must be a whole number, zero or greater."
+    condition = alltrue([
+      for cfg in values(var.cpu_instance_types) :
+      cfg.node_count >= 1 && cfg.node_count == floor(cfg.node_count)
+    ])
+    error_message = "node_count must be a whole number of at least 1, in every group. A group that should not exist is an absent key, not a count of zero."
   }
 }
 
-variable "gpu_node_count" {
-  # THIS VARIABLE IS SCHEDULED TO GO AWAY, and so is cpu_node_count above: the count
-  # belongs inside gpu_instance_types beside the group shape it counts, and
-  # cpu_instance_types becomes a map of groups at the same time, so a group is described
-  # one way in both modules. It exists at all because clusters/eks grew one and this
-  # module did not, and matching first makes the removal one change instead of two. The
-  # written-out plan, including the key-naming rule that keeps an existing cluster's
-  # resource addresses stable, is issue #502.
-  #
-  # Nodes per GPU group, which until this variable existed was the literal 1 in main.tf's
-  # group builder. It is named, typed and defaulted to match clusters/eks so that moving
-  # between the two modules does not mean relearning the surface.
-  #
-  # ADDING A KEY TO gpu_instance_types AND RAISING THIS ARE DIFFERENT PURCHASES, and the
-  # distinction survives the unification: a key buys a group with its own platform and
-  # preset, this buys more nodes of the shape a group already names. Accelerator quota is
-  # granted per platform and preset, so a count above one can be refused where a second
-  # key would not be.
-  #
-  # Unlike clusters/eks, this value DOES move a group that already exists: the node group
-  # resource here declares no ignore_changes on its size, so an edit is applied rather
-  # than silently dropped. That difference is upstream, not a choice made here.
-  description = "Number of nodes in EACH GPU node group. Zero drops the GPU groups altogether, mirroring cpu_node_count. Unlike clusters/eks -- where the value reaches the cloud only at create time -- an edit here does resize a group that already exists."
-  type        = number
-  default     = 1
-
-  validation {
-    condition     = var.gpu_node_count >= 0 && var.gpu_node_count == floor(var.gpu_node_count)
-    error_message = "gpu_node_count must be a whole number, zero or greater."
-  }
-}
-
-# Keyed by group name so each GPU node group has a stable key (gpu-<name>), mirroring
-# clusters/eks's gpu_instance_types map(list(string)) convention. Only platform + preset are
+# Keyed by group name so each GPU node group has a stable key. The key IS the node group
+# name -- the module adds no gpu- prefix of its own, mirroring clusters/eks's
+# gpu_instance_types -- so renaming a key replaces the group and keeping a key across a
+# reshape keeps the group's resource address. Only platform + preset are
 # required per group: os and drivers_preset are auto-resolved from Nebius' live compatibility
 # matrix (`nebius mk8s node-group get-compatibility-matrix`) for the group's platform and
 # var.release, picking the newest available driver preset. Set os/drivers_preset explicitly only
@@ -169,8 +138,16 @@ variable "gpu_node_count" {
 # group. Each address is charged against the project's vpc.ipv4-address.public.count quota, so set
 # it to false on a GPU group nobody logs in to; the CPU group has its own flag, off by default
 # (see README).
+# ADDING A KEY TO gpu_instance_types AND RAISING A GROUP'S node_count ARE DIFFERENT
+# PURCHASES: a key buys a group with its own platform and preset, a count buys more
+# nodes of the shape a group already names. Accelerator quota is granted per platform
+# and preset, so a count above one can be refused where a second key would not be.
+#
+# Unlike clusters/eks, node_count here DOES move a group that already exists: the node
+# group resource declares no ignore_changes on its size, so an edit is applied rather
+# than silently dropped. That difference is upstream, not a choice made here.
 variable "gpu_instance_types" {
-  description = "GPU node groups keyed by group name (each becomes gpu-<name>). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG; public_ip defaults to true, giving the nodes an SSH-reachable public IPv4 at the cost of one public-address quota unit each; boot_disk_size_gb overrides var.node_boot_disk_size_gb for the group -- set it (e.g. 400) on groups that pull inference-engine images, which overflow the 100 GiB module default into kubelet disk pressure; infiniband_fabric attaches the group to an InfiniBand fabric, which is what gives its nodes RDMA devices, and requires a preset whose allow_gpu_clustering is true."
+  description = "GPU node groups, keyed by node group name (the key IS the name; no prefix is added). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG; public_ip defaults to true, giving the nodes an SSH-reachable public IPv4 at the cost of one public-address quota unit each; boot_disk_size_gb overrides var.node_boot_disk_size_gb for the group -- set it (e.g. 400) on groups that pull inference-engine images, which overflow the 100 GiB module default into kubelet disk pressure; infiniband_fabric attaches the group to an InfiniBand fabric, which is what gives its nodes RDMA devices, and requires a preset whose allow_gpu_clustering is true; node_count sizes the group (an edit resizes a live group, unlike clusters/eks)."
   type = map(object({
     platform       = string
     preset         = string
@@ -199,9 +176,12 @@ variable "gpu_instance_types" {
     # and it shares the boot disk with the container runtime's layers, so a disk that is big
     # enough for the OS alone pushes the kubelet into disk pressure once the pulls start.
     boot_disk_size_gb = optional(number)
+    # Nodes in this group; see the purchases comment above for what a count buys that a
+    # second key does not.
+    node_count = number
   }))
   default = {
-    h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }
+    gpu-h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb", node_count = 1 }
   }
 
   validation {
@@ -210,6 +190,14 @@ variable "gpu_instance_types" {
       cfg.boot_disk_size_gb == null || (cfg.boot_disk_size_gb > 0 && cfg.boot_disk_size_gb == floor(cfg.boot_disk_size_gb))
     ])
     error_message = "boot_disk_size_gb must be a positive whole number when set."
+  }
+
+  validation {
+    condition = alltrue([
+      for cfg in values(var.gpu_instance_types) :
+      cfg.node_count >= 1 && cfg.node_count == floor(cfg.node_count)
+    ])
+    error_message = "node_count must be a whole number of at least 1, in every group. A group that should not exist is an absent key, not a count of zero."
   }
 }
 
