@@ -1,9 +1,6 @@
 # Spec: the transfer leg follows the parallelism declared in extraArgs
 
-Status: Building
-Blocked on: nothing — this revision was ratified on 2026-09-22, the parse-not-field direction
-chosen on gpustack/gpustack-operator#501 and the plan below confirmed. Implementation proceeds
-under this document.
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -603,7 +600,7 @@ in Go comments; the vllm.go:156-161 comment is rewritten in the same change that
       The page's size caps hold.
       Verify: `make lint docs < /dev/null`
 
-- [ ] **T6 · Gate C on hardware: an Ascend pair at tensor-parallel two, declared in extraArgs**
+- [x] **T6 · Gate C on hardware: an Ascend pair at tensor-parallel two, declared in extraArgs**
       Blocked by: T1–T5
       Owns: the e2e case under `.agents/skills/gpustack-operator-e2e/`
       Gate: review
