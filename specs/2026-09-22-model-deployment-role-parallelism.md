@@ -1,6 +1,6 @@
 # Spec: the transfer leg follows the parallelism declared in extraArgs
 
-Status: Planned
+Status: Building
 Blocked on: nothing — this revision was ratified on 2026-09-22, the parse-not-field direction
 chosen on gpustack/gpustack-operator#501 and the plan below confirmed. Implementation proceeds
 under this document.
@@ -174,7 +174,7 @@ dynamo's underscore-spelling miss is the documented cost of covering less.
 | `--tensor-parallel-size` | `-tp`, underscore spelling | degree, RELAY | 1 | KV shard count; process world = TP×PP |
 | `--pipeline-parallel-size` | `-pp`, underscore | degree | 1 | layer stages; each rank holds a device |
 | `--data-parallel-size` | `-dp`, underscore | degree, RELAY | 1 | independent engine cores, each TP×PP wide |
-| `--data-parallel-size-local` | `-dpl`, underscore | degree | engine-args `None`, then inferred | DP cores placed on THIS node; a declared value silences the size check's DP factor (F5) |
+| `--data-parallel-size-local` | `-dpl`, underscore | degree | engine-args `None`, then inferred | DP cores placed on THIS node; a declared value **above zero** IS the size check's DP factor (F5) |
 | `--data-parallel-rank`, `--data-parallel-start-rank`, `--data-parallel-address`, `--data-parallel-rpc-port`, `--data-parallel-backend`, `--data-parallel-hybrid-lb`, `--data-parallel-external-lb`, `--data-parallel-multi-port-external-lb` | `-dpn`, `-dpr`, `-dpa`, `-dpp`, `-dpb`, `-dph`, `-dpe`, `-dpm`, underscore (arg_utils.py:1128-1187) | wiring | — | DP collective wiring; any of them present silences the size check |
 | `--prefill-context-parallel-size` | `-pcp`, underscore | degree | 1 | expands the process world, NOT the KV shard count (parallel.py comment) |
 | `--decode-context-parallel-size` | `-dcp`, underscore | degree | 1 | shards the decode KV, but reuses TP ranks — no world expansion |
@@ -229,11 +229,28 @@ reproduced exactly, because each decides whether a degree is seen:
   so pass-through can never become a quiet wrong answer. The table's spelling set is a subset
   of the engine's, so the parser may accept an abbreviation the engine finds ambiguous against
   flags the table does not list — that direction fails loudly at engine start, never quietly.
-- **Short aliases take `=`, not concatenation.** `-tp 2` and `-tp=2` are TP=2; `-tp2` is not an
-  option argparse recognizes, so it passes through.
-- **A bare `--` ends flag recognition**, and a value token that itself starts with `-` is not
-  consumed as a value (argparse refuses `--tensor-parallel-size -2` as a missing argument) — a
-  known degree flag so orphaned is the missing-value error class.
+- **Single-dash aliases, abbreviations and concatenation.** A registered alias takes both value
+  forms (`-tp 2`, `-tp=2`); `-tp2` is not an option argparse recognizes, so it passes through.
+  The two single-LETTER registrations (`-n`, `-r`) also take a concatenated value (`-n2`) —
+  argparse's short-option rule. Three tokens are no spellings of their own but unique
+  single-dash abbreviations the engine resolves — `-t` of `-tp`, `-pc` of `-pcp`, `-e` of
+  `-ep` — each verified unique against the engine's full single-dash option set, and each
+  matched bare only: argparse does not split `=` for an unregistered key, so `-t=2` passes
+  through to the engine's own refusal. `-dc` belongs to `--diffusion-config` outright (an exact
+  spelling shadows the `-dcp` prefix) and `-d` prefixes a dozen options, so the table recognizes
+  no single-dash abbreviation of its own. A future engine option colliding with one of the three
+  turns the form into the engine's own ambiguous refusal — loud, never quiet.
+- **The engine's integer alphabet.** Values parse as the engine's own `int()` parses them:
+  whitespace-padded and single-underscore forms are accepted (`" 3 "` is 3, `"1_0"` is 10, `_3`
+  and `3_` are refused), one leading sign is allowed, and a value beyond the host int is an
+  out-of-range error. The same alphabet reads `VLLM_DP_SIZE` (`envs.py:1455` runs the value
+  through the same `int()`).
+- **A bare `--` ends flag recognition**, and a value token that looks like another flag is not
+  consumed as a value (argparse refuses `--tensor-parallel-size -x` as a missing argument) — a
+  known degree flag so orphaned is the missing-value error class. A token that looks like a
+  NEGATIVE NUMBER IS consumed, exactly as argparse consumes it, and fails the below-1 check
+  instead — the engine's own `ge=1` validation rejects the same token, so both readers refuse
+  the same input for the same reason.
 
 Unknown tokens are not the parser's business beyond this: they pass through to the engine
 untouched, which is the property that makes this model age-proof.
@@ -257,13 +274,18 @@ what keeps the parse both robust and forward-looking:
 - **The parser** — `modelDeploymentDeclaredParallelism(engine, extraArgs, env)`, implementing
   the inventory's semantics exactly: both value forms, last-wins, underscore spellings only
   where the engine's own parser accepts them, unique-prefix abbreviation with ambiguous-prefix
-  pass-through, mode flags consuming no token, a bare `--` ending recognition, `VLLM_DP_SIZE`
+  pass-through, the single-dash abbreviations (`-t`, `-pc`, `-e`, matched bare only) and
+  single-letter concatenation (`-n2`, `-r0`) the engines themselves resolve, values read in the
+  engine's own integer alphabet, mode flags consuming no token, a bare `--` ending recognition,
+  `VLLM_DP_SIZE`
   at the engine's own precedence below the CLI flag. Robustness is defined against the whole
   input space, not a happy path: the parser NEVER errors on a token it does not recognize — an
   unknown flag, an ambiguous prefix, a positional argument, anything after a bare `--`, an
   empty entry all pass through as the engine's own business — and it errors only on a KNOWN
-  degree flag whose value is missing (including a value token that starts with `-`),
-  non-integer, or below 1, and on a `VLLM_DP_SIZE` that is malformed while being the effective
+  degree flag whose value is missing (a following token that looks like another flag is never
+  consumed), non-integer or out of range, or below 1 (a negative number IS consumed, as argparse
+  consumes it, and lands in this class), and on a `VLLM_DP_SIZE` that is malformed while being
+  the effective
   DP source. Those two classes are the entire error set; a CLI-versus-env DP pair is not one,
   because the engine itself ranks them.
 - **The result** — one struct carrying EVERY recognized declaration: all degrees (not only the
@@ -274,10 +296,15 @@ what keeps the parse both robust and forward-looking:
 
 Acceptance: a table-driven suite over the spelling matrix — every alias of every row, both
 value forms, underscore acceptance and rejection per engine, a unique prefix resolving and an
-ambiguous one passing through, `-tp=2` accepted and `-tp2` passed through, recognition stopping
-at a bare `--`, a negative value refused as missing, a repeat resolving last-wins, a mode flag
+ambiguous one passing through, `-tp=2` accepted and `-tp2` passed through, the three single-dash
+abbreviations bare-only (`-t 2` resolving, `-t=2` passing through), single-letter concatenation
+(`-n2`, `-r0`), `-dc` shadowing the `-dcp` prefix, recognition stopping
+at a bare `--`, a negative value refused as below 1, the integer alphabet (`" 3 "` and `"1_0"`
+accepted, `_3` refused, a host-int overflow refused as out of range), a repeat resolving
+last-wins, a mode flag
 NOT consuming the next token, the pass-through rows (unknown flag, positional, empty entry),
-each error class, CLI-over-env and env-fallback DP precedence, and a table-less engine parsing
+each error class, CLI-over-env and env-fallback DP precedence with the local-share corners, and
+a table-less engine parsing
 to the zero value.
 
 **F2 — The Ascend leg renders both halves from both parses, in one change.**
@@ -465,21 +492,30 @@ type ModelDeploymentDeclaredParallelism struct {
 	DataParallel     int
 	// DataParallelLocal is vLLM's --data-parallel-size-local: the share of the DP width placed
 	// on this member. Zero means undeclared -- the engine then places the full width here and
-	// the size check multiplies; declared, the check stays silent rather than model placement.
+	// the size check multiplies. A declared share above zero IS the per-member data-parallel
+	// width -- with no wiring flag it is exactly the ranks this member runs -- so the check
+	// multiplies that instead. A DECLARED zero stores the same zero: it is the engine's own
+	// sentinel for DP specified externally, the check reads it as undeclared, and the env
+	// precedence still honors it.
 	DataParallelLocal int
 	// The degrees below have no key in today's transfer document; they are carried so the size
 	// check and any future consumer read the full picture without a parser change.
 	PrefillContextParallel int
 	DecodeContextParallel  int
 	// ExpertParallel is SGLang's degree. vLLM's same-named concept is a mode, so it lands in
-	// Modes instead -- the two spellings are never merged into one field.
-	ExpertParallel int
-	// Modes records the mode flags seen (expert-parallel, DP attention, prefill CP); consumers
-	// branch on them, as the size check does.
+	// Modes instead -- the two spellings are never merged into one field. The three after it
+	// are SGLang's remaining degrees: the size check branches on their presence, a future
+	// consumer on their values.
+	ExpertParallel           int
+	AttentionContextParallel int
+	MoEDataParallel          int
+	DWDPSize                 int
+	// Modes records the mode flags seen, by canonical spelling (expert-parallel, DP
+	// attention, prefill CP); consumers branch on them, as the size check does.
 	Modes []string
-	// Wiring records the wiring flags seen, by name (--nnodes and its family, the
-	// --data-parallel-* collective flags, --dist-init-addr): any of them means some of the
-	// width may live off this member, so the size check stays silent.
+	// Wiring records the wiring flags seen, by canonical spelling (--nnodes and its family,
+	// the --data-parallel-* collective flags, --dist-init-addr): any of them means some of
+	// the width may live off this member, so the size check stays silent.
 	Wiring []string
 }
 ```
@@ -490,13 +526,15 @@ in Go comments; the vllm.go:156-161 comment is rewritten in the same change that
 
 ### Implementation Plan
 
-- [ ] **T1 · The tables and the parser**
+- [x] **T1 · The tables and the parser**
       Blocked by: None
       Owns: `pkg/worker/controllers/worker/model_deployment_parallelism.go`,
       `pkg/worker/controllers/worker/model_deployment_parallelism_test.go`
       Gate: review
-      Acceptance: F1. The full spelling matrix passes — abbreviations, `--` termination,
-      negative values, env precedence included; the two error classes return; an unknown flag
+      Acceptance: F1. The full spelling matrix passes — abbreviations long and single-dash
+      (`-t`, `-pc`, `-e` bare-only), single-letter concatenation (`-n2`), the `-dc` shadow,
+      `--` termination, negative values and the integer alphabet, env precedence included; the
+      error classes return (missing, non-integer, out of range, below bound); an unknown flag
       and an engine with no table both parse to all-ones without error.
       Verify: `go test ./pkg/worker/controllers/worker/...`
 
@@ -571,9 +609,12 @@ rows and cases to them rather than restructuring them.
 Every added unit is covered inside its own task's suite:
 
 - `pkg/worker/controllers/worker`: the F1 spelling matrix — every alias, both value forms, underscore per
-  engine, unique-prefix resolving and ambiguous-prefix passing through, `-tp=2` versus `-tp2`, bare `--`
-  termination, negative values, last-wins, mode arity, CLI-over-env and env-fallback DP precedence, each
-  error class, the table-less engine — plus T3's thread pins: both Pods of a pair decode to identical
+  engine, unique-prefix resolving and ambiguous-prefix passing through, `-tp=2` versus `-tp2`, the
+  single-dash abbreviations bare-only and single-letter concatenation (`-n2`, `-r0`), the `-dc` shadow,
+  bare `--` termination, negative values, the integer alphabet and out-of-range refusal, last-wins, mode
+  arity, boolean-wiring `=value` pass-through, CLI-over-env and env-fallback DP precedence with the
+  local-share corners, each error class, the table-less engine — plus T3's thread pins: both Pods of a
+  pair decode to identical
   blocks, declaration-order first on a duplicated kind, the native leg unchanged, the annotation path
   byte-identical, the F6 hash-moves-on-both pin. Baseline 2026-09-22 — 80.6%.
 - `pkg/worker/kvcache/inject`: the render pins per declared pair, EVERY row asserting both blocks (the
