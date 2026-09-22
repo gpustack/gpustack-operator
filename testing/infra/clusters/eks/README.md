@@ -59,6 +59,20 @@ terraform apply \
   -var='cpu_node_count=2'
 ```
 
+> **Cross-node EFA works only between nodes of the SAME node group here.** This module gives every
+> node group its own cluster placement group, and EFA requires both ends of a transfer to sit in
+> one. Nodes from the CPU group and a GPU group therefore cannot move bytes to each other, even
+> though both are EFA-enabled and share an availability zone.
+>
+> The failure is silent, which is why it is called out here rather than left to be discovered: the
+> libfabric handshake succeeds and the endpoint pair is reported established, then every work
+> request hangs with the receiving adapter's byte counters at zero and no error on either side. It
+> reads as a broken test, not as a placement fault. Measured, then confirmed by repeating the same
+> transfer between two nodes of one group, where it completes.
+>
+> Put both ends of any cross-node fabric test in one node group. Making the groups share a
+> placement group is a change to the upstream module's shape and is deliberately not made here.
+
 Check a candidate type before applying; most are not EFA-capable, including every small size
 of the general-purpose families:
 
@@ -96,7 +110,7 @@ terraform destroy
 | `release` | EKS version | `1.34` |
 | `cpu_instance_types` | Instance types for the CPU node group | `["c6a.4xlarge","c7a.4xlarge"]` |
 | `cpu_node_count` | Number of nodes in the CPU node group AT CREATE TIME. `0` drops the group entirely, the same as `clusters/nebius`. The same `desired_size` rule as `gpu_node_count` below applies to an edit against a live group | `1` |
-| `efa_enabled` | Enable EFA on the CPU and GPU node groups: an EFA launch template, a cluster placement group, one private subnet (single availability zone, reached through the NAT gateway and therefore not over SSH), and the label `gpustack.ai/efa=true`. Both groups take the same private subnet on purpose, because RDMA does not reach across availability zones. REQUIRES every type in `cpu_instance_types` and `gpu_instance_types` to be EFA-capable, which neither default is | `false` |
+| `efa_enabled` | Enable EFA on the CPU and GPU node groups: an EFA launch template, **one cluster placement group per node group**, one private subnet (single availability zone, reached through the NAT gateway and therefore not over SSH), and the label `gpustack.ai/efa=true`. Every group takes that one private subnet on purpose, because RDMA does not reach across availability zones -- necessary, and NOT sufficient for cross-node EFA; see the warning under Usage. REQUIRES every type in `cpu_instance_types` and `gpu_instance_types` to be EFA-capable, which neither default is | `false` |
 | `gpu_instance_types` | GPU node groups as a `map(list(string))` keyed by group name | `{ g4dn = ["g4dn.xlarge","g4dn.12xlarge"] }` |
 | `gpu_node_count` | Nodes in each GPU node group AT CREATE TIME. Drives `desired_size`; `max_size` follows it but never drops below 1, which EKS refuses. Terraform does NOT move this on a group that already exists, because the module ignores changes to `desired_size` — an edit moves the bounds and leaves the node count where it was. Resize or park a live group with `aws eks update-nodegroup-config --scaling-config desiredSize=N`, which is drift-free precisely because the attribute is ignored | `1` |
 | `node_boot_disk_type` | Node root volume EBS type/performance (`volume_type`, optional `iops`/`throughput`) | `{ volume_type = "gp3", iops = 3000, throughput = 125 }` |

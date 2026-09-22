@@ -161,9 +161,18 @@ locals {
         # Same rule as the cpu group: a cluster placement group is scoped to one
         # availability zone, and an EFA interface cannot carry a public address, so
         # under EFA the group takes a private subnet. It is the same private subnet
-        # the cpu group takes, on purpose: both placement groups must land in one
-        # availability zone for cross-node RDMA, which does not reach across zones.
-        # Not a copy-paste slip.
+        # the cpu group takes, on purpose: one availability zone is REQUIRED for
+        # cross-node RDMA, which does not reach across zones. Not a copy-paste slip.
+        #
+        # ONE ZONE IS NOT ENOUGH, AND NOTHING HERE MAKES IT ENOUGH. The upstream module
+        # builds one cluster placement group per node group, and EFA needs both ends of
+        # a transfer inside the SAME group, so a transfer between this group and the cpu
+        # group cannot complete however the zones line up. It fails silently: the
+        # handshake succeeds, the endpoint pair reports established, then work requests
+        # hang with the receiving adapter's counters at zero. Measured, and left as is --
+        # sharing one group across node groups is the upstream module's shape to change,
+        # not this file's. Keep both ends of a cross-node fabric test in one node group;
+        # the README says the same thing where someone running it will read it.
         subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[var.efa_availability_zone_index]] : null
         # Under EFA the module substitutes its own interface set, sized and indexed for
         # the instance's network cards, so this group declares none of its own.
