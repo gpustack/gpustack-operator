@@ -450,9 +450,13 @@ func TestMemberWorkload_TwoMediaOnTheSameNodes(t *testing.T) {
 	vramMemory := vramContainer.Resources.Requests[core.ResourceMemory]
 	assert.True(t, resource.MustParse("4Gi").Equal(vramMemory),
 		"a VRAM segment is device memory: host memory carries localBufferSize only, got %s", &vramMemory)
-	assert.Empty(t, vramContainer.Resources.Limits,
-		"device memory is claimed by allocating it: charging an accelerator here would take a whole "+
-			"one from inference to account for a fraction of one device's memory")
+	require.Len(t, vramContainer.Resources.Limits, 1,
+		"exactly one charge, and it is the fabric's: device memory is claimed by allocating it, so "+
+			"charging an accelerator here would take a whole one from inference to account for a "+
+			"fraction of one device's memory")
+	vramFabric := vramContainer.Resources.Limits["device.gpustack.ai/rdma.shared"]
+	assert.Equal(t, int64(1), vramFabric.Value(),
+		"the group declared RDMA, so it is granted one endpoint whatever its medium is")
 	assert.True(t, vramPodSpec.HostNetwork)
 	require.NotNil(t, vramContainer.SecurityContext)
 	require.NotNil(t, vramContainer.SecurityContext.Capabilities)
@@ -501,20 +505,22 @@ func TestMemberWorkload_GroupTransportOverridesTheBackend(t *testing.T) {
 	assert.Equal(t, "tcp", env["MOONCAKE_PROTOCOL"], "the member is told its own group's protocol")
 }
 
-// TestMemberWorkload_VRAMGrantsNothingItWasNotDeclared pins that the medium on its own grants no
-// privilege, mounts nothing, and charges nothing.
+// TestMemberWorkload_VRAMIsChargedNoAccelerator pins that the medium on its own grants no privilege,
+// mounts nothing, and charges nothing.
 //
-// Two earlier designs are kept out by this test. One read an absent device-resource name as a
-// request for a privileged host-network Pod: the privilege it granted reached the node's device
-// nodes and not the vendor's user-space driver, which is not under /dev, so it produced a member
-// that started, looked healthy, and could not allocate a segment on two of the three vendors. The
-// other charged one extended resource per VRAM member, which takes a whole accelerator away from
-// inference to account for a fraction of one device's memory — a member's segment is one cudaMalloc
-// on one device, so it cannot use the rest of what it took.
+// Two earlier designs are kept out by this test. One charged one extended resource per VRAM member,
+// which takes a whole accelerator away from inference to account for a fraction of one device's
+// memory — a member's segment is one cudaMalloc on one device, so it cannot use the rest of what it
+// took. The other inferred a privileged host-network Pod from the medium: the privilege it granted
+// reached the node's device nodes and not the vendor's user-space driver, which is not under /dev,
+// so it produced a member that started, looked healthy, and could not allocate a segment on two of
+// the three vendors.
 //
 // The fabric rendering still applies, because it is keyed on the protocol and never on the medium:
-// on an RDMA backend this group gets the device tree and the two capabilities like any other.
-func TestMemberWorkload_VRAMGrantsNothingItWasNotDeclared(t *testing.T) {
+// on an RDMA backend this group gets the endpoint grant and the two capabilities like any other.
+// That is the half the grant matrix covers; what is only here is the ACCOUNTING — the host memory
+// this member is charged, and that its one limit is the fabric's rather than an accelerator.
+func TestMemberWorkload_VRAMIsChargedNoAccelerator(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 		k.Spec.Transport.Protocol = "RDMA"
 	}, withSecondMemberGroupVRAM())
@@ -530,14 +536,19 @@ func TestMemberWorkload_VRAMGrantsNothingItWasNotDeclared(t *testing.T) {
 		"the fabric path is keyed on the protocol, so the medium does not exempt this group from it")
 
 	assert.True(t, podSpec.HostNetwork, "rdma takes the host network whatever the medium is")
-	require.Len(t, podSpec.Volumes, 1, "the device tree, from the fabric path")
-	assert.Equal(t, RDMADevicePath, podSpec.Volumes[0].HostPath.Path)
+	assert.Empty(t, podSpec.Volumes,
+		"the RDMA path mounts nothing whatever the medium is: the grant carries the verbs node of "+
+			"the endpoint it allocated, and the tree would carry every other adapter with it")
 
 	memory := container.Resources.Requests[core.ResourceMemory]
 	assert.True(t, resource.MustParse("4Gi").Equal(memory),
 		"host memory still carries localBufferSize only, got %s", &memory)
-	assert.Empty(t, container.Resources.Limits,
-		"nothing is charged: device memory is claimed by allocating it")
+	require.Len(t, container.Resources.Limits, 1,
+		"the fabric's one endpoint, and nothing for the medium: device memory is claimed by "+
+			"allocating it")
+	fabric := container.Resources.Limits["device.gpustack.ai/rdma.shared"]
+	assert.Equal(t, int64(1), fabric.Value(),
+		"the charge that is present is the protocol's, never the medium's")
 }
 
 // TestMemberWorkload_DeclaredSecurityContextMergesOntoTheFabricOne is the test for the one merge
@@ -1229,17 +1240,22 @@ func TestMemberWorkload_RDMAContext(t *testing.T) {
 	assert.Equal(t, core.DNSClusterFirstWithHostNet, podSpec.DNSPolicy,
 		"a hostNetwork Pod that keeps ClusterFirst cannot resolve the leader's Service name")
 
-	require.Len(t, podSpec.Volumes, 1, "exactly one volume: the RDMA device tree")
-	require.NotNil(t, podSpec.Volumes[0].HostPath)
-	assert.Equal(t, "/dev/infiniband", podSpec.Volumes[0].HostPath.Path)
-	require.NotNil(t, podSpec.Volumes[0].HostPath.Type,
-		"an untyped hostPath is not a weaker check, it is no check: the kubelet's mounter returns "+
-			"without looking at the path at all")
-	assert.Equal(t, core.HostPathDirectory, *podSpec.Volumes[0].HostPath.Type,
-		"a node with no device tree has to stop the member at the mount. Left to start, it "+
-			"discovers no device, installs TCP and serves, while the object still says RDMA")
-	require.Len(t, container.VolumeMounts, 1)
-	assert.Equal(t, "/dev/infiniband", container.VolumeMounts[0].MountPath)
+	assert.Empty(t, podSpec.Volumes,
+		"the RDMA path mounts nothing. This operator's own device plugin injects the verbs node of "+
+			"each endpoint it grants, so the tree would hand a container granted one endpoint the "+
+			"device node of every other adapter on the node -- visible, unopenable, and enumerated "+
+			"by the store on its way to skipping them")
+	assert.Empty(t, container.VolumeMounts,
+		"asserted beside the volume rather than instead of it: a mount referencing no volume and a "+
+			"volume nothing mounts are different defects, and either one alone would leave half of "+
+			"this rendering in place")
+
+	rdma := container.Resources.Limits["device.gpustack.ai/rdma.shared"]
+	assert.Equal(t, int64(1), rdma.Value(),
+		"the name is spelled out rather than derived from GetRDMAResourceName, because what has to "+
+			"hold is that this request matches what the Device Manager ADVERTISES. Deriving both "+
+			"sides from one function would keep this green through a rename that left every "+
+			"running member Pending")
 
 	require.NotNil(t, container.SecurityContext)
 	require.NotNil(t, container.SecurityContext.Capabilities)
@@ -1909,58 +1925,68 @@ func TestMemberWorkload_SurveyQuotesThePathAgainstTheShell(t *testing.T) {
 	}
 }
 
-// TestMemberWorkload_FabricDeviceResource pins which extended resource a host-fabric member asks
-// for, across every combination of protocol and declaration.
+// TestMemberWorkload_FabricGrantFollowsTheProtocol pins the whole grant matrix: which extended
+// resource each protocol makes a member request, and whether the host's device tree is mounted
+// beside it.
 //
-// The name is not a property of the fabric. It belongs to whichever device plugin the cluster's
-// administrator installed, and the two common RDMA plugins both let that name be configured, so
-// there is nothing this operator could hard-code that would be right on two clusters. EFA is the
-// single exception -- its plugin is AWS's own and advertises one name -- which is why it has a
-// fallback and RDMA does not.
+// The two are asserted together in every row because they used to move together and no longer do.
+// A request asserted on its own would leave the mount free to come back on the RDMA path, and that
+// mount is exactly what the per-endpoint grant replaces: it carries every adapter on the node into
+// a container granted one of them.
 //
-// The case that matters most is the third row. An unset declaration on a fabric with no fallback
-// renders no request at all, which is what every backend written before this field did: the device
-// tree is mounted, the device cgroup refuses the open, the store finds no HCA and installs TCP, and
-// the object still reads as RDMA. Pinning it here says that outcome is reachable on purpose rather
-// than by omission.
-func TestMemberWorkload_FabricDeviceResource(t *testing.T) {
-	const declared = "rdma/hca_shared_devices_a"
+// THE NAMES ARE LITERALS ON PURPOSE. Deriving the expected RDMA key from the function the renderer
+// calls would make the row pass by construction. What has to hold is that this request matches what
+// the Device Manager ADVERTISES -- two packages, which one rename can separate while leaving every
+// derived assertion green and every running member Pending.
+//
+// The medium rows are here because medium and transport are INDEPENDENT axes. A DRAM group is as
+// entitled to a fabric as a VRAM one, and this rendering reads the medium nowhere; a row for each
+// keeps a later reader from inferring a coupling from the absence of one.
+func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
+	const (
+		rdmaKey core.ResourceName = "device.gpustack.ai/rdma.shared"
+		efaKey  core.ResourceName = "vpc.amazonaws.com/efa"
+	)
 
 	cases := []struct {
-		name     string
-		protocol string
-		declare  string
-		want     core.ResourceName
-		absent   core.ResourceName
+		name          string
+		protocol      string
+		groupProtocol string
+		medium        string
+		want          core.ResourceName
+		wantMount     bool
 	}{
 		{
-			name:     "EFA with nothing declared falls back to the one name its plugin advertises",
-			protocol: "EFA",
-			want:     efaDeviceResource,
+			name:     "RDMA asks for the shared key this operator publishes, and mounts nothing",
+			protocol: "RDMA", medium: "DRAM",
+			want: rdmaKey,
 		},
 		{
-			name:     "a declaration overrides the EFA fallback rather than joining it",
-			protocol: "EFA",
-			declare:  declared,
-			want:     declared,
-			absent:   efaDeviceResource,
+			name:     "a VRAM group on RDMA is granted exactly what a DRAM one is",
+			protocol: "RDMA", medium: "VRAM",
+			want: rdmaKey,
 		},
 		{
-			name:     "RDMA with nothing declared asks for nothing, which is the old behavior",
-			protocol: "RDMA",
-			absent:   declared,
+			name:     "EFA asks for the name AWS's own plugin advertises, and keeps the tree",
+			protocol: "EFA", medium: "DRAM",
+			want: efaKey, wantMount: true,
 		},
 		{
-			name:     "RDMA asks for exactly the resource the administrator named",
-			protocol: "RDMA",
-			declare:  declared,
-			want:     declared,
+			name:     "a group overriding the backend's TCP with RDMA is granted the fabric",
+			protocol: "TCP", groupProtocol: "RDMA", medium: "DRAM",
+			want: rdmaKey,
 		},
 		{
-			name:     "a declaration on a path with no fabric renders nothing at all",
-			protocol: "TCP",
-			declare:  declared,
-			absent:   declared,
+			name:     "a group overriding the backend's RDMA with TCP is granted nothing",
+			protocol: "RDMA", groupProtocol: "TCP", medium: "DRAM",
+		},
+		{
+			name:     "TCP grants no device and mounts no tree",
+			protocol: "TCP", medium: "DRAM",
+		},
+		{
+			name:     "the Auto that resolves to tcp is left exactly as rendered",
+			protocol: "Auto", medium: "DRAM",
 		},
 	}
 
@@ -1968,29 +1994,93 @@ func TestMemberWorkload_FabricDeviceResource(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 				k.Spec.Transport.Protocol = c.protocol
-				k.Spec.Transport.DeviceResourceName = c.declare
+				k.Spec.Connection.Managed.Members[0].Medium = c.medium
+				if c.groupProtocol != "" {
+					k.Spec.Connection.Managed.Members[0].Transport = &workercore.KVCacheBackendMemberTransport{Protocol: c.groupProtocol}
+				}
 			})
 
-			limits := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").
-				Spec.Template.Spec.Containers[0].Resources.Limits
+			podSpec := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.13").Spec.Template.Spec
+			limits := podSpec.Containers[0].Resources.Limits
 
-			if c.want != "" {
-				got := limits[c.want]
-				assert.Equal(t, int64(1), got.Value(),
-					"the device cgroup refuses to open the node the hostPath carried in until a "+
-						"plugin allocation adds the rule, and one device is what a member needs")
+			for _, key := range []core.ResourceName{rdmaKey, efaKey} {
+				got := limits[key]
+				if key == c.want {
+					assert.Equal(t, int64(1), got.Value(),
+						"one seat on one adapter is what a member asks for, and the device cgroup "+
+							"refuses the open until a plugin allocation adds the rule")
+					continue
+				}
+				assert.NotContains(t, limits, key,
+					"a resource asked for here is one the node must ADVERTISE, so an unwanted one "+
+						"leaves the member Pending rather than merely over-provisioned")
 			}
 
-			if c.absent != "" {
-				assert.NotContains(t, limits, c.absent,
-					"a resource asked for here is one the node must advertise, so an unwanted one "+
-						"makes the member unschedulable rather than merely over-provisioned")
+			// Read by path rather than by counting volumes: another medium may render a volume of
+			// its own, and a count would then fail for a reason that has nothing to do with the
+			// fabric.
+			mounted := false
+			for _, v := range podSpec.Volumes {
+				if v.HostPath != nil && v.HostPath.Path == RDMADevicePath {
+					mounted = true
+					require.NotNil(t, v.HostPath.Type,
+						"an untyped hostPath is not a weaker check, it is no check: the kubelet's "+
+							"mounter returns without looking at the path at all")
+					assert.Equal(t, core.HostPathDirectory, *v.HostPath.Type,
+						"a node with no device tree has to stop the member at the mount rather "+
+							"than start, find nothing, install TCP and serve under an object that "+
+							"says otherwise")
+				}
 			}
+			assert.Equal(t, c.wantMount, mounted,
+				"only EFA still mounts the tree, and RDMADevicePath carries the reading that "+
+					"would be needed before its half could go too")
 
-			if c.want == "" {
-				assert.Empty(t, limits,
-					"no fabric resource was asked for, and nothing else on this path sets a limit")
+			mountedInContainer := false
+			for _, m := range podSpec.Containers[0].VolumeMounts {
+				if m.MountPath == RDMADevicePath {
+					mountedInContainer = true
+				}
 			}
+			assert.Equal(t, c.wantMount, mountedInContainer,
+				"asserted beside the volume, never instead of it: a volume nothing mounts and a "+
+					"mount referencing no volume are different defects")
+		})
+	}
+}
+
+// TestFabricDeviceResource_NamesItsProtocols pins the one property the grant matrix structurally
+// cannot reach: what this function does with a protocol it does not name.
+//
+// The matrix drives RenderMemberDaemonSet, which consults memberProtocolIsHostFabric first, so no
+// input it can build ever reaches the default branch. That is exactly why the branch needs its own
+// case — the day a third host fabric is added to that predicate and not to this function, the only
+// thing standing between it and a seat on an RDMA adapter is this return.
+//
+// The names are literals here for the same reason they are in the matrix: what has to hold is that
+// the request matches what the Device Manager advertises, and deriving the expectation from the
+// function under test would assert nothing.
+func TestFabricDeviceResource_NamesItsProtocols(t *testing.T) {
+	cases := []struct {
+		name     string
+		protocol string
+		want     core.ResourceName
+	}{
+		{name: "rdma asks for the shared key", protocol: "rdma", want: "device.gpustack.ai/rdma.shared"},
+		{name: "efa asks for the name AWS's plugin advertises", protocol: "efa", want: "vpc.amazonaws.com/efa"},
+		{
+			name:     "a host fabric this function does not name is granted nothing, never RDMA's key",
+			protocol: "ub",
+		},
+		{name: "a non-fabric protocol is granted nothing", protocol: "tcp"},
+		{name: "the empty protocol is granted nothing", protocol: ""},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, fabricDeviceResource(c.protocol),
+				"a fallthrough here would hand an unnamed fabric the RDMA adapter it was never "+
+					"meant to hold, and nothing downstream would report the substitution")
 		})
 	}
 }

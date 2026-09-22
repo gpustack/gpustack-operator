@@ -18,6 +18,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
@@ -37,8 +38,26 @@ const (
 	// entrypoint's own default. Later groups offset from it; see memberRESTPort for why.
 	memberRESTPortBase int32 = 8080
 
-	// RDMADevicePath is the device tree a host-fabric member needs from its host: EFA devices
-	// surface here too, next to the RDMA ones.
+	// RDMADevicePath is the device tree an EFA member needs from its host. RDMA devices surface
+	// here too, but an RDMA member no longer mounts it: this operator's own device plugin injects
+	// the verbs node of each endpoint it grants, so the tree would add every OTHER adapter on the
+	// node to a container granted one of them.
+	//
+	// EFA keeps the mount here, and exactly one reason is left. Measurements on EFA hosts have since
+	// removed the mount while keeping the resource request and moved 25 GB across nodes between two
+	// members THIS RENDERER produced, byte counts agreeing between the application, the initiator's
+	// adapter counters and the target's. So "it was never read" and "it never carried traffic" are
+	// both answered, and neither is why the mount stays.
+	//
+	// What stays is that the redundancy belongs to THAT VENDOR'S PLUGIN rather than to the protocol:
+	// it injects the verbs node itself, and an allocator that injects nothing turns this mount back
+	// into the only way the device node reaches the container. Dropping it is therefore a decision
+	// about which allocators an EFA member may run against, not a missing reading, and it belongs to
+	// a change that says so rather than to this one.
+	//
+	// The opposite removal is what this whole rendering rests on: taking the REQUEST away instead
+	// failed loudly, with the device node present and world-readable and open() still refused. The
+	// mount makes a device visible; the request makes it openable.
 	//
 	// Exported because admission has to refuse a disk tier that would land on top of it: the two
 	// mounts are rendered into one container, and a collision there is resolved by the kubelet
@@ -84,12 +103,16 @@ const (
 	// rdmaDeviceVolumeName names that mount.
 	rdmaDeviceVolumeName = "rdma-devices"
 
+	// memberProtocolRDMA and memberProtocolEFA are the two RESOLVED protocols that reach the host's
+	// fabric, in the store's own spelling rather than the API's. They are constants because three
+	// places have to agree on the pair -- the predicate admission shares, the mount, and the
+	// resource derived from it -- and a fourth spelling of "efa" is how two of them would drift.
+	memberProtocolRDMA = "rdma"
+	memberProtocolEFA  = "efa"
+
 	// efaDeviceResource is the extended resource AWS's EFA device plugin advertises, and what an
-	// EFA member asks for one of WHEN THE BACKEND DECLARES NO NAME OF ITS OWN.
-	//
-	// It survives as a constant only because AWS's plugin advertises exactly one name. Every other
-	// fabric's name is chosen by whoever installed the plugin, which is why it is declared on the
-	// object instead, and why this is a fallback rather than the rule.
+	// EFA member asks for one of. EFA is AWS's own fabric and its plugin advertises exactly one
+	// name, so the protocol names the resource and nothing is declared.
 	//
 	// IT IS WHAT MAKES THE DEVICE OPENABLE. Mounting /dev/infiniband carries the device node into
 	// the container's mount namespace and does nothing else: the device cgroup still denies open(),
@@ -100,7 +123,8 @@ const (
 	//
 	// Requesting it also decides what a node without EFA looks like. Such a node advertises none of
 	// this resource, so the member is never placed there at all, rather than starting and running
-	// TCP under a spec that says EFA.
+	// TCP under a spec that says EFA. That refusal is the wanted one: a cluster whose nodes cannot
+	// serve the fabric is a cluster whose backend should say TCP.
 	efaDeviceResource core.ResourceName = "vpc.amazonaws.com/efa"
 
 	// memberLocalDiskVolumeName names the host directory holding a group's disk tier.
@@ -309,23 +333,25 @@ var memberProtocols = map[string]string{
 	"MACA":             "maca",
 }
 
-// MemberProtocolIsHostFabric reports whether a RESOLVED protocol is one of the two that reach the
-// host's device tree: the ones that take hostNetwork, get the two capabilities and mount the device
-// node. It takes MemberProtocol's output, not the API's spelling.
+// memberProtocolIsHostFabric reports whether a RESOLVED protocol is one of the two that reach the
+// host's fabric: the ones that take hostNetwork, get the two capabilities and are granted a device.
+// It takes MemberProtocol's output, not the API's spelling.
 //
 // rdma and efa are the only two. musa and maca are intra-node IPC transports, not host fabrics, and
 // the rest never leave the member's own network namespace, so none of them earns hostNetwork, the
-// capabilities or the mount.
+// capabilities or a device.
 //
-// It does NOT promise that a device request is rendered. That needs a name as well — declared, or
-// EFA's fallback — and an RDMA group with neither renders the mount and no request, which is the
-// state a declaration exists to let an operator leave.
+// Both of the two DO get a device request, each derived from the protocol by fabricDeviceResource,
+// so this predicate answers "is a device granted" as well. Only one of them also mounts the device
+// tree; RDMADevicePath says which and why.
 //
-// It is exported because admission asks the same question — a declared device resource name is
-// consequential only on these protocols, so the rule that judges one has to know which they are.
-// Restating the pair there would let the two drift apart the day a third fabric joins.
-func MemberProtocolIsHostFabric(protocol string) bool {
-	return protocol == "rdma" || protocol == "efa"
+// It is UNEXPORTED, and was not always: admission used to ask the same question, because the device
+// resource was declared on the object and a declared name is consequential only on these protocols.
+// That rule is gone with the field, and the pair is now stated in exactly two places, both in this
+// file and both total over it — here and in fabricDeviceResource. A second spelling anywhere else
+// is what would let them drift apart the day a third fabric joins.
+func memberProtocolIsHostFabric(protocol string) bool {
+	return protocol == memberProtocolRDMA || protocol == memberProtocolEFA
 }
 
 // MemberObjectName is the name of the objects rendered for one member group.
@@ -494,7 +520,7 @@ func RenderMemberDaemonSet(
 		},
 	}
 
-	applyMemberFabric(ds, MemberProtocolForGroup(kvcb, member), kvcb.Spec.Transport.DeviceResourceName)
+	applyMemberFabric(ds, MemberProtocolForGroup(kvcb, member))
 	applyMemberLocalDisk(ds, kvcb, member, group)
 	applyMemberHostPaths(ds, member)
 	// Last of the four, because it merges onto whatever the fabric path put there and so has to see
@@ -904,19 +930,24 @@ func memberResources(member workercore.KVCacheBackendMember) core.ResourceRequir
 
 // applyMemberFabric grants what a fabric needs, and only to the path that needs it.
 //
-// RDMA and EFA share the host-fabric base: hostNetwork, the device tree and two capabilities —
-// and NEVER privileged, which would hand the member its whole node for the sake of two operations.
+// RDMA and EFA share the host-fabric base: hostNetwork, two capabilities and one extended-resource
+// request — and NEVER privileged, which would hand the member its whole node for the sake of two
+// operations.
 //
-//   - Either may add one extended-resource request, because the device tree alone grants no access:
-//     the device cgroup still refuses to open the node it carries in, and a device plugin allocation
-//     is what adds the rule that lets it through.
-//   - The libfabric an EFA member runs on travels in the image, so there is no host tree to mount
-//     and no environment to render.
+//   - The request is DERIVED FROM THE PROTOCOL, never declared. Each of the two fabrics has exactly
+//     one name that is right on every cluster running this operator: EFA's plugin is AWS's own, and
+//     the RDMA one is published by this operator's own Device Manager. A member that cannot get it
+//     stays Pending, and that is the wanted failure — a cluster whose nodes cannot serve the fabric
+//     is a cluster whose backend should say TCP, said in the object rather than discovered later in
+//     a store log.
+//   - Only EFA mounts the device tree, and RDMADevicePath says why the other one stopped.
+//   - The libfabric an EFA member runs on travels in the image, so there is no host install prefix
+//     to mount and no environment to render.
 //   - Every other path, including the Auto that resolved to tcp, is left exactly as rendered: no
 //     security context at all rather than an empty one, since an empty struct is an invitation to
 //     add a capability to it.
-func applyMemberFabric(ds *apps.DaemonSet, protocol, deviceResource string) {
-	if !MemberProtocolIsHostFabric(protocol) {
+func applyMemberFabric(ds *apps.DaemonSet, protocol string) {
+	if !memberProtocolIsHostFabric(protocol) {
 		return
 	}
 
@@ -927,27 +958,7 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol, deviceResource string) {
 	// find the leader's Service name.
 	podSpec.DNSPolicy = core.DNSClusterFirstWithHostNet
 
-	// Typed, so a node with no device tree stops the member at the mount rather than starting,
-	// finding no device, installing TCP and serving while the object still says the fabric it was
-	// asked for. An untyped hostPath is not a weaker check but no check: the kubelet's mounter
-	// returns immediately for the empty type and never looks at the path. Directory and not
-	// DirectoryOrCreate, because only the OrCreate forms make a missing path, and an empty
-	// directory where the devices should be is that same silent start.
-	podSpec.Volumes = append(podSpec.Volumes, core.Volume{
-		Name: rdmaDeviceVolumeName,
-		VolumeSource: core.VolumeSource{
-			HostPath: &core.HostPathVolumeSource{
-				Path: RDMADevicePath,
-				Type: ptr.To(core.HostPathDirectory),
-			},
-		},
-	})
-
 	container := &podSpec.Containers[0]
-	container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
-		Name:      rdmaDeviceVolumeName,
-		MountPath: RDMADevicePath,
-	})
 	container.SecurityContext = &core.SecurityContext{
 		Capabilities: &core.Capabilities{
 			// IPC_LOCK to pin the memory the fabric registers, SYS_RESOURCE to raise the locked
@@ -956,17 +967,26 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol, deviceResource string) {
 		},
 	}
 
-	// The resource to ask for is DECLARED, because its name belongs to whichever device plugin the
-	// cluster's administrator installed rather than to the fabric. EFA is the one protocol with a
-	// single possible answer -- its plugin is AWS's own -- so it falls back to that name, and the
-	// declaration overrides it. A protocol with neither renders no request, which is what every
-	// backend written before this field did.
-	if deviceResource == "" {
-		if protocol != "efa" {
-			return
-		}
-
-		deviceResource = string(efaDeviceResource)
+	if protocol == memberProtocolEFA {
+		// Typed, so a node with no device tree stops the member at the mount rather than starting,
+		// finding no device, installing TCP and serving while the object still says the fabric it
+		// was asked for. An untyped hostPath is not a weaker check but no check: the kubelet's
+		// mounter returns immediately for the empty type and never looks at the path. Directory
+		// and not DirectoryOrCreate, because only the OrCreate forms make a missing path, and an
+		// empty directory where the devices should be is that same silent start.
+		podSpec.Volumes = append(podSpec.Volumes, core.Volume{
+			Name: rdmaDeviceVolumeName,
+			VolumeSource: core.VolumeSource{
+				HostPath: &core.HostPathVolumeSource{
+					Path: RDMADevicePath,
+					Type: ptr.To(core.HostPathDirectory),
+				},
+			},
+		})
+		container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
+			Name:      rdmaDeviceVolumeName,
+			MountPath: RDMADevicePath,
+		})
 	}
 
 	// The device allocation, and nothing else. The libfabric an EFA member runs on travels in the
@@ -980,11 +1000,49 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol, deviceResource string) {
 	// runs on a Pod and deliberately NOT on a pod template, so this DaemonSet stores exactly what
 	// is rendered here — which is what keeps the whole-Resources comparison in the controller from
 	// rewriting the template on every pass.
+	// Guarded rather than indexed directly: fabricDeviceResource names its protocols, so a fabric
+	// added to memberProtocolIsHostFabric and not to it returns the empty resource here. Rendering
+	// that would put an empty key in the list, which is a request no node can satisfy and no
+	// message explains; skipping it leaves the member asking for no device, which is what the rest
+	// of this rendering already treats as the visible failure.
+	device := fabricDeviceResource(protocol)
+	if device == "" {
+		return
+	}
+
 	if container.Resources.Limits == nil {
 		container.Resources.Limits = core.ResourceList{}
 	}
 
-	container.Resources.Limits[core.ResourceName(deviceResource)] = *resource.NewQuantity(1, resource.DecimalSI)
+	container.Resources.Limits[device] = *resource.NewQuantity(1, resource.DecimalSI)
+}
+
+// fabricDeviceResource is the extended resource one host-fabric protocol asks for, and it NAMES ITS
+// PROTOCOLS rather than falling through to one of them.
+//
+// The fallthrough is the thing to avoid here, not a style preference. Both spellings are correct
+// today, because memberProtocolIsHostFabric admits exactly this pair and applyMemberFabric consults
+// it first. What separates them is the day a third host fabric joins — which the comments in this
+// file expect: a fallthrough hands that fabric's members a seat on an RDMA adapter, silently and
+// with the wrong device, while naming the protocols returns the empty resource and the caller
+// renders no request at all. A member that asks for nothing is a visible failure on a fabric path;
+// a member granted the wrong adapter is not.
+//
+// Deriving the RDMA name rather than writing it here keeps one spelling in the repository: the
+// Device Manager serves whatever GetRDMAResourceName returns, so a member asking for a literal
+// would stop matching the day that function's keys moved and nothing would report it. The SHARED
+// mode is the one to ask for: an endpoint carries one exclusive token and many shared ones, so a
+// fleet exhausts the exclusive key long before the shared one on the same hardware, and a member
+// wants a seat on an adapter rather than the whole adapter.
+func fabricDeviceResource(protocol string) core.ResourceName {
+	switch protocol {
+	case memberProtocolRDMA:
+		return nodefeature.GetRDMAResourceName(workercore.DeviceAllocationModeShared)
+	case memberProtocolEFA:
+		return efaDeviceResource
+	default:
+		return ""
+	}
 }
 
 // applyMemberHostPaths mounts what the group declared it needs from its nodes.

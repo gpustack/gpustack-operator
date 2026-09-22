@@ -2375,7 +2375,7 @@ message KVCacheBackendTransport {
   //   - A host fabric needs two things this API cannot check: the member image must carry the
   //     runtime its transport links — the CANN toolkit for CANN, libfabric for EFA — and the NODE must run a
   //     device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.
-  //     Which resource the member asks for is deviceResourceName below.
+  //     Which resource the member asks for follows from this value; see the entry below.
   //   - RESPELLING THIS ENUM CARRIES A RESIDUAL RISK, knowingly accepted, on the same terms as
   //     Medium's. The values were once Auto, TCP, RDMA, EFA, HIP and Ascend; HIP and Ascend are
   //     gone, replaced by the toolchain names ROCM and CANN, and the rest changed case. An object
@@ -2388,37 +2388,18 @@ message KVCacheBackendTransport {
   //     answer here for the reason an alias map is not: the schema enum is the gate a stored object
   //     meets first, so widening what admission accepts reaches nothing that the API server has
   //     already refused.
+  //   - ON RDMA AND EFA THE PROTOCOL ALSO NAMES A DEVICE RESOURCE, which the member requests one
+  //     of so the device cgroup lets it open the fabric. Each fabric has exactly one name that is
+  //     right on every cluster running this operator — EFA's plugin is AWS's own, and the RDMA
+  //     one is published by this operator's Device Manager — so the name is derived from this
+  //     value and never declared. A node advertising none leaves the member Pending, which is the
+  //     intended refusal: a cluster that cannot serve the fabric is one whose backend should say
+  //     TCP, and saying so here beats discovering it later in a store log that reports no error
+  //     while installing TCP under an object that reads RDMA.
   //
   // +k8s:validation:default="Auto"
   // +k8s:validation:enum=["Auto","TCP","RDMA","EFA","CANN","ROCM","MUSA","MACA"]
   optional string protocol = 1;
-
-  // DeviceResourceName is the extended resource a host-fabric member asks one of, so the device
-  // cgroup lets it open the fabric device. It is CONSULTED ONLY on the RDMA and EFA protocols;
-  // beside any other it renders nothing.
-  //
-  //   - It is DECLARED rather than derived: the name belongs to whichever plugin the cluster's
-  //     administrator installed, so no name hard-coded here would be right on two clusters, and no
-  //     admission rule can check a node for a plugin whose resource it cannot know.
-  //   - EFA is the exception. Its plugin advertises exactly one name, so an EFA member asks for
-  //     vpc.amazonaws.com/efa when this is unset. That is a default rather than a property of the
-  //     protocol, and setting the field overrides it.
-  //   - UNSET IS NOT A SAFE DEFAULT, IT IS THE OLD BEHAVIOR. A fabric member naming no resource
-  //     mounts the device tree and requests nothing, so the cgroup refuses the open, the store
-  //     installs the store's tcp, and the object still reads as the fabric it asked for. Naming one instead
-  //     keeps the member off a node that advertises none, which is the safer failure but not
-  //     always the wanted one, so both stay reachable.
-  //
-  // The bounds below are the API server's own for a resource name: 63 characters after the slash
-  // and for each domain label, refused here rather than on the DaemonSet rendered from it, where
-  // they strand reconciliation with no obvious cause. The domain's 253-character limit is NOT among
-  // them — no regular expression can bound a repeated group whose labels vary in length, so
-  // 63.63.63.62 makes a domain of 254 that the 317 below still admits — and admission carries that
-  // one instead, so it is absent when the webhook is not installed.
-  //
-  // +k8s:validation:pattern="^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
-  // +k8s:validation:maxLength=317
-  optional string deviceResourceName = 2;
 }
 
 // KVCacheObjectReference names an object that consumes another one in this group. It is the ONE

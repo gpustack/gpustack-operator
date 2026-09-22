@@ -111,8 +111,8 @@ recorded in
 [the spec](../../specs/2026-09-05-kv-cache-media-and-scaling.md#f2--the-medium-enum-collapses-to-what-runs-and-each-removed-value-is-placed).
 
 The object is **cluster-scoped**: it names nodes, claims host memory and host paths, and on the RDMA
-and EFA paths needs `hostNetwork` and `/dev/infiniband`. Only a cluster administrator can
-legitimately declare one.
+and EFA paths needs `hostNetwork` and a fabric device. Only a cluster administrator can legitimately
+declare one.
 
 Tenant isolation is a different axis, handled one layer up — exactly as Kueue separates `ClusterQueue`
 from `LocalQueue` (<https://kueue.sigs.k8s.io/docs/concepts/>). One backend can be referenced by
@@ -299,9 +299,9 @@ against it: the metadata plane takes no configuration at all.
 
 One member group renders **one DaemonSet** over `members[].nodeSelector`. A member contributes *a
 node's* medium — that node's host memory or, on a VRAM group, its device memory, plus its host paths
-and on the RDMA path its `/dev/infiniband` — so its identity is the node, which is what a DaemonSet
-expresses. Two groups may select the same node — a DRAM group and a VRAM group is the shape the
-second medium exists for — and each still renders its own DaemonSet.
+and on a host-fabric group one of that node's fabric devices — so its identity is the node, which
+is what a DaemonSet expresses. Two groups may select the same node — a DRAM group and a VRAM group
+is the shape the second medium exists for — and each still renders its own DaemonSet.
 
 The member's whole configuration renders as **environment variables**: no ConfigMap, no volume, no init
 container.
@@ -371,33 +371,46 @@ build compiles no `ascend` transport.
 > them. `privileged` is reachable, but only by writing it into
 > [`members[].securityContext`](#reaching-a-nodes-accelerator), never by naming a protocol.
 
-An `EFA` group takes everything `RDMA` takes, plus one device from a plugin — by default
-`vpc.amazonaws.com/efa`, which `spec.transport.deviceResourceName` overrides. That request is what lets the
-member open the adapter: the `/dev/infiniband` mount carries the device node in while the device
-cgroup still refuses `open()`, so a member without one starts TCP instead.
+**Both host fabrics also grant the member one device, and the protocol names it.** Nothing is
+declared: an `RDMA` group asks for `device.gpustack.ai/rdma.shared`, one of
+[this operator's own RDMA keys](../architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves);
+an `EFA` group asks for `vpc.amazonaws.com/efa`, which AWS's plugin advertises.
 
-**The cluster therefore needs the device plugin that advertises whichever resource the group asks
-for** — the AWS EFA plugin when the name is left at its default; without it no node advertises the
-resource and the member stays unscheduled. Nothing is mounted from a host EFA install — the
-libfabric an `EFA` member runs on is in the image. Storage-optimized families such as `i7ie` are not
-EFA-capable; check `fi_info -p efa` on the node before selecting one.
+The renderer **derives** the RDMA name rather than spelling it, so the page linked above is the one
+to trust if the two ever disagree. The request is the permission — a bind mount of a device tree is
+not — so the member that gets one can `open()` the adapter and the member that gets none could not
+have.
 
-`spec.transport.deviceResourceName` names the extended resource a fabric member asks one of, for the
-clusters where that name is not AWS's. The RDMA shared-device plugin and the SR-IOV plugin each let
-an administrator choose it, so no constant would be right on two clusters. Set it and the member
-requests one of that resource; leave it unset and an `EFA` group still asks for the AWS name while an
-`RDMA` group asks for nothing.
+⚠️ **On a cluster tracking the default branch, this changes what running RDMA members ask for.** No
+release has ever carried this API, so there is no upgrade path to migrate; but a development cluster
+whose `RDMA` backend predates the change will have its members re-rendered against
+`device.gpustack.ai/rdma.shared` on the next reconcile. **Confirm the Device Manager is running on
+those nodes first** — otherwise the members roll and stay `Pending`.
 
-**It is read only on `RDMA` and `EFA`**, the two protocols that mount the device tree. Set beside any
-other protocol it renders nothing at all — no other path opens a fabric device, and requesting a
-resource there would only leave the member unschedulable.
+**The cluster therefore needs the plugin that advertises the group's resource**, and a node without
+it never runs that member: the Pod stays `Pending`. That refusal is the intended one. A cluster
+whose nodes cannot serve the fabric is a cluster whose backend should say `TCP`, and an operator who
+wants it back says so in `protocol` rather than by leaving a field empty.
 
-> **Why an `RDMA` group should set it** — a member that asks for nothing mounts the device tree and
-> is still denied `open()` by the device cgroup, so the store finds no adapter and installs `TCP`
-> while the object reads as `RDMA`. That is the behavior every backend had before this field, and it
-> stays reachable because naming a resource no plugin advertises leaves the member unschedulable
-> instead — this operator cannot tell which of the two an administrator without a plugin would
-> rather have.
+> **Why the failure is loud** — it used to be silent. A member that asked for no device still
+> mounted `/dev/infiniband`, so the device node was visible, `open()` returned `EPERM` from the
+> device cgroup, and the store reported no error: it discovered zero HCAs and installed `TCP` while
+> the object still read `RDMA`. Nothing in the cluster said the fabric was not in use.
+
+**Only `EFA` mounts `/dev/infiniband`.** The RDMA grant carries the verbs character device of each
+endpoint it allocates, so mounting the tree beside it would add every adapter the member was **not**
+granted — visible, unopenable, and enumerated by the store on its way to skipping them. EFA keeps
+the mount because what AWS's plugin injects has not been read here, and the reading that would
+settle it needs an EFA Pod requesting the resource while mounting nothing.
+
+Nothing is mounted from a host EFA install — the libfabric an `EFA` member runs on is in the image.
+Storage-optimized families such as `i7ie` are not EFA-capable; check `fi_info -p efa` on the node
+before selecting one.
+
+**The medium and the transport are independent.** A `DRAM` group is as entitled to a fabric as a
+`VRAM` one, and this rendering reads the medium nowhere: the protocol decides the network, the
+capabilities and the device, while the medium decides only what the segment is made of and what it
+is charged to.
 
 **What a member's Pod requests follows the group's medium.** A DRAM member requests host memory for
 `capacityPerMember + localBufferSize`. A VRAM member's segment is device memory, which **nothing
@@ -449,8 +462,8 @@ two declares a protocol that does not ask for them.
 Each `hostPaths[]` entry is `{path, mountPath, type, readOnly}`. Name a `type` — left empty the
 kubelet checks nothing, so a missing path becomes an empty directory in the container and the member
 starts anyway. A mount path is refused if it duplicates another entry's, if it is `/dev/infiniband`
-(the device tree a host-fabric group gets rendered, refused even under `TCP`, since the protocol can
-change later), or if it is this group's own `localDisks[].path`.
+(the tree an `EFA` group is rendered, refused under every protocol since that can change later), or
+if it is this group's own `localDisks[].path`.
 
 Two worked groups. The NVIDIA one needs no mounts at all, because the container runtime injects the
 driver once the variable tells it which devices to inject:

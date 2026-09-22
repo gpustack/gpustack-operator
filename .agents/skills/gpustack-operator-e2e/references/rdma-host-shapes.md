@@ -37,7 +37,14 @@ counts times each mode's token size, with endpoints whose link verdict is `faile
 **Structurally cannot answer**: anything about the virtual-function branch, anything about NUMA
 alignment, and anything about what InfiniBand needs beyond verbs.
 
-Case 80, and case 81's grant/refusal pair.
+Case 80, case 81's grant/refusal pair, and case 85.
+
+Case 85 is the cheapest reading in the family: it applies a `KVCacheBackend` whose transport is
+`RDMA` and reads the rendered member DaemonSet for the endpoint request and the absence of a
+`/dev/infiniband` mount. It pulls no store image and waits for no member Pod, so it needs a host
+that ADVERTISES an endpoint rather than one whose fabric works — a machine that cannot carry a
+store build for its own architecture still answers it. What it therefore does not answer is whether
+the granted endpoint opens; that is case 81, from the other end of the same chain.
 
 ### B. Group A, plus SR-IOV virtual functions configured
 

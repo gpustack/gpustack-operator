@@ -36,7 +36,7 @@ else
   NS="${2:-gpustack-system}"
   shift 2 2>/dev/null || shift $#
 fi
-CASES="${*:-80 81 82 83 84}"
+CASES="${*:-80 81 82 83 84 85}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -84,6 +84,8 @@ report() {
   echo "  case 83  a device manager and a readable kubelet configz"
   echo "  case 84  endpoint-whole, an InfiniBand link layer,"
   echo "           E2E_RDMA_PERFTEST_IMAGE"
+  echo "  case 85  endpoint, endpoint-whole                        (renders a backend; pulls no store"
+  echo "                                                            image and starts no member)"
   echo
   echo "A requirement reported UNMET is a statement about this machine. references/rdma-host-shapes.md"
   echo "says what a host carrying it looks like, and which reading no host in reach carries at all."

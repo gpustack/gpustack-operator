@@ -4173,11 +4173,6 @@ func (m *KVCacheBackendTransport) MarshalToSizedBuffer(dAtA []byte) (int, error)
 	_ = i
 	var l int
 	_ = l
-	i -= len(m.DeviceResourceName)
-	copy(dAtA[i:], m.DeviceResourceName)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.DeviceResourceName)))
-	i--
-	dAtA[i] = 0x12
 	i -= len(m.Protocol)
 	copy(dAtA[i:], m.Protocol)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Protocol)))
@@ -7582,8 +7577,6 @@ func (m *KVCacheBackendTransport) Size() (n int) {
 	_ = l
 	l = len(m.Protocol)
 	n += 1 + l + sovGenerated(uint64(l))
-	l = len(m.DeviceResourceName)
-	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -9435,7 +9428,6 @@ func (this *KVCacheBackendTransport) String() string {
 	}
 	s := strings.Join([]string{`&KVCacheBackendTransport{`,
 		`Protocol:` + fmt.Sprintf("%v", this.Protocol) + `,`,
-		`DeviceResourceName:` + fmt.Sprintf("%v", this.DeviceResourceName) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -22828,38 +22820,6 @@ func (m *KVCacheBackendTransport) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.Protocol = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field DeviceResourceName", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.DeviceResourceName = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
