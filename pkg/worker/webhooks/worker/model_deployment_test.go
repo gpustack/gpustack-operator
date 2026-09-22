@@ -624,15 +624,54 @@ func TestValidateModelDeployment(t *testing.T) {
 		},
 		{
 			// The bootstrap server runs on the PREFILLER, so that is the role the port is reserved
-			// on. The pair below it is what says the reservation follows the listener.
+			// on. The decode half below it is what says the reservation follows the listener, which
+			// renders on a prefiller of a declared pair alone.
 			name: "router_role_declares_mooncake_bootstrap_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
+					r.Name = "decode"
+					r.Kind = workercore.ModelDeploymentRoleKindDecode
+				}))
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
+				return md
+			}(),
+			wantMessage: `role "server" declares port 8998, which the operator reserves`,
+		},
+		{
+			// THE ROW THAT SAYS THE RESERVATION DOES NOT FOLLOW A ROUTER NAME. The leg binding this
+			// listener renders under every router on a vendor that can drive it, and this rule
+			// cannot read the vendor, so a rule keyed to one router releases the port here while
+			// the render still binds it -- two container ports numbered alike, which admission is
+			// the last place able to refuse. The row above covers the same declaration under the
+			// other router, so the pair pins that the two agree rather than that either one passes.
+			name: "vllm_router_prefill_role_declares_mooncake_bootstrap_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
+					r.Name = "decode"
+					r.Kind = workercore.ModelDeploymentRoleKindDecode
+				}))
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
+				return md
+			}(),
+			wantMessage: `role "server" declares port 8998, which the operator reserves`,
+		},
+		{
+			// THE PAIR DISCRIMINATOR ON THE vLLM SIDE: the leg renders on a prefiller of a declared
+			// pair alone, so a lone prefiller under a router binds no bootstrap server and keeps
+			// the port free -- the reservation reads the same pair axis the render reads, because
+			// unlike the vendor it is knowable here.
+			name: "lone_prefill_under_a_router_declares_the_bootstrap_port",
 			md: func() *workercore.ModelDeployment {
 				md := routedModelDeployment(nil)
 				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
 				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
 				return md
 			}(),
-			wantMessage: `role "server" declares port 8998, which the operator reserves`,
 		},
 		{
 			// A server role binds no bootstrap listener -- the transfer leg is rendered on the two
@@ -647,13 +686,18 @@ func TestValidateModelDeployment(t *testing.T) {
 		},
 		{
 			// The mirror on the other engine, which the vLLM-only rule released: SGLang renders its
-			// own bootstrap registry on any prefiller, under any router.
+			// own bootstrap registry on a prefiller of a declared pair, under any router and under
+			// none.
 			name: "sglang_prefill_role_declares_the_bootstrap_port",
 			md: func() *workercore.ModelDeployment {
 				md := routedModelDeployment(nil)
 				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterSGLang
 				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
+					r.Name = "decode"
+					r.Kind = workercore.ModelDeploymentRoleKindDecode
+				}))
 				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
 				return md
 			}(),
@@ -667,6 +711,53 @@ func TestValidateModelDeployment(t *testing.T) {
 				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterSGLang
 				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
+				return md
+			}(),
+		},
+		{
+			// THE ROW THAT SAYS THE RESERVATION DOES NOT FOLLOW A ROUTER AT ALL. SGLang's bootstrap
+			// registry follows the role of a declared pair, and a prefiller attached to a shared
+			// pool binds it with nothing routing the halves -- so the same declaration is refused
+			// on an unrouted deployment too, where the router-gated walk never ran.
+			name: "unrouted_sglang_prefill_of_a_pair_declares_the_bootstrap_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Router = nil
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
+					r.Name = "decode"
+					r.Kind = workercore.ModelDeploymentRoleKindDecode
+				}))
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
+				return md
+			}(),
+			wantMessage: `role "server" declares port 8998, which the operator reserves`,
+		},
+		{
+			// THE PAIR DISCRIMINATOR ON THE SGLANG SIDE: without the decode half the registry does
+			// not render either -- the split follows the pair on this engine -- so an unrouted lone
+			// prefiller feeding a shared pool keeps the port free.
+			name: "unrouted_sglang_lone_prefill_declares_the_bootstrap_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Router = nil
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
+				return md
+			}(),
+		},
+		{
+			// The two vLLM listeners render only under a router -- the event publisher feeds one
+			// router's data layer, and the bootstrap server follows a routed pair -- so an unrouted
+			// vLLM role reserves nothing and the same declaration is an ordinary port.
+			name: "unrouted_vllm_prefill_role_declares_the_bootstrap_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Router = nil
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
 				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
 				return md
 			}(),

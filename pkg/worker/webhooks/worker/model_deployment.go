@@ -664,29 +664,55 @@ func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorLi
 	return errs
 }
 
-// validateModelDeploymentRouterPorts refuses the port choices that collide with listeners the
-// operator synthesizes onto a routed replica. Both rules live at admission because the collision
-// they prevent is permanent there: the replica renders, and then a process binds a port something
-// else already holds.
-func validateModelDeploymentRouterPorts(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+// validateModelDeploymentRolePorts refuses the port choices that collide with listeners the
+// operator synthesizes onto a replica. It runs for EVERY role, routed or not, because the one
+// listener that does not follow a router -- SGLang's bootstrap registry, which follows the role of
+// a declared pair -- renders on an unrouted prefiller attached to a shared pool all the same. The
+// rule lives at admission because the collision it prevents is permanent there: the replica
+// renders, and then a process binds a port something else already holds.
+func validateModelDeploymentRolePorts(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
 
 	// The render places these on the same container the role's declared ports describe. The serving
 	// port is one of the declared ports when the role declares any, and the default when it names
 	// none, so the declared set is the whole collision surface.
+	//
+	// The refusal names the router when there is one, because a router is what drags the two vLLM
+	// listeners in; without one the listener on this role is the engine's own -- SGLang's registry,
+	// rendered for the role alone -- so the refusal lands on the port the user declared rather than
+	// on a field their object does not carry.
 	if reserved := modelDeploymentRouterReservedPorts(md, role); len(reserved) > 0 {
 		for _, port := range role.Ports {
 			if !slices.Contains(reserved, port.Port) {
 				continue
 			}
-			errs = append(errs, field.Invalid(field.NewPath("spec", "router"), md.Spec.Router,
-				fmt.Sprintf("role %q declares port %d, which the operator reserves for a listener it "+
-					"synthesizes onto this role under engine %q and router %q; reserved here are %v",
-					role.Name, port.Port, md.Spec.Engine.Name, md.Spec.Router.Name, reserved)))
+			if md.Spec.Router != nil {
+				errs = append(errs, field.Invalid(field.NewPath("spec", "router"), md.Spec.Router,
+					fmt.Sprintf("role %q declares port %d, which the operator reserves for a listener it "+
+						"synthesizes onto this role under engine %q and router %q; reserved here are %v",
+						role.Name, port.Port, md.Spec.Engine.Name, md.Spec.Router.Name, reserved)))
+			} else {
+				errs = append(errs, field.Invalid(rolePath.Child("ports"), port.Port,
+					fmt.Sprintf("role %q declares port %d, which the operator reserves for a listener it "+
+						"synthesizes onto this role under engine %q; reserved here are %v",
+						role.Name, port.Port, md.Spec.Engine.Name, reserved)))
+			}
 		}
 	}
+
+	return errs
+}
+
+// validateModelDeploymentRouterPorts refuses the port choices that collide with the serving
+// surface a managed router takes over. Both rules live at admission because the collision they
+// prevent is permanent there: the replica renders, and then a process binds a port something else
+// already holds.
+func validateModelDeploymentRouterPorts(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) field.ErrorList {
+	var errs field.ErrorList
 
 	// A direct decode role is fronted by a routing proxy that takes the serving port, and the model
 	// server has to move off it. The render moves it only when the operator placed the flag; a role
@@ -720,6 +746,18 @@ func validateModelDeploymentRouterPorts(
 // under a router configured by argv does -- while releasing one that IS used, because SGLang's
 // bootstrap registry is rendered on any prefiller and the old list only ever ran for vLLM.
 //
+// IT ANSWERS FOR UNROUTED DEPLOYMENTS TOO, because SGLang's registry follows the role rather than
+// any router: a prefiller of a declared pair attached to a shared pool binds it with nothing
+// routing the halves. The two vLLM listeners are the opposite case -- each renders only under a
+// router, the event publisher under one alone and the bootstrap server under whichever is named --
+// so they reserve nothing once no router is declared.
+//
+// THE PAIR IS READ ON THE SAME AXIS THE RENDER READS IT, because unlike the pool's vendor it is
+// knowable here: the roles are in the spec. Each bootstrap listener renders on a prefiller of a
+// declared pair alone -- the transfer leg and SGLang's split arguments each follow the pair rule
+// the router already follows -- so the reservation follows it too, and a lone prefiller feeding a
+// shared pool keeps every port free.
+//
 // The pool's accelerator vendor is not knowable at admission and is what excludes the Ascend
 // backend from publishing, so the reservation is made wherever a listener MIGHT be rendered.
 // Refusing a port there costs a user nothing they cannot rename.
@@ -737,22 +775,37 @@ func modelDeploymentRouterReservedPorts(
 
 	switch md.Spec.Engine.Name {
 	case workercore.ModelDeploymentEngineVLLM:
+		// Both listeners below render only under a router, so an unrouted vLLM role reserves
+		// nothing: the event publisher feeds one router's data layer, and the transfer leg that
+		// carries the bootstrap server follows a routed pair.
+		if md.Spec.Router == nil {
+			break
+		}
 		// The event publisher and its replay socket feed the picker's data layer, so they exist
 		// under that router alone -- and not on a decoder, which consumes rather than publishes.
 		if md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
 			kind != workercore.ModelDeploymentRoleKindDecode {
 			reserved = append(reserved, inject.VLLMKVEventsPort, inject.VLLMKVEventsReplayPort)
 		}
-		// The Mooncake bootstrap server runs on the prefiller alone, and only on the transfer leg,
-		// which this engine renders under that same router.
-		if md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
-			kind == workercore.ModelDeploymentRoleKindPrefill {
+		// The Mooncake bootstrap server runs on the prefiller alone, and UNDER EVERY ROUTER rather
+		// than one. The leg that binds it reads a router name only to exclude an Ascend pair behind
+		// a router that cannot drive it; on every other vendor the leg renders under whichever
+		// router is named. This rule cannot see the vendor, so naming one router here releases the
+		// port under the other two while the render still binds it -- the permanent collision the
+		// paragraph above describes as being wrong in both directions at once. The renderer states
+		// the same rule from its own side, that the reservation keeping a user's port off this one
+		// is vendor-blind. The pair term is read here too, because it CAN be: the leg follows a
+		// declared pair, and a lone prefiller under a router binds no bootstrap server.
+		if kind == workercore.ModelDeploymentRoleKindPrefill &&
+			workerctrl.ModelDeploymentDeclaresBothHalves(md) {
 			reserved = append(reserved, inject.VLLMMooncakeBootstrapPort)
 		}
 	case workercore.ModelDeploymentEngineSGLang:
 		// SGLang's bootstrap registry follows the ROLE and not any router, because naming the split
-		// is what it means to be one half on this engine.
-		if kind == workercore.ModelDeploymentRoleKindPrefill {
+		// is what it means to be one half on this engine. It renders on a declared pair, so the
+		// reservation reads the same rule.
+		if kind == workercore.ModelDeploymentRoleKindPrefill &&
+			workerctrl.ModelDeploymentDeclaresBothHalves(md) {
 			reserved = append(reserved, inject.SGLangBootstrapPort)
 		}
 	}
@@ -1220,6 +1273,10 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 		errs = append(errs, validateModelDeploymentRoleEnv(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleResources(role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleAdditionalVolumes(role, rolePath)...)
+		// Unconditional rather than inside the router's own rules, because the listeners this
+		// refuses against are not all the router's: SGLang's bootstrap registry follows the role
+		// and renders on an unrouted prefiller, and the router-gated walk never runs for one.
+		errs = append(errs, validateModelDeploymentRolePorts(md, role, rolePath)...)
 	}
 
 	return errs
