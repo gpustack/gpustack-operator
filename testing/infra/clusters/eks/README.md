@@ -95,10 +95,10 @@ terraform destroy
 | `name_prefix` | Cluster name prefix (a random suffix is appended) | `gpustack-eks` |
 | `release` | EKS version | `1.34` |
 | `cpu_instance_types` | Instance types for the CPU node group | `["c6a.4xlarge","c7a.4xlarge"]` |
-| `cpu_node_count` | Number of nodes in the CPU node group | `1` |
+| `cpu_node_count` | Number of nodes in the CPU node group AT CREATE TIME. `0` drops the group entirely, the same as `clusters/nebius`. The same `desired_size` rule as `gpu_node_count` below applies to an edit against a live group | `1` |
 | `efa_enabled` | Enable EFA on the CPU and GPU node groups: an EFA launch template, a cluster placement group, one private subnet (single availability zone, reached through the NAT gateway and therefore not over SSH), and the label `gpustack.ai/efa=true`. Both groups take the same private subnet on purpose, because RDMA does not reach across availability zones. REQUIRES every type in `cpu_instance_types` and `gpu_instance_types` to be EFA-capable, which neither default is | `false` |
 | `gpu_instance_types` | GPU node groups as a `map(list(string))` keyed by group name | `{ g4dn = ["g4dn.xlarge","g4dn.12xlarge"] }` |
-| `gpu_node_count` | Nodes in each GPU node group. Drives `desired_size`; `max_size` follows it but never drops below 1, which EKS refuses. `0` parks a group at no nodes without destroying it | `1` |
+| `gpu_node_count` | Nodes in each GPU node group AT CREATE TIME. Drives `desired_size`; `max_size` follows it but never drops below 1, which EKS refuses. Terraform does NOT move this on a group that already exists, because the module ignores changes to `desired_size` — an edit moves the bounds and leaves the node count where it was. Resize or park a live group with `aws eks update-nodegroup-config --scaling-config desiredSize=N`, which is drift-free precisely because the attribute is ignored | `1` |
 | `node_boot_disk_type` | Node root volume EBS type/performance (`volume_type`, optional `iops`/`throughput`) | `{ volume_type = "gp3", iops = 3000, throughput = 125 }` |
 | `node_boot_disk_size_gb` | Node root (boot) volume size, in GiB | `100` |
 | `node_instance_store_count` | Instance-store (ephemeral NVMe) devices mapped on every node group; must not exceed each instance type's disk count (e.g. `i7ie.xlarge` has 1). The devices surface as `/dev/nvme1n1` and onward | `0` |

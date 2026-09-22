@@ -37,13 +37,24 @@ variable "cpu_instance_types" {
 }
 
 variable "cpu_node_count" {
-  description = "Number of nodes in the CPU node group (min = max = this)."
+  # Same create-time rule as gpu_node_count below: min and max do follow an edit, but
+  # desired_size is ignored by the module, so an edit against a live group moves the
+  # bounds and leaves the node count where it was.
+  # SCHEDULED TO GO AWAY together with gpu_node_count below, which carries the reason:
+  # cpu_instance_types becomes a map of groups with the count inside each one, and "no
+  # group" becomes an absent key rather than a zero. Plan in issue #502.
+  #
+  # Zero drops the group rather than creating an empty one, which is the rule
+  # clusters/nebius already carried. A group of zero would not express the same thing
+  # here anyway: desired_size is ignored on an existing group, so a group asked for and
+  # then emptied is a group that stays.
+  description = "Number of nodes in the CPU node group at CREATE time (min = max = this). Zero drops the group altogether, the same as clusters/nebius. Terraform does not move desired_size on an existing group; see gpu_node_count."
   type        = number
   default     = 1
 
   validation {
-    condition     = var.cpu_node_count > 0 && var.cpu_node_count == floor(var.cpu_node_count)
-    error_message = "cpu_node_count must be a positive whole number."
+    condition     = var.cpu_node_count >= 0 && var.cpu_node_count == floor(var.cpu_node_count)
+    error_message = "cpu_node_count must be a whole number, zero or greater."
   }
 }
 
@@ -59,6 +70,31 @@ variable "efa_enabled" {
   default     = false
 }
 
+variable "efa_availability_zone_index" {
+  # WHICH availability zone the EFA groups land in, as an index into the module's own three.
+  # It exists because capacity is the thing that runs out, and it runs out PER ZONE: an
+  # EFA-capable accelerator type inside a cluster placement group is one of the scarcer
+  # things to ask an account for, and a refusal names the zone rather than the type.
+  #
+  # MOVING ZONES IS THE FIX THAT KEEPS THE MEASUREMENT; changing the instance type is not.
+  # The type is chosen for EfaSupported and for the accelerator on it, so swapping it swaps
+  # the hardware under test and quietly answers a different question. Measured 2026-09-22:
+  # g6e.8xlarge was refused in the first zone with InsufficientInstanceCapacity, and the
+  # refusal itself named the zones that had it.
+  #
+  # Both node groups follow this one index on purpose. A cluster placement group is scoped
+  # to one zone and RDMA does not reach across zones, so the two groups splitting zones
+  # would render a cluster that cannot do the thing it was built for.
+  description = "Index into the module's three availability zones, deciding which one the EFA node groups and their placement groups land in. Only read when efa_enabled is true. Move it when a zone refuses capacity; do NOT change the instance types instead, because those are what is under test."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.efa_availability_zone_index >= 0 && var.efa_availability_zone_index <= 2 && var.efa_availability_zone_index == floor(var.efa_availability_zone_index)
+    error_message = "efa_availability_zone_index must be 0, 1 or 2 -- the module creates three availability zones."
+  }
+}
+
 variable "gpu_instance_types" {
   # Keyed by group name so each GPU node group has a stable key (gpu-<name>).
   # Adding a key is a +create only; editing a key's instance-type list replaces
@@ -72,7 +108,20 @@ variable "gpu_instance_types" {
 }
 
 variable "gpu_node_count" {
-  description = "Number of nodes in each GPU node group (desired_size; max_size follows it but never drops below 1, which EKS refuses; min_size stays 0). Zero parks a group at no nodes without destroying it, so raising the count later adds nodes to the existing group."
+  # THIS VARIABLE IS SCHEDULED TO GO AWAY, and anyone here to change it should read that
+  # plan first: the count belongs inside gpu_instance_types, beside the group shape it
+  # counts, because one number applied to every key is already wrong as soon as two keys
+  # describe different hardware. cpu_instance_types becomes a map of groups at the same
+  # time, so the two stop being spelled differently for no reason. clusters/nebius takes
+  # the same change in the same edit. The written-out plan, including the key-naming rule
+  # that keeps an existing cluster's resource addresses stable, is issue #502.
+  #
+  # This value REACHES AWS ONLY WHEN THE GROUP IS CREATED. The module this delegates to
+  # declares ignore_changes on scaling_config[0].desired_size, so editing it against a
+  # group that already exists moves nothing -- not up, and not down to park it. An
+  # earlier version of this description promised both; main.tf carries the same
+  # correction beside the attribute itself.
+  description = "Number of nodes in each GPU node group at CREATE time (desired_size; max_size follows it but never drops below 1, which EKS refuses; min_size stays 0). Terraform does not move this on an existing group -- the module ignores changes to desired_size -- so resize or park a live group with `aws eks update-nodegroup-config --scaling-config desiredSize=N`, which is drift-free precisely because the attribute is ignored here."
   type        = number
   default     = 1
 

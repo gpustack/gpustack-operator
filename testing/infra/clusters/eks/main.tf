@@ -104,8 +104,13 @@ locals {
   node_group_tags = { DO_NOT_DELETE = "true" }
 
   node_groups = merge(
+    # Omitted entirely at cpu_node_count = 0, the same rule and the same spelling as
+    # clusters/nebius uses. On an accelerator-only cluster the plain node is not a small
+    # extra cost but a node nothing schedules onto, and a group of zero is not a way to
+    # express that here: desired_size is ignored on an existing group, so a group asked
+    # for and then emptied is a group that stays.
     {
-      cpu = {
+      for name in(var.cpu_node_count > 0 ? ["cpu"] : []) : name => {
         # https://docs.aws.amazon.com/eks/latest/APIReference/API_Nodegroup.html#AmazonEKS-Type-Nodegroup-amiType
         ami_type           = "AL2023_x86_64_STANDARD"
         desired_size       = var.cpu_node_count
@@ -122,7 +127,7 @@ locals {
         # carry a public address, so in a public subnet the node would have no route out and
         # EKS refuses the group with Ec2SubnetInvalidConfiguration. Those nodes are not
         # reachable over SSH either way.
-        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[0]] : null
+        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[var.efa_availability_zone_index]] : null
         # Under EFA the module substitutes its own interface set, sized and indexed for the
         # instance's network cards, so this group declares none of its own.
         network_interfaces = var.efa_enabled ? [] : [
@@ -159,7 +164,7 @@ locals {
         # the cpu group takes, on purpose: both placement groups must land in one
         # availability zone for cross-node RDMA, which does not reach across zones.
         # Not a copy-paste slip.
-        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[0]] : null
+        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[var.efa_availability_zone_index]] : null
         # Under EFA the module substitutes its own interface set, sized and indexed for
         # the instance's network cards, so this group declares none of its own.
         network_interfaces = var.efa_enabled ? [] : [
