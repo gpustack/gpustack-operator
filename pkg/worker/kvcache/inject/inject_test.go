@@ -1,6 +1,7 @@
 package inject
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -591,6 +592,80 @@ func TestRender_VLLMAscendKVTransfer(t *testing.T) {
 	})
 }
 
+// TestRender_VLLMAscendParallelismFollowsTheDeclaredPair pins the cross-side rule: the leg
+// writes BOTH blocks from the pair the caller resolved, so a pair whose halves differ renders
+// them exactly, and a half nothing declared renders the engine's own default of one. Every row
+// asserts both blocks -- a row asserting only one would pass a renderer that fills only that
+// block, the wrong-layout failure dressed as a fix -- and the last row declares the two halves
+// differently on purpose, so a renderer filling either side alone goes red on the other.
+func TestRender_VLLMAscendParallelismFollowsTheDeclaredPair(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pair ParallelismPair
+		want string
+	}{
+		{
+			name: "nothing declared renders the default of one",
+			pair: ParallelismPair{},
+			want: `{"prefill":{"tp_size":1,"dp_size":1},"decode":{"tp_size":1,"dp_size":1}}`,
+		},
+		{
+			name: "a prefill-declared decode-blank pair",
+			pair: ParallelismPair{Prefill: Parallelism{TensorParallel: 2, DataParallel: 1}},
+			want: `{"prefill":{"tp_size":2,"dp_size":1},"decode":{"tp_size":1,"dp_size":1}}`,
+		},
+		{
+			name: "the halves declared differently",
+			pair: ParallelismPair{
+				Prefill: Parallelism{TensorParallel: 2, DataParallel: 1},
+				Decode:  Parallelism{TensorParallel: 1, DataParallel: 2},
+			},
+			want: `{"prefill":{"tp_size":2,"dp_size":1},"decode":{"tp_size":1,"dp_size":2}}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(Input{
+				Engine: EngineVLLMAscend, Role: RoleDecode, KVTransfer: true,
+				Parallelism: tc.pair,
+			})
+			require.NoError(t, err)
+			require.Len(t, result.Args, 2)
+			assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+			assert.JSONEq(t, fmt.Sprintf(`{
+				"kv_connector":"MooncakeConnectorV1",
+				"kv_role":"kv_consumer",
+				"kv_port":8998,
+				"kv_connector_extra_config":%s
+			}`, tc.want), result.Args[1])
+		})
+	}
+
+	t.Run("both role Pods carry identical blocks", func(t *testing.T) {
+		pair := ParallelismPair{
+			Prefill: Parallelism{TensorParallel: 2, DataParallel: 1},
+			Decode:  Parallelism{TensorParallel: 1, DataParallel: 2},
+		}
+		type document struct {
+			KVRole string                    `json:"kv_role"`
+			Extra  map[string]map[string]int `json:"kv_connector_extra_config"`
+		}
+		docs := map[Role]document{}
+		for _, role := range []Role{RolePrefill, RoleDecode} {
+			result, err := Render(Input{
+				Engine: EngineVLLMAscend, Role: role, KVTransfer: true, Parallelism: pair,
+			})
+			require.NoError(t, err)
+			require.Len(t, result.Args, 2)
+			var doc document
+			require.NoError(t, json.Unmarshal([]byte(result.Args[1]), &doc))
+			docs[role] = doc
+		}
+		assert.Equal(t, docs[RolePrefill].Extra, docs[RoleDecode].Extra,
+			"the parallel blocks are one pair value; only kv_role may differ")
+		assert.NotEqual(t, docs[RolePrefill].KVRole, docs[RoleDecode].KVRole)
+	})
+}
+
 // TestRender_AscendDriverMountFollowsTheTransferLeg pins the negative half of the mount's
 // condition: it is bound to the Ascend transfer leg alone, so an Ascend deployment without the
 // leg -- and another vendor's leg -- renders no host path. The positive half lives in
@@ -763,6 +838,31 @@ func TestRender_Refusals(t *testing.T) {
 			name:  "a transport the engine's store backend refuses",
 			input: Input{Engine: EngineVLLMAscend, Connection: testConnection()},
 			want:  ReasonTransportUnsupported,
+		},
+		{
+			// Every degree here is legal on its own; the connector refuses the ORDERING at
+			// worker start, so the leg declines the pair rather than render a crash-loop.
+			name: "the Ascend pair with the decode half wider",
+			input: Input{
+				Engine: EngineVLLMAscend, Role: RoleDecode, KVTransfer: true,
+				Parallelism: ParallelismPair{
+					Prefill: Parallelism{TensorParallel: 1},
+					Decode:  Parallelism{TensorParallel: 2},
+				},
+			},
+			want: ReasonRoleUnsupported,
+		},
+		{
+			// An undeclared half reads as the default of one, so declaring only the decode
+			// side violates the ordering too.
+			name: "the Ascend pair declared on the decode side alone",
+			input: Input{
+				Engine: EngineVLLMAscend, Role: RolePrefill, KVTransfer: true,
+				Parallelism: ParallelismPair{
+					Decode: Parallelism{TensorParallel: 2},
+				},
+			},
+			want: ReasonRoleUnsupported,
 		},
 	}
 

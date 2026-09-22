@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -1270,6 +1271,7 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 		role, rolePath := &md.Spec.Roles[i], rolesPath.Index(i)
 
 		errs = append(errs, validateModelDeploymentRoleExtraArgs(md.Spec.Engine.Name, role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleParallelWidth(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleEnv(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleResources(role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleAdditionalVolumes(role, rolePath)...)
@@ -1352,6 +1354,15 @@ func validateModelDeploymentRoleAdditionalVolumes(
 // A silent merge is what this prevents, and the reason is diagnosability rather than tidiness: two
 // values for one connector argument leave no way to tell which one won, and the user who wrote the
 // second has no way to learn the first exists.
+//
+// A PARALLELISM DECLARATION THE PARSE CANNOT READ IS REFUSED HERE AS WELL, because the KV transfer
+// document is rendered from these same books: beside a declaration the engine itself would reject
+// at startup, no default the operator could write into the document is anything but a wrong answer
+// that starts. The refusal names the flag through the parse's own message. The books are the
+// role's one argument stream -- its ExtraArgs, or its Command when that replaces the line -- and
+// an unknown flag inside either stays admitted exactly as before: rejecting what IT does not know
+// is the engine's own work. The inert ExtraArgs beside a take-over Command are no stream at all,
+// so they are parsed by nobody, not even to be refused.
 func validateModelDeploymentRoleExtraArgs(
 	engine string, role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
@@ -1372,7 +1383,125 @@ func validateModelDeploymentRoleExtraArgs(
 		)))
 	}
 
+	if _, err := workerctrl.ParseModelDeploymentDeclaredParallelism(
+		engine, workerctrl.ModelDeploymentRoleArgs(role), role.Env); err != nil {
+		errs = append(errs, field.Invalid(rolePath, role.Name, fmt.Sprintf(
+			"declares parallelism the KV transfer document must follow but cannot read: %s", err,
+		)))
+	}
+
 	return errs
+}
+
+// validateModelDeploymentRoleParallelWidth is the first check that ever ties a role's declared
+// parallelism to its request: the per-member engine width must fit the per-member card count.
+//
+// THE CHECK IS DELIBERATELY SMALL. It computes only from numbers the author already wrote and
+// refuses only an arrangement that cannot start; everything ambiguous stays silent -- a wiring
+// flag (some of the width may live off this member and the table does not model placement), an
+// unreadable or zero card count, and a declaration the parse already refused. It never computes a
+// right size and never reads a pool: the author's own books, arithmetic, and a refusal only when
+// the arithmetic cannot run. The books are the role's one argument stream, so the inert ExtraArgs
+// beside a take-over Command enter no width -- the Command is that role's declaration.
+//
+// THE WIDTH FORMULAS ARE THE ENGINES' OWN. vLLM places tensor x pipeline x prefill-context
+// ranks on one member per data-parallel rank, and multiplies the data-parallel width on top:
+// the declared LOCAL share when one is written above zero -- with no wiring flag that share is
+// exactly the ranks this member runs -- else the full width, a declared zero reading as
+// undeclared because it is the engine's own sentinel for DP specified externally.
+// Decode-context reuses tensor ranks and expert-parallel is a mode, so neither enters the
+// product. SGLang places tensor x pipeline x data-parallel, narrowing to tensor x pipeline when
+// DP attention, DWDP, MoE-DP or attention-CP moves the data-parallel width inside the tensor
+// world.
+func validateModelDeploymentRoleParallelWidth(
+	engine string, role *workercore.ModelDeploymentRole, rolePath *field.Path,
+) field.ErrorList {
+	if role.Resources == nil || role.Resources.Accelerator == nil {
+		return nil
+	}
+
+	declared, err := workerctrl.ParseModelDeploymentDeclaredParallelism(
+		engine, workerctrl.ModelDeploymentRoleArgs(role), role.Env)
+	if err != nil || len(declared.Wiring) > 0 {
+		return nil
+	}
+
+	cards, ok := role.Resources.Accelerator.AsInt64()
+	if !ok || cards <= 0 {
+		return nil
+	}
+
+	// multiply folds one declared degree into the running width. Every degree is at least one,
+	// so the product only grows, and once it would overflow an int64 the refusal is already
+	// decided -- the card count fits in one too -- so the width pins one past the cards rather
+	// than wrap, and the refusal message then names no figure.
+	width, pinned := int64(1), false
+	multiply := func(degree int) {
+		if pinned {
+			return
+		}
+		if width > math.MaxInt64/int64(degree) {
+			width, pinned = cards+1, true
+			return
+		}
+		width *= int64(degree)
+	}
+
+	var factors []string
+	multiply(declared.TensorParallel)
+	multiply(declared.PipelineParallel)
+	if declared.TensorParallel > 1 {
+		factors = append(factors, fmt.Sprintf("tensor-parallel %d", declared.TensorParallel))
+	}
+	if declared.PipelineParallel > 1 {
+		factors = append(factors, fmt.Sprintf("pipeline-parallel %d", declared.PipelineParallel))
+	}
+
+	switch engine {
+	case workercore.ModelDeploymentEngineVLLM:
+		if declared.PrefillContextParallel > 1 {
+			multiply(declared.PrefillContextParallel)
+			factors = append(factors, fmt.Sprintf("prefill-context-parallel %d", declared.PrefillContextParallel))
+		}
+		// Any wiring flag already returned above, so a declared local share is exactly the DP
+		// ranks this member runs: it IS the per-member data-parallel width and multiplies.
+		if declared.DataParallelLocal > 1 {
+			multiply(declared.DataParallelLocal)
+			factors = append(factors, fmt.Sprintf("data-parallel-local %d", declared.DataParallelLocal))
+		} else if declared.DataParallelLocal == 0 {
+			multiply(declared.DataParallel)
+			if declared.DataParallel > 1 {
+				factors = append(factors, fmt.Sprintf("data-parallel %d", declared.DataParallel))
+			}
+		}
+	case workercore.ModelDeploymentEngineSGLang:
+		narrows := slices.Contains(declared.Modes, "--enable-dp-attention") ||
+			declared.DWDPSize > 1 || declared.MoEDataParallel > 1 || declared.AttentionContextParallel > 1
+		if !narrows {
+			multiply(declared.DataParallel)
+			if declared.DataParallel > 1 {
+				factors = append(factors, fmt.Sprintf("data-parallel %d", declared.DataParallel))
+			}
+		}
+	default:
+		return nil
+	}
+
+	if width <= cards {
+		return nil
+	}
+
+	needs := fmt.Sprintf("%d", width)
+	if pinned {
+		needs = fmt.Sprintf("more than %d", cards)
+	}
+
+	return field.ErrorList{field.Invalid(
+		rolePath.Child("resources", "accelerator"), cards, fmt.Sprintf(
+			"%d cards cannot hold the width the role declares (%s): the engine needs %s per "+
+				"member, and the width is per member, so %s does not rescue it",
+			cards, strings.Join(factors, ", "), needs, rolePath.Child("size"),
+		))}
 }
 
 // validateModelDeploymentRoleEnv refuses an environment entry the operator owns.

@@ -149,6 +149,42 @@ type Connection struct {
 	Protocol string
 }
 
+// Parallelism is one role's declared parallel shape, in the two degrees the point-to-point
+// transfer document carries. The zero value is the shape nothing declared; orOne renders it as
+// the engine's own default of one, which is what the document wrote when it held literals.
+type Parallelism struct {
+	// TensorParallel is the tensor-parallel width the role declared.
+	TensorParallel int
+
+	// DataParallel is the data-parallel width the role declared.
+	DataParallel int
+}
+
+// orOne maps an undeclared degree to the engine's own default of one, so the document never
+// claims a zero-width role.
+func (p Parallelism) orOne() Parallelism {
+	if p.TensorParallel == 0 {
+		p.TensorParallel = 1
+	}
+	if p.DataParallel == 0 {
+		p.DataParallel = 1
+	}
+
+	return p
+}
+
+// ParallelismPair is the declared parallel shape of BOTH roles of a prefill/decode pair. The
+// two halves travel as one value because the document asserts on them together: a renderer
+// that could fill one side from the caller and default the other would answer with a wrong
+// block layout instead of a refusal.
+type ParallelismPair struct {
+	// Prefill is the prefill role's declared shape.
+	Prefill Parallelism
+
+	// Decode is the decode role's declared shape.
+	Decode Parallelism
+}
+
 // Input is everything the synthesis needs, already resolved and already validated.
 type Input struct {
 	// Engine selects the renderer.
@@ -191,6 +227,12 @@ type Input struct {
 	// compile set onto another image's connector. It is read only when KVTransfer is set.
 	KVTransferProtocol string
 
+	// Parallelism is the pair's declared parallel shape, resolved by the caller off each
+	// role's own books. Only the document that asserts on it reads it -- the Ascend transfer
+	// leg's -- and the zero value renders 1/1 there, exactly what the leg's inline literals
+	// rendered, so a caller with no roles to parse changes nothing.
+	Parallelism ParallelismPair
+
 	// PublishKVEvents asks the engine to publish cache-placement events for a router. It is resolved
 	// per role by the caller; a false value preserves the ordinary connector render byte for byte.
 	PublishKVEvents bool
@@ -214,9 +256,11 @@ const (
 	ReasonRoleUnknown Reason = "RoleUnknown"
 
 	// ReasonRoleUnsupported is a role - or a capability requested alongside one - that the engine
-	// has no known knob for: a role the engine cannot express, or point-to-point transfer or KV
-	// event publishing asked of an engine that renders neither. Accepting and ignoring it would
-	// be the silent wrong result this package exists to avoid.
+	// has no known knob for: a role the engine cannot express, a role PAIRING whose declared
+	// values the engine cannot run (each role legal alone, the combination refused at engine
+	// start), or point-to-point transfer or KV event publishing asked of an engine that renders
+	// neither. Accepting and ignoring it would be the silent wrong result this package exists to
+	// avoid.
 	ReasonRoleUnsupported Reason = "RoleUnsupported"
 
 	// ReasonConnectionIncomplete is an input missing something rendering cannot proceed without:

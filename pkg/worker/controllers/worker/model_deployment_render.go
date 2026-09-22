@@ -601,6 +601,10 @@ func stampModelDeploymentPod(
 // IT PUBLISHES FACTS AND COMPOSES NO ARGUMENT. Which parallelism an engine turns on, and over how
 // many ranks, stays the author's to say: the member count is a product of degrees that cannot be
 // decomposed from one number, so a formula here would be a guess that runs instead of an error.
+// The declared degrees ARE read elsewhere -- the transfer document's parallel blocks are parsed
+// out of the roles' own books, their extra arguments and, for vLLM's data-parallel width, a
+// literal VLLM_DP_SIZE entry -- but that read copies the author's numbers into another document
+// and changes none of the membership facts published here.
 //
 // THE INDEX COMES THROUGH THE DOWNWARD API RATHER THAN AS A LITERAL, and that is what keeps one
 // template per ReplicaGroup: every member's container declares the same `fieldRef`, so the three
@@ -1021,11 +1025,13 @@ func modelDeploymentDemandsClientCert(command []string, i int) bool {
 		mode != modelDeploymentEngineTLSClientAuthOptional
 }
 
-// modelDeploymentRoleArgs is the part of a replica's command line the ROLE contributes, which is the
-// only part that can carry a listen or a TLS flag.
+// ModelDeploymentRoleArgs is the part of a replica's command line the ROLE contributes, which is
+// the only part that can carry a listen or a TLS flag.
 //
 // It exists so that a caller with nothing but the spec -- the published endpoint is derived from the
-// spec alone -- reaches the same answer the rendered command line would give it.
+// spec alone -- reaches the same answer the rendered command line would give it. It is also the
+// stream the parallelism declaration parses: the engine reads exactly these tokens under either
+// tier, so the books and the document can never come from different command lines.
 //
 // IT IS A NARROWER LIST THAN THE RENDER SCANS, and the two agree only because of an invariant this
 // function cannot enforce: the engine's base argv and the connector's rendered arguments carry no
@@ -1036,7 +1042,7 @@ func modelDeploymentDemandsClientCert(command []string, i int) bool {
 // A take-over role contributes its whole argv and nothing else: the extra arguments are not appended
 // to a command the user replaced, so reading them here would describe a command line that is not
 // being run.
-func modelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
+func ModelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
 	if len(role.Command) > 0 {
 		return role.Command
 	}

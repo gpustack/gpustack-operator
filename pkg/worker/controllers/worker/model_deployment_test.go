@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -27,6 +28,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
 func newModelDeploymentClient(objs ...ctrlcli.Object) ctrlcli.Client {
@@ -1391,4 +1393,222 @@ func TestModelDeploymentReconciler_ARolloutReplacesTheHighestOrdinalFirst(t *tes
 	require.NotEmpty(t, departed)
 	assert.Equal(t, "2", ordinals[departed],
 		"the replica that went is ordinal 2, the highest -- not whichever object was made first")
+}
+
+// TestModelDeploymentDeclaredParallelismPair pins the resolution rules off the deployment's own
+// role list: the first role of a kind in declaration order wins whichever tier it runs on (a rule
+// this function owns rather than borrows from admission), a take-over half's books are its command
+// while its inert extra arguments are read by nobody, a server kind's books are read by nobody,
+// and vLLM's environment-carried DP width reaches the pair.
+func TestModelDeploymentDeclaredParallelismPair(t *testing.T) {
+	testCases := []struct {
+		name    string
+		md      *workercore.ModelDeployment
+		want    inject.ParallelismPair
+		wantErr string
+	}{
+		{
+			name: "both halves read off their own books",
+			md: routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
+				md.Spec.Roles[1].ExtraArgs = []string{"--data-parallel-size", "3"}
+			}),
+			want: inject.ParallelismPair{
+				Prefill: inject.Parallelism{TensorParallel: 2, DataParallel: 1},
+				Decode:  inject.Parallelism{TensorParallel: 1, DataParallel: 3},
+			},
+		},
+		{
+			name: "the first role of a kind in declaration order wins",
+			md: routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
+				md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+					Name:      "prefill-again",
+					Kind:      workercore.ModelDeploymentRoleKindPrefill,
+					ExtraArgs: []string{"--tensor-parallel-size", "4"},
+				})
+			}),
+			want: inject.ParallelismPair{
+				Prefill: inject.Parallelism{TensorParallel: 2, DataParallel: 1},
+				Decode:  inject.Parallelism{TensorParallel: 1, DataParallel: 1},
+			},
+		},
+		{
+			// The command is the half's books and declares nothing, so the half is all ones;
+			// the inert extra arguments beside it are read by nobody -- the broken degree there
+			// would fail the parse if anyone did.
+			name: "a take-over half reads its command, its inert extra arguments parsed by nobody",
+			md: routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
+				md.Spec.Roles[1].Command = []string{"/bin/my-server", "--flag"}
+				md.Spec.Roles[1].ExtraArgs = []string{"--tensor-parallel-size", "banana"}
+			}),
+			want: inject.ParallelismPair{
+				Prefill: inject.Parallelism{TensorParallel: 2, DataParallel: 1},
+				Decode:  inject.Parallelism{TensorParallel: 1, DataParallel: 1},
+			},
+		},
+		{
+			// First of the kind in declaration order wins, whatever tier it runs on: the
+			// take-over role's command is the half's books, and the later managed role's degree
+			// is never read.
+			name: "the first role of a kind wins whichever tier it runs on",
+			md: routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Command = []string{"/bin/my-server", "--flag"}
+				md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+					Name:      "prefill-managed",
+					Kind:      workercore.ModelDeploymentRoleKindPrefill,
+					ExtraArgs: []string{"--tensor-parallel-size", "2"},
+				})
+			}),
+			want: inject.ParallelismPair{
+				Prefill: inject.Parallelism{TensorParallel: 1, DataParallel: 1},
+				Decode:  inject.Parallelism{TensorParallel: 1, DataParallel: 1},
+			},
+		},
+		{
+			name: "a take-over command carries the half's declared degrees",
+			md: routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[1].Command = []string{"/bin/my-server", "--data-parallel-size", "3"}
+			}),
+			want: inject.ParallelismPair{
+				Prefill: inject.Parallelism{TensorParallel: 1, DataParallel: 1},
+				Decode:  inject.Parallelism{TensorParallel: 1, DataParallel: 3},
+			},
+		},
+		{
+			name: "an unreadable degree in a take-over command names the role",
+			md: routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[1].Command = []string{"/bin/my-server", "--tensor-parallel-size"}
+			}),
+			wantErr: `role "decode"`,
+		},
+		{
+			name: "a server kind's books are read by nobody, not even to refuse them",
+			md: twoRoleDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "banana"}
+			}),
+			want: inject.ParallelismPair{},
+		},
+		{
+			name: "vLLM's environment-carried DP width reaches the pair",
+			md: routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{
+					{Name: "VLLM_DP_SIZE", Value: "3"},
+				}
+			}),
+			want: inject.ParallelismPair{
+				Prefill: inject.Parallelism{TensorParallel: 1, DataParallel: 3},
+				Decode:  inject.Parallelism{TensorParallel: 1, DataParallel: 1},
+			},
+		},
+		{
+			name: "an unreadable degree names the role",
+			md: routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[1].ExtraArgs = []string{"--tensor-parallel-size"}
+			}),
+			wantErr: `role "decode"`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := modelDeploymentDeclaredParallelismPair(tc.md)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestModelDeployment_UnreadableDeclaredParallelismFailsTheRender pins the loud direction: a
+// degree declaration nobody can read never becomes a silent 1/1 in a document the engine then
+// trusts. The same books would keep the engine itself from starting, so the render fails naming
+// the role -- exactly the refusal admission would have issued had the object passed through it.
+func TestModelDeployment_UnreadableDeclaredParallelismFailsTheRender(t *testing.T) {
+	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "banana"}
+	})
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.ErrorContains(t, err, `role "prefill"`)
+	require.ErrorContains(t, err, "is not an integer")
+}
+
+// TestModelDeployment_UnreadableDeclaredParallelismOffThePairStaysTheEngines pins the gate the
+// loud direction wears: a deployment holding ONE half renders no transfer document, so the
+// resolution has no consumer and an unreadable degree on its books stays the engine's own
+// startup refusal rather than failing the reconcile of every unrelated field. Admission still
+// refuses the same declaration on a new object -- this path exists for objects written before
+// the webhook learned the check.
+func TestModelDeployment_UnreadableDeclaredParallelismOffThePairStaysTheEngines(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "banana"}
+	})
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+}
+
+// TestModelDeployment_DegreeEditRollsThePair pins the rollout shape a degree edit has: the
+// parallel blocks are one document both roles carry identically, so editing one role's declared
+// degree -- a flag or vLLM's env-carried DP width -- rewrites BOTH roles' Pods and every spec
+// hash of the pair moves -- while an ordinary extraArgs edit moves only the hashes of the role
+// whose argv changed. The pair-wide move is the one exception the role's API comment documents
+// to a container-field edit rolling its own role.
+func TestModelDeployment_DegreeEditRollsThePair(t *testing.T) {
+	// Keyed by role and ordinal rather than by name: the name carries a random suffix per
+	// render, while the slot is the identity a replacement keeps.
+	renderHashes := func(t *testing.T, decodeArgs []string, decodeEnv []workercore.ModelDeploymentEnvVar) map[string]string {
+		md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
+			md.Spec.Roles[1].ExtraArgs = decodeArgs
+			md.Spec.Roles[1].Env = decodeEnv
+		})
+		cli := newModelDeploymentClient(md, ascendRenderInstanceType())
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+
+		hashes := map[string]string{}
+		for _, pod := range replicaPods(t, cli) {
+			ordinal, ok := modelDeploymentPodOrdinal(&pod)
+			require.True(t, ok, "%s carries no ordinal", pod.Name)
+			key := modelDeploymentPodRole(&pod) + "/" + strconv.Itoa(ordinal)
+			hash := pod.Annotations[modelDeploymentPodSpecHashAnnotation]
+			require.NotEmpty(t, hash, "%s carries no spec hash", pod.Name)
+			hashes[key] = hash
+		}
+
+		return hashes
+	}
+
+	base := renderHashes(t, []string{"--tensor-parallel-size", "1"}, nil)
+	degreeEdited := renderHashes(t, []string{"--tensor-parallel-size", "2"}, nil)
+	envEdited := renderHashes(t, []string{"--tensor-parallel-size", "1"},
+		[]workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "2"}})
+	argEdited := renderHashes(t, []string{"--tensor-parallel-size", "1", "--max-log-len=100"}, nil)
+
+	require.Len(t, base, 4)
+	for slot, hash := range base {
+		assert.NotEqual(t, hash, degreeEdited[slot],
+			"a degree edit on the decode role rewrites the document both roles carry: %s", slot)
+		assert.NotEqual(t, hash, envEdited[slot],
+			"and so does an env-carried DP width, the other declared-degree source: %s", slot)
+
+		edited := argEdited[slot]
+		if strings.HasPrefix(slot, "prefill/") {
+			assert.Equal(t, hash, edited,
+				"an ordinary extraArgs edit on the decode role leaves the prefill Pods: %s", slot)
+		} else {
+			assert.NotEqual(t, hash, edited,
+				"and lands on the role whose argv changed: %s", slot)
+		}
+	}
 }

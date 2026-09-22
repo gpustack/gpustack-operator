@@ -37,6 +37,7 @@ import (
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -1035,6 +1036,22 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	clusterVersion := system.LoopbackKubeVersion.Get()
 	nativeSidecar := kubediscovery.SupportsFeature(&clusterVersion, kubediscovery.FeatureNativeSidecar)
 
+	// The pair's declared parallel shape is also resolved once per reconcile, and only when
+	// the deployment IS a pair: the transfer document both halves carry asserts on it, so the
+	// two roles' syntheses must read one resolution -- and a declaration nobody can read fails
+	// the render here rather than becoming a silent 1/1 in a document the engine then trusts.
+	// A deployment holding one half renders no document, so the resolution has no consumer and
+	// an unreadable declaration there stays the engine's own startup refusal instead of
+	// failing the reconcile of every unrelated field.
+	var pair inject.ParallelismPair
+	if ModelDeploymentDeclaresBothHalves(md) {
+		var err error
+		pair, err = modelDeploymentDeclaredParallelismPair(md)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	desired := make(map[string]map[int][]*core.Pod, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
@@ -1080,6 +1097,10 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			// this deployment a pair" -- the same question the router's own mode answers -- and a
 			// half of an undeclared pair runs undivided on both layers now.
 			roleConnection.Disaggregated = ModelDeploymentDeclaresBothHalves(md)
+			// The same pair for every role, which is what keeps the two Pods' parallel blocks
+			// identical: the document asserts on the pair, so each role carries the one
+			// resolution rather than a read of its own books alone.
+			roleConnection.Parallelism = pair
 			roleConnection.KVTransfer = kvTransfer
 			roleConnection.RoutingSidecar = routingSidecar
 			if md.Spec.KVTransfer != nil {
@@ -1117,6 +1138,62 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	}
 
 	return desired, nil
+}
+
+// modelDeploymentDeclaredParallelismPair resolves the parallel shape both halves of the
+// deployment's prefill/decode pair declared, reading each role's own books -- its argument
+// stream and, for vLLM's data-parallel width, its literal environment.
+//
+// THE FIRST ROLE OF EACH KIND WINS, in declaration order. Admission already refuses a second
+// role of either kind, and this resolver still pins its own rule rather than lean on a check it
+// does not own: a render running past admission must still pick one half's books
+// deterministically. A kind with no role stays the zero half, and a role declaring nothing
+// parses to all ones; the renderer maps both to the engine's own default of one.
+//
+// A TAKE-OVER ROLE'S BOOKS ARE ITS COMMAND: the replaced argv is the only line that runs, so
+// it -- and never the inert extra arguments beside it -- is what the parse reads for that half.
+// A degree hidden inside a shell string, a script or a config file stays invisible, the
+// contract's accepted class; a degree written on the line itself is read exactly as a managed
+// role's is.
+//
+// A ROLE WHOSE BOOKS CANNOT BE READ IS AN ERROR, never a silent 1/1: the same declaration
+// would keep the engine itself from starting, and rendering a default beside it would trade the
+// engine's loud refusal for a wrong block layout.
+func modelDeploymentDeclaredParallelismPair(md *workercore.ModelDeployment) (inject.ParallelismPair, error) {
+	var pair inject.ParallelismPair
+	var prefillSeen, decodeSeen bool
+
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+
+		var half *inject.Parallelism
+		switch ModelDeploymentEffectiveRoleKind(role) {
+		case workercore.ModelDeploymentRoleKindPrefill:
+			if prefillSeen {
+				continue
+			}
+			prefillSeen = true
+			half = &pair.Prefill
+		case workercore.ModelDeploymentRoleKindDecode:
+			if decodeSeen {
+				continue
+			}
+			decodeSeen = true
+			half = &pair.Decode
+		default:
+			continue
+		}
+
+		declared, err := ParseModelDeploymentDeclaredParallelism(
+			md.Spec.Engine.Name, ModelDeploymentRoleArgs(role), role.Env)
+		if err != nil {
+			return pair, fmt.Errorf("role %q declares parallelism the operator cannot read: %w", role.Name, err)
+		}
+		half.TensorParallel = declared.TensorParallel
+		half.DataParallel = declared.DataParallel
+	}
+
+	return pair, nil
 }
 
 // kueueWorkloadWaitingForReplacementPods is the condition Kueue's pod integration sets on a group's
