@@ -467,7 +467,7 @@ test shows the hash moves on BOTH roles when a declared degree changes on one.
 Environment: LOCAL for everything below (smoke-checked 2026-09-22 — the three test packages run
 green on this machine; baselines inject 89.0%, controllers 80.6%, webhooks 91.4%). T6's
 hardware check is the only REMOTE step: the cluster of the CURRENT RKE kube context, available
-on demand (confirmed 2026-09-22), on its eight-NPU 910B2 host, NPUs 0–5 only.
+on demand (confirmed 2026-09-22), on its eight-NPU 910B2 host, all eight NPUs usable.
 
 ```bash
 go test ./pkg/worker/kvcache/inject/... \
@@ -610,9 +610,9 @@ in Go comments; the vllm.go:156-161 comment is rewritten in the same change that
       Acceptance: a prefill/decode pair whose roles carry `--tensor-parallel-size 2` comes up on
       the eight-NPU 910B2 host in the CURRENT RKE kube context (available on demand, confirmed
       2026-09-22) — no crash-loop, the document on each Pod carrying `2` in both halves;
-      transfer readings present on both halves; NPUs 0–5 ONLY (indices 6 and 7 are another
-      tenant's), verified by reading `npu-smi`'s process table against the operator's allocated
-      annotation, two independent readings that must agree.
+      transfer readings present on both halves; all eight NPUs on the host usable, verified by
+      reading `npu-smi`'s process table against the operator's allocated annotation, two
+      independent readings that must agree.
       Verify: the case's own report; this is the reading that promotes "above one" from inferred
       to measured.
 
@@ -654,7 +654,7 @@ unit suites already do; there is no mid-tier environment between that and a clus
 
 #### e2e tests
 
-T6 alone, on the eight-NPU 910B2 host in the current RKE kube context, NPUs 0–5 only: a prefill/decode pair
+T6 alone, on the eight-NPU 910B2 host in the current RKE kube context, all eight NPUs usable: a prefill/decode pair
 declaring `--tensor-parallel-size 2` in `extraArgs` comes up with no crash-loop and the document carrying
 `2` in both halves; transfer readings present on both halves; card use cross-checked by reading `npu-smi`'s
 process table against the operator's allocated annotation (two independent readings that must agree). NOT
