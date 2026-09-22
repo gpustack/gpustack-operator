@@ -3,7 +3,13 @@ provider "aws" {
 }
 
 data "aws_availability_zones" "available" {
-  exclude_zone_ids = ["us-east-1e"]
+  # EKS refuses to place a cluster in us-east-1e, so keep that zone out of the three this
+  # module builds on. The exclusion REQUIRES exclude_names: the sibling argument
+  # exclude_zone_ids matches zone IDs (the use1-azN form) instead, and a zone name handed to
+  # it matches nothing while raising no error, so the zone stays in the result and the code
+  # reads as though it were gone. Zone IDs are also the wrong currency here, because a zone
+  # name maps to a different ID in every account and this module names no account.
+  exclude_names = ["us-east-1e"]
   filter {
     name   = "opt-in-status"
     values = ["opt-in-not-required"]
