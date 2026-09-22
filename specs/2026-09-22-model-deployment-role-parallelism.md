@@ -594,7 +594,7 @@ in Go comments; the vllm.go:156-161 comment is rewritten in the same change that
       DP resolves the engine's way.
       Verify: `go test ./pkg/worker/webhooks/worker/...`
 
-- [ ] **T5 · Repair the statements this work makes false**
+- [x] **T5 · Repair the statements this work makes false**
       Blocked by: T2, T3, T4
       Owns: `docs/reference/model-deployment.md` alone — the code comments ride with T2/T3
       Acceptance: F3; no sentence still says the operator cannot see a role's parallelism or

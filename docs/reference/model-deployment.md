@@ -110,7 +110,9 @@ container spec and only the label value differs.
 
 ⛔ **What the engine does with those facts is yours.** The operator composes no
 `--tensor-parallel-size` or equivalent: the degrees do not decompose from `size` alone, and a
-formula missing an input is worse than no formula.
+formula missing an input is worse than no formula. Composing none is not seeing none — a degree
+the author declares on the role is read and validated, and [the transfer leg renders from
+it](#prefill-and-decode).
 
 A whole instance is the unit of replacement at every size. That is Kueue's constraint rather than a
 preference: a deleted member of an admitted group is held on the API server until the group's
@@ -149,8 +151,10 @@ admission check this operator runs, which holds every group until the whole set 
 ```
 
 > **A role's parallelism degrees are not API fields.** They reach the engine through
-> `roles[].extraArgs`, spelled the engine's own way, and the operator neither reads nor validates
-> them. They do not determine the AscendDirect transfer-port window.
+> `roles[].extraArgs` — or through `roles[].command` alone when the role takes the line over —
+> spelled the engine's own way. The operator composes no degree, but it reads those books:
+> admission refuses a degree it cannot parse, and the transfer leg renders from them. They do not
+> determine the AscendDirect transfer-port window.
 
 `name` identifies the role and becomes the Kueue PodSet name; `kind` selects behaviour and is closed.
 They are separate because a semantic reachable by typing a free-form string is a semantic one typo away
@@ -199,9 +203,24 @@ node with no driver installation fails the Pod's volume setup instead, naming th
 from the driver on every host that has one. The mount ships with the transfer leg alone — an
 Ascend deployment without one carries no host path.
 
-The leg renders both halves' parallel sizes as `1/1`, the one shape the operator composes — it
-renders no parallelism flag — and the connector asserts those sizes at startup, so a role widened
-by hand through `extraArgs` is outside what this renders for.
+The leg renders both halves' parallel sizes off each role's own books: a managed role's
+`extraArgs`, or a take-over role's whole `command` — never both. The one degree vLLM accepts as a
+literal environment entry, `VLLM_DP_SIZE`, rides alongside either. A role declaring none renders
+`1/1`, exactly as before.
+
+Those books are the whole of what the leg can see. A degree arriving any other way — the image's
+own entrypoint (never part of the rendered argv), a config file, a flag inside a `sh -c` string,
+`--additional-config`'s JSON value, an environment value pulled from a ConfigMap or Secret — is
+invisible to it, and an invisibly widened role keeps its `1/1` half.
+
+The connector's startup assert compares the document against itself, not against the engine, so
+an invisibly widened pair fails loudly only when the document's decode degree exceeds its
+prefill one; a pair widened symmetrically starts, answers, and pulls a wrong layout — the missing
+leg's quiet failure, one level down.
+
+Admission holds the visible side of the contract: a degree the books cannot be read for is
+refused, and so is a declared per-member width the role's card request cannot hold — see
+[What admission refuses](#what-admission-refuses).
 
 SGLang renders its halves through the engine's own disaggregation arguments rather than this
 connector path; the two engines' legs differ by [their handshake](#the-direct-transfers-transport)
@@ -533,7 +552,9 @@ not a property of the type, and dropping it here is what makes a rollout possibl
 
 Arguments fold into `command`; there is deliberately no `args`. A second append tier beside
 `extraArgs` would have no defined precedence, and would make the take-over tier ambiguous, since
-`args` alone would be neither take-over nor append.
+`args` alone would be neither take-over nor append. A take-over `command` is then the whole
+argv — the image's own entrypoint never participates — and an `extraArgs` written beside it is
+inert: read by nobody, refused nothing, and no part of the books the transfer leg renders from.
 
 **Engine authentication is the append tier's known bad input.** `--api-key` and `VLLM_API_KEY`
 are not operator-owned, so admission accepts them — and vLLM then guards its `/v1` routes,
@@ -857,6 +878,8 @@ depends on the `InstanceType` the role names.
 | a `kind` the engine has no term for | the engine and the kind — today, `prefill` or `decode` on SGLang |
 | an owned key in `extraArgs` | the key, the engine, and `roles[].command` as the way to own it |
 | an owned name in `env` | the same three |
+| a parallel degree the role's books cannot be read for — a known flag's value missing, non-integer, out of range or below its bound, or a malformed `VLLM_DP_SIZE` | the role, the flag, and `roles[].command` as the way to own the whole line |
+| a declared parallel width over the role's card request | the card count, the degrees behind the width, and that the width is per member — `size` does not rescue it |
 | a `template` field on a role | the unknown field itself — the block is gone, so strict decoding refuses it rather than a webhook rule |
 | a partition profile together with a slice percentage | both slice fields; one accelerator cannot serve both |
 | a `poolRef` outside this namespace | nothing — it is unrepresentable in the type |
