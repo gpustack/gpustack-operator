@@ -38,7 +38,8 @@ type KVCacheBackendTransportApplyConfiguration struct {
 	// - A host fabric needs two things this API cannot check: the member image must carry the
 	// runtime its transport links — the CANN toolkit for CANN, libfabric for EFA — and the NODE must run a
 	// device plugin, since a hostPath alone leaves the device cgroup refusing to open the device.
-	// Which resource the member asks for follows from this value; see the entry below.
+	// The effective protocol selects the fabric resource family; a member group's interface count
+	// selects its quantity and, for RDMA, whether it uses shared or exclusive resources.
 	// - RESPELLING THIS ENUM CARRIES A RESIDUAL RISK, knowingly accepted, on the same terms as
 	// Medium's. The values were once Auto, TCP, RDMA, EFA, HIP and Ascend; HIP and Ascend are
 	// gone, replaced by the toolchain names ROCM and CANN, and the rest changed case. An object
