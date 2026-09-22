@@ -31,21 +31,19 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	Roles []ModelDeploymentRoleApplyConfiguration `json:"roles,omitempty"`
 	// Router optionally puts a request router in front of the roles.
 	//
-	// NOTHING RENDERS A ROUTER YET. The field is accepted and the rules stated on it are applied, but
-	// no Deployment, ConfigMap or Service is created from it and status.endpoint does not move. Every
-	// sentence below describes the contract this field commits to, not behavior already in place, and
-	// each says which of the two it is where that is not obvious.
-	//
-	// THE PARAGRAPH ABOVE EXPIRES WHOLE, on the first change that renders anything from this field.
-	// Delete it then, rather than editing it down: whoever writes that renderer is the one reader
-	// guaranteed to be looking here, and a paragraph trimmed clause by clause becomes a list of what
-	// is still missing, which is the thing nobody keeps current.
-	//
 	// IT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides
 	// which shapes are legal behind it. Several plain servers is one of them: a router that scores on
 	// a cache view picks between equals in a way a Service cannot, so "there is no pair here" is not a
 	// reason to refuse one. Several prefillers with several decoders is another. A rule admitting only
 	// one prefiller and one decoder would describe a pairer rather than this field.
+	//
+	// ON ASCEND HARDWARE THE PREFILL/DECODE TRANSFER LEG RENDERS BEHIND ONE ROUTER ALONE:
+	// "llm-d-router", whose decode proxy relays the per-request handshake the Ascend connector waits
+	// for. "vllm-router" drives a pair in a handshake vocabulary that connector rejects, so an Ascend
+	// pair behind it renders as two complete engines with no leg between them; "sglang-gateway" is
+	// refused in front of this engine before any of that applies. The no-leg shape is QUIET: the
+	// deployment goes Ready, requests answer normally, and the two roles never exchange a block --
+	// a correctly answering deployment is exactly what makes the missing leg hard to see.
 	//
 	// Absent means no router, and that stays a supported shape rather than a broken one: the roles are
 	// individually addressable through their own Services either way, so a deployment written before
@@ -55,10 +53,12 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// pair.
 	//
 	// THIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and
-	// both may be set at once. The gate that turns this leg on — a managed llm-d router, vLLM, not
-	// Ascend, and a role kind of prefill or decode — reads none of spec.kvCache, and when both are
-	// set the two are synthesized into ONE connector and one --kv-transfer-config: a deployment may
-	// share a pool for its blocks AND hand them from prefill to decode directly, at the same time.
+	// both may be set at once. The gate that turns this leg on — every admitted router-and-engine
+	// pair (on Ascend hardware, "llm-d-router" alone; Router above names each combination and what
+	// the quiet no-leg shape looks like) and a role kind of prefill or decode — reads none of
+	// spec.kvCache, and when both are set the two are synthesized into ONE connector and one
+	// --kv-transfer-config: a deployment may share a pool for its blocks AND hand them from prefill
+	// to decode directly, at the same time.
 	//
 	// THE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from
 	// the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this

@@ -53,6 +53,38 @@ const (
 	sglangBackendArg   = "--hicache-storage-backend"
 	sglangBackendValue = "mooncake"
 
+	// The disaggregation arguments, which name the prefill/decode split itself. All three are
+	// ServerArgs fields: disaggregation_mode (v0.5.18 `server_args.py:3101-3105`, Literal
+	// "null"/"prefill"/"decode", "null" meaning no split), disaggregation_transfer_backend
+	// (v0.5.18 `server_args.py:3106-3113`, choices DISAGG_TRANSFER_BACKEND_CHOICES, default
+	// "mooncake") and disaggregation_bootstrap_port (v0.5.18 `server_args.py:3114-3118`, default
+	// 8998, "Bootstrap server port on the prefill server").
+	//
+	// The backend is written even though its default is already mooncake, because the value is a
+	// pair property: the router-side handshake and the engines' transfer engine must agree, and
+	// leaving the flag to its default lets a role's own argument change one side of the pair
+	// without anything here naming the leg it broke.
+	sglangDisaggregationModeArg          = "--disaggregation-mode"
+	sglangDisaggregationBackendArg       = "--disaggregation-transfer-backend"
+	sglangDisaggregationBackendMooncake  = "mooncake"
+	sglangDisaggregationBootstrapPortArg = "--disaggregation-bootstrap-port"
+
+	// SGLangBootstrapPort is where a disaggregated prefiller serves the bootstrap registry the
+	// decode side learns its transfer endpoints from. Upstream defaults it to 8998
+	// (v0.5.18 `server_args.py:3114-3118`, ServerArgs.disaggregation_bootstrap_port); it is
+	// rendered explicitly rather than left to that default because TWO other parties pair with
+	// it -- the gateway reads it off the prefill Pod's annotation, and the decode Pod's routing
+	// sidecar reads it from its environment -- and a default leaves each of them to restate the
+	// number on its own.
+	SGLangBootstrapPort int32 = 8998
+
+	// sglangBootstrapPortAnnotation publishes the prefiller's bootstrap port for a router that
+	// discovers workers through Kubernetes. The gateway reads it on prefill Pods alone
+	// (sgl-project/sglang@gateway-v0.3.1 `sgl-model-gateway/src/service_discovery.rs:54,136-141`,
+	// the default of Config.bootstrap_port_annotation). The value is the port as a decimal
+	// string, which is how the gateway's own discovery test writes it.
+	sglangBootstrapPortAnnotation = "sglang.ai/bootstrap-port"
+
 	// sglangPodIPFieldPath is the field the kubelet resolves at container start, which is the whole
 	// reason this engine takes the environment.
 	sglangPodIPFieldPath = "status.podIP"
@@ -115,7 +147,7 @@ func renderSGLang(in Input) (*Result, error) {
 		tenantEnvName = sglangTenantEnv
 	}
 
-	return &Result{
+	result := &Result{
 		Env: append(env, []core.EnvVar{
 			{Name: sglangMasterEnv, Value: in.Connection.MasterAddress},
 			{Name: sglangMetadataServerEnv, Value: MetadataServer},
@@ -134,5 +166,56 @@ func renderSGLang(in Input) (*Result, error) {
 		// workload declaration of this environment variable with the Binding's resolved tenant.
 		TenantEnvName: tenantEnvName,
 		Args:          []string{sglangBackendArg, sglangBackendValue},
-	}, nil
+	}
+
+	// A transfer leg with no half to render has nothing to pair, so it is refused rather than
+	// approximated - the shared store alone is what a role with no split renders.
+	if in.KVTransfer && in.Role != RolePrefill && in.Role != RoleDecode {
+		return nil, newRefusal(ReasonRoleUnsupported,
+			"point-to-point transfer pairs a prefill half with a decode half, and role %q is "+
+				"neither; a role with no split renders the shared store alone", in.Role)
+	}
+
+	// THE DISAGGREGATION LEG FOLLOWS THE ROLE AND THE PAIR, NOT THE TRANSFER FLAG, and the
+	// load-bearing parts are both in that sentence. The store client above is role-blind, so these
+	// arguments are the only rendering the two kinds have here; naming the split IS what it means to
+	// be one of them on this engine.
+	//
+	// Requiring the transfer flag as well would split admission from rendering. The handler that
+	// accepts a role asks the support table, which is answered per engine and role and knows nothing
+	// about the transfer leg, so a role it admitted would reach a renderer that refuses it - and the
+	// refusal would land in the reconciler, on an object already stored, where the user cannot act
+	// on it. The table exists precisely so that a role an engine cannot render is refused while the
+	// user can still fix it.
+	//
+	// The PAIR term is a different rule with a different reason: the routers already answer "is
+	// this a split" by whether both halves are declared, routing a lone half as the undivided shape
+	// rather than entering disaggregation against a set that can serve one side only. An engine
+	// started in half mode under that routing waits on a counterpart nothing assigns, so the two
+	// layers are made to agree here rather than in the router alone. The cost is carried knowingly:
+	// a deployment deliberately declaring one half to feed a shared store runs this engine
+	// undivided, where it previously started as one half.
+	if in.Disaggregated && (in.Role == RolePrefill || in.Role == RoleDecode) {
+		result.KVTransfer = true
+		result.Args = append(result.Args,
+			sglangDisaggregationModeArg, string(in.Role),
+			sglangDisaggregationBackendArg, sglangDisaggregationBackendMooncake)
+
+		// Only the prefill half serves the bootstrap registry, so only it names the port, opens
+		// it on the container and publishes it for discovery. The decode half learns the
+		// registry per request from whatever routes it, so it renders none of the three.
+		if in.Role == RolePrefill {
+			result.Args = append(result.Args,
+				sglangDisaggregationBootstrapPortArg, strconv.Itoa(int(SGLangBootstrapPort)))
+			result.Ports = append(result.Ports, core.ContainerPort{
+				Name: "bootstrap", Protocol: core.ProtocolTCP, ContainerPort: SGLangBootstrapPort,
+			})
+			if result.PodAnnotations == nil {
+				result.PodAnnotations = map[string]string{}
+			}
+			result.PodAnnotations[sglangBootstrapPortAnnotation] = strconv.Itoa(int(SGLangBootstrapPort))
+		}
+	}
+
+	return result, nil
 }

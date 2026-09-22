@@ -145,7 +145,7 @@ func TestModelDeploymentOwnedResourceRequiresAResourceNote(t *testing.T) {
 		map[string]string{ModelDeploymentResourceNoteRole: "prefill"})
 	router := new(core.Pod)
 	systemmeta.NoteResource(router, ModelDeploymentResourceType,
-		map[string]string{modelDeploymentResourceNoteRouter: "llm-d"})
+		map[string]string{modelDeploymentResourceNoteRouter: "llm-d-router"})
 	withoutNote := new(core.Pod)
 	systemmeta.NoteResource(withoutNote, ModelDeploymentResourceType, nil)
 	wrongType := role.DeepCopy()

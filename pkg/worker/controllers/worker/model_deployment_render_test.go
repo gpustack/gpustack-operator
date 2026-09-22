@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -161,7 +163,7 @@ func TestRenderModelDeploymentPod_DecodeUsesRoutingSidecar(t *testing.T) {
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
 				Connector: ModelDeploymentConnectorRender{
-					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 				},
 				NativeSidecar: true,
 			})
@@ -208,7 +210,7 @@ func TestRenderModelDeploymentPod_DecodeUsesClassicSidecarBelowTheFloor(t *testi
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
 		Connector: ModelDeploymentConnectorRender{
-			Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+			Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 		},
 		NativeSidecar: false,
 	})
@@ -233,6 +235,125 @@ func TestRenderModelDeploymentPod_DecodeUsesClassicSidecarBelowTheFloor(t *testi
 	assert.Equal(t, int32(8000), main.StartupProbe.HTTPGet.Port.IntVal)
 	assert.Equal(t, int32(8000), main.ReadinessProbe.HTTPGet.Port.IntVal)
 	assert.Equal(t, int32(8000), main.LivenessProbe.HTTPGet.Port.IntVal)
+}
+
+// sidecarRole is the minimal role the routing sidecar reads: a name and the port its Service
+// fronts.
+func sidecarRole() *workercore.ModelDeploymentRole {
+	return &workercore.ModelDeploymentRole{
+		Name:  "decode",
+		Ports: []workercore.ModelDeploymentPort{{Protocol: core.ProtocolTCP, Port: 8000}},
+	}
+}
+
+// argValue returns the value that follows a flag in an argument list, failing the test when the
+// flag is absent, so a handshake argument that disappears cannot pass as one that was never
+// asserted.
+func argValue(t *testing.T, args []string, flag string) string {
+	t.Helper()
+
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag {
+			return args[i+1]
+		}
+	}
+	require.Failf(t, "flag not rendered", "%q is not among %v", flag, args)
+
+	return ""
+}
+
+// TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine is called directly rather
+// than through the whole render so the connector vocabulary is pinned per engine and per vendor
+// without standing up a pair.
+func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testing.T) {
+	t.Run("vllm speaks the mooncake handshake", func(t *testing.T) {
+		sidecar := renderModelDeploymentRoutingSidecar(
+			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
+			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerNVIDIA)
+
+		assert.Contains(t, sidecar.Args, "--kv-connector=mooncake")
+		assert.Contains(t, sidecar.Args,
+			fmt.Sprintf("--mooncake-bootstrap-port=%d", inject.VLLMMooncakeBootstrapPort))
+		assert.NotContains(t, sidecar.Args, "--kv-connector=sglang",
+			"the SGLang connector would query a registry no vLLM prefiller serves")
+		for _, e := range sidecar.Env {
+			assert.NotEqual(t, "SGLANG_BOOTSTRAP_PORT", e.Name,
+				"the variable is the SGLang port's only carrier and vLLM carries none of it")
+		}
+	})
+
+	t.Run("vllm on ascend relays through nixlv2", func(t *testing.T) {
+		sidecar := renderModelDeploymentRoutingSidecar(
+			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
+			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerAscend)
+
+		assert.Contains(t, sidecar.Args, "--kv-connector=nixlv2",
+			"the Ascend connector speaks the four-null-key handshake the nixlv2 mode relays")
+		for _, arg := range sidecar.Args {
+			assert.NotContains(t, arg, "mooncake",
+				"an Ascend pair has no bootstrap registry, so no mooncake flag may render")
+		}
+	})
+
+	t.Run("sglang speaks the sglang handshake", func(t *testing.T) {
+		sidecar := renderModelDeploymentRoutingSidecar(
+			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
+			workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA)
+
+		assert.Contains(t, sidecar.Args, "--kv-connector=sglang")
+		assert.NotContains(t, sidecar.Args, "mooncake",
+			"a mooncake flag left beside the SGLang connector names a handshake this sidecar does not speak")
+		assert.Equal(t, strconv.Itoa(int(inject.SGLangBootstrapPort)),
+			argEnvValue(t, sidecar.Env, "SGLANG_BOOTSTRAP_PORT"))
+	})
+}
+
+// argEnvValue returns a rendered variable's value, failing the test when the variable is absent.
+func argEnvValue(t *testing.T, env []core.EnvVar, name string) string {
+	t.Helper()
+
+	for i := range env {
+		if env[i].Name == name {
+			return env[i].Value
+		}
+	}
+	require.Failf(t, "variable not rendered", "%q is not among the sidecar's environment", name)
+
+	return ""
+}
+
+// TestRenderModelDeploymentRoutingSidecar_SGLangBootstrapPortPairsWithThePrefiller asserts the
+// pairing the whole disaggregation shape rests on: the prefiller's bootstrap-server argument, the
+// annotation a discovering router reads, and the decode sidecar's environment variable are THREE
+// WRITINGS OF ONE VALUE. The assertion compares the rendered values to each other and to neither
+// implementation, so a literal substituted at any end -- the exact drift this test exists for --
+// fails here regardless of which end moved.
+func TestRenderModelDeploymentRoutingSidecar_SGLangBootstrapPortPairsWithThePrefiller(t *testing.T) {
+	prefill, err := SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
+		Engine:              workercore.ModelDeploymentEngineSGLang,
+		Manufacturer:        nodefeature.ManufacturerNVIDIA,
+		Domain:              "team-a-shared",
+		MasterServerAddress: "shared-kv-master.gpustack-system.svc:50051",
+		Protocols:           []string{"tcp"},
+		Kind:                workercore.ModelDeploymentRoleKindPrefill,
+		Disaggregated:       true,
+		KVTransfer:          true,
+	})
+	require.NoError(t, err)
+
+	engineArg := argValue(t, prefill.Args, "--disaggregation-bootstrap-port")
+	annotation := prefill.PodAnnotations["sglang.ai/bootstrap-port"]
+	require.NotEmpty(t, annotation, "the prefiller publishes no bootstrap port for discovery")
+
+	sidecar := renderModelDeploymentRoutingSidecar(
+		context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
+		workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA)
+	sidecarEnv := argEnvValue(t, sidecar.Env, "SGLANG_BOOTSTRAP_PORT")
+
+	assert.Equal(t, engineArg, sidecarEnv,
+		"the sidecar must dial the port the prefiller serves the registry on")
+	assert.Equal(t, engineArg, annotation,
+		"the annotation must publish the port the prefiller actually serves")
 }
 
 // TestRenderModelDeploymentPod_ProbeRouteFollowsTheServingShape asserts what route the three gates
@@ -276,7 +397,7 @@ func TestRenderModelDeploymentPod_ProbeRouteFollowsTheServingShape(t *testing.T)
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
 			Connector: ModelDeploymentConnectorRender{
-				Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+				Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 			},
 			NativeSidecar: true,
 		})
@@ -649,7 +770,7 @@ func TestRenderModelDeploymentPod_ConnectorPortCollision(t *testing.T) {
 		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
 			Connector: ModelDeploymentConnectorRender{
-				Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+				Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 			},
 		})
 		require.Error(t, err, "the engine port must clear every declared port, not only the served one")
@@ -1608,26 +1729,28 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 //
 // THE ORIGINAL DIGESTS WERE CAPTURED FROM THE RENDERER AS IT STOOD BEFORE IT WAS SPLIT into a
 // template half and a stamp half, and that split had to reproduce every one of them exactly. The
-// table has been RE-BASELINED twice since, each time for a rendering change that was intended: once
-// for the per-replica groups, where the stamp began naming a (role, ordinal) group, declaring a
-// total of one and writing the ordinal label; and once when the ordinal label's key took the
+// table has been RE-BASELINED three times since, each time for a rendering change that was
+// intended: once for the per-replica groups, where the stamp began naming a (role, ordinal) group,
+// declaring a total of one and writing the ordinal label; once when the ordinal label's key took the
 // modeldeployment prefix the role-kind label and the spec-hash annotation already carry, so that one
-// reader looking for this deployment's own keys finds all of them under one prefix. Every digest
-// here moved by intent rather than by drift. Each case renders ORDINAL ZERO -- the composite's zero value --
-// which is the one ordinal a digest can name without the table growing a dimension. To re-baseline
-// after an intended rendering change: empty the table, run this case, and pin the digests the
-// failures print.
+// reader looking for this deployment's own keys finds all of them under one prefix; and once when
+// the member index became unconditional on every member, so that one equality term in a discovery
+// selector names the Pods that answer the API at every role size. Every digest here moved by intent
+// rather than by drift. Each case renders ORDINAL ZERO -- the composite's zero value -- which is the
+// one ordinal a digest can name without the table growing a dimension. To re-baseline after an
+// intended rendering change: empty the table, run this case, and pin the digests the failures
+// print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "08f52247437b4925743d5b85ca010ac92f368391830cb5919e5f70fd6afd20c4",
-		"a sole server role with a synthesized cache connector":                              "2cb69c356d261024050512e2dcfdc297fdd914c96afd4d7c45aefde826b86098",
-		"a take-over role carrying a connector it must be given no part of":                  "42167cb00627d2d60bf26037123022df6e5a87973cdd5f40c15bf8123f7563a0",
-		"a direct decoder with a native routing sidecar":                                     "b4f7264275ec32c44c8ac81ec5e37a687ed092e0fb438d331e6f27d2477ea5c2",
-		"a direct decoder with a classic routing sidecar":                                    "1eb4e27a1f76ecd9ee7aa00ff11be477c525c6b767811ed3c427e5e18f5944cd",
-		"a role naming no image, synthesized from the observed hardware":                     "27b030d0cabb28c902f2be94112a313a4d51dab96c62f91bd650e09d3a0b9d7b",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "6f3b9d8fc490e9c9b35446813b2616ba917e7e7031e483e1cdee6cd26759bcbb",
-		"the prefill role of a two-role deployment":                                          "29cc6963fec2503f0921a99b38256c9e9e0086a99d4ff399f913ba8c16fea959",
-		"the decode role of a two-role deployment":                                           "6179eb90c879011839f4d422b2e4654795738e64c5d2c272e4440c51eca4a442",
+		"a sole server role": "077463504e23c8b59a28092878df9bad3f6d5e751ea4a7c2ebc020d6fc0f491f",
+		"a sole server role with a synthesized cache connector":                              "53f99d870f79ab45692006ef32561f1f2cd7b5aad7b64be251c76bd5a407aa29",
+		"a take-over role carrying a connector it must be given no part of":                  "1984284b5fbc1e7245e71bb5ea8c3ed1daccef316d724e398952fa637c4c67cd",
+		"a direct decoder with a native routing sidecar":                                     "7b312926f49ee6a3115f0e4acc38eec600cfdbec3532124748cde1867870e363",
+		"a direct decoder with a classic routing sidecar":                                    "24eebdf8d2209367f2b14ff19b85b54200da3bdcc3302bee9435d100be9b870f",
+		"a role naming no image, synthesized from the observed hardware":                     "7664b696700708f5d4de175ac9a55bfff9b69829ab39c0c2163a9757a9675561",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "c7a42af155f2e1bf67e46463c6e3aaca9e7645b8468d7cc9859dfff0543a6b1b",
+		"the prefill role of a two-role deployment":                                          "cc55b5f877f5a83778404751cb5754f6399d21b85a2beec3ff2dfda753d16bfa",
+		"the decode role of a two-role deployment":                                           "34f9da9b7a3a82873c3eb1ebac1711627533d20f84f694601aec4ea778c45eec",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its
@@ -1697,7 +1820,7 @@ func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t 
 					}}
 				})
 				in.Connector = ModelDeploymentConnectorRender{
-					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 				}
 				in.NativeSidecar = true
 
@@ -1715,7 +1838,7 @@ func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t 
 					}}
 				})
 				in.Connector = ModelDeploymentConnectorRender{
-					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 				}
 				in.NativeSidecar = false
 
@@ -2091,7 +2214,7 @@ func TestRenderModelDeploymentPodTemplate_RendersTwoReplicasOfOneRoleIdentical(t
 				return ModelDeploymentRenderInput{
 					Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
 					Connector: ModelDeploymentConnectorRender{
-						Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+						Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 					},
 					NativeSidecar: true,
 				}
@@ -2130,4 +2253,40 @@ func TestRenderModelDeploymentPodTemplate_RendersTwoReplicasOfOneRoleIdentical(t
 			assert.Equal(t, string(firstJSON), string(secondJSON))
 		})
 	}
+}
+
+// TestRenderModelDeploymentPod_DecodeWithoutTheProxyFlagRunsAlone is the row the sidecar cases
+// cannot carry, because every one of them sets both flags at once.
+//
+// A decoder under a router configured by argv HAS the engine-side transfer leg and NOT the proxy:
+// it learns where to pull from out of the request body, which the engine reads for itself. A
+// renderer deriving the proxy from the leg -- which is what it used to do -- passes every other
+// case in this file and puts that proxy on this Pod, where it would wait for a header nothing
+// sends and the replica would never answer.
+func TestRenderModelDeploymentPod_DecodeWithoutTheProxyFlagRunsAlone(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Router = &workercore.ModelDeploymentRouter{
+			Name: workercore.ModelDeploymentRouterVLLM,
+		}
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+	})
+
+	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+		Connector: ModelDeploymentConnectorRender{
+			Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
+		},
+		NativeSidecar: true,
+	})
+	require.NoError(t, err)
+
+	assert.Empty(t, pod.Spec.InitContainers, "no proxy is rendered for this router")
+	require.Len(t, pod.Spec.Containers, 1, "the engine runs alone")
+	assert.Equal(t, "main", pod.Spec.Containers[0].Name)
+	// And the engine keeps the port its Service publishes, because nothing took it.
+	assert.Contains(t, pod.Spec.Containers[0].Command, "--port")
+	at := slices.Index(pod.Spec.Containers[0].Command, "--port")
+	require.Less(t, at+1, len(pod.Spec.Containers[0].Command))
+	assert.Equal(t, "8000", pod.Spec.Containers[0].Command[at+1],
+		"the proxy is what moves the engine off the published port, and there is none")
 }

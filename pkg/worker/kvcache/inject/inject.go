@@ -135,28 +135,33 @@ func Render(in Input) (*Result, error) {
 		return nil, newRefusal(ReasonConnectionIncomplete,
 			"no shared store, point-to-point transfer, or KV event publisher was requested")
 	}
-	if !hasStore && in.Engine != EngineVLLM {
+	if !hasStore && in.Engine != EngineVLLM && in.Engine != EngineVLLMAscend {
 		return nil, newRefusal(ReasonConnectionIncomplete,
 			"engine %q requires a shared store connection", in.Engine)
 	}
-	// Point-to-point transfer and event publishing are vLLM-only capabilities, and asking for either
-	// on another engine is refused HERE rather than ignored by that engine's renderer.
+	// Point-to-point transfer is rendered by the whole vLLM family and by SGLang, each in its
+	// own vocabulary; KV event publishing is vLLM proper's alone. A capability an engine does not
+	// render is refused HERE rather than ignored by that engine's renderer.
 	//
 	// It is refused rather than dropped because dropping it is the failure this package exists to
-	// prevent: renderSGLang reads neither field, so an SGLang role asked for point-to-point
-	// transfer would start normally, serve normally, and move no blocks - with nothing in the Pod
-	// to read that says so. The combination is reachable, not theoretical: the router's metrics
-	// contract covers SGLang, so a managed router over an SGLang pool is a configuration a user
-	// can write today.
+	// prevent: an engine asked for a capability it renders no term for would start normally, serve
+	// normally, and move no blocks - with nothing in the Pod to read that says so. The combination
+	// is reachable, not theoretical: the router's metrics contract covers SGLang, so a managed
+	// router over an SGLang pool is a configuration a user can write today.
 	//
 	// The vLLM renderer refuses point-to-point transfer again, on a condition that also covers the
 	// role. That is not a duplicate of this one: this check is about the ENGINE and runs for every
 	// caller, while that one is about a role that is neither prefill nor decode and can only be
 	// reached once the engine is already vLLM.
-	if (in.KVTransfer || in.PublishKVEvents) && in.Engine != EngineVLLM {
+	if in.KVTransfer && in.Engine != EngineVLLM && in.Engine != EngineVLLMAscend && in.Engine != EngineSGLang {
 		return nil, newRefusal(ReasonRoleUnsupported,
-			"engine %q renders neither point-to-point transfer nor KV event publishing; "+
-				"asking for either would leave a container that starts and moves nothing", in.Engine)
+			"engine %q renders no point-to-point transfer; asking for one would leave a container "+
+				"that starts and moves nothing", in.Engine)
+	}
+	if in.PublishKVEvents && in.Engine != EngineVLLM {
+		return nil, newRefusal(ReasonRoleUnsupported,
+			"engine %q renders no KV event publishing; asking for it would leave a container that "+
+				"starts and moves nothing", in.Engine)
 	}
 
 	switch in.Engine {

@@ -45,7 +45,7 @@ locals {
       }
     },
     {
-      for name, cfg in var.gpu_instance_types :
+      for name, cfg in(var.gpu_node_count > 0 ? var.gpu_instance_types : {}) :
       "gpu-${name}" => {
         instance_type = { platform = cfg.platform, preset = cfg.preset }
         os            = coalesce(cfg.os, data.external.gpu_compat[name].result.os)
@@ -60,10 +60,11 @@ locals {
         # guess it — and that inbound reach is what the public address buys. Turn it off per group
         # (`public_ip = false`) only for a GPU group nobody has to log in to.
         public_ip = cfg.public_ip
-        # One node per GPU group. Accelerator capacity is bought a group at a time -- a second H100
-        # is a second entry in gpu_instance_types, which also gets its own platform and preset --
-        # and the tests that need several nodes need plain ones, which is what cpu_node_count buys.
-        node_count = 1
+        # Nodes per GPU group. Adding a key to gpu_instance_types and raising gpu_node_count are
+        # different purchases: a key buys a group with its own platform and preset, the count buys
+        # more nodes of the shape this group already names. Accelerator quota is granted per
+        # platform and preset, so a count above one can be refused where a second key would not be.
+        node_count = var.gpu_node_count
         gpu        = { drivers_preset = coalesce(cfg.drivers_preset, data.external.gpu_compat[name].result.drivers_preset) }
         # Null unless the group asked for a fabric. A fabric is what puts RDMA devices on the node,
         # and it can only be joined at creation time, so this cannot be added to a running group.

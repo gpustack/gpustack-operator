@@ -1064,7 +1064,8 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 		//
 		kvTransfer := modelDeploymentUsesKVTransfer(md, role, instType.Status.Detail.Manufacturer)
 		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, instType.Status.Detail.Manufacturer)
-		if connection != nil || kvTransfer || publishKVEvents {
+		routingSidecar := modelDeploymentFrontsDecodeWithSidecar(md, role)
+		if connection != nil || kvTransfer || publishKVEvents || routingSidecar {
 			roleConnection := ModelDeploymentConnectorInput{}
 			if connection != nil {
 				roleConnection = *connection
@@ -1075,7 +1076,12 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			// configuration: it is what makes a prefiller and a decoder two configurations rather
 			// than two copies of one, which is what the atomic admission of the pair is FOR.
 			roleConnection.Kind = role.Kind
+			// Deployment-wide rather than per role, because the split mode it gates answers "is
+			// this deployment a pair" -- the same question the router's own mode answers -- and a
+			// half of an undeclared pair runs undivided on both layers now.
+			roleConnection.Disaggregated = ModelDeploymentDeclaresBothHalves(md)
 			roleConnection.KVTransfer = kvTransfer
+			roleConnection.RoutingSidecar = routingSidecar
 			if md.Spec.KVTransfer != nil {
 				roleConnection.KVTransferProtocol = md.Spec.KVTransfer.Protocol
 			}

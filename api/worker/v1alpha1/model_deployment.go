@@ -74,21 +74,19 @@ type ModelDeploymentSpec struct {
 
 	// Router optionally puts a request router in front of the roles.
 	//
-	// NOTHING RENDERS A ROUTER YET. The field is accepted and the rules stated on it are applied, but
-	// no Deployment, ConfigMap or Service is created from it and status.endpoint does not move. Every
-	// sentence below describes the contract this field commits to, not behavior already in place, and
-	// each says which of the two it is where that is not obvious.
-	//
-	// THE PARAGRAPH ABOVE EXPIRES WHOLE, on the first change that renders anything from this field.
-	// Delete it then, rather than editing it down: whoever writes that renderer is the one reader
-	// guaranteed to be looking here, and a paragraph trimmed clause by clause becomes a list of what
-	// is still missing, which is the thing nobody keeps current.
-	//
 	// IT IS EAST-WEST TRAFFIC MANAGEMENT, NOT A PREFILL/DECODE PAIRER, and the distinction decides
 	// which shapes are legal behind it. Several plain servers is one of them: a router that scores on
 	// a cache view picks between equals in a way a Service cannot, so "there is no pair here" is not a
 	// reason to refuse one. Several prefillers with several decoders is another. A rule admitting only
 	// one prefiller and one decoder would describe a pairer rather than this field.
+	//
+	// ON ASCEND HARDWARE THE PREFILL/DECODE TRANSFER LEG RENDERS BEHIND ONE ROUTER ALONE:
+	// "llm-d-router", whose decode proxy relays the per-request handshake the Ascend connector waits
+	// for. "vllm-router" drives a pair in a handshake vocabulary that connector rejects, so an Ascend
+	// pair behind it renders as two complete engines with no leg between them; "sglang-gateway" is
+	// refused in front of this engine before any of that applies. The no-leg shape is QUIET: the
+	// deployment goes Ready, requests answer normally, and the two roles never exchange a block --
+	// a correctly answering deployment is exactly what makes the missing leg hard to see.
 	//
 	// Absent means no router, and that stays a supported shape rather than a broken one: the roles are
 	// individually addressable through their own Services either way, so a deployment written before
@@ -101,10 +99,12 @@ type ModelDeploymentSpec struct {
 	// pair.
 	//
 	// THIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and
-	// both may be set at once. The gate that turns this leg on — a managed llm-d router, vLLM, not
-	// Ascend, and a role kind of prefill or decode — reads none of spec.kvCache, and when both are
-	// set the two are synthesized into ONE connector and one --kv-transfer-config: a deployment may
-	// share a pool for its blocks AND hand them from prefill to decode directly, at the same time.
+	// both may be set at once. The gate that turns this leg on — every admitted router-and-engine
+	// pair (on Ascend hardware, "llm-d-router" alone; Router above names each combination and what
+	// the quiet no-leg shape looks like) and a role kind of prefill or decode — reads none of
+	// spec.kvCache, and when both are set the two are synthesized into ONE connector and one
+	// --kv-transfer-config: a deployment may share a pool for its blocks AND hand them from prefill
+	// to decode directly, at the same time.
 	//
 	// THE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from
 	// the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this
@@ -250,10 +250,12 @@ type ModelDeploymentKVTransfer struct {
 	//   - UNSET RENDERS "tcp", the transport every mooncake build carries. The default lives in
 	//     the renderer rather than in this schema, so the stored object holds exactly what was
 	//     asked.
-	//   - IT IS READ ONLY ON THE POINT-TO-POINT LEG: a managed llm-d router in front of vLLM
-	//     prefill/decode roles. On every other shape -- sglang, Ascend, or no router -- the value
-	//     is accepted and renders nothing, which is stated here because an accepted field that
-	//     silently does nothing is a promise broken quietly.
+	//   - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted
+	//     router-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind
+	//     "vllm-router" -- the value is accepted and renders nothing. An Ascend pair behind
+	//     "llm-d-router" renders the leg but not this value: that engine's transfer leg hardcodes
+	//     its transport, so the declared protocol has no key to land in. Each silence is stated
+	//     here because an accepted field that quietly does nothing is a promise broken quietly.
 	//   - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'
 	//     argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
 	//     across InstanceTypes the groups rebuild independently, and a mixed-protocol window
@@ -631,20 +633,28 @@ type ModelDeploymentRouter struct {
 	// visible in the same word twice: the transport protocol on the cache backend types spells it
 	// "Auto" while the connector here spells it "auto". The casing convention is per API type, and the
 	// reason is the one ModelDeploymentRoleKind states about itself -- these values are terms the
-	// outside tool understands, not terms this operator invents. "llm-d" is how that project spells
-	// itself in its module path, its API group and its label domain, so it is spelled that way here.
+	// outside tool understands, not terms this operator invents. "llm-d-router" is how the llm-d
+	// project spells this router in its module path, so it is spelled that way here.
 	//
-	// ONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a
-	// second implementation precisely so that adding one is a widening of this enum rather than a new
-	// field appearing on an API that already shipped without it.
+	// THE RENAME FROM "llm-d" CARRIES NO CONVERSION, because that spelling never shipped in a
+	// release: it lived on main between this field's introduction and this rename, with no release
+	// cut in between, so no released CRD ever accepted it and every object a release could have
+	// written spells the value this enum requires. A cluster running an unreleased build of the
+	// interval is outside that guarantee and edits such an object by hand.
 	//
 	// WIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set
 	// that router needs, AND the wiring that threads this value to a dispatch point. The schema
 	// reservation covers the first of those and nothing else, which is why a second router is a piece
 	// of work rather than a constant.
 	//
+	// A VALUE IS ALSO ENGINE-MATCHED, and the match is a separate rule rather than something this
+	// enum can express: "vllm-router" and "sglang-gateway" are each one project's own router for
+	// its own engine, so each is refused in front of the other's. "llm-d-router" takes either
+	// engine, because upstream carries a handshake connector and a metrics configuration for each
+	// of them.
+	//
 	// +required
-	// +k8s:validation:enum=["llm-d"]
+	// +k8s:validation:enum=["llm-d-router","vllm-router","sglang-gateway"]
 	Name string `json:"name" protobuf:"bytes,1,name=name"`
 
 	// Replicas is how many router Pods to run. Absent means one.
@@ -694,13 +704,51 @@ type ModelDeploymentRouter struct {
 	// +listType=atomic
 	// +k8s:validation:maxItems=32
 	ImagePullSecrets []core.LocalObjectReference `json:"imagePullSecrets,omitempty" protobuf:"bytes,6,rep,name=imagePullSecrets"`
+
+	// RequestTimeoutSeconds is how long the router waits for a reply before giving up on it.
+	//
+	// UNSET DOES NOT MEAN ONE THING ACROSS THE ROUTERS, and saying so here is the point of this
+	// paragraph. Leaving it out renders nothing, so each router keeps its own upstream default: one
+	// day under "llm-d-router", whose proxy carries the timeout, against half an hour under the two
+	// configured by their command line. That is a factor of forty-eight, and it is why setting this
+	// field is the only way a declaration survives a change of router — its absence leaves three
+	// upstream opinions in place rather than choosing between them.
+	//
+	// ZERO IS NOT ACCEPTED. It would mean "wait forever" under the proxy and nothing in particular
+	// under the other two, and a field meaning the same thing across three implementations cannot
+	// carry one implementation's special value. A day is already long enough that the difference is
+	// theoretical; the floor can be lowered later without breaking an object that exists.
+	//
+	// +optional
+	// +k8s:validation:minimum=1
+	RequestTimeoutSeconds *int32 `json:"requestTimeoutSeconds,omitempty" protobuf:"varint,7,opt,name=requestTimeoutSeconds"`
+
+	// DisaggregationThresholdTokens is how many prompt tokens NOT already in a prefix cache make a
+	// request worth splitting between a prefiller and a decoder. Below it the decode replica serves
+	// the whole request itself. Unset renders the router's own current value.
+	//
+	// ZERO DISABLES DISAGGREGATION ENTIRELY rather than meaning "always split": the decider returns
+	// "do not disaggregate" on a zero threshold before reading anything else. It is accepted rather
+	// than refused because it is a value upstream defines, and the field is optional, so writing
+	// zero and leaving the field out remain two different statements.
+	//
+	// IT IS MEANINGFUL UNDER "llm-d-router" ALONE and is REFUSED under the other two rather than
+	// ignored, because a field that is legal to write and renders nothing is a shape this API has
+	// rejected before. The refusal is stable because Name is frozen after creation, so an object
+	// cannot become invalid through a later edit to some other field.
+	//
+	// +optional
+	// +k8s:validation:minimum=0
+	DisaggregationThresholdTokens *int32 `json:"disaggregationThresholdTokens,omitempty" protobuf:"varint,8,opt,name=disaggregationThresholdTokens"`
 }
 
 // The routers a ModelDeployment can name, which are the values of ModelDeploymentRouter.Name's enum.
 //
 // Declared beside the field whose schema closes the set, so that a reader of either finds the other.
 const (
-	ModelDeploymentRouterLLMD = "llm-d"
+	ModelDeploymentRouterLLMD   = "llm-d-router"
+	ModelDeploymentRouterVLLM   = "vllm-router"
+	ModelDeploymentRouterSGLang = "sglang-gateway"
 )
 
 // ModelDeploymentStatus defines the observed state of ModelDeployment.
@@ -926,8 +974,14 @@ type ModelDeploymentRouterRoleStatus struct {
 	// matching on the empty string would find nothing.
 	Kind ModelDeploymentRoleKind `json:"kind" protobuf:"bytes,2,name=kind,casttype=ModelDeploymentRoleKind"`
 
-	// Selector is the label selector matching exactly this role's replicas, published VERBATIM so
-	// that a router is configured from observed strings rather than from a documented convention.
+	// Selector is the label selector matching exactly this role's Pods that answer the API -- one
+	// member per replica, its leader, which at size one is the replica's only Pod -- published
+	// VERBATIM so that a router is configured from observed strings rather than from a documented
+	// convention.
+	//
+	// The unit it names is the Pod, not the replica: a replica may span several Pods, and a member
+	// other than the leader serves no API even though the role runs it, so it stays outside what
+	// this selector matches.
 	//
 	// A router given a selector survives scaling; a router given a list of addresses does not, and
 	// would have to be reconfigured and restarted every time a role grew or shrank.

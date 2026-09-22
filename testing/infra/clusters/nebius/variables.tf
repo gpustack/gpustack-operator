@@ -106,13 +106,48 @@ variable "cpu_instance_types" {
 # alone and hold compute.instance.non-gpu.vcpu at zero, where a CPU node cannot be created at all
 # and asking for one fails the apply rather than costing a little extra.
 variable "cpu_node_count" {
-  description = "Number of nodes in the CPU node group (GPU groups are one node each). Zero drops the CPU group altogether, which is what a region holding compute.instance.non-gpu.vcpu at zero requires."
+  # SCHEDULED TO GO AWAY together with gpu_node_count below, which carries the reason:
+  # cpu_instance_types becomes a map of groups with the count inside each one, and "no
+  # group" becomes an absent key rather than a zero. Plan in issue #502.
+  description = "Number of nodes in the CPU node group. Zero drops the group altogether, which is what a region holding compute.instance.non-gpu.vcpu at zero requires. Same name, type, default and zero-drops rule as clusters/eks."
   type        = number
   default     = 1
 
   validation {
     condition     = var.cpu_node_count >= 0 && var.cpu_node_count == floor(var.cpu_node_count)
     error_message = "cpu_node_count must be a whole number, zero or greater."
+  }
+}
+
+variable "gpu_node_count" {
+  # THIS VARIABLE IS SCHEDULED TO GO AWAY, and so is cpu_node_count above: the count
+  # belongs inside gpu_instance_types beside the group shape it counts, and
+  # cpu_instance_types becomes a map of groups at the same time, so a group is described
+  # one way in both modules. It exists at all because clusters/eks grew one and this
+  # module did not, and matching first makes the removal one change instead of two. The
+  # written-out plan, including the key-naming rule that keeps an existing cluster's
+  # resource addresses stable, is issue #502.
+  #
+  # Nodes per GPU group, which until this variable existed was the literal 1 in main.tf's
+  # group builder. It is named, typed and defaulted to match clusters/eks so that moving
+  # between the two modules does not mean relearning the surface.
+  #
+  # ADDING A KEY TO gpu_instance_types AND RAISING THIS ARE DIFFERENT PURCHASES, and the
+  # distinction survives the unification: a key buys a group with its own platform and
+  # preset, this buys more nodes of the shape a group already names. Accelerator quota is
+  # granted per platform and preset, so a count above one can be refused where a second
+  # key would not be.
+  #
+  # Unlike clusters/eks, this value DOES move a group that already exists: the node group
+  # resource here declares no ignore_changes on its size, so an edit is applied rather
+  # than silently dropped. That difference is upstream, not a choice made here.
+  description = "Number of nodes in EACH GPU node group. Zero drops the GPU groups altogether, mirroring cpu_node_count. Unlike clusters/eks -- where the value reaches the cloud only at create time -- an edit here does resize a group that already exists."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.gpu_node_count >= 0 && var.gpu_node_count == floor(var.gpu_node_count)
+    error_message = "gpu_node_count must be a whole number, zero or greater."
   }
 }
 

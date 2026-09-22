@@ -214,6 +214,9 @@ func connectorInputForKind(
 ) ModelDeploymentConnectorInput {
 	in := connectorInput(engine, manufacturer)
 	in.Kind = kind
+	// The fixture declares the pair, so the kind it names is a half OF a pair rather than a half of
+	// nothing -- the shape whose split this file asserts everywhere.
+	in.Disaggregated = true
 
 	return in
 }
@@ -361,31 +364,184 @@ func TestSynthesizeModelDeploymentConnector_KVTransferProtocol(t *testing.T) {
 	}`, got.Args[1])
 }
 
-func TestModelDeploymentUsesKVTransfer(t *testing.T) {
-	base := newRenderDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
-		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+// connectorPredicateDeployment builds a routed deployment with one role of the given kind.
+func connectorPredicateDeployment(
+	router, engine string, kind workercore.ModelDeploymentRoleKind,
+) *workercore.ModelDeployment {
+	return newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Engine.Name = engine
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: router}
+		md.Spec.Roles[0].Kind = kind
 	})
+}
 
-	assert.True(t, modelDeploymentUsesKVTransfer(
-		base, &base.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
-	assert.False(t, modelDeploymentUsesKVTransfer(
-		base, &base.Spec.Roles[0], nodefeature.ManufacturerAscend))
+// complementaryRole returns the other half of a prefill/decode pair. The second return is false
+// for a server role, which has no other half -- a row naming it never needs the append.
+func complementaryRole(kind workercore.ModelDeploymentRoleKind) (workercore.ModelDeploymentRole, bool) {
+	switch kind {
+	case workercore.ModelDeploymentRoleKindPrefill:
+		return workercore.ModelDeploymentRole{Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode}, true
+	case workercore.ModelDeploymentRoleKindDecode:
+		return workercore.ModelDeploymentRole{Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill}, true
+	default:
+		return workercore.ModelDeploymentRole{}, false
+	}
+}
 
-	server := base.DeepCopy()
-	server.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
-	assert.False(t, modelDeploymentUsesKVTransfer(
-		server, &server.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+// TestModelDeploymentUsesKVTransfer pins the widening: the engine-side transfer leg follows EVERY
+// admitted router-and-engine pair, not one of them -- and it follows the PAIR, not the half: a
+// lone half is routed undivided by the router in front of it, and the engine side agrees rather
+// than starting a leg that waits on a counterpart nothing assigns.
+//
+// A prefiller that cannot hand a decoder its blocks is not disaggregated under any router, so the
+// leg is not a property of which router is in front. What IS per pair is the handshake, and the
+// engine renderers choose that; this predicate only answers whether there is a leg at all. The rows
+// name their router because a single-router table would keep passing under exactly the shape this
+// change removes.
+func TestModelDeploymentUsesKVTransfer(t *testing.T) {
+	cases := []struct {
+		name         string
+		router       string
+		engine       string
+		kind         workercore.ModelDeploymentRoleKind
+		manufacturer string
+		// lone names a row whose subject is one half of an undeclared pair.
+		lone bool
+		want bool
+	}{
+		{
+			name: "the picker in front of vllm", router: workercore.ModelDeploymentRouterLLMD,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			kind:         workercore.ModelDeploymentRoleKindPrefill,
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: true,
+		},
+		{
+			// The pair this widening adds: the picker takes either engine, and under SGLang the
+			// halves are rendered by that engine's own disaggregation arguments.
+			name: "the picker in front of sglang", router: workercore.ModelDeploymentRouterLLMD,
+			engine:       workercore.ModelDeploymentEngineSGLang,
+			kind:         workercore.ModelDeploymentRoleKindPrefill,
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: true,
+		},
+		{
+			name: "each project's own router", router: workercore.ModelDeploymentRouterVLLM,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			kind:         workercore.ModelDeploymentRoleKindDecode,
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: true,
+		},
+		{
+			name: "and the gateway", router: workercore.ModelDeploymentRouterSGLang,
+			engine:       workercore.ModelDeploymentEngineSGLang,
+			kind:         workercore.ModelDeploymentRoleKindDecode,
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: true,
+		},
+		{
+			// A server role is not half of anything, so there is nobody to pair with.
+			name: "a server role under any of them", router: workercore.ModelDeploymentRouterLLMD,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			kind:         workercore.ModelDeploymentRoleKindServer,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+		},
+		{
+			// The Ascend pair the leg now renders for: the picker carries the decode proxy,
+			// which is the driver this connector's handshake is relayed by.
+			name:         "on Ascend under the picker",
+			router:       workercore.ModelDeploymentRouterLLMD,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			kind:         workercore.ModelDeploymentRoleKindPrefill,
+			manufacturer: nodefeature.ManufacturerAscend, want: true,
+		},
+		{
+			// The vLLM router drives its pairs itself and speaks a handshake vocabulary the
+			// Ascend connector rejects, so the pair keeps the shape Ascend always had: no leg
+			// rather than a dead one.
+			name:         "on Ascend under the vllm router",
+			router:       workercore.ModelDeploymentRouterVLLM,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			kind:         workercore.ModelDeploymentRoleKindPrefill,
+			manufacturer: nodefeature.ManufacturerAscend,
+		},
+		{
+			// The pair rule's own rows: one half of an undeclared pair runs no leg, because the
+			// router in front of it is routing it as the undivided shape already.
+			name: "a lone prefill under the vllm router", lone: true,
+			router:       workercore.ModelDeploymentRouterVLLM,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			kind:         workercore.ModelDeploymentRoleKindPrefill,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+		},
+		{
+			name: "a lone decode under the picker", lone: true,
+			router:       workercore.ModelDeploymentRouterLLMD,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			kind:         workercore.ModelDeploymentRoleKindDecode,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			md := connectorPredicateDeployment(c.router, c.engine, c.kind)
+			if other, half := complementaryRole(c.kind); half && !c.lone {
+				// The row's subject is a role OF A PAIR, so the complementary half is declared
+				// beside the kind the row names.
+				md.Spec.Roles = append(md.Spec.Roles, other)
+			}
+			assert.Equal(t, c.want,
+				modelDeploymentUsesKVTransfer(md, &md.Spec.Roles[0], c.manufacturer))
+		})
+	}
 
-	unrouted := base.DeepCopy()
+	unrouted := connectorPredicateDeployment(workercore.ModelDeploymentRouterLLMD,
+		workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRoleKindPrefill)
 	unrouted.Spec.Router = nil
 	assert.False(t, modelDeploymentUsesKVTransfer(
-		unrouted, &unrouted.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+		unrouted, &unrouted.Spec.Roles[0], nodefeature.ManufacturerNVIDIA),
+		"a half with nothing routing between the halves has nobody to pair with either")
+}
 
-	sglang := base.DeepCopy()
-	sglang.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
-	assert.False(t, modelDeploymentUsesKVTransfer(
-		sglang, &sglang.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+// TestModelDeploymentFrontsDecodeWithSidecar pins the predicate that follows the router alone.
+//
+// The decode proxy reads the prefiller this request was assigned out of a header the picker writes,
+// and neither of the other two routers writes it. Deriving it from the transfer leg -- which is
+// what the renderer used to do -- puts that proxy on a decoder that will wait for a header nothing
+// sends, so the rows under the other routers are the ones that matter here.
+func TestModelDeploymentFrontsDecodeWithSidecar(t *testing.T) {
+	cases := []struct {
+		name   string
+		router string
+		engine string
+		kind   workercore.ModelDeploymentRoleKind
+		want   bool
+	}{
+		{
+			name: "the picker's decoder", router: workercore.ModelDeploymentRouterLLMD,
+			engine: workercore.ModelDeploymentEngineVLLM,
+			kind:   workercore.ModelDeploymentRoleKindDecode, want: true,
+		},
+		{
+			name: "the vllm router's decoder", router: workercore.ModelDeploymentRouterVLLM,
+			engine: workercore.ModelDeploymentEngineVLLM,
+			kind:   workercore.ModelDeploymentRoleKindDecode,
+		},
+		{
+			name: "the gateway's decoder", router: workercore.ModelDeploymentRouterSGLang,
+			engine: workercore.ModelDeploymentEngineSGLang,
+			kind:   workercore.ModelDeploymentRoleKindDecode,
+		},
+		{
+			name:   "the picker's prefiller, which fronts nothing",
+			router: workercore.ModelDeploymentRouterLLMD,
+			engine: workercore.ModelDeploymentEngineVLLM,
+			kind:   workercore.ModelDeploymentRoleKindPrefill,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			md := connectorPredicateDeployment(c.router, c.engine, c.kind)
+			assert.Equal(t, c.want, modelDeploymentFrontsDecodeWithSidecar(
+				md, &md.Spec.Roles[0]))
+		})
+	}
 }
 
 func TestModelDeploymentPublishesKVEvents(t *testing.T) {
@@ -402,13 +558,30 @@ func TestModelDeploymentPublishesKVEvents(t *testing.T) {
 	assert.False(t, modelDeploymentPublishesKVEvents(
 		base, &base.Spec.Roles[0], nodefeature.ManufacturerAscend))
 
-	// The two predicates share the router-name/engine/manufacturer gate, so a router that is not
-	// the managed one gets no publisher -- unreachable through the API today, and exactly the
-	// divergence a second router name would otherwise inherit.
-	otherRouter := base.DeepCopy()
-	otherRouter.Spec.Router.Name = "another-router"
+	// THE PUBLISHER IS THE ONE DECISION THAT DID NOT WIDEN, and these are the rows that say so.
+	// It feeds one router's prefix-cache data layer, which subscribes per Pod; the other two
+	// subscribe to nothing, so publishing under them would open two sockets on every replica that
+	// nothing reads.
+	for _, name := range []string{
+		workercore.ModelDeploymentRouterVLLM,
+		workercore.ModelDeploymentRouterSGLang,
+	} {
+		other := base.DeepCopy()
+		other.Spec.Router.Name = name
+		if name == workercore.ModelDeploymentRouterSGLang {
+			other.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+		}
+		assert.False(t, modelDeploymentPublishesKVEvents(
+			other, &other.Spec.Roles[0], nodefeature.ManufacturerNVIDIA),
+			"%s scores on its own observations and subscribes to no publisher", name)
+	}
+
+	// The engine half of the same gate: this publisher is vLLM's, so the picker in front of the
+	// other engine gets none either.
+	otherEngine := base.DeepCopy()
+	otherEngine.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 	assert.False(t, modelDeploymentPublishesKVEvents(
-		otherRouter, &otherRouter.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+		otherEngine, &otherEngine.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
 
 	decode := base.DeepCopy()
 	decode.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
@@ -513,16 +686,24 @@ func TestSynthesizeModelDeploymentConnector_TransportTheEngineCannotUse(t *testi
 	require.NoError(t, err, "and the transport that failed above is the ordinary one everywhere else")
 }
 
-// TestSynthesizeModelDeploymentConnector_RoleTheEngineCannotBeTold covers the two ways a kind fails
-// to render, and neither may fall back to a plain server.
+// TestSynthesizeModelDeploymentConnector_RoleTheEngineCannotBeTold covers a kind that cannot render,
+// which may not fall back to a plain server.
 //
 // A decoder configured as a server serves whole requests and looks healthy, which is the silent
 // wrong result the whole kind field exists to prevent.
+//
+// SGLang USED TO BE THE SECOND WAY TO FAIL HERE and is now the witness that it stopped being one:
+// the engine renders the split as its own disaggregation arguments, so the kind that was refused
+// is rendered instead. The case asserts the rendering rather than being deleted, because the
+// admitting side and this side have to keep agreeing, and a refusal quietly turning into a success
+// is the change nothing else in this file would notice.
 func TestSynthesizeModelDeploymentConnector_RoleTheEngineCannotBeTold(t *testing.T) {
-	_, err := SynthesizeModelDeploymentConnector(connectorInputForKind(
+	render, err := SynthesizeModelDeploymentConnector(connectorInputForKind(
 		workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA,
 		workercore.ModelDeploymentRoleKindPrefill))
-	require.Error(t, err, "sglang has no prefill/decode equivalent, so it is refused rather than rendered")
+	require.NoError(t, err, "sglang renders the prefill half as its disaggregation arguments")
+	require.Contains(t, render.Args, "--disaggregation-mode",
+		"the kind reaches the engine as the split it names, not as a label on a plain server")
 
 	_, err = SynthesizeModelDeploymentConnector(connectorInputForKind(
 		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, "router"))
@@ -945,35 +1126,54 @@ func TestModelDeploymentOwnedAndDefaultedCannotDisagree(t *testing.T) {
 		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA},
 	}
 
+	// THE ROLE IS AN AXIS OF THE RENDERER, so it is an axis here. A matrix over engines alone reads
+	// every key an unsplit replica renders and none of the ones a half renders, which is a whole
+	// class of keys the table can fail to own while this stays green -- and the halves are where
+	// the keys that pair two Pods live.
+	kinds := []workercore.ModelDeploymentRoleKind{
+		workercore.ModelDeploymentRoleKindServer,
+		workercore.ModelDeploymentRoleKindPrefill,
+		workercore.ModelDeploymentRoleKindDecode,
+	}
+
 	for _, c := range carriers {
-		t.Run(c.engine+"_on_"+c.manufacturer, func(t *testing.T) {
-			engine := c.engine
-			got, err := SynthesizeModelDeploymentConnector(connectorInput(engine, c.manufacturer))
-			require.NoError(t, err)
+		for _, kind := range kinds {
+			t.Run(c.engine+"_on_"+c.manufacturer+"_as_"+string(kind), func(t *testing.T) {
+				assertOwnedAndDefaultedAgree(t, c.engine, c.manufacturer, kind)
+			})
+		}
+	}
+}
 
-			for _, arg := range got.Args {
-				name := ModelDeploymentArgName(arg)
-				if !isFlag(name) {
-					continue // a flag's value, not a key ownership applies to
-				}
-				assert.True(t, ModelDeploymentOwnsArg(engine, name),
-					"the renderer emits %q but the table does not own it", name)
-			}
+func assertOwnedAndDefaultedAgree(
+	t *testing.T, engine, manufacturer string, kind workercore.ModelDeploymentRoleKind,
+) {
+	t.Helper()
 
-			for _, env := range got.Env {
-				assert.True(t, ModelDeploymentOwnsEnv(engine, env.Name),
-					"the renderer emits %q as owned but the table does not own it", env.Name)
-				assert.False(t, ModelDeploymentDefaultsEnv(env.Name),
-					"%q is both owned and defaulted, so a user supplying it is both refused and honoured", env.Name)
-			}
+	got, err := SynthesizeModelDeploymentConnector(connectorInputForKind(engine, manufacturer, kind))
+	require.NoError(t, err)
 
-			for _, env := range got.DefaultedEnv {
-				assert.True(t, ModelDeploymentDefaultsEnv(env.Name),
-					"the renderer defaults %q but the table does not list it", env.Name)
-				assert.False(t, ModelDeploymentOwnsEnv(engine, env.Name),
-					"%q is both defaulted and owned", env.Name)
-			}
-		})
+	for _, arg := range got.Args {
+		name := ModelDeploymentArgName(arg)
+		if !isFlag(name) {
+			continue // a flag's value, not a key ownership applies to
+		}
+		assert.True(t, ModelDeploymentOwnsArg(engine, name),
+			"the renderer emits %q but the table does not own it", name)
+	}
+
+	for _, env := range got.Env {
+		assert.True(t, ModelDeploymentOwnsEnv(engine, env.Name),
+			"the renderer emits %q as owned but the table does not own it", env.Name)
+		assert.False(t, ModelDeploymentDefaultsEnv(env.Name),
+			"%q is both owned and defaulted, so a user supplying it is both refused and honoured", env.Name)
+	}
+
+	for _, env := range got.DefaultedEnv {
+		assert.True(t, ModelDeploymentDefaultsEnv(env.Name),
+			"the renderer defaults %q but the table does not list it", env.Name)
+		assert.False(t, ModelDeploymentOwnsEnv(engine, env.Name),
+			"%q is both defaulted and owned", env.Name)
 	}
 }
 

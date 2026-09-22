@@ -221,7 +221,7 @@ func TestComputeModelDeploymentStatus_RouterReadinessControlsEndpointAndPhase(t 
 	}{
 		{
 			name: "endpoint_absent_while_router_unready", wantPhase: ModelDeploymentPhaseDegraded,
-			rolesReady: true, wantMessage: `router "llm-d" has no ready replicas`,
+			rolesReady: true, wantMessage: `router "llm-d-router" has no ready replicas`,
 		},
 		{
 			name: "endpoint_present_when_router_ready", readyReplicas: 1,

@@ -26,17 +26,25 @@ type ModelDeploymentRouterApplyConfiguration struct {
 	// visible in the same word twice: the transport protocol on the cache backend types spells it
 	// "Auto" while the connector here spells it "auto". The casing convention is per API type, and the
 	// reason is the one ModelDeploymentRoleKind states about itself -- these values are terms the
-	// outside tool understands, not terms this operator invents. "llm-d" is how that project spells
-	// itself in its module path, its API group and its label domain, so it is spelled that way here.
+	// outside tool understands, not terms this operator invents. "llm-d-router" is how the llm-d
+	// project spells this router in its module path, so it is spelled that way here.
 	//
-	// ONE VALUE TODAY IS A CHOICE TAKEN FOR NOW, NOT THE ABSENCE OF ONE. This field exists ahead of a
-	// second implementation precisely so that adding one is a widening of this enum rather than a new
-	// field appearing on an API that already shipped without it.
+	// THE RENAME FROM "llm-d" CARRIES NO CONVERSION, because that spelling never shipped in a
+	// release: it lived on main between this field's introduction and this rename, with no release
+	// cut in between, so no released CRD ever accepted it and every object a release could have
+	// written spells the value this enum requires. A cluster running an unreleased build of the
+	// interval is outside that guarantee and edits such an object by hand.
 	//
 	// WIDENING IT IS FOUR THINGS, NOT ONE: one entry here, one configuration renderer, the object set
 	// that router needs, AND the wiring that threads this value to a dispatch point. The schema
 	// reservation covers the first of those and nothing else, which is why a second router is a piece
 	// of work rather than a constant.
+	//
+	// A VALUE IS ALSO ENGINE-MATCHED, and the match is a separate rule rather than something this
+	// enum can express: "vllm-router" and "sglang-gateway" are each one project's own router for
+	// its own engine, so each is refused in front of the other's. "llm-d-router" takes either
+	// engine, because upstream carries a handshake connector and a metrics configuration for each
+	// of them.
 	Name *string `json:"name,omitempty"`
 	// Replicas is how many router Pods to run. Absent means one.
 	//
@@ -66,6 +74,34 @@ type ModelDeploymentRouterApplyConfiguration struct {
 	ImagePullPolicy *v1.PullPolicy `json:"imagePullPolicy,omitempty"`
 	// ImagePullSecrets are the secrets used to pull Image.
 	ImagePullSecrets []corev1.LocalObjectReferenceApplyConfiguration `json:"imagePullSecrets,omitempty"`
+	// RequestTimeoutSeconds is how long the router waits for a reply before giving up on it.
+	//
+	// UNSET DOES NOT MEAN ONE THING ACROSS THE ROUTERS, and saying so here is the point of this
+	// paragraph. Leaving it out renders nothing, so each router keeps its own upstream default: one
+	// day under "llm-d-router", whose proxy carries the timeout, against half an hour under the two
+	// configured by their command line. That is a factor of forty-eight, and it is why setting this
+	// field is the only way a declaration survives a change of router — its absence leaves three
+	// upstream opinions in place rather than choosing between them.
+	//
+	// ZERO IS NOT ACCEPTED. It would mean "wait forever" under the proxy and nothing in particular
+	// under the other two, and a field meaning the same thing across three implementations cannot
+	// carry one implementation's special value. A day is already long enough that the difference is
+	// theoretical; the floor can be lowered later without breaking an object that exists.
+	RequestTimeoutSeconds *int32 `json:"requestTimeoutSeconds,omitempty"`
+	// DisaggregationThresholdTokens is how many prompt tokens NOT already in a prefix cache make a
+	// request worth splitting between a prefiller and a decoder. Below it the decode replica serves
+	// the whole request itself. Unset renders the router's own current value.
+	//
+	// ZERO DISABLES DISAGGREGATION ENTIRELY rather than meaning "always split": the decider returns
+	// "do not disaggregate" on a zero threshold before reading anything else. It is accepted rather
+	// than refused because it is a value upstream defines, and the field is optional, so writing
+	// zero and leaving the field out remain two different statements.
+	//
+	// IT IS MEANINGFUL UNDER "llm-d-router" ALONE and is REFUSED under the other two rather than
+	// ignored, because a field that is legal to write and renders nothing is a shape this API has
+	// rejected before. The refusal is stable because Name is frozen after creation, so an object
+	// cannot become invalid through a later edit to some other field.
+	DisaggregationThresholdTokens *int32 `json:"disaggregationThresholdTokens,omitempty"`
 }
 
 // ModelDeploymentRouterApplyConfiguration constructs a declarative configuration of the ModelDeploymentRouter type for use with
@@ -126,5 +162,21 @@ func (b *ModelDeploymentRouterApplyConfiguration) WithImagePullSecrets(values ..
 		}
 		b.ImagePullSecrets = append(b.ImagePullSecrets, *values[i])
 	}
+	return b
+}
+
+// WithRequestTimeoutSeconds sets the RequestTimeoutSeconds field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RequestTimeoutSeconds field is set to the value of the last call.
+func (b *ModelDeploymentRouterApplyConfiguration) WithRequestTimeoutSeconds(value int32) *ModelDeploymentRouterApplyConfiguration {
+	b.RequestTimeoutSeconds = &value
+	return b
+}
+
+// WithDisaggregationThresholdTokens sets the DisaggregationThresholdTokens field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DisaggregationThresholdTokens field is set to the value of the last call.
+func (b *ModelDeploymentRouterApplyConfiguration) WithDisaggregationThresholdTokens(value int32) *ModelDeploymentRouterApplyConfiguration {
+	b.DisaggregationThresholdTokens = &value
 	return b
 }

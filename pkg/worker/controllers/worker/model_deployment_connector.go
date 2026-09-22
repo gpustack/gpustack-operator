@@ -35,6 +35,14 @@ type ModelDeploymentConnectorInput struct {
 	// a single-role deployment always rendered.
 	Kind workercore.ModelDeploymentRoleKind
 
+	// Disaggregated reports whether the deployment declaring this role declares BOTH halves of a
+	// prefill/decode pair. It is answered from the spec alone, so admission and rendering cannot
+	// disagree about it, and it is what keeps the engine's own split mode in step with the router's:
+	// a lone half is routed undivided and now runs undivided. The role discriminator on the store
+	// client follows Kind regardless, so a half declared to feed a shared pool keeps contributing
+	// to it.
+	Disaggregated bool
+
 	// Manufacturer is the accelerator vendor of the role's pool, as this project spells it, e.g.
 	// "nvidia" or "ascend". It selects the CONNECTOR, which the engine does not.
 	//
@@ -73,6 +81,11 @@ type ModelDeploymentConnectorInput struct {
 	// KVTransfer composes point-to-point P/D transfer with the shared store. The two are
 	// orthogonal inputs and both may be on at once; neither is a branch that excludes the other.
 	KVTransfer bool
+
+	// RoutingSidecar asks for the decode proxy. It travels beside KVTransfer rather than being
+	// derived from it because the two now answer differently: every admitted pair carries the
+	// transfer leg, and one router carries the proxy.
+	RoutingSidecar bool
 
 	// KVTransferProtocol is the transport the point-to-point leg is told to use, declared on
 	// the ModelDeployment. Empty renders the renderer's default. It is passed through verbatim:
@@ -135,31 +148,103 @@ type ModelDeploymentConnectorRender struct {
 
 	// KVTransfer is true when Args include the point-to-point P/D connector.
 	KVTransfer bool
+
+	// RoutingSidecar is true when a decode replica is fronted by the proxy that performs the
+	// handshake on its behalf. It is decided HERE rather than read off KVTransfer by the renderer,
+	// because the two stopped agreeing the moment a second router could carry the transfer leg.
+	RoutingSidecar bool
 }
 
-// modelDeploymentRoutesManagedVLLM is the gate both connector decisions share: the managed llm-d
-// router in front of a vLLM engine, off Ascend. It exists so the two predicates below cannot drift
-// apart on the dimensions they agree on -- with only one router name admitted today the router-name
-// clause looks redundant, and it is exactly the clause a second router name would silently inherit.
+// modelDeploymentRoutesManaged is now the KV EVENTS gate alone: a managed router is in front of
+// this deployment, off Ascend.
 //
-// Ascend is excluded because the Ascend render knows only the store connector: asked to publish
-// events it refuses, and a refused render is an error loop, not a deployment without events.
-func modelDeploymentRoutesManagedVLLM(md *workercore.ModelDeployment, manufacturer string) bool {
-	return md.Spec.Router != nil && md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
-		md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
-		manufacturer != nodefeature.ManufacturerAscend
+// THE THREE DECISIONS BELOW ANSWER SEPARATELY, and stating what they do not share is the point of
+// keeping them apart. The KV event publisher exists to feed one router's data layer, so it follows
+// that router and that engine -- and it stays off Ascend, because the vLLM-Ascend render knows no
+// publisher, and a refused render is an error loop, not a deployment without events. The
+// engine-side transfer leg follows every admitted pair, because a prefiller that cannot hand a
+// decoder its blocks is not disaggregated under any router. The decode proxy follows one router
+// alone, because it reads an endpoint out of a header only that router writes.
+func modelDeploymentRoutesManaged(md *workercore.ModelDeployment, manufacturer string) bool {
+	return md.Spec.Router != nil && manufacturer != nodefeature.ManufacturerAscend
 }
 
+// ModelDeploymentDeclaresBothHalves reports whether this deployment's roles contain a prefill role
+// and a decode role.
+//
+// IT IS THE PAIR RULE THE ROUTER RENDERER ALREADY FOLLOWS, stated for the engine side: a deployment
+// holding one half has no pair to hand blocks to, and every layer answering "is this a split" --
+// the router's mode, the engine's transfer leg, the engine's own split arguments -- must answer
+// alike or one object serves requests one way and moves blocks another. The router renderer routes
+// a lone half as the undivided shape; this predicate is what lets the engine side agree with it.
+// The cost is carried knowingly: a deployment deliberately declaring one half to feed a shared
+// store now runs its engines undivided, and the role discriminator on the store client is what
+// keeps that half's contribution to the pool.
+//
+// IT IS EXPORTED because the webhook's port reservation reads the same rule: the pair is knowable
+// at admission -- the roles are in the spec, unlike the pool's vendor -- so the refusal and the
+// render can agree on this axis exactly, refusing no port a render actually binds and releasing no
+// port one does.
+func ModelDeploymentDeclaresBothHalves(md *workercore.ModelDeployment) bool {
+	var prefill, decode bool
+	for i := range md.Spec.Roles {
+		switch ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i]) {
+		case workercore.ModelDeploymentRoleKindPrefill:
+			prefill = true
+		case workercore.ModelDeploymentRoleKindDecode:
+			decode = true
+		}
+	}
+
+	return prefill && decode
+}
+
+// modelDeploymentUsesKVTransfer reports whether this role runs the engine side of a routed
+// prefill/decode pair.
+//
+// ON ASCEND IT NAMES A ROUTER, and the exception is the handshake rather than the leg: the
+// connector vLLM-Ascend registers wants the prefiller's host, port, block ids and engine id
+// relayed per request, and the one driver wired for that here is the llm-d-router's decode
+// proxy. The vLLM router drives its pairs itself and speaks a vocabulary the Ascend connector
+// rejects, so a pair under it renders no leg rather than a dead one -- the shape Ascend always
+// had, not a regression.
+//
+// THE LEG FOLLOWS THE PAIR, NOT THE HALF: a role that is one half of nothing has nobody to hand
+// blocks to, and the router in front of it is already routing it as the undivided shape. Rendering
+// the leg anyway would start an engine that waits for a counterpart no router ever assigns.
 func modelDeploymentUsesKVTransfer(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) bool {
-	if !modelDeploymentRoutesManagedVLLM(md, manufacturer) {
+	if md.Spec.Router == nil {
+		return false
+	}
+	if manufacturer == nodefeature.ManufacturerAscend &&
+		md.Spec.Router.Name != workercore.ModelDeploymentRouterLLMD {
+		return false
+	}
+	if !ModelDeploymentDeclaresBothHalves(md) {
 		return false
 	}
 
 	kind := ModelDeploymentEffectiveRoleKind(role)
 	return kind == workercore.ModelDeploymentRoleKindPrefill ||
 		kind == workercore.ModelDeploymentRoleKindDecode
+}
+
+// modelDeploymentFrontsDecodeWithSidecar reports whether a decode replica gets the routing proxy.
+//
+// IT STAYS WITH ONE ROUTER because the proxy is that router's own protocol, not a property of
+// disaggregation: it reads the prefiller this request was assigned out of a header the picker
+// writes, and neither of the other two routers writes it. Ascend is not excluded: under this
+// router the proxy is also what DRIVES the transfer leg -- nothing else relays the prefiller's
+// handshake into the decoder's request -- so an Ascend leg without it would be rendered and
+// never pulled on.
+func modelDeploymentFrontsDecodeWithSidecar(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	return md.Spec.Router != nil &&
+		md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
+		ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindDecode
 }
 
 // THE SIZE AND TOPOLOGY CONSTANTS ARE `inject`'S, not redeclared here: `GlobalSegmentSize`,
@@ -212,8 +297,20 @@ var modelDeploymentOwnedKeys = map[string]struct {
 	//
 	// It appears in this table because the renderer always emits it for this engine. Whether the
 	// selected image reads it is not decided here.
+	//
+	// THE THREE DISAGGREGATION KEYS ARE OWNED FOR A DIFFERENT REASON than the two above: they are
+	// not a loader switch, they are the halves of a PAIR. The prefiller's bootstrap port is written
+	// in three places that must agree -- its own argument, the annotation a router discovers it by,
+	// and the environment the decode Pod's proxy reads -- and the mode is what makes a Pod one half
+	// rather than the other. A user entry lands after the operator's on the same command line, so
+	// an unowned key here lets a role declared as one half start as the other, with both ends of
+	// the pair still advertising the first.
 	workercore.ModelDeploymentEngineSGLang: {
-		Args: []string{"--hicache-storage-backend", "--hicache-storage-backend-extra-config"},
+		Args: []string{
+			"--hicache-storage-backend", "--hicache-storage-backend-extra-config",
+			"--disaggregation-mode", "--disaggregation-transfer-backend",
+			"--disaggregation-bootstrap-port",
+		},
 		Env: []string{
 			"SGLANG_HICACHE_MOONCAKE_CONFIG_PATH",
 			"MOONCAKE_MASTER",
@@ -322,7 +419,11 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 	res, err := inject.Render(inject.Input{
 		Engine: engine,
 		Role:   role,
-		Domain: in.Domain,
+		// The pair term travels beside the role rather than being derived from it: the renderer's
+		// split mode is a property of the deployment's whole role set, and a role alone cannot
+		// know whether its other half is declared.
+		Disaggregated: in.Disaggregated,
+		Domain:        in.Domain,
 		Connection: inject.Connection{
 			MasterAddress: in.MasterServerAddress,
 			Protocol:      protocol,
@@ -352,6 +453,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		Ports:          res.Ports,
 		KVEvents:       res.KVEvents,
 		KVTransfer:     res.KVTransfer,
+		// Passed through rather than derived: the renderer has no way to tell which router is in
+		// front, and deriving it from the transfer leg is exactly the inheritance this split ends.
+		RoutingSidecar: in.RoutingSidecar,
 	}, nil
 }
 
@@ -399,10 +503,17 @@ func ModelDeploymentEffectiveRoleKind(
 	return role.Kind
 }
 
+// modelDeploymentPublishesKVEvents reports whether this role runs the event publisher.
+//
+// IT STAYS WITH ONE ROUTER AND ONE ENGINE. The publisher exists to feed that router's prefix-cache
+// data layer, which subscribes per Pod; the other two score on their own observations and subscribe
+// to nothing, so publishing under them would open two sockets on every replica that nothing reads.
 func modelDeploymentPublishesKVEvents(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) bool {
-	return modelDeploymentRoutesManagedVLLM(md, manufacturer) &&
+	return modelDeploymentRoutesManaged(md, manufacturer) &&
+		md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD &&
+		md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
 		len(role.Command) == 0 &&
 		ModelDeploymentEffectiveRoleKind(role) != workercore.ModelDeploymentRoleKindDecode
 }

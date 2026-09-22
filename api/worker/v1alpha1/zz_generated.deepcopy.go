@@ -2407,6 +2407,16 @@ func (in *ModelDeploymentRouter) DeepCopyInto(out *ModelDeploymentRouter) {
 		*out = make([]v1.LocalObjectReference, len(*in))
 		copy(*out, *in)
 	}
+	if in.RequestTimeoutSeconds != nil {
+		in, out := &in.RequestTimeoutSeconds, &out.RequestTimeoutSeconds
+		*out = new(int32)
+		**out = **in
+	}
+	if in.DisaggregationThresholdTokens != nil {
+		in, out := &in.DisaggregationThresholdTokens, &out.DisaggregationThresholdTokens
+		*out = new(int32)
+		**out = **in
+	}
 	return
 }
 

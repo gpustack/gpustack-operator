@@ -154,7 +154,7 @@ YAML
     if [ "$router" = yes ]; then
       cat <<YAML
   router:
-    name: llm-d
+    name: llm-d-router
     image: ${ROUTER_IMAGE}
 YAML
     fi
@@ -196,7 +196,7 @@ router_objects_valid() {
   for kind in deployment configmap service serviceaccount role rolebinding; do
     row="$(k -n "$NS" get "$kind" "${LIFECYCLE}-router" \
       -o jsonpath='{.metadata.ownerReferences[0].uid}{"|"}{.metadata.labels.resource\.gpustack\.ai/type}{"|"}{.metadata.annotations.note\.gpustack\.ai/router}' 2>/dev/null)"
-    [ "$row" = "$uid|modeldeployments|llm-d" ] || return 1
+    [ "$row" = "$uid|modeldeployments|llm-d-router" ] || return 1
   done
 }
 
@@ -208,7 +208,7 @@ apply_md "$LIFECYCLE" no "$pair" >/dev/null
 assert_condition "$LIFECYCLE" False NoRouter "an unrouted P/D pair reports no consumer"
 
 k -n "$NS" patch modeldeployment "$LIFECYCLE" --type=merge \
-  -p '{"spec":{"router":{"name":"llm-d","image":"'"$ROUTER_IMAGE"'"}}}' >/dev/null
+  -p '{"spec":{"router":{"name":"llm-d-router","image":"'"$ROUTER_IMAGE"'"}}}' >/dev/null
 if wait_for "$SETTLE" router_count_is 6 && router_objects_valid; then
   record PASS "adding spec.router converges all six objects" "owned and discoverable"
 else
@@ -266,7 +266,7 @@ else
 fi
 
 k -n "$NS" patch modeldeployment "$LIFECYCLE" --type=merge \
-  -p '{"spec":{"router":{"name":"llm-d","image":"'"$ROUTER_IMAGE"'"}}}' >/dev/null
+  -p '{"spec":{"router":{"name":"llm-d-router","image":"'"$ROUTER_IMAGE"'"}}}' >/dev/null
 if wait_for "$SETTLE" router_count_is 6; then
   record PASS "re-adding spec.router restores all six objects" "six of six present"
 else

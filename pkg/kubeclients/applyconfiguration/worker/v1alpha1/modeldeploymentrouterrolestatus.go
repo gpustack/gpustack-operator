@@ -17,8 +17,14 @@ type ModelDeploymentRouterRoleStatusApplyConfiguration struct {
 	// resolved value rather than the field, because a role naming no kind is a server and a consumer
 	// matching on the empty string would find nothing.
 	Kind *workerv1alpha1.ModelDeploymentRoleKind `json:"kind,omitempty"`
-	// Selector is the label selector matching exactly this role's replicas, published VERBATIM so
-	// that a router is configured from observed strings rather than from a documented convention.
+	// Selector is the label selector matching exactly this role's Pods that answer the API -- one
+	// member per replica, its leader, which at size one is the replica's only Pod -- published
+	// VERBATIM so that a router is configured from observed strings rather than from a documented
+	// convention.
+	//
+	// The unit it names is the Pod, not the replica: a replica may span several Pods, and a member
+	// other than the leader serves no API even though the role runs it, so it stays outside what
+	// this selector matches.
 	//
 	// A router given a selector survives scaling; a router given a list of addresses does not, and
 	// would have to be reconfigured and restarted every time a role grew or shrank.

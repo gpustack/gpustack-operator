@@ -541,9 +541,10 @@ func TestModelDeploymentEndpointReadsEveryFlagTheEngineGets(t *testing.T) {
 	require.NotEmpty(t, operatorArgs, "a check over an empty list is vacuously true")
 	// The count is stated so that a renderer which stopped emitting arguments, or an engine dropped
 	// from Engines(), shows up as a smaller denominator rather than as a check that still passes.
-	require.Equal(t, 7, rendered,
-		"three engines, two of them with three roles and sglang with one; update this figure "+
-			"deliberately when that changes")
+	require.Equal(t, 9, rendered,
+		"three engines with three roles each, sglang included since it renders the prefill and "+
+			"decode halves as its own disaggregation arguments; update this figure deliberately "+
+			"when that changes")
 
 	scheme, gradable := modelDeploymentEngineTransport(operatorArgs)
 	assert.Equal(t, core.URISchemeHTTP, scheme,

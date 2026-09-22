@@ -31,9 +31,9 @@ func onManufacturer(manufacturer string) func(*worker.InstanceType) {
 //
 // THE REFUSED ROW IS THE POSITIVE BASELINE, and it has to be one this fixture can actually reach.
 // Without it, "the cross-manufacturer rows are accepted" is equally consistent with a fixture that
-// never reaches the kind rules at all, and every acceptance would hold vacuously. SGLang has no
-// rendering term for prefill or decode, so that pair is refused on the kind -- by a rule this same
-// path runs, on this same fixture.
+// never reaches the kind rules at all, and every acceptance would hold vacuously. It is a duplicate
+// kind, refused by a rule this same path runs on this same fixture. It used to be SGLang's
+// prefill/decode pair, which the kind rules no longer refuse.
 //
 // THE REFUSAL IS CHECKED BY WHICH RULE ANSWERED, not merely that an error came back. Two
 // instanceTypes also engage the barrier rule, and a case asserting only that something was refused
@@ -76,13 +76,28 @@ func TestModelDeploymentWebhook_CrossManufacturerIsAdmitted(t *testing.T) {
 			},
 		},
 		{
-			name:   "sglang_pd_is_refused_on_the_kind",
+			// SGLang renders the split as its own disaggregation arguments, so this pair is
+			// admitted where it used to be refused. The row is kept as the witness of that.
+			name:   "sglang_pd_is_admitted_on_the_kind",
 			engine: workercore.ModelDeploymentEngineSGLang,
 			roles: []workercore.ModelDeploymentRole{
 				pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", wholeCard()),
 				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "ascend-910c-8x", wholeCard()),
 			},
-			refuse: "has no rendering term for kind",
+		},
+		{
+			// THE POSITIVE BASELINE, which the row above used to be. It has to be a shape this
+			// fixture reaches through the same kind rules, and no engine is refused on a kind any
+			// more, so the refusal is the one a duplicate kind gets instead. Without a row that is
+			// actually refused, every acceptance above holds vacuously.
+			name:   "a_second_prefill_is_refused_on_the_kind",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			roles: []workercore.ModelDeploymentRole{
+				pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", wholeCard()),
+				pdRole("prefill-again", workercore.ModelDeploymentRoleKindPrefill,
+					"ascend-910c-8x", wholeCard()),
+			},
+			refuse: "is already declared by role",
 		},
 	}
 

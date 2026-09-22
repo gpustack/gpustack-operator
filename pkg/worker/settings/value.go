@@ -111,17 +111,26 @@ var (
 	// cluster can point them at its own registry, and so that a broken upstream release can be
 	// pinned back without rebuilding the operator.
 
-	// ModelDeploymentRouterImage is the endpoint picker a managed router runs when the object does
-	// not name one itself.
+	// ModelDeploymentRouterImage is the image a managed router runs when the object does not name
+	// one itself.
 	//
-	// The default is pinned to a release. Upstream publishes this under the tag `main`, which moves,
-	// and a moving tag would let two clusters installed months apart run different pickers against
-	// the one configuration this operator renders.
+	// ONE IMAGE CARRIES ALL THREE ROUTERS, and WHICH BINARY RUNS IS DECIDED BY THE RENDERED COMMAND
+	// rather than by this value. `spec.router.name` picks the binary; this setting only says where
+	// the binaries come from. A reader who expects one image per router would otherwise look for
+	// two settings that do not exist, and an air-gapped cluster would mirror three tags where one
+	// is enough.
+	//
+	// The default is pinned to a release of this project's own build. It is not an upstream tag: the
+	// three routers are compiled from three separate sources, one of them with a patch this
+	// repository carries, so there is no upstream image that holds them together. A moving tag would
+	// let two clusters installed months apart run different routers against the one configuration
+	// this operator renders.
 	ModelDeploymentRouterImage = settings.NewEditable(
 		"model-deployment-router-image",
-		"Indicates the endpoint picker image a managed router runs, "+
-			"when the ModelDeployment does not name one.",
-		setting.InitializeFromEnv("gpustack/mirrored-llm-d-router-endpoint-picker:v0.10.0"),
+		"Indicates the image a managed router runs, when the ModelDeployment does not name one. "+
+			"It carries every router this operator supports; the rendered command chooses which "+
+			"binary runs.",
+		setting.InitializeFromEnv("gpustack/llm-router:v0.1.0"),
 		setting.AllowContainerImageReference(),
 	)
 

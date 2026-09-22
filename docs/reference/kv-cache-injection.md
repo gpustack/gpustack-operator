@@ -159,6 +159,9 @@ rendered on the backend's member Pods only. On `TCP` that distinction costs noth
 `EFA`, an engine that is to move bytes over the fabric needs the same access on its own Pod, which
 this operator does not render today.
 
+The one exception is the Ascend prefill/decode leg, whose engine Pods mount a host driver
+tree read-only — see [Prefill and decode](model-deployment.md#prefill-and-decode).
+
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
 when the container has not spoken about them. A value you set yourself is left alone.
 

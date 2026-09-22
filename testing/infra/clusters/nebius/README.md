@@ -13,9 +13,9 @@ node groups, and point your local kubeconfig at it.
 - Creates a `nebius_mk8s_v1_cluster` with a public control-plane endpoint.
 - Creates a `cpu` `nebius_mk8s_v1_node_group` (shaped by `cpu_instance_types`,
   `cpu_node_count` nodes in it, and omitted altogether at `cpu_node_count = 0`),
-  plus one `gpu-<name>` group per `gpu_instance_types` key, one node each (every
-  node gets cloud-init injecting an SSH user + key, same idiom as
-  `computes/nebius`).
+  plus one `gpu-<name>` group per `gpu_instance_types` key, `gpu_node_count` nodes
+  in each and omitted altogether at `gpu_node_count = 0` (every node gets
+  cloud-init injecting an SSH user + key, same idiom as `computes/nebius`).
 - Gives each **GPU** group's nodes a public IPv4 so they can be reached over SSH
   (`public_ip`, default `true`); the CPU group takes none unless
   `cpu_instance_types.public_ip` asks for one. See
@@ -319,7 +319,8 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 | `node_boot_disk_size_gb` | Node boot disk size, in GiB, for every node group (per-group override: `boot_disk_size_gb` in `gpu_instance_types`) | `100` |
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
 | `cpu_instance_types` | Instance type for the CPU node group: `{platform, preset, os, public_ip (optional)}`. `public_ip` defaults to `false`; `true` gives the node an SSH-reachable public IPv4 at one public-address quota unit ([public addresses](#public-addresses)). | `{ platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }` |
-| `cpu_node_count` | Number of nodes in the CPU node group; GPU groups are one node each, so this is the module's only multi-node knob. `0` drops the CPU group entirely, which a region holding `compute.instance.non-gpu.vcpu` at zero requires. With `cpu_instance_types.public_ip`, costs one public-address quota unit per node ([public addresses](#public-addresses)) | `1` |
+| `cpu_node_count` | Number of nodes in the CPU node group. `0` drops the CPU group entirely, which a region holding `compute.instance.non-gpu.vcpu` at zero requires. With `cpu_instance_types.public_ip`, costs one public-address quota unit per node ([public addresses](#public-addresses)) | `1` |
+| `gpu_node_count` | Number of nodes in EACH GPU node group; `0` drops the GPU groups entirely. Adding a `gpu_instance_types` key and raising this are different purchases — a key buys a group with its own platform and preset, this buys more nodes of a shape a group already names — and accelerator quota is granted per platform and preset, so a count above one can be refused where a second key would not be. Same name, type and default as `clusters/eks`, but unlike there an edit DOES resize a group that already exists | `1` |
 | `gpu_instance_types` | GPU node groups keyed by group name (each becomes `gpu-<name>`): `{platform, preset, os (optional), drivers_preset (optional), preemptible (optional), mig (optional), public_ip (optional), boot_disk_size_gb (optional), infiniband_fabric (optional)}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; `preemptible` defaults to `false` ([preemptible nodes](#preemptible-nodes)); `mig` defaults to whether the platform supports MIG ([groups that cannot be partitioned](#groups-that-cannot-be-partitioned)); `public_ip` defaults to `true`, so the node is SSH-reachable, at one public-address quota unit per node ([public addresses](#public-addresses)); `boot_disk_size_gb` overrides `node_boot_disk_size_gb` for the group — set it (e.g. `400`) on groups that pull inference-engine images, which overflow the 100 GiB default into kubelet disk pressure; `infiniband_fabric` attaches the group to that fabric, which is what gives its nodes RDMA devices, and requires a preset whose `allow_gpu_clustering` is true ([InfiniBand fabrics](#infiniband-fabrics)). | `{ h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" } }` |
 | `switch_kube_context` | Let `get-credentials` leave this cluster current; `false` restores the previous context | `true` |
 
