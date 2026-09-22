@@ -80,6 +80,14 @@ type ModelDeploymentSpec struct {
 	// reason to refuse one. Several prefillers with several decoders is another. A rule admitting only
 	// one prefiller and one decoder would describe a pairer rather than this field.
 	//
+	// ON ASCEND HARDWARE THE PREFILL/DECODE TRANSFER LEG RENDERS BEHIND ONE ROUTER ALONE:
+	// "llm-d-router", whose decode proxy relays the per-request handshake the Ascend connector waits
+	// for. "vllm-router" drives a pair in a handshake vocabulary that connector rejects, so an Ascend
+	// pair behind it renders as two complete engines with no leg between them; "sglang-gateway" is
+	// refused in front of this engine before any of that applies. The no-leg shape is QUIET: the
+	// deployment goes Ready, requests answer normally, and the two roles never exchange a block --
+	// a correctly answering deployment is exactly what makes the missing leg hard to see.
+	//
 	// Absent means no router, and that stays a supported shape rather than a broken one: the roles are
 	// individually addressable through their own Services either way, so a deployment written before
 	// this field existed serves exactly as it did.
@@ -92,7 +100,8 @@ type ModelDeploymentSpec struct {
 	//
 	// THIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and
 	// both may be set at once. The gate that turns this leg on — every admitted router-and-engine
-	// pair, which never includes Ascend, and a role kind of prefill or decode — reads none of
+	// pair (on Ascend hardware, "llm-d-router" alone; Router above names each combination and what
+	// the quiet no-leg shape looks like) and a role kind of prefill or decode — reads none of
 	// spec.kvCache, and when both are set the two are synthesized into ONE connector and one
 	// --kv-transfer-config: a deployment may share a pool for its blocks AND hand them from prefill
 	// to decode directly, at the same time.
@@ -242,9 +251,11 @@ type ModelDeploymentKVTransfer struct {
 	//     the renderer rather than in this schema, so the stored object holds exactly what was
 	//     asked.
 	//   - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted
-	//     router-and-engine pair. On every other shape -- Ascend, or no managed router -- the
-	//     value is accepted and renders nothing, which is stated here because an accepted field
-	//     that silently does nothing is a promise broken quietly.
+	//     router-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind
+	//     "vllm-router" -- the value is accepted and renders nothing. An Ascend pair behind
+	//     "llm-d-router" renders the leg but not this value: that engine's transfer leg hardcodes
+	//     its transport, so the declared protocol has no key to land in. Each silence is stated
+	//     here because an accepted field that quietly does nothing is a promise broken quietly.
 	//   - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'
 	//     argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
 	//     across InstanceTypes the groups rebuild independently, and a mixed-protocol window

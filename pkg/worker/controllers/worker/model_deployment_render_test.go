@@ -263,13 +263,13 @@ func argValue(t *testing.T, args []string, flag string) string {
 }
 
 // TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine is called directly rather
-// than through the whole render because the sidecar path is gated on a managed vLLM pair today;
-// the gate is another change's to widen, and this case must not depend on it.
+// than through the whole render so the connector vocabulary is pinned per engine and per vendor
+// without standing up a pair.
 func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testing.T) {
 	t.Run("vllm speaks the mooncake handshake", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineVLLM, true)
+			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerNVIDIA)
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=mooncake")
 		assert.Contains(t, sidecar.Args,
@@ -282,10 +282,23 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 		}
 	})
 
+	t.Run("vllm on ascend relays through nixlv2", func(t *testing.T) {
+		sidecar := renderModelDeploymentRoutingSidecar(
+			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
+			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerAscend)
+
+		assert.Contains(t, sidecar.Args, "--kv-connector=nixlv2",
+			"the Ascend connector speaks the four-null-key handshake the nixlv2 mode relays")
+		for _, arg := range sidecar.Args {
+			assert.NotContains(t, arg, "mooncake",
+				"an Ascend pair has no bootstrap registry, so no mooncake flag may render")
+		}
+	})
+
 	t.Run("sglang speaks the sglang handshake", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineSGLang, true)
+			workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA)
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=sglang")
 		assert.NotContains(t, sidecar.Args, "mooncake",
@@ -323,6 +336,7 @@ func TestRenderModelDeploymentRoutingSidecar_SGLangBootstrapPortPairsWithThePref
 		MasterServerAddress: "shared-kv-master.gpustack-system.svc:50051",
 		Protocols:           []string{"tcp"},
 		Kind:                workercore.ModelDeploymentRoleKindPrefill,
+		Disaggregated:       true,
 		KVTransfer:          true,
 	})
 	require.NoError(t, err)
@@ -333,7 +347,7 @@ func TestRenderModelDeploymentRoutingSidecar_SGLangBootstrapPortPairsWithThePref
 
 	sidecar := renderModelDeploymentRoutingSidecar(
 		context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-		workercore.ModelDeploymentEngineSGLang, true)
+		workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA)
 	sidecarEnv := argEnvValue(t, sidecar.Env, "SGLANG_BOOTSTRAP_PORT")
 
 	assert.Equal(t, engineArg, sidecarEnv,

@@ -37,6 +37,14 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// reason to refuse one. Several prefillers with several decoders is another. A rule admitting only
 	// one prefiller and one decoder would describe a pairer rather than this field.
 	//
+	// ON ASCEND HARDWARE THE PREFILL/DECODE TRANSFER LEG RENDERS BEHIND ONE ROUTER ALONE:
+	// "llm-d-router", whose decode proxy relays the per-request handshake the Ascend connector waits
+	// for. "vllm-router" drives a pair in a handshake vocabulary that connector rejects, so an Ascend
+	// pair behind it renders as two complete engines with no leg between them; "sglang-gateway" is
+	// refused in front of this engine before any of that applies. The no-leg shape is QUIET: the
+	// deployment goes Ready, requests answer normally, and the two roles never exchange a block --
+	// a correctly answering deployment is exactly what makes the missing leg hard to see.
+	//
 	// Absent means no router, and that stays a supported shape rather than a broken one: the roles are
 	// individually addressable through their own Services either way, so a deployment written before
 	// this field existed serves exactly as it did.
@@ -46,7 +54,8 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	//
 	// THIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and
 	// both may be set at once. The gate that turns this leg on — every admitted router-and-engine
-	// pair, which never includes Ascend, and a role kind of prefill or decode — reads none of
+	// pair (on Ascend hardware, "llm-d-router" alone; Router above names each combination and what
+	// the quiet no-leg shape looks like) and a role kind of prefill or decode — reads none of
 	// spec.kvCache, and when both are set the two are synthesized into ONE connector and one
 	// --kv-transfer-config: a deployment may share a pool for its blocks AND hand them from prefill
 	// to decode directly, at the same time.

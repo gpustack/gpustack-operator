@@ -26,9 +26,11 @@ type ModelDeploymentKVTransferApplyConfiguration struct {
 	// the renderer rather than in this schema, so the stored object holds exactly what was
 	// asked.
 	// - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted
-	// router-and-engine pair. On every other shape -- Ascend, or no managed router -- the
-	// value is accepted and renders nothing, which is stated here because an accepted field
-	// that silently does nothing is a promise broken quietly.
+	// router-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind
+	// "vllm-router" -- the value is accepted and renders nothing. An Ascend pair behind
+	// "llm-d-router" renders the leg but not this value: that engine's transfer leg hardcodes
+	// its transport, so the declared protocol has no key to land in. Each silence is stated
+	// here because an accepted field that quietly does nothing is a promise broken quietly.
 	// - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'
 	// argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
 	// across InstanceTypes the groups rebuild independently, and a mixed-protocol window

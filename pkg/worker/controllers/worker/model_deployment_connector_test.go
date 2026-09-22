@@ -214,6 +214,9 @@ func connectorInputForKind(
 ) ModelDeploymentConnectorInput {
 	in := connectorInput(engine, manufacturer)
 	in.Kind = kind
+	// The fixture declares the pair, so the kind it names is a half OF a pair rather than a half of
+	// nothing -- the shape whose split this file asserts everywhere.
+	in.Disaggregated = true
 
 	return in
 }
@@ -372,8 +375,23 @@ func connectorPredicateDeployment(
 	})
 }
 
+// complementaryRole returns the other half of a prefill/decode pair. The second return is false
+// for a server role, which has no other half -- a row naming it never needs the append.
+func complementaryRole(kind workercore.ModelDeploymentRoleKind) (workercore.ModelDeploymentRole, bool) {
+	switch kind {
+	case workercore.ModelDeploymentRoleKindPrefill:
+		return workercore.ModelDeploymentRole{Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode}, true
+	case workercore.ModelDeploymentRoleKindDecode:
+		return workercore.ModelDeploymentRole{Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill}, true
+	default:
+		return workercore.ModelDeploymentRole{}, false
+	}
+}
+
 // TestModelDeploymentUsesKVTransfer pins the widening: the engine-side transfer leg follows EVERY
-// admitted router-and-engine pair, not one of them.
+// admitted router-and-engine pair, not one of them -- and it follows the PAIR, not the half: a
+// lone half is routed undivided by the router in front of it, and the engine side agrees rather
+// than starting a leg that waits on a counterpart nothing assigns.
 //
 // A prefiller that cannot hand a decoder its blocks is not disaggregated under any router, so the
 // leg is not a property of which router is in front. What IS per pair is the handshake, and the
@@ -387,7 +405,9 @@ func TestModelDeploymentUsesKVTransfer(t *testing.T) {
 		engine       string
 		kind         workercore.ModelDeploymentRoleKind
 		manufacturer string
-		want         bool
+		// lone names a row whose subject is one half of an undeclared pair.
+		lone bool
+		want bool
 	}{
 		{
 			name: "the picker in front of vllm", router: workercore.ModelDeploymentRouterLLMD,
@@ -423,18 +443,49 @@ func TestModelDeploymentUsesKVTransfer(t *testing.T) {
 			manufacturer: nodefeature.ManufacturerNVIDIA,
 		},
 		{
-			// The consequence the shared gate exists for: that render knows only the store
-			// connector and refuses a transfer leg, and a refused render is an error loop.
-			name:         "on Ascend, where the render refuses the leg",
+			// The Ascend pair the leg now renders for: the picker carries the decode proxy,
+			// which is the driver this connector's handshake is relayed by.
+			name:         "on Ascend under the picker",
 			router:       workercore.ModelDeploymentRouterLLMD,
 			engine:       workercore.ModelDeploymentEngineVLLM,
 			kind:         workercore.ModelDeploymentRoleKindPrefill,
+			manufacturer: nodefeature.ManufacturerAscend, want: true,
+		},
+		{
+			// The vLLM router drives its pairs itself and speaks a handshake vocabulary the
+			// Ascend connector rejects, so the pair keeps the shape Ascend always had: no leg
+			// rather than a dead one.
+			name:         "on Ascend under the vllm router",
+			router:       workercore.ModelDeploymentRouterVLLM,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			kind:         workercore.ModelDeploymentRoleKindPrefill,
 			manufacturer: nodefeature.ManufacturerAscend,
+		},
+		{
+			// The pair rule's own rows: one half of an undeclared pair runs no leg, because the
+			// router in front of it is routing it as the undivided shape already.
+			name: "a lone prefill under the vllm router", lone: true,
+			router:       workercore.ModelDeploymentRouterVLLM,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			kind:         workercore.ModelDeploymentRoleKindPrefill,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+		},
+		{
+			name: "a lone decode under the picker", lone: true,
+			router:       workercore.ModelDeploymentRouterLLMD,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			kind:         workercore.ModelDeploymentRoleKindDecode,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			md := connectorPredicateDeployment(c.router, c.engine, c.kind)
+			if other, half := complementaryRole(c.kind); half && !c.lone {
+				// The row's subject is a role OF A PAIR, so the complementary half is declared
+				// beside the kind the row names.
+				md.Spec.Roles = append(md.Spec.Roles, other)
+			}
 			assert.Equal(t, c.want,
 				modelDeploymentUsesKVTransfer(md, &md.Spec.Roles[0], c.manufacturer))
 		})
@@ -448,7 +499,7 @@ func TestModelDeploymentUsesKVTransfer(t *testing.T) {
 		"a half with nothing routing between the halves has nobody to pair with either")
 }
 
-// TestModelDeploymentFrontsDecodeWithSidecar pins the predicate that did NOT widen.
+// TestModelDeploymentFrontsDecodeWithSidecar pins the predicate that follows the router alone.
 //
 // The decode proxy reads the prefiller this request was assigned out of a header the picker writes,
 // and neither of the other two routers writes it. Deriving it from the transfer leg -- which is
@@ -488,7 +539,7 @@ func TestModelDeploymentFrontsDecodeWithSidecar(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			md := connectorPredicateDeployment(c.router, c.engine, c.kind)
 			assert.Equal(t, c.want, modelDeploymentFrontsDecodeWithSidecar(
-				md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+				md, &md.Spec.Roles[0]))
 		})
 	}
 }

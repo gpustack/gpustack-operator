@@ -480,6 +480,146 @@ func TestRender_VLLMKVTransferWithoutStore(t *testing.T) {
 	assert.Contains(t, envNames(result.Env), "VLLM_MOONCAKE_BOOTSTRAP_PORT")
 }
 
+// TestRender_VLLMAscendKVTransfer pins the Ascend leg's document: the connector the image's own
+// plugin registers, the port both halves must agree on, and the per-half parallel shapes the
+// connector asserts on at worker start. NO protocol key renders -- the Ascend transfer engine's
+// transport is hardcoded upstream, so a declared protocol has nowhere to land and is ignored.
+//
+// Both role containers also mount the host's driver tree read-only: the leg's transport reads
+// each NPU's NIC address through the hccn_tool that ships with it, and the engine image carries
+// the driver libraries but not the tool. The paths are asserted as LITERALS, not through the
+// package's constants -- they are the contract with the host's driver installation and the
+// engine image, and an assertion built from the constant under test would pass whatever the
+// constant held.
+func TestRender_VLLMAscendKVTransfer(t *testing.T) {
+	t.Run("prefill without a store", func(t *testing.T) {
+		result, err := Render(Input{
+			Engine: EngineVLLMAscend, Role: RolePrefill, KVTransfer: true,
+		})
+		require.NoError(t, err)
+		require.Len(t, result.Args, 2)
+		assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+		assert.JSONEq(t, `{
+			"kv_connector":"MooncakeConnectorV1",
+			"kv_role":"kv_producer",
+			"kv_port":8998,
+			"kv_connector_extra_config":{
+				"prefill":{"tp_size":1,"dp_size":1},
+				"decode":{"tp_size":1,"dp_size":1}}
+		}`, result.Args[1])
+		assert.True(t, result.KVTransfer)
+		assert.NotContains(t, envNames(result.Env), "VLLM_MOONCAKE_BOOTSTRAP_PORT",
+			"the variable is vLLM proper's; the Ascend connector takes the port from the document")
+		assert.Contains(t, result.Ports, core.ContainerPort{
+			Name: "mc-bootstrap", Protocol: core.ProtocolTCP, ContainerPort: VLLMMooncakeBootstrapPort,
+		}, "the prefiller declares the port its side channel listens on")
+
+		require.Len(t, result.Volumes, 1)
+		volume := result.Volumes[0]
+		assert.Equal(t, "gpustack-ascend-driver", volume.Name)
+		require.NotNil(t, volume.HostPath)
+		assert.Equal(t, "/usr/local/Ascend/driver", volume.HostPath.Path)
+		require.NotNil(t, volume.HostPath.Type)
+		assert.Equal(t, core.HostPathDirectory, *volume.HostPath.Type,
+			"a host missing the driver fails volume setup by name, a deploy-time signal")
+		assert.Equal(t, []core.VolumeMount{
+			{Name: "gpustack-ascend-driver", MountPath: "/usr/local/Ascend/driver", ReadOnly: true},
+		}, result.VolumeMounts)
+	})
+
+	t.Run("decode without a store", func(t *testing.T) {
+		result, err := Render(Input{
+			Engine: EngineVLLMAscend, Role: RoleDecode, KVTransfer: true, KVTransferProtocol: "rdma",
+		})
+		require.NoError(t, err)
+		require.Len(t, result.Args, 2)
+		assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+		// The declared protocol is deliberately ABSENT: it names a transport this engine's
+		// transfer leg does not offer a key for, so rendering it would claim a wiring that is
+		// not happening.
+		assert.JSONEq(t, `{
+			"kv_connector":"MooncakeConnectorV1",
+			"kv_role":"kv_consumer",
+			"kv_port":8998,
+			"kv_connector_extra_config":{
+				"prefill":{"tp_size":1,"dp_size":1},
+				"decode":{"tp_size":1,"dp_size":1}}
+		}`, result.Args[1])
+		assert.Empty(t, result.Ports, "a consumer dials the prefiller's advertised port and binds none")
+		assert.Empty(t, result.Env)
+
+		require.Len(t, result.Volumes, 1)
+		volume := result.Volumes[0]
+		assert.Equal(t, "gpustack-ascend-driver", volume.Name)
+		require.NotNil(t, volume.HostPath)
+		assert.Equal(t, "/usr/local/Ascend/driver", volume.HostPath.Path)
+		require.NotNil(t, volume.HostPath.Type)
+		assert.Equal(t, core.HostPathDirectory, *volume.HostPath.Type)
+		assert.Equal(t, []core.VolumeMount{
+			{Name: "gpustack-ascend-driver", MountPath: "/usr/local/Ascend/driver", ReadOnly: true},
+		}, result.VolumeMounts, "the consumer resolves addresses the same way the producer does")
+	})
+
+	t.Run("a store composes beside the leg", func(t *testing.T) {
+		conn := testConnection()
+		conn.Protocol = "ascend"
+		result, err := Render(Input{
+			Engine: EngineVLLMAscend, Role: RolePrefill, Connection: conn, KVTransfer: true,
+		})
+		require.NoError(t, err)
+		require.Len(t, result.Args, 2)
+		assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+		assert.JSONEq(t, `{
+			"kv_connector":"MultiConnector",
+			"kv_role":"kv_producer",
+			"kv_connector_extra_config":{"connectors":[
+				{"kv_connector":"MooncakeConnectorV1","kv_role":"kv_producer","kv_port":8998,
+				 "kv_connector_extra_config":{
+					"prefill":{"tp_size":1,"dp_size":1},
+					"decode":{"tp_size":1,"dp_size":1}}},
+				{"kv_connector":"AscendStoreConnector","kv_role":"kv_both"}
+			]}
+		}`, result.Args[1])
+
+		require.Len(t, result.Volumes, 2, "the store's file projection and the leg's mount compose")
+		assert.NotNil(t, result.Volumes[0].DownwardAPI, "the store's own volume comes first")
+		require.NotNil(t, result.Volumes[1].HostPath)
+		assert.Equal(t, "/usr/local/Ascend/driver", result.Volumes[1].HostPath.Path)
+		require.Len(t, result.VolumeMounts, 2)
+		assert.Equal(t, "/usr/local/Ascend/driver", result.VolumeMounts[1].MountPath)
+		assert.True(t, result.VolumeMounts[1].ReadOnly)
+	})
+}
+
+// TestRender_AscendDriverMountFollowsTheTransferLeg pins the negative half of the mount's
+// condition: it is bound to the Ascend transfer leg alone, so an Ascend deployment without the
+// leg -- and another vendor's leg -- renders no host path. The positive half lives in
+// TestRender_VLLMAscendKVTransfer; asserting only that half could not distinguish the condition
+// from "every Ascend render mounts the driver tree".
+func TestRender_AscendDriverMountFollowsTheTransferLeg(t *testing.T) {
+	t.Run("ascend with a store but no transfer leg", func(t *testing.T) {
+		conn := testConnection()
+		conn.Protocol = "ascend"
+		result, err := Render(Input{Engine: EngineVLLMAscend, Role: RolePrefill, Connection: conn})
+		require.NoError(t, err)
+		require.NotEmpty(t, result.Volumes, "the store leg still renders its own volume")
+		for i := range result.Volumes {
+			assert.Nil(t, result.Volumes[i].HostPath,
+				"volume %q: no host path without the transfer leg", result.Volumes[i].Name)
+		}
+		for i := range result.VolumeMounts {
+			assert.NotEqual(t, "/usr/local/Ascend/driver", result.VolumeMounts[i].MountPath)
+		}
+	})
+
+	t.Run("vllm proper's transfer leg", func(t *testing.T) {
+		result, err := Render(Input{Engine: EngineVLLM, Role: RolePrefill, KVTransfer: true})
+		require.NoError(t, err)
+		assert.Empty(t, result.Volumes, "a vendor whose leg needs no host path mounts none")
+		assert.Empty(t, result.VolumeMounts)
+	})
+}
+
 // TestRender_KVTransferProtocolIsNotTheMembers pins the split between the two data planes one
 // backend feeds. The STORE plane keeps following the backend's transport; the direct
 // prefill-to-decode leg does not read it, because it is engine to engine and never traverses the
@@ -773,9 +913,10 @@ func TestRender_TransferLegAndEventsFollowTheEngine(t *testing.T) {
 			wantErr: "moves nothing",
 		},
 		{
-			name:   "vllm-ascend cannot render direct transfer",
-			engine: EngineVLLMAscend, role: RolePrefill, direct: true,
-			wantErr: "moves nothing",
+			// The Ascend leg renders now: the connector it names is registered by the engine
+			// image's own plugin, and the decode proxy relays its handshake.
+			name:   "vllm-ascend renders direct transfer",
+			engine: EngineVLLMAscend, role: RolePrefill, direct: true, accepted: true,
 		},
 		{
 			name: "vllm renders both", engine: EngineVLLM, role: RolePrefill,

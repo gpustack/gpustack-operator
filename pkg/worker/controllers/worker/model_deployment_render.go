@@ -19,6 +19,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
@@ -358,11 +359,12 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		gradable   bool
 		enginePort = modelDeploymentServicePort(role).ContainerPort
 	)
-	// READ OFF THE PROXY'S OWN FLAG, not off the transfer leg. Every admitted router-and-engine
-	// pair carries a transfer leg, and only one of them fronts its decoder with a proxy; deriving
-	// this from the leg would put that router's proxy on the other two, where it would wait on a
-	// header nothing writes. The kind is still checked here because the flag is set per role and
-	// this is where the port it takes is moved.
+	// READ OFF THE PROXY'S OWN FLAG, not off the transfer leg. A transfer leg renders under every
+	// admitted router-and-engine pair but one -- an Ascend pair under "vllm-router" has none --
+	// and only one router fronts its decoder with a proxy; deriving this from the leg would put
+	// that router's proxy on the other two, where it would wait on a header nothing writes. The
+	// kind is still checked here because the flag is set per role and this is where the port it
+	// takes is moved.
 	directDecode := !takeOver && in.Connector.RoutingSidecar &&
 		ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindDecode
 	if directDecode {
@@ -475,7 +477,8 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	}
 	if directDecode {
 		sidecar := renderModelDeploymentRoutingSidecar(
-			ctx, role, enginePort, scheme, md.Spec.Engine.Name, in.NativeSidecar)
+			ctx, role, enginePort, scheme, md.Spec.Engine.Name, in.NativeSidecar,
+			in.InstanceType.Status.Detail.Manufacturer)
 		if in.NativeSidecar {
 			pod.Spec.InitContainers = []core.Container{sidecar}
 		} else {
@@ -666,9 +669,9 @@ func modelDeploymentCommandPort(command []string) (int32, error) {
 }
 
 // renderModelDeploymentRoutingSidecar builds the decode Pod's routing proxy. Which handshake it
-// speaks follows the ENGINE, because the connector is how the sidecar asks the prefiller's
-// bootstrap registry for transfer endpoints and each engine serves a different one: the value
-// names a connector the sidecar dispatches on, not a flavor of one protocol.
+// speaks follows the ENGINE and the pool's vendor, because the connector is how the sidecar asks
+// the prefiller's bootstrap registry for transfer endpoints and each engine serves a different
+// one: the value names a connector the sidecar dispatches on, not a flavor of one protocol.
 //
 // THE BOOTSTRAP PORT IS ONE VALUE WRITTEN AT BOTH ENDS. The prefiller names it in its own launch
 // argument, rendered by the inject package from its constant, and the sidecar reads it here. Under
@@ -677,10 +680,17 @@ func modelDeploymentCommandPort(command []string) (int32, error) {
 // SGLANG_BOOTSTRAP_PORT environment variable (llm-d/llm-d-router@v0.10.0
 // `pkg/sidecar/proxy/connector_sglang.go:38-50`). Both ends read the same constant, so a pair
 // cannot disagree about where the registry lives.
+//
+// ASCEND GETS NO PORT FLAG, because its pair has no registry to point at: the vLLM-Ascend
+// connector hands the decoder the prefiller's host and port inside the per-request
+// kv_transfer_params, and the sidecar's nixlv2 mode relays exactly that document
+// (llm-d/llm-d-router@v0.10.0 `pkg/sidecar/proxy/connector_nixlv2.go:162-170,405`). The connector
+// value is the sidecar's own constant vocabulary (`pkg/sidecar/constants/constants.go:21`,
+// KVConnectorNIXLV2), spelled here rather than derived from anything the engine names.
 func renderModelDeploymentRoutingSidecar(
 	ctx context.Context,
 	role *workercore.ModelDeploymentRole, enginePort int32, engineScheme core.URIScheme,
-	engine string, native bool,
+	engine string, native bool, manufacturer string,
 ) core.Container {
 	externalPort := modelDeploymentServicePort(role)
 	args := []string{
@@ -693,16 +703,16 @@ func renderModelDeploymentRoutingSidecar(
 			FieldPath: "status.podIP",
 		}},
 	}}
-	// The connector value is the sidecar's own constant vocabulary (llm-d/llm-d-router@v0.10.0
-	// `pkg/sidecar/constants/constants.go`, KVConnectorSGLang beside KVConnectorMooncake), so it
-	// is spelled here rather than derived from anything the engine names.
-	if engine == workercore.ModelDeploymentEngineSGLang {
+	switch {
+	case engine == workercore.ModelDeploymentEngineSGLang:
 		args = append(args, "--kv-connector=sglang")
 		env = append(env, core.EnvVar{
 			Name:  "SGLANG_BOOTSTRAP_PORT",
 			Value: strconv.Itoa(int(inject.SGLangBootstrapPort)),
 		})
-	} else {
+	case manufacturer == nodefeature.ManufacturerAscend:
+		args = append(args, "--kv-connector=nixlv2")
+	default:
 		args = append(args,
 			"--kv-connector=mooncake",
 			fmt.Sprintf("--mooncake-bootstrap-port=%d", inject.VLLMMooncakeBootstrapPort))

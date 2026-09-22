@@ -69,6 +69,25 @@ const (
 	// The connector name does not imply anything about tenant support; that belongs to the engine
 	// image and is not a selection criterion here.
 	vllmAscendStoreConnector = "AscendStoreConnector"
+
+	// vllmAscendTransferConnector is the name vLLM-Ascend registers for its point-to-point
+	// connector (`vllm_ascend/distributed/kv_transfer/__init__.py:29-31`, read at v0.23.0), loaded
+	// through the project's `ascend_kv_connector` entry point rather than named by path.
+	//
+	// It is NOT the connector vLLM proper registers under the same purpose: the two speak different
+	// handshake vocabularies over kv_transfer_params -- proper's MooncakeConnector wants a
+	// transfer_id and a bootstrap address, while this one wants the prefiller's host, port, block
+	// ids and engine id, which is why a router that proxies between them must match the engine.
+	vllmAscendTransferConnector = "MooncakeConnectorV1"
+
+	// vllmAscendDriverPath is the host driver tree the Ascend transfer leg reads each NPU's NIC
+	// address through: hccn_tool ships under it, while the engine image carries the driver
+	// libraries but not the tool. Host source and container mount point are one path, which is
+	// where the image's own driver stubs sit.
+	vllmAscendDriverPath = "/usr/local/Ascend/driver"
+
+	// vllmAscendDriverVolumeName names the projection of that tree on a Pod.
+	vllmAscendDriverVolumeName = "gpustack-ascend-driver"
 )
 
 // vllmConnectorFor returns the connector name the given engine's own factory can resolve.
@@ -123,12 +142,26 @@ func vllmKVRole(role Role) (string, error) {
 type vllmTransferConfig struct {
 	KVConnector            string                    `json:"kv_connector"`
 	KVRole                 string                    `json:"kv_role"`
+	KVPort                 int32                     `json:"kv_port,omitempty"`
 	KVConnectorExtraConfig *vllmConnectorExtraConfig `json:"kv_connector_extra_config,omitempty"`
 }
 
 type vllmConnectorExtraConfig struct {
 	Connectors       []vllmTransferConfig `json:"connectors,omitempty"`
 	MooncakeProtocol string               `json:"mooncake_protocol,omitempty"`
+	Prefill          *vllmRoleParallelism `json:"prefill,omitempty"`
+	Decode           *vllmRoleParallelism `json:"decode,omitempty"`
+}
+
+// vllmRoleParallelism is the per-half parallel shape vLLM-Ascend's point-to-point connector
+// ASSERTS on at worker start (`vllm_ascend/distributed/kv_transfer/kv_p2p/mooncake_connector.py:2066-2084`,
+// read at v0.23.0): a missing tp_size or dp_size under either key crashes the engine, and the
+// prefill value must be at least the decode one. The operator renders no parallelism flag, so an
+// engine it configured runs one device per Pod and the honest value is one; a role widened by
+// hand through ExtraArgs makes this wrong, which is a stated limit of the Ascend leg.
+type vllmRoleParallelism struct {
+	TPSize int `json:"tp_size"`
+	DPSize int `json:"dp_size"`
 }
 
 type vllmKVEventsConfig struct {
@@ -159,6 +192,9 @@ func renderVLLM(in Input) (*Result, error) {
 	// unreadable key is a compile error. Key order is not part of the contract - JSON defines none -
 	// so anything comparing this must decode it rather than match the string.
 	var transferConfigValue *vllmTransferConfig
+	// The per-vendor leg arms below also fill what the leg itself needs mounted on the Pod.
+	var legVolumes []core.Volume
+	var legVolumeMounts []core.VolumeMount
 	if hasStore {
 		connector, err := vllmConnectorFor(in.Engine)
 		if err != nil {
@@ -167,26 +203,75 @@ func renderVLLM(in Input) (*Result, error) {
 		transferConfigValue = &vllmTransferConfig{KVConnector: connector, KVRole: kvRole}
 	}
 	if in.KVTransfer {
-		if in.Engine != EngineVLLM || (in.Role != RolePrefill && in.Role != RoleDecode) {
+		native := in.Engine == EngineVLLM
+		if (!native && in.Engine != EngineVLLMAscend) || (in.Role != RolePrefill && in.Role != RoleDecode) {
 			return nil, newRefusal(ReasonRoleUnsupported,
 				"point-to-point transfer requires a native vLLM prefill or decode role")
 		}
-		// This value is NOT gated, on purpose. The accepted set is a property of the mooncake
-		// build inside the engine's own image, which this operator neither ships nor can
-		// inspect: a HIP-compiled build makes "hip" a working point-to-point transport, and
-		// refusing it here would hard-code one image's compile set onto another image's
-		// connector. checkTransport documents the same rule from the other side -- an
-		// unmeasured pair is let through, because a refusal on a fact nobody read turns a
-		// working engine into a broken one. A mismatch therefore still raises at startup, in
-		// the container that owns the fact. The rule binds the declared value and the default
-		// alike.
-		protocol := vllmKVTransferProtocol
-		if in.KVTransferProtocol != "" {
-			protocol = in.KVTransferProtocol
-		}
-		direct := vllmTransferConfig{
-			KVConnector: "MooncakeConnector", KVRole: kvRole,
-			KVConnectorExtraConfig: &vllmConnectorExtraConfig{MooncakeProtocol: protocol},
+		var direct vllmTransferConfig
+		if native {
+			// This value is NOT gated, on purpose. The accepted set is a property of the mooncake
+			// build inside the engine's own image, which this operator neither ships nor can
+			// inspect: a HIP-compiled build makes "hip" a working point-to-point transport, and
+			// refusing it here would hard-code one image's compile set onto another image's
+			// connector. checkTransport documents the same rule from the other side -- an
+			// unmeasured pair is let through, because a refusal on a fact nobody read turns a
+			// working engine into a broken one. A mismatch therefore still raises at startup, in
+			// the container that owns the fact. The rule binds the declared value and the default
+			// alike.
+			protocol := vllmKVTransferProtocol
+			if in.KVTransferProtocol != "" {
+				protocol = in.KVTransferProtocol
+			}
+			direct = vllmTransferConfig{
+				KVConnector: "MooncakeConnector", KVRole: kvRole,
+				KVConnectorExtraConfig: &vllmConnectorExtraConfig{MooncakeProtocol: protocol},
+			}
+		} else {
+			// The Ascend leg renders NO protocol key: its transfer engine is initialized with
+			// the literal "ascend" (`vllm_ascend/distributed/kv_transfer/utils/mooncake_transfer_engine.py:26`,
+			// read at v0.23.0), so spec.kvTransfer.protocol has no key to land in here and is
+			// ignored rather than refused -- admission cannot know the pool's vendor, and a
+			// refusal past admission is an error loop.
+			//
+			// kv_port is the one value both halves MUST agree on, and the agreement is structural:
+			// the prefiller advertises its side channel as an OFFSET from the consumer's own
+			// kv_port (`kv_p2p/mooncake_connector.py:1936-1945`), so two different values send
+			// the decoder dialing ports nothing listens on. VLLMMooncakeBootstrapPort is that one
+			// value; admission already reserves it on a routed prefiller of either vendor.
+			direct = vllmTransferConfig{
+				KVConnector: vllmAscendTransferConnector,
+				KVRole:      kvRole,
+				KVPort:      VLLMMooncakeBootstrapPort,
+				KVConnectorExtraConfig: &vllmConnectorExtraConfig{
+					Prefill: &vllmRoleParallelism{TPSize: 1, DPSize: 1},
+					Decode:  &vllmRoleParallelism{TPSize: 1, DPSize: 1},
+				},
+			}
+			// Both role containers mount the host driver tree, read-only. The leg's transport
+			// builds Device RoCE endpoints and reads each NPU's NIC address through hccn_tool,
+			// which ships with the driver -- the engine image carries the driver libraries but
+			// not the tool, and with neither source reachable the engine dies at startup with
+			// "Failed to get device ip from hccn.conf and hccn_tool". Reading /etc/hccn.conf
+			// works too, but only on a host that keeps the file, while the tool answers from
+			// the driver on every host that has one, so the tree is the one mount that covers
+			// both. The driver belongs to the host on every Ascend containerization path --
+			// the image supplies the toolkit -- so the mount shadows nothing a container ships
+			// with. It renders only alongside the transfer leg: projecting host paths into a
+			// tenant-adjacent workload has a far larger blast radius than a cluster-scoped
+			// DaemonSet, so it follows the capability that needs it rather than the vendor.
+			// The Directory type turns a host missing the driver into a volume setup error
+			// naming the path, a deploy-time signal instead of a startup failure.
+			hostPathDirectory := core.HostPathDirectory
+			legVolumes = append(legVolumes, core.Volume{
+				Name: vllmAscendDriverVolumeName,
+				VolumeSource: core.VolumeSource{
+					HostPath: &core.HostPathVolumeSource{Path: vllmAscendDriverPath, Type: &hostPathDirectory},
+				},
+			})
+			legVolumeMounts = append(legVolumeMounts, core.VolumeMount{
+				Name: vllmAscendDriverVolumeName, MountPath: vllmAscendDriverPath, ReadOnly: true,
+			})
 		}
 		if !hasStore {
 			// The decode arm renders only the role and the protocol: the bootstrap address is
@@ -248,6 +333,10 @@ func renderVLLM(in Input) (*Result, error) {
 			ClientConfigAnnotationKey: string(config),
 		}
 	}
+	// Appended AFTER the store block, which assigns both slices: a pool-backed pair needs its
+	// client configuration volume and the leg's mounts side by side.
+	result.Volumes = append(result.Volumes, legVolumes...)
+	result.VolumeMounts = append(result.VolumeMounts, legVolumeMounts...)
 	if transferConfigValue != nil {
 		transferDoc, err := json.Marshal(transferConfigValue)
 		if err != nil {
@@ -256,9 +345,16 @@ func renderVLLM(in Input) (*Result, error) {
 		result.Args = append(result.Args, vllmTransferConfigArg, string(transferDoc))
 	}
 	if in.KVTransfer && in.Role == RolePrefill {
-		result.Env = append(result.Env, core.EnvVar{
-			Name: "VLLM_MOONCAKE_BOOTSTRAP_PORT", Value: fmt.Sprint(VLLMMooncakeBootstrapPort),
-		})
+		// The port is declared on either vendor: it is where the prefiller's handshake listener
+		// sits, and the admission reservation that keeps a user's own port off it is
+		// vendor-blind. The variable is vLLM proper's alone -- its connector reads the bootstrap
+		// port from the environment, while vLLM-Ascend's takes it from the kv_port in the
+		// document above and would never look here.
+		if in.Engine == EngineVLLM {
+			result.Env = append(result.Env, core.EnvVar{
+				Name: "VLLM_MOONCAKE_BOOTSTRAP_PORT", Value: fmt.Sprint(VLLMMooncakeBootstrapPort),
+			})
+		}
 		result.Ports = append(result.Ports, core.ContainerPort{
 			Name: "mc-bootstrap", Protocol: core.ProtocolTCP,
 			ContainerPort: VLLMMooncakeBootstrapPort,

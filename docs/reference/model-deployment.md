@@ -178,8 +178,34 @@ makes the pair work.
 In both shapes the decode Pod runs llm-d's routing proxy as a restartable sidecar; it executes the
 prefill leg named by the router and then forwards the request to the decoder.
 
-SGLang has no P/D role rendering, and the Ascend connector has a different runtime-selected
-transport contract, so neither is presented as this native vLLM path.
+On **Ascend** the same two shapes render with that platform's own connector names —
+`MooncakeConnectorV1` for the leg and `AscendStoreConnector` for the pool — and the sidecar relays
+the handshake in its `nixlv2` mode, the one whose per-request document matches what that connector
+waits for.
+
+That is the ONE router combination that renders the leg on Ascend. Behind `vllm-router` an Ascend
+pair renders no leg — that router drives its pairs in a handshake vocabulary the Ascend connector
+rejects — and behind no router nothing pairs the roles at all. The missing leg is quiet: the
+deployment goes Ready, every request is answered normally, and the two roles never exchange a
+block — a correctly answering deployment is exactly what makes it hard to see.
+
+Both role containers then mount the host's `/usr/local/Ascend/driver` tree read-only — the leg's
+transport builds Device RoCE endpoints and reads each NPU's NIC address through the `hccn_tool`
+that ships with the driver, while the engine image carries the driver libraries but not the tool.
+
+Without the mount the leg renders but the engine dies at startup, unable to resolve a device IP; a
+node with no driver installation fails the Pod's volume setup instead, naming the path. Reading
+`/etc/hccn.conf` would work too, but only on a host that keeps that file, while the tool answers
+from the driver on every host that has one. The mount ships with the transfer leg alone — an
+Ascend deployment without one carries no host path.
+
+The leg renders both halves' parallel sizes as `1/1`, the one shape the operator composes — it
+renders no parallelism flag — and the connector asserts those sizes at startup, so a role widened
+by hand through `extraArgs` is outside what this renders for.
+
+SGLang renders its halves through the engine's own disaggregation arguments rather than this
+connector path; the two engines' legs differ by [their handshake](#the-direct-transfers-transport)
+alone.
 
 ### Two ways to configure a pair
 
@@ -198,7 +224,7 @@ metadata:
 spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct
-  engine:                                # the native P/D path is vLLM only
+  engine:                                # vllm | sglang; this example walks the vLLM pair
     name: vllm
     version: "0.27.1"
   router:
@@ -346,16 +372,18 @@ operator passes the value through verbatim, and a value the build rejects fails 
 startup.
 
 It is read on the direct-transfer leg, which every **admitted router-and-engine pair** renders on its
-`prefill` and `decode` roles off Ascend — a prefiller that cannot hand a decoder its blocks is not
-disaggregated under any router. What differs per pair is the handshake, not whether there is a leg:
-Mooncake's bootstrap server under native vLLM, SGLang's own registry under SGLang. On every other
-shape the field is accepted and renders nothing.
+`prefill` and `decode` roles — a prefiller that cannot hand a decoder its blocks is not
+disaggregated under any router. On every other shape the field is accepted and renders nothing.
 
-On Ascend the field has no consumer even beyond that gate: vllm-ascend's point-to-point connectors
-(its own family — `MooncakeConnectorV1`, not the native name) initialize their transfer engine with
-the protocol **hardcoded** to `ascend`, read from nothing (upstream `mooncake_transfer_engine.py`,
-verified at v0.23.0 and v0.26.0rc1 — upstream state, not a contract, and it may change). A declared
-value could only become meaningful there if upstream makes the protocol configurable.
+What differs per pair is the handshake, not whether there is a leg: Mooncake's bootstrap server
+under native vLLM, SGLang's own registry under SGLang, and on Ascend the decode sidecar's relay —
+[the one router combination that renders a leg there](#prefill-and-decode).
+
+On Ascend the field has no consumer even where the leg renders: vllm-ascend's point-to-point
+connectors initialize their transfer engine with the protocol **hardcoded** to `ascend`, read from
+nothing (upstream `mooncake_transfer_engine.py`, verified at v0.23.0 and v0.26.0rc1 — upstream
+state, not a contract), so a declared value is accepted and ignored unless upstream makes the
+protocol configurable.
 
 It is also **not** the pool's transport. `KVCacheBackend.spec.transport` defines the data plane the
 store members run and feeds the engine's store client; this leg is engine to engine and never
@@ -427,10 +455,13 @@ This limit governs the shared pool alone: [a pair needs no shared pool to hand b
 over](#prefill-and-decode).
 
 **The direct transfer across manufacturers follows a different rule — not "two manufacturers",
-but "is either half Ascend".** It is rendered per role, and the render excludes Ascend
-(`modelDeploymentUsesKVTransfer`): an Ascend half renders without it while the other half
-renders with it, and the transfer never forms. Two non-Ascend roles both render it — NVIDIA and
-AMD, say — and what the engines then do is upstream's answer, unmeasured here.
+but the router in front.** The leg renders per role, and on Ascend [only one router combination
+carries it](#prefill-and-decode).
+
+A mixed pair never forms a transfer either way: the two sides' connectors speak different handshake
+vocabularies, so a relayed document from one names nothing the other reads. Two non-Ascend roles
+both render it — NVIDIA and AMD, say — and what the engines then do is upstream's answer,
+unmeasured here.
 
 [Kueue assigns a ResourceFlavor per
 PodSet](../architecture/scheduling-chain.md#stage-4-the-kueue-chain), so a role still takes whatever
