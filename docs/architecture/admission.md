@@ -257,6 +257,10 @@ A second mutating webhook on Pods writes the client configuration an inference e
   appended arguments become shell positional parameters and never reach the engine.
 - The injected record includes `launchProgram` and `launchArgsForwarded`, so a JSONPath query can show
   the resolved executable and whether that author declaration admitted the launch.
+- A pool whose member groups offer two or more transports is refused for an engine that declares no
+  required transport, because such an engine is configured with one transport and reads a block from
+  any group. The `ModelDeployment` validating webhook refuses the same binding for the same reason,
+  since its own engine resolution happens there rather than on the Pod.
 
 ## Update validation while an object is deleted
 
@@ -278,7 +282,7 @@ it answers for having moved, which a finalizer edit does not do.
 | `KVCachePoolBinding` | yes | its pool read is gated on the quota ceiling having moved |
 | `KVCacheBackend` | yes | it reads the fallback-image setting only when `spec.image` moved |
 | `KVCachePool`, `InstanceType` | yes | every rule is answered from the old and new objects alone |
-| `ModelDeployment` | yes | its validation is answered that way, and its **defaulting** declines for an object carrying a deletion timestamp rather than keeping the guard |
+| `ModelDeployment` | yes | every external read its validation makes is skipped for a deleting object, and its **defaulting** declines for one rather than keeping the guard |
 | `PodKVCache` | yes | a terminating Pod still serves, and the kubelet still reprojects its client configuration |
 | `Instance` | **no** | its **defaulting** reads the referenced `InstanceType` and refuses when it is gone |
 | `Pod` (accelerator) | not applicable | registered for CREATE only, and a create carries no deletion timestamp |
