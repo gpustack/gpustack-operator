@@ -142,10 +142,15 @@ This release creates fresh TAS queues and supports changes to the ordered level 
 profile. A change such as region → zone → rack creates replacement Topologies and ResourceFlavors;
 the managed ClusterQueue keeps its name and UID.
 
-`NodeQueueReconciler` sets `HoldAndDrain`, waits for Kueue to report zero reserving Workloads,
-switches the complete flavor plan, and restores the queue's previous stop policy. Kueue owns
-eviction and readmission; serving workloads can be interrupted. Old flavors and Topologies retire
-after their references clear.
+When the new plan drops a flavor that Kueue still reports reservation or usage on, or does not
+report at all, `NodeQueueReconciler` sets `HoldAndDrain`, waits for Kueue to report zero reserving
+Workloads, switches the complete flavor plan, and restores the queue's previous stop policy. Kueue
+owns eviction and readmission; serving workloads can be interrupted.
+
+A dropped flavor that Kueue reports idle, an added flavor, or a quota-only change is updated in
+place without a hold. The decision reads only a queue status Kueue wrote for the current generation;
+until then the queue reports `TopologyReady=Unknown` with reason `AwaitingQueueStatus`. Old flavors
+and Topologies retire after their references clear.
 
 Generated Kueue Topology and ResourceFlavor topology fields are immutable. GPUStack reports drift
 instead of modifying them. Queues created by a previously published version are not adopted or
@@ -157,6 +162,7 @@ upgraded by this path; create fresh managed objects for this release.
 |---|---|---|
 | `TopologySource` `Ready=False` | Its `Valid` and `OwnershipConflict` conditions | The inventory is invalid, stale, expired, or contends with another writer |
 | ClusterQueue `TopologyReady=False` | Condition reason and referenced flavors/Topologies | A flavor is missing TAS metadata, selectors overlap, quota is not conserved, or the flavor limit was exceeded |
+| ClusterQueue `TopologyReady=Unknown`, reason `AwaitingQueueStatus` | The queue's Kueue `Active` condition and the Kueue controller | Kueue has not written the queue status for the current generation, so dropping a flavor waits for it |
 | ModelDeployment remains Pending | Its progress message and generated Workload conditions | No one domain at the required level fits the complete PodSet |
 | Aggregate quota looks sufficient | Flavor profiles and Workload topology assignment | The request cannot combine capacity from different profiles or domains |
 

@@ -83,7 +83,8 @@ semantics.
   not inferred from the supported live-profile transition below.
 - Zero-disruption admission while Nodes change topology profile. The operator preserves the managed
   ClusterQueue's identity and converges its flavor references in place, but it deliberately uses
-  Kueue `HoldAndDrain` to evict and drain reservations before removing an old flavor.
+  Kueue `HoldAndDrain` to evict and drain reservations before removing an old flavor that may
+  still hold quota.
 
 ## Proposal
 
@@ -275,15 +276,23 @@ operator-managed ClusterQueue's name and UID:
 2. Create every missing immutable Kueue Topology and profile-qualified ResourceFlavor required by
    that plan. Existing ClusterQueue references remain unchanged while any dependency is absent or
    invalid.
-3. Set the ClusterQueue's stop policy to Kueue `HoldAndDrain` before every flavor-reference switch,
-   then wait until the observed `status.reservingWorkloads` is zero. Holding even an empty queue
-   closes the race in which a new reservation could be admitted between a zero check and the switch.
-   Removing a flavor from a ClusterQueue does not itself evict an already admitted Workload, so this
-   drain is REQUIRED before switching references. The ClusterQueue name and UID remain unchanged
-   while draining.
-4. Update the existing ClusterQueue's `spec.resourceGroups` to the complete desired plan while it is
-   held. This is one API update against the same object; the queue MUST NOT expose a partially
-   assembled mix caused by incrementally appending flavors. Record the exact pre-migration stop
+3. Set the ClusterQueue's stop policy to Kueue `HoldAndDrain` before a flavor-reference switch that
+   drops a flavor which may still hold quota, then wait until the observed
+   `status.reservingWorkloads` is zero. Removing a flavor from a ClusterQueue does not itself evict
+   an already admitted Workload, so this drain is REQUIRED before dropping such a flavor. A dropped
+   flavor may hold quota unless the queue status written for the current generation (the `Active`
+   condition's `observedGeneration`) lists it in both `status.flavorsReservation` and
+   `status.flavorsUsage` with zero quantities. While that status trails the current generation the
+   controller changes nothing and reports `TopologyReady=Unknown` with reason `AwaitingQueueStatus`.
+   Dropping an idle flavor, adding a flavor, or changing only nominal quota updates the resource
+   groups in place without a hold; a Workload admitted onto a dropped flavor after Kueue's last
+   status write keeps running on it rather than being evicted. Emptying the last flavor reference is
+   always held first, even when nothing is reserved, which closes the race in which a new reservation
+   could be admitted between a zero check and the switch. The ClusterQueue name and UID remain
+   unchanged while draining.
+4. Update the existing ClusterQueue's `spec.resourceGroups` to the complete desired plan, while it is
+   held when step 3 requires a hold. This is one API update against the same object; the queue MUST
+   NOT expose a partially assembled mix caused by incrementally appending flavors. Record the exact pre-migration stop
    policy, including unset, `None`, `Hold`, or `HoldAndDrain`, and restore that value only after the
    complete new plan is observed. While the controller-owned migration marker exists,
    `HoldAndDrain` is authoritative; a conflicting external edit does not bypass the transition.
@@ -441,8 +450,9 @@ selectors, exact quota conservation, correct immutable flavor creation, self-hea
 generated Topology deletion before use, rejection above 64 flavors for one covered resource, and
 an actionable condition instead of mutation when an immutable managed object drifts. A live
 region-to-zone profile changed to region-to-zone-to-rack MUST preserve ClusterQueue name and UID,
-enter `HoldAndDrain`, wait for `status.reservingWorkloads=0`, atomically replace its flavor references
-only after every new dependency exists, restore admission, and eventually release the old
+enter `HoldAndDrain` while a Workload holds quota on an old flavor, wait for
+`status.reservingWorkloads=0`, atomically replace its flavor references only after every new
+dependency exists, restore admission, and eventually release the old
 no-contributor ResourceFlavor and Topology. Tests inject failure before, during, and after each phase
 and prove retries never duplicate quota, switch with a live reservation, or require queue recreation.
 
@@ -844,8 +854,8 @@ no spec task identifiers.
       updates `spec.resourceGroups` on the same managed ClusterQueue; its name and UID remain
       unchanged. It never deletes and recreates the ClusterQueue, and never requires deletion of the
       InstanceType or LocalQueue. Old no-contributor flavors are retired only after the successful
-      switch. NodeQueue always sets `HoldAndDrain`, waits for observed
-      `status.reservingWorkloads=0`, switches the complete resource groups while held, and restores
+      switch. NodeQueue sets `HoldAndDrain` whenever a dropped flavor may still hold quota, waits
+      for observed `status.reservingWorkloads=0`, switches the complete resource groups while held, and restores
       the exact pre-migration stop policy afterward. It NEVER relies on flavor removal to trigger eviction. The
       implementation replaces the current 16-item chunking behavior for this path and emits at most
       one resource group per covered resource with at most 64 flavors. A 65th required flavor,

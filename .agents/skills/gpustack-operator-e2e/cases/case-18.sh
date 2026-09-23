@@ -85,9 +85,10 @@ set_aware() {
 # wait_generic waits for the collapsed generic row to appear (rides out the <=30s setting cache).
 wait_generic() { for _ in $(seq 1 24); do [ -n "$(generic_row)" ] && return 0; sleep 3; done; return 1; }
 
-# The CPU ResourceFlavor is keyed by the node's real CPU (gpustack--${gKey}-...-${count}c),
+# The CPU ResourceFlavor is keyed by the node's real CPU (gpustack--${gKey}-...-${count}c, plus a
+# -fnv64-<16 hex> topology profile on a TAS cluster),
 # independent of any collapsed InstanceType name — the finest, setting-independent grain.
-CPURF=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | grep -E '/gpustack--.*-[0-9]+c$' | head -1)
+CPURF=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | grep -E '/gpustack--.*-[0-9]+c(-fnv64-[0-9a-f]{16})?$' | head -1)
 [ -n "$CPURF" ] || { echo "no CPU ResourceFlavor found — run case-1 first to materialize the chain"; exit 1; }
 
 # Capture the original setting (absent/other → the documented "false" default) and the derived types
@@ -124,9 +125,9 @@ record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0
 
 # --- A. The ResourceFlavor is the finest, double-dash grain and always records its raw CPU detail. ---
 rfname=${CPURF#*/}
-echo "$rfname" | grep -qE '^gpustack--.+-[0-9]+c$' \
+echo "$rfname" | grep -qE '^gpustack--.+-[0-9]+c(-fnv64-[0-9a-f]{16})?$' \
   && record PASS "CPU ResourceFlavor is the finest, double-dash grain" "${rfname}" \
-  || record FAIL "CPU ResourceFlavor is the finest, double-dash grain" "${rfname} — expected gpustack--\${gKey}-\${os}-\${arch}-\${count}c"
+  || record FAIL "CPU ResourceFlavor is the finest, double-dash grain" "${rfname} — expected gpustack--\${gKey}-\${os}-\${arch}-\${count}c[-fnv64-<hash>]"
 
 cpudetail=$(kubectl get "$CPURF" -o json 2>/dev/null | python3 -c "
 import json,sys
