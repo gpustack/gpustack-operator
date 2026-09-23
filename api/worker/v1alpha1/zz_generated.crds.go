@@ -23,6 +23,7 @@ func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 		"KVCachePool":        crd_gpustack_api_worker_v1alpha1_KVCachePool(),
 		"KVCachePoolBinding": crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding(),
 		"ModelDeployment":    crd_gpustack_api_worker_v1alpha1_ModelDeployment(),
+		"TopologySource":     crd_gpustack_api_worker_v1alpha1_TopologySource(),
 	}
 }
 
@@ -4551,6 +4552,17 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Maximum: ptr.To[float64](64),
 															Minimum: ptr.To[float64](1),
 														},
+														"topology": {
+															Description: "Topology optionally requires Kueue to place each replica's Pod group in one domain at this level.\nIt applies to this role's independent replica group; it does not require other roles or replicas\nto share that domain.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"requiredLevel": {
+																	Description: "RequiredLevel is one configured Kueue topology level, such as topology.kubernetes.io/zone.\nEmpty omits an explicit level and lets a compatible TAS flavor choose its hierarchy.",
+																	Type:        "string",
+																},
+															},
+															Nullable: true,
+														},
 													},
 												},
 											},
@@ -5000,6 +5012,383 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 							Description: "",
 							Priority:    0,
 							JSONPath:    ".status.endpoint",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_TopologySource() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "topologysources.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "topologysources",
+				Singular: "topologysource",
+				ShortNames: []string{
+					"toposrc",
+				},
+				Kind:     "TopologySource",
+				ListKind: "TopologySourceList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Cluster",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "TopologySource is the cluster-scoped topology inventory used to form Kueue hierarchies.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"nodeSelector",
+										"levels",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"additionalWritePrefix": {
+											Description: "AdditionalWritePrefix permits ConfigMap and webhook snapshots to write labels below one\nadministrator-owned DNS prefix. The value includes its trailing slash.",
+											Type:        "string",
+										},
+										"configMap": {
+											Description: "ConfigMap reads a versioned inventory snapshot from the worker namespace.",
+											Type:        "object",
+											Required: []string{
+												"configMapRef",
+												"key",
+												"maxStaleness",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"configMapRef": {
+													Type: "object",
+													Required: []string{
+														"namespace",
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"name": {
+															Type: "string",
+														},
+														"namespace": {
+															Type: "string",
+														},
+													},
+												},
+												"key": {
+													Type: "string",
+												},
+												"maxStaleness": {
+													Description: "MaxStaleness is how long the last valid snapshot remains usable after reads fail.",
+													Type:        "string",
+													Format:      "duration",
+												},
+											},
+											Nullable: true,
+										},
+										"levels": {
+											Description: "Levels is the ordered topology hierarchy. kubernetes.io/hostname is implicit and forbidden here.",
+											Type:        "array",
+											MaxItems:    ptr.To[int64](16),
+											MinItems:    ptr.To[int64](1),
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "string",
+												},
+											},
+											Nullable:  true,
+											XListType: ptr.To[string]("atomic"),
+										},
+										"nodeLabels": {
+											Description: "NodeLabels consumes the selected Nodes' existing labels without changing them.",
+											Type:        "object",
+											Nullable:    true,
+										},
+										"nodeSelector": {
+											Description: "NodeSelector selects the Nodes this source may describe.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"matchExpressions": {
+													Description: "matchExpressions is a list of label selector requirements. The requirements are ANDed.",
+													Type:        "array",
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "object",
+															Required: []string{
+																"key",
+																"operator",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"key": {
+																	Description: "key is the label key that the selector applies to.",
+																	Type:        "string",
+																},
+																"operator": {
+																	Description: "operator represents a key's relationship to a set of values.\nValid operators are In, NotIn, Exists and DoesNotExist.",
+																	Type:        "string",
+																},
+																"values": {
+																	Description: "values is an array of string values. If the operator is In or NotIn,\nthe values array must be non-empty. If the operator is Exists or DoesNotExist,\nthe values array must be empty. This array is replaced during a strategic\nmerge patch.",
+																	Type:        "array",
+																	Items: &v1.JSONSchemaPropsOrArray{
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:  true,
+																	XListType: ptr.To[string]("atomic"),
+																},
+															},
+														},
+													},
+													Nullable:  true,
+													XListType: ptr.To[string]("atomic"),
+												},
+												"matchLabels": {
+													Description: "matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels\nmap is equivalent to an element of matchExpressions, whose key field is \"key\", the\noperator is \"In\", and the values array contains only \"value\". The requirements are ANDed.",
+													Type:        "object",
+													AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+														Allows: true,
+														Schema: &v1.JSONSchemaProps{
+															Type: "string",
+														},
+													},
+													Nullable: true,
+												},
+											},
+										},
+										"webhook": {
+											Description: "Webhook reads a versioned inventory snapshot over authenticated HTTPS.",
+											Type:        "object",
+											Required: []string{
+												"url",
+												"pollInterval",
+												"timeout",
+												"maxStaleness",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"bearerTokenSecretRef": {
+													Description: "BearerTokenSecretRef selects bearer-token authentication. The Secret key is token.",
+													Type:        "object",
+													Required: []string{
+														"namespace",
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"name": {
+															Type: "string",
+														},
+														"namespace": {
+															Type: "string",
+														},
+													},
+													Nullable: true,
+												},
+												"caBundleConfigMapRef": {
+													Description: "CABundleConfigMapRef optionally supplies the endpoint's CA bundle from the worker namespace.\nThe ConfigMap must store the PEM bundle under ca.crt.",
+													Type:        "object",
+													Required: []string{
+														"namespace",
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"name": {
+															Type: "string",
+														},
+														"namespace": {
+															Type: "string",
+														},
+													},
+													Nullable: true,
+												},
+												"maxStaleness": {
+													Type:   "string",
+													Format: "duration",
+												},
+												"pollInterval": {
+													Type:   "string",
+													Format: "duration",
+												},
+												"timeout": {
+													Type:   "string",
+													Format: "duration",
+												},
+												"tlsClientCertificateSecretRef": {
+													Description: "TLSClientCertificateSecretRef selects mTLS authentication. The Secret keys are tls.crt and tls.key.",
+													Type:        "object",
+													Required: []string{
+														"namespace",
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"name": {
+															Type: "string",
+														},
+														"namespace": {
+															Type: "string",
+														},
+													},
+													Nullable: true,
+												},
+												"url": {
+													Type: "string",
+												},
+											},
+											Nullable: true,
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"conditions": {
+											Type: "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"conflictedNodes": {
+											Type:   "integer",
+											Format: "int32",
+										},
+										"lastSuccessfulRefreshTime": {
+											Type:     "string",
+											Format:   "date-time",
+											Nullable: true,
+										},
+										"lastSuccessfulRevision": {
+											Type: "string",
+										},
+										"mutatedNodes": {
+											Type:   "integer",
+											Format: "int32",
+										},
+										"observedGeneration": {
+											Type:   "integer",
+											Format: "int64",
+										},
+										"selectedNodes": {
+											Type:   "integer",
+											Format: "int32",
+										},
+										"sourceKind": {
+											Type: "string",
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Kind",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.sourceKind",
+						},
+						{
+							Name:        "Revision",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.lastSuccessfulRevision",
+						},
+						{
+							Name:        "Ready",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.conditions[?(@.type=='Ready')].status",
 						},
 					},
 				},

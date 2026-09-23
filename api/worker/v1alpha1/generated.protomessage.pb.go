@@ -208,6 +208,8 @@ func (*ModelDeploymentRoleResources) ProtoMessage() {}
 
 func (*ModelDeploymentRoleStatus) ProtoMessage() {}
 
+func (*ModelDeploymentRoleTopology) ProtoMessage() {}
+
 func (*ModelDeploymentRouter) ProtoMessage() {}
 
 func (*ModelDeploymentRouterKVEvents) ProtoMessage() {}
@@ -221,3 +223,19 @@ func (*ModelDeploymentRouterStatus) ProtoMessage() {}
 func (*ModelDeploymentSpec) ProtoMessage() {}
 
 func (*ModelDeploymentStatus) ProtoMessage() {}
+
+func (*TopologySource) ProtoMessage() {}
+
+func (*TopologySourceConfigMap) ProtoMessage() {}
+
+func (*TopologySourceList) ProtoMessage() {}
+
+func (*TopologySourceNodeLabels) ProtoMessage() {}
+
+func (*TopologySourceObjectReference) ProtoMessage() {}
+
+func (*TopologySourceSpec) ProtoMessage() {}
+
+func (*TopologySourceStatus) ProtoMessage() {}
+
+func (*TopologySourceWebhook) ProtoMessage() {}

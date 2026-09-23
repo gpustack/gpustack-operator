@@ -45,6 +45,10 @@ func (c *FakeWorkerV1alpha1) ModelDeployments(namespace string) v1alpha1.ModelDe
 	return newFakeModelDeployments(c, namespace)
 }
 
+func (c *FakeWorkerV1alpha1) TopologySources() v1alpha1.TopologySourceInterface {
+	return newFakeTopologySources(c)
+}
+
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
 func (c *FakeWorkerV1alpha1) RESTClient() rest.Interface {

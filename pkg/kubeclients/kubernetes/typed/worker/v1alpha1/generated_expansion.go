@@ -20,3 +20,5 @@ type KVCachePoolExpansion interface{}
 type KVCachePoolBindingExpansion interface{}
 
 type ModelDeploymentExpansion interface{}
+
+type TopologySourceExpansion interface{}

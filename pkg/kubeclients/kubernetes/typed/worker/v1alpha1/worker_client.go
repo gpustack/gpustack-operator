@@ -24,6 +24,7 @@ type WorkerV1alpha1Interface interface {
 	KVCachePoolsGetter
 	KVCachePoolBindingsGetter
 	ModelDeploymentsGetter
+	TopologySourcesGetter
 }
 
 // WorkerV1alpha1Client is used to interact with features provided by the worker.gpustack.ai group.
@@ -57,6 +58,10 @@ func (c *WorkerV1alpha1Client) KVCachePoolBindings(namespace string) KVCachePool
 
 func (c *WorkerV1alpha1Client) ModelDeployments(namespace string) ModelDeploymentInterface {
 	return newModelDeployments(c, namespace)
+}
+
+func (c *WorkerV1alpha1Client) TopologySources() TopologySourceInterface {
+	return newTopologySources(c)
 }
 
 // NewForConfig creates a new WorkerV1alpha1Client for the given config.
