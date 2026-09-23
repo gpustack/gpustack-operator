@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -645,6 +646,31 @@ func indexNodeByScheduleFlavor(obj ctrlcli.Object) []string {
 		})
 }
 
+// nodeFlavorNodeUpdated reports whether a Node update must reconcile the flavors the node
+// contributes to, before and after the update.
+func nodeFlavorNodeUpdated(oldNd, newNd *core.Node) bool {
+	if newNd.DeletionTimestamp != nil {
+		return false
+	}
+	// Fire when the managed mark or feature labels have changed.
+	if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
+		systemname.ManagedLabelKey,
+		TopologyProfileLabel,
+		nodefeature.FeatureLabelPrefix,
+		nodefeature.GeneralFeatureLabelPrefix,
+		nodefeature.AcceleratableFeatureLabelPrefix) {
+		return true
+	}
+	// Fire when the set of flavors the node contributes to has changed. A flavor name also blends
+	// the NFD cpu-model labels and the cpu-name annotation, which the labels above do not cover:
+	// when NFD publishes them after the node registers, the node leaves its generic flavor before
+	// the NodeFeature re-derives its labels, and only this update still maps to that flavor.
+	oldFlavors, newFlavors := indexNodeByScheduleFlavor(oldNd), indexNodeByScheduleFlavor(newNd)
+	slices.Sort(oldFlavors)
+	slices.Sort(newFlavors)
+	return !slices.Equal(oldFlavors, newFlavors)
+}
+
 func (r *NodeFlavorReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
 	// Configure field indexer.
 	fi := opts.Manager.GetFieldIndexer()
@@ -715,23 +741,12 @@ func (r *NodeFlavorReconciler) SetupController(ctx context.Context, opts control
 				// Trigger reconciliation when a Node is:
 				// - created.
 				// - deleted (so a flavor losing its last Node gets deleted).
-				// - updated if its managed mark or feature labels have changed (a
-				//   node leaving management deletes its orphaned flavors).
+				// - updated if its managed mark, feature labels or contributed flavors
+				//   have changed (a node leaving management or a flavor deletes the
+				//   orphaned flavors).
 				ctrlpredicate.Funcs{
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
-						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
-						if newNd.DeletionTimestamp == nil {
-							// Fire when the managed mark or feature labels have changed.
-							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
-								systemname.ManagedLabelKey,
-								TopologyProfileLabel,
-								nodefeature.FeatureLabelPrefix,
-								nodefeature.GeneralFeatureLabelPrefix,
-								nodefeature.AcceleratableFeatureLabelPrefix) {
-								return true
-							}
-						}
-						return false
+						return nodeFlavorNodeUpdated(e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node))
 					},
 				},
 			),

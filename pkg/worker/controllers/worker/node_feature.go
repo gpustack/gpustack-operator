@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"maps"
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,7 +26,7 @@ import (
 )
 
 // NodeFeatureReconciler reconciles nfd.NodeFeature objects driven by Kubernetes Node changes to finish the following tasks:
-//   - When a Node's labels are updated,
+//   - When a Node's labels or any input of its derived labels are updated,
 //     create/update the corresponding nfd.NodeFeature.
 type NodeFeatureReconciler struct {
 	Client ctrlcli.Client
@@ -118,27 +119,39 @@ func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controll
 			ctrlbuilder.WithPredicates(
 				// Trigger reconciliation when a Node is:
 				// - created.
-				// - updated if labels have changed.
+				// - updated if labels or any input of the derived labels have changed.
 				ctrlpredicate.Funcs{
 					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
 						return false
 					},
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
-						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
-						if newNd.DeletionTimestamp == nil {
-							// Fire when labels have changed.
-							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
-								systemname.ManagedLabelKey,
-								nodefeature.FeatureLabelPrefix,
-								nodefeature.GeneralFeatureLabelPrefix,
-								nodefeature.AcceleratableFeatureLabelPrefix) {
-								return true
-							}
-						}
-						return false
+						return nodeFeatureNodeUpdated(e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node))
 					},
 				},
 			),
 		).
 		Complete(r)
+}
+
+// nodeFeatureNodeUpdated reports whether a Node update must re-derive the node's NodeFeature.
+func nodeFeatureNodeUpdated(oldNd, newNd *core.Node) bool {
+	if newNd.DeletionTimestamp != nil {
+		return false
+	}
+	// Fire when labels have changed.
+	if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
+		systemname.ManagedLabelKey,
+		nodefeature.FeatureLabelPrefix,
+		nodefeature.GeneralFeatureLabelPrefix,
+		nodefeature.AcceleratableFeatureLabelPrefix) {
+		return true
+	}
+	// Fire when any input of the derived labels has changed, not only the labels above: NFD
+	// publishes the cpu-model labels and the cpu-name annotation after the node registers, and a
+	// derivation that ran first falls back to the generic group. Comparing the derivation itself
+	// covers every input it reads. Manual management is assumed on both sides so the managed
+	// label is compared as the node carries it, which detects every change either mode derives.
+	return !maps.Equal(
+		nodefeature.ConstructNodeCapacityLabels(oldNd, nodefeature.WithManualNodeManagement(true)),
+		nodefeature.ConstructNodeCapacityLabels(newNd, nodefeature.WithManualNodeManagement(true)))
 }
