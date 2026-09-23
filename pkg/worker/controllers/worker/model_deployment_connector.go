@@ -618,7 +618,9 @@ func ModelDeploymentEngineCommand(engine, model string) ([]string, error) {
 	case workercore.ModelDeploymentEngineVLLM:
 		return []string{"vllm", "serve", model}, nil
 	case workercore.ModelDeploymentEngineSGLang:
-		return []string{"python3", "-m", "sglang.launch_server", "--model-path", model}, nil
+		return []string{
+			"python3", "-m", "sglang.launch_server", "--model-path", model, "--enable-metrics",
+		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported engine %q", engine)
 	}

@@ -54,6 +54,15 @@ one adapter is ordinary RDMA practice — the isolation is the firmware's and th
 token count's. Taking a whole adapter exclusively removes it from every other tenant on the node and
 buys nothing the hardware was not already doing.
 
+For a managed `ModelDeployment`, set `spec.roles[].resources.interface` instead of naming the key
+in a Pod template. One RDMA interface selects the shared key, while two or more select the
+exclusive key with the requested count. An EFA transport selects
+[the EFA device plugin's own key](../architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves) instead.
+
+The field allocates a device to each rendered engine Pod and does not assert that the engine has
+transferred bytes. See [Model Deployment Reference](../reference/model-deployment.md) for protocol
+selection and mixed-fabric refusal.
+
 ## How many endpoints beside N accelerators
 
 **Ask for one RDMA endpoint per accelerator the container requests.** A host built for collective

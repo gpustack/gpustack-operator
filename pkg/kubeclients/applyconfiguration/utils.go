@@ -1276,6 +1276,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.InstanceSSHPublicKeySpecApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceType"):
 		return &applyconfigurationworkerv1.InstanceTypeApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("ModelDeployment"):
+		return &applyconfigurationworkerv1.ModelDeploymentApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("NFSInstancePersistentVolumeSource"):
 		return &applyconfigurationworkerv1.NFSInstancePersistentVolumeSourceApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("S3InstancePersistentVolumeSource"):

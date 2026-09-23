@@ -187,6 +187,7 @@ func TestRenderModelDeploymentPod_DecodeUsesRoutingSidecar(t *testing.T) {
 			assert.Contains(t, main.Command, "8200")
 			assert.NotEqual(t, tc.externalPort, main.Ports[0].ContainerPort)
 			assert.Equal(t, int32(8200), main.Ports[0].ContainerPort)
+			assert.Equal(t, "8200", pod.Annotations["prometheus.io/port"])
 			assert.Equal(t, tc.externalPort, main.StartupProbe.HTTPGet.Port.IntVal)
 			assert.Equal(t, tc.externalPort, main.ReadinessProbe.HTTPGet.Port.IntVal)
 			assert.Equal(t, tc.externalPort, main.LivenessProbe.HTTPGet.Port.IntVal)
@@ -573,6 +574,7 @@ func TestRenderModelDeploymentPod_Command(t *testing.T) {
 			engine: workercore.ModelDeploymentEngineSGLang,
 			wantCommand: []string{
 				"python3", "-m", "sglang.launch_server", "--model-path", "Qwen/Qwen2.5-72B-Instruct",
+				"--enable-metrics",
 				"--host", "0.0.0.0", "--port", "8000",
 			},
 		},
@@ -608,6 +610,7 @@ func TestRenderModelDeploymentPod_Command(t *testing.T) {
 			extraArgs: []string{"--host=127.0.0.1"},
 			wantCommand: []string{
 				"python3", "-m", "sglang.launch_server", "--model-path", "Qwen/Qwen2.5-72B-Instruct",
+				"--enable-metrics",
 				"--host=127.0.0.1",
 				"--port", "8000",
 			},
@@ -1114,6 +1117,34 @@ func TestRenderModelDeploymentPod_Ports(t *testing.T) {
 	pod = renderOne(t, md, newRenderInstanceType())
 	require.Len(t, pod.Spec.Containers[0].Ports, 1)
 	assert.Equal(t, int32(9000), pod.Spec.Containers[0].Ports[0].ContainerPort)
+}
+
+func TestRenderModelDeploymentPod_MetricsScrape(t *testing.T) {
+	for _, tc := range []struct {
+		name, scheme string
+		port         int32
+		tls          bool
+	}{
+		{name: "default", port: 8000, scheme: "http"},
+		{name: "custom", port: 9000, scheme: "http"},
+		{name: "TLS", port: 8000, scheme: "https", tls: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment()
+			if tc.tls {
+				md.Spec.Roles[0].ExtraArgs = []string{"--ssl-certfile", "/etc/tls/tls.crt"}
+			}
+			if tc.port != 8000 {
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: tc.port}}
+			}
+			pod := renderOne(t, md, newRenderInstanceType())
+			assert.Equal(t, "true", pod.Annotations["prometheus.io/scrape"])
+			assert.Equal(t, "/metrics", pod.Annotations["prometheus.io/path"])
+			assert.Equal(t, strconv.Itoa(int(tc.port)), pod.Annotations["prometheus.io/port"])
+			assert.Equal(t, tc.scheme, pod.Annotations["prometheus.io/scheme"])
+			assert.Equal(t, tc.port, pod.Spec.Containers[0].Ports[0].ContainerPort)
+		})
+	}
 }
 
 // TestRenderModelDeploymentPod_SynthesizesTheImage covers the role that names none.
@@ -1832,22 +1863,23 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // modeldeployment prefix the role-kind label and the spec-hash annotation already carry, so that one
 // reader looking for this deployment's own keys finds all of them under one prefix; and once when
 // the member index became unconditional on every member, so that one equality term in a discovery
-// selector names the Pods that answer the API at every role size. Every digest here moved by intent
+// selector names the Pods that answer the API at every role size; and once when each managed Pod
+// began declaring its metrics listener scheme. Every digest here moved by intent
 // rather than by drift. Each case renders ORDINAL ZERO -- the composite's zero value -- which is the
 // one ordinal a digest can name without the table growing a dimension. To re-baseline after an
 // intended rendering change: empty the table, run this case, and pin the digests the failures
 // print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "077463504e23c8b59a28092878df9bad3f6d5e751ea4a7c2ebc020d6fc0f491f",
-		"a sole server role with a synthesized cache connector":                              "53f99d870f79ab45692006ef32561f1f2cd7b5aad7b64be251c76bd5a407aa29",
+		"a sole server role": "1cb29ab0f4e5a9bd47afa4f6c52b2885ad84fbb1c91d9aaad535acc61958ad23",
+		"a sole server role with a synthesized cache connector":                              "05651de136063e951a141f471d5f78f8982bda1a010446d8f7def9b90454c48e",
 		"a take-over role carrying a connector it must be given no part of":                  "1984284b5fbc1e7245e71bb5ea8c3ed1daccef316d724e398952fa637c4c67cd",
-		"a direct decoder with a native routing sidecar":                                     "7b312926f49ee6a3115f0e4acc38eec600cfdbec3532124748cde1867870e363",
-		"a direct decoder with a classic routing sidecar":                                    "24eebdf8d2209367f2b14ff19b85b54200da3bdcc3302bee9435d100be9b870f",
-		"a role naming no image, synthesized from the observed hardware":                     "7664b696700708f5d4de175ac9a55bfff9b69829ab39c0c2163a9757a9675561",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "c7a42af155f2e1bf67e46463c6e3aaca9e7645b8468d7cc9859dfff0543a6b1b",
-		"the prefill role of a two-role deployment":                                          "cc55b5f877f5a83778404751cb5754f6399d21b85a2beec3ff2dfda753d16bfa",
-		"the decode role of a two-role deployment":                                           "34f9da9b7a3a82873c3eb1ebac1711627533d20f84f694601aec4ea778c45eec",
+		"a direct decoder with a native routing sidecar":                                     "a56ec8ab7a954d66b6badbfacce263227706665ffd1b120460d447c62cce4a93",
+		"a direct decoder with a classic routing sidecar":                                    "7fb447f32c49928352366f174283ad34d4ffafa998f499e4a8e0df725b7344a6",
+		"a role naming no image, synthesized from the observed hardware":                     "ac96f9db31215198c74244b62f8507768f24391f1795148eaf505042e957c19e",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "08df2de2c9cdd21bade33b9ffd747729594d1ce499d372c9d73880b053daecff",
+		"the prefill role of a two-role deployment":                                          "24e9afd8b31c7275286667243479be76bda47f80f71d2ff55d2e27e852732b21",
+		"the decode role of a two-role deployment":                                           "b9e5878c647878bb19ba98e5e325561219430a321e82ce1f27b23a6b929a17a5",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its

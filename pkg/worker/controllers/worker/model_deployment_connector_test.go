@@ -1443,6 +1443,7 @@ func TestModelDeploymentEngineCommand(t *testing.T) {
 			want: []string{
 				"python3", "-m", "sglang.launch_server",
 				"--model-path", "Qwen/Qwen2.5-72B-Instruct",
+				"--enable-metrics",
 			},
 		},
 		{

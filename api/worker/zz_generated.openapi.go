@@ -52,6 +52,13 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstanceTypeFlavorList{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_InstanceTypeFlavorList(ref),
 		v1.InstanceTypeFlavorSpec{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_InstanceTypeFlavorSpec(ref),
 		v1.InstanceTypeList{}.OpenAPIModelName():                                     schema_gpustack_api_worker_v1_InstanceTypeList(ref),
+		v1.ModelDeployment{}.OpenAPIModelName():                                      schema_gpustack_api_worker_v1_ModelDeployment(ref),
+		v1.ModelDeploymentCacheHit{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1_ModelDeploymentCacheHit(ref),
+		v1.ModelDeploymentList{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1_ModelDeploymentList(ref),
+		v1.ModelDeploymentMetricGauge{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1_ModelDeploymentMetricGauge(ref),
+		v1.ModelDeploymentMetricMissing{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1_ModelDeploymentMetricMissing(ref),
+		v1.ModelDeploymentMetricWindow{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_ModelDeploymentMetricWindow(ref),
+		v1.ModelDeploymentMetrics{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_ModelDeploymentMetrics(ref),
 		v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref),
 		v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref),
 		v1alpha1.Accelerator{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1alpha1_Accelerator(ref),
@@ -1937,6 +1944,536 @@ func schema_gpustack_api_worker_v1_InstanceTypeList(ref common.ReferenceCallback
 		},
 		Dependencies: []string{
 			v1.InstanceType{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelDeployment(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeployment is the v1 view of a managed serving deployment.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName(), v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelDeploymentCacheHit(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentCacheHit is a token hit ratio over two reads of the same Pod counters. Its source and scope prevent local prefix hits from being mixed with external-store hits.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"pod": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"source": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"scope": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"unit": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"hits": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"number"},
+							Format:  "double",
+						},
+					},
+					"queries": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"number"},
+							Format:  "double",
+						},
+					},
+					"rate": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"number"},
+							Format:  "double",
+						},
+					},
+					"windowSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"number"},
+							Format:  "double",
+						},
+					},
+					"podCount": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int32",
+						},
+					},
+					"observedAt": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"pod", "source", "scope", "unit", "hits", "queries", "rate", "windowSeconds", "podCount", "observedAt"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelDeploymentList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentList holds the list of ModelDeployments.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelDeployment{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.ModelDeployment{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelDeploymentMetricGauge(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentMetricGauge is one compatible sum of current Pod gauges.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"source": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"scope": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"unit": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"value": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"number"},
+							Format:  "double",
+						},
+					},
+					"podCount": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int32",
+						},
+					},
+					"observedAt": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"name", "source", "scope", "unit", "value", "podCount", "observedAt"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelDeploymentMetricMissing(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentMetricMissing names one source that could not contribute to the snapshot.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"pod": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"source": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"pod", "source", "reason"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelDeploymentMetricWindow(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentMetricWindow is one Pod's rate or histogram mean over two scrapes. Samples is the number of new events or histogram observations in that window.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"pod": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"source": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"scope": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"unit": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"value": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"number"},
+							Format:  "double",
+						},
+					},
+					"samples": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"number"},
+							Format:  "double",
+						},
+					},
+					"windowSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"number"},
+							Format:  "double",
+						},
+					},
+					"observedAt": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"name", "pod", "source", "scope", "unit", "value", "samples", "windowSeconds", "observedAt"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelDeploymentMetrics(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentMetrics is a best-effort snapshot of the deployment's serving metrics. Missing measurements are listed explicitly; a measured zero remains a numeric zero.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"timestamp": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"processing": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelDeploymentMetricGauge{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"queueing": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelDeploymentMetricGauge{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"cacheHits": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelDeploymentCacheHit{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"missing": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelDeploymentMetricMissing{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"partial": {
+						SchemaProps: spec.SchemaProps{
+							Default: false,
+							Type:    []string{"boolean"},
+							Format:  "",
+						},
+					},
+					"latency": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelDeploymentMetricWindow{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"traffic": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelDeploymentMetricWindow{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"transfer": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelDeploymentMetricWindow{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"timestamp", "partial"},
+			},
+		},
+		Dependencies: []string{
+			v1.ModelDeploymentCacheHit{}.OpenAPIModelName(), v1.ModelDeploymentMetricGauge{}.OpenAPIModelName(), v1.ModelDeploymentMetricMissing{}.OpenAPIModelName(), v1.ModelDeploymentMetricWindow{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
 	}
 }
 
@@ -8318,6 +8855,13 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 						SchemaProps: spec.SchemaProps{
 							Description: "Router is the observed contract of the managed router requested by spec.router.\n\nIt is ABSENT when spec.router is, rather than present and empty, for the same reason KVCache is: an empty object here cannot be told apart from a contract whose every string happens to be empty.",
 							Ref:         ref(v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName()),
+						},
+					},
+					"roleSummary": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RoleSummary is the current Ready count by role kind, for kubectl's Roles column. R counts managed router Pods; S, P, and D count server, prefill, and decode instances. A serving instance may contain several Pods, so the engine figures are not Pod counts.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 				},

@@ -21,6 +21,7 @@ import (
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["md"],subResources=["status"]
 // +k8s:crd-gen:printcolumn:name="Engine",type="string",jsonPath=".spec.engine.name"
+// +k8s:crd-gen:printcolumn:name="Roles",type="string",jsonPath=".status.roleSummary"
 // +k8s:crd-gen:printcolumn:name="Phase",type="string",jsonPath=".status.phase"
 // +k8s:crd-gen:printcolumn:name="Endpoint",type="string",jsonPath=".status.endpoint"
 type ModelDeployment struct {
@@ -840,6 +841,11 @@ type ModelDeploymentStatus struct {
 	// an empty object here cannot be told apart from a contract whose every string happens to be
 	// empty.
 	Router *ModelDeploymentRouterStatus `json:"router,omitempty" protobuf:"bytes,7,opt,name=router"`
+
+	// RoleSummary is the current Ready count by role kind, for kubectl's Roles column. R counts
+	// managed router Pods; S, P, and D count server, prefill, and decode instances. A serving
+	// instance may contain several Pods, so the engine figures are not Pod counts.
+	RoleSummary string `json:"roleSummary,omitempty" protobuf:"bytes,8,opt,name=roleSummary"`
 }
 
 // ModelDeploymentRoleStatus is one role's observed readiness.

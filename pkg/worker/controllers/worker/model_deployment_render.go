@@ -537,8 +537,25 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			pod.Annotations[k] = v
 		}
 	}
+	if !takeOver {
+		if pod.Annotations == nil {
+			pod.Annotations = make(map[string]string, 3)
+		}
+		for key, value := range modelDeploymentMetricsAnnotations(enginePort, scheme) {
+			pod.Annotations[key] = value
+		}
+	}
 
 	return pod, nil
+}
+
+func modelDeploymentMetricsAnnotations(port int32, scheme core.URIScheme) map[string]string {
+	return map[string]string{
+		"prometheus.io/scrape": "true",
+		"prometheus.io/path":   "/metrics",
+		"prometheus.io/port":   strconv.Itoa(int(port)),
+		"prometheus.io/scheme": strings.ToLower(string(scheme)),
+	}
 }
 
 // stampModelDeploymentPod puts the Kueue group metadata on a rendered replica and then writes the

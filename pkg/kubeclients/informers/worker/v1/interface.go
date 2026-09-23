@@ -29,6 +29,8 @@ type Interface interface {
 	InstanceTypes() InstanceTypeInformer
 	// InstanceTypeFlavors returns a InstanceTypeFlavorInformer.
 	InstanceTypeFlavors() InstanceTypeFlavorInformer
+	// ModelDeployments returns a ModelDeploymentInformer.
+	ModelDeployments() ModelDeploymentInformer
 }
 
 type version struct {
@@ -80,4 +82,9 @@ func (v *version) InstanceTypes() InstanceTypeInformer {
 // InstanceTypeFlavors returns a InstanceTypeFlavorInformer.
 func (v *version) InstanceTypeFlavors() InstanceTypeFlavorInformer {
 	return &instanceTypeFlavorInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// ModelDeployments returns a ModelDeploymentInformer.
+func (v *version) ModelDeployments() ModelDeploymentInformer {
+	return &modelDeploymentInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

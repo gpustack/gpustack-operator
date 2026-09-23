@@ -305,6 +305,35 @@ func TestRenderModelDeploymentRouterObjects_MetricsUseServingPort(t *testing.T) 
 	assert.Equal(t, int32(8100), objects.Contract.Metrics.Port)
 }
 
+func TestRenderModelDeploymentRouterObjects_MetricsScrape(t *testing.T) {
+	for _, name := range []string{
+		workercore.ModelDeploymentRouterLLMD,
+		workercore.ModelDeploymentRouterVLLM,
+		workercore.ModelDeploymentRouterSGLang,
+	} {
+		t.Run(name, func(t *testing.T) {
+			md := routedModelDeployment()
+			md.Spec.Router.Name = name
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+			require.NoError(t, err)
+			annotations := objects.Deployment.Spec.Template.Annotations
+			assert.Equal(t, "true", annotations["prometheus.io/scrape"])
+			assert.Equal(t, "/metrics", annotations["prometheus.io/path"])
+			assert.Equal(t, "9090", annotations["prometheus.io/port"])
+			assert.Equal(t, "http", annotations["prometheus.io/scheme"])
+			found := false
+			for _, container := range objects.Deployment.Spec.Template.Spec.Containers {
+				for _, port := range container.Ports {
+					if port.Name == "metrics" && port.ContainerPort == 9090 {
+						found = true
+					}
+				}
+			}
+			assert.True(t, found, "the advertised port belongs to a router container")
+		})
+	}
+}
+
 func TestRenderModelDeploymentRouterObjects_RefusesDifferentServingPorts(t *testing.T) {
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[1].Ports = []workercore.ModelDeploymentPort{{Port: 8100}}
@@ -702,16 +731,17 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 // three routers, and once when the containers running out of that image gained the command naming
 // which of its three programs to run. That last one was found by running it: the image declares no
 // entrypoint, so arguments without a command land in the CMD position and the first flag is read as
-// the program name, which every field-picked case in this file passed over.
+// the program name, which every field-picked case in this file passed over. The metrics listener
+// scheme annotation was then added to each managed router Pod.
 // To re-baseline after an intended rendering change: empty the table, run this case, and pin the
 // digests the failures print.
 func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a prefill and decode pair": "dc5ec1b1f33cf0747ab1b62a06aed9ec85ec22f659c2ec8312e386c1b627fe39",
-		"a sole server role":        "fe125bc4b78455ca2bb12f2b16cedd692face6a95d39bdf964612ce791821d04",
-		"a router declaring its own image, policy, replicas and extra arguments": "114d2ea9d4d2c8d258b4ede43bdf99c5d68c93bec6c3a2bceec44688937912f2",
-		"a role whose command the user took over, so it publishes no events":     "aaccdb749a6a7587b12cf4da8c7470c60347c26ae02dc8004fe22f606f1e35a4",
-		"an sglang engine, whose metrics contract differs":                       "5ce0ccb55a5156f5479fbf883e5ded9317bedb0c7c0ddd80c12796b12e5a87e0",
+		"a prefill and decode pair": "4e62baa7a1935f66946a863ee730e551cd23a4f8ffe677051b47e2bf58f8b9a4",
+		"a sole server role":        "052c5cc61b6c6b2c313c8cc743f070dcc9e5eaa2f8cf197ad52affa3fa8dc0cc",
+		"a router declaring its own image, policy, replicas and extra arguments": "a3eb0fce558ed09aa0f41e6b57cf7e9777bc169ed48709a0f2647064532c43cc",
+		"a role whose command the user took over, so it publishes no events":     "cb3bbff686dad17a56b2f26dc9ef12cf3a8fbefb139b31361b76d0b6a92b72d6",
+		"an sglang engine, whose metrics contract differs":                       "c2034efbe3aba469e9bba1f7a8249f61c94976e89f958dc719a1e29ce7ce42cc",
 	}
 
 	soleServerRole := func() *workercore.ModelDeployment {

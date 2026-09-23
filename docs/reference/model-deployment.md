@@ -5,8 +5,8 @@
 > **Audience** users, operators, contributors · **Prerequisites** [KV Cache Pool](../kv-cache/pool.md) ·
 > **Read time** ~12 min
 
-A `ModelDeployment` is N replicas of one or more inference-engine roles attached to a KV cache pool, so
-that the replicas hit each other's cached prefixes instead of each re-computing the same prefill.
+A `ModelDeployment` is N replicas of one or more inference-engine roles. It can attach to a KV
+cache pool so replicas reuse cached prefixes, run a direct prefill/decode pair, or use both paths.
 
 It renders **Pods** directly. The deployment's own validating webhook checks a new KV cache
 binding's transport, because these generated Pods do not pass through the KV cache Pod injection
@@ -127,6 +127,20 @@ The accelerator request of **one Pod** lives in `roles[].resources`, whose field
 [Accelerator Requests](../accelerator-requests.md) — at `size: 1` the Pod and the instance are the
 same request. CPU, memory and ephemeral storage are **derived** from the InstanceType's per-unit
 resources scaled by the card count, so they are not expressible here.
+
+An optional `resources.interface` requests a whole number of fabric interfaces per engine Pod.
+One RDMA interface uses `device.gpustack.ai/rdma.shared`; more than one uses that count of
+`device.gpustack.ai/rdma` devices. EFA uses
+[the EFA device plugin's own key](../architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves).
+An unset or zero count adds no device request.
+
+The key follows the bound cache backend's effective group protocol and any direct prefill/decode
+transport the engine actually renders. Different backend-group protocols or an RDMA and EFA mix
+are refused for a positive count.
+
+A count with no managed RDMA or EFA transfer leg is also refused. The count is frozen with the
+other role resources. See
+[RDMA Operations](../operation/rdma.md) for the allocation and topology limits.
 
 ## Prefill and decode
 
@@ -888,6 +902,7 @@ depends on the `InstanceType` the role names.
 | an edit to an identity field — `model`, `engine.name`, `kvCache`, or the shape of the roles | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Which fields are the deployment's identity](#which-fields-are-the-deployments-identity) |
 | a resource mode the named `InstanceType` does not offer | the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list |
 | a whole-accelerator count over the type's whole-accelerator capacity | the capacity itself, not only that the request was too large, so the next attempt is not a guess. The bound is the pool's total, not what is free, so a deployment submitted while every accelerator is held is admitted and waits in its queue; one above the largest node but within the total is admitted and stays queued — see [Accelerator Requests](../accelerator-requests.md#limitations) |
+| a negative or fractional `resources.interface`, or one with no effective RDMA/EFA leg | the role's interface field and the protocol that prevents allocation; mixed backend groups and mixed fabric legs are rejected |
 | an explicit `accelerator: 0` on an acceleratable `InstanceType` shared by another role | the accelerator field, the shared type, and two recommended remedies: request at least one accelerator or move the CPU-only role to a non-acceleratable type |
 | a `prefill` and a `decode` role both requesting a **logical slice** from types that draw on the same accelerator group | both roles and the slice field. Whole cards and partition profiles are accepted — including on one card, because partitions are isolated by the device |
 | roles on several `instanceType`s **when `instance-type-derived-from-node` is off** | that setting. The groups are gated as a set by an admission check this operator references from the queues it derives, and with the setting off no queue carries it |
@@ -975,6 +990,7 @@ and therefore neither locates its window.
 the domain · [Accelerator Requests](../accelerator-requests.md) for the request fields
 `roles[].resources` mirrors · [Admission](../architecture/admission.md) for the gates a replica passes
 as an ordinary Pod · [Model Deployment Status](model-deployment-status.md) for what each condition
-and published field means.
+and published field means · [Model Deployment Metrics](model-deployment-metrics.md) for the
+structured snapshot and Pod scrape endpoints.
 
 **Next** → [Accelerator Requests](../accelerator-requests.md)

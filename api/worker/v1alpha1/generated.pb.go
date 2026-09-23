@@ -6158,6 +6158,11 @@ func (m *ModelDeploymentStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.RoleSummary)
+	copy(dAtA[i:], m.RoleSummary)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.RoleSummary)))
+	i--
+	dAtA[i] = 0x42
 	if m.Router != nil {
 		{
 			size, err := m.Router.MarshalToSizedBuffer(dAtA[:i])
@@ -8868,6 +8873,8 @@ func (m *ModelDeploymentStatus) Size() (n int) {
 		l = m.Router.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	l = len(m.RoleSummary)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -10729,6 +10736,7 @@ func (this *ModelDeploymentStatus) String() string {
 		`Roles:` + repeatedStringForRoles + `,`,
 		`KVCache:` + strings.Replace(this.KVCache.String(), "ModelDeploymentKVCacheStatus", "ModelDeploymentKVCacheStatus", 1) + `,`,
 		`Router:` + strings.Replace(this.Router.String(), "ModelDeploymentRouterStatus", "ModelDeploymentRouterStatus", 1) + `,`,
+		`RoleSummary:` + fmt.Sprintf("%v", this.RoleSummary) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -30159,6 +30167,38 @@ func (m *ModelDeploymentStatus) Unmarshal(dAtA []byte) error {
 			if err := m.Router.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
+			iNdEx = postIndex
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RoleSummary", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.RoleSummary = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

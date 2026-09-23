@@ -4799,6 +4799,10 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											Description: "PhaseMessage carries the reason for the phase.",
 											Type:        "string",
 										},
+										"roleSummary": {
+											Description: "RoleSummary is the current Ready count by role kind, for kubectl's Roles column. R counts\nmanaged router Pods; S, P, and D count server, prefill, and decode instances. A serving\ninstance may contain several Pods, so the engine figures are not Pod counts.",
+											Type:        "string",
+										},
 										"roles": {
 											Description: "Roles is one entry per declared role.",
 											Type:        "array",
@@ -5010,6 +5014,14 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 							Description: "",
 							Priority:    0,
 							JSONPath:    ".spec.engine.name",
+						},
+						{
+							Name:        "Roles",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.roleSummary",
 						},
 						{
 							Name:        "Phase",

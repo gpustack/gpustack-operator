@@ -209,7 +209,7 @@ func renderModelDeploymentRouterObjects(
 	// ConfigMap, and rendering an empty one would leave an object whose absence and whose emptiness
 	// a reader cannot tell apart, plus a config hash taken over nothing.
 	var configMap *core.ConfigMap
-	annotations := map[string]string{}
+	annotations := modelDeploymentMetricsAnnotations(modelDeploymentRouterMetricsPort, core.URISchemeHTTP)
 	if len(workload.Config) > 0 {
 		configMap = &core.ConfigMap{
 			ObjectMeta: meta.ObjectMeta{Name: name, Namespace: md.Namespace, Labels: maps.Clone(labels)},

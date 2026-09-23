@@ -16,6 +16,7 @@ var setups = []extensionapi.Setup{
 	extensionapi.NewSettingHandler(settings.Indexer()),
 	new(worker.DevicesHandler),
 	new(worker.InstanceHandler),
+	new(worker.ModelDeploymentHandler),
 	new(worker.InstanceImagePullSecretHandler),
 	new(worker.InstancePersistentVolumeHandler),
 	new(worker.InstancePersistentVolumeTypeHandler),

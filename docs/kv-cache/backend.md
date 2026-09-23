@@ -374,7 +374,8 @@ build compiles no `ascend` transport.
 **Both host fabrics also grant the member one device, and the protocol names it.** Nothing is
 declared: an `RDMA` group asks for `device.gpustack.ai/rdma.shared`, one of
 [this operator's own RDMA keys](../architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves);
-an `EFA` group asks for `vpc.amazonaws.com/efa`, which AWS's plugin advertises.
+an `EFA` group asks for
+[the key AWS's EFA device plugin advertises](../architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves).
 
 The renderer **derives** the RDMA name rather than spelling it, so the page linked above is the one
 to trust if the two ever disagree. The request is the permission — a bind mount of a device tree is

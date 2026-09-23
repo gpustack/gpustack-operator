@@ -17,6 +17,15 @@ all role replicas are ready but a declared router has no ready replica.
 `status.roles[]` carries `name`, `kind`, `desired`, `ready`, `quotaReserved`, `unmanaged` and
 `assignedFlavors` per role.
 
+`kubectl get modeldeployments` shows `status.roleSummary` in its `ROLES` column. It counts current
+Ready instances by kind: `R` is managed router Pods, `S` is ordinary servers, `P` is prefillers,
+and `D` is decoders. For example, `1R2S` means one Ready router and two Ready servers; `1R3P4D`
+means one Ready router, three Ready prefillers and four Ready decoders.
+
+Without a router, the `R` part is absent; a declared kind with nothing Ready shows zero. Several
+roles of the same kind are summed. A serving instance made of several Pods still counts once; use
+`status.roles[].desired` to see the requested count.
+
 Without a router, `status.endpoint` is the address the deployment-wide Service serves on, in the form
 `<scheme>://<name>.<namespace>.svc:<port>`. The scheme is read from the same role the port is — the
 first one — and is `https` only where that role passes `--ssl-certfile` or `--ssl-keyfile`. With a
@@ -26,6 +35,10 @@ router it is absent until the router is ready, then uses the router Service's ow
 the cache pool's client endpoint, the metrics names and port, and one entry for every role containing
 the effective kind, selector, direct endpoint and any dialable KV-event endpoints. The event entries
 are absent when the corresponding rendered Pods do not carry publisher configuration.
+
+This router contract names metrics sources for routing; it is not a live utilization sample.
+The separate [Model Deployment Metrics](model-deployment-metrics.md) subresource reads the current
+router and engine Pod endpoints and reports partial coverage explicitly.
 
 > **Why** — either flag alone is enough, and the rest of the `--ssl-*` family is not enough. Both
 > engines hand every ssl argument to uvicorn, which turns on TLS for those two and for nothing else,

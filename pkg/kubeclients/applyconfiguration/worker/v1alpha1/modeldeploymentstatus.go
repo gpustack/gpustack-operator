@@ -52,6 +52,10 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// an empty object here cannot be told apart from a contract whose every string happens to be
 	// empty.
 	Router *ModelDeploymentRouterStatusApplyConfiguration `json:"router,omitempty"`
+	// RoleSummary is the current Ready count by role kind, for kubectl's Roles column. R counts
+	// managed router Pods; S, P, and D count server, prefill, and decode instances. A serving
+	// instance may contain several Pods, so the engine figures are not Pod counts.
+	RoleSummary *string `json:"roleSummary,omitempty"`
 }
 
 // ModelDeploymentStatusApplyConfiguration constructs a declarative configuration of the ModelDeploymentStatus type for use with
@@ -123,5 +127,13 @@ func (b *ModelDeploymentStatusApplyConfiguration) WithKVCache(value *ModelDeploy
 // If called multiple times, the Router field is set to the value of the last call.
 func (b *ModelDeploymentStatusApplyConfiguration) WithRouter(value *ModelDeploymentRouterStatusApplyConfiguration) *ModelDeploymentStatusApplyConfiguration {
 	b.Router = value
+	return b
+}
+
+// WithRoleSummary sets the RoleSummary field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RoleSummary field is set to the value of the last call.
+func (b *ModelDeploymentStatusApplyConfiguration) WithRoleSummary(value string) *ModelDeploymentStatusApplyConfiguration {
+	b.RoleSummary = &value
 	return b
 }
