@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"maps"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -911,4 +912,71 @@ func TestSyncNodeFlavorNotes(t *testing.T) {
 			assert.Equal(t, "yes", f.Annotations["example.com/keep"], "a non-operator annotation is preserved")
 		})
 	}
+}
+
+// TestNodeFlavorReconciler_RetiresFlavorLeftByLateCPUIdentity replays a node that registers
+// before NFD publishes its CPU identity. The node first pools into the generic CPU flavor; NFD
+// then publishes the identity, and the NodeFeature re-derives the general labels onto the real
+// CPU. Every Node update is delivered through the watch predicate and mapped from both the old
+// and the new Node, as the controller does; the generic flavor must be retired (terminating, so
+// NodeQueue drops it from the queue) rather than left behind with capacity no Node backs.
+func TestNodeFlavorReconciler_RetiresFlavorLeftByLateCPUIdentity(t *testing.T) {
+	registered := newManagedCPUNode("node-0", 2, 8, 20)
+	genericName := cpuFlavorName(registered)
+	require.Contains(t, genericName, "gpustack--generic-")
+
+	identified := registered.DeepCopy()
+	discoverCPU(identified, true)
+	rederived := identified.DeepCopy()
+	for k := range rederived.Labels {
+		if strings.HasPrefix(k, nodefeature.GeneralFeatureLabelPrefix) {
+			delete(rederived.Labels, k)
+		}
+	}
+	for k, v := range nodefeature.ConstructNodeCapacityLabels(rederived) {
+		if strings.HasPrefix(k, nodefeature.GeneralFeatureLabelPrefix) {
+			rederived.Labels[k] = v
+		}
+	}
+	amdName := cpuFlavorName(rederived)
+	require.Contains(t, amdName, "gpustack--amd-epyc-7571-")
+
+	queue := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: "queue"}, Spec: kueue.ClusterQueueSpec{
+		ResourceGroups: []kueue.ResourceGroup{{Flavors: []kueue.FlavorQuotas{{
+			Name: kueue.ResourceFlavorReference(genericName),
+		}}}},
+	}}
+	cli := buildNodeFlavorClient(registered.DeepCopy(), queue)
+	r := &NodeFlavorReconciler{Client: cli}
+	reconcileNodeFlavor(t, cli, genericName)
+	rf, err := getResourceFlavor(t, cli, genericName)
+	require.NoError(t, err)
+	rf.Finalizers = []string{"kueue.x-k8s.io/resource-in-use"}
+	require.NoError(t, cli.Update(context.Background(), rf))
+
+	ctx := context.Background()
+	for _, step := range []struct{ old, new *core.Node }{
+		{registered, identified},
+		{identified, rederived},
+	} {
+		nd := new(core.Node)
+		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(step.new), nd))
+		nd.Labels, nd.Annotations = step.new.Labels, step.new.Annotations
+		require.NoError(t, cli.Update(ctx, nd))
+		if !nodeFlavorNodeUpdated(step.old, step.new) {
+			continue
+		}
+		reqs := append(r.enqueueResourceFlavorWhenNodeChanged(ctx, step.old),
+			r.enqueueResourceFlavorWhenNodeChanged(ctx, step.new)...)
+		for _, req := range reqs {
+			reconcileNodeFlavor(t, cli, req.Name)
+		}
+	}
+
+	got, err := getResourceFlavor(t, cli, genericName)
+	require.NoError(t, err, "Kueue's finalizer keeps the referenced flavor until the queue drops it")
+	assert.NotNil(t, got.DeletionTimestamp, "the generic flavor no Node backs must be retired")
+	got, err = getResourceFlavor(t, cli, amdName)
+	require.NoError(t, err)
+	assert.Equal(t, "2", got.Labels[nodefeature.GeneralFeatureLabelPrefix+"amd-epyc-7571"+_ResourceFlavorCapacityLabelSuffix])
 }
