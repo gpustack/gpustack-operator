@@ -55,13 +55,15 @@ token count's. Taking a whole adapter exclusively removes it from every other te
 buys nothing the hardware was not already doing.
 
 For a managed `ModelDeployment`, set `spec.roles[].resources.interface` instead of naming the key
-in a Pod template. One RDMA interface selects the shared key, while two or more select the
-exclusive key with the requested count. An EFA transport selects
-[the EFA device plugin's own key](../architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves) instead.
+in a Pod template. [Model Deployment Reference](../reference/model-deployment.md) states which key a
+count selects, and the mixed-fabric refusal. The field allocates a device to each rendered engine
+Pod and does not assert that the engine has transferred bytes.
 
-The field allocates a device to each rendered engine Pod and does not assert that the engine has
-transferred bytes. See [Model Deployment Reference](../reference/model-deployment.md) for protocol
-selection and mixed-fabric refusal.
+**An EFA leg also needs an EFA build of Mooncake in the engine image.** The default build, which
+the runner engine images carry, has no EFA transport: granted the device, the engine fails at
+startup because its transfer engine cannot initialize; without the grant, the transfer falls back
+to TCP. The EFA builds ship as `mooncake-transfer-engine-efa` and
+`mooncake-transfer-engine-efa-cuda13`, and need libfabric installed in the same image.
 
 ## How many endpoints beside N accelerators
 
