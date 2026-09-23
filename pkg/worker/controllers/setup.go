@@ -19,6 +19,8 @@ var setups = []controller.Setup{
 	new(worker.ModelDeploymentJointAdmissionCheckReconciler),
 	new(worker.NodeQueueReconciler),
 	new(worker.NodeQueueEntranceReconciler),
+	new(worker.TopologySourceReconciler),
+	new(worker.NodeTopologyReconciler),
 	new(worker.NodeCapacityReconciler),
 	new(worker.NodeFeatureReconciler),
 	new(worker.NodeFlavorReconciler),
