@@ -86,8 +86,8 @@
 #                  another reads like a fix because the first error really is gone.
 #              ⇒ WHAT WOULD: a real accelerator, the engine starting AND serving requests with the
 #              injected configuration, and the KV traffic demonstrably going through mooncake.
-#              Tracked in issue #333, which carries this one assertion and nothing else - so a
-#              carrier found closed has to be checked for THIS answer rather than a neighbour's.
+#              Tracked in issue #455 R1: an Ascend engine must serve with the injected configuration.
+#              The earlier issue #333 closed without observing that assertion.
 #              DISK, AND WHY THIS IS A STEP COUNT RATHER THAN A PARAMETER. Measured 2026-09-04 from
 #              the arm64 manifests, scaled by a ratio measured on a third image (6.0GB of layers ->
 #              22.7GB resident, 3.8x): vLLM 13.6GB of layers / ~52GB resident, SGLang 18.1GB / ~69GB,

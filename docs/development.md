@@ -211,6 +211,11 @@ step, with the operational caveats.
 (`zz_generated.*`, `generated.pb.go`, `generated.proto`): edit the source `*.go` types or `gen/api/main.go`
 and run `make generate` (the `gpustack-operator-generate` skill automates this).
 
+The patched applyconfiguration generator strips list and continuation indentation from API comments
+in `staging/k8s.io/code-generator/cmd/applyconfiguration-gen/generators/applyconfiguration.go:317-326`
+(`commentsWithoutMarkers`). A comment scan of `pkg/kubeclients/applyconfiguration/` can therefore report
+list formatting that cannot be fixed by editing the source comment; fix the generator patch instead.
+
 ## Vendored / patched dependencies
 
 `go.mod` `replace`s several k8s modules (`k8s.io/api`, `apimachinery`, `code-generator`,

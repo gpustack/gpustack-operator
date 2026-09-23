@@ -3193,11 +3193,9 @@ message ModelDeploymentPort {
 // nothing at all: it adds or removes instances, and every instance that stays keeps running,
 // keeps the accelerators it was admitted with and keeps whatever cache it holds.
 //
-// ADDING OR REMOVING A ROLE REACHES NO FURTHER THAN THE ROLE IT NAMES. A replica's group is named
-// from the deployment, the role and that replica's ordinal, and from nothing else -- not from how
-// many roles the deployment declares -- so a second role arriving leaves the first role's replicas
-// exactly where they were. Renaming a role is what moves that role's own replicas: each of its
-// ordinals derives a new group and is replaced.
+// THE SET OF ROLES IS FIXED AFTER CREATION. Admission refuses adding, removing or renaming a role.
+// A replica's group is named from the deployment, its role and its ordinal, so edits to one role's
+// running configuration do not rename a sibling role's groups.
 //
 // A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A ROLLOUT. The replica that left is replaced on
 // its own, under a new name, while its siblings keep serving — see

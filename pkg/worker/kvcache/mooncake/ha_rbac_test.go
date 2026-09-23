@@ -63,8 +63,7 @@ func TestTheElectionExistsOnlyAboveOneReplica(t *testing.T) {
 	assert.Contains(t, RenderLeaderFlags(two), "-enable_ha=true",
 		"the same field turns live the moment there is something to elect")
 	assert.True(t, RenderLeaderRBAC(two).Wanted())
-	assert.Equal(t, "k8s://"+kuberess.SystemNamespaceName+"/mooncake-dram-leader",
-		MemberMasterEntry(two))
+	assert.Equal(t, LeaderServiceHost(two)+":50051", MemberMasterEntry(two))
 }
 
 // TestRenderLeaderRBAC_FollowsTheField pins that the access exists exactly when the election does.
@@ -171,49 +170,30 @@ func TestRenderMemberRBAC_ReadsAndNothingElse(t *testing.T) {
 	assert.Empty(t, memberServiceAccountName(testBackend()))
 }
 
-// TestMemberMasterEntry_TakesOneOfTwoForms pins F4: HA changes the SCHEME, not the variable.
-//
-// Both forms are asserted, and the non-HA one exactly, because "unchanged when the feature is off"
-// is the guarantee that keeps every existing deployment working -- and it is the one an added
-// prefix breaks silently, since the member would still start and simply never find a leader.
-func TestMemberMasterEntry_TakesOneOfTwoForms(t *testing.T) {
+// TestMemberMasterEntry_UsesServiceWithAndWithoutHA pins the member address across both modes.
+func TestMemberMasterEntry_UsesServiceWithAndWithoutHA(t *testing.T) {
 	assert.Equal(t, LeaderServiceHost(testBackend())+":50051", MemberMasterEntry(testBackend()),
 		"without HA it is the leader Service and the RPC port, as it was before HA existed")
 
-	assert.Equal(t, "k8s://"+kuberess.SystemNamespaceName+"/mooncake-dram-leader",
-		MemberMasterEntry(haBackend()),
-		"with HA it names the Lease, which is what the client reads the leader out of")
+	assert.Equal(t, LeaderServiceHost(haBackend())+":50051", MemberMasterEntry(haBackend()),
+		"with HA it reaches the elected leader through the Service")
 
-	// The two halves have to agree: the entry a member is given must be the Lease the leader takes,
-	// or the member follows an election nobody is holding. Compared against the leader's own
-	// rendered flag rather than against a second literal, because two literals can drift apart.
 	assert.Contains(t, RenderLeaderFlags(haBackend()),
 		"-ha_backend_connstring="+kuberess.SystemNamespaceName+"/mooncake-dram-leader")
 }
 
-// TestMemberMasterEntry_AddressingSelectsBetweenTheTwoForms pins the field, its default, and the
-// one thing the field must NOT move.
-//
-// The default is asserted from an object the schema has NOT defaulted -- an empty string -- because
-// that is what the renderer actually sees when a webhook is absent, and a renderer that treated an
-// empty value as "Service" would quietly rewrite every existing backend's members.
-//
-// The member's account stays put under both forms, and that is deliberate rather than an oversight:
-// the two entries exist to be compared on a cluster, and a comparison whose arms differ in two
-// things cannot attribute what it measures.
-func TestMemberMasterEntry_AddressingSelectsBetweenTheTwoForms(t *testing.T) {
+// TestMemberMasterEntry_UsesServiceForEachAddressingValue checks all accepted field values.
+func TestMemberMasterEntry_UsesServiceForEachAddressingValue(t *testing.T) {
 	addressed := func(value string) *workercore.KVCacheBackend {
 		return haBackend(func(kvcb *workercore.KVCacheBackend) {
 			kvcb.Spec.Connection.Managed.Leader.HighAvailability.MemberAddressing = value
 		})
 	}
 
-	lease := "k8s://" + kuberess.SystemNamespaceName + "/mooncake-dram-leader"
 	service := LeaderServiceHost(testBackend()) + ":50051"
 
-	assert.Equal(t, lease, MemberMasterEntry(addressed("")),
-		"an unset value is an object that never went through admission, not a request to move")
-	assert.Equal(t, lease, MemberMasterEntry(addressed(MemberAddressingLease)))
+	assert.Equal(t, service, MemberMasterEntry(addressed("")))
+	assert.Equal(t, service, MemberMasterEntry(addressed(MemberAddressingLease)))
 	assert.Equal(t, service, MemberMasterEntry(addressed(MemberAddressingService)),
 		"the Service publishes only ready endpoints, and a standby is not ready")
 
@@ -224,7 +204,7 @@ func TestMemberMasterEntry_AddressingSelectsBetweenTheTwoForms(t *testing.T) {
 	assert.NotEmpty(t, accountFor(MemberAddressingLease),
 		"the equality below is worth nothing if both arms render no account at all")
 	assert.Equal(t, accountFor(MemberAddressingLease), accountFor(MemberAddressingService),
-		"the account does not move with the entry: one variable, or the cluster trip proves nothing")
+		"the member account stays mounted under both values")
 }
 
 // TestRenderLeaderRBAC_IsPerBackend pins that two backends do not share an account.

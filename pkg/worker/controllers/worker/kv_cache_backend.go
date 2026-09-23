@@ -1525,9 +1525,9 @@ func (r *KVCacheBackendReconciler) syncLeaderWorkload(
 
 // ensureHARBAC creates or converges the access both roles need, and does nothing when HA is off.
 //
-// Both roles, and the member's is not optional under HA: its MOONCAKE_MASTER becomes a k8s:// entry,
-// so it reads the same Lease to find the leader. Rendered here rather than beside the DaemonSets
-// because there is one account for the whole backend -- every group reads one Lease.
+// The leader uses its account for election. The member account remains in the rendered HA set even
+// though its Service address does not use the token. Rendered here rather than beside the
+// DaemonSets because there is one account for the whole backend.
 //
 // REQUIRED: "does nothing" is a RETURN, not an empty render handed to syncHARBAC. This runs BEFORE
 // the workloads; syncHARBAC reads an unwanted set as "delete these", so passing one through would

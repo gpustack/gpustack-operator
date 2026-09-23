@@ -1325,22 +1325,11 @@ func TestKVCacheBackendReconciler_ConvergesAHighAvailabilitySwitch(t *testing.T)
 	onMember := memberPod()
 	require.NotNil(t, onMember.AutomountServiceAccountToken)
 	assert.True(t, *onMember.AutomountServiceAccountToken,
-		"the member reads the same Lease, so it needs a token too")
+		"the member account remains mounted while addressing is resolved")
 	assert.Equal(t, mooncake.MemberRBACObjectName(kvcb), onMember.ServiceAccountName,
 		"under its own account, which cannot take the Lease the way the leader's can")
-	// The invariant that ties the two sides together: the Lease a member is told to READ is the one
-	// the leader is told to TAKE. Read out of the leader's own rendered argv rather than restated as
-	// a literal, because two literals agree until one of the two derivations moves -- and a member
-	// following a Lease nobody holds looks exactly like a member waiting for a leader to come up.
-	var leaderConnstring string
-	for _, arg := range on.Containers[0].Args {
-		if entry, ok := strings.CutPrefix(arg, "-ha_backend_connstring="); ok {
-			leaderConnstring = entry
-		}
-	}
-	require.NotEmpty(t, leaderConnstring, "the leader was rendered with a connection string")
-	assert.Equal(t, "k8s://"+leaderConnstring, memberMaster(onMember),
-		"the member reads the same Lease the leader takes, through the scheme its client parses")
+	assert.Equal(t, mooncake.LeaderServiceHost(kvcb)+":50051", memberMaster(onMember),
+		"the member connects through the Service that fronts the elected leader")
 
 	setHA(false)
 	assert.Equal(t, expect(false), present(t),

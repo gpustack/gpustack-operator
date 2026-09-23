@@ -132,10 +132,9 @@ func (r *ModelDeploymentWebhook) ReceiveDeletionUpdate() {}
 // make the request stop meaning what it says. Validation refuses it on an accelerated type shared
 // with another role and points a CPU-only replica at a CPU-only InstanceType instead.
 //
-// IT RUNS ON UPDATE AS WELL AS CREATE, because roles are not frozen: a deployment edited to add a
-// second role would otherwise carry an undefaulted one and reach exactly the state above. The
-// defaulter cannot tell a new role from an old one -- it is handed the incoming object and no
-// previous one -- so it defaults any unset count it finds, which on an object that was stored
+// IT RUNS ON UPDATE AS WELL AS CREATE, because an existing role can still have an unset count.
+// Adding or removing a role is refused by validation. The defaulter is handed the incoming object
+// and no previous one, so it defaults any unset count it finds, which on an object that was stored
 // before this rule existed changes a request that had already been admitted. That is acceptable
 // only because this API is in no released version, so there are no such objects outside a branch.
 func (r *ModelDeploymentWebhook) Default(ctx context.Context, obj runtime.Object) error {
@@ -233,12 +232,67 @@ func (r *ModelDeploymentWebhook) getInstanceType(
 	return instType, nil
 }
 
+// validateModelDeploymentHostAccess applies the Instance host access gates to each role. Access
+// already held by a role remains valid when an administrator closes a gate.
+func validateModelDeploymentHostAccess(
+	old, md *workercore.ModelDeployment, privilegedAllowed, hostPathAllowed bool,
+) field.ErrorList {
+	var errs field.ErrorList
+	oldRoles := make(map[string]*workercore.ModelDeploymentRole)
+	if old != nil {
+		for i := range old.Spec.Roles {
+			oldRoles[old.Spec.Roles[i].Name] = &old.Spec.Roles[i]
+		}
+	}
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		held := oldRoles[role.Name]
+		rolePath := field.NewPath("spec", "roles").Index(i)
+		if role.Privileged && !privilegedAllowed && (held == nil || !held.Privileged) {
+			errs = append(errs, field.Forbidden(rolePath.Child("privileged"),
+				fmt.Sprintf("privileged mode is not allowed: enable the %q setting to allow it",
+					settings.InstancePrivilegedAllowed.Name())))
+		}
+		if hostPathAllowed {
+			continue
+		}
+		for j := range role.AdditionalVolumes {
+			want := &role.AdditionalVolumes[j]
+			if want.HostPath == nil {
+				continue
+			}
+			covered := false
+			if held != nil {
+				for k := range held.AdditionalVolumes {
+					prev := &held.AdditionalVolumes[k]
+					if prev.HostPath != nil && coversHostAccess(
+						&workercore.InstanceAdditionalVolume{HostPath: prev.HostPath, SubPath: prev.SubPath, ReadOnly: prev.ReadOnly},
+						&workercore.InstanceAdditionalVolume{HostPath: want.HostPath, SubPath: want.SubPath, ReadOnly: want.ReadOnly},
+					) {
+						covered = true
+						break
+					}
+				}
+			}
+			if !covered {
+				errs = append(errs, field.Forbidden(rolePath.Child("additionalVolumes").Index(j).Child("hostPath"),
+					fmt.Sprintf("mounting a host path is not allowed: enable the %q setting to allow it",
+						settings.InstanceHostPathVolumeAllowed.Name())))
+			}
+		}
+	}
+	return errs
+}
+
 func (r *ModelDeploymentWebhook) ValidateCreate(
 	ctx context.Context, obj runtime.Object,
 ) (ctrladmission.Warnings, error) {
 	md := obj.(*workercore.ModelDeployment)
 
 	errs := validateModelDeployment(md, nil)
+	errs = append(errs, validateModelDeploymentHostAccess(nil, md,
+		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
+		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
 
 	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
 
@@ -272,6 +326,9 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	// too long could never be shortened, and every later edit -- including one that removes the
 	// offending role -- would be refused. That is worse than the reconcile failure the rule prevents.
 	errs := validateModelDeployment(md, modelDeploymentRoleNames(oldObj))
+	errs = append(errs, validateModelDeploymentHostAccess(old, md,
+		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
+		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
 	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
 	errs = append(errs, validateModelDeploymentRouterName(md, old)...)
 	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)

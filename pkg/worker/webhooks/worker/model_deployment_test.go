@@ -58,6 +58,38 @@ func role(mutate func(*workercore.ModelDeploymentRole)) workercore.ModelDeployme
 	return r
 }
 
+func TestValidateModelDeploymentHostAccess(t *testing.T) {
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+	md.Spec.Roles[0].Privileged = true
+	md.Spec.Roles[0].AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{{
+		MountPath: "/driver", HostPath: &core.HostPathVolumeSource{Path: "/usr/local/driver"},
+	}}
+	testCases := []struct {
+		name              string
+		old               *workercore.ModelDeployment
+		privilegedAllowed bool
+		hostPathAllowed   bool
+		wantFields        []string
+	}{
+		{name: "closed gates reject both", wantFields: []string{"spec.roles[0].privileged", "spec.roles[0].additionalVolumes[0].hostPath"}},
+		{name: "open gates admit the same deployment", privilegedAllowed: true, hostPathAllowed: true},
+		{name: "privileged gate is independent", privilegedAllowed: true, wantFields: []string{"spec.roles[0].additionalVolumes[0].hostPath"}},
+		{name: "host path gate is independent", hostPathAllowed: true, wantFields: []string{"spec.roles[0].privileged"}},
+		{name: "held access survives closed gates", old: md.DeepCopy()},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := validateModelDeploymentHostAccess(tc.old, md, tc.privilegedAllowed, tc.hostPathAllowed)
+			var fields []string
+			for _, err := range errs {
+				assert.Equal(t, field.ErrorTypeForbidden, err.Type)
+				fields = append(fields, err.Field)
+			}
+			assert.Equal(t, tc.wantFields, fields)
+		})
+	}
+}
+
 // routedModelDeployment builds a one-server-role deployment carrying spec.router, so the router cases
 // differ from one another in the router alone and never in the roles.
 func routedModelDeployment(mutate func(*workercore.ModelDeploymentRouter)) *workercore.ModelDeployment {
