@@ -1,8 +1,8 @@
 # Scheduling Chain
 
 > **Purpose** — how node and device signals become capacity labels, and how five controllers
-> materialize them into a Kueue `ResourceFlavor` → `ClusterQueue` → `LocalQueue` chain plus an
-> `InstanceType` CRD.
+> materialize them with topology profiles into a Kueue `Topology` → `ResourceFlavor` →
+> `ClusterQueue` → `LocalQueue` chain plus an `InstanceType` CRD.
 > **Audience** contributors · **Prerequisites** [Architecture](../architecture.md),
 > [Device Discovery](device-discovery.md) · **Read time** ~9 min
 
@@ -137,26 +137,21 @@ API without touching any Node.
 
 ## Stage 4: the Kueue chain
 
-The capacity labels drive a Kueue chain built by `pkg/worker/controllers/worker`. **One isolated
-ClusterQueue per pool**: with exclusive / shared / sliced / partitioned in one queue there is
-no cross-queue borrowing to broker, so `spec.cohortName` stays empty.
+The capacity and topology-profile labels drive a Kueue chain built by
+`pkg/worker/controllers/worker`. **One isolated ClusterQueue per pool**: with exclusive / shared /
+sliced / partitioned in one queue there is no cross-queue borrowing to broker, so
+`spec.cohortName` stays empty.
 
 **Kueue assigns a ResourceFlavor per PodSet, not per Workload.** Each PodSet forms its own assignment
 group and a candidate flavor is evaluated against that PodSet's own `nodeSelector`, so one ClusterQueue
 can serve two accelerator models at once: a Workload's PodSets may land on different flavors of the
 same pool.
 
-The selector that would drive it is one `acceleratable.feature.gpustack.ai/<aKey>` entry — exactly the
-key an accelerated flavor pins in its `nodeLabels`.
-
-**Nothing in this operator writes that selector today.** `ModelDeployment` stopped rendering it when
-`roles[].acceleratorKey` was withdrawn, so the per-PodSet mechanism above is available and unused: a
-multi-role workload takes whatever flavors its pool assigns.
-
-A key **no** candidate flavor pins is not a constraint that fails. `flavorSelector` keeps only the
-nodeSelector keys the flavor carries and drops the rest, so an unknown key is ignored and an arbitrary
-flavor is assigned. Whatever starts writing such a selector therefore has to validate it against the
-pool first — a wrong key surfaces two gates downstream, as a Pod left `Pending` at the scheduler.
+Every generated flavor also pins `topology.gpustack.ai/profile` and references the Kueue `Topology`
+for that ordered level set. Kueue TAS chooses a domain for the complete PodSet; a
+`ModelDeployment` can require a level without naming its concrete value. The discovery, profile,
+quota-conservation, and request path is in [Topology-Aware
+Scheduling](topology-aware-scheduling.md).
 
 ## Naming and grouping
 
@@ -186,6 +181,8 @@ Two discriminators keep the pools clean:
 - `feature.gpustack.ai/acceleratable=true|false`, on every flavor and queue, lets a collapsed generic
   queue select "all non-accelerated flavors" and stops an *aware* generic queue (`general.${gKey}=true`)
   matching an accelerated flavor carrying the same key.
+- When `instance-type-mixed-on-node=false`, the worker publishes `feature.gpustack.ai/cpu-only=true`
+  through NFD only for Nodes without a detected accelerator; CPU flavors select it to exclude GPU Nodes.
 - `note.gpustack.ai/cpuDetail` carries the raw CPU detail: always on a CPU flavor, on an accelerated one
   only when awareness is on. The defaulting webhook folds it back into the type's spec — see
   [Admission](admission.md#the-instancetype-and-instance-webhooks).
@@ -223,10 +220,11 @@ flowchart LR
 
 ### `NodeFlavorReconciler` (`node_flavor.go`)
 
-Indexes managed nodes by `(key, os, arch, count)`, one `ResourceFlavor` per group. `spec.nodeLabels`
-pins workloads — the feature key `{general.|acceleratable.}feature.gpustack.ai/${key}=true`, full
-`kubernetes.io/os|arch` — plus a blanket `{Operator: Exists}` toleration, eligibility being by
-nodeLabels, not taints.
+Indexes managed nodes by `(key, os, arch, count, topology profile)`, one `ResourceFlavor` per group.
+`spec.nodeLabels` pins workloads — the feature key
+`{general.|acceleratable.}feature.gpustack.ai/${key}=true`, full `kubernetes.io/os|arch`, and
+`topology.gpustack.ai/profile` — plus a blanket `{Operator: Exists}` toleration, eligibility being by
+nodeLabels, not taints. `spec.topologyName` references the generated Kueue Topology for that profile.
 
 Labels carry the pool identity (`.count`, `.capacity = contributing nodes × count`);
 `note.gpustack.ai/*` annotations the per-accelerator VRAM and device descriptors — device information
@@ -284,7 +282,7 @@ Owns the backing `ClusterQueue`'s **quota and admission gating** — resource gr
 drain policy (admin `Hold↔None` belongs to the `InstanceTypeReconciler`), the AdmissionCheck reference —
 resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
 
-- **Groups** — from the live flavors, smallest per-node count first so Kueue packs small nodes first. An
+- **Groups** — from the live topology-aware flavors, smallest per-node count first so Kueue packs small nodes first. An
   accelerated queue advertises only `credits.gpustack.ai/${manufacturer}` (nominal `capacity × M`; one
   whole accelerator = `M = 1,600,000` credits, so Kueue's int64 accounting never rounds fractional
   shared/sliced credits up to 1), a non-accelerated queue only CPU.
@@ -300,6 +298,9 @@ resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
 - **No live flavor left** while the queue carries quota — gated by
   `instance-type-drain-when-no-flavors` (default true): `HoldAndDrain`, requeue until every reservation
   clears, then empty the groups so Kueue's counters never go negative.
+- **Topology readiness** — refuse a partial queue plan when a flavor lacks its profile or Topology,
+  selectors overlap, quota changes across the profile split, the same resource would occur in two
+  groups, or one resource group would exceed the [flavor limit](topology-aware-scheduling.md#capacity-and-lifecycle-limits).
 
 It **reactivates** (StopPolicy `None`) a queue *it* drained to empty — a `HoldAndDrain`, never an admin
 `Hold` — once flavors return, though the `InstanceTypeReconciler`'s sticky `Inactive` backfill re-holds
@@ -323,6 +324,7 @@ The per-accelerator **AdmissionCheck**, third of the five gates; its behavior is
 ---
 
 **See also** — [Device Discovery](device-discovery.md) (where the capacity signals come from) ·
+[Topology-Aware Scheduling](topology-aware-scheduling.md) (how topology profiles enter this chain) ·
 [Walkthrough](../walkthrough.md) (the same objects on a live cluster) ·
 [Settings](../settings.md#online-adjustable-settings)
 

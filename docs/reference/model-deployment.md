@@ -16,6 +16,7 @@ path; ordinary Pod admission still applies to each replica.
 
 - [A minimal deployment](#a-minimal-deployment)
 - [Prefill and decode](#prefill-and-decode)
+- [Topology placement](#topology-placement)
 - [The reuse domain is inherited](#the-reuse-domain-is-inherited)
 - [The three override tiers](#the-three-override-tiers)
 - [What the operator owns](#what-the-operator-owns)
@@ -426,7 +427,8 @@ disagree on the protocol until both converge — the same window an `engine.vers
 | label `kueue.x-k8s.io/queue-name` | the `status.entrance` **published by** the role's InstanceType | unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type rather than re-derived from its name, so this operator and the reconcile that creates the LocalQueue cannot disagree about the queue |
 | label `app.kubernetes.io/component` | the role's `name` | unchanged; what a `Service` selects on and what `status.roles[]` is attributed by |
 | label `modeldeployment.gpustack.ai/role-kind` | the role's **effective** `kind`, so `server` when the field is unset | what something in front of the replicas selects on to tell a prefiller from a decoder. It is the resolved value rather than the field, because a selector matching the empty string would miss every replica of the default shape. Rendered for every deployment, a lone `server` included, so "no prefiller is running" and "this deployment does not label its roles" are different answers |
-| `spec.nodeSelector` | nothing is added | a role takes whatever flavor its pool assigns. Kueue evaluates a candidate flavor per PodSet, and with no selector to match against there is nothing to narrow the choice within one pool |
+| annotation `kueue.x-k8s.io/podset-required-topology` | `roles[].topology.requiredLevel`, when non-empty | asks Kueue to fit this replica's whole PodSet in one domain at the named hierarchy level |
+| `spec.nodeSelector` | no topology value is added | Kueue selects the concrete domain through the flavor's Topology and writes its assignment; the deployment requests a level, not a region, zone, rack, or host value |
 
 The `role-hash` annotation is load-bearing rather than cosmetic. Kueue takes it verbatim when present
 and otherwise derives a digest of the Pod spec's *shape*, which names the PodSet after nothing an
@@ -496,6 +498,24 @@ debugging.
 With `spec.router`, the operator renders six objects named `<deployment>-router`: a Deployment,
 ConfigMap, Service, ServiceAccount, Role and RoleBinding. Removing `spec.router` prunes all six.
 What `status.endpoint` publishes in each shape is under [Status](model-deployment-status.md#status).
+
+## Topology placement
+
+`roles[].topology.requiredLevel` is an optional Kubernetes label key. It requires the `size` Pods in
+each replica group to fit within one domain at that level. See [per-replica request
+semantics](../architecture/topology-aware-scheduling.md#a-modeldeployment-request-is-per-replica).
+
+The value names a configured level, not a domain value. Region, zone, a GPUStack rack key, an
+administrator-owned key, and selected Topograph labels all use the same field. The syntax is
+validated at admission; availability in the chosen queue is resolved dynamically by Kueue.
+
+Omit `topology` or leave `requiredLevel` empty for unconstrained topology-aware placement.
+`kubernetes.io/hostname` is implicit and is rejected as an explicit required level. Changing or
+removing the request changes the role render hash and rolls only that role's replicas.
+
+The full discovery, profile, capacity, and diagnostic contract is in [Topology-Aware
+Scheduling](../architecture/topology-aware-scheduling.md); setup examples are in [Topology-Aware
+Scheduling Operations](../operation/topology-aware-scheduling.md).
 
 ## The reuse domain is inherited
 
@@ -839,9 +859,9 @@ by precedent and stops meaning anything.
 
 The grouping key is the **replica**: every replica of every role forms its own pod group, derived from
 the role and the replica's ordinal within it, and Kueue composes one Workload per group with a
-declared total of one. Two roles naming the same `instanceType` share nothing — a queue name is
-derived from the `instanceType` and one Workload carries one queue name, so rather than forbid the
-shape the roles are simply not made to share.
+declared total equal to the role's `size`. Two roles naming the same `instanceType` share nothing —
+a queue name is derived from the `instanceType` and one Workload carries one queue name, so rather
+than forbid the shape the roles are simply not made to share.
 
 **What an edit costs is therefore the replica, not the group it used to share.** Growing or shrinking
 `replicas` adds or removes whole groups and leaves every surviving replica's group, Workload and
@@ -873,6 +893,7 @@ depends on the `InstanceType` the role names.
 | roles on several `instanceType`s **when `instance-type-derived-from-node` is off** | that setting. The groups are gated as a set by an admission check this operator references from the queues it derives, and with the setting off no queue carries it |
 | a role whose `<deployment>-<role>` is not a DNS-1035 label | the combined **Service** name, which is what the pair becomes; over 63 characters or carrying a dot from a subdomain-shaped deployment name. A role the object **already had** is exempt, so a rule added later cannot strand a stored object |
 | two roles whose Services would be named the same | the shared name and both claimants — a role named `x-r0` collides with a role `x` of several members, whose instance 0 is published behind `<deployment>-x-r0`. Checked on every edit, since `replicas` decides how many instance Services a role derives |
+| an invalid topology `requiredLevel` | the field path and the [topology placement](#topology-placement) field rule |
 | a `replicas` over 1024, or a `size` over 64 | the bound — refused by the **schema**. It limits how many Pods one pass renders before it writes any of them, so it is this operator's own ceiling rather than a Kubernetes one |
 | `kind: server` beside any other kind | that a server serves whole requests by itself, so the combination describes no arrangement |
 | a `kind` the engine has no term for | the engine and the kind — today, `prefill` or `decode` on SGLang |
