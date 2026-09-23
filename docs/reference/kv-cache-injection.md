@@ -363,6 +363,33 @@ one this engine cannot use. Pair vLLM-Ascend with a pool that offers `CANN`: dec
 `spec.transport.protocol`, or on one member group's `transport.protocol` when only one group serves
 the fabric.
 
+**A backend may also mix vendors across member groups** — one group offering `rdma` to NVIDIA nodes,
+another `ascend` to Ascend nodes — through the same per-group `transport.protocol` override.
+Admission imposes no rule on that combination; the per-engine check above is untouched. Whether
+cross-vendor *sharing* then works is a property of the engine's cache key, not of the transport:
+
+| Engine | Cross-vendor sharing | Why |
+|---|---|---|
+| `sglang` | possible in principle | its Mooncake key is vendor-neutral — no vendor, dtype, device or engine id in the key, and no platform branch in the `mooncake` backend |
+| `vllm` | not applicable | the key embeds `model`, `tp_rank`, `pcp`, `dcp` and `pp_rank`, so the key itself is heterogeneous across two vendors |
+
+"Cross-vendor sharing is meaningless" is a statement about vLLM only. For SGLang the one remaining
+precondition is that both sides lay a block's payload bytes out identically, and that has NEVER been
+measured: the experiment is one model, one `page_size` and one TP/PP shape, SGLang on NVIDIA against
+SGLang on Ascend pointed at one pool, checking whether the second side hits the first's entries and
+reads back the correct bytes.
+
+The transport is not the limit: the HIXL wiki documents Mooncake's `rdma` transport moving buffers
+directly between an NVIDIA GPU and an Ascend NPU — [Mooncake NPU guide, appendix 2](https://gitcode.com/cann/hixl/wiki/Mooncake%EF%BC%88NPU%20%E7%89%88%EF%BC%89%E5%AE%8C%E6%95%B4%E6%8C%87%E5%8D%97.md).
+What stops the combination today is on this operator's side: `applyMemberFabric` in
+`pkg/worker/kvcache/mooncake/member_workload.go` grants fabric access — host network, a device, a
+mount — only to `rdma` and `efa`, so an Ascend member group is rendered none of it and does not come up.
+
+> **Why a page instead of an admission rule** — a rule becomes API semantics, and an upstream
+> improvement on either side would then force an incompatible removal; a documented note only gets
+> edited. Treat this section as temporary: it records where the engines and this operator stand, and
+> upstream work on either side can obsolete it.
+
 ## What a cache changes about a workload
 
 Joining a pool changes three things about a Pod that are easy to file as bugs.
