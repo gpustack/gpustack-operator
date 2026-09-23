@@ -419,10 +419,11 @@ var MemberDerivedEnvs = []string{
 // It is a PLAIN LIST for the same reason MemberDerivedEnvs is: the exclusive and forbidden kinds
 // would both be empty here, and nothing in the leader's namespace voids another setting.
 //
-// The last two are rendered only under high availability and under a snapshot declaration, and are
-// reserved UNCONDITIONALLY for the same reason the election flags are: an object must be creatable
-// with the variable already in place and the field turned on afterwards, and a passthrough value
-// would silently win over the reference the rendered argv or the mounted claim arrives with.
+// None is rendered unconditionally: the first three only under high availability, the last only
+// under a snapshot declaration. All four are reserved UNCONDITIONALLY for the same reason the
+// election flags are: an object must be creatable with the variable already in place and the field
+// turned on afterwards, and a passthrough value would silently win over the reference the rendered
+// argv or the mounted claim arrives with.
 var LeaderDerivedEnvs = []string{
 	LeaderPodIPEnv,
 	LeaderPodNameEnv,
