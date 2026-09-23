@@ -40,6 +40,7 @@ Run as a **test-orchestration lead** (main agent) coordinating read-only **domai
 | 5 | Adopting another release's objects needs `--take-ownership` | `deploy/gpustack-operator/chart/templates/migrate/**`, `deploy/gpustack-operator/chart/files/migrate-*.sh`, `deploy/gpustack-operator/chart/charts/**` | `cases/case-5.sh` | yes (confirm) |
 | 6 | Image mode: the worker installs the bundled chart itself | `pkg/worker/kuberess/**`, `pkg/kubeapp/**`, `pack/gpustack-operator/Dockerfile` | `cases/case-6.sh` | yes (confirm) |
 | 7 | A live older install rolls forward onto this build | `pkg/worker/kuberess/**`, `pkg/kubeapp/**`, `deploy/gpustack-operator/chart/templates/migrate/**`, `deploy/gpustack-operator/chart/files/migrate-*.sh` | `cases/case-7.sh` | yes (confirm) |
+| 8 | Topograph AWS API uses EKS Pod Identity and brokers complete IMDS discovery | `deploy/gpustack-operator/chart/charts/topograph/**`, `deploy/gpustack-operator/chart/values.yaml`, `testing/infra/clusters/eks/**` | `cases/case-8.sh` | no |
 
 **CASES 6 and 7 need a cluster with no chart release** — the two install modes are exclusive, because
 both renders carry the cluster-scoped `gpustack-cpu-info` NodeFeatureRule and Helm refuses the second

@@ -44,10 +44,11 @@ variable "cpu_instance_types" {
   # --scaling-config desiredSize=N`, which is drift-free precisely because the attribute
   # is ignored here. A group asked for and then emptied is a group that stays, which is
   # why "no group" is an absent key rather than a count of zero.
-  description = "CPU node groups, keyed by node group name (the key IS the name; no prefix is added): candidate instance types for the group and its node count at CREATE time (min = max = desired = node_count; desired is ignored on a live group, see the comment here). Check types with https://aws.amazon.com/ec2/pricing/on-demand/"
+  description = "CPU node groups, keyed by node group name (the key IS the name; no prefix is added): candidate instance types, node count at CREATE time (min = max = desired = node_count; desired is ignored on a live group), and an optional public-subnet availability_zone_index. Check types with https://aws.amazon.com/ec2/pricing/on-demand/"
   type = map(object({
-    instance_types = list(string)
-    node_count     = number
+    instance_types          = list(string)
+    node_count              = number
+    availability_zone_index = optional(number)
   }))
   default = { cpu = { instance_types = ["c6a.4xlarge", "c7a.4xlarge"], node_count = 1 } }
 
@@ -58,6 +59,20 @@ variable "cpu_instance_types" {
     ])
     error_message = "node_count must be a whole number of at least 1, in every group. A group that should not exist is an absent key, not a count of zero."
   }
+
+  validation {
+    condition = alltrue([
+      for cfg in values(var.cpu_instance_types) :
+      cfg.availability_zone_index == null || (cfg.availability_zone_index >= 0 && cfg.availability_zone_index <= 2 && cfg.availability_zone_index == floor(cfg.availability_zone_index))
+    ])
+    error_message = "availability_zone_index, when set, must be 0, 1 or 2 -- the module creates three availability zones."
+  }
+}
+
+variable "topograph_aws_pod_identity_enabled" {
+  description = "Configure Node IMDS for the Topograph AWS broker and create the Topograph API Pod Identity role and association granting only ec2:DescribeInstanceTopology."
+  type        = bool
+  default     = false
 }
 
 variable "efa_enabled" {
@@ -231,7 +246,7 @@ variable "switch_kube_context" {
   # bare kubectl points at it afterwards. Set it to false while another cluster is
   # mid-verification. Nothing is restored when there was no current context to begin
   # with (a kubeconfig that did not exist yet), so the merged one stays current there.
-  description = "Whether `aws eks update-kubeconfig` may leave this cluster as the current context. When false, the context that was current before the update is restored."
+  description = "Whether `aws eks update-kubeconfig` may leave this cluster as the current context. When false, an existing context that was current before the update is restored."
   type        = bool
   default     = true
 }
