@@ -3152,7 +3152,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 											Nullable: true,
 										},
 										"conditions": {
-											Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,\nCapacityObserved, Deletable, RolloutComplete, and — each only where it has something to be a\nverdict about — SnapshotStorageShared and ElectionObserved. Every one is derived from an\nobserved document.",
+											Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,\nCapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has\nsomething to be a verdict about — SnapshotStorageShared and ElectionObserved. Every one is\nderived from an observed document.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{

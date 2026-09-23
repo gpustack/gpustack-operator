@@ -1001,8 +1001,8 @@ func (r *KVCacheBackendReconciler) observeMembers(
 // reportKVCacheBackendPoolWrites uses the current leader process as its observation window.
 // The master counters reset with that process, while a reconcile interval could miss short
 // writes. An unfinished PutStart has neither PutEnd nor PutRevoke and remains Unknown. A False
-// result means failed writes were observed in this process without an observed success; it does
-// not claim every current write is failing.
+// result means a revoke was observed in this process without a put end request or occupied
+// segment; it does not claim every current write is failing.
 func reportKVCacheBackendPoolWrites(
 	holder *workercore.KVCacheBackend,
 	metrics *mooncake.LeaderCapacity,
@@ -1015,7 +1015,7 @@ func reportKVCacheBackendPoolWrites(
 	}
 	if metrics.PutEndRequests != nil && *metrics.PutEndRequests > 0 {
 		KVCacheBackendConditionPoolWrites.True(holder, "WriteObserved",
-			"the leader completed a put since this process started")
+			"the leader saw a put end request since this process started")
 		return
 	}
 	allReported := true
