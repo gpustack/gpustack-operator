@@ -36,10 +36,11 @@ NS="${1:?usage: case-3.sh <NS>}"
 # the case behaves the same on a 1-node local cluster and an N-node real one.
 IT=$(kubectl get instancetypes.worker.gpustack.ai \
   -o jsonpath='{.items[?(@.spec.acceleratable==false)].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep -m1 'gpustack-')
-# One of the pool's CPU ResourceFlavors (named gpustack--${gKey}-${os}-${arch}-${count}c — keyed by
+# One of the pool's CPU ResourceFlavors (named gpustack--${gKey}-${os}-${arch}-${count}c, plus a
+# -fnv64-<16 hex> topology profile on a TAS cluster — keyed by
 # the node's real CPU, so its name is independent of the collapsed InstanceType name), kept as a
 # full type/name path so `kubectl get "$RF"` works — watched so we see it deleted on de-manage.
-RF=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | grep -E '/gpustack--.*-[0-9]+c$' | head -1)
+RF=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | grep -E '/gpustack--.*-[0-9]+c(-fnv64-[0-9a-f]{16})?$' | head -1)
 [ -n "$RF" ] && [ -n "$IT" ] || { echo "no general RF/InstanceType found — run case-1 first to materialize the chain"; exit 1; }
 # Every <node>-gpustack-worker NodeFeature: de-managing ALL of them removes a pool that spans more
 # than one node (a single node's toggle leaves the others' flavors behind).

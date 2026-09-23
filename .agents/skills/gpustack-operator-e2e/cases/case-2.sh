@@ -150,7 +150,7 @@ echo "$WORKER_NFS" | xargs -r -I{} kubectl -n "$NS" patch {} --type=merge \
 #    the fuller teardown (InstanceType survival + queue emptying) is CASE 3.
 rf_gone=""
 for _ in $(seq 1 40); do
-  n=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | grep -cE '/gpustack--.*-[0-9]+c$')
+  n=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | grep -cE '/gpustack--.*-[0-9]+c(-fnv64-[0-9a-f]{16})?$')
   [ "${n:-0}" -eq 0 ] && { rf_gone=1; break; }
   sleep 3
 done
