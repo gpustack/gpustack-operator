@@ -9,7 +9,7 @@ Review the PR's diff on **two axes**, reported separately and never merged or
 reranked against each other:
 
 - **Standards** — does the code follow this repo's documented conventions
-  (`CLAUDE.md`, `.github/copilot-instructions.md`, `docs/`)?
+  (`AGENTS.md`, `.github/copilot-instructions.md`, `docs/`)?
 - **Spec** — does the code faithfully implement what the PR description / linked
   issue / `specs/` document asked for?
 

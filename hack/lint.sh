@@ -121,7 +121,7 @@ function lint() {
 
   # The two review-exclusion lists, which are kept in separate files and which one of them promises
   # to mirror verbatim. Nothing held it to that: the docs gate's page set is README.md, AGENTS.md,
-  # CLAUDE.md, docs/** and .claude/skills/**, so `.github/` is covered by no gate at all. The drift
+  # docs/** and .claude/skills/**, so `.github/` is covered by no gate at all. The drift
   # is silent -- two reviewers disagreeing about scope produces no error and no missing output, only
   # a review narrower than the sentence describing it, and each file stays internally consistent.
   # Its self-test runs first because both lists are parsed out of text: a parse that matches nothing

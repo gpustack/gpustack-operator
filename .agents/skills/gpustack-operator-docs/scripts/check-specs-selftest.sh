@@ -41,7 +41,7 @@ build() {
   mkdir -p "$MINI/tree/specs" "$MINI/tree/docs" "$MINI/tree/.claude/skills" \
     "$MINI/tree/pkg/thing" "$MINI/tree/pkg/other"
   : > "$MINI/tree/README.md"
-  : > "$MINI/tree/CLAUDE.md"
+  : > "$MINI/tree/AGENTS.md"
   cat > "$MINI/tree/pkg/thing/thing_test.go" <<'EOF'
 package thing
 

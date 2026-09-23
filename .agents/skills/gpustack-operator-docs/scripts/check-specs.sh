@@ -60,7 +60,7 @@ if [ -d specs ]; then
 fi
 # Rule 3's corpus. Everything a reader might copy a command out of.
 CORPUS="README.md
-CLAUDE.md
+AGENTS.md
 $SPECS"
 for d in docs .claude/skills; do
   if [ -d "$d" ]; then

@@ -2,7 +2,7 @@
 # check-docs.sh — the documentation contract for this repository.
 #
 # Scope:
-#   * links and #anchors — README.md, CLAUDE.md, docs/**/*.md, .claude/skills/**/*.md
+#   * links and #anchors — README.md, AGENTS.md, docs/**/*.md, .claude/skills/**/*.md
 #   * page structure and index coverage — docs/**/*.md only
 #
 # Fails on:
@@ -52,12 +52,8 @@ shape_err() {
 
 # Pages whose structure is under contract.
 PAGES=$(find docs -name '*.md' | sort)
-# Everything whose links are checked. AGENTS.md is named here in its own right and not left to
-# CLAUDE.md, which is on this list and whose entire body is the single line `@AGENTS.md`. An entry
-# that only forwards contributes no coverage of what it forwards to, while reading exactly like
-# coverage -- a list auditor sees a root instruction file present and stops. That file is the one
-# every session loads and the one that names the build, lint and test entry points, which is the
-# kind of pointer that rots; it has already sent a change to a target that does not read it.
+# Everything whose links are checked. AGENTS.md is included because it names the build, lint and
+# test entry points, which can go stale. Its bare backtick paths are outside this link check.
 #
 # Only the two link loops read this list. Being on it subjects a file to link and anchor resolution
 # and to nothing else -- the Contents, header, footer, index and size rules are held by $PAGES, and
@@ -70,8 +66,8 @@ PAGES=$(find docs -name '*.md' | sort)
 # anyone counting what this list covers would otherwise find nothing to show for the entry and
 # conclude it is dead. It is not: it was confirmed to report both a path and an anchor that do not
 # exist, and to pass a link that resolves, before being trusted.
-LINKED_PAGES=$(printf '%s\n%s\n%s\n%s\n%s\n' \
-  "README.md" "AGENTS.md" "CLAUDE.md" "$PAGES" "$(find .claude/skills -name '*.md' | sort)")
+LINKED_PAGES=$(printf '%s\n%s\n%s\n%s\n' \
+  "README.md" "AGENTS.md" "$PAGES" "$(find .claude/skills -name '*.md' | sort)")
 
 # Shape caps (rules 5-7). The paragraph cap is the one that carries the weight: a long page that
 # reads in short paragraphs and clear lists is fine, a short page that reads as a wall of text is not.
@@ -409,7 +405,7 @@ if [ "$errors" -gt 0 ]; then
   echo "FAIL: $errors problem(s)."
   exit 1
 fi
-summary="OK: $(printf '%s\n' "$PAGES" | awk 'NF { n++ } END { print n + 0 }') docs pages checked; links also verified across README.md, AGENTS.md, CLAUDE.md and .claude/skills."
+summary="OK: $(printf '%s\n' "$PAGES" | awk 'NF { n++ } END { print n + 0 }') docs pages checked; links also verified across README.md, AGENTS.md and .claude/skills."
 [ "$warnings" -eq 0 ] || summary="$summary
 WARN: $warnings shape warning(s); rules 5-8 are advisory under --report."
 echo "$summary"
