@@ -1,0 +1,69 @@
+{{- if and .Values.cleanupOnUninstall .Values.kueue.enabled }}
+{{- /*
+  Pre-delete hook Job that stops the worker and deletes the Kueue objects it created, while Kueue
+  is still running to finalize them. Weight 1 runs it after the drain at weight 0, which needs the
+  worker up. Without it, helm deletes Kueue and its CRDs together, the worker's queues, flavors,
+  topologies and admission checks keep a finalizer nobody is left to remove, and
+  `helm uninstall --wait` waits on the CRDs until --timeout. files/drain-kueue.sh says why each
+  step is there.
+
+  Rendered only where this release ships Kueue; the script then confirms, from the CRD's Helm
+  ownership, that the Kueue in the cluster is the one it shipped. It fails the hook when it cannot
+  finish, because the uninstall would otherwise hang on the same objects until --timeout.
+
+  $budget is the script's own deadline, and the Job's is derived from it with room to spare, so
+  a slow Kueue ends in the script's report naming what is left rather than in a killed Pod.
+*/}}
+{{- $budget := 120 }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gpustack-operator.fullname" . }}-drain-kueue
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: {{ add $budget 60 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gpustack-operator.commonLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- /*
+        No nodeSelector, deliberately, and `global.nodeSelector` is not inherited here.
+        A selector naming a label the release itself produces, an NFD one being the
+        obvious case, would leave this Job Pending until the deadline expires on a
+        cluster where that labeller is the very thing being uninstalled.
+      */}}
+      serviceAccountName: {{ include "gpustack-operator.fullname" . }}-cleanup
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ if kindIs "string" . }}{{ . }}{{ else }}{{ .name }}{{ end }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: drain-kueue
+          image: {{ include "gpustack-operator.image" (dict "root" . "overrides" dict) | quote }}
+          imagePullPolicy: {{ include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" dict) }}
+          command: ["/usr/bin/env", "bash", "/scripts/drain-kueue.sh"]
+          args:
+            - {{ include "gpustack-operator.namespace" . | quote }}
+            - {{ .Release.Name | quote }}
+            - {{ include "gpustack-operator.worker.fullname" . | quote }}
+            - {{ $budget | quote }}
+          volumeMounts:
+            - name: cleanup-script
+              mountPath: /scripts
+      volumes:
+        - name: cleanup-script
+          configMap:
+            name: {{ include "gpustack-operator.fullname" . }}-cleanup
+            defaultMode: 0755
+{{- end }}

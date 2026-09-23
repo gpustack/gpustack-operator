@@ -62,8 +62,10 @@ helm uninstall gpustack-operator --namespace gpustack-system
 `helm uninstall` removes only what the release owns. The finalizers the controllers leave on their
 objects, and the CRDs, aggregated APIServices and webhook configurations the worker registers itself,
 stay behind. Run the chart's `files/cleanup.sh` afterwards to clear them, or install with
-`--set cleanupOnUninstall=true` to have a gated post-delete Job do it — which is safe only where this
-release exclusively owns those CRDs.
+`--set cleanupOnUninstall=true` to have gated hook Jobs do it — which is safe only where this release
+exclusively owns those CRDs. Before anything is deleted, those Jobs drain the operator's custom
+resources and, where this release owns Kueue, stop the worker and delete the Kueue objects it created
+while Kueue can still finalize them; the post-delete Job then clears what is left.
 
 The dependencies listed below are **vendored subcharts**: their sources are committed into this
 chart's `charts/` directory, so the `Repository` column is intentionally empty — `helm install`

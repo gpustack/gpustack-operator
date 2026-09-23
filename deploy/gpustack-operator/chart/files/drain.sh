@@ -48,7 +48,15 @@ echo "[drain] namespace=${NS} budget=${BUDGET}s"
 # Preflight. Every step below swallows errors by design and the script always exits 0, so against a
 # wrong or absent context it would report "done" having drained nothing - and the uninstall would
 # then proceed to strip finalizers that never ran. Refuse to run blind, and name the context.
-if ! kubectl get --raw=/healthz --request-timeout=10s >/dev/null 2>&1; then
+# The check carries NO --request-timeout. That flag, like --server or --token, changes the
+# client configuration, and kubectl then stops falling back to the in-cluster one: inside the
+# hook Pod it would dial localhost:8080 and fail every time. timeout(1) bounds it instead,
+# where there is one.
+healthz=(kubectl get --raw=/healthz)
+if command -v timeout >/dev/null 2>&1; then
+  healthz=(timeout 10 "${healthz[@]}")
+fi
+if ! "${healthz[@]}" >/dev/null 2>&1; then
   echo "[drain] SKIPPED: cannot reach the API server of the current kubectl context" \
     "($(kubectl config current-context 2>/dev/null || echo 'none set')); nothing was drained" >&2
   exit 0

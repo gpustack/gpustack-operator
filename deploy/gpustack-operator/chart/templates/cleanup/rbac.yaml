@@ -1,9 +1,10 @@
 {{- if .Values.cleanupOnUninstall }}
 {{- /*
-  Dedicated ServiceAccount shared by the two uninstall hook Jobs. The pre-delete
-  one deletes custom resources in every namespace; the post-delete one uninstalls
+  Dedicated ServiceAccount shared by the uninstall hook Jobs. The pre-delete
+  ones delete custom resources in every namespace, and scale the worker down and
+  delete its Kueue objects; the post-delete one uninstalls
   the worker's runtime sub-releases and deletes cluster-scoped CRDs/APIServices/
-  webhooks across the cluster. Both are cluster-wide, so it is bound to
+  webhooks across the cluster. All are cluster-wide, so it is bound to
   cluster-admin (the worker uses the same binding). Hook-managed and removed on
   success, so the broad grant exists only for the duration of the uninstall.
 */}}
