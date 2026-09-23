@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -130,7 +131,7 @@ func markClusterQueueStopped(t *testing.T, cli ctrlcli.Client, name string) {
 	t.Helper()
 	cq, err := getClusterQueue(t, cli, name)
 	require.NoError(t, err)
-	cq.Status.Conditions = append(cq.Status.Conditions, meta.Condition{
+	apimeta.SetStatusCondition(&cq.Status.Conditions, meta.Condition{
 		Type:               kueue.ClusterQueueActive,
 		Status:             meta.ConditionFalse,
 		Reason:             kueue.ClusterQueueActiveReasonStopped,
@@ -426,6 +427,7 @@ func TestNodeQueueReconciler_RetriesMissingTopologyDuringMigration(t *testing.T)
 	name := nodeQueueName(key)
 	flavor := newNodesFlavor("gpustack-generic-linux-amd64-4c-p-new", key, 4, 4)
 	queue := newInstanceTypeQueue(key, false, cpuResourceGroup("gpustack-generic-linux-amd64-4c-p-old", 4))
+	observeQueueUsage(queue, map[string]int64{"gpustack-generic-linux-amd64-4c-p-old": 4})
 	cli := buildNodeQueueClient(queue, flavor)
 	reconcileNodeQueueN(t, cli, name, 1)
 
@@ -911,6 +913,7 @@ func TestNodeQueueReconciler_MigratesFlavorPlanWithoutReplacingQueue(t *testing.
 			cq.Generation = 7
 			cq.Spec.StopPolicy = tc.stopPolicy
 			cq.Status.AdmittedWorkloads = 1
+			observeQueueUsage(cq, map[string]int64{oldFlavor: 4})
 			newRF := newNodesFlavor(newFlavor, key, 4, 4)
 			cli := buildNodeQueueClient(cq, newRF)
 
@@ -931,6 +934,8 @@ func TestNodeQueueReconciler_MigratesFlavorPlanWithoutReplacingQueue(t *testing.
 				"an observed stop is insufficient while a reservation remains")
 
 			got.Status.AdmittedWorkloads = 0
+			got.Status.FlavorsReservation = nil
+			got.Status.FlavorsUsage = nil
 			require.NoError(t, cli.Status().Update(context.Background(), got))
 			reconcileNodeQueueN(t, cli, name, 1)
 			got, err = getClusterQueue(t, cli, name)
@@ -956,13 +961,17 @@ func TestNodeQueueReconciler_WaitsForCurrentStoppedGeneration(t *testing.T) {
 	newFlavor := "gpustack-generic-linux-amd64-4c-p-new"
 	cq := newInstanceTypeQueue(key, false, cpuResourceGroup(oldFlavor, 4))
 	cq.Generation = 7
+	observeQueueUsage(cq, map[string]int64{oldFlavor: 4})
 	newRF := newNodesFlavor(newFlavor, key, 4, 4)
 	cli := buildNodeQueueClient(cq, newRF)
 
 	reconcileNodeQueueN(t, cli, name, 1)
 	got, err := getClusterQueue(t, cli, name)
 	require.NoError(t, err)
-	got.Status.Conditions = append(got.Status.Conditions, meta.Condition{
+	require.Equal(t, _TASQueueMigrationPhaseDraining, got.Annotations[_TASQueueMigrationPhaseAnnotation])
+	got.Status.FlavorsReservation = nil
+	got.Status.FlavorsUsage = nil
+	apimeta.SetStatusCondition(&got.Status.Conditions, meta.Condition{
 		Type:               kueue.ClusterQueueActive,
 		Status:             meta.ConditionFalse,
 		Reason:             kueue.ClusterQueueActiveReasonStopped,
@@ -1253,4 +1262,159 @@ func TestNodeQueueReconciler_HoldsBeforeEmptyingUnreservedQueue(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, kueue.None, ptr.Deref(got.Spec.StopPolicy, kueue.None))
 	assert.NotContains(t, got.Annotations, _TASQueueMigrationPhaseAnnotation)
+}
+
+// observeQueueUsage records the status Kueue writes for the queue's current spec: the Active
+// condition at the current generation, and one reservation and usage entry per referenced flavor
+// with the given CPU quantity (zero when the flavor is absent from usage).
+func observeQueueUsage(cq *kueue.ClusterQueue, usage map[string]int64) {
+	apimeta.SetStatusCondition(&cq.Status.Conditions, meta.Condition{
+		Type:               kueue.ClusterQueueActive,
+		Status:             meta.ConditionTrue,
+		Reason:             kueue.ClusterQueueActiveReasonReady,
+		ObservedGeneration: cq.Generation,
+	})
+	cq.Status.FlavorsReservation = nil
+	cq.Status.FlavorsUsage = nil
+	for _, group := range cq.Spec.ResourceGroups {
+		for _, flavor := range group.Flavors {
+			entry := kueue.FlavorUsage{
+				Name: flavor.Name,
+				Resources: []kueue.ResourceUsage{{
+					Name:  core.ResourceCPU,
+					Total: *resource.NewQuantity(usage[string(flavor.Name)], resource.DecimalSI),
+				}},
+			}
+			cq.Status.FlavorsReservation = append(cq.Status.FlavorsReservation, entry)
+			cq.Status.FlavorsUsage = append(cq.Status.FlavorsUsage, *entry.DeepCopy())
+		}
+	}
+}
+
+// twoFlavorQueue builds a CPU queue that references a retired flavor next to the live one, the
+// shape a Node leaves behind when it moves from a transient group to its settled one.
+func twoFlavorQueue(key, retired, live string) *kueue.ClusterQueue {
+	group := cpuResourceGroup(live, 4)
+	group.Flavors = append(group.Flavors, cpuResourceGroup(retired, 4).Flavors...)
+	cq := newInstanceTypeQueue(key, false, group)
+	cq.Generation = 3
+	return cq
+}
+
+// TestNodeQueueReconciler_DropsIdleFlavorInPlace pins that dropping a flavor Kueue reports no
+// reservation and no usage on is an in-place update: Kueue does not evict Workloads when a flavor
+// leaves the resource groups, so holding the queue would only evict the Workloads running on the
+// flavors that stay.
+func TestNodeQueueReconciler_DropsIdleFlavorInPlace(t *testing.T) {
+	key := "generic"
+	name := nodeQueueName(key)
+	live := "gpustack-generic-linux-amd64-4c-p-settled"
+	retired := "gpustack-generic-linux-amd64-4c-p-transient"
+	cq := twoFlavorQueue(key, retired, live)
+	cq.Status.AdmittedWorkloads = 1
+	observeQueueUsage(cq, map[string]int64{live: 4})
+	cli := buildNodeQueueClient(cq, newNodesFlavor(live, key, 4, 4))
+
+	res := reconcileNodeQueueN(t, cli, name, 1)
+	assert.Zero(t, res.RequeueAfter)
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, kueue.None, ptr.Deref(got.Spec.StopPolicy, kueue.None),
+		"dropping an idle flavor must not drain the Workloads admitted on the remaining flavor")
+	assert.NotContains(t, got.Annotations, _TASQueueMigrationPhaseAnnotation)
+	assert.NotContains(t, got.Annotations, _TASQueueMigrationStopPolicyAnnotation)
+	require.Len(t, got.Spec.ResourceGroups, 1)
+	require.Len(t, got.Spec.ResourceGroups[0].Flavors, 1)
+	assert.Equal(t, live, string(got.Spec.ResourceGroups[0].Flavors[0].Name))
+	assert.Equal(t, "Ready", nodeQueueConditionTopologyReady.GetReason(got))
+}
+
+// TestNodeQueueReconciler_DrainsWhenDroppedFlavorMayBeInUse pins that a dropped flavor Kueue
+// reports reservation or usage on, or does not report at all, still goes through the hold/drain
+// migration.
+func TestNodeQueueReconciler_DrainsWhenDroppedFlavorMayBeInUse(t *testing.T) {
+	key := "generic"
+	name := nodeQueueName(key)
+	live := "gpustack-generic-linux-amd64-4c-p-settled"
+	retired := "gpustack-generic-linux-amd64-4c-p-transient"
+
+	tests := []struct {
+		name    string
+		observe func(cq *kueue.ClusterQueue)
+	}{
+		{
+			name: "reserved on the dropped flavor",
+			observe: func(cq *kueue.ClusterQueue) {
+				observeQueueUsage(cq, nil)
+				cq.Status.FlavorsReservation[1].Resources[0].Total = *resource.NewQuantity(4, resource.DecimalSI)
+			},
+		},
+		{
+			name: "admitted on the dropped flavor",
+			observe: func(cq *kueue.ClusterQueue) {
+				observeQueueUsage(cq, nil)
+				cq.Status.FlavorsUsage[1].Resources[0].Total = *resource.NewQuantity(4, resource.DecimalSI)
+			},
+		},
+		{
+			name: "dropped flavor missing from the status",
+			observe: func(cq *kueue.ClusterQueue) {
+				observeQueueUsage(cq, nil)
+				cq.Status.FlavorsReservation = cq.Status.FlavorsReservation[:1]
+				cq.Status.FlavorsUsage = cq.Status.FlavorsUsage[:1]
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cq := twoFlavorQueue(key, retired, live)
+			tc.observe(cq)
+			require.Equal(t, kueue.ResourceFlavorReference(retired), cq.Spec.ResourceGroups[0].Flavors[1].Name)
+			cli := buildNodeQueueClient(cq, newNodesFlavor(live, key, 4, 4))
+
+			res := reconcileNodeQueueN(t, cli, name, 1)
+			assert.Positive(t, res.RequeueAfter)
+			got, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+			assert.Equal(t, _TASQueueMigrationPhaseDraining, got.Annotations[_TASQueueMigrationPhaseAnnotation])
+			require.Len(t, got.Spec.ResourceGroups[0].Flavors, 2, "the old plan remains until Kueue drains it")
+		})
+	}
+}
+
+// TestNodeQueueReconciler_WaitsForCurrentQueueStatusBeforeDroppingFlavor pins that a queue status
+// Kueue has not yet written for the current generation neither authorizes the in-place drop nor
+// starts a drain: the reconciler writes no spec, reports the wait on TopologyReady, and decides
+// once Kueue reports the current generation.
+func TestNodeQueueReconciler_WaitsForCurrentQueueStatusBeforeDroppingFlavor(t *testing.T) {
+	key := "generic"
+	name := nodeQueueName(key)
+	live := "gpustack-generic-linux-amd64-4c-p-settled"
+	retired := "gpustack-generic-linux-amd64-4c-p-transient"
+	cq := twoFlavorQueue(key, retired, live)
+	observeQueueUsage(cq, map[string]int64{live: 4})
+	cq.Status.Conditions[0].ObservedGeneration = cq.Generation - 1
+	cli := buildNodeQueueClient(cq, newNodesFlavor(live, key, 4, 4))
+
+	res := reconcileNodeQueueN(t, cli, name, 1)
+	assert.Positive(t, res.RequeueAfter, "a stale status is re-read later")
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, kueue.None, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+	assert.NotContains(t, got.Annotations, _TASQueueMigrationPhaseAnnotation)
+	require.Len(t, got.Spec.ResourceGroups[0].Flavors, 2, "the plan is unchanged while the status is stale")
+	assert.True(t, nodeQueueConditionTopologyReady.IsUnknown(got))
+	assert.Equal(t, "AwaitingQueueStatus", nodeQueueConditionTopologyReady.GetReason(got))
+
+	observeQueueUsage(got, map[string]int64{live: 4})
+	require.NoError(t, cli.Status().Update(context.Background(), got))
+	res = reconcileNodeQueueN(t, cli, name, 1)
+	assert.Zero(t, res.RequeueAfter)
+	got, err = getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, kueue.None, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+	require.Len(t, got.Spec.ResourceGroups[0].Flavors, 1)
+	assert.Equal(t, live, string(got.Spec.ResourceGroups[0].Flavors[0].Name))
+	assert.Equal(t, "Ready", nodeQueueConditionTopologyReady.GetReason(got))
 }

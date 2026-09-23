@@ -145,9 +145,9 @@ func (r *NodeQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// resource-in-use finalizer until no ClusterQueue references it, and removes it only on a
 	// ClusterQueue update that drops the reference. Keeping a mid-deletion flavor in the resource
 	// groups re-holds that finalizer and deadlocks its removal, so it is treated as absent from the
-	// desired plan. NodeQueue drains the ClusterQueue before switching a non-empty plan because
-	// removing a flavor does not itself evict or re-admit Workloads. An all-terminating pool falls
-	// through to the no-flavors drain/empty path.
+	// desired plan. NodeQueue drains the ClusterQueue before dropping a flavor Kueue may still hold
+	// quota on because removing a flavor does not itself evict or re-admit Workloads. An
+	// all-terminating pool falls through to the no-flavors drain/empty path.
 	live := rfList.Items[:0]
 	for i := range rfList.Items {
 		if rfList.Items[i].DeletionTimestamp == nil {
@@ -239,12 +239,30 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 		changed = true
 	}
 
-	// Only dropping a referenced flavor switches flavor references and needs the hold/drain
-	// migration. A Node joining or leaving an existing profile changes nominal quota alone, and a
-	// new profile only adds a reference; both are updated in place without evicting anything.
+	// Only dropping a referenced flavor that Kueue may still hold quota on needs the hold/drain
+	// migration, which evicts every admitted workload so it is re-admitted onto the new plan. A
+	// Node joining or leaving an existing profile changes nominal quota alone, a new profile only
+	// adds a reference, and a dropped flavor that Kueue reports idle holds nothing to move — Kueue
+	// does not evict workloads when a flavor leaves the resource groups — so all three are updated
+	// in place without evicting anything.
 	planChanged := !kubemeta.DeepEqual(cq.Spec.ResourceGroups, eGroups)
-	migrationPhase := cq.Annotations[_TASQueueMigrationPhaseAnnotation]
-	if migrationPhase != "" || (planChanged && dropsFlavorReference(cq.Spec.ResourceGroups, eGroups)) {
+	migrate := cq.Annotations[_TASQueueMigrationPhaseAnnotation] != ""
+	if !migrate && planChanged {
+		if dropped := droppedFlavorReferences(cq.Spec.ResourceGroups, eGroups); len(dropped) > 0 {
+			// Kueue writes the flavor usage together with the Active condition's
+			// observedGeneration, so usage read before Kueue observed the current spec may omit a
+			// flavor that spec added. Wait for it rather than drain: our own in-place writes bump
+			// the generation, and a drop that arrives right after one must not evict on a stale read.
+			if !clusterQueueObservedAtCurrentGeneration(cq) {
+				return ctrl.Result{RequeueAfter: _TASQueueMigrationRequeueAfter}, r.setTopologyReadyConditionStatus(
+					ctx, cq, meta.ConditionUnknown, "AwaitingQueueStatus",
+					fmt.Sprintf("waiting for Kueue to report flavor usage at generation %d before dropping flavors %v",
+						cq.Generation, dropped))
+			}
+			migrate = flavorsMayBeInUse(cq, dropped)
+		}
+	}
+	if migrate {
 		return r.migrateClusterQueueResourceGroups(ctx, cq, eGroups, changed)
 	}
 
@@ -363,10 +381,17 @@ func decodeStopPolicy(value string) (*kueue.StopPolicy, *nodeQueueValidationErro
 
 func clusterQueueStoppedAtCurrentGeneration(cq *kueue.ClusterQueue) bool {
 	condition := apimeta.FindStatusCondition(cq.Status.Conditions, kueue.ClusterQueueActive)
-	return condition != nil &&
+	return clusterQueueObservedAtCurrentGeneration(cq) &&
 		condition.Status == meta.ConditionFalse &&
-		condition.Reason == kueue.ClusterQueueActiveReasonStopped &&
-		condition.ObservedGeneration >= cq.Generation
+		condition.Reason == kueue.ClusterQueueActiveReasonStopped
+}
+
+// clusterQueueObservedAtCurrentGeneration reports whether Kueue has written the queue status for
+// the current spec. Kueue sets the Active condition's observedGeneration in the same status write
+// as the reservation and usage counters, so the counters are current only when this holds.
+func clusterQueueObservedAtCurrentGeneration(cq *kueue.ClusterQueue) bool {
+	condition := apimeta.FindStatusCondition(cq.Status.Conditions, kueue.ClusterQueueActive)
+	return condition != nil && condition.ObservedGeneration >= cq.Generation
 }
 
 func (r *NodeQueueReconciler) rejectClusterQueue(
@@ -386,12 +411,18 @@ func (r *NodeQueueReconciler) rejectClusterQueue(
 func (r *NodeQueueReconciler) setTopologyReadyCondition(
 	ctx context.Context, cq *kueue.ClusterQueue, ready bool, reason, message string,
 ) error {
-	before := cq.DeepCopy()
+	status := meta.ConditionFalse
 	if ready {
-		nodeQueueConditionTopologyReady.True(cq, reason, message)
-	} else {
-		nodeQueueConditionTopologyReady.False(cq, reason, message)
+		status = meta.ConditionTrue
 	}
+	return r.setTopologyReadyConditionStatus(ctx, cq, status, reason, message)
+}
+
+func (r *NodeQueueReconciler) setTopologyReadyConditionStatus(
+	ctx context.Context, cq *kueue.ClusterQueue, status meta.ConditionStatus, reason, message string,
+) error {
+	before := cq.DeepCopy()
+	nodeQueueConditionTopologyReady.Status(cq, string(status), reason, message)
 	if kubemeta.DeepEqual(before.Status, cq.Status) {
 		return nil
 	}
@@ -515,23 +546,43 @@ func (r *NodeQueueReconciler) validateTASFlavors(
 	return nil, nil
 }
 
-// dropsFlavorReference reports whether the desired plan no longer references a flavor the
-// current resource groups reference.
-func dropsFlavorReference(current, desired []kueue.ResourceGroup) bool {
+// droppedFlavorReferences returns the flavors the current resource groups reference and the
+// desired plan no longer does.
+func droppedFlavorReferences(current, desired []kueue.ResourceGroup) []kueue.ResourceFlavorReference {
 	wanted := make(map[kueue.ResourceFlavorReference]struct{})
 	for _, group := range desired {
 		for _, flavor := range group.Flavors {
 			wanted[flavor.Name] = struct{}{}
 		}
 	}
+	var dropped []kueue.ResourceFlavorReference
 	for _, group := range current {
 		for _, flavor := range group.Flavors {
 			if _, exists := wanted[flavor.Name]; !exists {
-				return true
+				dropped = append(dropped, flavor.Name)
 			}
 		}
 	}
-	return false
+	return dropped
+}
+
+// flavorsMayBeInUse reports whether the queue status, observed at the current generation, shows
+// reserved or admitted quota on any of the flavors, or omits one of them. Kueue lists every flavor
+// of the observed spec in both counters, so an omitted flavor is one whose usage is unknown.
+//
+// The counters trail admission: a workload Kueue admits onto a flavor after its last status write
+// is not yet counted, and dropping that flavor in place leaves the workload running on it rather
+// than evicting it, since Kueue does not evict workloads when a flavor leaves the resource groups.
+func flavorsMayBeInUse(cq *kueue.ClusterQueue, flavors []kueue.ResourceFlavorReference) bool {
+	idle := func(usage []kueue.FlavorUsage, name kueue.ResourceFlavorReference) bool {
+		i := slices.IndexFunc(usage, func(u kueue.FlavorUsage) bool { return u.Name == name })
+		return i >= 0 && !slices.ContainsFunc(usage[i].Resources, func(u kueue.ResourceUsage) bool {
+			return !u.Total.IsZero() || !u.Borrowed.IsZero()
+		})
+	}
+	return slices.ContainsFunc(flavors, func(name kueue.ResourceFlavorReference) bool {
+		return !idle(cq.Status.FlavorsReservation, name) || !idle(cq.Status.FlavorsUsage, name)
+	})
 }
 
 // drainOrEmptyClusterQueue handles a queue whose pool has lost all its flavors: it empties the
