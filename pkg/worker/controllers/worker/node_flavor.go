@@ -55,7 +55,8 @@ import (
 // re-evaluates every flavor, so orphans left behind by a key/count switch are
 // deleted even though no Node event would ever enqueue them.
 type NodeFlavorReconciler struct {
-	Client ctrlcli.Client
+	Client    ctrlcli.Client
+	APIReader ctrlcli.Reader
 }
 
 var _ ctrlreconcile.Reconciler = (*NodeFlavorReconciler)(nil)
@@ -128,14 +129,24 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	if len(contributors) == 0 {
-		// No Node contributes: a flavor that does not exist yet is a no-op; an
-		// existing flavor is deleted so it stops advertising stale capacity.
 		if rf == nil {
+			if err := r.retireUnusedTopologyForFlavor(ctx, req.Name); err != nil {
+				return ctrl.Result{}, err
+			}
 			logger.V(3).Info("resource flavor not found and unused, skip")
 			return ctrl.Result{}, nil
 		}
-		err = r.Client.Delete(ctx, rf)
+		unprofiled, err := r.hasUnprofiledContributor(ctx, rf)
 		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if unprofiled {
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+		// Kueue keeps a referenced flavor alive with its resource-in-use finalizer. Marking the
+		// orphan for deletion is what lets NodeQueue drop it from the queue and eventually releases
+		// that finalizer; preserving it would keep stale capacity eligible for every fresh queue.
+		if err = r.Client.Delete(ctx, rf); err != nil {
 			if kerrors.IsNotFound(err) {
 				return ctrl.Result{}, nil
 			}
@@ -162,6 +173,7 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		keyLabel:             "true",
 		core.LabelOSStable:   flavor.OS,
 		core.LabelArchStable: flavor.Arch,
+		TopologyProfileLabel: node.Labels[TopologyProfileLabel],
 		// The generic-vs-accelerated discriminator every pool selector matches on, so a
 		// collapsed generic pool selects "not accelerated" and an aware generic pool never
 		// matches an accelerated flavor of the same CPU.
@@ -174,11 +186,12 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if flavor.Acceleratable {
 		labels[nodefeature.GeneralFeatureLabelPrefix+flavor.GeneralKey] = "true"
 	}
-	// When disallow mixed CPU/accelerator nodes,
-	// mark the flavor as not acceleratable so a collapsed generic pool does not select it.
-	nodeLabels := flavor.NodeLabels
+	profile := node.Labels[TopologyProfileLabel]
+	// When mixing is disabled, constrain CPU flavors to the worker's CPU-only Node label.
+	nodeLabels := maps.Clone(flavor.NodeLabels)
+	nodeLabels[TopologyProfileLabel] = profile
 	if !flavor.Acceleratable && !mixingAllowed {
-		nodeLabels[nodefeature.NodeAcceleratableLabelKey] = "false"
+		nodeLabels[nodefeature.NodeCPUOnlyLabelKey] = "true"
 	}
 	eRf := &kueue.ResourceFlavor{
 		ObjectMeta: meta.ObjectMeta{
@@ -191,6 +204,10 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			// managed mark + feature key + os/arch), not by taints.
 			Tolerations: []core.Toleration{{Operator: core.TolerationOpExists}},
 			NodeLabels:  nodeLabels,
+			TopologyName: func() *kueue.TopologyReference {
+				name := kueue.TopologyReference(topologyName(profile))
+				return &name
+			}(),
 		},
 	}
 
@@ -211,16 +228,25 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		"family":           flavor.Family,
 		"memory":           flavor.Memory,
 		"cores":            flavor.Cores,
+		"topologyProfile":  profile,
 	}
 	// Record the raw CPU detail: always for a CPU flavor; for an accelerated flavor only when
 	// CPU-manufacturer awareness is on.
 	if !flavor.Acceleratable || cpuAware {
 		eNotes["cpuDetail"] = cpuDetailNote(nodefeature.ExtractGeneralDetail(node), flavor.Acceleratable)
 	}
+	// This setting changes an immutable selector without changing the flavor name.
+	// Retire the old object so NodeQueue drops its reference before a fresh one is created.
+	if rf != nil && resourceFlavorMixingSelectorDrift(rf, eRf, flavor.Acceleratable) {
+		return ctrl.Result{}, ctrlcli.IgnoreNotFound(r.Client.Delete(ctx, rf))
+	}
 
 	systemmeta.NoteResource(eRf, _ResourceFlavorResType, eNotes)
 	rfAlignFn := func(aRf *kueue.ResourceFlavor) (_ *kueue.ResourceFlavor, skip bool, err error) {
 		skip = true
+		if !kubemeta.DeepEqual(aRf.Spec, eRf.Spec) {
+			return aRf, true, fmt.Errorf("managed ResourceFlavor %q has immutable topology drift; create fresh scheduling objects", aRf.Name)
+		}
 		// Update schedule labels (capacity changes as nodes join or leave).
 		if !mapx.Contain(aRf.Labels, eRf.Labels) {
 			if aRf.Labels == nil {
@@ -229,11 +255,6 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			for k, v := range eRf.Labels {
 				aRf.Labels[k] = v
 			}
-			skip = false
-		}
-		// Update spec.
-		if !kubemeta.DeepEqual(aRf.Spec, eRf.Spec) {
-			aRf.Spec = eRf.Spec
 			skip = false
 		}
 		// Update notes — replace the operator note set wholesale so a note that is no longer
@@ -254,6 +275,15 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	logger.V(2).Info("synced resource flavor")
 
+	// A topology-profile change produces a new immutable ResourceFlavor name. Create that
+	// replacement first, then retire only siblings for the same hardware identity that no Node
+	// still contributes to. NodeQueue owns the subsequent in-place ClusterQueue update; a Kueue
+	// finalizer keeps a referenced old flavor observable until that handoff completes.
+	if err = r.retireUnusedTopologyProfileSiblings(ctx, eRf, mixingAllowed); err != nil {
+		logger.Error(err, "retire unused topology profile siblings")
+		return ctrl.Result{}, err
+	}
+
 	// Author the pool's InstanceType from the just-synced flavor when
 	// instance-type-derived-from-node is enabled — create-only, never delete/update, so an
 	// admin's edits to an existing type are preserved. The InstanceTypeReconciler no longer
@@ -266,6 +296,151 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 	return ctrl.Result{}, nil
+}
+
+func (r *NodeFlavorReconciler) hasUnprofiledContributor(
+	ctx context.Context, flavor *kueue.ResourceFlavor,
+) (bool, error) {
+	selector := maps.Clone(flavor.Spec.NodeLabels)
+	delete(selector, TopologyProfileLabel)
+	if len(selector) == 0 {
+		return false, nil
+	}
+	nodes := new(core.NodeList)
+	if err := r.Client.List(ctx, nodes, ctrlcli.MatchingLabels(selector)); err != nil {
+		return false, err
+	}
+	for i := range nodes.Items {
+		if nodes.Items[i].Labels[TopologyProfileLabel] == "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func resourceFlavorMixingSelectorDrift(actual, wanted *kueue.ResourceFlavor, acceleratable bool) bool {
+	actualLabels, wantedLabels := actual.Spec.NodeLabels, wanted.Spec.NodeLabels
+	actualAcceleratable := actualLabels[nodefeature.NodeAcceleratableLabelKey]
+	wantedAcceleratable := wantedLabels[nodefeature.NodeAcceleratableLabelKey]
+	sameAcceleratable := actualAcceleratable == wantedAcceleratable
+	sameCPUOnly := actualLabels[nodefeature.NodeCPUOnlyLabelKey] == wantedLabels[nodefeature.NodeCPUOnlyLabelKey]
+	if acceleratable || (sameAcceleratable && sameCPUOnly) {
+		return false
+	}
+	for _, labels := range []map[string]string{actual.Spec.NodeLabels, wanted.Spec.NodeLabels} {
+		if value := labels[nodefeature.NodeAcceleratableLabelKey]; value != "" && value != "false" {
+			return false
+		}
+		if value := labels[nodefeature.NodeCPUOnlyLabelKey]; value != "" && value != "true" {
+			return false
+		}
+	}
+	actualSpec, wantedSpec := actual.Spec.DeepCopy(), wanted.Spec.DeepCopy()
+	delete(actualSpec.NodeLabels, nodefeature.NodeAcceleratableLabelKey)
+	delete(wantedSpec.NodeLabels, nodefeature.NodeAcceleratableLabelKey)
+	delete(actualSpec.NodeLabels, nodefeature.NodeCPUOnlyLabelKey)
+	delete(wantedSpec.NodeLabels, nodefeature.NodeCPUOnlyLabelKey)
+	return kubemeta.DeepEqual(actualSpec, wantedSpec)
+}
+
+func (r *NodeFlavorReconciler) retireUnusedTopologyProfileSiblings(
+	ctx context.Context,
+	wanted *kueue.ResourceFlavor,
+	mixingAllowed bool,
+) error {
+	flavors := new(kueue.ResourceFlavorList)
+	if err := r.Client.List(ctx, flavors,
+		systemmeta.GetResourcesLabelSetOfType[ctrlcli.MatchingLabels](_ResourceFlavorResType)); err != nil {
+		return err
+	}
+	wantedBase := topologyUnqualifiedFlavorName(wanted)
+	for i := range flavors.Items {
+		flavor := &flavors.Items[i]
+		if flavor.Name == wanted.Name || flavor.DeletionTimestamp != nil ||
+			topologyUnqualifiedFlavorName(flavor) != wantedBase {
+			continue
+		}
+		nodes := new(core.NodeList)
+		if err := r.Client.List(ctx, nodes,
+			ctrlcli.MatchingFields{IndexingNodeByScheduleFlavor: flavor.Name},
+			ctrlcli.UnsafeDisableDeepCopy); err != nil {
+			return err
+		}
+		contributed := false
+		for j := range nodes.Items {
+			node := &nodes.Items[j]
+			matched := matchNodeFlavor(node, flavor.Name)
+			if matched != nil && (mixingAllowed || matched.Acceleratable || !nodeIsAccelerated(node)) {
+				contributed = true
+				break
+			}
+		}
+		if contributed {
+			continue
+		}
+		if err := r.Client.Delete(ctx, flavor); err != nil && !kerrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+// retireUnusedTopologyForFlavor releases a generated Topology after the last flavor that used its
+// profile is gone. A Node or another flavor still using the profile keeps it alive.
+func (r *NodeFlavorReconciler) retireUnusedTopologyForFlavor(ctx context.Context, flavorName string) error {
+	marker := "-" + topologyProfilePrefix
+	index := strings.LastIndex(flavorName, marker)
+	if index < 0 {
+		return nil
+	}
+	profile := flavorName[index+1:]
+	if len(profile) != len(topologyProfilePrefix)+16 {
+		return nil
+	}
+	if strings.Trim(profile[len(topologyProfilePrefix):], "0123456789abcdef") != "" {
+		return nil
+	}
+
+	reader := r.APIReader
+	if reader == nil {
+		reader = r.Client
+	}
+	nodes := new(core.NodeList)
+	if err := reader.List(ctx, nodes, ctrlcli.MatchingLabels{TopologyProfileLabel: profile}); err != nil {
+		return err
+	}
+	if len(nodes.Items) > 0 {
+		return nil
+	}
+	topologyName := topologyName(profile)
+	flavors := new(kueue.ResourceFlavorList)
+	if err := reader.List(ctx, flavors); err != nil {
+		return err
+	}
+	for i := range flavors.Items {
+		ref := flavors.Items[i].Spec.TopologyName
+		if ref != nil && string(*ref) == topologyName {
+			return nil
+		}
+	}
+	topology := new(kueue.Topology)
+	if err := reader.Get(ctx, ctrlcli.ObjectKey{Name: topologyName}, topology); err != nil {
+		return ctrlcli.IgnoreNotFound(err)
+	}
+	if topology.DeletionTimestamp != nil || !systemmeta.MatchResource(topology, topologyResourceType) {
+		return nil
+	}
+	return ctrlcli.IgnoreNotFound(r.Client.Delete(ctx, topology))
+}
+
+// topologyUnqualifiedFlavorName returns the immutable hardware identity shared by flavor
+// siblings that differ only in topology profile.
+func topologyUnqualifiedFlavorName(flavor *kueue.ResourceFlavor) string {
+	profile := flavor.Labels[TopologyProfileLabel]
+	if profile == "" {
+		return flavor.Name
+	}
+	return strings.TrimSuffix(flavor.Name, "-"+profile)
 }
 
 // syncNodeFlavorNotes makes the ResourceFlavor's operator notes exactly equal to want, returning
@@ -291,13 +466,21 @@ func syncNodeFlavorNotes(rf *kueue.ResourceFlavor, want map[string]string) bool 
 // matchNodeFlavor returns the node's flavor whose name equals flavorName, or nil
 // when the node contributes no such flavor.
 func matchNodeFlavor(nd *core.Node, flavorName string) *nodefeature.NodeFlavor {
+	profile := nd.Labels[TopologyProfileLabel]
+	if profile == "" {
+		return nil
+	}
 	for _, f := range nodefeature.ExtractNodeFlavors(nd) {
-		if f.Name == flavorName {
+		if topologyQualifiedFlavorName(f.Name, profile) == flavorName {
 			matched := f
 			return &matched
 		}
 	}
 	return nil
+}
+
+func topologyQualifiedFlavorName(flavorName, profile string) string {
+	return flavorName + "-" + profile
 }
 
 // featureKeyLabel returns the "<general.|acceleratable.>feature.gpustack.ai/<key>"
@@ -452,9 +635,13 @@ func indexNodeByScheduleFlavor(obj ctrlcli.Object) []string {
 	if !kubemeta.IsLabeled(nd, systemname.ManagedLabelKey, "true") {
 		return nil
 	}
+	profile := nd.Labels[TopologyProfileLabel]
+	if profile == "" {
+		return nil
+	}
 	return slicex.Transform(nodefeature.ExtractNodeFlavors(nd),
 		func(f nodefeature.NodeFlavor) string {
-			return f.Name
+			return topologyQualifiedFlavorName(f.Name, profile)
 		})
 }
 
@@ -467,6 +654,7 @@ func (r *NodeFlavorReconciler) SetupController(ctx context.Context, opts control
 	}
 
 	r.Client = opts.Manager.GetClient()
+	r.APIReader = opts.Manager.GetAPIReader()
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("nodeflavor").
@@ -485,11 +673,11 @@ func (r *NodeFlavorReconciler) SetupController(ctx context.Context, opts control
 				// - created (incl. the start-up resync).
 				// - updated if its spec, schedule labels (incl. capacity) or notes
 				//   have changed.
-				// Never react to deletion: a Node event re-creates the flavor when a
-				// Node still contributes to it.
+				// Reconcile deletion to retire a generated Topology after its last flavor
+				// reference disappears. A Node event re-creates a still-needed flavor.
 				ctrlpredicate.Funcs{
 					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
-						return false
+						return true
 					},
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						oldRf, newRf := e.ObjectOld.(*kueue.ResourceFlavor), e.ObjectNew.(*kueue.ResourceFlavor)
@@ -536,6 +724,7 @@ func (r *NodeFlavorReconciler) SetupController(ctx context.Context, opts control
 							// Fire when the managed mark or feature labels have changed.
 							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
 								systemname.ManagedLabelKey,
+								TopologyProfileLabel,
 								nodefeature.FeatureLabelPrefix,
 								nodefeature.GeneralFeatureLabelPrefix,
 								nodefeature.AcceleratableFeatureLabelPrefix) {
@@ -627,6 +816,10 @@ func (r *NodeFlavorReconciler) enqueueResourceFlavorWhenNodeChanged(
 		WithValues("node", ctrlcli.ObjectKeyFromObject(obj))
 
 	nd := obj.(*core.Node)
+	profile := nd.Labels[TopologyProfileLabel]
+	if profile == "" {
+		return nil
+	}
 
 	flavors := nodefeature.ExtractNodeFlavors(nd)
 	if len(flavors) == 0 {
@@ -641,7 +834,7 @@ func (r *NodeFlavorReconciler) enqueueResourceFlavorWhenNodeChanged(
 		}
 		reqs = append(reqs, ctrlreconcile.Request{
 			NamespacedName: ctrlcli.ObjectKey{
-				Name: flavors[i].Name,
+				Name: topologyQualifiedFlavorName(flavors[i].Name, profile),
 			},
 		})
 	}

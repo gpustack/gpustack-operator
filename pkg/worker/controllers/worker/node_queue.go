@@ -3,13 +3,16 @@ package worker
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
@@ -29,6 +32,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
+	"gpustack.ai/gpustack/pkg/worker/apistatus"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -37,8 +41,8 @@ import (
 // reference — driven by ClusterQueue, ResourceFlavor, and AdmissionCheck changes. The
 // InstanceTypeReconciler owns the queue's lifecycle (creation, schedule labels,
 // cohort/preemption isolation, and deletion); this reconciler
-// converges the credit/CPU quota from the flavors alone — it does not look at the owning
-// InstanceType:
+// validates the flavor selectors against Nodes, then converges credit/CPU quota without looking
+// at the owning InstanceType:
 //   - Being deleted: drive HoldAndDrain unconditionally so Kueue evicts the admitted workloads
 //     and can then drop its own finalizer and remove the queue — Kueue never evicts on delete by
 //     itself. (This covers both an admin's direct delete and the InstanceType teardown's delete.)
@@ -61,6 +65,26 @@ var _ ctrlreconcile.Reconciler = (*NodeQueueReconciler)(nil)
 // _ClusterQueueResType is the systemmeta resource type carried by the backing
 // ClusterQueue this reconciler owns.
 const _ClusterQueueResType = "instancetypes"
+
+const (
+	_TASQueueAnnotation                    = "topology.gpustack.ai/tas-queue"
+	_TASQueueMigrationPhaseAnnotation      = "topology.gpustack.ai/migration-phase"
+	_TASQueueMigrationStopPolicyAnnotation = "topology.gpustack.ai/migration-stop-policy"
+	_TASQueueMigrationPhaseDraining        = "draining"
+	_TASQueueMigrationPhaseSwitched        = "switched"
+	_TASQueueMigrationStopPolicyUnset      = "unset"
+	_TASQueueMigrationRequeueAfter         = 5 * time.Second
+	_maxQueueFlavors                       = 64
+
+	nodeQueueConditionTopologyReady = apistatus.ClusterQueueConditionTopologyReady
+)
+
+type nodeQueueValidationError struct {
+	reason  string
+	message string
+}
+
+func (e *nodeQueueValidationError) Error() string { return e.message }
 
 func (r *NodeQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
@@ -119,15 +143,10 @@ func (r *NodeQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// reconciler deleted them because their nodes left the pool, but Kueue holds each one's
 	// resource-in-use finalizer until no ClusterQueue references it, and removes it only on a
 	// ClusterQueue update that drops the reference. Keeping a mid-deletion flavor in the resource
-	// groups re-holds that finalizer and deadlocks its removal, so it is treated as gone: filling
-	// without it (a partial pool) drops it from the groups — the very update Kueue waits for — and
-	// an all-terminating pool falls through to the drain/empty path.
-	//
-	// A workload still admitted on a dropped (partial-pool) flavor is evicted by Kueue and
-	// re-admitted on the pool's remaining live flavors — Kueue re-evaluates admission when a
-	// flavor leaves a ClusterQueue's resource groups. The dropped flavor's node has already left
-	// the pool, so that workload must move regardless; the graceful whole-pool drain (HoldAndDrain,
-	// gated by instance-type-drain-when-no-flavors) only governs the all-terminating path below.
+	// groups re-holds that finalizer and deadlocks its removal, so it is treated as absent from the
+	// desired plan. NodeQueue drains the ClusterQueue before switching a non-empty plan because
+	// removing a flavor does not itself evict or re-admit Workloads. An all-terminating pool falls
+	// through to the no-flavors drain/empty path.
 	live := rfList.Items[:0]
 	for i := range rfList.Items {
 		if rfList.Items[i].DeletionTimestamp == nil {
@@ -148,10 +167,27 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 	ctx context.Context, cq *kueue.ClusterQueue, rfList *kueue.ResourceFlavorList,
 ) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
+	if failure := duplicateCoveredResource(cq.Spec.ResourceGroups); failure != nil {
+		return r.rejectClusterQueue(ctx, cq, failure)
+	}
+	if len(cq.Spec.ResourceGroups) > 0 && cq.Annotations[_TASQueueAnnotation] != "true" {
+		return r.rejectClusterQueue(ctx, cq, &nodeQueueValidationError{
+			reason:  "UnsupportedExistingObject",
+			message: "existing ClusterQueue has quota that was not created by the topology-aware queue controller; create fresh managed objects",
+		})
+	}
+	if failure, err := r.validateTASFlavors(ctx, cq, rfList); err != nil {
+		return ctrl.Result{}, err
+	} else if failure != nil {
+		return r.rejectClusterQueue(ctx, cq, failure)
+	}
 
 	// Smallest per-node count first, so Kueue's flavor fungibility fills small nodes first.
 	slices.SortStableFunc(rfList.Items, func(a, b kueue.ResourceFlavor) int {
-		return cmp.Compare(parseNodeFlavorCount(a.Name), parseNodeFlavorCount(b.Name))
+		if byCount := cmp.Compare(parseResourceFlavorCount(&a), parseResourceFlavorCount(&b)); byCount != 0 {
+			return byCount
+		}
+		return cmp.Compare(a.Name, b.Name)
 	})
 
 	_, firstNotes := systemmeta.DescribeResource(&rfList.Items[0])
@@ -159,6 +195,13 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 	eGroups := buildResourceGroups(rfList, acceleratable, firstNotes["manufacturer"])
 
 	changed := false
+	if cq.Annotations == nil {
+		cq.Annotations = make(map[string]string)
+	}
+	if cq.Annotations[_TASQueueAnnotation] != "true" {
+		cq.Annotations[_TASQueueAnnotation] = "true"
+		changed = true
+	}
 	// Reference the node-devices AdmissionCheck on an accelerated queue, but only once it
 	// reports Active: Kueue turns a ClusterQueue that lists a missing or inactive
 	// AdmissionCheck inactive, so it would stop admitting. The Watches on the AdmissionCheck
@@ -194,6 +237,13 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 		cq.Spec.AdmissionChecksStrategy = admissionChecks
 		changed = true
 	}
+
+	planChanged := !kubemeta.DeepEqual(cq.Spec.ResourceGroups, eGroups)
+	migrationPhase := cq.Annotations[_TASQueueMigrationPhaseAnnotation]
+	if migrationPhase != "" || (len(cq.Spec.ResourceGroups) > 0 && planChanged) {
+		return r.migrateClusterQueueResourceGroups(ctx, cq, eGroups, changed)
+	}
+
 	// Reactivate only a queue WE drained to empty (HoldAndDrain + empty quota). An admin Hold is
 	// owned by the InstanceTypeReconciler (a type marked Inactive) and stays sticky across a pool
 	// losing and regaining its flavors, so it must not be flipped back to None here — doing so would
@@ -202,7 +252,7 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 		cq.Spec.StopPolicy = ptr.To(kueue.None)
 		changed = true
 	}
-	if !kubemeta.DeepEqual(cq.Spec.ResourceGroups, eGroups) {
+	if planChanged {
 		cq.Spec.ResourceGroups = eGroups
 		changed = true
 	}
@@ -213,7 +263,232 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 		}
 		logger.V(2).Info("filled cluster queue resource groups")
 	}
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, r.setTopologyReadyCondition(ctx, cq, true, "Ready", "all queue flavors are topology-aware and quota is conserved")
+}
+
+func (r *NodeQueueReconciler) migrateClusterQueueResourceGroups(
+	ctx context.Context,
+	cq *kueue.ClusterQueue,
+	desired []kueue.ResourceGroup,
+	changed bool,
+) (ctrl.Result, error) {
+	logger := ctrllog.FromContext(ctx)
+	phase := cq.Annotations[_TASQueueMigrationPhaseAnnotation]
+
+	if phase == "" {
+		cq.Annotations[_TASQueueMigrationPhaseAnnotation] = _TASQueueMigrationPhaseDraining
+		cq.Annotations[_TASQueueMigrationStopPolicyAnnotation] = encodeStopPolicy(cq.Spec.StopPolicy)
+		cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)
+		if err := r.Client.Update(ctx, cq); err != nil {
+			logger.Error(err, "start cluster queue topology migration")
+			return ctrl.Result{}, err
+		}
+		if err := r.setTopologyReadyCondition(ctx, cq, false, "Migrating", "holding and draining before switching topology flavors"); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: _TASQueueMigrationRequeueAfter}, nil
+	}
+
+	if phase != _TASQueueMigrationPhaseDraining && phase != _TASQueueMigrationPhaseSwitched {
+		return r.rejectClusterQueue(ctx, cq, &nodeQueueValidationError{
+			reason:  "InvalidMigrationState",
+			message: fmt.Sprintf("ClusterQueue has unsupported topology migration phase %q", phase),
+		})
+	}
+	if _, failure := decodeStopPolicy(cq.Annotations[_TASQueueMigrationStopPolicyAnnotation]); failure != nil {
+		return r.rejectClusterQueue(ctx, cq, failure)
+	}
+	if ptr.Deref(cq.Spec.StopPolicy, kueue.None) != kueue.HoldAndDrain {
+		cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)
+		changed = true
+	}
+	if changed {
+		if err := r.Client.Update(ctx, cq); err != nil {
+			logger.Error(err, "maintain held cluster queue topology migration")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: _TASQueueMigrationRequeueAfter}, nil
+	}
+	if !clusterQueueStoppedAtCurrentGeneration(cq) || hasReserved(cq) {
+		return ctrl.Result{RequeueAfter: _TASQueueMigrationRequeueAfter}, nil
+	}
+
+	if phase == _TASQueueMigrationPhaseDraining || !kubemeta.DeepEqual(cq.Spec.ResourceGroups, desired) {
+		cq.Spec.ResourceGroups = desired
+		cq.Annotations[_TASQueueMigrationPhaseAnnotation] = _TASQueueMigrationPhaseSwitched
+		if err := r.Client.Update(ctx, cq); err != nil {
+			logger.Error(err, "switch held cluster queue topology flavors")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: _TASQueueMigrationRequeueAfter}, nil
+	}
+
+	restored, _ := decodeStopPolicy(cq.Annotations[_TASQueueMigrationStopPolicyAnnotation])
+	cq.Spec.StopPolicy = restored
+	delete(cq.Annotations, _TASQueueMigrationPhaseAnnotation)
+	delete(cq.Annotations, _TASQueueMigrationStopPolicyAnnotation)
+	if err := r.Client.Update(ctx, cq); err != nil {
+		logger.Error(err, "restore cluster queue after topology migration")
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, r.setTopologyReadyCondition(ctx, cq, true, "Ready", "all queue flavors are topology-aware and quota is conserved")
+}
+
+func encodeStopPolicy(policy *kueue.StopPolicy) string {
+	if policy == nil {
+		return _TASQueueMigrationStopPolicyUnset
+	}
+	return string(*policy)
+}
+
+func decodeStopPolicy(value string) (*kueue.StopPolicy, *nodeQueueValidationError) {
+	if value == _TASQueueMigrationStopPolicyUnset {
+		return nil, nil
+	}
+	policy := kueue.StopPolicy(value)
+	switch policy {
+	case kueue.None, kueue.Hold, kueue.HoldAndDrain:
+		return ptr.To(policy), nil
+	default:
+		return nil, &nodeQueueValidationError{
+			reason:  "InvalidMigrationState",
+			message: fmt.Sprintf("ClusterQueue has unsupported saved stop policy %q", value),
+		}
+	}
+}
+
+func clusterQueueStoppedAtCurrentGeneration(cq *kueue.ClusterQueue) bool {
+	condition := apimeta.FindStatusCondition(cq.Status.Conditions, kueue.ClusterQueueActive)
+	return condition != nil &&
+		condition.Status == meta.ConditionFalse &&
+		condition.Reason == kueue.ClusterQueueActiveReasonStopped &&
+		condition.ObservedGeneration >= cq.Generation
+}
+
+func (r *NodeQueueReconciler) rejectClusterQueue(
+	ctx context.Context, cq *kueue.ClusterQueue, failure *nodeQueueValidationError,
+) (ctrl.Result, error) {
+	ctrllog.FromContext(ctx).Error(failure, "reject topology-aware cluster queue")
+	result := ctrl.Result{}
+	if failure.reason == "MissingTopology" || cq.Annotations[_TASQueueMigrationPhaseAnnotation] != "" {
+		result.RequeueAfter = 30 * time.Second
+	}
+	return result, r.setTopologyReadyCondition(ctx, cq, false, failure.reason, failure.message)
+}
+
+func (r *NodeQueueReconciler) setTopologyReadyCondition(
+	ctx context.Context, cq *kueue.ClusterQueue, ready bool, reason, message string,
+) error {
+	before := cq.DeepCopy()
+	if ready {
+		nodeQueueConditionTopologyReady.True(cq, reason, message)
+	} else {
+		nodeQueueConditionTopologyReady.False(cq, reason, message)
+	}
+	if kubemeta.DeepEqual(before.Status, cq.Status) {
+		return nil
+	}
+	return r.Client.Status().Patch(ctx, cq, ctrlcli.MergeFrom(before))
+}
+
+func duplicateCoveredResource(groups []kueue.ResourceGroup) *nodeQueueValidationError {
+	seen := make(map[core.ResourceName]struct{})
+	for _, group := range groups {
+		for _, name := range group.CoveredResources {
+			if _, exists := seen[name]; exists {
+				return &nodeQueueValidationError{
+					reason:  "DuplicateCoveredResource",
+					message: fmt.Sprintf("resource %q is covered by more than one ClusterQueue resource group", name),
+				}
+			}
+			seen[name] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func (r *NodeQueueReconciler) validateTASFlavors(
+	ctx context.Context, cq *kueue.ClusterQueue, rfList *kueue.ResourceFlavorList,
+) (*nodeQueueValidationError, error) {
+	if len(rfList.Items) > _maxQueueFlavors {
+		return &nodeQueueValidationError{
+			reason:  "TooManyFlavors",
+			message: fmt.Sprintf("covered resource requires %d flavors; Kueue permits at most %d", len(rfList.Items), _maxQueueFlavors),
+		}, nil
+	}
+	selected := make(map[string]string)
+	selectedCounts := make([]int, len(rfList.Items))
+	for i := range rfList.Items {
+		rf := &rfList.Items[i]
+		profile := rf.Spec.NodeLabels[TopologyProfileLabel]
+		if profile == "" || rf.Labels[TopologyProfileLabel] != profile || rf.Spec.TopologyName == nil {
+			return &nodeQueueValidationError{
+				reason:  "MissingTopology",
+				message: fmt.Sprintf("ResourceFlavor %q is not bound to one topology profile", rf.Name),
+			}, nil
+		}
+		if expected := topologyName(profile); string(*rf.Spec.TopologyName) != expected {
+			return &nodeQueueValidationError{
+				reason: "MissingTopology",
+				message: fmt.Sprintf(
+					"ResourceFlavor %q references Topology %q instead of profile Topology %q",
+					rf.Name, *rf.Spec.TopologyName, expected),
+			}, nil
+		}
+		topology := new(kueue.Topology)
+		if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: string(*rf.Spec.TopologyName)}, topology); err != nil {
+			if kerrors.IsNotFound(err) {
+				return &nodeQueueValidationError{
+					reason:  "MissingTopology",
+					message: fmt.Sprintf("ResourceFlavor %q references missing Topology %q", rf.Name, *rf.Spec.TopologyName),
+				}, nil
+			}
+			return nil, err
+		}
+		nodes := new(core.NodeList)
+		if err := r.Client.List(ctx, nodes, ctrlcli.MatchingLabels(rf.Spec.NodeLabels)); err != nil {
+			return nil, err
+		}
+		selectedCounts[i] = len(nodes.Items)
+		for _, node := range nodes.Items {
+			if prior, exists := selected[node.Name]; exists {
+				return &nodeQueueValidationError{
+					reason:  "OverlappingSelectors",
+					message: fmt.Sprintf("Node %q is selected by ResourceFlavors %q and %q", node.Name, prior, rf.Name),
+				}, nil
+			}
+			selected[node.Name] = rf.Name
+		}
+	}
+	for i := range rfList.Items {
+		rf := &rfList.Items[i]
+		count := parseResourceFlavorCount(rf)
+		capacity := parseResourceFlavorCapacity(rf)
+		expected := int64(selectedCounts[i]) * count
+		if count <= 0 || capacity != expected {
+			return &nodeQueueValidationError{
+				reason: "NonConservedQuota",
+				message: fmt.Sprintf(
+					"ResourceFlavor %q advertises capacity %d but %d selected Nodes contribute %d each",
+					rf.Name, capacity, selectedCounts[i], count),
+			}, nil
+		}
+	}
+
+	poolSelector := nodefeature.PoolFlavorSelector(cq.Labels)
+	poolNodes := new(core.NodeList)
+	if err := r.Client.List(ctx, poolNodes, ctrlcli.MatchingLabels(poolSelector)); err != nil {
+		return nil, err
+	}
+	for _, node := range poolNodes.Items {
+		if _, exists := selected[node.Name]; !exists {
+			return &nodeQueueValidationError{
+				reason:  "NonConservedQuota",
+				message: fmt.Sprintf("Node %q belongs to the queue pool but contributes to no ResourceFlavor", node.Name),
+			}, nil
+		}
+	}
+	return nil, nil
 }
 
 // drainOrEmptyClusterQueue handles a queue whose pool has lost all its flavors: it empties the
@@ -225,22 +500,24 @@ func (r *NodeQueueReconciler) drainOrEmptyClusterQueue(
 ) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
 
+	if cq.Annotations[_TASQueueMigrationPhaseAnnotation] != "" {
+		return r.migrateClusterQueueResourceGroups(ctx, cq, nil, false)
+	}
 	if len(cq.Spec.ResourceGroups) == 0 {
 		return ctrl.Result{}, nil
 	}
 
-	if hasReserved(cq) {
-		// Reservations still outstanding: draining (when enabled) evicts them; emptying the
-		// quota now would drive the counters negative, so wait and re-check.
-		if settings.InstanceTypeDrainWhenNoFlavors.ShouldValueBool(ctx) &&
-			ptr.Deref(cq.Spec.StopPolicy, kueue.None) != kueue.HoldAndDrain {
-			cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)
-			if err := r.Client.Update(ctx, cq); err != nil {
-				logger.Error(err, "hold and drain cluster queue with no flavors")
-				return ctrl.Result{}, err
-			}
-			logger.V(2).Info("held and draining cluster queue with no flavors; requeue in 60s")
+	drain := settings.InstanceTypeDrainWhenNoFlavors.ShouldValueBool(ctx)
+	if drain {
+		if cq.Annotations == nil {
+			cq.Annotations = make(map[string]string)
 		}
+		// Emptying the last flavor reference is the same identity-stable plan migration as a
+		// profile replacement. The migration marker preserves the prior stop policy and lets a
+		// returning flavor join the in-progress plan before admission is restored.
+		return r.migrateClusterQueueResourceGroups(ctx, cq, nil, false)
+	} else if hasReserved(cq) {
+		// Without automatic drain, wait for reservations to clear on their own.
 		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
 
@@ -281,7 +558,7 @@ func buildResourceGroups(rfList *kueue.ResourceFlavorList, acceleratable bool, m
 		covered = []core.ResourceName{nodefeature.GetAcceleratableCreditsResourceName(manufacturer)}
 	}
 
-	var groups []kueue.ResourceGroup
+	group := kueue.ResourceGroup{CoveredResources: covered}
 	for i := range rfList.Items {
 		rf := &rfList.Items[i]
 		capacity := parseResourceFlavorCapacity(rf)
@@ -294,12 +571,7 @@ func buildResourceGroups(rfList *kueue.ResourceFlavorList, acceleratable bool, m
 			nominal = nodefeature.AcceleratorsToCredits(nominal)
 		}
 
-		// A resource group holds at most 16 flavors.
-		if len(groups) == 0 || len(groups[len(groups)-1].Flavors) >= 16 {
-			groups = append(groups, kueue.ResourceGroup{CoveredResources: covered})
-		}
-		g := &groups[len(groups)-1]
-		g.Flavors = append(g.Flavors, kueue.FlavorQuotas{
+		group.Flavors = append(group.Flavors, kueue.FlavorQuotas{
 			Name: kueue.ResourceFlavorReference(rf.Name),
 			Resources: []kueue.ResourceQuota{
 				{
@@ -312,25 +584,49 @@ func buildResourceGroups(rfList *kueue.ResourceFlavorList, acceleratable bool, m
 			},
 		})
 	}
-	return groups
+	if len(group.Flavors) == 0 {
+		return nil
+	}
+	return []kueue.ResourceGroup{group}
 }
 
-// parseNodeFlavorCount extracts the per-node count encoded in a node ResourceFlavor name
-// "gpustack--${key}-${os}-${arch}-${count}{c|d}" (CPU cores for a CPU flavor, device count for
-// a device flavor); returns 0 when the name lacks the suffix.
+// parseResourceFlavorCount reads the per-node count from the flavor selector rather than its
+// name, whose suffix is the topology profile on topology-qualified flavors.
+func parseResourceFlavorCount(rf *kueue.ResourceFlavor) int64 {
+	prefix := nodefeature.GeneralFeatureLabelPrefix
+	if rf.Labels[nodefeature.NodeAcceleratableLabelKey] == "true" {
+		prefix = nodefeature.AcceleratableFeatureLabelPrefix
+	}
+	for key, value := range rf.Spec.NodeLabels {
+		if value != "true" || !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if count, err := strconvx.Atoi[int64](rf.Spec.NodeLabels[key+_ResourceFlavorCountLabelSuffix]); err == nil && count > 0 {
+			return count
+		}
+	}
+	return 0
+}
+
+// parseNodeFlavorCount extracts the per-node count segment encoded in a node flavor name. A
+// topology-qualified flavor appends "-fnv64-<hash>" after that segment, so scan segments from the end
+// instead of assuming the count is the final suffix. Queue ordering still reads the selector with
+// parseResourceFlavorCount because labels are authoritative when the ResourceFlavor is available.
 func parseNodeFlavorCount(name string) int64 {
-	i := strings.LastIndex(name, "-")
-	if i < 0 {
-		return 0
+	if profileIndex := strings.LastIndex(name, "-"+topologyProfilePrefix); profileIndex >= 0 {
+		name = name[:profileIndex]
 	}
-	seg := name[i+1:]
-	if len(seg) < 2 {
-		return 0
-	}
-	switch seg[len(seg)-1] {
-	case 'c', 'd':
-		if v, err := strconvx.Atoi[int64](seg[:len(seg)-1]); err == nil {
-			return v
+	segments := strings.Split(name, "-")
+	for i := len(segments) - 1; i >= 0; i-- {
+		segment := segments[i]
+		if len(segment) < 2 {
+			continue
+		}
+		switch segment[len(segment)-1] {
+		case 'c', 'd':
+			if value, err := strconvx.Atoi[int64](segment[:len(segment)-1]); err == nil {
+				return value
+			}
 		}
 	}
 	return 0

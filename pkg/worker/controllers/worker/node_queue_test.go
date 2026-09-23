@@ -2,9 +2,10 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"strconv"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,6 +22,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -38,11 +40,73 @@ func enableInstanceTypeDrainWhenNoFlavors(t *testing.T) {
 
 // buildNodeQueueClient builds a fake client for the NodeQueueReconciler. Unlike the
 // InstanceType client it carries no ResourceFlavor→node-queue field index (the reconciler
-// lists flavors by MatchingLabels) and registers no status subresource, so a fixture
-// ClusterQueue keeps any preset .status (the reservation counters hasReserved reads).
+// lists flavors by MatchingLabels). It registers the ClusterQueue status subresource so
+// topology readiness updates exercise the same API path as a real cluster; fixture status is
+// retained for the reservation counters hasReserved reads.
 func buildNodeQueueClient(objs ...ctrlcli.Object) ctrlcli.Client {
+	profile := topologyProfile([]string{core.LabelHostname})
+	topologyNames := make(map[string]struct{})
+	var generated []ctrlcli.Object
+	for _, obj := range objs {
+		rf, ok := obj.(*kueue.ResourceFlavor)
+		if !ok {
+			continue
+		}
+		if rf.Labels == nil {
+			rf.Labels = make(map[string]string)
+		}
+		rf.Labels[TopologyProfileLabel] = profile
+		if rf.Spec.NodeLabels == nil {
+			rf.Spec.NodeLabels = map[string]string{
+				systemname.ManagedLabelKey: "true",
+				core.LabelOSStable:         rf.Labels[core.LabelOSStable],
+				core.LabelArchStable:       rf.Labels[core.LabelArchStable],
+				TopologyProfileLabel:       profile,
+			}
+			for key, value := range rf.Labels {
+				if key == nodefeature.NodeAcceleratableLabelKey ||
+					(value == "true" && (strings.HasPrefix(key, nodefeature.GeneralFeatureLabelPrefix) ||
+						strings.HasPrefix(key, nodefeature.AcceleratableFeatureLabelPrefix))) {
+					rf.Spec.NodeLabels[key] = value
+					if count := rf.Labels[key+_ResourceFlavorCountLabelSuffix]; count != "" {
+						rf.Spec.NodeLabels[key+_ResourceFlavorCountLabelSuffix] = count
+					}
+				}
+			}
+		}
+		if rf.Spec.TopologyName == nil {
+			name := kueue.TopologyReference(topologyName(profile))
+			rf.Spec.TopologyName = &name
+		}
+		topologyNames[string(*rf.Spec.TopologyName)] = struct{}{}
+		if rf.DeletionTimestamp != nil {
+			continue
+		}
+
+		count := parseResourceFlavorCount(rf)
+		capacity := parseResourceFlavorCapacity(rf)
+		for i := int64(0); count > 0 && i < capacity/count; i++ {
+			labels := make(map[string]string, len(rf.Spec.NodeLabels)+1)
+			for key, value := range rf.Spec.NodeLabels {
+				labels[key] = value
+			}
+			labels[core.LabelHostname] = fmt.Sprintf("%s-%d", rf.Name, i)
+			generated = append(generated, &core.Node{ObjectMeta: meta.ObjectMeta{
+				Name:   labels[core.LabelHostname],
+				Labels: labels,
+			}})
+		}
+	}
+	for name := range topologyNames {
+		generated = append(generated, &kueue.Topology{
+			ObjectMeta: meta.ObjectMeta{Name: name},
+			Spec:       kueue.TopologySpec{Levels: []kueue.TopologyLevel{{NodeLabel: core.LabelHostname}}},
+		})
+	}
+	objs = append(objs, generated...)
 	return ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
+		WithStatusSubresource(&kueue.ClusterQueue{}).
 		WithObjects(objs...).
 		Build()
 }
@@ -60,6 +124,19 @@ func reconcileNodeQueueN(t *testing.T, cli ctrlcli.Client, name string, n int) c
 		require.NoError(t, err)
 	}
 	return res
+}
+
+func markClusterQueueStopped(t *testing.T, cli ctrlcli.Client, name string) {
+	t.Helper()
+	cq, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	cq.Status.Conditions = append(cq.Status.Conditions, meta.Condition{
+		Type:               kueue.ClusterQueueActive,
+		Status:             meta.ConditionFalse,
+		Reason:             kueue.ClusterQueueActiveReasonStopped,
+		ObservedGeneration: cq.Generation,
+	})
+	require.NoError(t, cli.Status().Update(context.Background(), cq))
 }
 
 // newInstanceTypeQueue builds an operator-owned backing ClusterQueue the way the
@@ -83,6 +160,9 @@ func newInstanceTypeQueue(key string, acceleratable bool, groups ...kueue.Resour
 			StopPolicy:        ptr.To(kueue.None),
 			ResourceGroups:    groups,
 		},
+	}
+	if len(groups) > 0 {
+		cq.Annotations = map[string]string{_TASQueueAnnotation: "true"}
 	}
 	systemmeta.NoteResource(cq, _ClusterQueueResType, nil)
 	return cq
@@ -144,6 +224,34 @@ func cpuResourceGroup(flavorName string, cpu int64) kueue.ResourceGroup {
 			}},
 		}},
 	}
+}
+
+func TestValidateTASFlavors_CPUOnlyNodeMatchesFlavor(t *testing.T) {
+	node := newManagedCPUNode("node-a", 4, 16, 32)
+	name := cpuFlavorName(node)
+	flavorClient := buildNodeFlavorClient(node)
+	reconcileNodeFlavor(t, flavorClient, name)
+	flavor, err := getResourceFlavor(t, flavorClient, name)
+	require.NoError(t, err)
+	profile := node.Labels[TopologyProfileLabel]
+	topology := &kueue.Topology{
+		ObjectMeta: meta.ObjectMeta{Name: topologyName(profile)},
+		Spec:       kueue.TopologySpec{Levels: topologyLevelObjects([]string{core.LabelHostname})},
+	}
+	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(node, flavor, topology).Build()
+	r := &NodeQueueReconciler{Client: cli}
+	queue := &kueue.ClusterQueue{}
+	flavors := &kueue.ResourceFlavorList{Items: []kueue.ResourceFlavor{*flavor}}
+	failure, err := r.validateTASFlavors(context.Background(), queue, flavors)
+	require.NoError(t, err)
+	assert.Nil(t, failure)
+
+	delete(node.Labels, nodefeature.NodeCPUOnlyLabelKey)
+	require.NoError(t, cli.Update(context.Background(), node))
+	failure, err = r.validateTASFlavors(context.Background(), queue, flavors)
+	require.NoError(t, err)
+	require.NotNil(t, failure)
+	assert.Equal(t, "NonConservedQuota", failure.reason)
 }
 
 // TestNodeQueueReconciler_FillsAndSortsByCount pins that the reconciler fills the resource
@@ -223,6 +331,150 @@ func TestNodeQueueReconciler_FillsAndSortsByCount(t *testing.T) {
 			assert.Nil(t, rq.LendingLimit, "no lendingLimit on a cohort-less queue")
 		})
 	}
+}
+
+func TestNodeQueueReconciler_TASFlavorLimit(t *testing.T) {
+	for _, flavorCount := range []int{0, 1, 16, 17, 64, 65} {
+		t.Run(strconv.Itoa(flavorCount), func(t *testing.T) {
+			const key = "generic"
+			name := nodeQueueName(key)
+			objs := []ctrlcli.Object{newInstanceTypeQueue(key, false)}
+			for i := 1; i <= flavorCount; i++ {
+				flavorName := fmt.Sprintf("gpustack-generic-linux-amd64-%dc-profile", i)
+				objs = append(objs, newNodesFlavor(flavorName, key, int64(i), int64(i)))
+			}
+			cli := buildNodeQueueClient(objs...)
+
+			_, err := (&NodeQueueReconciler{Client: cli}).Reconcile(context.Background(),
+				ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: name}})
+			require.NoError(t, err)
+			got, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			if flavorCount == 65 {
+				assert.Empty(t, got.Spec.ResourceGroups, "an oversized queue is not partially filled")
+				assert.True(t, nodeQueueConditionTopologyReady.IsFalse(got))
+				assert.Equal(t, "TooManyFlavors", nodeQueueConditionTopologyReady.GetReason(got))
+				return
+			}
+			if flavorCount == 0 {
+				assert.Empty(t, got.Spec.ResourceGroups)
+				return
+			}
+			require.Len(t, got.Spec.ResourceGroups, 1, "one covered resource has one group")
+			assert.Len(t, got.Spec.ResourceGroups[0].Flavors, flavorCount)
+			var actualQuota int64
+			for _, flavor := range got.Spec.ResourceGroups[0].Flavors {
+				actualQuota += flavor.Resources[0].NominalQuota.Value()
+			}
+			assert.Equal(t, int64(flavorCount*(flavorCount+1)/2), actualQuota,
+				"quota equals the independently counted capacity of one Node per flavor")
+			assert.True(t, nodeQueueConditionTopologyReady.IsTrue(got))
+		})
+	}
+}
+
+func TestNodeQueueReconciler_RejectsInvalidTASQueueInputs(t *testing.T) {
+	const key = "generic"
+	name := nodeQueueName(key)
+
+	t.Run("overlapping selectors", func(t *testing.T) {
+		first := newNodesFlavor("gpustack-generic-linux-amd64-4c-a", key, 4, 4)
+		second := newNodesFlavor("gpustack-generic-linux-amd64-4c-b", key, 4, 4)
+		cli := buildNodeQueueClient(newInstanceTypeQueue(key, false), first, second)
+		reconcileNodeQueueN(t, cli, name, 1)
+		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		assert.Empty(t, got.Spec.ResourceGroups)
+		assert.Equal(t, "OverlappingSelectors", nodeQueueConditionTopologyReady.GetReason(got))
+	})
+
+	t.Run("missing topology", func(t *testing.T) {
+		rf := newNodesFlavor("gpustack-generic-linux-amd64-4c", key, 4, 4)
+		cli := buildNodeQueueClient(newInstanceTypeQueue(key, false), rf)
+		require.NoError(t, cli.Delete(context.Background(), &kueue.Topology{
+			ObjectMeta: meta.ObjectMeta{Name: string(*rf.Spec.TopologyName)},
+		}))
+		result := reconcileNodeQueueN(t, cli, name, 1)
+		assert.Positive(t, result.RequeueAfter)
+		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		assert.Empty(t, got.Spec.ResourceGroups)
+		assert.Equal(t, "MissingTopology", nodeQueueConditionTopologyReady.GetReason(got))
+	})
+
+	t.Run("non-conserved quota", func(t *testing.T) {
+		rf := newNodesFlavor("gpustack-generic-linux-amd64-4c", key, 4, 4)
+		cli := buildNodeQueueClient(newInstanceTypeQueue(key, false), rf)
+		stored := new(kueue.ResourceFlavor)
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: rf.Name}, stored))
+		for label := range stored.Labels {
+			if strings.HasSuffix(label, _ResourceFlavorCapacityLabelSuffix) {
+				stored.Labels[label] = "8"
+			}
+		}
+		require.NoError(t, cli.Update(context.Background(), stored))
+		reconcileNodeQueueN(t, cli, name, 1)
+		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		assert.Empty(t, got.Spec.ResourceGroups)
+		assert.Equal(t, "NonConservedQuota", nodeQueueConditionTopologyReady.GetReason(got))
+	})
+}
+
+func TestNodeQueueReconciler_RetriesMissingTopologyDuringMigration(t *testing.T) {
+	const key = "generic"
+	name := nodeQueueName(key)
+	flavor := newNodesFlavor("gpustack-generic-linux-amd64-4c-p-new", key, 4, 4)
+	queue := newInstanceTypeQueue(key, false, cpuResourceGroup("gpustack-generic-linux-amd64-4c-p-old", 4))
+	cli := buildNodeQueueClient(queue, flavor)
+	reconcileNodeQueueN(t, cli, name, 1)
+
+	topology := &kueue.Topology{ObjectMeta: meta.ObjectMeta{Name: string(*flavor.Spec.TopologyName)}}
+	require.NoError(t, cli.Delete(context.Background(), topology))
+	result := reconcileNodeQueueN(t, cli, name, 1)
+	assert.Positive(t, result.RequeueAfter)
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, _TASQueueMigrationPhaseDraining, got.Annotations[_TASQueueMigrationPhaseAnnotation])
+	assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+	assert.Equal(t, "MissingTopology", nodeQueueConditionTopologyReady.GetReason(got))
+}
+
+func TestNodeQueueReconciler_DoesNotRewriteExistingQueue(t *testing.T) {
+	const key = "generic"
+	name := nodeQueueName(key)
+	original := cpuResourceGroup("legacy-non-tas", 4)
+	cq := newInstanceTypeQueue(key, false, original)
+	delete(cq.Annotations, _TASQueueAnnotation)
+	rf := newNodesFlavor("gpustack-generic-linux-amd64-4c", key, 4, 4)
+	cli := buildNodeQueueClient(cq, rf)
+
+	reconcileNodeQueueN(t, cli, name, 1)
+
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	require.Len(t, got.Spec.ResourceGroups, 1)
+	require.Len(t, got.Spec.ResourceGroups[0].Flavors, 1)
+	assert.Equal(t, kueue.ResourceFlavorReference("legacy-non-tas"), got.Spec.ResourceGroups[0].Flavors[0].Name)
+	assert.Equal(t, int64(4), got.Spec.ResourceGroups[0].Flavors[0].Resources[0].NominalQuota.Value())
+	assert.Equal(t, "UnsupportedExistingObject", nodeQueueConditionTopologyReady.GetReason(got))
+}
+
+func TestNodeQueueReconciler_RejectsDuplicateCoveredResource(t *testing.T) {
+	const key = "generic"
+	name := nodeQueueName(key)
+	cq := newInstanceTypeQueue(key, false,
+		cpuResourceGroup("first", 2),
+		cpuResourceGroup("second", 2))
+	rf := newNodesFlavor("gpustack-generic-linux-amd64-4c", key, 4, 4)
+	cli := buildNodeQueueClient(cq, rf)
+
+	reconcileNodeQueueN(t, cli, name, 1)
+
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Len(t, got.Spec.ResourceGroups, 2, "invalid existing quota is untouched")
+	assert.Equal(t, "DuplicateCoveredResource", nodeQueueConditionTopologyReady.GetReason(got))
 }
 
 // TestNodeQueueReconciler_AcceleratedFillsDespiteGeneralKey pins that an accelerated pool's queue
@@ -423,7 +675,7 @@ func TestNodeQueueReconciler_DrainThenEmptyRespectsReservations(t *testing.T) {
 		require.NotNil(t, got.Spec.StopPolicy)
 		assert.Equal(t, kueue.HoldAndDrain, *got.Spec.StopPolicy, "held and draining while reserved")
 		assert.NotEmpty(t, got.Spec.ResourceGroups, "groups not emptied while reserved")
-		assert.Equal(t, 60*time.Second, res.RequeueAfter, "requeues to re-check the drain")
+		assert.Equal(t, _TASQueueMigrationRequeueAfter, res.RequeueAfter, "requeues to re-check the drain")
 	})
 
 	t.Run("no reservations: groups emptied", func(t *testing.T) {
@@ -433,7 +685,11 @@ func TestNodeQueueReconciler_DrainThenEmptyRespectsReservations(t *testing.T) {
 
 		cli := buildNodeQueueClient(cq) // no flavors, nothing reserved
 
-		reconcileNodeQueueN(t, cli, name, 2)
+		reconcileNodeQueueN(t, cli, name, 1)
+		markClusterQueueStopped(t, cli, name)
+		reconcileNodeQueueN(t, cli, name, 1)
+		markClusterQueueStopped(t, cli, name)
+		reconcileNodeQueueN(t, cli, name, 1)
 
 		got, err := getClusterQueue(t, cli, name)
 		require.NoError(t, err)
@@ -595,9 +851,17 @@ func TestNodeQueueReconciler_IgnoresTerminatingFlavor(t *testing.T) {
 		rf := terminating(newNodesFlavor("gpustack-generic-linux-amd64-4c", key, 4, 4))
 		cli := buildNodeQueueClient(cq, rf)
 
-		reconcileNodeQueueN(t, cli, name, 2)
-
+		reconcileNodeQueueN(t, cli, name, 1)
 		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		if ptr.Deref(got.Spec.StopPolicy, kueue.None) == kueue.HoldAndDrain {
+			markClusterQueueStopped(t, cli, name)
+			reconcileNodeQueueN(t, cli, name, 1)
+			markClusterQueueStopped(t, cli, name)
+			reconcileNodeQueueN(t, cli, name, 1)
+		}
+
+		got, err = getClusterQueue(t, cli, name)
 		require.NoError(t, err)
 		assert.Empty(t, got.Spec.ResourceGroups,
 			"a terminating flavor is treated as absent, so the queue drops the reference and empties")
@@ -623,6 +887,132 @@ func TestNodeQueueReconciler_IgnoresTerminatingFlavor(t *testing.T) {
 		assert.Equal(t, []string{"gpustack-generic-linux-amd64-8c"}, names,
 			"only the live flavor feeds the queue; the terminating one is dropped")
 	})
+}
+
+func TestNodeQueueReconciler_MigratesFlavorPlanWithoutReplacingQueue(t *testing.T) {
+	key := "generic"
+	name := nodeQueueName(key)
+	oldFlavor := "gpustack-generic-linux-amd64-4c-p-old"
+	newFlavor := "gpustack-generic-linux-amd64-4c-p-new"
+
+	tests := []struct {
+		name         string
+		stopPolicy   *kueue.StopPolicy
+		wantRestored *kueue.StopPolicy
+	}{
+		{name: "restores None", stopPolicy: ptr.To(kueue.None), wantRestored: ptr.To(kueue.None)},
+		{name: "restores admin Hold", stopPolicy: ptr.To(kueue.Hold), wantRestored: ptr.To(kueue.Hold)},
+		{name: "restores unset", stopPolicy: nil, wantRestored: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cq := newInstanceTypeQueue(key, false, cpuResourceGroup(oldFlavor, 4))
+			cq.UID = "stable-queue-uid"
+			cq.Generation = 7
+			cq.Spec.StopPolicy = tc.stopPolicy
+			cq.Status.AdmittedWorkloads = 1
+			newRF := newNodesFlavor(newFlavor, key, 4, 4)
+			cli := buildNodeQueueClient(cq, newRF)
+
+			res := reconcileNodeQueueN(t, cli, name, 1)
+			assert.Positive(t, res.RequeueAfter)
+			got, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+			assert.Equal(t, oldFlavor, string(got.Spec.ResourceGroups[0].Flavors[0].Name),
+				"the old plan remains while Kueue has not drained reservations")
+
+			markClusterQueueStopped(t, cli, name)
+			res = reconcileNodeQueueN(t, cli, name, 1)
+			assert.Positive(t, res.RequeueAfter)
+			got, err = getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, oldFlavor, string(got.Spec.ResourceGroups[0].Flavors[0].Name),
+				"an observed stop is insufficient while a reservation remains")
+
+			got.Status.AdmittedWorkloads = 0
+			require.NoError(t, cli.Status().Update(context.Background(), got))
+			reconcileNodeQueueN(t, cli, name, 1)
+			got, err = getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, newFlavor, string(got.Spec.ResourceGroups[0].Flavors[0].Name))
+			assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(got.Spec.StopPolicy, kueue.None),
+				"the replacement plan remains held until Kueue observes it")
+
+			markClusterQueueStopped(t, cli, name)
+			reconcileNodeQueueN(t, cli, name, 1)
+			got, err = getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, "stable-queue-uid", string(got.UID))
+			assert.Equal(t, tc.wantRestored, got.Spec.StopPolicy)
+		})
+	}
+}
+
+func TestNodeQueueReconciler_WaitsForCurrentStoppedGeneration(t *testing.T) {
+	key := "generic"
+	name := nodeQueueName(key)
+	oldFlavor := "gpustack-generic-linux-amd64-4c-p-old"
+	newFlavor := "gpustack-generic-linux-amd64-4c-p-new"
+	cq := newInstanceTypeQueue(key, false, cpuResourceGroup(oldFlavor, 4))
+	cq.Generation = 7
+	newRF := newNodesFlavor(newFlavor, key, 4, 4)
+	cli := buildNodeQueueClient(cq, newRF)
+
+	reconcileNodeQueueN(t, cli, name, 1)
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	got.Status.Conditions = append(got.Status.Conditions, meta.Condition{
+		Type:               kueue.ClusterQueueActive,
+		Status:             meta.ConditionFalse,
+		Reason:             kueue.ClusterQueueActiveReasonStopped,
+		ObservedGeneration: got.Generation - 1,
+	})
+	require.NoError(t, cli.Status().Update(context.Background(), got))
+
+	res := reconcileNodeQueueN(t, cli, name, 1)
+	assert.Positive(t, res.RequeueAfter)
+	got, err = getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, oldFlavor, string(got.Spec.ResourceGroups[0].Flavors[0].Name),
+		"stale stopped status must not authorize a flavor switch")
+}
+
+func TestNodeQueueReconciler_FlavorReturnsDuringNoFlavorDrain(t *testing.T) {
+	enableInstanceTypeDrainWhenNoFlavors(t)
+	key := "generic"
+	name := nodeQueueName(key)
+	oldFlavor := "gpustack-generic-linux-amd64-4c-p-old"
+	newFlavor := newNodesFlavor("gpustack-generic-linux-amd64-4c-p-new", key, 4, 4)
+	cq := newInstanceTypeQueue(key, false, cpuResourceGroup(oldFlavor, 4))
+	cli := buildNodeQueueClient(cq, newFlavor)
+	require.NoError(t, cli.Delete(context.Background(), newFlavor))
+
+	reconcileNodeQueueN(t, cli, name, 1)
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, _TASQueueMigrationPhaseDraining,
+		got.Annotations[_TASQueueMigrationPhaseAnnotation])
+	assert.Equal(t, kueue.None,
+		kueue.StopPolicy(got.Annotations[_TASQueueMigrationStopPolicyAnnotation]))
+	markClusterQueueStopped(t, cli, name)
+
+	newFlavor.ResourceVersion = ""
+	newFlavor.DeletionTimestamp = nil
+	newFlavor.Finalizers = nil
+	require.NoError(t, cli.Create(context.Background(), newFlavor))
+	reconcileNodeQueueN(t, cli, name, 1)
+	got, err = getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, newFlavor.Name, string(got.Spec.ResourceGroups[0].Flavors[0].Name))
+	assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+
+	markClusterQueueStopped(t, cli, name)
+	reconcileNodeQueueN(t, cli, name, 1)
+	got, err = getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, kueue.None, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+	assert.NotContains(t, got.Annotations, _TASQueueMigrationPhaseAnnotation)
 }
 
 // jointCheck builds the joint-admission AdmissionCheck, Active or not.

@@ -21,6 +21,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 // podGroupDeployment builds a two-role deployment, prefill 2 and decode 2 on ONE instanceType, which
@@ -115,6 +116,52 @@ func TestModelDeploymentPodGroup(t *testing.T) {
 		first.Annotations[kueuepodconst.GroupServingAnnotationKey],
 		"an inference deployment never finishes; without this Kueue reclaims the quota of a Pod "+
 			"that reached Succeeded while the deployment is still meant to be serving")
+}
+
+func TestModelDeploymentPodGroup_RequiredTopology(t *testing.T) {
+	levels := []string{
+		"topology.kubernetes.io/region",
+		"topology.kubernetes.io/zone",
+		"topology.gpustack.ai/rack",
+		"fabric.topograph.run/tier-1",
+		nodefeature.NodeFabricDomainLabelKey,
+	}
+	for _, level := range levels {
+		t.Run(level, func(t *testing.T) {
+			md := podGroupDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Replicas = 2
+				md.Spec.Roles[0].ReplicaSize = 3
+				md.Spec.Roles[0].Topology = &workercore.ModelDeploymentRoleTopology{RequiredLevel: level}
+			})
+			role := &md.Spec.Roles[0]
+			groups := make(map[string]struct{})
+			for ordinal := range int(role.Replicas) {
+				for member := range modelDeploymentRoleSize(role) {
+					group := ModelDeploymentPodGroup(md, role, ordinal, member)
+					assert.Equal(t, level, group.Annotations[kueue.PodSetRequiredTopologyAnnotation])
+					groups[group.Labels[kueuepodconst.GroupNameLabel]] = struct{}{}
+				}
+			}
+			assert.Len(t, groups, 2, "each replica remains an independent Kueue group")
+		})
+	}
+}
+
+func TestModelDeploymentPodGroup_TopologyParticipatesInRolloutHash(t *testing.T) {
+	before := podGroupDeployment()
+	after := before.DeepCopy()
+	after.Spec.Roles[0].Topology = &workercore.ModelDeploymentRoleTopology{
+		RequiredLevel: "topology.kubernetes.io/zone",
+	}
+
+	hash := func(md *workercore.ModelDeployment, role int) string {
+		pod := &core.Pod{ObjectMeta: meta.ObjectMeta{Labels: map[string]string{}}}
+		stampModelDeploymentPod(pod, md, &md.Spec.Roles[role], 0, 0)
+		return pod.Annotations[modelDeploymentPodSpecHashAnnotation]
+	}
+
+	assert.NotEqual(t, hash(before, 0), hash(after, 0), "changing topology rolls the affected role")
+	assert.Equal(t, hash(before, 1), hash(after, 1), "a sibling role keeps its render hash")
 }
 
 // TestModelDeploymentPodGroup_RoleHashIsTheRoleName is the case that would pass by accident.

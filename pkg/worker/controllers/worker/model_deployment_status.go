@@ -658,11 +658,12 @@ func observeModelDeploymentQuota(
 
 		return
 	}
+	downstream := modelDeploymentInadmissibleWorkloadDetails(pods, wlByReplica)
 
 	if len(groups) == 1 {
 		ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
-			"%d of this deployment's %d replicas are waiting for quota in cluster queue %q%s",
-			waiting, modelDeploymentDeclaredReplicas(md), queue, taken))
+			"%d of this deployment's %d replicas are waiting for quota in cluster queue %q%s%s",
+			waiting, modelDeploymentDeclaredReplicas(md), queue, taken, downstream))
 
 		return
 	}
@@ -672,8 +673,57 @@ func observeModelDeploymentQuota(
 	// tells an operator nothing is serving while the deployment serves.
 	ModelDeploymentConditionQuotaReserved.False(holder, "Pending", fmt.Sprintf(
 		"%d of this deployment's %d replicas are waiting for quota: the replicas of roles %s. Those "+
-			"replicas are admitted only once the whole set can run%s",
-		waiting, modelDeploymentDeclaredReplicas(md), strings.Join(waitingRoles, ", "), taken))
+			"replicas are admitted only once the whole set can run%s%s",
+		waiting, modelDeploymentDeclaredReplicas(md), strings.Join(waitingRoles, ", "), taken, downstream))
+}
+
+// modelDeploymentInadmissibleWorkloadDetails preserves Kueue's explanation while adding the role
+// and replica identity an operator needs to find the affected group. Kueue's reason and message are
+// downstream prose, not a stable ModelDeployment reason vocabulary, so they are displayed but
+// never parsed or promoted into a new condition reason.
+func modelDeploymentInadmissibleWorkloadDetails(
+	pods []core.Pod, wlByReplica map[types.UID]*kueue.Workload,
+) string {
+	type detail struct {
+		role, workload, message string
+		ordinal                 int
+	}
+	var details []detail
+	for _, view := range modelDeploymentGroupPodsByReplica(pods) {
+		if !view.Seated {
+			continue
+		}
+		wl := modelDeploymentReplicaWorkload(view, wlByReplica)
+		if wl == nil || kubeapistatus.ConditionType(kueue.WorkloadQuotaReserved).IsTrue(wl) {
+			continue
+		}
+		for _, condition := range wl.Status.Conditions {
+			if condition.Type == kueue.WorkloadQuotaReserved && condition.Message != "" {
+				details = append(details, detail{
+					role: view.Role, ordinal: view.Ordinal, workload: wl.Name, message: condition.Message,
+				})
+				break
+			}
+		}
+	}
+	slices.SortFunc(details, func(a, b detail) int {
+		if byRole := strings.Compare(a.role, b.role); byRole != 0 {
+			return byRole
+		}
+		if a.ordinal != b.ordinal {
+			return a.ordinal - b.ordinal
+		}
+		return strings.Compare(a.workload, b.workload)
+	})
+	if len(details) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(details))
+	for _, item := range details {
+		parts = append(parts, fmt.Sprintf("role %q replica %d workload %q: %s",
+			item.role, item.ordinal, item.workload, item.message))
+	}
+	return "; downstream admission: " + strings.Join(parts, "; ")
 }
 
 // modelDeploymentReplicaWorkloads resolves, for every replica this pass observed, the one Workload

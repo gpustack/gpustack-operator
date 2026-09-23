@@ -106,6 +106,40 @@ func TestNodeDevicesReconciler_SyncsGeneralKey(t *testing.T) {
 	assert.Equal(t, "true", got.Labels[accelKey], "the DeviceManager's accelerator label is left untouched")
 }
 
+func TestNodeDevicesReconciler_SyncsTopologyProfile(t *testing.T) {
+	const node = "node-a"
+	cases := []struct {
+		name        string
+		nodeProfile string
+		devProfile  string
+		want        string
+	}{
+		{name: "replaces a stale profile", nodeProfile: "fnv64-a", devProfile: "fnv64-stale", want: "fnv64-a"},
+		{name: "removes a profile the node no longer carries", devProfile: "fnv64-stale"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			nd := &core.Node{ObjectMeta: meta.ObjectMeta{Name: node, Labels: map[string]string{}}}
+			if c.nodeProfile != "" {
+				nd.Labels[TopologyProfileLabel] = c.nodeProfile
+			}
+			devs := &workercore.Devices{ObjectMeta: meta.ObjectMeta{Name: node, Labels: map[string]string{
+				TopologyProfileLabel: c.devProfile,
+			}}}
+			cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(nd, devs).Build()
+			r := &NodeDevicesReconciler{Client: cli}
+
+			_, err := r.Reconcile(context.Background(),
+				ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: node}})
+			require.NoError(t, err)
+
+			got := new(workercore.Devices)
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: node}, got))
+			assert.Equal(t, c.want, got.Labels[TopologyProfileLabel])
+		})
+	}
+}
+
 // TestNodeDevicesReconciler_MissingDevicesIsNoop pins that a Node with no Devices
 // object (e.g. not yet reported by the DeviceManager) reconciles without error.
 func TestNodeDevicesReconciler_MissingDevicesIsNoop(t *testing.T) {
@@ -134,6 +168,7 @@ func TestNodeDevicesControlInSync(t *testing.T) {
 		generic = nodefeature.GeneralFeatureLabelPrefix + "generic"
 		aKey    = nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-a10g"
 		aKey2   = nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4"
+		profile = TopologyProfileLabel
 	)
 	cases := []struct {
 		name string
@@ -171,6 +206,12 @@ func TestNodeDevicesControlInSync(t *testing.T) {
 			name: "general key differs",
 			a:    map[string]string{gKey: "true"},
 			b:    map[string]string{gKey2: "true"},
+			want: false,
+		},
+		{
+			name: "topology profile differs",
+			a:    map[string]string{profile: "fnv64-a"},
+			b:    map[string]string{profile: "fnv64-b"},
 			want: false,
 		},
 		{
