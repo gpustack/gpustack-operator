@@ -261,12 +261,20 @@ from the published images, by unpacking each one's `dist-info`:
 | `cuda13.0-vllm0.25.1`, `cuda13.0-vllm0.27.1` | 0.3.10.post2 |
 | `rocm7.2-vllm0.27.1` | 0.3.11.post1 |
 | `cuda13.0-vllm0.29.0` | 0.3.13.post1 |
+| `cuda12.9-vllm0.29.0` | 0.3.13.post1 |
+| `cuda12.9-sglang0.5.18` | 0.3.12.post1 |
 
 Backends serving the first two rows name `spec.image` on the 0.3.10 and the 0.3.11 line
 respectively, and the [default](../settings.md) fails both as measured above; it matches the third
-row exactly. **An image absent from the table was not measured, and a neighbouring row is not
-evidence for it** — the first two rows are one vLLM version and different lines. Direct P/D transfer
-(`MooncakeConnector`, no `spec.kvCache`) is engine to engine and exempt from this matching.
+and fourth rows exactly. The SGLang row needs a 0.3.12 store, such as `kvcacheai/mooncake:0.3.12.post1`.
+**An image absent from the table was not measured, and a neighbouring row is not evidence for it** —
+the first two rows are one vLLM version and different lines.
+
+Direct P/D transfer (`MooncakeConnector`, no `spec.kvCache`) is engine to engine and exempt from this
+matching, but not from the client's version: its `tcp` leg is
+[pinned](../reference/model-deployment.md#the-direct-transfers-transport) through `MC_FORCE_TCP`,
+which only clients from 0.3.12 on read. On an image embedding 0.3.10.post2 — the first row — the leg
+cannot run over TCP between hosts without RDMA; use an image carrying 0.3.12 or later.
 
 Two boundaries, recorded so nobody rediscovers them: upstream has **no 0.3.12.post2** — the 0.3.12
 line ends at 0.3.12.post1 — and nothing older than 0.3.10 is built or exercised by this project.

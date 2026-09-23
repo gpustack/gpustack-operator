@@ -21,6 +21,11 @@ type Result struct {
 	// another reuse domain.
 	Env []core.EnvVar
 
+	// DefaultedEnv is the variables the target container gets only where it declares none of the
+	// same name. Unlike Env, a container-declared value is never overwritten here, because each of
+	// these is a default the workload may legitimately answer for itself.
+	DefaultedEnv []core.EnvVar
+
 	// Args is appended to the target container's args, in order.
 	//
 	// Both engines need an argument that has no environment equivalent, so this is never empty. The
@@ -28,6 +33,12 @@ type Result struct {
 	// NEITHER command nor args must not receive these, because Kubernetes then reads args as the whole
 	// command line and discards the image's own.
 	Args []string
+
+	// DefaultedArgs is argument groups appended after Args, each starting with its flag. A caller
+	// drops a whole group when the container's own arguments already name that flag, in either
+	// "--flag value" or "--flag=value" form: each is a default the workload may answer for itself,
+	// and a switch that only turns something on could not be turned off by a later entry.
+	DefaultedArgs [][]string
 
 	// Volumes is added to the Pod's spec, and VolumeMounts to the target container. Both are empty for
 	// an engine whose vehicle is the environment.
@@ -135,7 +146,8 @@ func Render(in Input) (*Result, error) {
 		return nil, newRefusal(ReasonConnectionIncomplete,
 			"no shared store, point-to-point transfer, or KV event publisher was requested")
 	}
-	if !hasStore && in.Engine != EngineVLLM && in.Engine != EngineVLLMAscend {
+	if !hasStore && in.Engine != EngineVLLM && in.Engine != EngineVLLMAscend &&
+		(in.Engine != EngineSGLang || !in.KVTransfer) {
 		return nil, newRefusal(ReasonConnectionIncomplete,
 			"engine %q requires a shared store connection", in.Engine)
 	}

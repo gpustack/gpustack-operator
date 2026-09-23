@@ -246,11 +246,18 @@ type ModelDeploymentKVTransfer struct {
 	//     property of the mooncake build inside the engine's own image, which this operator
 	//     neither ships nor can inspect: a HIP-compiled build makes "hip" a working point-to-point
 	//     transport, and an enum here would hard-code one image's compile set onto another image's
-	//     connector. The value is passed through verbatim, and a value the engine build rejects
+	//     connector. vLLM receives the value verbatim, and a value the engine build rejects
 	//     raises at engine startup, in the container that owns the fact.
 	//   - UNSET RENDERS "tcp", the transport every mooncake build carries. The default lives in
 	//     the renderer rather than in this schema, so the stored object holds exactly what was
 	//     asked.
+	//   - "tcp" IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport
+	//     from the host's hardware and does not read the requested one. On vLLM the leg also gets
+	//     MC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's
+	//     transfer backend: "tcp" renders "mooncake_tcp", any other value renders "mooncake", and
+	//     the value itself is not passed through. Neither pin renders while the deployment's store
+	//     runs a transport other than tcp, because it is process-wide and would leave the store
+	//     client without its fabric; the leg then keeps the engine's own selection.
 	//   - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted
 	//     router-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind
 	//     "vllm-router" -- the value is accepted and renders nothing. An Ascend pair behind

@@ -401,9 +401,15 @@ express two ends naming different protocols for one connection, which fails at t
 than at admission.
 
 It is **declared, not discovered, and not gated**. The set an engine accepts belongs to the mooncake
-build inside the engine's own image — a HIP-compiled build makes `hip` a working transport — so the
-operator passes the value through verbatim, and a value the build rejects fails that container at
-startup.
+build inside the engine's own image — a HIP-compiled build makes `hip` a working transport — so vLLM
+gets the value verbatim, and a value the build rejects fails that container at startup. SGLang maps
+it: `tcp` renders `--disaggregation-transfer-backend mooncake_tcp`, anything else `mooncake`.
+
+**`tcp` is enforced, not only requested**: the transfer engine picks its transport from the host,
+and with no RDMA device a build with multi-node NVLink installs NVLink between hosts with no NVLink
+path. So native vLLM also gets the [defaulted](#what-the-operator-owns) `MC_FORCE_TCP=1`. Both pins
+are process-wide, so neither renders beside a store on another transport, and only [clients from
+0.3.12 on](../kv-cache/backend.md#the-store-version-must-match-the-engines-client) honor them.
 
 It is read on the direct-transfer leg, which every **admitted router-and-engine pair** renders on its
 `prefill` and `decode` roles — a prefiller that cannot hand a decoder its blocks is not
@@ -411,18 +417,13 @@ disaggregated under any router. On every other shape the field is accepted and r
 
 What differs per pair is the handshake, not whether there is a leg: Mooncake's bootstrap server
 under native vLLM, SGLang's own registry under SGLang, and on Ascend the decode sidecar's relay —
-[the one router combination that renders a leg there](#prefill-and-decode).
+[the one router combination that renders a leg there](#prefill-and-decode). There the field is
+ignored: vllm-ascend hardcodes the protocol to `ascend` (upstream `mooncake_transfer_engine.py`,
+verified at v0.23.0 and v0.26.0rc1).
 
-On Ascend the field has no consumer even where the leg renders: vllm-ascend's point-to-point
-connectors initialize their transfer engine with the protocol **hardcoded** to `ascend`, read from
-nothing (upstream `mooncake_transfer_engine.py`, verified at v0.23.0 and v0.26.0rc1 — upstream
-state, not a contract), so a declared value is accepted and ignored unless upstream makes the
-protocol configurable.
-
-It is also **not** the pool's transport. `KVCacheBackend.spec.transport` defines the data plane the
-store members run and feeds the engine's store client; this leg is engine to engine and never
-traverses the store, so the two declare separately — a deployment with no `kvCache` block still has
-this leg to configure.
+It is also **not** the pool's transport. `KVCacheBackend.spec.transport` feeds the engine's store
+client; this leg is engine to engine and never traverses the store, so the two declare separately —
+a deployment with no `kvCache` block still has this leg to configure.
 
 Editing it [turns over every role](#rollout-is-a-rolling-replacement): the value renders into both
 ends' arguments, so every role's replicas turn over one at a time. A prefiller and a decoder can
@@ -646,6 +647,9 @@ way to own it instead.
 `1`, and a user's own value wins with no refusal. It turns on the transfer engine's metrics, without
 which the hit rate this design rests on cannot be measured at all. It is read by the transfer engine
 rather than by an engine's config class, so it does not depend on which keys that class accepts.
+
+So are `MC_FORCE_TCP` [on a `tcp` leg](#the-direct-transfers-transport) and
+[SGLang's two cache switches](kv-cache-injection.md#sglangs-host-memory-tier).
 
 Two of SGLang's owned keys are owned for what a user entry would **destroy** rather than duplicate,
 and the operator does not set either of them:

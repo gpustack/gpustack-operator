@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -779,6 +780,132 @@ func TestRenderModelDeploymentPod_ConnectorPortCollision(t *testing.T) {
 		require.Error(t, err, "the engine port must clear every declared port, not only the served one")
 		assert.Contains(t, err.Error(), "9100")
 	})
+}
+
+// TestRenderModelDeploymentPod_TCPPinYieldsToTheRole follows the TCP pin from synthesis onto the
+// Pod: the operator's value lands when the role sets none, and a role's own entry -- any value, the
+// transfer engine reads it for presence -- stands alone. The first row is the second's baseline,
+// so a render that dropped the variable outright fails there rather than passing both.
+func TestRenderModelDeploymentPod_TCPPinYieldsToTheRole(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		roleEnv []workercore.ModelDeploymentEnvVar
+		want    string
+	}{
+		{name: "the operator's pin lands", want: "1"},
+		{
+			name:    "the role's own value stands",
+			roleEnv: []workercore.ModelDeploymentEnvVar{{Name: "MC_FORCE_TCP", Value: "true"}},
+			want:    "true",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles[0].Env = tc.roleEnv
+			})
+			connector, err := SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
+				Engine: md.Spec.Engine.Name, Kind: workercore.ModelDeploymentRoleKindPrefill,
+				Disaggregated: true, KVTransfer: true,
+			})
+			require.NoError(t, err)
+
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Connector: connector,
+			})
+			require.NoError(t, err)
+
+			count := 0
+			for _, e := range pod.Spec.Containers[0].Env {
+				if e.Name == "MC_FORCE_TCP" {
+					count++
+					assert.Equal(t, tc.want, e.Value)
+				}
+			}
+			assert.Equal(t, 1, count, "exactly one MC_FORCE_TCP entry reaches the container")
+		})
+	}
+}
+
+// TestRenderModelDeploymentPod_DefaultedArgsYieldToTheRole follows the SGLang defaulted switches
+// from synthesis onto the argv. A role naming the same flag, in either spelling, keeps its own
+// entry and the operator's whole group is dropped; the rows without one are the baseline that
+// shows the group lands exactly once otherwise.
+func TestRenderModelDeploymentPod_DefaultedArgsYieldToTheRole(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		kind      workercore.ModelDeploymentRoleKind
+		store     bool
+		extraArgs []string
+		flag      string
+		want      []string
+	}{
+		{
+			name: "a decode half gets the retraction backup", kind: workercore.ModelDeploymentRoleKindDecode,
+			flag: "--disaggregation-decode-retraction-backup",
+			want: []string{"--disaggregation-decode-retraction-backup", "cpu_tensor"},
+		},
+		{
+			name: "a decode half's own backup stands", kind: workercore.ModelDeploymentRoleKindDecode,
+			extraArgs: []string{"--disaggregation-decode-retraction-backup=host_pool"},
+			flag:      "--disaggregation-decode-retraction-backup",
+			want:      []string{"--disaggregation-decode-retraction-backup=host_pool"},
+		},
+		{
+			name: "a decode half's own backup stands in two tokens", kind: workercore.ModelDeploymentRoleKindDecode,
+			extraArgs: []string{"--disaggregation-decode-retraction-backup", "host_pool"},
+			flag:      "--disaggregation-decode-retraction-backup",
+			want:      []string{"--disaggregation-decode-retraction-backup", "host_pool"},
+		},
+		{
+			name: "a prefill half with a store gets the hierarchical cache", kind: workercore.ModelDeploymentRoleKindPrefill,
+			store: true, flag: "--enable-hierarchical-cache",
+			want: []string{"--enable-hierarchical-cache"},
+		},
+		{
+			name: "a prefill half's own hierarchical cache is not repeated", kind: workercore.ModelDeploymentRoleKindPrefill,
+			store: true, extraArgs: []string{"--enable-hierarchical-cache"}, flag: "--enable-hierarchical-cache",
+			want: []string{"--enable-hierarchical-cache"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Roles[0].Kind = tc.kind
+				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
+			})
+			in := ModelDeploymentConnectorInput{
+				Engine: workercore.ModelDeploymentEngineSGLang, Kind: tc.kind,
+				Disaggregated: true, KVTransfer: true,
+			}
+			if tc.store {
+				in.MasterServerAddress = "shared-kv-master.gpustack-system.svc:50051"
+				in.Protocols = []string{"tcp"}
+			}
+			connector, err := SynthesizeModelDeploymentConnector(in)
+			require.NoError(t, err)
+
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Connector: connector,
+			})
+			require.NoError(t, err)
+
+			command := pod.Spec.Containers[0].Command
+			var got []string
+			for i, arg := range command {
+				if ModelDeploymentArgName(arg) != tc.flag {
+					continue
+				}
+				got = append(got, arg)
+				if arg == tc.flag && i+1 < len(command) && !strings.HasPrefix(command[i+1], "--") {
+					got = append(got, command[i+1])
+				}
+			}
+			assert.Equal(t, tc.want, got, "the argv carries exactly one answer for %s", tc.flag)
+		})
+	}
 }
 
 // TestRenderModelDeploymentPod_Env covers the merge of the two sources: what the operator owns is

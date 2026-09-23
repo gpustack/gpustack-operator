@@ -120,7 +120,7 @@ kubelet resolves at container start.
 |---|---|---|
 | `vllm` | a projected file | arg `--kv-transfer-config` selecting `MooncakeStoreConnector` and the role; env `MOONCAKE_CONFIG_PATH`; a read-only volume and mount at `/etc/gpustack/kvcache` |
 | `vllm-ascend` | a projected file | the same, except the connector is `AscendStoreConnector` — the two engines share the vehicle and the file's keys, but not a connector registry |
-| `sglang` | environment variables | arg `--hicache-storage-backend mooncake`; the `MOONCAKE_*` variables below; **no** volume and **no** mount |
+| `sglang` | environment variables | arg `--hicache-storage-backend mooncake` and [`--enable-hierarchical-cache`](#sglangs-host-memory-tier); the `MOONCAKE_*` variables below; **no** volume and **no** mount |
 
 The file is a `downwardAPI` projection of the Pod's own `kvcache.gpustack.ai/client-config`
 annotation. No ConfigMap is created, so the webhook needs no RBAC for one and leaves nothing to
@@ -164,6 +164,24 @@ tree read-only — see [Prefill and decode](model-deployment.md#prefill-and-deco
 
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
 when the container has not spoken about them. A value you set yourself is left alone.
+
+### SGLang's host-memory tier
+
+An SGLang container also gets `--enable-hierarchical-cache`, after the injected arguments, unless its
+own arguments already name that flag. The storage backend hangs off the hierarchical cache's host
+tier: naming the backend alone enables storage prefetch over a plain radix cache, and the first
+request fails with an `AttributeError` (measured at SGLang v0.5.18).
+
+That tier is a pinned host pool of `hicache_ratio` (default 2.0) times the device KV pool. SGLang
+refuses to build it unless the node's available memory — read host-wide, not from the container's
+limit — exceeds a fixed 10 GiB reserve plus the pool, so size the node for it. The container's
+memory limit still has to hold the engine and the pool, or the result is an OOM kill.
+
+A `ModelDeployment` renders the same switch on every SGLang role with a store except a decode half,
+where SGLang forces its radix cache off and refuses the two together. A decode half gets
+`--disaggregation-decode-retraction-backup cpu_tensor` instead: left unset, SGLang infers a host
+pool for retraction and meets the same check with no store at all. A role's own `extraArgs` naming
+either flag drops the operator's.
 
 **An injected variable overrules one you declared yourself.** Injection is opt-in and its opt-out
 is explicit, so a Pod that asked for it and then declares a Mooncake variable has given two answers
@@ -444,9 +462,10 @@ copied and nothing is allocated twice, so the two are not competing — disablin
 no memory back and loses the engine's own reuse.
 
 Host DRAM is where an overlap could happen, and neither engine puts KV there unless asked. vLLM's
-`--swap-space` is deprecated and ignored, and `kv_offloading_size` defaults off; SGLang's host tier
-needs `--enable-hierarchical-cache`, which is off. This injection renders none of the three, so the
-only host DRAM it adds is the staging buffer above.
+`--swap-space` is deprecated and ignored, and `kv_offloading_size` defaults off, so on vLLM the only
+host DRAM this injection adds is the staging buffer above. SGLang's host tier needs
+`--enable-hierarchical-cache`, which this injection renders because the store hangs off that tier —
+its [host pool](#sglangs-host-memory-tier) is the one host allocation it adds there.
 
 > **NEVER set `kv_offloading_size` on a container this injects into.** Setting it makes vLLM
 > overwrite `kv_connector` with `OffloadingConnector` — unconditionally, with no conflict check,

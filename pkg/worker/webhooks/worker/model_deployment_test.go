@@ -656,6 +656,14 @@ func TestValidateModelDeployment(t *testing.T) {
 			})),
 		},
 		{
+			// The TCP pin is defaulted too: the operator renders it for a tcp leg, and a user
+			// setting it has asked for the same thing, so it is honored rather than refused.
+			name: "env_defaulted_tcp_pin",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.Env = []workercore.ModelDeploymentEnvVar{{Name: "MC_FORCE_TCP", Value: "true"}}
+			})),
+		},
+		{
 			// The rank keys are owned WHATEVER THE ENGINE, because they describe the Pod's shape
 			// rather than anything an engine reads by name. Refusing them is not tidiness: the
 			// index is rendered as a fieldRef, a user entry of that name would be merged onto it by

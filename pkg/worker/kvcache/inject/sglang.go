@@ -69,6 +69,31 @@ const (
 	sglangDisaggregationBackendMooncake  = "mooncake"
 	sglangDisaggregationBootstrapPortArg = "--disaggregation-bootstrap-port"
 
+	// sglangDisaggregationBackendMooncakeTCP is the same Mooncake backend pinned to TCP. SGLang's
+	// disaggregation hook (v0.5.18 `arg_groups/pd_disaggregation_hook.py`) sets MC_FORCE_TCP when
+	// it is unset, rewrites the backend back to mooncake and clears the IB device, so it is the
+	// engine's own spelling of what the vLLM renderer does with the variable. The router side of
+	// the pair speaks mooncake either way; only the engines' transfer engine is pinned.
+	sglangDisaggregationBackendMooncakeTCP = "mooncake_tcp"
+
+	// sglangRetractionBackupArg selects where a decode half keeps the KV cache of a request it
+	// retracts (v0.5.18 `server_args.py` ServerArgs.disaggregation_decode_retraction_backup,
+	// choices cpu_tensor and host_pool). Left unset, a decode half on an MHA pool infers host_pool
+	// and builds a hierarchical host pool (v0.5.18 `mem_cache/kv_cache_builder.py`), which SGLang
+	// refuses to build unless the node's available memory, read host-wide, exceeds a fixed 10 GiB
+	// reserve plus the pool (v0.5.18 `mem_cache/pool_host/base.py`
+	// HICACHE_HOST_MEMORY_RESERVE_BYTES). cpu_tensor keeps per-request CPU tensors and builds no
+	// pool, so a decode half starts on a node with less than that to spare.
+	sglangRetractionBackupArg      = "--disaggregation-decode-retraction-backup"
+	sglangRetractionBackupCPUValue = "cpu_tensor"
+
+	// sglangHierarchicalCacheArg turns on the hierarchical cache the storage backend hangs off.
+	// At v0.5.18 the scheduler enables storage prefetch whenever a storage backend is named
+	// (`managers/scheduler.py`), while the tree cache that prefetch reads is the hierarchical one
+	// only under this flag (`mem_cache/registry.py`); naming the backend alone leaves a plain
+	// RadixCache, and the first request raises AttributeError on hicache_storage_pass_prefix_keys.
+	sglangHierarchicalCacheArg = "--enable-hierarchical-cache"
+
 	// SGLangBootstrapPort is where a disaggregated prefiller serves the bootstrap registry the
 	// decode side learns its transfer endpoints from. Upstream defaults it to 8998
 	// (v0.5.18 `server_args.py:3114-3118`, ServerArgs.disaggregation_bootstrap_port); it is
@@ -139,16 +164,21 @@ func renderSGLang(in Input) (*Result, error) {
 	// The tenant is omitted entirely for an empty domain rather than emitted empty, because this
 	// engine normalises a blank value back to the store default - so an empty variable would be
 	// indistinguishable from not setting one, while still looking, on the Pod, like configuration.
+	hasStore := in.Connection.MasterAddress != ""
+	// decodeHalf is whether this engine starts in decode mode, which is the disaggregation leg's
+	// own condition below: a lone decode half runs undivided and is a server like any other.
+	decodeHalf := in.Disaggregated && in.Role == RoleDecode
 	env := []core.EnvVar{}
-	tenantInjected := in.Domain != ""
+	tenantInjected := hasStore && in.Domain != ""
 	tenantEnvName := ""
 	if tenantInjected {
 		env = append(env, core.EnvVar{Name: sglangTenantEnv, Value: in.Domain})
 		tenantEnvName = sglangTenantEnv
 	}
 
-	result := &Result{
-		Env: append(env, []core.EnvVar{
+	result := &Result{}
+	if hasStore {
+		env = append(env, []core.EnvVar{
 			{Name: sglangMasterEnv, Value: in.Connection.MasterAddress},
 			{Name: sglangMetadataServerEnv, Value: MetadataServer},
 			{Name: sglangProtocolEnv, Value: in.Connection.Protocol},
@@ -160,12 +190,23 @@ func renderSGLang(in Input) (*Result, error) {
 					FieldRef: &core.ObjectFieldSelector{FieldPath: sglangPodIPFieldPath},
 				},
 			},
-		}...),
-		TenantInjected: tenantInjected,
+		}...)
+		result.Env = env
+		result.TenantInjected = tenantInjected
 		// Named only when a tenant was actually emitted. Callers use the name to overwrite every
 		// workload declaration of this environment variable with the Binding's resolved tenant.
-		TenantEnvName: tenantEnvName,
-		Args:          []string{sglangBackendArg, sglangBackendValue},
+		result.TenantEnvName = tenantEnvName
+		result.Args = []string{sglangBackendArg, sglangBackendValue}
+		// A decode half never gets the hierarchical cache: SGLang forces the radix cache off on a
+		// decode half (v0.5.18 `arg_groups/pd_disaggregation_hook.py`), and refuses the two flags
+		// together. Every other shape serves prefills and reads the tree the backend feeds.
+		//
+		// It builds a pinned host pool of hicache_ratio (default 2.0) times the device KV pool,
+		// under the same 10 GiB host-wide reserve sglangRetractionBackupArg describes; that node
+		// prerequisite is the price of a working store, not something this renderer can shrink.
+		if !decodeHalf {
+			result.DefaultedArgs = append(result.DefaultedArgs, []string{sglangHierarchicalCacheArg})
+		}
 	}
 
 	// A transfer leg with no half to render has nothing to pair, so it is refused rather than
@@ -197,9 +238,20 @@ func renderSGLang(in Input) (*Result, error) {
 	// undivided, where it previously started as one half.
 	if in.Disaggregated && (in.Role == RolePrefill || in.Role == RoleDecode) {
 		result.KVTransfer = true
+		// The backend is a pair property, so both halves choose it from the same inputs: a tcp
+		// leg is pinned exactly where directLegForcesTCP allows it, and every other leg keeps
+		// the transport the transfer engine selects for itself.
+		backend := sglangDisaggregationBackendMooncake
+		if directLegForcesTCP(in) {
+			backend = sglangDisaggregationBackendMooncakeTCP
+		}
 		result.Args = append(result.Args,
 			sglangDisaggregationModeArg, string(in.Role),
-			sglangDisaggregationBackendArg, sglangDisaggregationBackendMooncake)
+			sglangDisaggregationBackendArg, backend)
+		if decodeHalf {
+			result.DefaultedArgs = append(result.DefaultedArgs,
+				[]string{sglangRetractionBackupArg, sglangRetractionBackupCPUValue})
+		}
 
 		// Only the prefill half serves the bootstrap registry, so only it names the port, opens
 		// it on the container and publishes it for discovery. The decode half learns the

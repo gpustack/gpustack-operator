@@ -3,6 +3,7 @@ package inject
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -273,9 +274,10 @@ func TestRender_SGLangDisaggregationRendersBothHalves(t *testing.T) {
 		role Role
 		// wantArgs is the whole argument list, so an argument that disappears or one that
 		// appears on the wrong half fails by equality rather than by going unnoticed.
-		wantArgs        []string
-		wantPorts       []core.ContainerPort
-		wantAnnotations map[string]string
+		wantArgs          []string
+		wantDefaultedArgs [][]string
+		wantPorts         []core.ContainerPort
+		wantAnnotations   map[string]string
 	}{
 		{
 			name: "prefill",
@@ -283,9 +285,10 @@ func TestRender_SGLangDisaggregationRendersBothHalves(t *testing.T) {
 			wantArgs: []string{
 				"--hicache-storage-backend", "mooncake",
 				"--disaggregation-mode", "prefill",
-				"--disaggregation-transfer-backend", "mooncake",
+				"--disaggregation-transfer-backend", "mooncake_tcp",
 				"--disaggregation-bootstrap-port", "8998",
 			},
+			wantDefaultedArgs: [][]string{{"--enable-hierarchical-cache"}},
 			wantPorts: []core.ContainerPort{
 				{Name: "bootstrap", Protocol: core.ProtocolTCP, ContainerPort: 8998},
 			},
@@ -297,10 +300,11 @@ func TestRender_SGLangDisaggregationRendersBothHalves(t *testing.T) {
 			wantArgs: []string{
 				"--hicache-storage-backend", "mooncake",
 				"--disaggregation-mode", "decode",
-				"--disaggregation-transfer-backend", "mooncake",
+				"--disaggregation-transfer-backend", "mooncake_tcp",
 			},
-			wantPorts:       nil,
-			wantAnnotations: nil,
+			wantDefaultedArgs: [][]string{{"--disaggregation-decode-retraction-backup", "cpu_tensor"}},
+			wantPorts:         nil,
+			wantAnnotations:   nil,
 		},
 	}
 
@@ -313,12 +317,115 @@ func TestRender_SGLangDisaggregationRendersBothHalves(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.wantArgs, result.Args)
+			assert.Equal(t, tc.wantDefaultedArgs, result.DefaultedArgs)
 			assert.Equal(t, tc.wantPorts, result.Ports)
 			assert.Equal(t, tc.wantAnnotations, result.PodAnnotations)
 			assert.True(t, result.KVTransfer, "the rendered transfer arm is reported")
 			assert.Equal(t, "kvcache-master.gpustack-system.svc:50051",
 				envValue(t, result.Env, "MOONCAKE_MASTER").Value,
 				"the disaggregation leg composes with the store leg rather than replacing it")
+		})
+	}
+}
+
+func TestRender_SGLangPureTransferRendersBothHalves(t *testing.T) {
+	for _, role := range []Role{RolePrefill, RoleDecode} {
+		t.Run(string(role), func(t *testing.T) {
+			result, err := Render(Input{
+				Engine: EngineSGLang, Role: role, Disaggregated: true, KVTransfer: true,
+			})
+			require.NoError(t, err)
+			assert.Empty(t, result.Env)
+			assert.NotContains(t, result.Args, "--hicache-storage-backend")
+			assert.Contains(t, result.Args, "--disaggregation-mode")
+			assert.Contains(t, result.Args, string(role))
+			assert.True(t, result.KVTransfer)
+		})
+	}
+}
+
+// TestRender_SGLangTransferBackendFollowsTheLeg pins the transfer backend both halves render. It
+// is a PAIR property, so every row renders both halves and requires them to agree. A tcp leg is
+// pinned through mooncake_tcp; a fabric leg, and a tcp leg beside a store whose transport is not
+// tcp, keep mooncake. The tcp-store row is the rdma-store row's positive baseline.
+func TestRender_SGLangTransferBackendFollowsTheLeg(t *testing.T) {
+	rdmaStore := testConnection()
+	rdmaStore.Protocol = "rdma"
+	for _, tc := range []struct {
+		name     string
+		conn     Connection
+		protocol string
+		want     string
+	}{
+		{name: "unset protocol without a store", want: "mooncake_tcp"},
+		{name: "declared tcp", protocol: "tcp", want: "mooncake_tcp"},
+		{name: "declared rdma", protocol: "rdma", want: "mooncake"},
+		{name: "tcp store and tcp leg", conn: testConnection(), want: "mooncake_tcp"},
+		{name: "rdma store and tcp leg", conn: rdmaStore, want: "mooncake"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backends := map[Role]string{}
+			for _, role := range []Role{RolePrefill, RoleDecode} {
+				result, err := Render(Input{
+					Engine: EngineSGLang, Role: role, Connection: tc.conn,
+					Disaggregated: true, KVTransfer: true, KVTransferProtocol: tc.protocol,
+				})
+				require.NoError(t, err)
+				i := slices.Index(result.Args, "--disaggregation-transfer-backend")
+				require.GreaterOrEqual(t, i, 0, "the %s half renders no transfer backend", role)
+				require.Less(t, i+1, len(result.Args))
+				backends[role] = result.Args[i+1]
+			}
+			assert.Equal(t, map[Role]string{RolePrefill: tc.want, RoleDecode: tc.want}, backends)
+		})
+	}
+}
+
+// TestRender_SGLangDefaultedArgsFollowTheShape pins the two defaulted switches against the shape
+// the engine starts in. A decode half gets the retraction backup and never the hierarchical cache
+// -- SGLang forces its radix cache off and refuses the two together -- while every shape that
+// serves prefills with a store attached gets the hierarchical cache the backend hangs off. A lone
+// decode half runs undivided, so it is a server here. Neither switch may reach Args, where a
+// caller could not drop it for a workload that answers it itself.
+func TestRender_SGLangDefaultedArgsFollowTheShape(t *testing.T) {
+	hierarchical := []string{"--enable-hierarchical-cache"}
+	retraction := []string{"--disaggregation-decode-retraction-backup", "cpu_tensor"}
+	for _, tc := range []struct {
+		name string
+		in   Input
+		want [][]string
+	}{
+		{
+			name: "no role with a store", want: [][]string{hierarchical},
+			in: Input{Engine: EngineSGLang, Connection: testConnection()},
+		},
+		{
+			name: "prefill half with a store", want: [][]string{hierarchical},
+			in: Input{Engine: EngineSGLang, Role: RolePrefill, Connection: testConnection(), Disaggregated: true},
+		},
+		{
+			name: "decode half with a store", want: [][]string{retraction},
+			in: Input{Engine: EngineSGLang, Role: RoleDecode, Connection: testConnection(), Disaggregated: true},
+		},
+		{
+			name: "prefill half without a store",
+			in:   Input{Engine: EngineSGLang, Role: RolePrefill, Disaggregated: true, KVTransfer: true},
+		},
+		{
+			name: "decode half without a store", want: [][]string{retraction},
+			in: Input{Engine: EngineSGLang, Role: RoleDecode, Disaggregated: true, KVTransfer: true},
+		},
+		{
+			name: "lone decode with a store", want: [][]string{hierarchical},
+			in: Input{Engine: EngineSGLang, Role: RoleDecode, Connection: testConnection()},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(tc.in)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, result.DefaultedArgs)
+			assert.NotContains(t, result.Args, "--enable-hierarchical-cache")
+			assert.NotContains(t, result.Args, "--disaggregation-decode-retraction-backup")
 		})
 	}
 }
@@ -787,6 +894,81 @@ func TestRender_KVTransferProtocolDeclared(t *testing.T) {
 				Engine: EngineVLLM, Role: RoleDecode, Connection: conn,
 				KVTransfer: true, KVTransferProtocol: protocol,
 			})["protocol"], "the declared value moves the direct leg alone")
+		})
+	}
+}
+
+// TestRender_VLLMForcesTheTCPLeg pins when a native vLLM leg is PINNED to TCP, not merely told:
+// the transfer engine ignores the document's protocol key and reads MC_FORCE_TCP for presence, so
+// the variable is what decides the transport. The name is asserted as a literal because it is the
+// contract with the transfer engine, and the variable must arrive defaulted -- never in Env, where
+// a caller would overwrite a workload's own entry.
+//
+// The store row with an rdma transport is the narrowing: the variable is process-wide, so pinning
+// the leg there would strip the store client of the fabric it was given. The tcp store row beside
+// it is its positive baseline, so a check that simply dropped the variable whenever a store is
+// present fails there.
+func TestRender_VLLMForcesTheTCPLeg(t *testing.T) {
+	rdmaStore := testConnection()
+	rdmaStore.Protocol = "rdma"
+	ascendStore := testConnection()
+	ascendStore.Protocol = "ascend"
+	for _, tc := range []struct {
+		name  string
+		in    Input
+		force bool
+	}{
+		{
+			name: "prefill unset protocol", force: true,
+			in: Input{Engine: EngineVLLM, Role: RolePrefill, KVTransfer: true},
+		},
+		{
+			name: "decode unset protocol", force: true,
+			in: Input{Engine: EngineVLLM, Role: RoleDecode, KVTransfer: true},
+		},
+		{
+			name: "declared tcp", force: true,
+			in: Input{Engine: EngineVLLM, Role: RoleDecode, KVTransfer: true, KVTransferProtocol: "tcp"},
+		},
+		{
+			name: "declared rdma",
+			in:   Input{Engine: EngineVLLM, Role: RolePrefill, KVTransfer: true, KVTransferProtocol: "rdma"},
+		},
+		{
+			name: "tcp store and tcp leg", force: true,
+			in: Input{Engine: EngineVLLM, Role: RolePrefill, KVTransfer: true, Connection: testConnection()},
+		},
+		{
+			name: "rdma store and tcp leg",
+			in:   Input{Engine: EngineVLLM, Role: RolePrefill, KVTransfer: true, Connection: rdmaStore},
+		},
+		{
+			name: "store only",
+			in:   Input{Engine: EngineVLLM, Role: RolePrefill, Connection: testConnection()},
+		},
+		{
+			name: "no role store only",
+			in:   Input{Engine: EngineVLLM, Connection: testConnection()},
+		},
+		{
+			name: "vllm-ascend prefill",
+			in:   Input{Engine: EngineVLLMAscend, Role: RolePrefill, KVTransfer: true},
+		},
+		{
+			name: "vllm-ascend decode with a store",
+			in:   Input{Engine: EngineVLLMAscend, Role: RoleDecode, KVTransfer: true, Connection: ascendStore},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(tc.in)
+			require.NoError(t, err)
+			assert.NotContains(t, envNames(result.Env), "MC_FORCE_TCP",
+				"the variable is a default the workload may answer for itself")
+			if !tc.force {
+				assert.NotContains(t, envNames(result.DefaultedEnv), "MC_FORCE_TCP")
+				return
+			}
+			assert.Equal(t, []core.EnvVar{{Name: "MC_FORCE_TCP", Value: "1"}}, result.DefaultedEnv)
 		})
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -382,6 +383,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			return nil, err
 		}
 		command = append(command, in.Connector.Args...)
+		command = append(command, modelDeploymentDefaultedArgs(in.Connector.DefaultedArgs, role.ExtraArgs)...)
 		command = append(command, role.ExtraArgs...)
 
 		// READ BEFORE FILLING, and read the SAME list the filling reads. What decides whether the
@@ -1235,6 +1237,22 @@ func modelDeploymentUserSetsEnv(userEnv []workercore.ModelDeploymentEnvVar, name
 	}
 
 	return false
+}
+
+// modelDeploymentDefaultedArgs flattens the connector's defaulted argument groups, dropping every
+// group whose flag the role's own arguments already name in either spelling.
+func modelDeploymentDefaultedArgs(groups [][]string, userArgs []string) []string {
+	var out []string
+	for _, group := range groups {
+		if slices.ContainsFunc(userArgs, func(arg string) bool {
+			return ModelDeploymentArgName(arg) == group[0]
+		}) {
+			continue
+		}
+		out = append(out, group...)
+	}
+
+	return out
 }
 
 // deriveModelDeploymentResources turns a role's accelerator request into the full resource request
