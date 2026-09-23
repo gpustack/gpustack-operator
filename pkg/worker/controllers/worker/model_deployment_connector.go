@@ -62,9 +62,9 @@ type ModelDeploymentConnectorInput struct {
 
 	// Protocols is what the pool's backend offers, in the artifact's own spelling and in group
 	// declaration order: each member group's effective protocol, ALREADY MAPPED by
-	// `mooncake.MemberProtocols`. It is a list because groups may now disagree — a VRAM group on a
-	// fabric beside a DRAM group on TCP — and which one the engine is handed is decided at
-	// synthesis, where the engine is known, by `inject.MatchTransport`.
+	// `mooncake.MemberProtocols`. It is a list because groups may disagree — a VRAM group on a
+	// fabric beside a DRAM group on TCP. `inject.MatchTransport` refuses that mix for an
+	// unconstrained engine, which cannot select a transport per target segment.
 	//
 	// It feeds the store client alone. The point-to-point leg does not read it -- the two data
 	// planes declare separately, and vllmKVTransferProtocol says why. Empty is the no-store
@@ -397,7 +397,7 @@ func ModelDeploymentArgName(arg string) string {
 // It is PURE: same input, same output, no client and no clock. Everything it needs about the pool
 // and the domain arrives as values.
 func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (ModelDeploymentConnectorRender, error) {
-	engine, err := modelDeploymentInjectEngine(in.Engine, in.Manufacturer)
+	engine, err := ModelDeploymentInjectEngine(in.Engine, in.Manufacturer)
 	if err != nil {
 		return ModelDeploymentConnectorRender{}, err
 	}
@@ -417,9 +417,8 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 
 	// Which of the pool's offers the engine is handed is decided HERE and not at resolution,
 	// because the answer needs the engine and the connection is resolved per deployment while the
-	// engine varies per role. The match is deterministic — the first offer in declaration order
-	// the engine's store backend accepts — and a pool serving nothing it accepts is refused
-	// rather than started on a transport its connector raises on.
+	// engine varies per role. The match refuses unsupported offers and a mixed pool an
+	// unconstrained engine cannot use with a single installed transport.
 	protocol, err := inject.MatchTransport(engine, in.Protocols)
 	if err != nil {
 		return ModelDeploymentConnectorRender{}, err
@@ -471,7 +470,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 	}, nil
 }
 
-// modelDeploymentInjectEngine maps this API's engine value onto the shared renderer's.
+// ModelDeploymentInjectEngine maps this API's engine value and role manufacturer onto the shared renderer's.
 //
 // THE TWO ENUMS ARE DELIBERATELY DIFFERENT SHAPES. This API has a single `vllm` value because on
 // CANN the runner installs the vllm_ascend package for that same declared engine, so the
@@ -481,7 +480,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 // A WRONG MAPPING HERE IS INVISIBLE IN THE TENANT OUTPUT: both vLLM entries render tenant_id, so
 // swapping them changes nothing a tenant assertion could observe. What it does change is the
 // connector name, which is why that is what the test for this pins.
-func modelDeploymentInjectEngine(engine, manufacturer string) (inject.Engine, error) {
+func ModelDeploymentInjectEngine(engine, manufacturer string) (inject.Engine, error) {
 	switch engine {
 	case workercore.ModelDeploymentEngineVLLM:
 		if manufacturer == nodefeature.ManufacturerAscend {
@@ -570,7 +569,7 @@ func ModelDeploymentSupportsRoleKind(engine string, kind workercore.ModelDeploym
 	}
 
 	for _, manufacturer := range []string{"", nodefeature.ManufacturerAscend} {
-		injectEngine, err := modelDeploymentInjectEngine(engine, manufacturer)
+		injectEngine, err := ModelDeploymentInjectEngine(engine, manufacturer)
 		if err != nil {
 			return false
 		}

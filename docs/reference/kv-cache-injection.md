@@ -22,7 +22,7 @@ webhooks may write too.
 - [Tenant compatibility is the image owner's responsibility](#tenant-compatibility-is-the-image-owners-responsibility)
 - [Verify the vLLM file vehicle](#verify-the-vllm-file-vehicle)
 - [Reading the injection record](#reading-the-injection-record)
-- [vLLM-Ascend requires the `ascend` transport](#vllm-ascend-requires-the-ascend-transport)
+- [Transport compatibility at binding](#transport-compatibility-at-binding)
 - [What a cache changes about a workload](#what-a-cache-changes-about-a-workload)
 - [What it leaves alone, and one flag that replaces it](#what-it-leaves-alone-and-one-flag-that-replaces-it)
 
@@ -329,7 +329,13 @@ It used to carry a second job — telling you that your own `SGLANG_HICACHE_MOON
 taken precedence and left the injection inert. That outcome no longer occurs: those keys are refused
 at admission, so a Pod that was injected is a Pod whose injection is read.
 
-## vLLM-Ascend requires the `ascend` transport
+## Transport compatibility at binding
+
+An engine configured with one transport cannot safely bind to a pool whose member groups offer
+different protocols. The client reads each target segment's protocol; a block on a group using a
+transport the engine did not install fails with `NotSupportedTransport`. Pod injection refuses that
+binding and names every effective offer. Make the groups use one protocol or choose another pool;
+the mixed pool itself remains valid for consumers that can use it.
 
 **A pool whose groups offer no `ascend` transport makes a vLLM-Ascend container fail to start**, and
 the injection is what triggers it. That engine accepts one transport and raises on the rest:
@@ -342,9 +348,9 @@ The engine's own file reader defaults `protocol` to `ascend`, so a file that sai
 worked. This project writes the resolved pool transport explicitly on every path; that value
 overwrites the engine default.
 
-It is **refused, not left to the container**. The refusal lives in the renderer both injection paths
-share, so it surfaces as an admission rejection for an injected Pod and as a reconcile error on a
-`ModelDeployment` whose role derives this engine.
+It is **refused, not left to the container**. The shared transport check rejects an injected Pod at
+admission. A `ModelDeployment` checks a new binding in its own validating webhook, since its
+controller path does not use Pod injection.
 
 **The transport has two spellings and the message uses both.** What the pool offers and what the
 engine accepts are reported as the artifact spells them, because that is the value the container was

@@ -167,16 +167,13 @@ func checkTransport(engine Engine, protocol string) error {
 // handed. The offers are each member group's effective protocol in declaration order, computed by
 // the caller through mooncake.MemberProtocols.
 //
-// THE MATCH IS THE FIRST OFFER IN DECLARATION ORDER THAT THE ENGINE'S CONSTRAINT ACCEPTS — and the
-// first offer outright for an unconstrained engine, which accepts them all. Nothing matches an
-// engine to a specific group: a pool names exactly one backend, and the engine only learns the
-// master address, so the rule has to pick without a binding. Declaration order is deterministic
-// and costs nothing to explain, and every accepted offer is one the engine can run on.
+// An unconstrained engine can use one effective transport. A mixed pool is refused because the
+// engine only learns the master address and is configured with one transport; it cannot select a
+// transport for each target segment. A constrained engine takes its matching offer.
 //
-// A refusal means NO group satisfies the constraint, which is the case worth failing loudly for:
-// admitted, the engine's store backend raises at startup on every group the pool has, and the
-// container never serves a request. An engine with no measured entry claims less and is let
-// through, on the same rule as the singular check.
+// A refusal means no group satisfies a constraint, or an unconstrained engine would have to use
+// two transports. The latter fails when a block is on a group using the transport it did not
+// install. An engine with no measured entry is treated as unconstrained.
 //
 // An empty offer list is NOT a transport answer: it is the no-store shape, which Render refuses
 // for its own reason, so this returns no protocol and no error rather than borrowing that case.
@@ -194,6 +191,29 @@ func MatchTransport(engine Engine, offers []string) (string, error) {
 	}
 
 	facts := engineTransportConstraint[engine]
+	if facts.Required == "" {
+		unique := make([]string, 0, len(offers))
+		seen := make(map[string]struct{}, len(offers))
+		for _, offer := range offers {
+			if offer == "" {
+				continue
+			}
+			if _, ok := seen[offer]; !ok {
+				seen[offer] = struct{}{}
+				unique = append(unique, offer)
+			}
+		}
+		if len(unique) > 1 {
+			return "", newRefusal(ReasonTransportUnsupported,
+				"engine %q declares no required transport and this pool offers %q. The engine can be "+
+					"configured with only one transport; when it reads a block from a group using another, "+
+					"the client reads that target segment's protocol and fails with NotSupportedTransport. "+
+					"Set that backend's spec.transport.protocol and any overriding member group's "+
+					"transport.protocol to one common transport, or bind this workload to a pool with one "+
+					"effective transport",
+				engine, unique)
+		}
+	}
 	for _, offer := range offers {
 		if offer == "" {
 			continue

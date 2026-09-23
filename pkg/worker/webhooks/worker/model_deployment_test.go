@@ -90,6 +90,51 @@ func TestValidateModelDeploymentHostAccess(t *testing.T) {
 	}
 }
 
+func TestModelDeploymentWebhook_PoolTransportBinding(t *testing.T) {
+	cases := []struct {
+		name         string
+		second       string
+		manufacturer string
+		wantReject   bool
+	}{
+		{"mixed unconstrained", "RDMA", nodefeature.ManufacturerNVIDIA, true},
+		{"one effective transport", "TCP", nodefeature.ManufacturerNVIDIA, false},
+		{"mixed constrained and satisfied", "CANN", nodefeature.ManufacturerAscend, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			objs := kvCacheFixture()
+			backend := objs[2].(*workercore.KVCacheBackend)
+			backend.Spec.Connection.Managed = &workercore.KVCacheBackendManaged{Members: []workercore.KVCacheBackendMember{
+				{NodeSelector: map[string]string{"cache": "dram"}, Medium: "DRAM", CapacityPerMember: resource.MustParse("64Gi")},
+				{
+					NodeSelector: map[string]string{"cache": "vram"}, Medium: "VRAM", CapacityPerMember: resource.MustParse("16Gi"),
+					Transport: &workercore.KVCacheBackendMemberTransport{Protocol: tc.second},
+				},
+			}}
+			objs = append(objs, servingInstanceType("h20-8x", 8, func(it *worker.InstanceType) {
+				it.Status.Detail.Manufacturer = tc.manufacturer
+			}))
+			md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+			md.Spec.KVCache.PoolRef.Name = "chat"
+			w := newModelDeploymentWebhookWith(objs)
+			_, err := w.ValidateCreate(context.Background(), md)
+			if tc.wantReject {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), `["tcp" "rdma"]`)
+				assert.Contains(t, err.Error(), "NotSupportedTransport")
+				assert.Contains(t, err.Error(), "spec.kvCache.poolRef.name")
+				old := md.DeepCopy()
+				md.Spec.Roles[0].Replicas++
+				_, err = w.ValidateUpdate(context.Background(), old, md)
+				assert.NoError(t, err, "an unchanged binding remains editable after an upgrade")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 // routedModelDeployment builds a one-server-role deployment carrying spec.router, so the router cases
 // differ from one another in the router alone and never in the roles.
 func routedModelDeployment(mutate func(*workercore.ModelDeploymentRouter)) *workercore.ModelDeployment {

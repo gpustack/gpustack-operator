@@ -154,11 +154,14 @@ func TestMatchTransport(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		// Declaration order decides among the offers an engine accepts, so the answer is stable
-		// across reconciles rather than whichever group happened to be read first.
+		// Repeated offers are one effective transport and remain admissible.
 		{
-			name:   "an unconstrained engine takes the first offer",
-			engine: EngineVLLM, offers: []string{"rdma", "tcp"}, want: "rdma",
+			name:   "an unconstrained engine accepts one effective transport",
+			engine: EngineVLLM, offers: []string{"rdma", "rdma"}, want: "rdma",
+		},
+		{
+			name:   "an unconstrained engine refuses mixed offers",
+			engine: EngineVLLM, offers: []string{"rdma", "tcp"}, wantErr: true,
 		},
 		{
 			name:   "a constrained engine takes the first offer it accepts",
@@ -194,6 +197,18 @@ func TestMatchTransport(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestMatchTransport_MixedOffersMessage(t *testing.T) {
+	_, err := MatchTransport(EngineVLLM, []string{"rdma", "", "tcp", "rdma"})
+	require.Error(t, err)
+	message := err.Error()
+	assert.Contains(t, message, `["rdma" "tcp"]`)
+	assert.Contains(t, message, "declares no required transport")
+	assert.Contains(t, message, "only one transport")
+	assert.Contains(t, message, "NotSupportedTransport")
+	assert.Contains(t, message, "spec.transport.protocol")
+	assert.Contains(t, message, "member group's transport.protocol")
 }
 
 // TestMatchTransport_MessageNamesEveryOffer is the plural counterpart of the singular message pin:

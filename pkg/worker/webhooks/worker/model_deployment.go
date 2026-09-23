@@ -26,6 +26,7 @@ import (
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -45,22 +46,18 @@ import (
 // a comparison between two entries of a list, and a collision between what a user supplies and what
 // the operator owns.
 //
-// MOST VALIDATION RULES ARE ANSWERED FROM THE OBJECT ALONE, AND TWO ARE NOT. Whether the named
-// InstanceType offers the resource mode a role asks for, and whether the role's card count fits what
-// that type hands out at once, are facts about another object. Everything else here is decided
-// without leaving the request.
+// MOST VALIDATION RULES ARE ANSWERED FROM THE OBJECT ALONE. Resource mode and card count depend on
+// an InstanceType. A new cache binding's transport depends on its Binding, pool and backend.
 //
-// WHAT READS ANOTHER OBJECT READS IT FROM THE API SERVER AND NEVER FROM A CACHE, the default and
-// those two rules alike. A cache decides the outcome in both directions when it is behind — a type
+// WHAT READS ANOTHER OBJECT READS IT FROM THE API SERVER AND NEVER FROM A CACHE, including defaulting
+// and the transport check. A cache decides the outcome in both directions when it is behind — a type
 // created moments ago reads as absent and refuses a deployment that names a type that exists, and a
 // type recreated under the same name reads with its old acceleratable flag and writes a count from
 // it. The second is the worse one, because the wrong value is then persisted.
 //
-// THE PRICE IS ONE CONSISTENT READ PER HANDLER PASS, not per role: every role of a valid deployment
-// names the same type and each pass memoizes by name. An admission therefore pays two, one for the
-// mutating half and one for the validating half, because they are separate calls and a value carried
-// between them would be a third cache with no one watching it. This handler runs on a user-initiated
-// write to one object rather than in a reconcile loop, which is what makes that the cheaper side.
+// TYPE READS ARE MEMOIZED BY NAME WITHIN EACH RULE, not per role. The mutating and validating
+// halves are separate calls, and a new binding also reads its pool and backend. These reads happen
+// on a user-initiated write rather than in a reconcile loop.
 //
 // nolint: lll
 // +k8s:webhook-gen:validating:group="worker.gpustack.ai",version="v1alpha1",resource="modeldeployments",scope="Namespaced"
@@ -284,6 +281,70 @@ func validateModelDeploymentHostAccess(
 	return errs
 }
 
+// validateModelDeploymentPoolTransport checks a new cache binding against each role's engine.
+// An unchanged binding is held access: an existing deployment remains editable if its backend
+// later changes transport, as with the host access gates above.
+func (r *ModelDeploymentWebhook) validateModelDeploymentPoolTransport(
+	ctx context.Context, old, md *workercore.ModelDeployment,
+) (field.ErrorList, error) {
+	if md.Spec.KVCache == nil || md.DeletionTimestamp != nil ||
+		old != nil && kubemeta.DeepEqual(old.Spec.KVCache, md.Spec.KVCache) {
+		return nil, nil
+	}
+	path := field.NewPath("spec", "kvCache", "poolRef", "name")
+	binding := &workercore.KVCachePoolBinding{}
+	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: md.Namespace, Name: md.Spec.KVCache.PoolRef.Name,
+	}, binding); err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, field.InternalError(path, fmt.Errorf("get kv cache pool binding: %w", err))
+	}
+	pool := &workercore.KVCachePool{}
+	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: binding.Spec.PoolRef.Name}, pool); err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, field.InternalError(path, fmt.Errorf("get kv cache pool: %w", err))
+	}
+	if len(pool.Spec.Backends) == 0 {
+		return nil, nil
+	}
+	backend := &workercore.KVCacheBackend{}
+	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: pool.Spec.Backends[0]}, backend); err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, field.InternalError(path, fmt.Errorf("get kv cache backend: %w", err))
+	}
+	offers := mooncake.MemberProtocols(backend)
+	seen := make(map[string]struct{}, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if _, ok := seen[role.InstanceType]; ok {
+			continue
+		}
+		seen[role.InstanceType] = struct{}{}
+		manufacturer := ""
+		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
+			instType, err := r.getInstanceType(ctx, role.InstanceType, i)
+			if err != nil {
+				return nil, err
+			}
+			manufacturer = instType.Status.Detail.Manufacturer
+		}
+		engine, err := workerctrl.ModelDeploymentInjectEngine(md.Spec.Engine.Name, manufacturer)
+		if err != nil {
+			return nil, field.InternalError(path, err)
+		}
+		if _, err := inject.MatchTransport(engine, offers); err != nil {
+			return field.ErrorList{field.Forbidden(path, err.Error())}, nil
+		}
+	}
+	return nil, nil
+}
+
 func (r *ModelDeploymentWebhook) ValidateCreate(
 	ctx context.Context, obj runtime.Object,
 ) (ctrladmission.Warnings, error) {
@@ -301,6 +362,13 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 		return nil, err
 	}
 	errs = append(errs, typeErrs...)
+	if len(errs) == 0 {
+		transportErrs, err := r.validateModelDeploymentPoolTransport(ctx, nil, md)
+		if err != nil {
+			return nil, err
+		}
+		errs = append(errs, transportErrs...)
+	}
 
 	if len(errs) > 0 {
 		return nil, kerrors.NewInvalid(md.GroupVersionKind().GroupKind(), md.Name, errs)
@@ -338,6 +406,13 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 		return nil, err
 	}
 	errs = append(errs, typeErrs...)
+	if len(errs) == 0 {
+		transportErrs, err := r.validateModelDeploymentPoolTransport(ctx, old, md)
+		if err != nil {
+			return nil, err
+		}
+		errs = append(errs, transportErrs...)
+	}
 
 	if len(errs) > 0 {
 		return nil, kerrors.NewInvalid(md.GroupVersionKind().GroupKind(), md.Name, errs)

@@ -97,10 +97,9 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 			"address to point %q at; retry once the pool reports one", pool.Name, engine)
 	}
 
-	// The engine is handed the protocol of the FIRST group whose effective transport its store
-	// backend accepts, in declaration order — the match rule inject.MatchTransport documents. A
-	// pool whose groups serve nothing the engine accepts is refused here, at admission, rather
-	// than started on a transport its connector raises on.
+	// The match refuses an unsupported transport and a mixed pool whose unconstrained engine
+	// could install only one of its offers. Both are binding failures, so this Pod is refused
+	// here at admission rather than started with a client that cannot reach some segments.
 	protocol, err := inject.MatchTransport(engine, mooncake.MemberProtocols(backend))
 	if err != nil {
 		return nil, err
