@@ -20,7 +20,7 @@
 #                CRDs / the four bundled applications in the operator's own release);
 #              - NFD stamps feature.gpustack.ai/cpu-* + acceleratable labels;
 #              - the Worker derives general.feature.gpustack.ai/* capacity labels;
-#              - the general ResourceFlavor (name ...-<count>c), its ClusterQueue, its
+#              - the general ResourceFlavor (name ...-<count>c[-fnv64-<hash>]), its ClusterQueue, its
 #                InstanceType (Active + entrance LocalQueue), and its LocalQueue all exist
 #                under the "gpustack-" prefix;
 #              - the general InstanceType's spec.os/spec.arch equal its ClusterQueue's
@@ -70,10 +70,11 @@ gen=$(kubectl get nodefeatures -A -o json | grep -Eo '"general\.feature\.gpustac
 assert_nonempty "Worker general.* labels" "$gen"
 
 # The pooling chain materialized the general objects (all prefixed "gpustack-"). A CPU
-# flavor carries the -${count}c suffix; the CQ/InstanceType is the flavor name without it.
+# flavor carries the -${count}c suffix and, since flavors split by topology profile, a trailing
+# -fnv64-<16 hex> profile; the CQ/InstanceType is the flavor name without them.
 # The flavor is the head of the chain, so it is the one worth waiting on; the rest follow it
 # within a reconcile and are read directly.
-assert_nonempty "ResourceFlavor (general)" "$(await_nonempty "kubectl get resourceflavors.kueue.x-k8s.io -o name | grep -E 'gpustack-.*-[0-9]+c\$'")"
+assert_nonempty "ResourceFlavor (general)" "$(await_nonempty "kubectl get resourceflavors.kueue.x-k8s.io -o name | grep -E 'gpustack-.*-[0-9]+c(-fnv64-[0-9a-f]{16})?\$'")"
 assert_nonempty "ClusterQueue (general)"   "$(await_nonempty "kubectl get clusterqueues.kueue.x-k8s.io   -o name | grep 'gpustack-'")"
 assert_nonempty "LocalQueue (general)"     "$(await_nonempty "kubectl get localqueues.kueue.x-k8s.io -A  -o name | grep 'gpustack-fnv64-'")"
 
