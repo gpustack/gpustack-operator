@@ -15,7 +15,8 @@
 #              E2E_EXPECT_PURE_PD=1 when checking a deployment without a cache binding. Set
 #              E2E_REJECT_MANIFEST to a local YAML file for server-side dry-run rejection.
 # Expected:    The stored role count and every owned main-container limit match the input; no
-#              second fabric key is present. Optional pure P/D and rejection checks hold.
+#              second fabric key is present. Optional pure P/D check holds, and a rejection names a
+#              mixed-fabric reason on a role's interface field.
 # Cleanup:     Read-only, except the API server's non-persisting dry-run; no cleanup is needed.
 set -uo pipefail
 
@@ -102,9 +103,12 @@ done <<<"$pod_rows"
 
 if [ -n "${E2E_REJECT_MANIFEST:-}" ]; then
   [ -f "$E2E_REJECT_MANIFEST" ] || { echo "rejection fixture file is absent" >&2; exit 2; }
+  # Only the two mixed-fabric reasons on a role's interface field count. Any other refusal, such as
+  # accelerator capacity, must fail here even when an object name carries a matching word.
+  mixed_re='spec\.roles\[[0-9]+\]\.resources\.interface: Invalid value: "[^"]*": (cache member groups use conflicting protocols: |cache and direct-transfer legs use )'
   if rejection="$(kubectl apply --dry-run=server -f "$E2E_REJECT_MANIFEST" 2>&1)"; then
     record FAIL "mixed-fabric rejection" "$rejection"
-  elif [[ "$rejection" == *"conflict"* || "$rejection" == *"mixed"* ]]; then
+  elif [[ "$rejection" =~ $mixed_re ]]; then
     record PASS "mixed-fabric rejection" "$E2E_REJECT_MANIFEST"
   else
     record FAIL "mixed-fabric rejection" "$rejection"

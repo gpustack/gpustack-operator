@@ -67,7 +67,12 @@ if [ "${E2E_EXPECT_PARTIAL:-0}" = 1 ]; then
   else
     record FAIL "partial read names missing sources" "$MD"
   fi
-elif jq -e '.partial == false and (.missing // [] | length == 0)' <<<"$second" >/dev/null; then
+# A complete read may still list the two entries that do not count as partial: a labeled failure
+# or error counter not yet exported beside its paired counter, and a source the router does not
+# provide for this shape. Any other missing entry is a partial read.
+elif jq -e '.partial == false and all(.missing // [] | .[];
+  (.reason | startswith("labeled failure or error counter is not exported")) or
+  (.reason | startswith("unsupported source:")))' <<<"$second" >/dev/null; then
   record PASS "complete read" "$MD"
 else
   record FAIL "complete read" "$(jq -c '{partial,missing}' <<<"$second")"

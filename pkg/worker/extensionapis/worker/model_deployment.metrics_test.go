@@ -432,13 +432,18 @@ llm_d_epp_request_error_total %d
 	require.NoError(t, err)
 	result = obj.(*worker.ModelDeploymentMetrics)
 	require.Len(t, result.Latency, 2)
-	require.Len(t, result.Traffic, 3)
+	// The llm-d error counter also counts requests its request counter never saw, so the two
+	// rates are reported apart and no fraction is derived from them.
+	require.Len(t, result.Traffic, 2)
+	rates := map[string]worker.ModelDeploymentMetricWindow{}
 	for _, metric := range result.Traffic {
-		if metric.Name == "error-ratio" {
-			assert.InDelta(t, 1.0/3.0, metric.Value, 1e-9)
-			assert.Equal(t, float64(3), metric.Samples)
-		}
+		rates[metric.Name] = metric
 	}
+	assert.Equal(t, "llm_d_epp_request_total", rates["requests"].Source)
+	assert.Equal(t, float64(3), rates["requests"].Samples)
+	assert.Equal(t, "llm_d_epp_request_error_total", rates["request-errors"].Source)
+	assert.Equal(t, float64(1), rates["request-errors"].Samples)
+	assert.NotContains(t, rates, "error-ratio")
 }
 
 func TestModelDeploymentMetricsHandler_RejectsUndeclaredPort(t *testing.T) {
@@ -559,7 +564,7 @@ func TestModelDeploymentMetricsHandler_ScrapeBudgetFitsTheRequest(t *testing.T) 
 
 func TestModelDeploymentMetricsHandler_DoesNotDivideDifferentCounterWindows(t *testing.T) {
 	md := metricsModelDeployment()
-	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: "llm-d-router"}
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: "sglang-gateway"}
 	h := &ModelDeploymentMetricsHandler{}
 	pod := core.Pod{ObjectMeta: meta.ObjectMeta{Name: "chat-router", UID: "router-uid"}}
 	base := time.Now()
@@ -568,12 +573,12 @@ func TestModelDeploymentMetricsHandler_DoesNotDivideDifferentCounterWindows(t *t
 		body    string
 		missing bool
 	}{
-		{0, "# TYPE llm_d_epp_request_total counter\nllm_d_epp_request_total 1\n# TYPE llm_d_epp_request_error_total counter\nllm_d_epp_request_error_total 0\n", false},
-		{1, "# TYPE llm_d_epp_request_total counter\nllm_d_epp_request_total 3\n", false},
-		{2, "# TYPE llm_d_epp_request_total counter\nllm_d_epp_request_total 5\n# TYPE llm_d_epp_request_error_total counter\nllm_d_epp_request_error_total 1\n", true},
+		{0, "# TYPE smg_router_requests_total counter\nsmg_router_requests_total 1\n# TYPE smg_router_request_errors_total counter\nsmg_router_request_errors_total 0\n", false},
+		{1, "# TYPE smg_router_requests_total counter\nsmg_router_requests_total 3\n", false},
+		{2, "# TYPE smg_router_requests_total counter\nsmg_router_requests_total 5\n# TYPE smg_router_request_errors_total counter\nsmg_router_request_errors_total 1\n", true},
 	}
 	for _, tc := range tests {
-		parsed, err := parseModelDeploymentMetrics([]byte(tc.body), "", "llm-d-router")
+		parsed, err := parseModelDeploymentMetrics([]byte(tc.body), "", "sglang-gateway")
 		require.NoError(t, err)
 		result := &worker.ModelDeploymentMetrics{}
 		read := &modelDeploymentPodScrape{pod: pod, router: true, value: parsed, at: base.Add(time.Duration(tc.seconds) * time.Second)}
@@ -583,7 +588,7 @@ func TestModelDeploymentMetricsHandler_DoesNotDivideDifferentCounterWindows(t *t
 				assert.NotEqual(t, "error-ratio", metric.Name)
 			}
 			assert.Contains(t, result.Missing, worker.ModelDeploymentMetricMissing{
-				Pod: pod.Name, Source: "llm_d_epp_request_total+llm_d_epp_request_error_total",
+				Pod: pod.Name, Source: "smg_router_requests_total+smg_router_request_errors_total",
 				Reason: "request and error counters have different sampling windows",
 			})
 		}
@@ -655,9 +660,316 @@ func TestModelDeploymentMetricsHandler_PDTransferUsesKind(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, transferQueues)
+	var transferReads int
 	for _, missing := range result.Missing {
 		if missing.Source == "sglang:kv_transfer_latency_ms" {
-			assert.Equal(t, "generation-pod", missing.Pod)
+			transferReads++
+			assert.Equal(t, "prompt-pod", missing.Pod)
 		}
+	}
+	assert.Equal(t, 1, transferReads)
+}
+
+func TestModelDeploymentMetricsHandler_PDPrefillDoesNotExpectInterTokenLatency(t *testing.T) {
+	var stage atomic.Int32
+	serve := func(prefill bool) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			observations := 2 + 2*int(stage.Load())
+			body := metricsVLLMResponse(5*observations/2, 10*observations/2, observations)
+			itl := fmt.Sprintf("vllm:inter_token_latency_seconds_sum %d\nvllm:inter_token_latency_seconds_count %d", observations*3, observations)
+			switch {
+			case prefill:
+				// A prefill half answers with its first token only, so its inter-token
+				// histogram never moves while its other series do.
+				body = strings.Replace(body, itl, "vllm:inter_token_latency_seconds_sum 0\nvllm:inter_token_latency_seconds_count 0", 1)
+			case stage.Load() == 2:
+				body = strings.Replace(body, itl, "vllm:inter_token_latency_seconds_sum 12\nvllm:inter_token_latency_seconds_count 4", 1)
+			}
+			fmt.Fprint(w, body)
+		}))
+	}
+	prefillServer, decodeServer := serve(true), serve(false)
+	defer prefillServer.Close()
+	defer decodeServer.Close()
+	md := metricsModelDeployment()
+	md.Spec.Roles = []workercore.ModelDeploymentRole{
+		{Name: "prompt", Kind: workercore.ModelDeploymentRoleKindPrefill},
+		{Name: "generation", Kind: workercore.ModelDeploymentRoleKindDecode},
+	}
+	pod := func(server *httptest.Server, name, role string) *core.Pod {
+		u, err := url.Parse(server.URL)
+		require.NoError(t, err)
+		host, port, err := net.SplitHostPort(u.Host)
+		require.NoError(t, err)
+		p := metricsEnginePod(md, name, host, port)
+		p.Labels["app.kubernetes.io/component"] = role
+		return p
+	}
+	prefill := pod(prefillServer, "prompt-pod", "prompt")
+	decode := pod(decodeServer, "generation-pod", "generation")
+	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(md, prefill, decode).Build()
+	h := &ModelDeploymentMetricsHandler{APIReader: cli, HTTPClient: http.DefaultClient}
+	key := types.NamespacedName{Namespace: md.Namespace, Name: md.Name}
+	_, err := h.OnGet(context.Background(), key, ctrlcli.GetOptions{})
+	require.NoError(t, err)
+	stage.Store(1)
+	obj, err := h.OnGet(context.Background(), key, ctrlcli.GetOptions{})
+	require.NoError(t, err)
+	result := obj.(*worker.ModelDeploymentMetrics)
+	assert.Empty(t, result.Missing)
+	assert.False(t, result.Partial)
+	itl := map[string]float64{}
+	for _, latency := range result.Latency {
+		if latency.Name == "itl" {
+			itl[latency.Pod] = latency.Samples
+		}
+	}
+	assert.Equal(t, map[string]float64{"generation-pod": 2}, itl,
+		"the decode half keeps its inter-token latency")
+
+	// A decode half whose inter-token histogram stops moving is still reported.
+	stage.Store(2)
+	obj, err = h.OnGet(context.Background(), key, ctrlcli.GetOptions{})
+	require.NoError(t, err)
+	result = obj.(*worker.ModelDeploymentMetrics)
+	assert.True(t, result.Partial)
+	assert.Equal(t, []worker.ModelDeploymentMetricMissing{{
+		Pod: "generation-pod", Source: "vllm:inter_token_latency_seconds",
+		Reason: "no observations in the sampling window",
+	}}, result.Missing)
+}
+
+func TestModelDeploymentMetricsHandler_UnexportedErrorCounterIsNotPartial(t *testing.T) {
+	tests := []struct {
+		name        string
+		windows     []string
+		wantReason  string
+		wantPartial bool
+	}{
+		{"request counter read in the same scrape", []string{"ttft", "tpot", "requests"}, modelDeploymentLabeledCounterUnexported, false},
+		{"request counter absent too", []string{"ttft", "tpot"}, "metric is absent", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := metricsModelDeployment()
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: "llm-d-router"}
+			h := &ModelDeploymentMetricsHandler{}
+			read := &modelDeploymentPodScrape{
+				pod:    core.Pod{ObjectMeta: meta.ObjectMeta{Name: "router", UID: "router-uid"}},
+				router: true,
+				value:  modelDeploymentScrape{windows: map[string]modelDeploymentWindowPair{}},
+				at:     time.Now(),
+			}
+			for _, key := range tc.windows {
+				read.value.windows[key] = modelDeploymentWindowPair{sum: 1, count: 1}
+			}
+			h.mergeWindowMetrics(&worker.ModelDeploymentMetrics{}, md, read)
+			for _, key := range tc.windows {
+				read.value.windows[key] = modelDeploymentWindowPair{sum: 3, count: 3}
+			}
+			read.at = read.at.Add(time.Second)
+			result := &worker.ModelDeploymentMetrics{}
+			h.mergeWindowMetrics(result, md, read)
+			assert.Contains(t, result.Missing, worker.ModelDeploymentMetricMissing{
+				Pod: "router", Source: "llm_d_epp_request_error_total", Reason: tc.wantReason,
+			})
+			assert.Equal(t, tc.wantPartial, modelDeploymentMissingIsPartial(result.Missing))
+			for _, metric := range result.Traffic {
+				assert.NotEqual(t, "error-ratio", metric.Name, "no fraction without an error counter")
+			}
+		})
+	}
+}
+
+func TestModelDeploymentMetricsHandler_VLLMRouterPDReadsItsOwnSeries(t *testing.T) {
+	body, err := os.ReadFile("testdata/model_deployment_metrics/vllm_router_pd_serving.prom")
+	require.NoError(t, err)
+	parsed, err := parseModelDeploymentMetrics(body, "", "vllm-router")
+	require.NoError(t, err)
+	assert.Equal(t, modelDeploymentWindowPair{count: 1}, parsed.windows["pd-requests"])
+	assert.NotContains(t, parsed.windows, "pd-errors")
+	assert.NotContains(t, parsed.windows, "successful-requests")
+
+	md := metricsModelDeployment()
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: "vllm-router"}
+	md.Spec.Roles = []workercore.ModelDeploymentRole{
+		{Name: "prompt", Kind: workercore.ModelDeploymentRoleKindPrefill},
+		{Name: "generation", Kind: workercore.ModelDeploymentRoleKindDecode},
+	}
+	h := &ModelDeploymentMetricsHandler{}
+	read := &modelDeploymentPodScrape{
+		pod: core.Pod{ObjectMeta: meta.ObjectMeta{Name: "router", UID: "router-uid"}}, router: true,
+		value: parsed, at: time.Now(),
+	}
+	h.mergeMetrics(&worker.ModelDeploymentMetrics{}, md, read)
+	read.value.windows["pd-requests"] = modelDeploymentWindowPair{count: 5}
+	read.at = read.at.Add(2 * time.Second)
+	result := &worker.ModelDeploymentMetrics{}
+	h.mergeMetrics(result, md, read)
+
+	assert.Empty(t, result.Processing, "the P/D router exports no processing gauge")
+	require.Len(t, result.Traffic, 1)
+	assert.Equal(t, "pd-requests", result.Traffic[0].Name)
+	assert.Equal(t, "vllm_router_pd_requests_total", result.Traffic[0].Source)
+	assert.Equal(t, float64(2), result.Traffic[0].Value)
+	assert.ElementsMatch(t, []worker.ModelDeploymentMetricMissing{
+		{Pod: "router", Source: "vllm_router_running_requests", Reason: modelDeploymentVLLMRouterPDNoProcessing},
+		{Pod: "router", Source: "vllm_router_active_workers", Reason: modelDeploymentVLLMRouterPDNoProcessing},
+		{Pod: "router", Source: "vllm_router_pd_errors_total", Reason: modelDeploymentLabeledCounterUnexported},
+	}, result.Missing)
+	assert.False(t, modelDeploymentMissingIsPartial(result.Missing))
+
+	// The same router in front of one server keeps its non-P/D series.
+	md.Spec.Roles = []workercore.ModelDeploymentRole{{Name: "server"}}
+	result = &worker.ModelDeploymentMetrics{}
+	h.mergeMetrics(result, md, read)
+	assert.Contains(t, result.Missing, worker.ModelDeploymentMetricMissing{
+		Pod: "router", Source: "vllm_router_running_requests", Reason: "metric is absent",
+	})
+	assert.True(t, modelDeploymentMissingIsPartial(result.Missing))
+}
+
+// sglangPDResponse follows what each half of a pinned SGLang pair exported under load: the
+// prefill half carries the prefill token counters and the KV transfer histograms but no TTFT;
+// the decode half carries TTFT and ITL but never prefills, so its token counters stay at zero.
+func sglangPDResponse(prefill bool, step int) string {
+	queue := "# TYPE sglang:num_running_reqs gauge\nsglang:num_running_reqs 1\n" +
+		"# TYPE sglang:num_queue_reqs gauge\nsglang:num_queue_reqs 0\n" +
+		"# TYPE sglang:num_decode_transfer_queue_reqs gauge\nsglang:num_decode_transfer_queue_reqs 0\n"
+	if prefill {
+		return queue + fmt.Sprintf(`# TYPE sglang:prefill_effective_tokens_total counter
+sglang:prefill_effective_tokens_total{mode="input"} %d
+sglang:prefill_effective_tokens_total{mode="device_hit"} %d
+sglang:prefill_effective_tokens_total{mode="host_hit"} 0
+sglang:prefill_effective_tokens_total{mode="storage_hit"} 0
+# TYPE sglang:kv_transfer_latency_ms histogram
+sglang:kv_transfer_latency_ms_sum %d
+sglang:kv_transfer_latency_ms_count %d
+# TYPE sglang:kv_transfer_total_mb histogram
+sglang:kv_transfer_total_mb_sum %d
+sglang:kv_transfer_total_mb_count %d
+# TYPE sglang:kv_transfer_speed_gb_s histogram
+sglang:kv_transfer_speed_gb_s_sum %d
+sglang:kv_transfer_speed_gb_s_count %d
+`, 10*step, 20*step, 100*step, step, 2*step, step, step, step)
+	}
+	return queue + fmt.Sprintf(`# TYPE sglang:prefill_effective_tokens_total counter
+sglang:prefill_effective_tokens_total{mode="input"} 0
+sglang:prefill_effective_tokens_total{mode="device_hit"} 0
+sglang:prefill_effective_tokens_total{mode="host_hit"} 0
+sglang:prefill_effective_tokens_total{mode="storage_hit"} 0
+# TYPE sglang:time_to_first_token_seconds histogram
+sglang:time_to_first_token_seconds_sum %d
+sglang:time_to_first_token_seconds_count %d
+# TYPE sglang:inter_token_latency_seconds histogram
+sglang:inter_token_latency_seconds_sum %d
+sglang:inter_token_latency_seconds_count %d
+`, step, step, 3*step, 30*step)
+}
+
+func sglangPDHandler(t *testing.T) (*ModelDeploymentMetricsHandler, types.NamespacedName, *atomic.Int32) {
+	t.Helper()
+	step := &atomic.Int32{}
+	step.Store(1)
+	serve := func(prefill bool) *httptest.Server {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, sglangPDResponse(prefill, int(step.Load())))
+		}))
+		t.Cleanup(server.Close)
+		return server
+	}
+	md := metricsModelDeployment()
+	md.Spec.Engine.Name = "sglang"
+	md.Spec.Roles = []workercore.ModelDeploymentRole{
+		{Name: "prompt", Kind: workercore.ModelDeploymentRoleKindPrefill},
+		{Name: "generation", Kind: workercore.ModelDeploymentRoleKindDecode},
+	}
+	pod := func(server *httptest.Server, name, role string) *core.Pod {
+		u, err := url.Parse(server.URL)
+		require.NoError(t, err)
+		host, port, err := net.SplitHostPort(u.Host)
+		require.NoError(t, err)
+		p := metricsEnginePod(md, name, host, port)
+		p.Labels["app.kubernetes.io/component"] = role
+		return p
+	}
+	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(md,
+		pod(serve(true), "prompt-pod", "prompt"), pod(serve(false), "generation-pod", "generation")).Build()
+	return &ModelDeploymentMetricsHandler{APIReader: cli, HTTPClient: http.DefaultClient},
+		types.NamespacedName{Namespace: md.Namespace, Name: md.Name}, step
+}
+
+func TestModelDeploymentMetricsHandler_SGLangPDReadsEachSeriesFromItsHalf(t *testing.T) {
+	h, key, step := sglangPDHandler(t)
+	_, err := h.OnGet(context.Background(), key, ctrlcli.GetOptions{})
+	require.NoError(t, err)
+	step.Store(3)
+	obj, err := h.OnGet(context.Background(), key, ctrlcli.GetOptions{})
+	require.NoError(t, err)
+	result := obj.(*worker.ModelDeploymentMetrics)
+
+	transfer := map[string]string{}
+	for _, metric := range result.Transfer {
+		transfer[metric.Name] = metric.Pod
+	}
+	assert.Equal(t, map[string]string{
+		"transfer-latency": "prompt-pod", "transfer-size": "prompt-pod", "transfer-speed": "prompt-pod",
+	}, transfer, "the prefill half sends the blocks and observes the transfer")
+	for _, hit := range result.CacheHits {
+		assert.Equal(t, "prompt-pod", hit.Pod, "only the prefill half prefills")
+	}
+	assert.Len(t, result.CacheHits, 3)
+	latency := map[string]string{}
+	for _, metric := range result.Latency {
+		latency[metric.Pod+"/"+metric.Name] = metric.Source
+	}
+	assert.Equal(t, map[string]string{
+		"generation-pod/ttft": "sglang:time_to_first_token_seconds",
+		"generation-pod/itl":  "sglang:inter_token_latency_seconds",
+	}, latency)
+	assert.Equal(t, []worker.ModelDeploymentMetricMissing{{
+		Pod: "prompt-pod", Source: "sglang:num_transfer_failed_reqs_total", Reason: modelDeploymentLabeledCounterUnexported,
+	}}, result.Missing)
+	assert.False(t, result.Partial)
+}
+
+func TestModelDeploymentMetricsHandler_SGLangTransferFailuresNeedTheirPair(t *testing.T) {
+	tests := []struct {
+		name        string
+		windows     []string
+		wantReason  string
+		wantPartial bool
+	}{
+		{"transfer size read in the same scrape", []string{"transfer-latency", "transfer-size", "transfer-speed"}, modelDeploymentLabeledCounterUnexported, false},
+		{"transfer size absent", []string{"transfer-latency", "transfer-speed"}, "metric is absent", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := metricsModelDeployment()
+			md.Spec.Engine.Name = "sglang"
+			md.Spec.Roles = []workercore.ModelDeploymentRole{
+				{Name: "prompt", Kind: workercore.ModelDeploymentRoleKindPrefill},
+				{Name: "generation", Kind: workercore.ModelDeploymentRoleKindDecode},
+			}
+			pod := core.Pod{ObjectMeta: meta.ObjectMeta{
+				Name: "prompt-pod", UID: "prompt-uid", Labels: map[string]string{"app.kubernetes.io/component": "prompt"},
+			}}
+			read := &modelDeploymentPodScrape{pod: pod, value: modelDeploymentScrape{windows: map[string]modelDeploymentWindowPair{}}, at: time.Now()}
+			for _, key := range tc.windows {
+				read.value.windows[key] = modelDeploymentWindowPair{sum: 1, count: 1}
+			}
+			result := &worker.ModelDeploymentMetrics{}
+			(&ModelDeploymentMetricsHandler{}).mergeWindowMetrics(result, md, read)
+			var failures []worker.ModelDeploymentMetricMissing
+			for _, missing := range result.Missing {
+				if missing.Source == "sglang:num_transfer_failed_reqs_total" {
+					failures = append(failures, missing)
+				}
+			}
+			assert.Equal(t, []worker.ModelDeploymentMetricMissing{{
+				Pod: "prompt-pod", Source: "sglang:num_transfer_failed_reqs_total", Reason: tc.wantReason,
+			}}, failures)
+			assert.Equal(t, tc.wantPartial, modelDeploymentMissingIsPartial(failures))
+		})
 	}
 }

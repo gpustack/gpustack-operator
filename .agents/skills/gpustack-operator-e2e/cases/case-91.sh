@@ -18,7 +18,7 @@
 # Expected:    Both engine containers carry MC_FORCE_TCP=1 and log the TCP-only selection with no
 #              cross-node NVLink line; the request finishes; the prefill engine's transferred-byte
 #              sum is positive and its sample count increased; no engine counts a failed transfer;
-#              the store master holds allocated bytes or counted a put; restart counts stay fixed.
+#              the store master's batch-put item count increased; restart counts stay fixed.
 # Cleanup:     A trap removes the temporary probe Pod on pass and failure.
 set -uo pipefail
 
@@ -88,8 +88,10 @@ metrics_url() {
 }
 prefill_url="$(metrics_url "$prefill")" || { echo "prefill has no advertised metrics port" >&2; exit 2; }
 decode_url="$(metrics_url "$decode")" || { echo "decode has no advertised metrics port" >&2; exit 2; }
-endpoint="$(kubectl get kvcachepool "$(jq -r '.spec.kvCache.poolRef.name' <<<"$md_json")" \
-  -o jsonpath='{.status.clientEndpoint}')" || exit 2
+# poolRef names the namespace's KVCachePoolBinding; the cluster-scoped pool is behind it.
+pool_name="$(kubectl -n "$NS" get kvcachepoolbinding "$(jq -r '.spec.kvCache.poolRef.name' <<<"$md_json")" \
+  -o jsonpath='{.spec.poolRef.name}')" || exit 2
+endpoint="$(kubectl get kvcachepool "$pool_name" -o jsonpath='{.status.clientEndpoint}')" || exit 2
 [ -n "$endpoint" ] || { echo "the pool publishes no client endpoint" >&2; exit 2; }
 store_url="http://${endpoint%:*}:9003/metrics"
 before_restarts="$(jq '[.items[].status.containerStatuses[]?.restartCount] | add // 0' <<<"$pods")"
@@ -109,7 +111,7 @@ read_metric() {
 }
 before="$(read_metric "$prefill_url" vllm:mooncake_bytes_transferred_count)" ||
   { echo "native Mooncake transfer histogram is absent" >&2; exit 1; }
-put_before="$(read_metric "$store_url" master_put_end_requests_total || echo 0)"
+put_before="$(read_metric "$store_url" master_batch_put_end_items_total || echo 0)"
 url="/apis/worker.gpustack.ai/v1/namespaces/$NS/modeldeployments/$MD/metrics"
 kubectl get --raw "$url" >/dev/null || exit 2
 payload="$(jq -nc --arg model "$MODEL" '{model:$model,messages:[{role:"user",content:
@@ -126,7 +128,7 @@ if f_prefill="$(read_metric "$prefill_url" vllm:mooncake_num_failed_transfers_to
   f_decode="$(read_metric "$decode_url" vllm:mooncake_num_failed_transfers_total)"; then
   failed=$((f_prefill + f_decode))
 fi
-put_after="$(read_metric "$store_url" master_put_end_requests_total || echo 0)"
+put_after="$(read_metric "$store_url" master_batch_put_end_items_total || echo 0)"
 allocated="$(read_metric "$store_url" master_allocated_bytes || echo 0)"
 snapshot="$(kubectl get --raw "$url")" || exit 2
 pods_after="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=$MD" -o json)" || exit 2
@@ -158,8 +160,10 @@ check "$(awk -v before="$before" -v after="$after" 'BEGIN { print (after > befor
 check "$(awk -v bytes="$bytes" 'BEGIN { print (bytes > 0) ? "true" : "false" }')" \
   "native Mooncake transferred bytes are positive"
 check "$([ "$failed" = 0 ] && echo true || echo false)" "no engine counted a failed transfer"
-check "$(awk -v a="$allocated" -v b="$put_before" -v p="$put_after" \
-  'BEGIN { print (a > 0 || p > b) ? "true" : "false" }')" "the store master holds or counted a write"
+# The store writes through batch puts, so their item count is the one that grows with a request;
+# allocated bytes are printed beside it and stay positive from any earlier write.
+check "$(awk -v b="$put_before" -v p="$put_after" 'BEGIN { print (p > b) ? "true" : "false" }')" \
+  "the store master counted batch-put items ($put_before to $put_after, allocated $allocated bytes)"
 check "$(jq -r '[.latency[]? | select(.samples > 0)] | length > 0' <<<"$snapshot")" \
   "aggregated latency window has samples"
 check "$([ "$after_restarts" -eq "$before_restarts" ] && echo true || echo false)" \

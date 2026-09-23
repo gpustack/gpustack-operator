@@ -79,13 +79,15 @@ func parseModelDeploymentMetrics(body []byte, engine, router string) (modelDeplo
 			addHistogram(out.windows, families, "ttft", "llm_d_epp_request_ttft_seconds")
 			addHistogram(out.windows, families, "tpot", "llm_d_epp_request_streaming_tpot_seconds")
 			addCounterWindow(out.windows, families, "requests", "llm_d_epp_request_total")
-			addCounterWindow(out.windows, families, "errors", "llm_d_epp_request_error_total")
+			addCounterWindow(out.windows, families, "request-errors", "llm_d_epp_request_error_total")
 		case "vllm-router":
 			addGauge(out.gauges, families, "router-running", "vllm_router_running_requests")
 			addGauge(out.gauges, families, "router-reported-workers", "vllm_router_active_workers")
 			addCounterWindow(out.windows, families, "successful-requests", "vllm_router_requests_total")
 			addCounterWindow(out.windows, families, "errors", "vllm_router_request_errors_total")
 			addCounterWindow(out.windows, families, "retries-exhausted", "vllm_router_retries_exhausted_total")
+			addCounterWindow(out.windows, families, "pd-requests", "vllm_router_pd_requests_total")
+			addCounterWindow(out.windows, families, "pd-errors", "vllm_router_pd_errors_total")
 		case "sglang-gateway":
 			addGauge(out.gauges, families, "router-running", "smg_worker_requests_active")
 			addGauge(out.gauges, families, "router-backends", "smg_worker_pool_size")

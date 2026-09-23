@@ -1,0 +1,23 @@
+# TYPE vllm_router_policy_decisions_total counter
+vllm_router_policy_decisions_total{policy="cache_aware",worker="http://decode:8000"} 1
+vllm_router_policy_decisions_total{policy="cache_aware",worker="http://prefill:8000"} 1
+
+# TYPE vllm_router_pd_decode_requests_total counter
+vllm_router_pd_decode_requests_total{worker="http://decode:8000"} 1
+
+# TYPE vllm_router_pd_prefill_requests_total counter
+vllm_router_pd_prefill_requests_total{worker="http://prefill:8000"} 1
+
+# TYPE vllm_router_processed_requests_total counter
+vllm_router_processed_requests_total{worker="http://prefill:8000"} 1
+vllm_router_processed_requests_total{worker="http://decode:8000"} 1
+
+# TYPE vllm_router_pd_requests_total counter
+vllm_router_pd_requests_total{route="/v1/chat/completions"} 1
+
+# TYPE vllm_router_pd_request_duration_seconds histogram
+vllm_router_pd_request_duration_seconds_bucket{route="/v1/chat/completions",le="0.5"} 0
+vllm_router_pd_request_duration_seconds_bucket{route="/v1/chat/completions",le="1"} 1
+vllm_router_pd_request_duration_seconds_bucket{route="/v1/chat/completions",le="+Inf"} 1
+vllm_router_pd_request_duration_seconds_sum{route="/v1/chat/completions"} 0.61
+vllm_router_pd_request_duration_seconds_count{route="/v1/chat/completions"} 1

@@ -212,7 +212,7 @@ func (h *ModelDeploymentMetricsHandler) OnGet(
 	slices.SortFunc(result.Missing, func(a, b worker.ModelDeploymentMetricMissing) int {
 		return compareNames(a.Pod+a.Source, b.Pod+b.Source)
 	})
-	result.Partial = result.Partial || len(result.Missing) > 0
+	result.Partial = result.Partial || modelDeploymentMissingIsPartial(result.Missing)
 	result.Timestamp = meta.NewTime(time.Now())
 	return result, nil
 }
@@ -359,6 +359,14 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 			metricNames["router-running"] = "llm_d_epp_request_running"
 			metricNames["router-backends"] = "llm_d_epp_ready_endpoints"
 		case "vllm-router":
+			if isModelDeploymentPD(md) {
+				for _, source := range []string{"vllm_router_running_requests", "vllm_router_active_workers"} {
+					result.Missing = append(result.Missing, worker.ModelDeploymentMetricMissing{
+						Pod: read.pod.Name, Source: source, Reason: modelDeploymentVLLMRouterPDNoProcessing,
+					})
+				}
+				break
+			}
 			metricNames["router-running"] = "vllm_router_running_requests"
 			metricNames["router-reported-workers"] = "vllm_router_active_workers"
 		case "sglang-gateway":
@@ -407,6 +415,12 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 	}
 	h.mergeWindowMetrics(result, md, read)
 	if read.router {
+		return
+	}
+	// The decode half of an SGLang pair receives its prompt's cache from the prefill half and
+	// never prefills, so its prefill token counters stay at zero and hold no hit ratio.
+	if md.Spec.Engine.Name == "sglang" && isModelDeploymentPD(md) &&
+		modelDeploymentPodRoleKind(md, &read.pod) == workercore.ModelDeploymentRoleKindDecode {
 		return
 	}
 	if len(read.value.counters) == 0 {
@@ -472,52 +486,86 @@ func modelDeploymentPodRoleKind(md *workercore.ModelDeployment, pod *core.Pod) w
 	return ""
 }
 
+const (
+	modelDeploymentLabeledCounterUnexported = "labeled failure or error counter is not exported before its first increment; " +
+		"its paired counter was read in the same scrape"
+	modelDeploymentVLLMRouterPDNoProcessing = "unsupported source: the vLLM router exports no router processing gauge " +
+		"for a prefill/decode deployment"
+)
+
+// modelDeploymentMissingIsPartial reports whether a required source is missing. Two listed
+// entries are not: a failure or error counter that a healthy Pod has had no reason to export
+// yet, and a source the router is known not to provide for this deployment's shape. Both stay in
+// missing[] so no value is fabricated, but neither says a readable source failed to contribute.
+func modelDeploymentMissingIsPartial(missing []worker.ModelDeploymentMetricMissing) bool {
+	return slices.ContainsFunc(missing, func(m worker.ModelDeploymentMetricMissing) bool {
+		return m.Reason != modelDeploymentLabeledCounterUnexported && m.Reason != modelDeploymentVLLMRouterPDNoProcessing
+	})
+}
+
 type modelDeploymentWindowDefinition struct {
 	name, source, area, unit string
 	histogram                bool
+	// pairedWith names the counter that vouches for a labeled failure or error counter. A labeled
+	// counter exports nothing until its first increment, so one absent while its pair was read in
+	// the same scrape is a Pod that has not failed yet, not an unreadable source. Only the entries
+	// listed with a pair get this reading; any other absent counter is still a missing source.
+	pairedWith string
 }
 
 func modelDeploymentWindowDefinitions(md *workercore.ModelDeployment, router bool) []modelDeploymentWindowDefinition {
 	if router {
 		switch md.Spec.Router.Name {
 		case "llm-d-router":
+			// The router's error counter also counts requests its request counter never records,
+			// such as a bad request that names no model, so the error counter is named apart
+			// to keep the two out of an error fraction.
 			return []modelDeploymentWindowDefinition{
-				{"ttft", "llm_d_epp_request_ttft_seconds", "latency", "seconds", true},
-				{"tpot", "llm_d_epp_request_streaming_tpot_seconds", "latency", "seconds", true},
-				{"requests", "llm_d_epp_request_total", "traffic", "requests/second", false},
-				{"errors", "llm_d_epp_request_error_total", "traffic", "errors/second", false},
+				{"ttft", "llm_d_epp_request_ttft_seconds", "latency", "seconds", true, ""},
+				{"tpot", "llm_d_epp_request_streaming_tpot_seconds", "latency", "seconds", true, ""},
+				{"requests", "llm_d_epp_request_total", "traffic", "requests/second", false, ""},
+				{"request-errors", "llm_d_epp_request_error_total", "traffic", "errors/second", false, "requests"},
 			}
 		case "vllm-router":
+			// The router's prefill/decode mode records only its pd_* series. Its error counter
+			// is also incremented on refusals that never reach the request counter, so the two
+			// share no denominator and are named apart to keep them out of an error fraction.
+			if isModelDeploymentPD(md) {
+				return []modelDeploymentWindowDefinition{
+					{"pd-requests", "vllm_router_pd_requests_total", "traffic", "requests/second", false, ""},
+					{"pd-errors", "vllm_router_pd_errors_total", "traffic", "errors/second", false, "pd-requests"},
+				}
+			}
 			return []modelDeploymentWindowDefinition{
-				{"successful-requests", "vllm_router_requests_total", "traffic", "requests/second", false},
-				{"errors", "vllm_router_request_errors_total", "traffic", "errors/second", false},
-				{"retries-exhausted", "vllm_router_retries_exhausted_total", "traffic", "events/second", false},
+				{"successful-requests", "vllm_router_requests_total", "traffic", "requests/second", false, ""},
+				{"errors", "vllm_router_request_errors_total", "traffic", "errors/second", false, "successful-requests"},
+				{"retries-exhausted", "vllm_router_retries_exhausted_total", "traffic", "events/second", false, ""},
 			}
 		case "sglang-gateway":
 			return []modelDeploymentWindowDefinition{
-				{"requests", "smg_router_requests_total", "traffic", "requests/second", false},
-				{"errors", "smg_router_request_errors_total", "traffic", "errors/second", false},
-				{"http-5xx-responses", "smg_http_responses_total", "traffic", "responses/second", false},
+				{"requests", "smg_router_requests_total", "traffic", "requests/second", false, ""},
+				{"errors", "smg_router_request_errors_total", "traffic", "errors/second", false, "requests"},
+				{"http-5xx-responses", "smg_http_responses_total", "traffic", "responses/second", false, ""},
 			}
 		}
 	}
 	if md.Spec.Engine.Name == "vllm" {
 		return []modelDeploymentWindowDefinition{
-			{"ttft", "vllm:time_to_first_token_seconds", "latency", "seconds", true},
-			{"tpot", "vllm:request_time_per_output_token_seconds", "latency", "seconds", true},
-			{"itl", "vllm:inter_token_latency_seconds", "latency", "seconds", true},
+			{"ttft", "vllm:time_to_first_token_seconds", "latency", "seconds", true, ""},
+			{"tpot", "vllm:request_time_per_output_token_seconds", "latency", "seconds", true, ""},
+			{"itl", "vllm:inter_token_latency_seconds", "latency", "seconds", true, ""},
 		}
 	}
 	definitions := []modelDeploymentWindowDefinition{
-		{"ttft", "sglang:time_to_first_token_seconds", "latency", "seconds", true},
-		{"itl", "sglang:inter_token_latency_seconds", "latency", "seconds", true},
+		{"ttft", "sglang:time_to_first_token_seconds", "latency", "seconds", true, ""},
+		{"itl", "sglang:inter_token_latency_seconds", "latency", "seconds", true, ""},
 	}
 	if isModelDeploymentPD(md) {
 		definitions = append(definitions,
-			modelDeploymentWindowDefinition{"transfer-latency", "sglang:kv_transfer_latency_ms", "transfer", "milliseconds", true},
-			modelDeploymentWindowDefinition{"transfer-speed", "sglang:kv_transfer_speed_gb_s", "transfer", "GB/second", true},
-			modelDeploymentWindowDefinition{"transfer-size", "sglang:kv_transfer_total_mb", "transfer", "MB", true},
-			modelDeploymentWindowDefinition{"transfer-failures", "sglang:num_transfer_failed_reqs_total", "transfer", "errors/second", false},
+			modelDeploymentWindowDefinition{"transfer-latency", "sglang:kv_transfer_latency_ms", "transfer", "milliseconds", true, ""},
+			modelDeploymentWindowDefinition{"transfer-speed", "sglang:kv_transfer_speed_gb_s", "transfer", "GB/second", true, ""},
+			modelDeploymentWindowDefinition{"transfer-size", "sglang:kv_transfer_total_mb", "transfer", "MB", true, ""},
+			modelDeploymentWindowDefinition{"transfer-failures", "sglang:num_transfer_failed_reqs_total", "transfer", "errors/second", false, "transfer-size"},
 		)
 	}
 	return definitions
@@ -536,13 +584,29 @@ func (h *ModelDeploymentMetricsHandler) mergeWindowMetrics(
 	sources := map[string]string{}
 	for _, definition := range modelDeploymentWindowDefinitions(md, read.router) {
 		sources[definition.name] = definition.source
-		if definition.area == "transfer" && modelDeploymentPodRoleKind(md, &read.pod) != workercore.ModelDeploymentRoleKindDecode {
+		// SGLang observes a KV transfer on the half that sends it, the prefill half.
+		if definition.area == "transfer" && modelDeploymentPodRoleKind(md, &read.pod) != workercore.ModelDeploymentRoleKindPrefill {
+			continue
+		}
+		// The same half hands the first token to decode, which is where SGLang records TTFT.
+		if definition.name == "ttft" && md.Spec.Engine.Name == "sglang" && isModelDeploymentPD(md) &&
+			modelDeploymentPodRoleKind(md, &read.pod) == workercore.ModelDeploymentRoleKindPrefill {
+			continue
+		}
+		// The prefill half of a pair answers with the first token alone, so it never observes
+		// a gap between two tokens; expecting one would mark every paired snapshot partial.
+		if definition.name == "itl" && isModelDeploymentPD(md) &&
+			modelDeploymentPodRoleKind(md, &read.pod) == workercore.ModelDeploymentRoleKindPrefill {
 			continue
 		}
 		current, ok := read.value.windows[definition.name]
 		if !ok {
+			reason := "metric is absent"
+			if _, seen := read.value.windows[definition.pairedWith]; definition.pairedWith != "" && seen {
+				reason = modelDeploymentLabeledCounterUnexported
+			}
 			result.Missing = append(result.Missing, worker.ModelDeploymentMetricMissing{
-				Pod: read.pod.Name, Source: definition.source, Reason: "metric is absent",
+				Pod: read.pod.Name, Source: definition.source, Reason: reason,
 			})
 			continue
 		}

@@ -37,9 +37,9 @@ sample timestamps to the selected Prometheus series.
 | Area | Response | Source and scope | Unit |
 |---|---|---|---|
 | processing | `processing[].name: running` | vLLM `num_requests_running` or SGLang `num_running_reqs`, summed by engine role over readable Pods | requests |
-| processing | `router-running` | llm-d `request_running`, vLLM router `running_requests`, or SGLang gateway `worker_requests_active` | requests |
+| processing | `router-running` | llm-d `request_running`, vLLM router `running_requests` (not in its P/D mode), or SGLang gateway `worker_requests_active` | requests |
 | processing | `router-backends` | llm-d `ready_endpoints` or SGLang gateway `worker_pool_size` | backends |
-| processing | `router-reported-workers` | vLLM router `active_workers`; this count alone does not prove a worker is reachable or ready | workers |
+| processing | `router-reported-workers` | vLLM router `active_workers`, not in its P/D mode; this count alone does not prove a worker is reachable or ready | workers |
 | queueing | `queueing[].name: waiting` | vLLM `num_requests_waiting` or SGLang `num_queue_reqs`, summed by engine role over readable Pods | requests |
 | queueing | `decode-transfer-waiting` | SGLang P/D decode transfer queue | requests |
 
@@ -71,20 +71,30 @@ the vLLM router does not supply those series in the pinned version. Router measu
 more of the request path than engine measurements; their scopes stay separate.
 
 `traffic[]` reports router requests per second, router-source errors per second, and their error
-fraction when the counters have compatible windows. For the SGLang gateway it also reports
-`http-5xx-responses` per second from `smg_http_responses_total`.
+fraction when the counters share a sampling window and a denominator. For the SGLang gateway it
+also reports `http-5xx-responses` per second from `smg_http_responses_total`.
 
 That counter covers gateway HTTP responses across paths, including a `503 no_available_workers`
 response that its router error counter does not record. Its labels do not identify the routed
 request endpoint, so the API keeps this rate separate from the routed-request error fraction.
+
+For the llm-d router, `requests` comes from `llm_d_epp_request_total` and `request-errors` from
+`llm_d_epp_request_error_total`. That error counter also counts requests the request counter never
+records, such as a bad request that names no model, so this router has no `error-ratio` entry.
 
 For the vLLM router, `successful-requests` counts only completed successes. `errors` is its own
 router error counter and misses some upstream failures. `retries-exhausted` records exhausted
 attempts, including a failure on the first attempt. These counters do not supply a compatible
 all-request denominator, so this router has no `error-ratio` entry.
 
-`transfer[]` reports SGLang P/D decode KV transfer latency, speed, size and failures per second
-when emitted. vLLM connector metrics depend on the selected connector, so this API does not
+Behind a prefill/decode pair the vLLM router runs its P/D mode, which records only its `pd_*`
+series: `pd-requests` from `vllm_router_pd_requests_total` and `pd-errors` from
+`vllm_router_pd_errors_total`. That error counter also counts refusals that never reach the request
+counter, so there is no `error-ratio`. The mode exports no running-request or worker gauge, so
+`missing[]` names both as unsupported sources; the engine processing gauges are unaffected.
+
+`transfer[]` reports SGLang P/D KV transfer latency, speed, size and failures per second when
+emitted, read from the prefill half, which sends the blocks and records them. vLLM connector metrics depend on the selected connector, so this API does not
 promise a common transfer measurement for vLLM P/D.
 
 Each entry names its Pod, source, scope, unit, value, sample count, window duration and read time.
@@ -95,7 +105,11 @@ native Pod histograms in Prometheus for percentiles.
 
 vLLM's request-level TPOT includes zero-valued
 observations for requests with at most one output token, while ITL measures gaps between streamed
-outputs. Compare like sources and roles.
+outputs. Compare like sources and roles. The prefill role of a prefill/decode pair answers with its
+first token alone, so ITL is not read from it and its absence is not reported in `missing[]`.
+
+In an SGLang pair TTFT is read from the decode half, which records it, and cache hits from the
+prefill half alone: the decode half never prefills, so its token counters hold no ratio.
 
 ## Missing and partial samples
 
@@ -104,6 +118,12 @@ the Pod or source and the reason: an absent metric, an unreadable endpoint, miss
 first counter sample, a reset, incompatible request and error windows, or a window with no queries.
 A successful Pod remains in the result when another fails. If no owned Pod can be read, the
 subresource returns Service Unavailable.
+
+Two kinds of `missing[]` entry leave `partial` unset. A router's error counter and SGLang's
+transfer failure counter are labeled counters that export nothing before their first increment. One
+absent while the same scrape read its pair (the router's request counter, the transfer size) is
+listed with that reason and yields no fraction; it is not reported as zero. The other is a source
+the router does not provide for the deployment's shape, described above.
 
 A request reads at most 64 owned Pods, with 32 concurrent fetches, a two-second limit per fetch,
 an eight-second whole-request limit and a 1 MiB response cap per Pod. Two rounds of fetches fit in

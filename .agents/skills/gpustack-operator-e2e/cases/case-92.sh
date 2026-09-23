@@ -20,7 +20,7 @@
 # Expected:    Both halves render mooncake_tcp and log the TCP-only selection; the decode half runs
 #              retraction backup cpu_tensor and no hierarchical cache, the prefill half runs the
 #              hierarchical cache; neither logs a host-memory refusal; the request returns content;
-#              the store master holds allocated bytes or counted a put; restart counts stay fixed.
+#              the store master's batch-put item count increased; restart counts stay fixed.
 # Cleanup:     A trap removes the temporary probe Pod on pass and failure.
 set -uo pipefail
 
@@ -48,7 +48,10 @@ if jq -e 'any(.spec.roles[]; any(.env[]?; .name == "MC_FORCE_TCP") or
   echo "a role declares the pin or a cache switch itself, so the Pod cannot show what the operator rendered" >&2
   exit 2
 fi
-pool="$(kubectl get kvcachepool "$(jq -r '.spec.kvCache.poolRef.name' <<<"$md_json")" -o json)" || exit 2
+# poolRef names the namespace's KVCachePoolBinding; the cluster-scoped pool is behind it.
+pool_name="$(kubectl -n "$NS" get kvcachepoolbinding "$(jq -r '.spec.kvCache.poolRef.name' <<<"$md_json")" \
+  -o jsonpath='{.spec.poolRef.name}')" || exit 2
+pool="$(kubectl get kvcachepool "$pool_name" -o json)" || exit 2
 for backend in $(jq -r '.spec.backends[]' <<<"$pool"); do
   store_image="$(kubectl get kvcachebackend "$backend" -o jsonpath='{.spec.image}')" || exit 2
   [[ "$store_image" == *:0.3.12* ]] ||
@@ -97,7 +100,7 @@ read_metric() {
       substr($1, length(name) + 1, 1) == "{") { total += $2; found = 1 }
       END { if (!found) exit 1; printf "%.0f\n", total }'
 }
-put_before="$(read_metric "$store_url" master_put_end_requests_total || echo 0)"
+put_before="$(read_metric "$store_url" master_batch_put_end_items_total || echo 0)"
 payload="$(jq -nc --arg model "$MODEL" '{model:$model,messages:[{role:"user",content:
   "Explain how a Kubernetes controller reconciles a desired state."}],max_tokens:64}')"
 response="$(kubectl -n "$NS" exec "$PROBE" -- curl -sS --max-time 60 \
@@ -105,7 +108,7 @@ response="$(kubectl -n "$NS" exec "$PROBE" -- curl -sS --max-time 60 \
   --data-binary "$payload" "http://$MD-router.$NS.svc:8081/v1/chat/completions")"
 request_exit=$?
 content="$(sed '/^HTTP_STATUS:/d' <<<"$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null)"
-put_after="$(read_metric "$store_url" master_put_end_requests_total || echo 0)"
+put_after="$(read_metric "$store_url" master_batch_put_end_items_total || echo 0)"
 allocated="$(read_metric "$store_url" master_allocated_bytes || echo 0)"
 pods_after="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=$MD" -o json)" || exit 2
 after_restarts="$(jq '[.items[].status.containerStatuses[]?.restartCount] | add // 0' <<<"$pods_after")"
@@ -149,8 +152,10 @@ check "$([ "$(has_arg "$decode" --enable-hierarchical-cache)" = false ] && echo 
 check "$(has_arg "$prefill" --enable-hierarchical-cache)" "prefill renders the hierarchical cache"
 check "$([ "$request_exit" -eq 0 ] && [[ "$response" == *'HTTP_STATUS:200'* ]] && [ -n "$content" ] &&
   echo true || echo false)" "routed P/D request returned content"
-check "$(awk -v a="$allocated" -v b="$put_before" -v p="$put_after" \
-  'BEGIN { print (a > 0 || p > b) ? "true" : "false" }')" "the store master holds or counted a write"
+# The store writes through batch puts, so their item count is the one that grows with a request;
+# allocated bytes are printed beside it and stay positive from any earlier write.
+check "$(awk -v b="$put_before" -v p="$put_after" 'BEGIN { print (p > b) ? "true" : "false" }')" \
+  "the store master counted batch-put items ($put_before to $put_after, allocated $allocated bytes)"
 check "$([ "$after_restarts" -eq "$before_restarts" ] && echo true || echo false)" \
   "engine restart count unchanged"
 [ "$fails" -eq 0 ]
