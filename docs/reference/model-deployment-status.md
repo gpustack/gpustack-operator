@@ -202,20 +202,11 @@ or a log line.
 > socket never bound. In the same project another undeclared switch fails loudly instead. One
 > switch's failure mode cannot be inferred from another's.
 
-> **Two rows are not reachable yet.** The per-replica reader this condition takes is an interface the
-> reconciler is built with, and no concrete implementation is wired: the operator therefore reads
-> every replica as giving no account. So the first `CacheActive` row and the `CacheOperationsFailing`
-> row below describe the contract rather than current behaviour — today `True` is reached only
-> through the domain-holds-data row, and a serving deployment whose every store operation fails reads
-> as `Unknown`/`NoObservationAvailable`. The rows are documented rather than removed because the
-> condition's semantics are what a consumer codes against, and they are marked rather than left
-> implicit because a table a reader trusts must not describe a state the operator cannot produce.
-
 | Value | Reason | Meaning |
 |---|---|---|
-| `True` | `CacheActive` | *(not reachable yet)* a ready replica reports succeeding store operations |
+| `True` | `CacheActive` | a ready replica reports succeeding store operations |
 | `True` | `CacheActive` | no replica gave an account, and the reuse domain holds data — this attributes to the domain, which is shared by every deployment on its Binding |
-| `False` | `CacheOperationsFailing` | *(not reachable yet)* a ready replica reports store operations of which **none** succeeded; the engine is serving without the cache |
+| `False` | `CacheOperationsFailing` | a ready replica reports store operations of which **none** succeeded; the engine is serving without the cache |
 | `Unknown` | `Unmanaged` | a role took over its command line, so the operator rendered no cache client |
 | `Unknown` | `NoReplicaReady` | no replica is ready, so no engine has an account to give |
 | `Unknown` | `NoObservationAvailable` | ready replicas gave no account and the domain reports nothing held |

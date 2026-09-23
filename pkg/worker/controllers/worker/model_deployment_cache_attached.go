@@ -67,6 +67,14 @@ const (
 // rests on: the reuse domain is shared by every deployment on one Binding by design, so a
 // domain-level figure cannot attribute — with a healthy deployment and a broken one on one Binding,
 // the healthy one's writes would report the broken one as attached.
+//
+// TODO: nothing in production assigns a scraper to the reconciler, so every ready replica reads as
+// giving no account and the two verdicts that need one — CacheActive from a succeeding replica, and
+// CacheOperationsFailing — are UNREACHABLE. A serving deployment whose every store operation fails
+// therefore reports Unknown. The tests pass because they inject a fake, so reading this file alone
+// suggests the path runs. Wiring a real one belongs with the per-Pod scrape path that metrics
+// aggregation has to build regardless; a second path built only for this condition would duplicate
+// it.
 type ModelDeploymentCacheScraper interface {
 	// ScrapeCache reads one replica's account.
 	//
