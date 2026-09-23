@@ -385,11 +385,17 @@ func TestLeaderWorkload_Probes(t *testing.T) {
 			"master that is merely slow to activate is not")
 }
 
-// TestLeaderWorkload_PodIdentityEnv pins that the argv's $(VAR) references resolve. T4
-// renders -pod_name=$(KUBERNETES_POD_NAME); without the matching downward-API entry here the flag
-// reaches the process as the literal string, and the master would take that for a pod name.
+// TestLeaderWorkload_PodIdentityEnv pins that the argv's $(VAR) references resolve. An electing
+// backend renders -pod_name=$(KUBERNETES_POD_NAME); without the matching downward-API entry here the
+// flag reaches the process as the literal string, and the master would take that for a pod name.
+// Without an election neither the flag nor the variable is rendered.
 func TestLeaderWorkload_PodIdentityEnv(t *testing.T) {
-	container := leaderContainer(t, testBackend(), "mooncake:v0.3.13")
+	for _, e := range leaderContainer(t, testBackend(), "mooncake:v0.3.13").Env {
+		assert.NotContains(t, []string{LeaderPodNameEnv, LeaderPodNamespaceEnv}, e.Name,
+			"a variable no flag reads is dead weight in the manifest")
+	}
+
+	container := leaderContainer(t, haBackend(), "mooncake:v0.3.13")
 
 	byName := make(map[string]core.EnvVar, len(container.Env))
 	for _, env := range container.Env {
@@ -639,9 +645,9 @@ func TestLeaderWorkload_ExtraEnv(t *testing.T) {
 // refused for a collision that cannot happen.
 //
 // The union is taken over several fixtures on purpose. No single backend renders all of them: the
-// Pod IP is emitted only under high availability, and the snapshot path only when a snapshot is
-// declared — which is also why both are reserved unconditionally, so the field that turns their
-// rendering on can be edited after the object exists without re-opening the name.
+// Pod's identity and IP are emitted only under high availability, and the snapshot path only when a
+// snapshot is declared — which is also why all of them are reserved unconditionally, so the field
+// that turns their rendering on can be edited after the object exists without re-opening the name.
 func TestLeaderDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 	fixtures := []struct {
 		name string

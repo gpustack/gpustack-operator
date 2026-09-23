@@ -19,8 +19,8 @@ const (
 	LeaderMetricsPort = 9003
 
 	// LeaderPodNameEnv and LeaderPodNamespaceEnv are the environment variables the rendered argv
-	// refers to. The workload that runs this argv has to define both from the downward API, which
-	// is what makes the reference resolve.
+	// refers to under high availability. The workload that runs this argv has to define both from
+	// the downward API, which is what makes the reference resolve.
 	//
 	// They carry this repository's own names rather than the bare POD_NAME / POD_NAMESPACE the
 	// flag documents as its default source. Nothing is lost by that: the flags are rendered
@@ -28,8 +28,8 @@ const (
 	// component here already spells them this way.
 	LeaderPodNameEnv      = "KUBERNETES_POD_NAME"
 	LeaderPodNamespaceEnv = "KUBERNETES_POD_NAMESPACE"
-	// LeaderPodIPEnv is the third, and it is defined only under high availability because only the
-	// election reads it. See the -rpc_address flag for what it decides.
+	// LeaderPodIPEnv is the third, and like the other two it is defined only under high availability
+	// because only the election reads it. See the -rpc_address flag for what it decides.
 	LeaderPodIPEnv = "KUBERNETES_POD_IP"
 
 	// LeaderKVLeaseTTL is how long a cached object is protected from eviction, rendered in place of
@@ -204,9 +204,19 @@ func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 		flags = append(flags, "-enable_offload=true", "-offload_on_evict=true")
 	}
 
-	flags = append(flags,
-		fmt.Sprintf("-pod_name=$(%s)", LeaderPodNameEnv),
-		fmt.Sprintf("-pod_namespace=$(%s)", LeaderPodNamespaceEnv))
+	// The Pod's own identity, rendered only when an election runs, because the election is the only
+	// reader: the artifact uses it to label the winning Pod as the leader, and only under the
+	// Kubernetes Lease backend. It sits here rather than in the election group so that the argv of an
+	// electing backend is unchanged from when it was rendered unconditionally.
+	//
+	// Unconditional was not free. The artifact accepts both flags only from 0.3.12, and an unknown
+	// flag is fatal at startup, so every older image exited before serving -- including the ones a
+	// single leader otherwise runs without complaint.
+	if leaderNeedsAPIAccess(leader) {
+		flags = append(flags,
+			fmt.Sprintf("-pod_name=$(%s)", LeaderPodNameEnv),
+			fmt.Sprintf("-pod_namespace=$(%s)", LeaderPodNamespaceEnv))
+	}
 
 	// The escape hatch goes last and in the order written, so two renders of one spec are
 	// byte-identical and a passthrough can override nothing the lines above DERIVED from a field --

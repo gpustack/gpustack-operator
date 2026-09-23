@@ -35,8 +35,6 @@ func TestRenderLeaderFlags(t *testing.T) {
 				"-metrics_port=9003",
 				"-default_kv_lease_ttl=5m",
 				"-allocation_strategy=free_ratio_first",
-				"-pod_name=$(KUBERNETES_POD_NAME)",
-				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
 			},
 		},
 		{
@@ -49,8 +47,6 @@ func TestRenderLeaderFlags(t *testing.T) {
 				"-metrics_port=9003",
 				"-default_kv_lease_ttl=5m",
 				"-allocation_strategy=random",
-				"-pod_name=$(KUBERNETES_POD_NAME)",
-				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
 			},
 		},
 		{
@@ -60,8 +56,6 @@ func TestRenderLeaderFlags(t *testing.T) {
 				"-rpc_port=50051",
 				"-metrics_port=9003",
 				"-default_kv_lease_ttl=5m",
-				"-pod_name=$(KUBERNETES_POD_NAME)",
-				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
 			},
 		},
 		{
@@ -82,8 +76,6 @@ func TestRenderLeaderFlags(t *testing.T) {
 				"-allocation_strategy=free_ratio_first",
 				"-enable_multi_tenants=true",
 				"-tenant_quota_connector_uri=/var/lib/mooncake/tenant-quota-policy.yaml",
-				"-pod_name=$(KUBERNETES_POD_NAME)",
-				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
 			},
 		},
 		{
@@ -100,8 +92,6 @@ func TestRenderLeaderFlags(t *testing.T) {
 				"-metrics_port=9003",
 				"-default_kv_lease_ttl=5m",
 				"-allocation_strategy=free_ratio_first",
-				"-pod_name=$(KUBERNETES_POD_NAME)",
-				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
 			},
 		},
 		{
@@ -125,8 +115,6 @@ func TestRenderLeaderFlags(t *testing.T) {
 				"-metrics_port=9003",
 				"-default_kv_lease_ttl=5m",
 				"-allocation_strategy=free_ratio_first",
-				"-pod_name=$(KUBERNETES_POD_NAME)",
-				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
 				"-offload_cap_ratio=0.5",
 				"-client_ttl=30",
 				"-promotion_on_hit=true",
@@ -146,8 +134,6 @@ func TestRenderLeaderFlags(t *testing.T) {
 				"-metrics_port=9003",
 				"-default_kv_lease_ttl=5m",
 				"-allocation_strategy=free_ratio_first",
-				"-pod_name=$(KUBERNETES_POD_NAME)",
-				"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
 				"-client_verbose_logging",
 			},
 		},
@@ -226,6 +212,52 @@ func TestRenderLeaderFlags_HighAvailability(t *testing.T) {
 		"-pod_name=$(KUBERNETES_POD_NAME)",
 		"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
 	}, RenderLeaderFlags(kvcb))
+}
+
+// TestRenderLeaderFlags_PodIdentityOnlyUnderElection pins that -pod_name and -pod_namespace appear
+// exactly where an election runs, and nowhere else.
+//
+// The election is their only reader: the artifact labels the winning Pod with them under the Lease
+// backend. Everywhere else they are not merely unused but fatal on an older image -- the artifact
+// accepts them only from 0.3.12, and an unknown flag exits the master at startup -- so a single
+// leader on 0.3.10 or 0.3.11 never served at all while they were unconditional.
+func TestRenderLeaderFlags_PodIdentityOnlyUnderElection(t *testing.T) {
+	identity := []string{
+		"-pod_name=$(KUBERNETES_POD_NAME)",
+		"-pod_namespace=$(KUBERNETES_POD_NAMESPACE)",
+	}
+
+	cases := []struct {
+		name string
+		kvcb *workercore.KVCacheBackend
+		want bool
+	}{
+		{"a single leader", testBackend(), false},
+		{
+			"highAvailability at one replica, which elects nothing",
+			leaderBackend(workercore.KVCacheBackendLeader{
+				Replicas:         ptr.To[int32](1),
+				HighAvailability: &workercore.KVCacheBackendLeaderHighAvailability{},
+			}),
+			false,
+		},
+		{"an electing backend", haBackend(), true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			flags := RenderLeaderFlags(c.kvcb)
+			for _, flag := range identity {
+				if c.want {
+					assert.Contains(t, flags, flag, "the election labels its winner with it")
+				} else {
+					assert.NotContains(t, flags, flag,
+						"nothing reads it without an election, and a master older than 0.3.12 "+
+							"exits on it")
+				}
+			}
+		})
+	}
 }
 
 // TestRenderLeaderFlags_AdvertisedAddressIsPerReplica pins that the address the election campaigns

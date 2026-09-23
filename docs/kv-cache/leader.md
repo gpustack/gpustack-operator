@@ -144,7 +144,8 @@ availability is a compile-time switch and every option ships **off**:
 | member | answers `Invalid HA backend entry`, exits, CrashLoopBackOffs |
 
 Use an image built from [`pack/mirrored-mooncake`](../../pack/mirrored-mooncake/Dockerfile) for
-`spec.image` **and for every `members[].image`**.
+`spec.image` **and for every `members[].image`**, on Mooncake 0.3.12 or later: an electing leader is
+also rendered `-pod_name` and `-pod_namespace` to label the winner, and a 0.3.11 master exits on both.
 
 A lease-less image is not refused outright: at one replica the election flags are never rendered, so
 such an image runs a single-leader backend even with `highAvailability` set — the flags arrive only

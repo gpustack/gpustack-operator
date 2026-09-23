@@ -270,8 +270,8 @@ evidence for it** — the first two rows are one vLLM version and different line
 
 Two boundaries, recorded so nobody rediscovers them: upstream has **no 0.3.12.post2** — the 0.3.12
 line ends at 0.3.12.post1 — and nothing older than 0.3.10 is built or exercised by this project.
-High availability carries its own per-version rule — the k8s-lease backend exists only from
-0.3.11 — see [High availability](leader.md#high-availability).
+High availability carries its own per-version rule — it needs a master from 0.3.12 on — see
+[High availability](leader.md#high-availability).
 
 ## The metadata plane
 

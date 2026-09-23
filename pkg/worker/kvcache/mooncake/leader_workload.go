@@ -252,36 +252,37 @@ func LeaderSnapshot(
 // A variable defined here that neither the argv nor the process reads would be dead weight; a flag
 // referring to one not defined here reaches the process as the literal "$(NAME)".
 //
-// The Pod IP is the one that comes and goes, because -rpc_address is rendered only under high
-// availability -- see the election group in leader_flags.go for what that address decides.
+// The Pod's name, namespace and IP come and go together, because the flags that refer to them are
+// rendered only under high availability -- see the election group in leader_flags.go for what the
+// address decides, and the pod identity flags there for why the other two are not unconditional.
 //
 // The snapshot path is the exception to the first sentence and the reason it is worded that way: no
 // flag names it, the store's local object store reads the variable directly, and there is no flag
 // that could name it. Its value is where the claim is mounted, and rendering one without the other
 // is a master that refuses to start or a standby reading an empty directory.
 func leaderEnv(kvcb *workercore.KVCacheBackend) []core.EnvVar {
-	env := []core.EnvVar{
-		{
-			Name: LeaderPodNameEnv,
-			ValueFrom: &core.EnvVarSource{
-				FieldRef: &core.ObjectFieldSelector{FieldPath: "metadata.name"},
-			},
-		},
-		{
-			Name: LeaderPodNamespaceEnv,
-			ValueFrom: &core.EnvVarSource{
-				FieldRef: &core.ObjectFieldSelector{FieldPath: "metadata.namespace"},
-			},
-		},
-	}
+	var env []core.EnvVar
 
 	if leaderNeedsAPIAccess(kvcb.Spec.Connection.Managed.Leader) {
-		env = append(env, core.EnvVar{
-			Name: LeaderPodIPEnv,
-			ValueFrom: &core.EnvVarSource{
-				FieldRef: &core.ObjectFieldSelector{FieldPath: "status.podIP"},
+		env = append(env,
+			core.EnvVar{
+				Name: LeaderPodNameEnv,
+				ValueFrom: &core.EnvVarSource{
+					FieldRef: &core.ObjectFieldSelector{FieldPath: "metadata.name"},
+				},
 			},
-		})
+			core.EnvVar{
+				Name: LeaderPodNamespaceEnv,
+				ValueFrom: &core.EnvVarSource{
+					FieldRef: &core.ObjectFieldSelector{FieldPath: "metadata.namespace"},
+				},
+			},
+			core.EnvVar{
+				Name: LeaderPodIPEnv,
+				ValueFrom: &core.EnvVarSource{
+					FieldRef: &core.ObjectFieldSelector{FieldPath: "status.podIP"},
+				},
+			})
 	}
 
 	if LeaderSnapshot(kvcb.Spec.Connection.Managed.Leader) != nil {
