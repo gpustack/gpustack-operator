@@ -36,6 +36,7 @@ func newManagedCPUNode(name string, cpu, memGi, stgGi int64) *core.Node {
 				systemname.ManagedLabelKey: "true",
 				core.LabelOSStable:         "linux",
 				core.LabelArchStable:       "amd64",
+				TopologyProfileLabel:       topologyProfile([]string{core.LabelHostname}),
 			},
 		},
 		Status: core.NodeStatus{
@@ -53,6 +54,7 @@ func newManagedCPUNode(name string, cpu, memGi, stgGi int64) *core.Node {
 	// The general .count label ConstructNodeCapacityLabels stamps; ExtractNodeFlavors
 	// reads the CPU flavor size from it, so the fixture must carry it.
 	nd.Labels[nodefeature.GeneralFeatureLabelPrefix+gKey+".count"] = itoa(cpu)
+	nd.Labels[nodefeature.NodeCPUOnlyLabelKey] = "true"
 	return nd
 }
 
@@ -71,6 +73,7 @@ func newManagedAccelNode(name string, count int64) *core.Node {
 // carries, which is what the preset lookup normalizes.
 func newManagedAccelNodeOf(name string, count int64, aKey, product string) *core.Node {
 	nd := newManagedCPUNode(name, 48, 192, 100)
+	delete(nd.Labels, nodefeature.NodeCPUOnlyLabelKey)
 	p := nodefeature.AcceleratableFeatureLabelPrefix + aKey
 	nd.Labels[nodefeature.NodeAcceleratableLabelKey] = "true"
 	nd.Labels[p] = "true"
@@ -87,6 +90,7 @@ func newManagedAccelNodeOf(name string, count int64, aKey, product string) *core
 // makes it exercise the sanitize-and-length-cap step a live node's product label goes through.
 func newDetectedAccelNode(name, manufacturer, product string, memoryMib uint64, count int) *core.Node {
 	nd := newManagedCPUNode(name, 48, 192, 100)
+	delete(nd.Labels, nodefeature.NodeCPUOnlyLabelKey)
 	nd.Labels[nodefeature.NodeAcceleratableLabelKey] = "true"
 	maps.Copy(nd.Labels, nodefeature.ConstructAcceleratableNodeLabels(device.DevicesGroupList{{
 		ID:           device.ConstructGroupID(manufacturer, product, memoryMib),
@@ -122,7 +126,7 @@ func reconcileNodeFlavor(t *testing.T, cli ctrlcli.Client, name string) {
 func cpuFlavorName(nd *core.Node) string {
 	for _, f := range nodefeature.ExtractNodeFlavors(nd) {
 		if !f.Acceleratable {
-			return f.Name
+			return topologyQualifiedFlavorName(f.Name, nd.Labels[TopologyProfileLabel])
 		}
 	}
 	return ""
@@ -132,7 +136,7 @@ func cpuFlavorName(nd *core.Node) string {
 func deviceFlavorName(nd *core.Node) string {
 	for _, f := range nodefeature.ExtractNodeFlavors(nd) {
 		if f.Acceleratable {
-			return f.Name
+			return topologyQualifiedFlavorName(f.Name, nd.Labels[TopologyProfileLabel])
 		}
 	}
 	return ""
@@ -177,10 +181,11 @@ func TestNodeFlavorReconciler_Reconcile(t *testing.T) {
 			name: "not found and unused is noop",
 		},
 		{
-			// An existing flavor that no node contributes to is DELETED (no drain).
+			// An existing flavor that no node contributes to is deleted. Kueue's
+			// resource-in-use finalizer preserves it while a queue still references it;
+			// NodeQueue then drops the terminating flavor from that queue.
 			name:       "deletes unused flavor",
 			withFlavor: true,
-			wantExists: false,
 		},
 	}
 
@@ -213,6 +218,27 @@ func TestNodeFlavorReconciler_Reconcile(t *testing.T) {
 	}
 }
 
+// TestNodeFlavorReconciler_DeletesReferencedUnusedFlavor pins the handoff to Kueue: deleting an
+// orphan does not remove a flavor that is still in a ClusterQueue immediately. Its finalizer keeps
+// it observable with a deletion timestamp so NodeQueue can drop that exact reference first.
+func TestNodeFlavorReconciler_DeletesReferencedUnusedFlavor(t *testing.T) {
+	name := cpuFlavorName(newManagedCPUNode("probe", 4, 16, 32))
+	rf := newNodesFlavor(name, "generic", 4, 4)
+	rf.Finalizers = []string{"kueue.x-k8s.io/resource-in-use"}
+	queue := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: "queue"}, Spec: kueue.ClusterQueueSpec{
+		ResourceGroups: []kueue.ResourceGroup{{Flavors: []kueue.FlavorQuotas{{
+			Name: kueue.ResourceFlavorReference(name),
+		}}}},
+	}}
+	cli := buildNodeFlavorClient(rf, queue)
+
+	reconcileNodeFlavor(t, cli, name)
+
+	got, err := getResourceFlavor(t, cli, name)
+	require.NoError(t, err, "Kueue's finalizer must keep the referenced flavor until the queue drops it")
+	assert.NotNil(t, got.DeletionTimestamp, "the orphan must be terminating, not eligible for a fresh queue")
+}
+
 // TestNodeFlavorReconciler_ActiveShape pins the full shape an active CPU flavor is
 // materialized with: schedule labels, pinned nodeLabels, a blanket toleration, and
 // the "nodes" notes.
@@ -242,6 +268,10 @@ func TestNodeFlavorReconciler_ActiveShape(t *testing.T) {
 	assert.Equal(t, "linux", rf.Spec.NodeLabels[core.LabelOSStable], "os pinned (full)")
 	assert.Equal(t, "amd64", rf.Spec.NodeLabels[core.LabelArchStable], "arch pinned (full)")
 	assert.Equal(t, "true", rf.Spec.NodeLabels[gKey], "feature key pinned")
+	profile := nd.Labels[TopologyProfileLabel]
+	assert.Equal(t, profile, rf.Spec.NodeLabels[TopologyProfileLabel], "topology profile pinned")
+	require.NotNil(t, rf.Spec.TopologyName)
+	assert.Equal(t, topologyName(profile), string(*rf.Spec.TopologyName))
 	assert.Equal(t, "4", rf.Spec.NodeLabels[gKey+_ResourceFlavorCountLabelSuffix], "count pinned in nodeLabels")
 	require.Len(t, rf.Spec.Tolerations, 1, "blanket toleration set")
 	assert.Equal(t, core.TolerationOpExists, rf.Spec.Tolerations[0].Operator, "tolerates any taint")
@@ -285,6 +315,10 @@ func TestNodeFlavorReconciler_ActiveShapeAccelerated(t *testing.T) {
 	// The paired CPU key's presence (the fixture node reports no cpu-model, so "generic"),
 	// so an aware (CPU-split) pool can select it.
 	assert.Equal(t, "true", rf.Labels[nodefeature.GeneralFeatureLabelPrefix+"generic"], "paired cpu key presence")
+	profile := nd.Labels[TopologyProfileLabel]
+	assert.Equal(t, profile, rf.Spec.NodeLabels[TopologyProfileLabel], "topology profile pinned")
+	require.NotNil(t, rf.Spec.TopologyName)
+	assert.Equal(t, topologyName(profile), string(*rf.Spec.TopologyName))
 
 	_, notes := systemmeta.DescribeResource(rf)
 	assert.Equal(t, "true", notes["acceleratable"], "acceleratable note")
@@ -298,6 +332,140 @@ func TestNodeFlavorReconciler_ActiveShapeAccelerated(t *testing.T) {
 	// With CPU-manufacturer awareness off (the unit binary's resolved default), an
 	// accelerated flavor does not record cpuDetail — the CPU is not a scheduling axis.
 	assert.NotContains(t, notes, "cpuDetail", "accel cpuDetail gated off when unaware")
+}
+
+func TestNodeFlavorReconcilerSplitsHardwareByTopologyProfile(t *testing.T) {
+	zoneNode := newManagedCPUNode("zone-node", 4, 16, 32)
+	zoneProfile := topologyProfile([]string{core.LabelTopologyZone, core.LabelHostname})
+	zoneNode.Labels[TopologyProfileLabel] = zoneProfile
+	hostNode := newManagedCPUNode("host-node", 4, 16, 32)
+	hostProfile := topologyProfile([]string{core.LabelHostname})
+	hostNode.Labels[TopologyProfileLabel] = hostProfile
+	base := nodefeature.ExtractNodeFlavors(zoneNode)[0].Name
+	zoneName := topologyQualifiedFlavorName(base, zoneProfile)
+	hostName := topologyQualifiedFlavorName(base, hostProfile)
+	cli := buildNodeFlavorClient(zoneNode, hostNode)
+
+	reconcileNodeFlavor(t, cli, zoneName)
+	reconcileNodeFlavor(t, cli, hostName)
+	reconcileNodeFlavor(t, cli, zoneName)
+	reconcileNodeFlavor(t, cli, hostName)
+
+	zoneFlavor, err := getResourceFlavor(t, cli, zoneName)
+	require.NoError(t, err)
+	hostFlavor, err := getResourceFlavor(t, cli, hostName)
+	require.NoError(t, err)
+	assert.Equal(t, zoneProfile, zoneFlavor.Spec.NodeLabels[TopologyProfileLabel])
+	assert.Equal(t, hostProfile, hostFlavor.Spec.NodeLabels[TopologyProfileLabel])
+	assert.NotEqual(t, zoneFlavor.Spec.NodeLabels[TopologyProfileLabel], hostFlavor.Spec.NodeLabels[TopologyProfileLabel])
+	assert.Equal(t, int64(4), parseResourceFlavorCapacity(zoneFlavor))
+	assert.Equal(t, int64(4), parseResourceFlavorCapacity(hostFlavor))
+}
+
+func TestNodeFlavorReconcilerMigratesReferencedProfileWithoutReplacingQueue(t *testing.T) {
+	node := newManagedCPUNode("node-a", 4, 16, 32)
+	base := nodefeature.ExtractNodeFlavors(node)[0].Name
+	oldProfile := node.Labels[TopologyProfileLabel]
+	oldName := topologyQualifiedFlavorName(base, oldProfile)
+	cli := buildNodeFlavorClient(node)
+	reconcileNodeFlavor(t, cli, oldName)
+	oldFlavor, err := getResourceFlavor(t, cli, oldName)
+	require.NoError(t, err)
+	oldFlavor.Finalizers = []string{"kueue.x-k8s.io/resource-in-use"}
+	require.NoError(t, cli.Update(context.Background(), oldFlavor))
+	queue := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: "queue"}, Spec: kueue.ClusterQueueSpec{
+		ResourceGroups: []kueue.ResourceGroup{{Flavors: []kueue.FlavorQuotas{{Name: kueue.ResourceFlavorReference(oldName)}}}},
+	}}
+	require.NoError(t, cli.Create(context.Background(), queue))
+	wantQueue := queue.DeepCopy()
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(node), node))
+	newProfile := topologyProfile([]string{core.LabelTopologyZone, core.LabelHostname})
+	node.Labels[TopologyProfileLabel] = newProfile
+	require.NoError(t, cli.Update(context.Background(), node))
+	newName := topologyQualifiedFlavorName(base, newProfile)
+
+	r := &NodeFlavorReconciler{Client: cli}
+	_, err = r.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: newName}})
+	require.NoError(t, err)
+	_, err = getResourceFlavor(t, cli, newName)
+	require.NoError(t, err, "the replacement profile flavor must exist before retiring its sibling")
+	oldFlavor, err = getResourceFlavor(t, cli, oldName)
+	require.NoError(t, err)
+	assert.NotNil(t, oldFlavor.DeletionTimestamp, "the unbacked sibling flavor must be terminating")
+	gotQueue := new(kueue.ClusterQueue)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(queue), gotQueue))
+	assert.Equal(t, wantQueue.Spec, gotQueue.Spec, "NodeFlavor must leave queue migration to NodeQueue")
+}
+
+func TestNodeFlavorRetiresUnreferencedGeneratedTopology(t *testing.T) {
+	profile := topologyProfile([]string{core.LabelTopologyZone, core.LabelHostname})
+	name := topologyName(profile)
+	flavorName := topologyQualifiedFlavorName("gpustack--generic-linux-amd64-4c", profile)
+	tests := []struct {
+		name         string
+		activeNode   bool
+		activeFlavor bool
+		managed      bool
+		wantDeleted  bool
+	}{
+		{name: "unreferenced managed topology", managed: true, wantDeleted: true},
+		{name: "node still uses profile", activeNode: true, managed: true},
+		{name: "another flavor still references topology", activeFlavor: true, managed: true},
+		{name: "foreign topology", wantDeleted: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			topology := &kueue.Topology{ObjectMeta: meta.ObjectMeta{Name: name}}
+			if tc.managed {
+				systemmeta.NoteResource(topology, topologyResourceType, nil)
+			}
+			objects := []ctrlcli.Object{topology}
+			if tc.activeNode {
+				objects = append(objects, &core.Node{ObjectMeta: meta.ObjectMeta{
+					Name: "node-a", Labels: map[string]string{TopologyProfileLabel: profile},
+				}})
+			}
+			if tc.activeFlavor {
+				ref := kueue.TopologyReference(name)
+				objects = append(objects, &kueue.ResourceFlavor{
+					ObjectMeta: meta.ObjectMeta{Name: "another-flavor"},
+					Spec:       kueue.ResourceFlavorSpec{TopologyName: &ref},
+				})
+			}
+			cli := buildNodeFlavorClient(objects...)
+			r := &NodeFlavorReconciler{Client: cli}
+			_, err := r.Reconcile(context.Background(), ctrlreconcile.Request{
+				NamespacedName: ctrlcli.ObjectKey{Name: flavorName},
+			})
+			require.NoError(t, err)
+			err = cli.Get(context.Background(), ctrlcli.ObjectKey{Name: name}, new(kueue.Topology))
+			if tc.wantDeleted {
+				assert.True(t, kerrors.IsNotFound(err))
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestNodeFlavorReconcilerDoesNotRewriteImmutableFlavor(t *testing.T) {
+	node := newManagedCPUNode("node-a", 4, 16, 32)
+	name := cpuFlavorName(node)
+	cli := buildNodeFlavorClient(node)
+	reconcileNodeFlavor(t, cli, name)
+	flavor, err := getResourceFlavor(t, cli, name)
+	require.NoError(t, err)
+	drifted := kueue.TopologyReference("foreign-topology")
+	flavor.Spec.TopologyName = &drifted
+	require.NoError(t, cli.Update(context.Background(), flavor))
+
+	r := &NodeFlavorReconciler{Client: cli}
+	_, err = r.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: name}})
+	require.ErrorContains(t, err, "immutable topology drift")
+	got, getErr := getResourceFlavor(t, cli, name)
+	require.NoError(t, getErr)
+	require.NotNil(t, got.Spec.TopologyName)
+	assert.Equal(t, drifted, *got.Spec.TopologyName)
 }
 
 // TestNodeFlavorReconciler_MixingDisabledExcludesAccelNode pins the
@@ -323,6 +491,44 @@ func TestNodeFlavorReconciler_MixingDisabledExcludesAccelNode(t *testing.T) {
 	reconcileNodeFlavor(t, cli, deviceFlavorName(nd))
 	_, err = getResourceFlavor(t, cli, deviceFlavorName(nd))
 	assert.NoError(t, err, "device flavor must still be created")
+}
+
+func TestNodeFlavorReconciler_RecreatesFlavorAfterMixingSelectorDrift(t *testing.T) {
+	node := newManagedCPUNode("node-a", 4, 16, 32)
+	name := cpuFlavorName(node)
+	cli := buildNodeFlavorClient(node)
+	reconcileNodeFlavor(t, cli, name)
+
+	flavor, err := getResourceFlavor(t, cli, name)
+	require.NoError(t, err)
+	delete(flavor.Spec.NodeLabels, nodefeature.NodeCPUOnlyLabelKey)
+	require.NoError(t, cli.Update(context.Background(), flavor))
+
+	r := &NodeFlavorReconciler{Client: cli}
+	_, err = r.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: name}})
+	require.NoError(t, err)
+	_, err = getResourceFlavor(t, cli, name)
+	assert.True(t, kerrors.IsNotFound(err), "stale immutable selector must be retired")
+
+	reconcileNodeFlavor(t, cli, name)
+	flavor, err = getResourceFlavor(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, "true", flavor.Spec.NodeLabels[nodefeature.NodeCPUOnlyLabelKey])
+}
+
+func TestNodeFlavorReconciler_KeepsFlavorWhileProfileIsMissing(t *testing.T) {
+	node := newManagedCPUNode("node-a", 4, 16, 32)
+	name := cpuFlavorName(node)
+	cli := buildNodeFlavorClient(node)
+	reconcileNodeFlavor(t, cli, name)
+
+	delete(node.Labels, TopologyProfileLabel)
+	require.NoError(t, cli.Update(context.Background(), node))
+	r := &NodeFlavorReconciler{Client: cli}
+	_, err := r.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: name}})
+	require.NoError(t, err)
+	_, err = getResourceFlavor(t, cli, name)
+	assert.NoError(t, err)
 }
 
 // TestNodeFlavorReconciler_AuthorsDerivedInstanceType pins that, with

@@ -42,11 +42,14 @@ note() { kubectl get resourceflavor "$1" -o jsonpath="{.metadata.annotations.not
 bounce_worker() { kubectl -n "$NS" rollout restart deploy/gpustack-operator-worker >/dev/null 2>&1;
   kubectl -n "$NS" rollout status deploy/gpustack-operator-worker --timeout=180s >/dev/null 2>&1; }
 
-# --- Skip gate: a real accelerated ResourceFlavor (device flavor gpustack--${gKey}--${aKey}-…-Nd). ---
-ARF=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | sed 's#.*/##' | grep -E '^gpustack--.+--.+-[0-9]+d$' | head -1)
+# --- Skip gate: a real accelerated ResourceFlavor, identified by its controller-owned annotation. ---
+ARF=$(kubectl get resourceflavors.kueue.x-k8s.io -o json 2>/dev/null | jq -r '
+  [.items[]
+   | select(.metadata.annotations["note.gpustack.ai/acceleratable"] == "true")
+   | .metadata.name] | sort | .[0] // ""')
 if [ -z "$ARF" ]; then
   echo "== CASE 19 — SKIPPED =="
-  echo "No accelerated ResourceFlavor (gpustack--\${gKey}--\${aKey}-…-Nd) — this case needs real accelerator"
+  echo "No ResourceFlavor marked acceleratable — this case needs real accelerator"
   echo "hardware. Run it on a GPU cluster to exercise the aware accelerated derive + real GPU deploy."
   exit 0
 fi
@@ -96,14 +99,14 @@ done
   && record PASS "aware accelerated type materializes" "${AWARE_IT} Active" \
   || record FAIL "aware accelerated type materializes" "${AWARE_IT} not Active — aware split derive did not converge"
 
-# 2. Its descriptors: split identity + correct GPU info + folded CPU detail.
-read -r sAG sGG sProd sMem sCores sHasCPU <<<"$(kubectl get instancetype "$AWARE_IT" -o json 2>/dev/null | python3 -c "
-import json,sys
-try: s=json.load(sys.stdin).get('spec',{})
-except Exception: s={}
-cpu=s.get('cpu') or {}
-print(s.get('acceleratorGroup',''), s.get('generalGroup',''), s.get('product',''), s.get('memory',''), s.get('cores',''), ('yes' if cpu else 'no'))
-")"
+# 2. Its identity and observed descriptors: split identity + correct GPU info + folded CPU detail.
+it_json="$(kubectl get instancetype "$AWARE_IT" -o json 2>/dev/null)"
+sAG="$(printf '%s' "$it_json" | jq -r '.spec.acceleratorGroup // ""')"
+sGG="$(printf '%s' "$it_json" | jq -r '.spec.generalGroup // ""')"
+sProd="$(printf '%s' "$it_json" | jq -r '.status.detail.product // ""')"
+sMem="$(printf '%s' "$it_json" | jq -r '.status.detail.memory // ""')"
+sCores="$(printf '%s' "$it_json" | jq -r '.status.detail.cores // ""')"
+sHasCPU="$(printf '%s' "$it_json" | jq -r 'if ((.status.detail.cpu // {}) | length) > 0 then "yes" else "no" end')"
 { [ "$sAG" = "$AKEY" ] && [ "$sGG" = "$GKEY" ]; } \
   && record PASS "aware type splits by CPU" "acceleratorGroup=${sAG} generalGroup=${sGG}" \
   || record FAIL "aware type splits by CPU" "acceleratorGroup='${sAG}' generalGroup='${sGG}', want ${AKEY}/${GKEY}"

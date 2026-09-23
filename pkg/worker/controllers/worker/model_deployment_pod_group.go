@@ -8,6 +8,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -204,40 +205,45 @@ func ModelDeploymentPodGroup(
 	// what changes the trade.
 	labels[modelDeploymentMemberIndexLabel] = strconvx.Itoa(member)
 
+	annotations := map[string]string{
+		// THE TOTAL IS THE REPLICA'S SIZE, AND A REPLICA COUNT CHANGE NEVER MOVES IT: the group
+		// is this replica and nobody else's, so adding or removing replicas adds or removes
+		// whole groups rather than editing the total any running member carries. That is what
+		// turns a resize into a trim rather than a rebuild, and it survives sizes above one
+		// only because the size itself is frozen at creation -- a mutable size would put this
+		// number back under two writers, which is the defect the per-replica split removed.
+		kueuepodconst.GroupTotalCountAnnotation: strconvx.Itoa(modelDeploymentRoleSize(role)),
+		// THE ROLE HASH IS LOAD-BEARING, NOT COSMETIC. Kueue reads this annotation verbatim when
+		// present and otherwise derives a digest of the Pod spec's SHAPE -- containers,
+		// nodeSelector, affinity, tolerations -- and an opaque digest names the PodSet after
+		// nothing an operator wrote. Per-role flavor assignment and per-role status both join a
+		// Workload's PodSets to the roles by this name, so a digest breaks the join while nothing
+		// errors. Writing the role's own name here makes the PodSet identity the role's identity
+		// by construction, which is also why that name is validated to Kueue's PodSetReference
+		// pattern and to uniqueness.
+		//
+		// IT STAYS THE ROLE'S NAME AND DOES NOT GAIN THE ordinal. This is what Kueue groups
+		// PodSets by and what status reads to attribute a Pod, so folding the ordinal in would
+		// give every replica its own PodSet identity and break the join the annotation exists
+		// to carry.
+		kueuepodconst.RoleHashAnnotation: role.Name,
+		// An inference deployment never finishes. Without this, Kueue applies BATCH semantics to
+		// it: a Pod reaching Succeeded is reported as reclaimable and its quota is handed back
+		// while the deployment is still meant to be serving.
+		//
+		// IT HAS A COST THE DEPARTURE PATHS PAY. Kueue reads a serving group as one that is
+		// never finished, so it never releases the finalizer it holds on the group's Pods; only
+		// the Workload being deleted does. deleteModelDeploymentGroupWorkload is what pays it,
+		// and removing this annotation without removing that call would leak Workloads.
+		kueuepodconst.GroupServingAnnotationKey: kueuepodconst.GroupServingAnnotationValue,
+	}
+	if role.Topology != nil && role.Topology.RequiredLevel != "" {
+		annotations[kueue.PodSetRequiredTopologyAnnotation] = role.Topology.RequiredLevel
+	}
+
 	return ModelDeploymentPodGroupMeta{
-		Labels: labels,
-		Annotations: map[string]string{
-			// THE TOTAL IS THE REPLICA'S SIZE, AND A REPLICA COUNT CHANGE NEVER MOVES IT: the group
-			// is this replica and nobody else's, so adding or removing replicas adds or removes
-			// whole groups rather than editing the total any running member carries. That is what
-			// turns a resize into a trim rather than a rebuild, and it survives sizes above one
-			// only because the size itself is frozen at creation -- a mutable size would put this
-			// number back under two writers, which is the defect the per-replica split removed.
-			kueuepodconst.GroupTotalCountAnnotation: strconvx.Itoa(modelDeploymentRoleSize(role)),
-			// THE ROLE HASH IS LOAD-BEARING, NOT COSMETIC. Kueue reads this annotation verbatim when
-			// present and otherwise derives a digest of the Pod spec's SHAPE -- containers,
-			// nodeSelector, affinity, tolerations -- and an opaque digest names the PodSet after
-			// nothing an operator wrote. Per-role flavor assignment and per-role status both join a
-			// Workload's PodSets to the roles by this name, so a digest breaks the join while nothing
-			// errors. Writing the role's own name here makes the PodSet identity the role's identity
-			// by construction, which is also why that name is validated to Kueue's PodSetReference
-			// pattern and to uniqueness.
-			//
-			// IT STAYS THE ROLE'S NAME AND DOES NOT GAIN THE ordinal. This is what Kueue groups
-			// PodSets by and what status reads to attribute a Pod, so folding the ordinal in would
-			// give every replica its own PodSet identity and break the join the annotation exists
-			// to carry.
-			kueuepodconst.RoleHashAnnotation: role.Name,
-			// An inference deployment never finishes. Without this, Kueue applies BATCH semantics to
-			// it: a Pod reaching Succeeded is reported as reclaimable and its quota is handed back
-			// while the deployment is still meant to be serving.
-			//
-			// IT HAS A COST THE DEPARTURE PATHS PAY. Kueue reads a serving group as one that is
-			// never finished, so it never releases the finalizer it holds on the group's Pods; only
-			// the Workload being deleted does. deleteModelDeploymentGroupWorkload is what pays it,
-			// and removing this annotation without removing that call would leak Workloads.
-			kueuepodconst.GroupServingAnnotationKey: kueuepodconst.GroupServingAnnotationValue,
-		},
+		Labels:      labels,
+		Annotations: annotations,
 	}
 }
 

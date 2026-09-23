@@ -461,6 +461,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 	generalPresence := func(manu, key string) map[string]string {
 		return map[string]string{
 			systemname.ManagedLabelKey:                 "true",
+			NodeCPUOnlyLabelKey:                        "true",
 			GeneralFeatureLabelPrefix + manu:           "true",
 			GeneralFeatureLabelPrefix + key:            "true",
 			GeneralFeatureLabelPrefix + key + ".count": "16",
@@ -515,7 +516,11 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			node: newNode(
 				mergeLabels(cpuModelLabels(), deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "2")),
 			),
-			expected: generalPresence("amd", "amd-25-1"),
+			expected: func() map[string]string {
+				labels := generalPresence("amd", "amd-25-1")
+				delete(labels, NodeCPUOnlyLabelKey)
+				return labels
+			}(),
 		},
 		{
 			// Existing managed=true on the node is preserved verbatim.
@@ -554,6 +559,14 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConstructNodeCapacityLabels_CPUOnlySelector(t *testing.T) {
+	node := &core.Node{ObjectMeta: meta.ObjectMeta{Labels: map[string]string{}}}
+	assert.Equal(t, "true", ConstructNodeCapacityLabels(node)[NodeCPUOnlyLabelKey])
+	node.Labels[NodeAcceleratableLabelKey] = "true"
+	_, found := ConstructNodeCapacityLabels(node)[NodeCPUOnlyLabelKey]
+	assert.False(t, found)
 }
 
 // TestConstructNodeCapacityLabels_ManualNodeManagement pins the node-management-manual

@@ -18,18 +18,20 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 
 1. [Architecture](architecture.md) — the overview, so the objects make sense.
 2. [Installation Modes](architecture/installation-modes.md) — what the chart owns, what the worker applies.
-3. [High Availability Operations](operation/high-availability.md) — the replica knob per component.
-4. [Settings & Environment Variables](settings.md) — online-adjustable settings and every `GPUSTACK_*`.
-5. [Vendor Prerequisites](vendor-prerequisites.md) — what to install per manufacturer, and which vendor
+3. [Topology-Aware Scheduling Operations](operation/topology-aware-scheduling.md) — select a topology
+   inventory, publish a hierarchy, and verify Kueue TAS.
+4. [High Availability Operations](operation/high-availability.md) — the replica knob per component.
+5. [Settings & Environment Variables](settings.md) — online-adjustable settings and every `GPUSTACK_*`.
+6. [Vendor Prerequisites](vendor-prerequisites.md) — what to install per manufacturer, and which vendor
    GPU Operator components to disable.
-6. [Preflight Operations](operation/preflight.md) — one container run that says what a node can
+7. [Preflight Operations](operation/preflight.md) — one container run that says what a node can
    detect, slice and manage, before anything is installed on it.
-7. [RDMA Operations](operation/rdma.md) — the kubelet topology policy to set before an accelerator
+8. [RDMA Operations](operation/rdma.md) — the kubelet topology policy to set before an accelerator
    and an RDMA adapter land together, and how to confirm the node is running it.
-8. [NVIDIA MIG Operations](operation/nvidia-mig.md), [T-Head MIG Operations](operation/thead-mig.md)
+9. [NVIDIA MIG Operations](operation/nvidia-mig.md), [T-Head MIG Operations](operation/thead-mig.md)
    and [Hygon MIG Operations](operation/hygon-mig.md) —
    the runbook for enabling and disabling partitioning on a node.
-9. Upgrading: [Migrating to Bundled Subcharts](migration/to-subcharts.md) · [Migrating from
+10. Upgrading: [Migrating to Bundled Subcharts](migration/to-subcharts.md) · [Migrating from
    v0.5.x](migration/from-v0.5.md) · [Migration Troubleshooting](migration/troubleshooting.md) when it
    goes wrong.
 
@@ -37,7 +39,8 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 
 1. [Architecture](architecture.md) → [Device Discovery](architecture/device-discovery.md) → [Network
    Topology](architecture/network-topology.md) → [Scheduling
-   Chain](architecture/scheduling-chain.md) → [Admission](architecture/admission.md).
+   Chain](architecture/scheduling-chain.md) → [Topology-Aware
+   Scheduling](architecture/topology-aware-scheduling.md) → [Admission](architecture/admission.md).
 2. [Internals](architecture/internals.md) — the invariants that break quietly if you miss them.
 3. [Development](development.md) — build, lint, test, code generation, vendored dependencies.
 4. The [`gpustack-operator-docs`](../.claude/skills/gpustack-operator-docs/SKILL.md) skill — where a doc
@@ -57,6 +60,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Device Discovery](architecture/device-discovery.md) | How NFD and the Device Manager turn hardware into labels and a per-accelerator ledger; what the allocator injects | contributors | ~20 min |
 | [Network Topology](architecture/network-topology.md) | The node's network interface inventory and its accelerators' scale-up fabric, how an RDMA link is verified, and which of those facts can reach a scheduling decision | contributors, operators | ~10 min |
 | [Scheduling Chain](architecture/scheduling-chain.md) | How capacity labels become ResourceFlavors, ClusterQueues, LocalQueues and InstanceTypes | contributors | ~9 min |
+| [Topology-Aware Scheduling](architecture/topology-aware-scheduling.md) | How Topograph or TopologySource inventory becomes profiles, Kueue Topologies, TAS queues and per-replica placement | operators, contributors | ~10 min |
 | [Admission](architecture/admission.md) | The five gates, the four-view status, which field answers "what can I still get" | contributors, operators | ~8 min |
 | [Installation Modes](architecture/installation-modes.md) | Chart mode vs image mode; which objects the worker must apply itself | operators, contributors | ~3 min |
 | [Internals](architecture/internals.md) | Startup ordering, the gateway mirror, the device-plugin registration loop, per-manufacturer packages, CGO bindings, the 63-char rule | contributors | ~5 min |
@@ -72,6 +76,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Vendor Prerequisites](vendor-prerequisites.md) | What to install per manufacturer before GPUStack, and which vendor GPU Operator components to keep or disable | operators | ~10 min |
 | [Development](development.md) | Build, lint, test, code generation, vendored subcharts and dependencies | contributors | ~6 min |
 | [High Availability Operations](operation/high-availability.md) | Which knob to raise per control-plane component, and the one topology that cannot be redundant | operators | ~4 min |
+| [Topology-Aware Scheduling Operations](operation/topology-aware-scheduling.md) | Enabling Topograph or publishing generic inventory, requesting a level, verifying TAS, and diagnosing Pending groups | operators, users | ~16 min |
 | [NVIDIA MIG Operations](operation/nvidia-mig.md) | Enabling/disabling MIG, reboot recovery, and a recorded three-configuration walkthrough | operators | ~21 min |
 | [T-Head MIG Operations](operation/thead-mig.md) | Enabling/disabling T-Head's own MIG-named partitioning, the busy-mode-change prerequisite, and reboot recovery | operators | ~10 min |
 | [Hygon MIG Operations](operation/hygon-mig.md) | The same runbook for Hygon, whose mode is node-wide and whose partitioned nodes serve nothing else | operators | ~10 min |

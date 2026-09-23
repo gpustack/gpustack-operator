@@ -48,3 +48,7 @@ dependencies:
     version: 0.43.7
     repository: ""
     condition: csi-driver-s3.enabled
+  - name: topograph
+    version: 1.0.0
+    repository: ""
+    condition: topograph.enabled

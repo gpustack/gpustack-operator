@@ -790,12 +790,15 @@ func TestPoolDevicesSelector(t *testing.T) {
 
 func TestParseNodeFlavorCount(t *testing.T) {
 	cases := map[string]int64{
-		"gpustack-generic-linux-amd64-16c":       16,
-		"gpustack-nvidia-a10g-linux-amd64-4d":    4,
-		"gpustack-amd-epyc-7763-linux-amd64-64c": 64,
-		"gpustack-generic-linux-amd64":           0,
-		"":                                       0,
-		"garbage":                                0,
+		"gpustack-generic-linux-amd64-16c":                       16,
+		"gpustack-nvidia-a10g-linux-amd64-4d":                    4,
+		"gpustack-amd-epyc-7763-linux-amd64-64c":                 64,
+		"gpustack-generic-linux-amd64-2c-p-profilehash":          2,
+		"gpustack-nvidia-a10g-linux-amd64-1d-p-profilehash":      1,
+		"gpustack-generic-linux-amd64-4c-fnv64-123456789012345c": 4,
+		"gpustack-generic-linux-amd64":                           0,
+		"":                                                       0,
+		"garbage":                                                0,
 	}
 	for name, want := range cases {
 		assert.Equalf(t, want, parseNodeFlavorCount(name), "name %q", name)
@@ -1427,16 +1430,18 @@ func TestInstanceTypeReconciler_SyncInactive(t *testing.T) {
 
 		startPolicy kueue.StopPolicy
 		inactive    bool
+		migrating   bool
 
 		wantPolicy   kueue.StopPolicy
 		wantInactive bool
 	}{
-		{"active stays active", kueue.None, false, kueue.None, false},
-		{"inactive holds the active queue", kueue.None, true, kueue.Hold, true},
-		{"held inactive is stable", kueue.Hold, true, kueue.Hold, true},
-		{"cleared inactive releases the hold", kueue.Hold, false, kueue.None, false},
-		{"draining inactive is not downgraded", kueue.HoldAndDrain, true, kueue.HoldAndDrain, true},
-		{"draining backfills inactive (drain wins)", kueue.HoldAndDrain, false, kueue.HoldAndDrain, true},
+		{"active stays active", kueue.None, false, false, kueue.None, false},
+		{"inactive holds the active queue", kueue.None, true, false, kueue.Hold, true},
+		{"held inactive is stable", kueue.Hold, true, false, kueue.Hold, true},
+		{"cleared inactive releases the hold", kueue.Hold, false, false, kueue.None, false},
+		{"draining inactive is not downgraded", kueue.HoldAndDrain, true, false, kueue.HoldAndDrain, true},
+		{"draining backfills inactive (drain wins)", kueue.HoldAndDrain, false, false, kueue.HoldAndDrain, true},
+		{"topology migration does not backfill inactive", kueue.HoldAndDrain, false, true, kueue.HoldAndDrain, false},
 	}
 
 	for _, c := range cases {
@@ -1458,6 +1463,10 @@ func TestInstanceTypeReconciler_SyncInactive(t *testing.T) {
 			}
 			cq := newInstanceTypeQueue(key, true)
 			cq.Spec.StopPolicy = ptr.To(c.startPolicy)
+			if c.migrating {
+				cq.Annotations = make(map[string]string)
+				cq.Annotations[_TASQueueMigrationPhaseAnnotation] = _TASQueueMigrationPhaseDraining
+			}
 			cli := buildInstanceTypeClient(it, cq)
 
 			// Converge.

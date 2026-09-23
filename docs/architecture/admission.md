@@ -324,6 +324,10 @@ The feature gate `AssignQueueLabelsForPods` is disabled in the deployed Kueue Co
 (`kueue.managerConfig.controllerManagerConfigYaml` in the chart's `values.yaml`), so Kueue never copies
 cluster/local queue names onto Pod labels; long ClusterQueue names would not fit a label value.
 
+`TopologyAwareScheduling` is enabled. Generated ResourceFlavors reference Kueue Topologies, and the
+Pod integration converts a `ModelDeployment` role's required-level annotation into the Workload
+PodSet request described in [Topology-Aware Scheduling](topology-aware-scheduling.md).
+
 It also sets `resources.quotaCheckStrategy: IgnoreUndeclared`, so a single-dimension queue (only `cpu`,
 or only the manufacturer `credits`) does not reject a Workload for the Pod resources it does not cover
 (`memory`/`ephemeral-storage`). Its `resources.transformations` list is generated from `pkg/nodefeature`

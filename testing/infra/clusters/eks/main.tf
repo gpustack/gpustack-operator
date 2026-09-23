@@ -128,12 +128,17 @@ locals {
         labels             = var.efa_enabled ? { "gpustack.ai/efa" = "true" } : {}
         enable_efa_support = var.efa_enabled
         enable_efa_only    = false
+        metadata_options = var.topograph_aws_pod_identity_enabled ? {
+          http_endpoint               = "enabled"
+          http_put_response_hop_limit = 2
+          http_tokens                 = "required"
+        } : null
         # A cluster placement group is scoped to one availability zone, so the group takes a
         # single subnet, and under EFA it has to be a private one: an EFA interface cannot
         # carry a public address, so in a public subnet the node would have no route out and
         # EKS refuses the group with Ec2SubnetInvalidConfiguration. Those nodes are not
         # reachable over SSH either way.
-        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[var.efa_availability_zone_index]] : null
+        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[var.efa_availability_zone_index]] : cfg.availability_zone_index == null ? null : [module.vpc.public_subnets[cfg.availability_zone_index]]
         # Under EFA the module substitutes its own interface set, sized and indexed for the
         # instance's network cards, so this group declares none of its own.
         network_interfaces = var.efa_enabled ? [] : [
@@ -164,6 +169,11 @@ locals {
         labels             = var.efa_enabled ? { "gpustack.ai/efa" = "true" } : {}
         enable_efa_support = var.efa_enabled
         enable_efa_only    = false
+        metadata_options = var.topograph_aws_pod_identity_enabled ? {
+          http_endpoint               = "enabled"
+          http_put_response_hop_limit = 2
+          http_tokens                 = "required"
+        } : null
         # Same rule as the cpu group: a cluster placement group is scoped to one
         # availability zone, and an EFA interface cannot carry a public address, so
         # under EFA the group takes a private subnet. It is the same private subnet
@@ -325,6 +335,51 @@ module "eks" {
   }
 }
 
+resource "aws_iam_role" "topograph_aws" {
+  count = var.topograph_aws_pod_identity_enabled ? 1 : 0
+
+  name = "${local.eks_name}-topograph-aws"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "pods.eks.amazonaws.com"
+      }
+      Action = ["sts:AssumeRole", "sts:TagSession"]
+    }]
+  })
+
+  tags = {
+    Environment = "testing"
+    Terraform   = "true"
+  }
+}
+
+resource "aws_iam_role_policy" "topograph_aws" {
+  count = var.topograph_aws_pod_identity_enabled ? 1 : 0
+
+  name = "describe-instance-topology"
+  role = aws_iam_role.topograph_aws[0].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "ec2:DescribeInstanceTopology"
+      Resource = "*"
+    }]
+  })
+}
+
+resource "aws_eks_pod_identity_association" "topograph_aws" {
+  count = var.topograph_aws_pod_identity_enabled ? 1 : 0
+
+  cluster_name    = module.eks.cluster_name
+  namespace       = "gpustack-system"
+  service_account = "gpustack-operator-topograph"
+  role_arn        = aws_iam_role.topograph_aws[0].arn
+}
+
 resource "null_resource" "update_kubeconfig" {
   depends_on = [module.eks]
 
@@ -346,10 +401,11 @@ resource "null_resource" "update_kubeconfig" {
       set -euo pipefail
       # Read before the update: update-kubeconfig always makes the cluster it writes the
       # current context, so keeping the current context means putting this one back
-      # afterwards. Empty when there is no kubeconfig yet.
+      # afterwards. Empty when there is no kubeconfig yet; a destroyed cluster can
+      # also leave current-context naming an entry that no longer exists.
       previous="$(kubectl config current-context 2>/dev/null || true)"
       aws eks --region ${self.triggers.region} update-kubeconfig --name ${self.triggers.name} --alias ${self.triggers.context} --user-alias ${self.triggers.context}
-      if [ '${var.switch_kube_context}' = 'false' ] && [ -n "$previous" ]; then
+      if [ '${var.switch_kube_context}' = 'false' ] && [ -n "$previous" ] && kubectl config get-contexts "$previous" --no-headers >/dev/null 2>&1; then
         kubectl config use-context "$previous" >/dev/null
         echo "current context left at $previous"
       fi

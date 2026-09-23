@@ -1903,6 +1903,9 @@ func modelDeploymentWithEveryField() *workercore.ModelDeployment {
 			r.ImagePullPolicy = core.PullIfNotPresent
 			r.ImagePullSecrets = []core.LocalObjectReference{{Name: "registry"}}
 			r.Command = []string{"/bin/serve"}
+			r.Topology = &workercore.ModelDeploymentRoleTopology{
+				RequiredLevel: "topology.kubernetes.io/zone",
+			}
 			r.Ports = []workercore.ModelDeploymentPort{{Port: 8000}}
 			r.AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{
 				{MountPath: "/data", ConfigMap: &core.LocalObjectReference{Name: "weights"}},
@@ -1971,6 +1974,9 @@ func TestValidateModelDeploymentIdentity(t *testing.T) {
 		{"role_replicas", func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 8 }, ""},
 		{"role_extra_args", func(md *workercore.ModelDeployment) {
 			md.Spec.Roles[0].ExtraArgs = []string{"--max-model-len=16384"}
+		}, ""},
+		{"role_topology", func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Topology.RequiredLevel = "topology.gpustack.ai/rack"
 		}, ""},
 		{"role_env", func(md *workercore.ModelDeployment) {
 			md.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{{Name: "HF_HOME", Value: "/other"}}

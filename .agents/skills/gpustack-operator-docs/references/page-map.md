@@ -64,6 +64,15 @@ scheme, the controller diagram, and the five reconcilers' ownership split.
 
 **Never** — the ledger's internals (`device-discovery.md`) or gate behavior (`admission.md`). Cross-link both.
 
+## `docs/architecture/topology-aware-scheduling.md`
+
+**Owns** — the topology discovery boundary, `TopologySource` source and ownership model, hierarchy
+profiles, generated Kueue Topologies, TAS flavor and queue semantics, per-replica requests, the
+64-flavor limit, and the fresh-queue and live-profile lifecycle boundaries.
+
+**Never** — the commands and manifests an operator follows (`operation/topology-aware-scheduling.md`)
+or the full `ModelDeployment` field contract (`reference/model-deployment.md`). Link both.
+
 ## `docs/architecture/admission.md`
 
 **Owns** — the five gates, the `Devices` ledger's role beneath them, the four-view status, capability
@@ -89,6 +98,16 @@ the gateway's hand-maintained mirror, the device-plugin generation/re-registrati
 per-manufacturer package split, the CGO bindings, the 63-character rule.
 
 **Rule of thumb** — if breaking it produces a *silent* failure, it belongs here.
+
+## `docs/operation/topology-aware-scheduling.md`
+
+**Owns** — choosing and enabling Topograph or a generic source, snapshot and credential examples,
+webhook trust/RBAC/egress, AWS identity and IMDS requirements, requesting a level, live hierarchy
+changes, inspection order, Pending diagnosis, and the temporary EKS validation shape and ownership
+handoff or cleanup warning.
+
+**Never** — re-explain why profiles split capacity or how each reconciler owns the Kueue chain; that
+is `architecture/topology-aware-scheduling.md`. Do not turn the temporary EKS shape into a benchmark.
 
 ## `docs/kv-cache/backend.md`
 

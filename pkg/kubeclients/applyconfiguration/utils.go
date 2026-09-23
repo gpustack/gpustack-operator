@@ -1466,6 +1466,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleResourcesApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleTopology"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleTopologyApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRouter"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRouterApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRouterKVEvents"):
@@ -1480,6 +1482,18 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("TopologySource"):
+		return &applyconfigurationworkerv1alpha1.TopologySourceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("TopologySourceConfigMap"):
+		return &applyconfigurationworkerv1alpha1.TopologySourceConfigMapApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("TopologySourceObjectReference"):
+		return &applyconfigurationworkerv1alpha1.TopologySourceObjectReferenceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("TopologySourceSpec"):
+		return &applyconfigurationworkerv1alpha1.TopologySourceSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("TopologySourceStatus"):
+		return &applyconfigurationworkerv1alpha1.TopologySourceStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("TopologySourceWebhook"):
+		return &applyconfigurationworkerv1alpha1.TopologySourceWebhookApplyConfiguration{}
 
 	}
 	return nil

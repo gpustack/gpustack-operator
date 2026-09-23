@@ -29,6 +29,7 @@ one, not to widen the overview.
 | Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/architecture/device-discovery.md` |
 | The NIC/RDMA interface inventory, `pciRootId`/`pciSwitches`, the three link states, the `rdma.*` node labels, the RDMA resource keys | `docs/architecture/network-topology.md` |
 | Capacity labels, flavor/queue/InstanceType naming and grouping, the five reconcilers | `docs/architecture/scheduling-chain.md` |
+| Topograph's boundary, `TopologySource`, topology profiles, Kueue Topologies and TAS capacity semantics | `docs/architecture/topology-aware-scheduling.md` |
 | Any admission gate, the four-view status, InstanceType/Instance/Pod webhook rules, drain-stop | `docs/architecture/admission.md` |
 | Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/architecture/installation-modes.md` |
 | Startup ordering, the gateway mirror, the device-plugin registration loop, per-manufacturer packages, CGO bindings, the 63-char rule | `docs/architecture/internals.md` |
@@ -41,6 +42,7 @@ one, not to widen the overview.
 | How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/reference/kv-cache-injection.md` |
 | A resource key, a request rule, a request example | `docs/accelerator-requests.md` |
 | How many RDMA endpoints a workload asks for, setting or reading the kubelet TopologyManager policy, what to do about RDMA keys no queue meters | `docs/operation/rdma.md` |
+| Enabling Topograph, publishing topology snapshots, webhook trust, requesting a level, TAS diagnosis or EKS validation | `docs/operation/topology-aware-scheduling.md` |
 | A `Setting` or a `GPUSTACK_*` variable | `docs/settings.md` |
 | A make target, a subchart patch, code generation, a vendored dependency | `docs/development.md` |
 | An administrator procedure (MIG mode, replicas) | `docs/operation/*.md` |

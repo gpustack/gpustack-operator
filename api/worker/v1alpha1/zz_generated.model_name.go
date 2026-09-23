@@ -501,6 +501,11 @@ func (in ModelDeploymentRoleStatus) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRoleTopology) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleTopology"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentRouter) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRouter"
 }
@@ -533,4 +538,44 @@ func (in ModelDeploymentSpec) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in TopologySource) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.TopologySource"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in TopologySourceConfigMap) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.TopologySourceConfigMap"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in TopologySourceList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.TopologySourceList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in TopologySourceNodeLabels) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.TopologySourceNodeLabels"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in TopologySourceObjectReference) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.TopologySourceObjectReference"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in TopologySourceSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.TopologySourceSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in TopologySourceStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.TopologySourceStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in TopologySourceWebhook) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.TopologySourceWebhook"
 }

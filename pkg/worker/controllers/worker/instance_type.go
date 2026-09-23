@@ -155,10 +155,19 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 // Inactive=true, but it never clears Inactive on None. That keeps the sync memoryless and
 // non-oscillating; a pool that recovered from a full-drain stays inactive (its leftover
 // Inactive=true re-Holds the reactivated queue) until an admin clears the flag. At most one
-// guarded write happens per call; a stable state writes nothing. It reports whether it wrote.
+// guarded write happens per call; a stable state writes nothing. While NodeQueue carries its
+// topology-migration marker, this synchronization pauses because that controller temporarily owns
+// StopPolicy. It reports whether it wrote.
 func (r *InstanceTypeReconciler) syncInactive(
 	ctx context.Context, it *workercore.InstanceType, cq *kueue.ClusterQueue,
 ) (bool, error) {
+	// NodeQueue owns StopPolicy for the whole topology migration window. In particular, its
+	// temporary HoldAndDrain must not be mirrored into the administrator-facing Inactive field;
+	// otherwise the restored active policy is immediately converted into a sticky Hold.
+	if cq.Annotations[_TASQueueMigrationPhaseAnnotation] != "" {
+		return false, nil
+	}
+
 	switch ptr.Deref(cq.Spec.StopPolicy, kueue.None) {
 	case kueue.None:
 		if it.Spec.Inactive {

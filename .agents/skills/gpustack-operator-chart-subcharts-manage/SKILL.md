@@ -1,13 +1,13 @@
 ---
 name: gpustack-operator-chart-subcharts-manage
-description: "Add, upgrade, patch, or remove a vendored subchart of the operator Helm chart (Kueue, Node Feature Discovery, csi-driver-nfs, csi-driver-s3)."
+description: "Add, upgrade, patch, or remove a vendored subchart of the operator Helm chart (Kueue, Node Feature Discovery, Topograph, csi-driver-nfs, csi-driver-s3)."
 disable-model-invocation: true
 allowed-tools: "Read, Edit, Write, Grep, Glob, Bash(make deps*), Bash(make generate chart*), Bash(make lint chart*), Bash(make test chart*), Bash(go test ./pkg/worker/kuberess/*), Bash(git status*), Bash(git diff*), Bash(git log*), Bash(git rm*), Bash(git checkout --*), Bash(git -C /tmp/*), Bash(git init*), Bash(./.sbin/helm*), Bash(curl -sSfL*), Bash(tar -zxf*), Bash(rsync -a*), Bash(mktemp -d*), Bash(find deploy/gpustack-operator/chart/charts*), Bash(ls*), Bash(cat deploy/gpustack-operator/chart/*), Bash(cat hack/deploy/gpustack-operator/chart/*), Bash(rm -rf deploy/gpustack-operator/chart/charts/*), Bash(rm -f deploy/gpustack-operator/chart/Chart.lock), Bash(kubectl get*), Bash(kubectl patch*), Bash(kubectl delete*), Bash(kubectl config current-context), Bash(helm list*), Bash(helm uninstall*)"
 ---
 
 # Manage a vendored subchart of the operator chart
 
-Kueue, Node Feature Discovery, `csi-driver-nfs` and `csi-driver-s3` ship as subcharts of the operator chart,
+Kueue, Node Feature Discovery, `csi-driver-nfs`, `csi-driver-s3`, and Topograph ship as subcharts of the operator chart,
 vendored **unpacked and patched** under `deploy/gpustack-operator/chart/charts/<name>/` and **committed** —
 which is what makes `helm install` work from a bare clone and keeps CI offline-capable.
 
@@ -224,6 +224,28 @@ strip CRs. Regenerate it with the commands above.
    `gpustack-operator-e2e` for scheduling-chain behaviour.
 
 ## Things that bite
+
+- **Kueue feature gates have one source of truth.** The bundled controller rejects a gate passed through
+  `controllerManager.featureGates` when `managerConfig.controllerManagerConfigYaml` already declares
+  feature gates. Add a required TAS gate to the configuration YAML alongside the existing gates; do not add a
+  competing CLI gate. On a disposable install, read the rendered ConfigMap and manager arguments, then wait
+  for the Kueue controller rollout before testing scheduling behavior.
+- **A parent helper is an install-time dependency, not a Helm dependency declaration.** A vendored subchart
+  template patched to `include` a parent helper can render only through the parent chart. Test it with the
+  parent chart's `helm template` and install path; a standalone render of the subchart is not a valid
+  integration check. Keep the patch narrowly scoped to values derived from the parent release or global
+  settings.
+- **Topograph has two identities with different jobs.** The API Deployment calls provider APIs, while the
+  node-data-broker DaemonSet reads node-local facts. A cloud workload identity therefore belongs on the API
+  ServiceAccount; do not attach it to the broker ServiceAccount because the chart happens to render both.
+  Expose API ServiceAccount creation/name through parent values and assert the rendered Deployment uses it.
+- **AWS broker IMDS access is infrastructure, not Helm identity.** An IMDSv2 token response must cross the
+  Pod network hop, so the node launch template needs metadata tokens required and response hop limit 2. Pod
+  Identity on the API ServiceAccount does not fix broker IMDS timeouts. Prove both broker readiness and an
+  API Pod credential endpoint in E2E.
+- **Helm cannot enable Topograph after detecting NVIDIA Nodes.** Rendering precedes live Node discovery.
+  Keep the whole provider stack explicitly opt-in and use `nodeDataBroker.nodeSelector` to restrict only the
+  DaemonSet when a provider input exists on selected Nodes; the API server and observer remain shared.
 
 - **A PATH `helm` shadows the pin.** `gpustack::helm::helm::validate` returns early on any PATH `helm` and
   `make deps` never installs one; a system 3.13 has no `--take-ownership`. Use `./.sbin/helm` and assert

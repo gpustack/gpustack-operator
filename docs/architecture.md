@@ -14,7 +14,7 @@ Kubernetes projects:
   external controller gate admission on per-accelerator feasibility.
 
 Nothing else has to be deployed: NFD, Kueue and the two CSI drivers are vendored subcharts of this
-chart.
+chart. Topograph is also vendored, but stays disabled until an administrator selects a provider.
 
 ## Contents
 
@@ -41,9 +41,9 @@ Details, and the startup ordering the worker must keep, are in [Internals](archi
    maintains the `Devices` CR ledger.
 3. **Capacity profiling** — the Worker derives per-node capacity labels: CPU cores, the four `.sliced.*`
    logical-slicing capacities and the `.partitioned.*` hardware-partitioning capacities.
-4. **Queue construction & admission** — Worker controllers materialize those labels into Kueue
-   `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool) and an `InstanceType`
-   CRD, and gate admission with a per-accelerator `AdmissionCheck` read from the `Devices` ledger.
+4. **Queue construction & admission** — Worker controllers materialize those labels and topology
+   profiles into Kueue `Topology` → `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool)
+   and an `InstanceType` CRD, and gate admission with a per-accelerator `AdmissionCheck`.
 
 ```mermaid
 flowchart TD
@@ -55,7 +55,7 @@ flowchart TD
     subgraph control["Control Plane"]
         NFDM["NFD master"]
         WK["GPUStack Worker controllers"]
-        KUEUE["Kueue objects<br/>ResourceFlavor / ClusterQueue / LocalQueue<br/>+ AdmissionCheck"]
+        KUEUE["Kueue objects<br/>Topology / ResourceFlavor / ClusterQueue / LocalQueue<br/>+ AdmissionCheck"]
         IT["InstanceType CRD<br/>(materialized four-view status)"]
     end
 
@@ -82,7 +82,7 @@ cannot:
 |---|---|---|
 | Submit | a Pod — plain, or rendered by a GPUStack `Instance` or by a [`ModelDeployment`](reference/model-deployment.md) replica — carries the pool's entrance label `kueue.x-k8s.io/queue-name: gpustack-fnv64-…` and requests `nvidia.com/gpu.sliced: 1` + `nvidia.com/gpu.sliced.memory-percentage: 50` | [Accelerator Requests](accelerator-requests.md) |
 | Gate 1 — Pod webhook | validates the request rules and folds the memory budget into `nvidia.com/gpu.sliced.units`, the credit input | [Admission](architecture/admission.md#gate-1--the-pod-webhook) |
-| Gate 2 — Kueue | reserves against the pool ClusterQueue's `credits.gpustack.ai/nvidia` quota — a scalar total, so it can over-admit a fragmented pool | [Admission](architecture/admission.md#gate-2--kueue-credits) |
+| Gate 2 — Kueue | reserves against the pool ClusterQueue's `credits.gpustack.ai/nvidia` quota and fits the complete PodSet inside the selected topology domains | [Topology-Aware Scheduling](architecture/topology-aware-scheduling.md) |
 | Gate 3 — AdmissionCheck | asks the pool's `Devices` ledger whether one accelerator can really host the slice; holds the workload with `Retry` if not | [Admission](architecture/admission.md#gate-3--the-per-accelerator-admissioncheck) |
 | Gate 4 — scheduler / kubelet | picks a node whose `.sliced.*` capacity keys still fit, then an accelerator-bound token — *which is* the accelerator | [Device Discovery](architecture/device-discovery.md#placement-is-a-preference-not-a-decision) |
 | Gate 5 — allocator | refuses an accelerator another mode holds, injects the manufacturer's runtime isolation, and records the allocation in the `Devices` ledger | [Device Discovery](architecture/device-discovery.md#the-device-plugin-allocator) |
@@ -107,6 +107,7 @@ are in [Device Discovery](architecture/device-discovery.md#device-accelerator-re
 
 - [Device Discovery](architecture/device-discovery.md) — stages 1 and 2, and what the allocator injects.
 - [Scheduling Chain](architecture/scheduling-chain.md) — stages 3 and 4.
+- [Topology-Aware Scheduling](architecture/topology-aware-scheduling.md) — inventory, profiles and Kueue TAS.
 - [Admission](architecture/admission.md) — the five gates and the four-view status.
 - [Installation Modes](architecture/installation-modes.md) — chart mode versus image mode.
 - [Internals](architecture/internals.md) — startup order and the invariants that fail silently.

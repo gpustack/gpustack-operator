@@ -34,6 +34,8 @@ const (
 	// accelerator, e.g. "feature.gpustack.ai/acceleratable=true". It is the cheap
 	// "is this node accelerated?" check, set alongside the per-device keys.
 	NodeAcceleratableLabelKey = FeatureLabelPrefix + "acceleratable"
+	// NodeCPUOnlyLabelKey selects nodes without a detected accelerator for CPU-only flavors.
+	NodeCPUOnlyLabelKey = FeatureLabelPrefix + "cpu-only"
 )
 
 // ConstructAcceleratableNodeLabels constructs accelerator feature labels from the given device group list.
@@ -346,6 +348,9 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 	}
 	if node.Labels != nil && node.Labels[systemname.ManagedLabelKey] != "" {
 		labels[systemname.ManagedLabelKey] = node.Labels[systemname.ManagedLabelKey]
+	}
+	if node.Labels[NodeAcceleratableLabelKey] != "true" {
+		labels[NodeCPUOnlyLabelKey] = "true"
 	}
 
 	// Record the general(CPU) key presence so the NodeFlavorReconciler can pool

@@ -882,6 +882,32 @@ func TestObserveModelDeploymentQuota(t *testing.T) {
 	}
 }
 
+func TestObserveModelDeploymentQuota_ReportsDownstreamInadmissibleWorkload(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].Topology = &workercore.ModelDeploymentRoleTopology{
+			RequiredLevel: "topology.kubernetes.io/zone",
+		}
+	})
+	pod := *readyReplica(md, 0, true)
+	pod.Labels[modelDeploymentReplicaOrdinalLabel] = "0"
+	wl := groupWorkload([]core.Pod{pod}, false)
+	wl.Name = "wl-server-r0"
+	wl.Status.Conditions[0].Reason = "Pending"
+	wl.Status.Conditions[0].Message = "topology level topology.kubernetes.io/zone has no fitting domain"
+
+	holder := new(workercore.ModelDeployment)
+	observeQuotaOver(md, []core.Pod{pod}, []*kueue.Workload{wl}, holder)
+
+	assert.Equal(t, "Pending", ModelDeploymentConditionQuotaReserved.GetReason(holder),
+		"Kueue prose does not become a new stable reason enum")
+	message := ModelDeploymentConditionQuotaReserved.GetMessage(holder)
+	assert.Contains(t, message, `role "server" replica 0`)
+	assert.Contains(t, message, `workload "wl-server-r0"`)
+	assert.Contains(t, message, wl.Status.Conditions[0].Message,
+		"the downstream inadmissible explanation is preserved verbatim")
+}
+
 // TestObserveModelDeploymentQuota_TrueCoversEveryRole pins the one thing the condition may not do:
 // be true for one role and not another.
 //

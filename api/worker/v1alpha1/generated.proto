@@ -3383,6 +3383,13 @@ message ModelDeploymentRole {
   // +listType=map
   // +listMapKey=name
   repeated ModelDeploymentEnvVar env = 6;
+
+  // Topology optionally requires Kueue to place each replica's Pod group in one domain at this level.
+  // It applies to this role's independent replica group; it does not require other roles or replicas
+  // to share that domain.
+  //
+  // +optional
+  optional ModelDeploymentRoleTopology topology = 16;
 }
 
 // ModelDeploymentRoleResources is what one Pod of a role asks of an accelerator.
@@ -3500,6 +3507,14 @@ message ModelDeploymentRoleStatus {
   // +optional
   // +listType=atomic
   repeated string assignedFlavors = 6;
+}
+
+// ModelDeploymentRoleTopology is the topology request for one independent replica group.
+message ModelDeploymentRoleTopology {
+  // RequiredLevel is one configured Kueue topology level, such as topology.kubernetes.io/zone.
+  // Empty omits an explicit level and lets a compatible TAS flavor choose its hierarchy.
+  // +optional
+  optional string requiredLevel = 1;
 }
 
 // ModelDeploymentRouter is the router that fronts a deployment's roles, and how much of it this
@@ -3888,5 +3903,138 @@ message ModelDeploymentStatus {
   // an empty object here cannot be told apart from a contract whose every string happens to be
   // empty.
   optional ModelDeploymentRouterStatus router = 7;
+}
+
+// TopologySource is the cluster-scoped topology inventory used to form Kueue hierarchies.
+//
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:crd-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["toposrc"],subResources=["status"]
+// +k8s:crd-gen:printcolumn:name="Kind",type="string",jsonPath=".status.sourceKind"
+// +k8s:crd-gen:printcolumn:name="Revision",type="string",jsonPath=".status.lastSuccessfulRevision"
+// +k8s:crd-gen:printcolumn:name="Ready",type="string",jsonPath=".status.conditions[?(@.type=='Ready')].status"
+message TopologySource {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional TopologySourceSpec spec = 2;
+
+  optional TopologySourceStatus status = 3;
+}
+
+// TopologySourceConfigMap reads the snapshot key from one ConfigMap.
+message TopologySourceConfigMap {
+  // +required
+  optional TopologySourceObjectReference configMapRef = 1;
+
+  // +required
+  optional string key = 2;
+
+  // MaxStaleness is how long the last valid snapshot remains usable after reads fail.
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Duration maxStaleness = 3;
+}
+
+// TopologySourceList holds a list of TopologySource objects.
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message TopologySourceList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated TopologySource items = 2;
+}
+
+// TopologySourceNodeLabels is the read-only source arm. Its presence selects labels already on Nodes.
+message TopologySourceNodeLabels {
+}
+
+// TopologySourceObjectReference identifies a namespaced credential or configuration object.
+message TopologySourceObjectReference {
+  // +required
+  optional string namespace = 1;
+
+  // +required
+  optional string name = 2;
+}
+
+// TopologySourceSpec selects Nodes and one inventory source. Levels are ordered coarsest first.
+message TopologySourceSpec {
+  // NodeSelector selects the Nodes this source may describe.
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector nodeSelector = 1;
+
+  // Levels is the ordered topology hierarchy. kubernetes.io/hostname is implicit and forbidden here.
+  // +required
+  // +k8s:validation:minItems=1
+  // +k8s:validation:maxItems=16
+  // +listType=atomic
+  repeated string levels = 2;
+
+  // AdditionalWritePrefix permits ConfigMap and webhook snapshots to write labels below one
+  // administrator-owned DNS prefix. The value includes its trailing slash.
+  // +optional
+  optional string additionalWritePrefix = 6;
+
+  // NodeLabels consumes the selected Nodes' existing labels without changing them.
+  // +optional
+  optional TopologySourceNodeLabels nodeLabels = 3;
+
+  // ConfigMap reads a versioned inventory snapshot from the worker namespace.
+  // +optional
+  optional TopologySourceConfigMap configMap = 4;
+
+  // Webhook reads a versioned inventory snapshot over authenticated HTTPS.
+  // +optional
+  optional TopologySourceWebhook webhook = 5;
+}
+
+// TopologySourceStatus is the last observed topology inventory state.
+message TopologySourceStatus {
+  optional int64 observedGeneration = 1;
+
+  optional string sourceKind = 2;
+
+  optional string lastSuccessfulRevision = 3;
+
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time lastSuccessfulRefreshTime = 4;
+
+  optional int32 selectedNodes = 5;
+
+  optional int32 mutatedNodes = 6;
+
+  optional int32 conflictedNodes = 7;
+
+  // +patchMergeKey=type
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=type
+  repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 8;
+}
+
+// TopologySourceWebhook reads snapshots from an HTTPS endpoint. Exactly one credential arm is required.
+message TopologySourceWebhook {
+  // +required
+  optional string url = 1;
+
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Duration pollInterval = 2;
+
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Duration timeout = 3;
+
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Duration maxStaleness = 4;
+
+  // CABundleConfigMapRef optionally supplies the endpoint's CA bundle from the worker namespace.
+  // The ConfigMap must store the PEM bundle under ca.crt.
+  // +optional
+  optional TopologySourceObjectReference caBundleConfigMapRef = 5;
+
+  // BearerTokenSecretRef selects bearer-token authentication. The Secret key is token.
+  // +optional
+  optional TopologySourceObjectReference bearerTokenSecretRef = 6;
+
+  // TLSClientCertificateSecretRef selects mTLS authentication. The Secret keys are tls.crt and tls.key.
+  // +optional
+  optional TopologySourceObjectReference tlsClientCertificateSecretRef = 7;
 }
 

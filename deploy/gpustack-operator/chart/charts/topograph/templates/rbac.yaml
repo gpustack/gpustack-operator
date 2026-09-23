@@ -1,0 +1,103 @@
+{{- if .Values.rbac.create -}}
+{{- /*
+pods/exec is needed by providers that exec inside pods, and by Slinky only for
+legacy partition discovery through `scontrol show partition` in the controller
+pod (falling back to a login pod when present).
+Slinky skips that path when dynamic nodes are enabled or when a topology entry
+already supplies nodes, a pod selector, or the default flat topology.
+*/ -}}
+{{- $needsPodExec := dict "value" false -}}
+{{- if eq .Values.provider.name "infiniband-k8s" -}}
+{{- $_ := set $needsPodExec "value" true -}}
+{{- end -}}
+{{- if eq .Values.engine.name "slinky" -}}
+{{- $params := default dict .Values.engine.params -}}
+{{- if not (get $params "useDynamicNodes") -}}
+{{- range $topology := (default dict (get $params "topologies")) -}}
+{{- $spec := default dict $topology -}}
+{{- $hasNodes := hasKey $spec "nodes" -}}
+{{- $podSelector := get $spec "podSelector" -}}
+{{- $hasPodSelector := and $podSelector (or (get $podSelector "matchLabels") (get $podSelector "matchExpressions")) -}}
+{{- $isDefaultFlat := and (get $spec "clusterDefault") (eq (get $spec "plugin") "topology/flat") (not (get $spec "partition")) -}}
+{{- if and (not $hasNodes) (not $hasPodSelector) (not $isDefaultFlat) -}}
+{{- $_ := set $needsPodExec "value" true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "topograph.rbacName" . }}
+rules:
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [list]
+{{- if $needsPodExec.value }}
+- apiGroups: [""]
+  resources: [pods/exec]
+  verbs: [create]
+{{- end }}
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [get,list]
+{{- if eq .Values.engine.name "k8s" }}
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [patch]
+{{- end }}
+{{- if eq .Values.engine.name "slinky" }}
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [patch]
+{{- end }}
+- apiGroups: [apps]
+  resources: [daemonsets]
+  verbs: [get]
+{{- if eq .Values.engine.name "slinky" }}
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [create,get,update]
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "topograph.rbacName" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "topograph.serviceAccountName" . }}
+  namespace: {{.Release.Namespace}}
+  apiGroup: ""
+roleRef:
+  kind: ClusterRole
+  name: {{ include "topograph.rbacName" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- if eq .Values.engine.name "nfd" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "topograph.rbacName" . }}
+  namespace: {{ .Values.nfdNamespace | quote }}
+rules:
+- apiGroups: [nfd.k8s-sigs.io]
+  resources: [nodefeatures,nodefeaturegroups]
+  verbs: [create,list,patch,delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "topograph.rbacName" . }}
+  namespace: {{ .Values.nfdNamespace | quote }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "topograph.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  apiGroup: ""
+roleRef:
+  kind: Role
+  name: {{ include "topograph.rbacName" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}

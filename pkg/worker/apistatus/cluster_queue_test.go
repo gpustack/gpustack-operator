@@ -31,10 +31,42 @@ func TestGetSummaryOfClusterQueue(t *testing.T) {
 		wantMessage string // asserted only when non-empty
 	}{
 		{
+			name: "topology rejection is inactive with its actionable message",
+			cq: &kueue.ClusterQueue{
+				Status: kueue.ClusterQueueStatus{
+					Conditions: []meta.Condition{
+						{
+							Type:    string(ClusterQueueConditionTopologyReady),
+							Status:  meta.ConditionFalse,
+							Reason:  "MissingTopology",
+							Message: "referenced Topology is missing",
+						},
+					},
+				},
+			},
+			wantPhase:   "Inactive",
+			wantMessage: "referenced Topology is missing",
+		},
+		{
 			name: "hold and drain with reserved is draining",
 			cq: &kueue.ClusterQueue{
 				Spec:   kueue.ClusterQueueSpec{StopPolicy: ptr.To(kueue.HoldAndDrain)},
 				Status: reservedStatus,
+			},
+			wantPhase:   "Draining",
+			wantMessage: "cluster queue is draining admitted workloads",
+		},
+		{
+			name: "topology migration with reserved workloads is draining",
+			cq: &kueue.ClusterQueue{
+				Spec: kueue.ClusterQueueSpec{StopPolicy: ptr.To(kueue.HoldAndDrain)},
+				Status: kueue.ClusterQueueStatus{
+					FlavorsReservation: reservedStatus.FlavorsReservation,
+					Conditions: []meta.Condition{{
+						Type: string(ClusterQueueConditionTopologyReady), Status: meta.ConditionFalse,
+						Reason: "Migrating", Message: "holding and draining before switching topology flavors",
+					}},
+				},
 			},
 			wantPhase:   "Draining",
 			wantMessage: "cluster queue is draining admitted workloads",

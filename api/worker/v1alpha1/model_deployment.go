@@ -478,6 +478,21 @@ type ModelDeploymentRole struct {
 	// +listType=map
 	// +listMapKey=name
 	Env []ModelDeploymentEnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,6,rep,name=env"`
+
+	// Topology optionally requires Kueue to place each replica's Pod group in one domain at this level.
+	// It applies to this role's independent replica group; it does not require other roles or replicas
+	// to share that domain.
+	//
+	// +optional
+	Topology *ModelDeploymentRoleTopology `json:"topology,omitempty" protobuf:"bytes,16,name=topology"`
+}
+
+// ModelDeploymentRoleTopology is the topology request for one independent replica group.
+type ModelDeploymentRoleTopology struct {
+	// RequiredLevel is one configured Kueue topology level, such as topology.kubernetes.io/zone.
+	// Empty omits an explicit level and lets a compatible TAS flavor choose its hierarchy.
+	// +optional
+	RequiredLevel string `json:"requiredLevel,omitempty" protobuf:"bytes,1,name=requiredLevel"`
 }
 
 // ModelDeploymentRoleKind is what a role is told it is, in a prefill/decode disaggregated

@@ -14,7 +14,7 @@
 
 ## Chart mode and image mode
 
-Kueue, NFD and the two CSI drivers are **vendored subcharts** of the operator chart
+Kueue, NFD, Topograph and the two CSI drivers are **vendored subcharts** of the operator chart
 (`deploy/gpustack-operator/chart/charts/`), each behind an `enabled` switch. Their one configuration
 surface is the chart's `values.yaml`, reachable two ways:
 
@@ -41,6 +41,14 @@ also renders the overlay's switches.
 starts at it. Every mode needs it, including `node-feature-discovery.enabled=false` — the supported way
 to run against the cluster's own NFD. Hence the worker applies it, not the chart (see
 [below](#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)).
+
+Topograph is also absent from the image-mode application map. It is an optional provider stack,
+defaults off, and requires provider credentials and security choices that an image-mode overlay must
+not invent. The default chart renders no Topograph object and pulls no Topograph image.
+
+Enable Topograph through a chart-mode release. Generic `TopologySource` discovery and the hostname-only
+fallback remain available without it. See [Topology-Aware Scheduling
+Operations](../operation/topology-aware-scheduling.md#choose-the-inventory-path).
 
 ## The two modes are exclusive
 
@@ -88,6 +96,8 @@ controller-owned status.
 
 **See also** — [Migrating to Bundled Subcharts](../migration/to-subcharts.md) (the ownership
 transfer out of the pre-subchart layout) · [High Availability Operations](../operation/high-availability.md) (more
-than one replica per control-plane component) · [Development](../development.md#vendored-subcharts)
+than one replica per control-plane component) · [Topology-Aware Scheduling
+Operations](../operation/topology-aware-scheduling.md) (Topograph and generic inventory) ·
+[Development](../development.md#vendored-subcharts)
 
 **Next** → [Internals](internals.md) — startup ordering and the invariants a contributor must keep.

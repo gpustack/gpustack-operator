@@ -1,0 +1,11 @@
+{{- if .Values.topograph.enabled }}
+{{- if not (semverCompare ">=1.27-0" .Capabilities.KubeVersion.Version) }}
+{{- fail "topograph.enabled requires Kubernetes 1.27 or later" }}
+{{- end }}
+{{- if eq .Values.topograph.provider.name "test" }}
+{{- fail "topograph.enabled requires a production provider; provider.name=test is not supported" }}
+{{- end }}
+{{- if ne .Values.topograph.engine.name "k8s" }}
+{{- fail "topograph.enabled requires engine.name=k8s" }}
+{{- end }}
+{{- end }}

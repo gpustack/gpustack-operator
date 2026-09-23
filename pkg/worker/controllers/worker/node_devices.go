@@ -23,16 +23,15 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 )
 
-// NodeDevicesReconciler keeps the control-plane labels the worker owns — gpustack.ai/managed and the
-// node's real general(CPU) feature key — in sync on each Devices object. A Devices object is
+// NodeDevicesReconciler keeps the control-plane labels the worker owns — gpustack.ai/managed, the
+// node's real general(CPU) feature key, and its topology profile — in sync on each Devices object. A Devices object is
 // cluster-scoped and named after the node, so the two share a key. The DeviceManager stamps a Devices
 // object's os/arch/accelerator-key selector labels but deliberately leaves these to the worker: node
 // management is a control-plane decision the per-node device-manager must not assert, and the CPU key
 // (ExtractGeneralNodeKey) needs the node's CPU labels the device-manager's NodeFeature does not carry
 // (so it can only ever guess the "generic" sentinel). Mirroring both lets a queue's Devices be
-// selected by "<feature key> + kubernetes.io/os|arch + gpustack.ai/managed=true", and — the reason the
-// CPU key matters — lets the node-devices AdmissionCheck locate a pool's Devices by the accelerated
-// ResourceFlavor's nodeLabels, which carry the same real CPU key.
+// selected by the same labels as its ResourceFlavor. The CPU key distinguishes hardware pools; the
+// topology profile keeps device admission inside the exact TAS capacity partition Kueue assigned.
 type NodeDevicesReconciler struct {
 	Client ctrlcli.Client
 }
@@ -94,17 +93,21 @@ func (r *NodeDevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 // nodeDevicesControlLabelKey reports whether a label key is one the worker owns on a Devices object:
-// the managed mark or a general(CPU) feature key (bare or a .count/.capacity sibling).
+// the managed mark, topology profile, or a general(CPU) feature key (bare or a .count/.capacity sibling).
 func nodeDevicesControlLabelKey(k string) bool {
-	return k == systemname.ManagedLabelKey || strings.HasPrefix(k, nodefeature.GeneralFeatureLabelPrefix)
+	return k == systemname.ManagedLabelKey || k == TopologyProfileLabel ||
+		strings.HasPrefix(k, nodefeature.GeneralFeatureLabelPrefix)
 }
 
 // nodeDevicesControlLabels are the labels the worker mirrors from a Node onto its Devices: the managed
-// mark (only when the node carries one) and the node's real general(CPU) feature key.
+// mark (only when the node carries one), topology profile, and the node's real general(CPU) feature key.
 func nodeDevicesControlLabels(nd *core.Node) map[string]string {
-	out := make(map[string]string, 2)
+	out := make(map[string]string, 3)
 	if v := nd.Labels[systemname.ManagedLabelKey]; v != "" {
 		out[systemname.ManagedLabelKey] = v
+	}
+	if v := nd.Labels[TopologyProfileLabel]; v != "" {
+		out[TopologyProfileLabel] = v
 	}
 	if gKey := nodefeature.ExtractGeneralNodeKey(nd); gKey != "" {
 		out[nodefeature.GeneralFeatureLabelPrefix+gKey] = "true"
@@ -113,13 +116,14 @@ func nodeDevicesControlLabels(nd *core.Node) map[string]string {
 }
 
 // nodeDevicesControlInSync reports whether two label sets agree on the worker-owned control labels:
-// the managed mark and every general(CPU) key. It drives both the skip check (Devices vs desired) and
+// the managed mark, topology profile, and every general(CPU) key. It drives both the skip check (Devices vs desired) and
 // the watch predicates (old vs new). The DeviceManager-owned labels — notably the accelerator
 // (acceleratable.) selector keys the detector stamps — are deliberately ignored, so an
 // accelerator-only change never triggers a control re-sync. This is the mirror of the detector's
 // acceleratableDevicesSelectorLabels, which keeps those accelerator keys and drops the general key.
 func nodeDevicesControlInSync(a, b map[string]string) bool {
 	return mapx.EqualWithKey(a, b, systemname.ManagedLabelKey) &&
+		mapx.EqualWithKey(a, b, TopologyProfileLabel) &&
 		mapx.EqualWithStringPrefix(a, b, nodefeature.GeneralFeatureLabelPrefix)
 }
 

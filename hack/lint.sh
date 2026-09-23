@@ -11,6 +11,8 @@ function chart_lint() {
   # A static assertion over rendered output, needing no cluster, so it belongs to lint
   # rather than to test.
   gpustack::helm::verify_images "${ROOT_DIR}/deploy/gpustack-operator/chart"
+  HELM_BIN="$(gpustack::helm::helm::bin)" \
+    bash "${ROOT_DIR}/deploy/gpustack-operator/chart/ci/test-topograph.sh"
   gpustack::helm::lint "${ROOT_DIR}/deploy/gpustack-operator/chart"
 }
 

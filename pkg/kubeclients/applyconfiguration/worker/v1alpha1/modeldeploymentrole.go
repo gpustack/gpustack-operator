@@ -157,6 +157,10 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// and refused for owned names on exactly the same terms, so the nesting expressed a precedence
 	// that never existed.
 	Env []ModelDeploymentEnvVarApplyConfiguration `json:"env,omitempty"`
+	// Topology optionally requires Kueue to place each replica's Pod group in one domain at this level.
+	// It applies to this role's independent replica group; it does not require other roles or replicas
+	// to share that domain.
+	Topology *ModelDeploymentRoleTopologyApplyConfiguration `json:"topology,omitempty"`
 }
 
 // ModelDeploymentRoleApplyConfiguration constructs a declarative configuration of the ModelDeploymentRole type for use with
@@ -306,5 +310,13 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithEnv(values ...*ModelDeployme
 		}
 		b.Env = append(b.Env, *values[i])
 	}
+	return b
+}
+
+// WithTopology sets the Topology field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Topology field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithTopology(value *ModelDeploymentRoleTopologyApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
+	b.Topology = value
 	return b
 }

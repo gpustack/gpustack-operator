@@ -153,6 +153,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentRole{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref),
 		v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref),
 		v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref),
+		v1alpha1.ModelDeploymentRoleTopology{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleTopology(ref),
 		v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref),
 		v1alpha1.ModelDeploymentRouterKVEvents{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterKVEvents(ref),
 		v1alpha1.ModelDeploymentRouterMetrics{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterMetrics(ref),
@@ -160,6 +161,14 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterStatus(ref),
 		v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref),
 		v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref),
+		v1alpha1.TopologySource{}.OpenAPIModelName():                                 schema_gpustack_api_worker_v1alpha1_TopologySource(ref),
+		v1alpha1.TopologySourceConfigMap{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_TopologySourceConfigMap(ref),
+		v1alpha1.TopologySourceList{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_TopologySourceList(ref),
+		v1alpha1.TopologySourceNodeLabels{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_TopologySourceNodeLabels(ref),
+		v1alpha1.TopologySourceObjectReference{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_TopologySourceObjectReference(ref),
+		v1alpha1.TopologySourceSpec{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_TopologySourceSpec(ref),
+		v1alpha1.TopologySourceStatus{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_TopologySourceStatus(ref),
+		v1alpha1.TopologySourceWebhook{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_TopologySourceWebhook(ref),
 		corev1.AWSElasticBlockStoreVolumeSource{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_AWSElasticBlockStoreVolumeSource(ref),
 		corev1.Affinity{}.OpenAPIModelName():                                         schema_k8sio_api_core_v1_Affinity(ref),
 		corev1.AppArmorProfile{}.OpenAPIModelName():                                  schema_k8sio_api_core_v1_AppArmorProfile(ref),
@@ -7663,12 +7672,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							},
 						},
 					},
+					"topology": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Topology optionally requires Kueue to place each replica's Pod group in one domain at this level. It applies to this role's independent replica group; it does not require other roles or replicas to share that domain.",
+							Ref:         ref(v1alpha1.ModelDeploymentRoleTopology{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"name", "instanceType"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName(), v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName(), v1alpha1.ModelDeploymentPort{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName(), v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName(), v1alpha1.ModelDeploymentPort{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleTopology{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -7796,6 +7811,26 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 					},
 				},
 				Required: []string{"name", "desired", "ready", "quotaReserved", "unmanaged", "kind"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleTopology(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRoleTopology is the topology request for one independent replica group.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"requiredLevel": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RequiredLevel is one configured Kueue topology level, such as topology.kubernetes.io/zone. Empty omits an explicit level and lets a compatible TAS flavor choose its hierarchy.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
 			},
 		},
 	}
@@ -8284,6 +8319,382 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 		},
 		Dependencies: []string{
 			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_TopologySource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "TopologySource is the cluster-scoped topology inventory used to form Kueue hierarchies.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.TopologySourceSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.TopologySourceStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.TopologySourceSpec{}.OpenAPIModelName(), v1alpha1.TopologySourceStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_TopologySourceConfigMap(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "TopologySourceConfigMap reads the snapshot key from one ConfigMap.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"configMapRef": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.TopologySourceObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"key": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"maxStaleness": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxStaleness is how long the last valid snapshot remains usable after reads fail.",
+							Ref:         ref(metav1.Duration{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"configMapRef", "key", "maxStaleness"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.TopologySourceObjectReference{}.OpenAPIModelName(), metav1.Duration{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_TopologySourceList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "TopologySourceList holds a list of TopologySource objects.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.TopologySource{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.TopologySource{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_TopologySourceNodeLabels(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "TopologySourceNodeLabels is the read-only source arm. Its presence selects labels already on Nodes.",
+				Type:        []string{"object"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_TopologySourceObjectReference(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "TopologySourceObjectReference identifies a namespaced credential or configuration object.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"namespace": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"namespace", "name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_TopologySourceSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "TopologySourceSpec selects Nodes and one inventory source. Levels are ordered coarsest first.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"nodeSelector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodeSelector selects the Nodes this source may describe.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(metav1.LabelSelector{}.OpenAPIModelName()),
+						},
+					},
+					"levels": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Levels is the ordered topology hierarchy. kubernetes.io/hostname is implicit and forbidden here.",
+							MinItems:    ptr.To[int64](1),
+							MaxItems:    ptr.To[int64](16),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"additionalWritePrefix": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AdditionalWritePrefix permits ConfigMap and webhook snapshots to write labels below one administrator-owned DNS prefix. The value includes its trailing slash.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"nodeLabels": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodeLabels consumes the selected Nodes' existing labels without changing them.",
+							Ref:         ref(v1alpha1.TopologySourceNodeLabels{}.OpenAPIModelName()),
+						},
+					},
+					"configMap": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ConfigMap reads a versioned inventory snapshot from the worker namespace.",
+							Ref:         ref(v1alpha1.TopologySourceConfigMap{}.OpenAPIModelName()),
+						},
+					},
+					"webhook": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Webhook reads a versioned inventory snapshot over authenticated HTTPS.",
+							Ref:         ref(v1alpha1.TopologySourceWebhook{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"nodeSelector", "levels"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.TopologySourceConfigMap{}.OpenAPIModelName(), v1alpha1.TopologySourceNodeLabels{}.OpenAPIModelName(), v1alpha1.TopologySourceWebhook{}.OpenAPIModelName(), metav1.LabelSelector{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_TopologySourceStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "TopologySourceStatus is the last observed topology inventory state.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"observedGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int64",
+						},
+					},
+					"sourceKind": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"lastSuccessfulRevision": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"lastSuccessfulRefreshTime": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"selectedNodes": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int32",
+						},
+					},
+					"mutatedNodes": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int32",
+						},
+					},
+					"conflictedNodes": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int32",
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_TopologySourceWebhook(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "TopologySourceWebhook reads snapshots from an HTTPS endpoint. Exactly one credential arm is required.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"url": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"pollInterval": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref(metav1.Duration{}.OpenAPIModelName()),
+						},
+					},
+					"timeout": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref(metav1.Duration{}.OpenAPIModelName()),
+						},
+					},
+					"maxStaleness": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref(metav1.Duration{}.OpenAPIModelName()),
+						},
+					},
+					"caBundleConfigMapRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CABundleConfigMapRef optionally supplies the endpoint's CA bundle from the worker namespace. The ConfigMap must store the PEM bundle under ca.crt.",
+							Ref:         ref(v1alpha1.TopologySourceObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"bearerTokenSecretRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "BearerTokenSecretRef selects bearer-token authentication. The Secret key is token.",
+							Ref:         ref(v1alpha1.TopologySourceObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"tlsClientCertificateSecretRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TLSClientCertificateSecretRef selects mTLS authentication. The Secret keys are tls.crt and tls.key.",
+							Ref:         ref(v1alpha1.TopologySourceObjectReference{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"url", "pollInterval", "timeout", "maxStaleness"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.TopologySourceObjectReference{}.OpenAPIModelName(), metav1.Duration{}.OpenAPIModelName()},
 	}
 }
 

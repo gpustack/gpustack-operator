@@ -645,8 +645,30 @@ func validateModelDeployment(
 	errs = append(errs, validateModelDeploymentServiceNamesAreDistinct(md)...)
 	errs = append(errs, validateModelDeploymentRoleMemberNames(md)...)
 	errs = append(errs, validateModelDeploymentRoleKinds(md)...)
+	errs = append(errs, validateModelDeploymentRoleTopology(md)...)
 	errs = append(errs, validateModelDeploymentRouter(md)...)
 
+	return errs
+}
+
+func validateModelDeploymentRoleTopology(md *workercore.ModelDeployment) field.ErrorList {
+	rolesPath := field.NewPath("spec", "roles")
+	var errs field.ErrorList
+	for i := range md.Spec.Roles {
+		topology := md.Spec.Roles[i].Topology
+		if topology == nil || topology.RequiredLevel == "" {
+			continue
+		}
+		path := rolesPath.Index(i).Child("topology", "requiredLevel")
+		if msgs := validation.IsQualifiedName(topology.RequiredLevel); len(msgs) > 0 {
+			errs = append(errs, field.Invalid(path, topology.RequiredLevel,
+				"is not a topology label key: "+strings.Join(msgs, "; ")))
+		}
+		if topology.RequiredLevel == core.LabelHostname {
+			errs = append(errs, field.Forbidden(path,
+				"kubernetes.io/hostname is implicit; omit requiredLevel for hostname-only placement"))
+		}
+	}
 	return errs
 }
 
