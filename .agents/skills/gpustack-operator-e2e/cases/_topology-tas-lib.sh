@@ -304,12 +304,28 @@ tas_wl_check_state() {
     -o jsonpath="{range .status.admissionChecks[?(@.name==\"$3\")]}{.state}{end}" 2>/dev/null
 }
 
+# Whether a Workload can be read at all. A negative probe asserts ABSENT admission and reservation,
+# and the readers above return "" for an unreadable Workload too, so every negative sample also
+# records this: a refusal read off an object that could not be fetched is no reading.
+tas_wl_readable() {
+  kubectl -n "$1" get workloads.kueue.x-k8s.io "$2" -o name >/dev/null 2>&1
+}
+
 # Whether an admitted Workload carries a TAS topology assignment, plus its level keys for row text.
 # Kueue writes topologyAssignment only for a PodSet it placed through a topology, so presence is
 # the direct evidence that admission was TAS admission and not plain quota admission.
 tas_wl_topology_levels() {
-  kubectl -n "$1" get workloads.kueue.x-k8s.io "$2" \
-    -o jsonpath='{range .status.admission.podSetAssignments[*]}{.topologyAssignment.levels[*]}{" "}{end}' 2>/dev/null
+  kubectl -n "$1" get workloads.kueue.x-k8s.io "$2" -o json 2>/dev/null | tas_topology_levels_of_workload
+}
+
+# The assigned levels of every PodSet in one Workload JSON on stdin, one PodSet per space-separated
+# entry with its levels comma-joined, or nothing when ANY PodSet lacks a non-empty
+# topologyAssignment.levels. A jsonpath range cannot answer this: it prints its separator once per
+# PodSet whether or not the field exists, so an absent assignment still reads as a non-empty string.
+tas_topology_levels_of_workload() {
+  jq -r '[.status.admission.podSetAssignments[]? | (.topologyAssignment.levels // [])] as $levels
+    | if ($levels | length) > 0 and ($levels | all(length > 0))
+      then $levels | map(join(",")) | join(" ") else empty end' 2>/dev/null
 }
 
 # Every Pod of a label selector as "name nodename", one per line, Pods without a node included
@@ -320,9 +336,66 @@ tas_pod_nodes() {
     -o jsonpath='{range .items[*]}{.metadata.name} {.spec.nodeName}{"\n"}{end}' 2>/dev/null
 }
 
+# Whether a group's "name nodename" rows (tas_pod_nodes) hold exactly $2 Pods, every one bound. An
+# unbound Pod renders with an empty nodename, so it is COUNTED here and fails the check; a later loop
+# that reads only non-empty nodenames would silently skip it.
+tas_rows_all_bound() {
+  printf '%s\n' "$1" | awk -v want="$2" '
+    NF == 0 { next }
+    { n++; if (NF < 2) unbound++ }
+    END { exit !(n == want && unbound == 0) }'
+}
+
 tas_node_zone() {
   kubectl get node "$1" \
     -o jsonpath="{.metadata.labels.topology\\.kubernetes\\.io/zone}" 2>/dev/null
+}
+
+# The verdict on a ClusterQueue watch reduced to TSV rows of
+#
+#   uid  stopPolicy  reservingWorkloads  oldFlavorsAllPresent  stoppedAtCurrentGeneration
+#
+# printed as four yes/no words, in order:
+#
+#   held      HoldAndDrain was observed while every old flavor was still referenced
+#   reserved  that held old plan was observed while Kueue still counted a reservation
+#   drained   AFTER such a reserved observation, the held old plan read stopped with zero reservations
+#   dropped   an old flavor disappeared before the drain was observed
+#
+# A migration that holds an already-empty queue proves nothing about keeping a reservation's flavor,
+# which is why `drained` counts only after `reserved`.
+tas_cq_transition_verdict() {
+  awk -F '\t' '
+    $2 == "HoldAndDrain" && $4 == "true" {
+      held = 1
+      if ($3 > 0 && !drained) reserved = 1
+      if (reserved && $3 == 0 && $5 == "true") drained = 1
+    }
+    $4 == "false" && !switched { switched = 1; if (!drained) dropped = 1 }
+    END { print (held ? "yes" : "no"), (reserved ? "yes" : "no"), (drained ? "yes" : "no"), (dropped ? "yes" : "no") }
+  ' "$1"
+}
+
+# The sorted "node value" pairs a snapshot file assigns to one label key. The snapshot is the YAML
+# this case family writes: a two-space-indented Node name line, then four-space-indented labels.
+tas_snapshot_pairs() {
+  awk -v key="$2" '
+    /^  [^ ]/ { node = $1; sub(/:$/, "", node) }
+    /^    [^ ]/ { k = $1; sub(/:$/, "", k); if (k == key) print node, $2 }
+  ' "$1" | sort
+}
+
+# The sorted "node value" pairs of one label key on the Nodes a selector matches. A Node without the
+# label is listed with an empty value, so a missing projection reads as a mismatch, not an omission.
+tas_node_label_pairs() {
+  kubectl get nodes -l "$1" -o json 2>/dev/null \
+    | jq -r --arg key "$2" '.items[] | .metadata.name + " " + (.metadata.labels[$key] // "")' | sort
+}
+
+# How many NodeFeatures one TopologySource owns, or "" when they cannot be listed.
+tas_source_nodefeatures() {
+  kubectl -n "$1" get nodefeatures.nfd.k8s-sigs.io -l "topology.gpustack.ai/source-uid=$2" -o json 2>/dev/null \
+    | jq '[.items[]?] | length' 2>/dev/null
 }
 
 # --- ModelDeployment helpers --------------------------------------------------------------------

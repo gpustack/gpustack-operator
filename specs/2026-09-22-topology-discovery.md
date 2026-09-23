@@ -121,9 +121,10 @@ exactly one member of the following tagged union:
   redirects, proxy-derived destinations, and inline credentials are rejected. Responses have a
   fixed maximum body size and must complete within the configured timeout.
 
-ConfigMap, CA, and credential references are restricted to the namespace in which the worker is
-installed. The controller receives `get`, `list`, and `watch` only for the referenced resource
-kinds in that namespace; it does not receive cross-namespace Secret read access. The installation
+ConfigMap, CA, and credential references are restricted by admission to the namespace in which the
+worker is installed, and the controller reads only the referenced objects. RBAC does not enforce
+that boundary: the worker service account is bound to `cluster-admin`, and the shared manager cache
+watches Secrets and ConfigMaps cluster-wide. The installation
 guide must pair webhook use with explicit egress policy and explain that the cluster administrator,
 not an ordinary tenant, is authorizing the endpoint. The controller resolves and connects to the
 validated HTTPS URL itself and never forwards caller-controlled authorization headers.
@@ -752,7 +753,7 @@ no spec task identifiers.
       exactly one bearer-token or client-certificate credential, does not follow redirects, ignores
       environment proxy configuration for the destination, bounds response bytes and request time,
       redacts credentials and response bodies from events/status/logs, and shares ConfigMap's atomic
-      validation and staleness behavior. Secret and CA watches are namespace- and reference-scoped.
+      validation and staleness behavior. Secret and CA changes enqueue only the referencing sources.
       Verify: an `httptest` TLS server covers custom CA, bearer and mTLS success, bad certificate,
       redirect, timeout, oversized body, 4xx/5xx, rotation, recovery, and redaction. A malicious URL
       table covers HTTP, userinfo, fragments, and unsupported schemes. Run focused tests with the

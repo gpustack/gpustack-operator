@@ -27,6 +27,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
@@ -238,9 +239,12 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 		changed = true
 	}
 
+	// Only dropping a referenced flavor switches flavor references and needs the hold/drain
+	// migration. A Node joining or leaving an existing profile changes nominal quota alone, and a
+	// new profile only adds a reference; both are updated in place without evicting anything.
 	planChanged := !kubemeta.DeepEqual(cq.Spec.ResourceGroups, eGroups)
 	migrationPhase := cq.Annotations[_TASQueueMigrationPhaseAnnotation]
-	if migrationPhase != "" || (len(cq.Spec.ResourceGroups) > 0 && planChanged) {
+	if migrationPhase != "" || (planChanged && dropsFlavorReference(cq.Spec.ResourceGroups, eGroups)) {
 		return r.migrateClusterQueueResourceGroups(ctx, cq, eGroups, changed)
 	}
 
@@ -370,7 +374,10 @@ func (r *NodeQueueReconciler) rejectClusterQueue(
 ) (ctrl.Result, error) {
 	ctrllog.FromContext(ctx).Error(failure, "reject topology-aware cluster queue")
 	result := ctrl.Result{}
-	if failure.reason == "MissingTopology" || cq.Annotations[_TASQueueMigrationPhaseAnnotation] != "" {
+	// NodeQueue does not watch Nodes: a missing Topology or a flavor that does not yet count every
+	// pool Node heals only through a later ResourceFlavor event, so both are retried.
+	if failure.reason == "MissingTopology" || failure.reason == "NonConservedQuota" ||
+		cq.Annotations[_TASQueueMigrationPhaseAnnotation] != "" {
 		result.RequeueAfter = 30 * time.Second
 	}
 	return result, r.setTopologyReadyCondition(ctx, cq, false, failure.reason, failure.message)
@@ -475,12 +482,29 @@ func (r *NodeQueueReconciler) validateTASFlavors(
 		}
 	}
 
+	// Every Node the NodeFlavor reconciler would count for this pool must be selected by a live
+	// flavor. Those are the managed, profiled Nodes carrying the pool's feature labels; with
+	// mixing disabled an accelerated Node does not feed a CPU pool.
 	poolSelector := nodefeature.PoolFlavorSelector(cq.Labels)
+	if poolSelector == nil {
+		return nil, nil
+	}
+	cpuPool := poolSelector[nodefeature.NodeAcceleratableLabelKey] != "true"
+	if cpuPool {
+		// Nodes never carry acceleratable=false; a CPU pool's Nodes simply lack the label.
+		delete(poolSelector, nodefeature.NodeAcceleratableLabelKey)
+	}
+	poolSelector[systemname.ManagedLabelKey] = "true"
+	mixingAllowed := settings.InstanceTypeMixedOnNode.ShouldValueBool(ctx)
 	poolNodes := new(core.NodeList)
 	if err := r.Client.List(ctx, poolNodes, ctrlcli.MatchingLabels(poolSelector)); err != nil {
 		return nil, err
 	}
-	for _, node := range poolNodes.Items {
+	for i := range poolNodes.Items {
+		node := &poolNodes.Items[i]
+		if node.Labels[TopologyProfileLabel] == "" || (cpuPool && !mixingAllowed && nodeIsAccelerated(node)) {
+			continue
+		}
 		if _, exists := selected[node.Name]; !exists {
 			return &nodeQueueValidationError{
 				reason:  "NonConservedQuota",
@@ -491,15 +515,33 @@ func (r *NodeQueueReconciler) validateTASFlavors(
 	return nil, nil
 }
 
+// dropsFlavorReference reports whether the desired plan no longer references a flavor the
+// current resource groups reference.
+func dropsFlavorReference(current, desired []kueue.ResourceGroup) bool {
+	wanted := make(map[kueue.ResourceFlavorReference]struct{})
+	for _, group := range desired {
+		for _, flavor := range group.Flavors {
+			wanted[flavor.Name] = struct{}{}
+		}
+	}
+	for _, group := range current {
+		for _, flavor := range group.Flavors {
+			if _, exists := wanted[flavor.Name]; !exists {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // drainOrEmptyClusterQueue handles a queue whose pool has lost all its flavors: it empties the
-// quota, but only once every reservation has cleared so Kueue never counts negative. While
-// reservations remain it optionally drives HoldAndDrain (gated by the setting) and requeues;
-// an already-empty queue is a no-op.
+// quota through the held migration, switching only once every reservation has cleared so Kueue
+// never counts negative. The drain setting decides only whether remaining reservations are drained
+// (HoldAndDrain) or waited out without holding; a queue with nothing reserved is always held before
+// it is emptied, and an already-empty queue is a no-op.
 func (r *NodeQueueReconciler) drainOrEmptyClusterQueue(
 	ctx context.Context, cq *kueue.ClusterQueue,
 ) (ctrl.Result, error) {
-	logger := ctrllog.FromContext(ctx)
-
 	if cq.Annotations[_TASQueueMigrationPhaseAnnotation] != "" {
 		return r.migrateClusterQueueResourceGroups(ctx, cq, nil, false)
 	}
@@ -508,27 +550,20 @@ func (r *NodeQueueReconciler) drainOrEmptyClusterQueue(
 	}
 
 	drain := settings.InstanceTypeDrainWhenNoFlavors.ShouldValueBool(ctx)
-	if drain {
-		if cq.Annotations == nil {
-			cq.Annotations = make(map[string]string)
-		}
-		// Emptying the last flavor reference is the same identity-stable plan migration as a
-		// profile replacement. The migration marker preserves the prior stop policy and lets a
-		// returning flavor join the in-progress plan before admission is restored.
-		return r.migrateClusterQueueResourceGroups(ctx, cq, nil, false)
-	} else if hasReserved(cq) {
+	if !drain && hasReserved(cq) {
 		// Without automatic drain, wait for reservations to clear on their own.
 		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
 
-	// Every reservation is zero: empty the quota (an empty resource-group list is valid).
-	cq.Spec.ResourceGroups = nil
-	if err := r.Client.Update(ctx, cq); err != nil {
-		logger.Error(err, "empty cluster queue resource groups")
-		return ctrl.Result{}, err
+	if cq.Annotations == nil {
+		cq.Annotations = make(map[string]string)
 	}
-	logger.V(2).Info("emptied cluster queue resource groups")
-	return ctrl.Result{}, nil
+	// Emptying the last flavor reference is the same identity-stable plan migration as a
+	// profile replacement, also when nothing is reserved: holding first closes the race in which a
+	// reservation lands between the zero check and the switch. The migration marker preserves the
+	// prior stop policy and lets a returning flavor join the in-progress plan before admission is
+	// restored.
+	return r.migrateClusterQueueResourceGroups(ctx, cq, nil, false)
 }
 
 // hasReserved reports whether the ClusterQueue still holds reserved quota or

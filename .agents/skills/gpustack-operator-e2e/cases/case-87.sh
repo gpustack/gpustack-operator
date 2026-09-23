@@ -26,9 +26,10 @@
 #                 Pending rows, and the Pending readings are taken across TWO intervals.
 #
 #              3. OPERATOR SOURCE-TO-PLACEMENT. A size-two zone-required ModelDeployment is admitted
-#                 and binds in one observed zone; a size-three request stays unadmitted although the
-#                 four-Node cluster has aggregate capacity, and one deliberately hostname-only Node
-#                 is excluded. Omission remains admitted without an explicit required level.
+#                 and both of its Pods bind in one observed zone; a size-three request stays
+#                 unadmitted although the same group without a required level is admitted on the
+#                 same queue first, and one deliberately hostname-only Node is excluded. Omission
+#                 remains admitted without an explicit required level.
 #
 #              4. LIVE PROFILE TRANSITION. A zone-aware ModelDeployment first reserves the
 #                 operator-managed queue on its old topology. Replacing that profile with rack
@@ -70,11 +71,15 @@
 #              InstanceType with E2E_MD_INSTANCE_TYPE.
 #
 # Expected:    Every source reaches its documented Ready/stale/expired/recovered states and produces
-#              the exact generated Topology levels; both the control Job and the size-two deployment
+#              the exact generated Topology levels; each writing source's snapshot values appear on
+#              the Nodes through its own NodeFeatures, and retiring it removes those NodeFeatures and
+#              labels while the cloud region/zone and a label no source owns remain; both the control
+#              Job and the size-two deployment
 #              carry topologyAssignment and bind in one observed zone; both three-Pod groups hold no
 #              admission, quota reservation or bound Pod across two intervals while aggregate Nodes
-#              suffice; the queue transition preserves name/UID and never drops an old flavor while
-#              status still reports a reservation; a fitting two-role deployment has both Workloads
+#              suffice; the queue transition preserves name/UID, is observed held with the old flavors
+#              while a reservation is still counted, and never drops an old flavor before that
+#              reservation drains; a fitting two-role deployment has both Workloads
 #              admitted with the joint check Ready;
 #              with the pool occupied, a second two-role deployment has every Workload joint
 #              Pending, unadmitted, unreserved and unbound across two intervals.
@@ -106,10 +111,26 @@ JOINT_CHECK="gpustack-model-deployment-joint"
 # refused, and short enough that the case's own bound still bounds it.
 INTERVAL="${E2E_TAS_INTERVAL:-20}"
 
+# A topology.gpustack.ai/* label no source owns, set straight on one Node by this case. Sources publish
+# only through their own NodeFeatures, so retiring a source must leave this label where it is.
+FOREIGN_LABEL="topology.gpustack.ai/e2e-foreign"
+
 FAILS=0
 ROWS=()
 CQ_WATCH_PID=""
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+print_rows() {
+  echo
+  echo "STATUS | CHECK | OBJECT"
+  for r in "${ROWS[@]}"; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+}
+# An input-required exit still owes the rows already recorded: a FAIL measured before the missing
+# input was noticed is a real failure, and exit 2 alone would report it as "input required".
+exit_input_required() {
+  print_rows
+  [ "$FAILS" -eq 0 ] || { echo "[case-87] ${FAILS} check(s) FAILED before the input check"; exit 1; }
+  exit 2
+}
 
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_topology-tas-lib.sh"
@@ -120,8 +141,8 @@ cleanup() {
     kill "$CQ_WATCH_PID" 2>/dev/null || true
     wait "$CQ_WATCH_PID" 2>/dev/null || true
   fi
-  for md in "${PREFIX}-transition" "${PREFIX}-zone-fit" "${PREFIX}-zone-refuse" "${PREFIX}-omit" \
-    "${PREFIX}-md" "${PREFIX}-filler" "${PREFIX}-starved"; do
+  for md in "${PREFIX}-transition" "${PREFIX}-zone-fit" "${PREFIX}-zone-control" "${PREFIX}-zone-refuse" \
+    "${PREFIX}-omit" "${PREFIX}-md" "${PREFIX}-filler" "${PREFIX}-starved"; do
     tas_md_force_release "$NS" "$md"
   done
   instance_workload="$(kubectl -n "$NS" get pod "${PREFIX}-instance" \
@@ -131,12 +152,12 @@ cleanup() {
   kubectl -n "$NS" delete instance.worker.gpustack.ai "${PREFIX}-instance" \
     --ignore-not-found --wait=false >/dev/null 2>&1
   kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai \
-    "${PREFIX}-transition" "${PREFIX}-zone-fit" "${PREFIX}-zone-refuse" "${PREFIX}-omit" \
-    "${PREFIX}-md" "${PREFIX}-filler" "${PREFIX}-starved" \
+    "${PREFIX}-transition" "${PREFIX}-zone-fit" "${PREFIX}-zone-control" "${PREFIX}-zone-refuse" \
+    "${PREFIX}-omit" "${PREFIX}-md" "${PREFIX}-filler" "${PREFIX}-starved" \
     --ignore-not-found --wait=false >/dev/null 2>&1
   sleep 5
-  for md in "${PREFIX}-transition" "${PREFIX}-zone-fit" "${PREFIX}-zone-refuse" "${PREFIX}-omit" \
-    "${PREFIX}-md" "${PREFIX}-filler" "${PREFIX}-starved"; do
+  for md in "${PREFIX}-transition" "${PREFIX}-zone-fit" "${PREFIX}-zone-control" "${PREFIX}-zone-refuse" \
+    "${PREFIX}-omit" "${PREFIX}-md" "${PREFIX}-filler" "${PREFIX}-starved"; do
     tas_md_force_release "$NS" "$md"
   done
   kubectl -n "$NS" delete job.batch "${PREFIX}-fit" "${PREFIX}-refuse" \
@@ -154,6 +175,7 @@ cleanup() {
     >/dev/null 2>&1 || true
   kubectl label nodes -l topology.gpustack.ai/e2e-rack=enabled topology.gpustack.ai/e2e-rack- \
     >/dev/null 2>&1 || true
+  kubectl label nodes -l "$FOREIGN_LABEL" "${FOREIGN_LABEL}-" >/dev/null 2>&1 || true
   tas_delete_fixtures "$PREFIX" "$NS"
 }
 trap cleanup EXIT
@@ -219,6 +241,13 @@ wait_cq_topology_plan() {
 
 cq_plan_topologies_inline() {
   printf '%s\n' "${CQ_PLAN_TOPOLOGIES:-missing}" | paste -sd, -
+}
+
+# "node region/zone" for every Node a writing source selects, sorted.
+native_region_zone_pairs() {
+  kubectl get nodes -l topology.gpustack.ai/e2e-rack=enabled -o json 2>/dev/null | jq -r '
+    .items[] | .metadata.name + " " + (.metadata.labels["topology.kubernetes.io/region"] // "") + "/" +
+    (.metadata.labels["topology.kubernetes.io/zone"] // "")' | sort
 }
 
 delete_source() {
@@ -403,6 +432,11 @@ while read -r node; do
 done <<EOF
 $CPU_NODES
 EOF
+FOREIGN_NODE="$(printf '%s\n' "$CPU_NODES" | sed -n '1p')"
+[ -n "$FOREIGN_NODE" ] && kubectl label node "$FOREIGN_NODE" "${FOREIGN_LABEL}=kept" --overwrite >/dev/null
+# The cloud's own region/zone on every Node a writing source selects, read before any source runs:
+# retiring a source must leave exactly these values behind.
+NATIVE_PAIRS_BEFORE="$(native_region_zone_pairs)"
 
 # Leave one real Node outside the native source. It remains hostname-only while the other three
 # retain their cloud region/zone labels, making exclusion from an explicit zone/rack request an
@@ -426,10 +460,38 @@ if wait_source "${PREFIX}-native" 'True|Observed' \
   ZONE_PROFILE_NODES="$(kubectl get nodes -l topology.gpustack.ai/e2e-native=enabled --no-headers | wc -l | tr -d ' ')"
   HOST_ONLY_NODES="$(kubectl get nodes -l '!topology.gpustack.ai/e2e-native' --no-headers | wc -l | tr -d ' ')"
   record PASS "native EKS region and zone labels form the active topology profile" \
-    "${SOURCE_TOPOLOGY}: ${ZONE_PROFILE_NODES} region/zone Nodes; ${HOST_ONLY_NODES} hostname-only Node excluded"
+    "${SOURCE_TOPOLOGY}: ${ZONE_PROFILE_NODES} region/zone Nodes; ${HOST_ONLY_NODES} Node(s) outside the selector"
 else
   record FAIL "native EKS region and zone labels form the active topology profile" \
     "source=$(source_condition "${PREFIX}-native" Ready), topology=${SOURCE_TOPOLOGY:-missing}"
+fi
+
+NATIVE_SOURCE_UID="$(kubectl get topologysource "${PREFIX}-native" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+NATIVE_FEATURES="$(tas_source_nodefeatures "$SYSTEM_NS" "$NATIVE_SOURCE_UID")"
+if [ -n "$NATIVE_SOURCE_UID" ] && [ "$NATIVE_FEATURES" = 0 ]; then
+  record PASS "the read-only nodeLabels source owns no NodeFeature" "${PREFIX}-native owns 0 NodeFeatures"
+else
+  record FAIL "the read-only nodeLabels source owns no NodeFeature" \
+    "uid=${NATIVE_SOURCE_UID:-missing}, owned NodeFeatures=${NATIVE_FEATURES:-unreadable}"
+fi
+
+# The schedulable Node left outside the selector must read hostname-only, not merely be counted.
+EXCLUDED_ROWS=""
+EXCLUDED_OK=no
+while read -r node; do
+  [ -n "$node" ] || continue
+  [ "$(kubectl get node "$node" -o jsonpath='{.metadata.labels.topology\.gpustack\.ai/e2e-native}' 2>/dev/null)" = enabled ] && continue
+  profile="$(kubectl get node "$node" -o jsonpath='{.metadata.labels.topology\.gpustack\.ai/profile}' 2>/dev/null)"
+  levels="$(kubectl get topology.kueue.x-k8s.io "gpustack-${profile}" -o jsonpath='{range .spec.levels[*]}{.nodeLabel}{" "}{end}' 2>/dev/null)"
+  EXCLUDED_ROWS="${EXCLUDED_ROWS}${node}=${levels:-missing};"
+  if [ "$levels" = 'kubernetes.io/hostname ' ]; then EXCLUDED_OK=yes; else EXCLUDED_OK=bad; break; fi
+done <<EOF
+$CPU_NODES
+EOF
+if [ "$EXCLUDED_OK" = yes ]; then
+  record PASS "the schedulable Node outside the native selector is hostname-only" "$EXCLUDED_ROWS"
+else
+  record FAIL "the schedulable Node outside the native selector is hostname-only" "${EXCLUDED_ROWS:-no excluded schedulable Node}"
 fi
 
 if [ -z "$IT" ]; then
@@ -474,11 +536,19 @@ if tas_md_wait_pods "$NS" "${PREFIX}-transition" 1 \
   && tas_md_wait_workloads "$NS" "${PREFIX}-transition" 1; then
   TRANSITION_WL="$(tas_md_workloads "$NS" "${PREFIX}-transition" | sed -n '1p')"
 fi
+# The reservation must be THIS queue's and sit on one of the old flavors: a Workload admitted
+# elsewhere, or already on a newer flavor, would let the drain rows below pass without ever holding
+# an old-plan reservation.
 for _ in $(seq 1 60); do
+  transition_cq="$(kubectl -n "$NS" get workload "$TRANSITION_WL" -o jsonpath='{.status.admission.clusterQueue}' 2>/dev/null)"
+  transition_flavor="$(kubectl -n "$NS" get workload "$TRANSITION_WL" -o json 2>/dev/null \
+    | jq -r '[.status.admission.podSetAssignments[0].flavors[]?][0] // empty')"
   if [ -n "$TRANSITION_WL" ] \
     && [ "$(tas_wl_condition "$NS" "$TRANSITION_WL" QuotaReserved)" = True ] \
     && [ "$(tas_wl_condition "$NS" "$TRANSITION_WL" Admitted)" = True ] \
-    && [ "$(kubectl -n "$NS" get workload "$TRANSITION_WL" -o jsonpath='{.spec.podSets[0].topologyRequest.required}' 2>/dev/null)" = topology.kubernetes.io/zone ]; then
+    && [ "$(kubectl -n "$NS" get workload "$TRANSITION_WL" -o jsonpath='{.spec.podSets[0].topologyRequest.required}' 2>/dev/null)" = topology.kubernetes.io/zone ] \
+    && [ "$transition_cq" = "$CQ" ] && [ -n "$transition_flavor" ] \
+    && printf '%s\n' "$OLD_FLAVORS" | grep -Fxq "$transition_flavor"; then
     TRANSITION_RESERVED=yes
     break
   fi
@@ -486,10 +556,10 @@ for _ in $(seq 1 60); do
 done
 if [ "$TRANSITION_RESERVED" = yes ]; then
   record PASS "a Workload reserves the old topology before migration" \
-    "${TRANSITION_WL} is admitted on ${NATIVE_TOPOLOGY}; ClusterQueue reservingWorkloads=$(kubectl get clusterqueue "$CQ" -o jsonpath='{.status.reservingWorkloads}')"
+    "${TRANSITION_WL} is admitted by ${transition_cq} through old flavor ${transition_flavor} on ${NATIVE_TOPOLOGY}; ClusterQueue reservingWorkloads=$(kubectl get clusterqueue "$CQ" -o jsonpath='{.status.reservingWorkloads}')"
 else
   record FAIL "a Workload reserves the old topology before migration" \
-    "workload=${TRANSITION_WL:-missing}, quotaReserved=$(tas_wl_condition "$NS" "$TRANSITION_WL" QuotaReserved), admitted=$(tas_wl_condition "$NS" "$TRANSITION_WL" Admitted)"
+    "workload=${TRANSITION_WL:-missing}, queue=${transition_cq:-missing} (want ${CQ}), flavor=${transition_flavor:-missing} (want one of $(printf '%s' "$OLD_FLAVORS" | paste -sd, -)), quotaReserved=$(tas_wl_condition "$NS" "$TRANSITION_WL" QuotaReserved), admitted=$(tas_wl_condition "$NS" "$TRANSITION_WL" Admitted)"
 fi
 
 # Update the same source so the reserved queue transitions directly from region/zone to
@@ -540,11 +610,8 @@ jq -r --argjson olds "$OLD_FLAVORS_JSON" '
    (([$cq.status.conditions[]? | select(.type == "Active" and .status == "False" and
        .reason == "Stopped" and .observedGeneration >= $cq.metadata.generation)] | length > 0)
      | tostring)] | @tsv' "${TMP_CASE87}/cq-watch.json" > "${TMP_CASE87}/cq-watch.tsv"
-read -r TRANSITION_HELD TRANSITION_DRAINED TRANSITION_DROPPED_OLD <<<"$(awk -F '\t' '
-  $2 == "HoldAndDrain" && $4 == "true" { held = 1; if ($3 == 0 && $5 == "true") drained = 1 }
-  $4 == "false" && !switched { switched = 1; if (!drained) dropped = 1 }
-  END { print (held ? "yes" : "no"), (drained ? "yes" : "no"), (dropped ? "yes" : "no") }
-' "${TMP_CASE87}/cq-watch.tsv")"
+read -r TRANSITION_HELD TRANSITION_HELD_RESERVED TRANSITION_DRAINED TRANSITION_DROPPED_OLD \
+  <<<"$(tas_cq_transition_verdict "${TMP_CASE87}/cq-watch.tsv")"
 
 RACK_SOURCE_UID="$(kubectl get topologysource "${PREFIX}-native" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
 RACK_FEATURES="$(kubectl -n "$SYSTEM_NS" get nodefeatures -l "topology.gpustack.ai/source-uid=${RACK_SOURCE_UID}" -o json 2>/dev/null)"
@@ -560,14 +627,31 @@ else
     "source=$(source_condition "${PREFIX}-native" Ready), topology=${RACK_TOPOLOGY:-missing}, features=${RACK_FEATURE_COUNT:-missing}/${RACK_NODE_COUNT:-missing}"
 fi
 
+# The NodeFeature is the source's half; the Node label is NFD's. Each Node must carry the exact rack
+# value its snapshot entry names, read off the Node itself.
+RACK_EXPECTED="$(tas_snapshot_pairs "${TMP_CASE87}/rack.yaml" topology.gpustack.ai/rack)"
+RACK_ACTUAL=""
+for _ in $(seq 1 60); do
+  RACK_ACTUAL="$(tas_node_label_pairs topology.gpustack.ai/e2e-rack=enabled topology.gpustack.ai/rack)"
+  [ -n "$RACK_EXPECTED" ] && [ "$RACK_ACTUAL" = "$RACK_EXPECTED" ] && break
+  sleep 2
+done
+if [ -n "$RACK_EXPECTED" ] && [ "$RACK_ACTUAL" = "$RACK_EXPECTED" ]; then
+  record PASS "NFD projects every snapshot rack value onto its Node" \
+    "$(printf '%s' "$RACK_ACTUAL" | paste -sd, -)"
+else
+  record FAIL "NFD projects every snapshot rack value onto its Node" \
+    "snapshot=$(printf '%s' "$RACK_EXPECTED" | paste -sd, -); nodes=$(printf '%s' "$RACK_ACTUAL" | paste -sd, -)"
+fi
+
 if [ "$CQ_WATCH_READY" = yes ] && [ -n "$OLD_FLAVORS" ] && [ "$TRANSITION_RESERVED" = yes ] && [ "$TRANSITION_HELD" = yes ] \
-  && [ "$TRANSITION_DRAINED" = yes ] && [ "$TRANSITION_DROPPED_OLD" = no ] \
+  && [ "$TRANSITION_HELD_RESERVED" = yes ] && [ "$TRANSITION_DRAINED" = yes ] && [ "$TRANSITION_DROPPED_OLD" = no ] \
   && [ "$TRANSITION_SWITCHED" = yes ]; then
   record PASS "a reserved profile transition drains before switching the same ClusterQueue" \
-    "${CQ} kept uid=${CQ_PLAN_UID}; HoldAndDrain observed; old flavors retained until reservingWorkloads=0; stopPolicy restored to ${PRE_TRANSITION_STOP}"
+    "${CQ} kept uid=${CQ_PLAN_UID}; HoldAndDrain observed with the old flavors and a counted reservation, then reservingWorkloads=0 before any old flavor left; stopPolicy restored to ${PRE_TRANSITION_STOP}"
 else
   record FAIL "a reserved profile transition drains before switching the same ClusterQueue" \
-    "watch=${CQ_WATCH_READY}, oldFlavors=${OLD_FLAVORS:-missing}, reserved=${TRANSITION_RESERVED}, held=${TRANSITION_HELD}, drained=${TRANSITION_DRAINED}, droppedOld=${TRANSITION_DROPPED_OLD}, switched=${TRANSITION_SWITCHED}, beforeUID=${STABLE_CQ_UID:-missing}, afterUID=${uid_now:-missing}"
+    "watch=${CQ_WATCH_READY}, oldFlavors=${OLD_FLAVORS:-missing}, reserved=${TRANSITION_RESERVED}, held=${TRANSITION_HELD}, heldWhileReserved=${TRANSITION_HELD_RESERVED}, drained=${TRANSITION_DRAINED}, droppedOld=${TRANSITION_DROPPED_OLD}, switched=${TRANSITION_SWITCHED}, beforeUID=${STABLE_CQ_UID:-missing}, afterUID=${uid_now:-missing}"
 fi
 
 TRANSITION_READMITTED=no
@@ -661,6 +745,32 @@ if [ -n "${RACK_TOPOLOGY:-}" ]; then
   fi
 fi
 
+# Retiring the writing source must remove exactly what it published: its NodeFeatures, and through
+# NFD the private rack labels. The cloud's region/zone and a label no source owns stay as they were.
+RETIRED_OK=no
+for _ in $(seq 1 60); do
+  RETIRED_FEATURES="$(tas_source_nodefeatures "$SYSTEM_NS" "$RACK_SOURCE_UID")"
+  RETIRED_LEFT="$(tas_node_label_pairs topology.gpustack.ai/e2e-rack=enabled topology.gpustack.ai/rack \
+    | awk 'NF > 1' | grep -c . || true)"
+  NATIVE_PAIRS_AFTER="$(native_region_zone_pairs)"
+  FOREIGN_AFTER="$(kubectl get node "$FOREIGN_NODE" -o json 2>/dev/null \
+    | jq -r --arg key "$FOREIGN_LABEL" '.metadata.labels[$key] // ""')"
+  if [ -n "$RACK_SOURCE_UID" ] && [ "$RETIRED_FEATURES" = 0 ] && [ "$RETIRED_LEFT" = 0 ] \
+    && [ -n "$NATIVE_PAIRS_BEFORE" ] && [ "$NATIVE_PAIRS_AFTER" = "$NATIVE_PAIRS_BEFORE" ] \
+    && [ "$FOREIGN_AFTER" = kept ]; then
+    RETIRED_OK=yes
+    break
+  fi
+  sleep 2
+done
+if [ "$RETIRED_OK" = yes ]; then
+  record PASS "deleting the snapshot source removes only what it published" \
+    "0 NodeFeatures and 0 rack labels remain; region/zone unchanged on every Node; ${FOREIGN_LABEL} kept on ${FOREIGN_NODE}"
+else
+  record FAIL "deleting the snapshot source removes only what it published" \
+    "uid=${RACK_SOURCE_UID:-missing}, NodeFeatures=${RETIRED_FEATURES:-unreadable}, rack labels=${RETIRED_LEFT:-unknown}, region/zone before=$(printf '%s' "$NATIVE_PAIRS_BEFORE" | paste -sd, -) after=$(printf '%s' "$NATIVE_PAIRS_AFTER" | paste -sd, -), foreign=${FOREIGN_AFTER:-absent}"
+fi
+
 apply_webhook_server
 apply_webhook_source
 if wait_source "${PREFIX}-webhook" 'True|Observed' \
@@ -672,13 +782,52 @@ else
     "source=$(source_condition "${PREFIX}-webhook" Ready)"
 fi
 
+WEBHOOK_SOURCE_UID="$(kubectl get topologysource "${PREFIX}-webhook" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
+WEBHOOK_EXPECTED="$(tas_snapshot_pairs "${TMP_CASE87}/snapshot.json" topology.gpustack.ai/webhook-domain)"
+WEBHOOK_EXPECTED_COUNT="$(printf '%s\n' "$WEBHOOK_EXPECTED" | grep -c . || true)"
+WEBHOOK_ACTUAL=""
+for _ in $(seq 1 60); do
+  WEBHOOK_FEATURES="$(tas_source_nodefeatures "$SYSTEM_NS" "$WEBHOOK_SOURCE_UID")"
+  WEBHOOK_ACTUAL="$(tas_node_label_pairs topology.gpustack.ai/e2e-rack=enabled topology.gpustack.ai/webhook-domain)"
+  [ "$WEBHOOK_EXPECTED_COUNT" -gt 0 ] && [ "$WEBHOOK_FEATURES" = "$WEBHOOK_EXPECTED_COUNT" ] \
+    && [ "$WEBHOOK_ACTUAL" = "$WEBHOOK_EXPECTED" ] && break
+  sleep 2
+done
+if [ "$WEBHOOK_EXPECTED_COUNT" -gt 0 ] && [ "$WEBHOOK_FEATURES" = "$WEBHOOK_EXPECTED_COUNT" ] \
+  && [ "$WEBHOOK_ACTUAL" = "$WEBHOOK_EXPECTED" ]; then
+  record PASS "the webhook snapshot reaches every Node through its own NodeFeatures" \
+    "${WEBHOOK_FEATURES} NodeFeatures; $(printf '%s' "$WEBHOOK_ACTUAL" | paste -sd, -)"
+else
+  record FAIL "the webhook snapshot reaches every Node through its own NodeFeatures" \
+    "NodeFeatures=${WEBHOOK_FEATURES:-unreadable}/${WEBHOOK_EXPECTED_COUNT}; snapshot=$(printf '%s' "$WEBHOOK_EXPECTED" | paste -sd, -); nodes=$(printf '%s' "$WEBHOOK_ACTUAL" | paste -sd, -)"
+fi
+
+# Between the first failed poll and maxStaleness the source is Stale and keeps what it published.
+# The window is the source's maxStaleness less one poll interval, several times this loop's period.
 kubectl -n "$SYSTEM_NS" scale deploy/"${PREFIX}-webhook" --replicas=0 >/dev/null
+if wait_source "${PREFIX}-webhook" 'False|Stale'; then
+  STALE_FEATURES="$(tas_source_nodefeatures "$SYSTEM_NS" "$WEBHOOK_SOURCE_UID")"
+  STALE_LABELS="$(tas_node_label_pairs topology.gpustack.ai/e2e-rack=enabled topology.gpustack.ai/webhook-domain \
+    | awk 'NF > 1' | grep -c . || true)"
+  if [ "$STALE_FEATURES" = "$WEBHOOK_EXPECTED_COUNT" ] && [ "$STALE_LABELS" = "$WEBHOOK_EXPECTED_COUNT" ]; then
+    record PASS "an unavailable webhook is Stale and retains its last snapshot" \
+      "Ready=False/Stale; ${STALE_FEATURES} NodeFeatures and ${STALE_LABELS} webhook-domain labels retained"
+  else
+    record FAIL "an unavailable webhook is Stale and retains its last snapshot" \
+      "Ready=False/Stale but NodeFeatures=${STALE_FEATURES:-unreadable}, labels=${STALE_LABELS} of ${WEBHOOK_EXPECTED_COUNT}"
+  fi
+else
+  record FAIL "an unavailable webhook is Stale and retains its last snapshot" \
+    "never read Ready=False/Stale; source=$(source_condition "${PREFIX}-webhook" Ready)"
+fi
 if wait_source "${PREFIX}-webhook" 'False|Expired'; then
   remaining="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.labels.topology\.gpustack\.ai/webhook-domain}{"\n"}{end}' | grep -c . || true)"
-  if [ "$remaining" = 0 ]; then
-    record PASS "an unavailable webhook expires and removes only its owned labels" "Ready=False/Expired; zero webhook-domain labels remain"
+  expired_features="$(tas_source_nodefeatures "$SYSTEM_NS" "$WEBHOOK_SOURCE_UID")"
+  if [ "$remaining" = 0 ] && [ "$expired_features" = 0 ]; then
+    record PASS "an unavailable webhook expires and removes only its owned labels" "Ready=False/Expired; zero webhook-domain labels and zero NodeFeatures remain"
   else
-    record FAIL "an unavailable webhook expires and removes only its owned labels" "${remaining} owned labels remain after Expired"
+    record FAIL "an unavailable webhook expires and removes only its owned labels" \
+      "${remaining} owned labels and ${expired_features:-unreadable} NodeFeatures remain after Expired"
   fi
 else
   record FAIL "an unavailable webhook expires and removes only its owned labels" "source=$(source_condition "${PREFIX}-webhook" Ready)"
@@ -837,7 +986,7 @@ if [ "$TAS_OK" = yes ]; then
   FIT_LEVELS="$(tas_wl_topology_levels "$NS" "$FIT_WL")"
   if [ -n "$FIT_LEVELS" ]; then
     record PASS "the admission carries a topology assignment" \
-      "topologyAssignment levels: ${FIT_LEVELS}- written only for a PodSet Kueue placed through a topology"
+      "topologyAssignment levels: ${FIT_LEVELS} - written only for a PodSet Kueue placed through a topology"
   else
     record FAIL "the admission carries a topology assignment" \
       "admitted without any topologyAssignment: this is plain quota admission, not TAS placement"
@@ -917,6 +1066,8 @@ EOF
       "no Workload was composed, so no Pod was ever ungated"
   else
     refuse_sample() {
+      REF_READABLE=no
+      tas_wl_readable "$NS" "$REF_WL" && REF_READABLE=yes
       REF_ADMITTED="$(tas_wl_admitted "$NS" "$REF_WL")"
       REF_RESERVED="$(tas_wl_condition "$NS" "$REF_WL" QuotaReserved)"
       REF_BOUND="$(kubectl -n "$NS" get pods -l "batch.kubernetes.io/job-name=${PREFIX}-refuse" \
@@ -927,16 +1078,18 @@ EOF
     REF_FIRST_ADMITTED="$REF_ADMITTED"
     REF_FIRST_RESERVED="$REF_RESERVED"
     REF_FIRST_BOUND="$REF_BOUND"
+    REF_FIRST_READABLE="$REF_READABLE"
     sleep "$INTERVAL"
     refuse_sample
 
-    if [ -z "$REF_FIRST_ADMITTED" ] && [ "$REF_FIRST_RESERVED" != True ] \
+    if [ "$REF_FIRST_READABLE" = yes ] && [ "$REF_READABLE" = yes ] \
+      && [ -z "$REF_FIRST_ADMITTED" ] && [ "$REF_FIRST_RESERVED" != True ] \
       && [ -z "$REF_ADMITTED" ] && [ "$REF_RESERVED" != True ]; then
       record PASS "the cross-zone group stays unadmitted with no reservation (two intervals)" \
         "two samples ${INTERVAL}s apart: no status.admission, QuotaReserved=${REF_RESERVED:-absent}"
     else
       record FAIL "the cross-zone group stays unadmitted with no reservation (two intervals)" \
-        "admission: '${REF_ADMITTED:0:80}', QuotaReserved=${REF_RESERVED:-absent} - three Pods only aggregate capacity could fit were admitted anyway"
+        "readable=${REF_FIRST_READABLE}/${REF_READABLE}, admission: '${REF_ADMITTED:0:80}', QuotaReserved=${REF_RESERVED:-absent} - three Pods only aggregate capacity could fit were admitted anyway, or the Workload could not be read"
     fi
 
     if [ "$REF_FIRST_BOUND" = 0 ] && [ "$REF_BOUND" = 0 ]; then
@@ -959,14 +1112,14 @@ if [ -z "$IT" ]; then
 fi
 if [ -z "$IT" ]; then
   echo "[case-87] no InstanceType in the cluster; run case-1 first" >&2
-  exit 2
+  exit_input_required
 fi
 
 CQ="$(tas_md_cq_of_it "$NS" "$IT")"
 if [ -z "$CQ" ]; then
   echo "[case-87] InstanceType ${IT} names no reachable ClusterQueue in ${NS}; run case-1 first, and" >&2
   echo "          check that ${NS} carries the pool's entrance LocalQueue" >&2
-  exit 2
+  exit_input_required
 fi
 
 # --- ModelDeployment topology request through the operator-managed TAS queue --------------------
@@ -1002,8 +1155,7 @@ fi
 ZONE_FIT_ROWS=""
 for _ in $(seq 1 60); do
   ZONE_FIT_ROWS="$(tas_pod_nodes "$NS" "app.kubernetes.io/instance=${PREFIX}-zone-fit")"
-  [ "$(printf '%s\n' "$ZONE_FIT_ROWS" | grep -c . || true)" = 2 ] \
-    && [ -z "$(printf '%s\n' "$ZONE_FIT_ROWS" | grep ' $' || true)" ] && break
+  tas_rows_all_bound "$ZONE_FIT_ROWS" 2 && break
   sleep 2
 done
 ZONE_FIT_ZONES=""
@@ -1012,8 +1164,11 @@ while read -r _pod node; do
 done <<EOF
 $ZONE_FIT_ROWS
 EOF
-if [ "$(printf '%s' "$ZONE_FIT_ZONES" | xargs -n1 | sort -u | grep -c . || true)" = 1 ] \
-  && [ "$(printf '%s\n' "$ZONE_FIT_ROWS" | grep -c . || true)" = 2 ]; then
+# Both Pods bound, both bound Nodes zoned, one zone: an unbound Pod, or a bound Node without a zone,
+# would otherwise drop out of the zone count and leave a single zone that proves nothing.
+if tas_rows_all_bound "$ZONE_FIT_ROWS" 2 \
+  && [ "$(printf '%s' "$ZONE_FIT_ZONES" | wc -w | tr -d ' ')" = 2 ] \
+  && [ "$(printf '%s' "$ZONE_FIT_ZONES" | xargs -n1 | sort -u | grep -c . || true)" = 1 ]; then
   record PASS "both Pods of the size-two ModelDeployment bind in one observed zone" \
     "$(printf '%s' "$ZONE_FIT_ROWS" | tr '\n' ';') zone=${ZONE_FIT_ZONES}"
 else
@@ -1023,6 +1178,36 @@ fi
 tas_md_force_release "$NS" "${PREFIX}-zone-fit"
 kubectl -n "$NS" delete modeldeployment "${PREFIX}-zone-fit" --wait=false >/dev/null 2>&1
 
+# THE REFUSAL NEEDS A CONTROL ON THE SAME QUEUE. Four Nodes is a count, not proof that quota and live
+# capacity hold three of these Pods; the same size-three group WITHOUT a required level must be
+# admitted first, or the refusal below could be a quota or capacity verdict rather than a zone one.
+tas_md_apply "${PREFIX}-zone-control" "$NS" "$BINDING" \
+  "$(tas_md_role_block server '' "$IT" 1 "$IMAGE" 3)"
+ZONE_CONTROL_WL=""
+if tas_md_wait_pods "$NS" "${PREFIX}-zone-control" 3 && tas_md_wait_workloads "$NS" "${PREFIX}-zone-control" 1; then
+  ZONE_CONTROL_WL="$(tas_md_workloads "$NS" "${PREFIX}-zone-control" | sed -n '1p')"
+fi
+ZONE_CONTROL_ADMITTED=no
+for _ in $(seq 1 60); do
+  [ -n "$ZONE_CONTROL_WL" ] && [ -n "$(tas_wl_admitted "$NS" "$ZONE_CONTROL_WL")" ] \
+    && { ZONE_CONTROL_ADMITTED=yes; break; }
+  sleep 2
+done
+if [ "$ZONE_CONTROL_ADMITTED" = yes ]; then
+  record PASS "a size-three group without a required level is admitted on the same queue" \
+    "${ZONE_CONTROL_WL} admitted: quota and live capacity hold three Pods in aggregate"
+else
+  record FAIL "a size-three group without a required level is admitted on the same queue" \
+    "workload=${ZONE_CONTROL_WL:-missing}, admission absent; the size-three refusal below cannot be read as a zone verdict"
+fi
+tas_md_force_release "$NS" "${PREFIX}-zone-control"
+kubectl -n "$NS" delete modeldeployment "${PREFIX}-zone-control" --wait=false >/dev/null 2>&1
+for _ in $(seq 1 60); do
+  [ "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${PREFIX}-zone-control" \
+    --no-headers 2>/dev/null | wc -l | tr -d ' ')" = 0 ] && break
+  sleep 2
+done
+
 tas_md_apply "${PREFIX}-zone-refuse" "$NS" "$BINDING" \
   "$(tas_md_role_block server '' "$IT" 1 "$IMAGE" 3 topology.kubernetes.io/zone)"
 ZONE_REFUSE_WL=""
@@ -1030,6 +1215,8 @@ if tas_md_wait_pods "$NS" "${PREFIX}-zone-refuse" 3 && tas_md_wait_workloads "$N
   ZONE_REFUSE_WL="$(tas_md_workloads "$NS" "${PREFIX}-zone-refuse" | sed -n '1p')"
 fi
 zone_refuse_sample() {
+  ZONE_REFUSE_READABLE=no
+  tas_wl_readable "$NS" "$ZONE_REFUSE_WL" && ZONE_REFUSE_READABLE=yes
   ZONE_REFUSE_ADMISSION="$(tas_wl_admitted "$NS" "$ZONE_REFUSE_WL")"
   ZONE_REFUSE_RESERVED="$(tas_wl_condition "$NS" "$ZONE_REFUSE_WL" QuotaReserved)"
   ZONE_REFUSE_BOUND="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${PREFIX}-zone-refuse" \
@@ -1040,19 +1227,22 @@ if [ -n "$ZONE_REFUSE_WL" ]; then
   ZONE_REFUSE_FIRST_ADMISSION="$ZONE_REFUSE_ADMISSION"
   ZONE_REFUSE_FIRST_RESERVED="$ZONE_REFUSE_RESERVED"
   ZONE_REFUSE_FIRST_BOUND="$ZONE_REFUSE_BOUND"
+  ZONE_REFUSE_FIRST_READABLE="$ZONE_REFUSE_READABLE"
   sleep "$INTERVAL"
   zone_refuse_sample
 fi
-if [ -n "$ZONE_REFUSE_WL" ] && [ -z "$ZONE_REFUSE_FIRST_ADMISSION" ] \
+if [ -n "$ZONE_REFUSE_WL" ] && [ "$ZONE_CONTROL_ADMITTED" = yes ] \
+  && [ "${ZONE_REFUSE_FIRST_READABLE:-no}" = yes ] && [ "${ZONE_REFUSE_READABLE:-no}" = yes ] \
+  && [ -z "$ZONE_REFUSE_FIRST_ADMISSION" ] \
   && [ "$ZONE_REFUSE_FIRST_RESERVED" != True ] && [ "$ZONE_REFUSE_FIRST_BOUND" = 0 ] \
   && [ -z "$ZONE_REFUSE_ADMISSION" ] \
   && [ "$ZONE_REFUSE_RESERVED" != True ] && [ "$ZONE_REFUSE_BOUND" = 0 ] \
   && [ "$TAS_NODES" = 4 ] && [ "$TAS_MAX_ZONE_NODES" = 2 ]; then
   record PASS "a size-three zone request stays Pending despite four aggregate Nodes" \
-    "two samples ${INTERVAL}s apart: 4 total, max zone 2; no admission, reservation, or binding"
+    "two samples ${INTERVAL}s apart: 4 total, max zone 2, the unconstrained control admitted; no admission, reservation, or binding"
 else
   record FAIL "a size-three zone request stays Pending despite four aggregate Nodes" \
-    "workload=${ZONE_REFUSE_WL:-missing}, admission=${ZONE_REFUSE_ADMISSION:-none}, reserved=${ZONE_REFUSE_RESERVED:-none}, bound=${ZONE_REFUSE_BOUND:-0}, shape=${TAS_ZONES_SUMMARY}, hostname-only=${HOST_ONLY_NODES:-unknown}"
+    "workload=${ZONE_REFUSE_WL:-missing}, readable=${ZONE_REFUSE_FIRST_READABLE:-no}/${ZONE_REFUSE_READABLE:-no}, control=${ZONE_CONTROL_ADMITTED}, admission=${ZONE_REFUSE_ADMISSION:-none}, reserved=${ZONE_REFUSE_RESERVED:-none}, bound=${ZONE_REFUSE_BOUND:-0}, shape=${TAS_ZONES_SUMMARY}, hostname-only=${HOST_ONLY_NODES:-unknown}"
 fi
 tas_md_force_release "$NS" "${PREFIX}-zone-refuse"
 kubectl -n "$NS" delete modeldeployment "${PREFIX}-zone-refuse" --wait=false >/dev/null 2>&1
@@ -1333,6 +1523,7 @@ $(tas_md_role_block decode decode "$IT" 1 "$IMAGE")"
     starved_sample() {
       STARVED_ADMITTED=""
       STARVED_RESERVED=""
+      STARVED_UNREADABLE=""
       STARVED_CHECKS=""
       STARVED_CHECK_BAD=""
       STARVED_PODS=0
@@ -1341,6 +1532,7 @@ $(tas_md_role_block decode decode "$IT" 1 "$IMAGE")"
       idx=0
       while read -r wl; do
         idx=$((idx + 1))
+        tas_wl_readable "$NS" "$wl" || STARVED_UNREADABLE="${STARVED_UNREADABLE}${wl} "
         [ -n "$(tas_wl_admitted "$NS" "$wl")" ] && STARVED_ADMITTED="${STARVED_ADMITTED}${wl} "
         [ "$(tas_wl_condition "$NS" "$wl" QuotaReserved)" = True ] && STARVED_RESERVED="${STARVED_RESERVED}${wl} "
         s="$(tas_wl_check_state "$NS" "$wl" "$JOINT_CHECK")"
@@ -1364,15 +1556,17 @@ EOF
     STARVED_FIRST_CHECK_BAD="$STARVED_CHECK_BAD"
     STARVED_FIRST_PODS="$STARVED_PODS"
     STARVED_FIRST_BOUND="$STARVED_BOUND"
+    STARVED_FIRST_UNREADABLE="$STARVED_UNREADABLE"
     sleep "$INTERVAL"
     starved_sample
 
-    if [ -z "$STARVED_FIRST_ADMITTED$STARVED_FIRST_RESERVED$STARVED_ADMITTED$STARVED_RESERVED" ]; then
+    if [ -z "$STARVED_FIRST_ADMITTED$STARVED_FIRST_RESERVED$STARVED_ADMITTED$STARVED_RESERVED" ] \
+      && [ -z "$STARVED_FIRST_UNREADABLE$STARVED_UNREADABLE" ]; then
       record PASS "every Workload of the short deployment stays unadmitted and unreserved (two intervals)" \
         "two samples ${INTERVAL}s apart over $(printf '%s' "$STARVED_WLS" | tr '\n' ' '): no admission, no quota reservation"
     else
       record FAIL "every Workload of the short deployment stays unadmitted and unreserved (two intervals)" \
-        "admitted: '${STARVED_ADMITTED:-none}', reserved: '${STARVED_RESERVED:-none}' - the pool was not actually short"
+        "admitted: '${STARVED_ADMITTED:-none}', reserved: '${STARVED_RESERVED:-none}', unreadable: '${STARVED_FIRST_UNREADABLE}${STARVED_UNREADABLE}' - the pool was not actually short, or a Workload could not be read"
     fi
 
     if [ -z "$STARVED_FIRST_CHECK_BAD$STARVED_CHECK_BAD" ]; then
@@ -1397,8 +1591,6 @@ EOF
 fi
 
 # Results.
-echo
-echo "STATUS | CHECK | OBJECT"
-for r in "${ROWS[@]}"; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+print_rows
 [ "$FAILS" -eq 0 ] || { echo "[case-87] ${FAILS} check(s) FAILED"; exit 1; }
 echo "[case-87] all checks passed (rows that SKIP name what the cluster could not supply)"

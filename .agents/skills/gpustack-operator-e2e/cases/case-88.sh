@@ -12,8 +12,9 @@
 #              passes gpustack-node-devices, receives a Kueue topology assignment and binds there.
 # Environment: The operator and bundled Kueue with TAS enabled, one Ready schedulable Node with a
 #              free accelerator in its Devices ledger, and an Active accelerated InstanceType.
-#              The namespace must contain the InstanceType's entrance LocalQueue. AUTO-SKIPS when
-#              no free accelerator exists; exits 2 when the scheduling chain is incomplete.
+#              The namespace must contain the InstanceType's entrance LocalQueue. AUTO-SKIPS (exit 0,
+#              printing NOTHING WAS VERIFIED, which records as pending and never as a pass) when no
+#              free accelerator exists; exits 2 when the scheduling chain is incomplete.
 # Inputs:      Real Node labels, Devices ledger, generated Topology/ResourceFlavor/ClusterQueue,
 #              Kueue Workload and the rendered Pod. The pause image does not need an accelerator
 #              userspace; placement is proven from admission, the Pod request and its bound Node.
@@ -66,7 +67,7 @@ NODE="$(kubectl get devices.worker.gpustack.ai -o json 2>/dev/null | jq -r '
        ((.mode // 0) == 0 and (.remaining // 0) >= 1600000)))
    | .metadata.name] | sort | .[0] // ""')"
 if [ -z "$NODE" ]; then
-  echo "== CASE 88 — SKIPPED =="
+  echo "== CASE 88 — SKIPPED — NOTHING WAS VERIFIED =="
   echo "No Devices ledger reports a free whole accelerator card."
   exit 0
 fi
@@ -74,7 +75,7 @@ fi
 ready="$(kubectl get node "$NODE" -o jsonpath='{range .status.conditions[?(@.type=="Ready")]}{.status}{end}' 2>/dev/null)"
 unschedulable="$(kubectl get node "$NODE" -o jsonpath='{.spec.unschedulable}' 2>/dev/null)"
 if [ "$ready" != True ] || [ "$unschedulable" = true ]; then
-  echo "== CASE 88 — SKIPPED =="
+  echo "== CASE 88 — SKIPPED — NOTHING WAS VERIFIED =="
   echo "The free accelerator Node is not Ready and schedulable (Ready=${ready:-missing}, unschedulable=${unschedulable:-false})."
   exit 0
 fi
@@ -210,12 +211,24 @@ done
 wl_json="$(kubectl -n "$NS" get workload.kueue.x-k8s.io "$WL" -o json 2>/dev/null)"
 required="$(printf '%s' "$wl_json" | jq -r '.spec.podSets[0].topologyRequest.required // ""' 2>/dev/null)"
 assignment_count="$(printf '%s' "$wl_json" | jq '[.status.admission.podSetAssignments[]?.topologyAssignment.slices[]?] | length' 2>/dev/null)"
-if [ "$required" = topology.kubernetes.io/zone ] && [ "${assignment_count:-0}" -gt 0 ]; then
+# Every PodSet must carry non-empty assigned levels; counting slices across PodSets alone would pass
+# with one PodSet assigned and another admitted without any topology.
+assignment_levels="$(printf '%s' "$wl_json" | jq -r '[.status.admission.podSetAssignments[]? | (.topologyAssignment.levels // [])] as $levels
+  | if ($levels | length) > 0 and ($levels | all(length > 0)) then $levels | map(join(",")) | join(" ") else empty end' 2>/dev/null)"
+# The hostname domains the assignment names, decoded from either the universal or the individual
+# encoding, and the flavor it charged.
+assigned_hosts="$(printf '%s' "$wl_json" | jq -r '[.status.admission.podSetAssignments[]?.topologyAssignment
+  | select(. != null) | (.levels | index("kubernetes.io/hostname")) as $i | select($i != null)
+  | .slices[]?.valuesPerLevel[$i]
+  | if .universal then .universal
+    else (.individual as $v | $v.roots[]? | ($v.prefix // "") + . + ($v.suffix // "")) end] | unique | join(",")' 2>/dev/null)"
+assigned_flavor="$(printf '%s' "$wl_json" | jq -r '[.status.admission.podSetAssignments[]?.flavors[]?] | unique | join(",")' 2>/dev/null)"
+if [ "$required" = topology.kubernetes.io/zone ] && [ "${assignment_count:-0}" -gt 0 ] && [ -n "$assignment_levels" ]; then
   record PASS "Kueue admits the GPU Workload through TAS" \
-    "required=${required}; topologyAssignment slices=${assignment_count}; admitted=${admitted:-missing}"
+    "required=${required}; topologyAssignment levels=${assignment_levels}, slices=${assignment_count}; admitted=${admitted:-missing}"
 else
   record FAIL "Kueue admits the GPU Workload through TAS" \
-    "required=${required:-missing}, assignments=${assignment_count:-0}, admitted=${admitted:-missing}"
+    "required=${required:-missing}, levels=${assignment_levels:-missing}, slices=${assignment_count:-0}, admitted=${admitted:-missing}"
 fi
 
 if [ "$device_check" = Ready ]; then
@@ -235,6 +248,16 @@ if [ "$BOUND_NODE" = "$NODE" ] && [ "$bound_profile" = "$PROFILE" ] && [ "$gpu_r
 else
   record FAIL "the admitted Pod requests and binds the real accelerator" \
     "pod=${POD:-missing}, node=${BOUND_NODE:-missing}, expected=${NODE}, profile=${bound_profile:-missing}, gpu=${gpu_request:-missing}"
+fi
+
+# Device admission and Kueue placement agree only if the Node the assignment named, through the
+# flavor the queue offers for this profile, is the Node the Pod bound.
+if [ -n "$BOUND_NODE" ] && [ "$assigned_hosts" = "$BOUND_NODE" ] && [ -n "$RF" ] && [ "$assigned_flavor" = "$RF" ]; then
+  record PASS "the topology assignment names the bound Node and the profile flavor" \
+    "assignment host=${assigned_hosts}; flavor=${assigned_flavor}"
+else
+  record FAIL "the topology assignment names the bound Node and the profile flavor" \
+    "assignment host=${assigned_hosts:-missing} vs bound ${BOUND_NODE:-missing}; flavor=${assigned_flavor:-missing} vs ${RF:-missing}"
 fi
 
 echo

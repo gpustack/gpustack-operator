@@ -1101,3 +1101,156 @@ func TestNodeQueueReconciler_TheJointCheckWaitsForActive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, got.Spec.AdmissionChecksStrategy, "an inactive check is not referenced")
 }
+
+// TestNodeQueueReconciler_UpdatesQuotaInPlaceWhenNoFlavorIsRemoved pins that only removing a
+// referenced flavor is a flavor-reference switch: a Node joining or leaving an existing profile
+// changes only nominal quota, and a new profile only adds a reference, so neither holds the queue.
+func TestNodeQueueReconciler_UpdatesQuotaInPlaceWhenNoFlavorIsRemoved(t *testing.T) {
+	key := "generic"
+	name := nodeQueueName(key)
+	small := "gpustack-generic-linux-amd64-4c-p-same"
+	large := "gpustack-generic-linux-amd64-8c-p-same"
+
+	tests := []struct {
+		name    string
+		current int64
+		flavors []*kueue.ResourceFlavor
+		want    map[string]int64
+	}{
+		{
+			name:    "node joins the profile",
+			current: 4,
+			flavors: []*kueue.ResourceFlavor{newNodesFlavor(small, key, 4, 8)},
+			want:    map[string]int64{small: 8},
+		},
+		{
+			name:    "node leaves the profile",
+			current: 8,
+			flavors: []*kueue.ResourceFlavor{newNodesFlavor(small, key, 4, 4)},
+			want:    map[string]int64{small: 4},
+		},
+		{
+			name:    "flavor is added",
+			current: 4,
+			flavors: []*kueue.ResourceFlavor{newNodesFlavor(small, key, 4, 4), newNodesFlavor(large, key, 8, 8)},
+			want:    map[string]int64{small: 4, large: 8},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cq := newInstanceTypeQueue(key, false, cpuResourceGroup(small, tc.current))
+			cq.Status.AdmittedWorkloads = 1
+			objs := []ctrlcli.Object{cq}
+			for _, rf := range tc.flavors {
+				objs = append(objs, rf)
+			}
+			cli := buildNodeQueueClient(objs...)
+
+			res := reconcileNodeQueueN(t, cli, name, 1)
+			assert.Zero(t, res.RequeueAfter)
+			got, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, kueue.None, ptr.Deref(got.Spec.StopPolicy, kueue.None),
+				"a quota-only change must not drain admitted workloads")
+			assert.NotContains(t, got.Annotations, _TASQueueMigrationPhaseAnnotation)
+			assert.NotContains(t, got.Annotations, _TASQueueMigrationStopPolicyAnnotation)
+			require.Len(t, got.Spec.ResourceGroups, 1)
+			quota := make(map[string]int64)
+			for _, fq := range got.Spec.ResourceGroups[0].Flavors {
+				quota[string(fq.Name)] = fq.Resources[0].NominalQuota.Value()
+			}
+			assert.Equal(t, tc.want, quota)
+		})
+	}
+}
+
+// TestNodeQueueReconciler_PoolConservationCountsOnlyContributingNodes pins that the pool-level
+// conservation check selects the Nodes a ResourceFlavor can count: an unmanaged Node matching the
+// pool labels contributes nothing and must not block the queue, while a managed, profiled Node that
+// no live flavor selects leaves the plan incomplete and is retried.
+func TestNodeQueueReconciler_PoolConservationCountsOnlyContributingNodes(t *testing.T) {
+	hostnameProfile := topologyProfile([]string{core.LabelHostname})
+
+	t.Run("unmanaged accelerated node", func(t *testing.T) {
+		key := "nvidia-a10g"
+		name := nodeQueueName(key)
+		rf := newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-1d", key, 1, 2, accelerated(nodefeature.ManufacturerNVIDIA))
+		cq := newInstanceTypeQueue(key, true)
+		unmanaged := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "unmanaged", Labels: map[string]string{
+			systemname.ManagedLabelKey:            "false",
+			featureKeyLabel(true, key):            "true",
+			nodefeature.NodeAcceleratableLabelKey: "true",
+			core.LabelOSStable:                    "linux",
+			core.LabelArchStable:                  "amd64",
+			core.LabelHostname:                    "unmanaged",
+			TopologyProfileLabel:                  hostnameProfile,
+		}}}
+		cli := buildNodeQueueClient(cq, rf, unmanaged)
+
+		reconcileNodeQueueN(t, cli, name, 2)
+		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		require.Len(t, got.Spec.ResourceGroups, 1, "an unmanaged Node must not block the managed Nodes' quota")
+		assert.Equal(t, creditsValue(2), got.Spec.ResourceGroups[0].Flavors[0].Resources[0].NominalQuota.Value())
+		assert.Equal(t, "Ready", nodeQueueConditionTopologyReady.GetReason(got))
+	})
+
+	t.Run("managed CPU node without a live flavor", func(t *testing.T) {
+		key := "generic"
+		name := nodeQueueName(key)
+		rf := newNodesFlavor("gpustack-generic-linux-amd64-4c", key, 4, 4)
+		cq := newInstanceTypeQueue(key, false)
+		// A real Node never carries acceleratable=false; the pool selector must still find it.
+		pending := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "pending", Labels: map[string]string{
+			systemname.ManagedLabelKey:                                    "true",
+			featureKeyLabel(false, key):                                   "true",
+			featureKeyLabel(false, key) + _ResourceFlavorCountLabelSuffix: "8",
+			core.LabelOSStable:                                            "linux",
+			core.LabelArchStable:                                          "amd64",
+			core.LabelHostname:                                            "pending",
+			TopologyProfileLabel:                                          hostnameProfile,
+		}}}
+		cli := buildNodeQueueClient(cq, rf, pending)
+
+		res := reconcileNodeQueueN(t, cli, name, 1)
+		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		assert.Empty(t, got.Spec.ResourceGroups, "an incomplete plan leaves the queue unchanged")
+		assert.Equal(t, "NonConservedQuota", nodeQueueConditionTopologyReady.GetReason(got))
+		assert.Positive(t, res.RequeueAfter, "a non-conserved plan is retried once the missing flavor appears")
+	})
+}
+
+// TestNodeQueueReconciler_HoldsBeforeEmptyingUnreservedQueue pins that emptying the last flavor
+// reference holds the queue first even with automatic drain off and nothing reserved, so no
+// reservation can land between the zero check and the switch.
+func TestNodeQueueReconciler_HoldsBeforeEmptyingUnreservedQueue(t *testing.T) {
+	require.False(t, settings.InstanceTypeDrainWhenNoFlavors.ShouldValueBool(context.Background()),
+		"this case covers the automatic-drain-off path")
+	key := "generic"
+	name := nodeQueueName(key)
+	flavor := "gpustack-generic-linux-amd64-4c"
+	cq := newInstanceTypeQueue(key, false, cpuResourceGroup(flavor, 4))
+	cli := buildNodeQueueClient(cq)
+
+	res := reconcileNodeQueueN(t, cli, name, 1)
+	assert.Positive(t, res.RequeueAfter)
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+	assert.Equal(t, _TASQueueMigrationPhaseDraining, got.Annotations[_TASQueueMigrationPhaseAnnotation])
+	require.Len(t, got.Spec.ResourceGroups, 1, "the reference stays until Kueue observes the hold")
+
+	markClusterQueueStopped(t, cli, name)
+	reconcileNodeQueueN(t, cli, name, 1)
+	got, err = getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Empty(t, got.Spec.ResourceGroups)
+
+	markClusterQueueStopped(t, cli, name)
+	reconcileNodeQueueN(t, cli, name, 1)
+	got, err = getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, kueue.None, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+	assert.NotContains(t, got.Annotations, _TASQueueMigrationPhaseAnnotation)
+}
