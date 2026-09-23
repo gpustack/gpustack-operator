@@ -565,7 +565,7 @@ mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:5005
 Five phases — `Provisioning`, `Ready`, `Degraded`, `Error`, `Deleting`. `Ready` carries no
 `phaseMessage`; every other phase carries one.
 
-Conditions report the axes: `LeaderAvailable`, `MembersMounted`, `CapacityObserved`, `Deletable` and
+Conditions report the axes: `LeaderAvailable`, `MembersMounted`, `CapacityObserved`, `PoolWrites`, `Deletable` and
 `RolloutComplete`. Two more appear only where they have something to judge —
 `SnapshotStorageShared` when [`leader.highAvailability.snapshot`](leader.md#high-availability) is
 set, and `ElectionObserved` above one leader replica.
@@ -615,6 +615,17 @@ adding up what members were asked to provide.
 
 **`status.capacity.total` is capacity, not usage**, and a disk tier contributes the ceiling the
 member declared — published as soon as the member registers, before anything is written there.
+
+`PoolWrites` reports pool-wide write activity. `True` means the leader has seen a put end since
+its current process started, or a member reports positive `allocator_used_bytes`. `False` means
+the leader has seen both a put start and a put revoke while every member reports zero allocated
+bytes. `Unknown` covers no put start, an unfinished put, or a missing reading.
+
+The process lifetime is the observation window because these counters reset when the leader
+restarts; a single status poll could miss a short write.
+
+This condition does not identify which deployment attempted a write, and a previous failure in that
+window does not prove that every current write fails.
 
 To ask whether the **disk** tier is holding data, the figure to read is not on the CR at all — see
 [The tier is written one bucket at a time](local-disk-tier.md#the-tier-is-written-one-bucket-at-a-time).

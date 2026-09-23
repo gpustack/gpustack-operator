@@ -36,6 +36,33 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 )
 
+func TestReportKVCacheBackendPoolWrites(t *testing.T) {
+	zero := uint64(0)
+	used := uint64(10)
+	cases := []struct {
+		name     string
+		metrics  mooncake.LeaderCapacity
+		segments []mooncake.SegmentDetail
+		status   string
+		reason   string
+	}{
+		{"idle", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](0), PutEndRequests: ptr.To[int64](0), PutRevokeRequests: ptr.To[int64](0)}, []mooncake.SegmentDetail{{AllocatorUsedBytes: &zero}}, "Unknown", "NoWritesObserved"},
+		{"failed write", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](1), PutEndRequests: ptr.To[int64](0), PutRevokeRequests: ptr.To[int64](1)}, []mooncake.SegmentDetail{{AllocatorUsedBytes: &zero}}, "False", "WritesRevoked"},
+		{"completed write", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](1), PutEndRequests: ptr.To[int64](1), PutRevokeRequests: ptr.To[int64](0)}, []mooncake.SegmentDetail{{AllocatorUsedBytes: &zero}}, "True", "WriteObserved"},
+		{"allocated data", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](0), PutEndRequests: ptr.To[int64](0), PutRevokeRequests: ptr.To[int64](0)}, []mooncake.SegmentDetail{{AllocatorUsedBytes: &used}}, "True", "AllocationObserved"},
+		{"write in flight", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](1), PutEndRequests: ptr.To[int64](0), PutRevokeRequests: ptr.To[int64](0)}, []mooncake.SegmentDetail{{AllocatorUsedBytes: &zero}}, "Unknown", "WriteIncomplete"},
+		{"allocation missing", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](1), PutEndRequests: ptr.To[int64](0), PutRevokeRequests: ptr.To[int64](1)}, []mooncake.SegmentDetail{{}}, "Unknown", "AllocationMissing"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			holder := &workercore.KVCacheBackend{}
+			reportKVCacheBackendPoolWrites(holder, &tc.metrics, tc.segments)
+			assert.Equal(t, tc.status, KVCacheBackendConditionPoolWrites.GetStatus(holder))
+			assert.Equal(t, tc.reason, KVCacheBackendConditionPoolWrites.GetReason(holder))
+		})
+	}
+}
+
 // newKVCacheBackendObject builds a managed backend with the given consumers already recorded in
 // status, which is the only input this task's status derivation reads.
 // withReconcilerDiskTier declares a local disk tier on the canonical group.

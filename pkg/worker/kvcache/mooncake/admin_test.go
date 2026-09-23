@@ -261,6 +261,18 @@ func TestAdminDecodeCapacity_ANumberThatIsNotAByteCountIsMalformed(t *testing.T)
 	assert.Equal(t, int64(536870912000), *capacity.TotalBytes)
 }
 
+func TestAdminDecodePutCounters(t *testing.T) {
+	got, err := DecodeLeaderCapacity([]byte("master_put_start_requests_total 2\n" +
+		"master_put_end_requests_total 0\nmaster_put_revoke_requests_total 1\n"))
+	require.NoError(t, err)
+	require.NotNil(t, got.PutStartRequests)
+	require.NotNil(t, got.PutEndRequests)
+	require.NotNil(t, got.PutRevokeRequests)
+	assert.Equal(t, int64(2), *got.PutStartRequests)
+	assert.Zero(t, *got.PutEndRequests)
+	assert.Equal(t, int64(1), *got.PutRevokeRequests)
+}
+
 func TestAdminDecodeSegments(t *testing.T) {
 	t.Run("identity, status, and allocation are read", func(t *testing.T) {
 		got, err := DecodeSegmentListing(fixture(t, "segments-detail.json"))

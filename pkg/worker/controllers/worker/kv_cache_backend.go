@@ -76,6 +76,9 @@ const (
 	KVCacheBackendConditionLeaderAvailable  kubeapistatus.ConditionType = "LeaderAvailable"
 	KVCacheBackendConditionMembersMounted   kubeapistatus.ConditionType = "MembersMounted"
 	KVCacheBackendConditionCapacityObserved kubeapistatus.ConditionType = "CapacityObserved"
+	// KVCacheBackendConditionPoolWrites reports store-wide write activity since the current
+	// leader process started. It does not attribute writes to a deployment.
+	KVCacheBackendConditionPoolWrites kubeapistatus.ConditionType = "PoolWrites"
 	// KVCacheBackendConditionDeletable is False exactly while status.usedBy names a consumer.
 	// It is the condition the finalizer's refusal is explained by.
 	KVCacheBackendConditionDeletable kubeapistatus.ConditionType = "Deletable"
@@ -512,6 +515,7 @@ func (r *KVCacheBackendReconciler) observeLeader(
 		reason, message := "NoAdminEndpoint", "the backend publishes no admin endpoint to read"
 		KVCacheBackendConditionLeaderAvailable.False(holder, reason, message)
 		KVCacheBackendConditionCapacityObserved.False(holder, reason, message)
+		KVCacheBackendConditionPoolWrites.Unknown(holder, reason, message)
 		setMembersObservationFailed(holder, reason, message)
 		return
 	}
@@ -560,6 +564,7 @@ func (r *KVCacheBackendReconciler) observeLeader(
 		}
 		KVCacheBackendConditionLeaderAvailable.False(holder, reason, message)
 		KVCacheBackendConditionCapacityObserved.False(holder, reason, message)
+		KVCacheBackendConditionPoolWrites.Unknown(holder, reason, message)
 		// Membership keeps its last schema-valid value: an empty list would read as "every member is
 		// gone", which is a claim this pass cannot make. Rows written under the former schema are the
 		// exception; the helper omits them because the API server cannot accept them on this update.
@@ -577,6 +582,8 @@ func (r *KVCacheBackendReconciler) observeLeader(
 		KVCacheBackendConditionLeaderAvailable.False(holder, reason, message)
 		KVCacheBackendConditionCapacityObserved.False(holder, reason,
 			"the leader is up but its service plane is not active, so it holds no capacity to report")
+		KVCacheBackendConditionPoolWrites.Unknown(holder, reason,
+			"the leader is up but its service plane is not active")
 		setMembersObservationFailed(holder, reason,
 			"the leader is up but its service plane is not active, so it lists no segment")
 		return
@@ -585,8 +592,9 @@ func (r *KVCacheBackendReconciler) observeLeader(
 	KVCacheBackendConditionLeaderAvailable.True(holder, "Serving",
 		fmt.Sprintf("the leader serves in role %q", clipFaultDetail(health.Role)))
 
-	r.observeCapacity(ctx, kvcb, holder, client)
-	r.observeMembers(ctx, kvcb, holder, client)
+	metrics := r.observeCapacity(ctx, kvcb, holder, client)
+	segments := r.observeMembers(ctx, kvcb, holder, client)
+	reportKVCacheBackendPoolWrites(holder, metrics, segments)
 }
 
 // leaderPodIsReady reports whether the leader's Deployment has an available replica.
@@ -782,19 +790,19 @@ func (r *KVCacheBackendReconciler) observeCapacity(
 	kvcb *workercore.KVCacheBackend,
 	holder *workercore.KVCacheBackend,
 	client *mooncake.AdminClient,
-) {
+) *mooncake.LeaderCapacity {
 	capacity, err := adminRead(ctx, client.Capacity)
 	if err != nil {
 		KVCacheBackendConditionCapacityObserved.False(holder, "ScrapeFailed",
 			fmt.Sprintf("the leader's metrics could not be read: %v", err))
-		return
+		return nil
 	}
 
 	total, used := selectKVCacheBackendCapacity(kvcb, capacity)
 	if total == nil || used == nil {
 		KVCacheBackendConditionCapacityObserved.False(holder, "FamilyMissing",
 			"the leader's exposition does not carry the capacity families for this backend's medium")
-		return
+		return &capacity
 	}
 
 	holder.Status.Capacity = &workercore.KVCacheBackendCapacity{
@@ -803,6 +811,7 @@ func (r *KVCacheBackendReconciler) observeCapacity(
 	}
 	KVCacheBackendConditionCapacityObserved.True(holder, "Observed",
 		"capacity is read from the leader's own counters")
+	return &capacity
 }
 
 // observeMembers publishes the leader's segment listing as status.members[].
@@ -816,7 +825,7 @@ func (r *KVCacheBackendReconciler) observeMembers(
 	kvcb *workercore.KVCacheBackend,
 	holder *workercore.KVCacheBackend,
 	client *mooncake.AdminClient,
-) {
+) []mooncake.SegmentDetail {
 	logger := ctrllog.FromContext(ctx)
 
 	segments, err := adminRead(ctx, client.Segments)
@@ -832,7 +841,7 @@ func (r *KVCacheBackendReconciler) observeMembers(
 		setMembersObservationFailed(holder, "ListingFailed",
 			fmt.Sprintf("the leader's segment listing could not be read, so membership is as of "+
 				"the last successful read: %v", err))
-		return
+		return nil
 	}
 
 	if size := segmentListingSize(segments); len(segments) > kvCacheBackendMaxMembers ||
@@ -846,7 +855,7 @@ func (r *KVCacheBackendReconciler) observeMembers(
 				"object past the size the api server accepts, and every status write would fail "+
 				"from then on — including this one",
 				len(segments), size, kvCacheBackendMaxMembers, kvCacheBackendMaxMembersBytes))
-		return
+		return nil
 	}
 
 	pods, ready, joinErr := r.listMemberPods(ctx, kvcb)
@@ -986,6 +995,63 @@ func (r *KVCacheBackendReconciler) observeMembers(
 		KVCacheBackendConditionMembersMounted.True(holder, "Mounted",
 			fmt.Sprintf("the leader lists %d segment(s)", len(members)))
 	}
+	return segments
+}
+
+// reportKVCacheBackendPoolWrites uses the current leader process as its observation window.
+// The master counters reset with that process, while a reconcile interval could miss short
+// writes. An unfinished PutStart has neither PutEnd nor PutRevoke and remains Unknown. A False
+// result means failed writes were observed in this process without an observed success; it does
+// not claim every current write is failing.
+func reportKVCacheBackendPoolWrites(
+	holder *workercore.KVCacheBackend,
+	metrics *mooncake.LeaderCapacity,
+	segments []mooncake.SegmentDetail,
+) {
+	if metrics == nil || segments == nil {
+		KVCacheBackendConditionPoolWrites.Unknown(holder, "ReadFailed",
+			"the leader's metrics or segment listing could not be read")
+		return
+	}
+	if metrics.PutEndRequests != nil && *metrics.PutEndRequests > 0 {
+		KVCacheBackendConditionPoolWrites.True(holder, "WriteObserved",
+			"the leader completed a put since this process started")
+		return
+	}
+	allReported := true
+	for _, segment := range segments {
+		if segment.AllocatorUsedBytes == nil {
+			allReported = false
+			continue
+		}
+		if *segment.AllocatorUsedBytes > 0 {
+			KVCacheBackendConditionPoolWrites.True(holder, "AllocationObserved",
+				"a member reports allocated bytes")
+			return
+		}
+	}
+	if !allReported {
+		KVCacheBackendConditionPoolWrites.Unknown(holder, "AllocationMissing",
+			"a member did not report allocator_used_bytes")
+		return
+	}
+	if metrics.PutStartRequests == nil || metrics.PutRevokeRequests == nil {
+		KVCacheBackendConditionPoolWrites.Unknown(holder, "CountersMissing",
+			"the leader did not report put start and revoke counters")
+		return
+	}
+	if *metrics.PutStartRequests == 0 {
+		KVCacheBackendConditionPoolWrites.Unknown(holder, "NoWritesObserved",
+			"the leader has seen no put start since this process started")
+		return
+	}
+	if *metrics.PutRevokeRequests > 0 {
+		KVCacheBackendConditionPoolWrites.False(holder, "WritesRevoked",
+			"the leader saw a put revoke and members report no allocated bytes")
+		return
+	}
+	KVCacheBackendConditionPoolWrites.Unknown(holder, "WriteIncomplete",
+		"the leader has seen a put start but no completed or revoked put")
 }
 
 // podIsReady reports the Pod's own readiness, which for a member is the store client having mounted

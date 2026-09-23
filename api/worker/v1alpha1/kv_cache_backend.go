@@ -977,9 +977,9 @@ type KVCacheBackendStatus struct {
 	PhaseMessage string `json:"phaseMessage,omitempty" protobuf:"bytes,2,opt,name=phaseMessage"`
 
 	// Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,
-	// CapacityObserved, Deletable, RolloutComplete, and — each only where it has something to be a
-	// verdict about — SnapshotStorageShared and ElectionObserved. Every one is derived from an
-	// observed document.
+	// CapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has
+	// something to be a verdict about — SnapshotStorageShared and ElectionObserved. Every one is
+	// derived from an observed document.
 	//
 	// +patchMergeKey=type
 	// +patchStrategy=merge
