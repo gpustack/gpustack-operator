@@ -121,9 +121,9 @@ func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 	//
 	// REQUIRED: -rpc_address belongs to this group even though it looks like a bind setting. The
 	// artifact folds it into "rpc_address:rpc_port" and campaigns with that string, which becomes
-	// BOTH the election's identity and the address written into the Lease for members to connect
-	// to. Left at its 0.0.0.0 default, every replica campaigns under one identity and every member
-	// following the Lease is handed 0.0.0.0 -- an address that resolves back to the member itself.
+	// BOTH the election's identity and the address written into the Lease for members that explicitly
+	// choose Lease addressing. Left at its 0.0.0.0 default, every replica campaigns under one identity
+	// and every member following the Lease is handed an address that resolves back to itself.
 	// The Pod IP is the only value that is unique per replica and reachable from another Pod, and
 	// it also binds correctly, because the artifact hands the same string to its RPC server.
 	if leaderNeedsAPIAccess(leader) {

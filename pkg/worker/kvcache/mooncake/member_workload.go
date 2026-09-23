@@ -501,8 +501,8 @@ func RenderMemberDaemonSet(
 					// that has no use for one -- on the host-fabric paths an image that also holds
 					// two capabilities.
 					//
-					// Under HA the member reaches the elected leader through its Service. The
-					// member account remains mounted although this address does not use the token.
+					// Under HA the default Service address does not use this token. An
+					// explicit Lease address does, so the member account stays mounted.
 					AutomountServiceAccountToken: ptr.To(leaderNeedsAPIAccess(
 						kvcb.Spec.Connection.Managed.Leader)),
 					ServiceAccountName: memberServiceAccountName(kvcb),
@@ -582,9 +582,16 @@ func memberContainerSpec(
 	}
 }
 
-// MemberMasterEntry gives a member the leader Service address and RPC port. The Service publishes
-// only ready endpoints, so a standby does not answer as the serving leader.
+// MemberMasterEntry gives a member the leader Service address by default. An explicit Lease choice
+// gives the client Lease coordinates when HA runs. The Service publishes only ready endpoints, so a
+// standby does not answer as the serving leader.
 func MemberMasterEntry(kvcb *workercore.KVCacheBackend) string {
+	leader := kvcb.Spec.Connection.Managed.Leader
+	if leaderNeedsAPIAccess(leader) &&
+		leader.HighAvailability.MemberAddressing == MemberAddressingLease {
+		return fmt.Sprintf("k8s://%s/%s", kuberess.SystemNamespaceName, LeaderObjectName(kvcb))
+	}
+
 	return fmt.Sprintf("%s:%d", LeaderServiceHost(kvcb), LeaderRPCPort)
 }
 

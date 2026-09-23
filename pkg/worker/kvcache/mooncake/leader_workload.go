@@ -106,9 +106,8 @@ const (
 		`printf '%s' "$POLICY_EMPTY" > "$POLICY_FILE"; fi`
 )
 
-// The two values leader.highAvailability.memberAddressing takes. Only the second is tested for,
-// because the field is schema-defaulted and an empty value means the object never went through
-// admission -- which is the same reading every other enum in this package gives an empty string.
+// The two values leader.highAvailability.memberAddressing takes. An empty value renders Service,
+// which is the schema default for objects that passed admission.
 const (
 	MemberAddressingLease   = "Lease"
 	MemberAddressingService = "Service"

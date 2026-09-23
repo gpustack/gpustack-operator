@@ -20,8 +20,8 @@ func MemberRBACObjectName(kvcb *workercore.KVCacheBackend) string {
 	return kvcb.Name + "-member"
 }
 
-// leaderNeedsAPIAccess reports whether an election runs, which is the same question as whether
-// either side talks to the API server.
+// leaderNeedsAPIAccess reports whether an election runs. The leader then needs API access, and the
+// member account stays available for an explicit Lease address.
 //
 // The election exists only ABOVE ONE REPLICA. A single process has nothing to elect between, so
 // highAvailability with one replica renders no election flag, no Lease and no API token -- and the
@@ -32,13 +32,12 @@ func MemberRBACObjectName(kvcb *workercore.KVCacheBackend) string {
 //
 // The pairing is re-evaluated on every render, not decided at create: raising replicas past one
 // turns the election on, and lowering back to one turns it off. Both flips restart the leader and
-// roll every member, because the member's master entry changes shape with the answer here -- see
-// MemberMasterEntry.
+// roll every member because their token and account settings change. An explicit Lease address also
+// changes shape with the election -- see MemberMasterEntry.
 //
-// Without an election neither the leader nor a member has a reason to hold a token; with one, both
-// do -- the leader elects through a Lease and a member reads that same Lease to find the leader. It
-// is a named predicate rather than an inlined check because five renderings ask it, and five copies
-// of the pairing is how one of them comes to disagree.
+// Without an election neither role has a reason to hold a token. Under HA, the leader elects through
+// a Lease and an explicitly Lease-addressed member reads it. The member account is rendered for both
+// address values. The predicate is named because five renderings ask it.
 func leaderNeedsAPIAccess(leader workercore.KVCacheBackendLeader) bool {
 	if leader.HighAvailability == nil {
 		return false
@@ -115,17 +114,15 @@ func RenderLeaderRBAC(kvcb *workercore.KVCacheBackend) HARBAC {
 	})
 }
 
-// RenderMemberRBAC renders what a member needs to FIND the leader, or nothing.
+// RenderMemberRBAC renders the account an explicitly Lease-addressed member needs, or nothing.
 //
-// A member is a client: it reads the Lease holder at connect time and re-reads it to follow an
-// election. It never takes leadership, so this account is strictly narrower than the leader's --
-// separate rather than shared for exactly that reason, since one account carrying `update` would
-// let any member steal the Lease from the leader.
+// A Lease-addressed member reads the holder at connect time and re-reads it to follow an election.
+// It never takes leadership, so this account is narrower than the leader's. The default Service
+// address does not use the account, but both address values receive it.
 //
 // LIMITED: the read is a POLL. The k8s coordinator's WaitForViewChange re-reads the holder every
-// 200ms rather than watching, so each member issues about five Lease reads per second against the
-// API server for as long as it runs, and that cost scales with the member count rather than with
-// the failover rate.
+// 200ms rather than watching, so each Lease-addressed member issues about five reads per second
+// against the API server, and that cost scales with the Lease-addressed member count.
 func RenderMemberRBAC(kvcb *workercore.KVCacheBackend) HARBAC {
 	return renderHARBAC(kvcb, MemberRBACObjectName(kvcb), memberResourceNoteRole, []rbac.PolicyRule{
 		{

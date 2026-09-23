@@ -200,28 +200,25 @@ healthy failover briefly shows `2` ready as the old leader steps down; both read
 | role | grant | why |
 |---|---|---|
 | leader | `leases`: `create`, `get`, `update`; `pods`: `patch` | takes the Lease, and labels its own Pod |
-| member | `leases`: `get` | finds the leader, and nothing more |
+| member | `leases`: `get` | follows an explicit `Lease` address, and nothing more |
 
 The member's is narrower on purpose: a shared account would let any member take the Lease from the
 leader it is following.
 
-**A member's `MOONCAKE_MASTER` becomes `k8s://<namespace>/<lease>`** instead of the leader Service
-address, so the client reads the holder and follows it across an election without restarting. Where
-no election runs — the field unset, or one replica — the value is unchanged.
-
-**`leader.highAvailability.memberAddressing` chooses between that and the Service address**, and
-defaults to `Lease`, which is the `k8s://` form above. `Service` hands members the leader Service
-instead — a standby is not ready, so the Service already resolves to whichever replica is serving.
+**A member's `MOONCAKE_MASTER` defaults to the leader Service address.** A standby is not ready, so
+the Service resolves to the serving leader. With `memberAddressing: Lease` and an election running,
+the member instead gets `k8s://<namespace>/<lease>` and reads the current holder itself. Without an
+election, both values render the Service address.
 
 | value | what a member is given | what it pays |
 |---|---|---|
-| `Lease` (default) | the Lease's coordinates, read by the client itself | the member must reach the API server, so its image must carry the leadership backend |
-| `Service` | `<backend>-leader.<namespace>.svc:50051` | endpoint propagation after an election, which nothing here has measured |
+| `Lease` | the Lease's coordinates, read by the client itself | the member must reach the API server, so its image must carry the leadership backend |
+| `Service` (default) | `<backend>-leader.<namespace>.svc:50051` | endpoint propagation after an election |
 
-⛔ **Neither has been measured against the other.** The default is `Lease` because that is what this
-operator has always rendered, not because it won a comparison; the figure that would settle it is how
-long a member cannot reach a master after the leader Pod is deleted. Treat `Service` as the one to
-try. Changing the value rolls every member group, because it rewrites `MOONCAKE_MASTER`.
+In one cluster failover comparison the forms differed by 0.13 seconds, within the noise of one run.
+Both first failed at 31.41 seconds and converged around 60.6 seconds, so election dominated the
+result; retest if election timing changes. The Service endpoint transition was inferred from the
+result, not observed directly. Changing the value rolls every member group when HA is active.
 
 **A snapshot is what a standby starts from, and without one it starts from nothing.** Set
 `leader.highAvailability.snapshot` and the serving replica writes the master's metadata to storage on

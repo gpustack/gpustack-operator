@@ -141,8 +141,8 @@ func TestRenderLeaderRBAC_GrantsExactlyWhatTheBackendCalls(t *testing.T) {
 // TestRenderMemberRBAC_ReadsAndNothingElse is the whole point of the member having an account of
 // its own rather than reusing the leader's.
 //
-// A member is a client: it reads the Lease holder to find the leader and re-reads it to follow an
-// election. Sharing the leader's account would hand every member `create` and `update`, which is
+// A member using Lease addressing reads the holder and re-reads it to follow an election. Sharing
+// the leader's account would hand every member `create` and `update`, which is
 // the ability to TAKE the Lease -- so the assertion that matters is not that the read is granted
 // but that nothing else is.
 func TestRenderMemberRBAC_ReadsAndNothingElse(t *testing.T) {
@@ -182,8 +182,8 @@ func TestMemberMasterEntry_UsesServiceWithAndWithoutHA(t *testing.T) {
 		"-ha_backend_connstring="+kuberess.SystemNamespaceName+"/mooncake-dram-leader")
 }
 
-// TestMemberMasterEntry_UsesServiceForEachAddressingValue checks all accepted field values.
-func TestMemberMasterEntry_UsesServiceForEachAddressingValue(t *testing.T) {
+// TestMemberMasterEntry_AddressingSelectsExplicitLease checks the default and both field values.
+func TestMemberMasterEntry_AddressingSelectsExplicitLease(t *testing.T) {
 	addressed := func(value string) *workercore.KVCacheBackend {
 		return haBackend(func(kvcb *workercore.KVCacheBackend) {
 			kvcb.Spec.Connection.Managed.Leader.HighAvailability.MemberAddressing = value
@@ -191,9 +191,10 @@ func TestMemberMasterEntry_UsesServiceForEachAddressingValue(t *testing.T) {
 	}
 
 	service := LeaderServiceHost(testBackend()) + ":50051"
+	lease := "k8s://" + kuberess.SystemNamespaceName + "/mooncake-dram-leader"
 
 	assert.Equal(t, service, MemberMasterEntry(addressed("")))
-	assert.Equal(t, service, MemberMasterEntry(addressed(MemberAddressingLease)))
+	assert.Equal(t, lease, MemberMasterEntry(addressed(MemberAddressingLease)))
 	assert.Equal(t, service, MemberMasterEntry(addressed(MemberAddressingService)),
 		"the Service publishes only ready endpoints, and a standby is not ready")
 

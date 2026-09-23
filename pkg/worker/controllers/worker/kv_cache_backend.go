@@ -1525,8 +1525,8 @@ func (r *KVCacheBackendReconciler) syncLeaderWorkload(
 
 // ensureHARBAC creates or converges the access both roles need, and does nothing when HA is off.
 //
-// The leader uses its account for election. The member account remains in the rendered HA set even
-// though its Service address does not use the token. Rendered here rather than beside the
+// The leader uses its account for election. The member account permits an explicit Lease address;
+// the default Service address does not use its token. Rendered here rather than beside the
 // DaemonSets because there is one account for the whole backend.
 //
 // REQUIRED: "does nothing" is a RETURN, not an empty render handed to syncHARBAC. This runs BEFORE
