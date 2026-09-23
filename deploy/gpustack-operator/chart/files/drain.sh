@@ -106,8 +106,9 @@ resource_of() { # crd-name -> plural.VERSION.group, empty when the CRD is absent
 # error, an expired token or a mid-run RBAC change into the answer "this kind is empty", and the run
 # reports `done` over objects that still hold live finalizers. The preflight cannot cover this: it
 # proves the API server answered once, at the start, not that it keeps answering.
-list_objects() { # resource -> "ns/name" lines; NON-ZERO when the list itself failed
-  kubectl get "$1" -A \
+list_objects() { # resource [selector] -> "ns/name" lines; NON-ZERO when the list itself failed
+  # shellcheck disable=SC2086
+  kubectl get "$1" -A ${2:+-l "$2"} \
     -o jsonpath='{range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"\n"}{end}' 2>/dev/null
 }
 
@@ -122,8 +123,11 @@ remaining_left() { # seconds left in the budget, never negative
 # object: a hundred Instances would be waited for one after another, and the first slow one would
 # consume a budget the rest never get to use. Issuing every delete first lets the controllers work
 # on all of them at once, which is how they run anyway.
-drain_kind() { # resource
-  local res="$1" objects listing left refused=0 ns name
+#
+# The optional selector narrows only the WAIT, never the delete: every object of the kind is
+# deleted, and the kind counts as drained once nothing matching the selector is left.
+drain_kind() { # resource [wait-selector]
+  local res="$1" wait_sel="${2:-}" objects listing left refused=0 ns name
   if ! objects="$(list_objects "${res}")"; then
     echo "[drain] INCOMPLETE: ${res} could not be listed, so whether it drained is unknown" >&2
     return 1
@@ -161,7 +165,7 @@ EOF
     # listing when the report below prints it. Assigning the call's output directly would overwrite
     # it with the empty string a failed kubectl produces, and the operator would get an INCOMPLETE
     # header naming nothing - the one moment the names matter most.
-    if listing="$(list_objects "${res}")"; then
+    if listing="$(list_objects "${res}" "${wait_sel}")"; then
       objects="${listing}"
       [ -n "$(printf '%s' "${objects}" | tr -d '[:space:]')" ] || return 0
     fi
@@ -186,7 +190,17 @@ for crd in ${DRAIN_ORDER}; do
   case "${res}" in
     ""|.*|*..*) continue ;;
   esac
-  drain_kind "${res}" || incomplete=yes
+  # A derived InstanceType is deleted once and not waited for. While the worker runs it authors the
+  # type again from its Node a few seconds after the delete completes, so the kind never empties
+  # and the wait would only spend the whole budget. The delete still starts the type's teardown
+  # while the worker runs. The recreated type is left to the later steps: drain-kueue.sh, where this
+  # release ships Kueue, stops the worker and deletes the queue it backs, and cleanup.sh strips its
+  # finalizer.
+  wait_sel=""
+  if [ "${crd}" = "instancetypes.worker.gpustack.ai" ]; then
+    wait_sel="schedule.gpustack.ai/derived-from-node!=true"
+  fi
+  drain_kind "${res}" "${wait_sel}" || incomplete=yes
 done
 
 # Sweep whatever is left in the gpustack groups, in whatever order `kubectl get crd` returns.
