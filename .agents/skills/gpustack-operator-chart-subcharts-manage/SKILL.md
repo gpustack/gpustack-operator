@@ -205,10 +205,12 @@ strip CRs. Regenerate it with the commands above.
 6. `make test chart` — `ct install` in a container (docker + `~/.kube/config`, current context) into a
    namespace **chart-testing generates**, which is also what proves the chart names no namespace of its own.
    Needs a reachable Kubernetes cluster with **no conflicting release**: the chart templates cluster-scoped
-   objects and Helm refuses any object carrying another release's ownership metadata. `ci/smoke-values.yaml`
-   pins the operator image to `:dev` and sets `cleanupOnUninstall: true`, so the leg needs network egress.
+   objects and Helm refuses any object carrying another release's ownership metadata. `hack/lib/helm.sh`
+   passes `image.tag=dev` and `cleanupOnUninstall=true` through `--helm-extra-set-args`, so the leg needs
+   network egress.
 
-   A **clean** `ct` cycle needs no cleanup — that flag handles it. An **interrupted** run leaves debris, and
+   The post-delete cleanup Job currently fails with `BackoffLimitExceeded` on every uninstall, and chart-testing
+   only prints that error, so a green run does not prove the cluster was cleaned. An **interrupted** run leaves debris, and
    Helm names only one object per failure, so sweep by annotation instead of discovering them one run at a time:
 
    ```bash

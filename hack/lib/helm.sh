@@ -380,6 +380,13 @@ function gpustack::helm::lint() {
 # template a subchart's value — so this install used to have to be pinned to that one
 # namespace. The parent now renders the selector from .Release.Namespace, and a random
 # namespace here is what proves it.
+#
+# The values go through --helm-extra-set-args, which chart-testing passes to install and
+# upgrade only. --helm-extra-args also reaches `helm test` and `helm uninstall`, and both
+# reject --set. The operator image is pinned to the published "dev" tag, as the chart's
+# default "v<.Chart.AppVersion>" is never a real image in development. cleanupOnUninstall
+# is written into the release at install, so the uninstall between iterations runs the
+# cleanup hooks that remove the cluster-scoped leftovers.
 function gpustack::helm::test() {
   local target="$1"
 
@@ -397,5 +404,6 @@ function gpustack::helm::test() {
     ct install \
     --charts "${target#"${ROOT_DIR}/"}" \
     --chart-repos "${chart_repos}" \
-    --helm-extra-args '--timeout 600s --set image.tag=dev --set cleanupOnUninstall=true'
+    --helm-extra-args '--timeout 600s' \
+    --helm-extra-set-args '--set=image.tag=dev --set=cleanupOnUninstall=true'
 }
