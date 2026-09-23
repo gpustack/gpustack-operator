@@ -115,6 +115,9 @@ func TestNew_ServesOnlyModesWithAResourceName(t *testing.T) {
 // shape a serving server has, which is what keeps a run alive for Stop to end.
 type fakeServer struct {
 	err error
+	// failAfter, when set, holds a failing start back until it is closed, so a case can order the
+	// failure after something else has happened.
+	failAfter chan struct{}
 
 	mu      sync.Mutex
 	starts  int
@@ -135,6 +138,12 @@ func (f *fakeServer) Start(ctx context.Context, kubeSocket string) error {
 	f.mu.Unlock()
 
 	if f.err != nil {
+		if f.failAfter != nil {
+			select {
+			case <-f.failAfter:
+			case <-ctx.Done():
+			}
+		}
 		return f.err
 	}
 	f.started <- struct{}{}
@@ -204,6 +213,7 @@ func TestStart_RunsEveryServerOnceAgainstTheKubeSocket(t *testing.T) {
 func TestStart_ReturnsAServerFailure(t *testing.T) {
 	boomer := newFakeServer()
 	boomer.err = errors.New("listen: no such directory")
+	boomer.failAfter = make(chan struct{})
 	sibling := newFakeServer()
 	agg := &aggregated{
 		logger:  logr.Discard(),
@@ -215,14 +225,24 @@ func TestStart_ReturnsAServerFailure(t *testing.T) {
 		errCh <- agg.Start(context.Background())
 	}()
 
+	// The failure is released only once the sibling is serving. The pool skips a task still queued
+	// when the run's context ends, so a failure that raced ahead would leave the sibling never
+	// started, and the teardown below would have nothing running to end.
+	select {
+	case <-sibling.started:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the sibling server was never started")
+	}
+	close(boomer.failAfter)
+
 	select {
 	case err := <-errCh:
 		require.ErrorContains(t, err, "listen:")
 	case <-time.After(30 * time.Second):
 		t.Fatal("a failing server's error never surfaced from Start")
 	}
-	// The sibling was started before the failure ended the run, and the run's teardown is what
-	// ended it — not a second start.
+	// The sibling was serving when the failure ended the run, and the run's teardown is what ended
+	// it — not a second start.
 	assert.Equal(t, 1, sibling.startCount())
 }
 
