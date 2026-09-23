@@ -78,7 +78,7 @@ func (r *TopologySourceReconciler) applyTopologySourceSnapshot(
 		selected[nodes.Items[i].Name] = struct{}{}
 	}
 	if err := validateTopologySnapshot(source, snapshot, selected); err != nil {
-		return r.markTopologySourceConfigMapInvalid(ctx, source, before, "SnapshotInvalid", err)
+		return r.markTopologySourceSnapshotContentInvalid(ctx, source, before, err)
 	}
 	conflicted, conflictingSources, err := r.topologySourceConflictedNodes(ctx, source, nodes.Items)
 	if err != nil {
@@ -108,7 +108,7 @@ func (r *TopologySourceReconciler) applyTopologySourceSnapshot(
 		}
 		published, err := topologySourcePublishedLabels(&nodes.Items[i], labels)
 		if err != nil {
-			return r.markTopologySourceConfigMapInvalid(ctx, source, before, "SnapshotInvalid", err)
+			return r.markTopologySourceSnapshotContentInvalid(ctx, source, before, err)
 		}
 		if len(published) > 0 {
 			desired[nodes.Items[i].Name] = published
@@ -200,6 +200,28 @@ func (r *TopologySourceReconciler) markTopologySourceConfigMapInvalid(
 		source.Spec.ConfigMap.MaxStaleness.Duration,
 		"ConfigMap snapshot",
 	)
+}
+
+// markTopologySourceSnapshotContentInvalid rejects a fetched snapshot whose content is invalid under
+// the staleness window of the source kind that delivered it.
+func (r *TopologySourceReconciler) markTopologySourceSnapshotContentInvalid(
+	ctx context.Context,
+	source *workercore.TopologySource,
+	before workercore.TopologySourceStatus,
+	err error,
+) (ctrl.Result, error) {
+	if source.Spec.Webhook != nil {
+		return r.markTopologySourceSnapshotInvalid(
+			ctx,
+			source,
+			before,
+			"SnapshotInvalid",
+			err,
+			source.Spec.Webhook.MaxStaleness.Duration,
+			"webhook snapshot",
+		)
+	}
+	return r.markTopologySourceConfigMapInvalid(ctx, source, before, "SnapshotInvalid", err)
 }
 
 func (r *TopologySourceReconciler) markTopologySourceSnapshotInvalid(

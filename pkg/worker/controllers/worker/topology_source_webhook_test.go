@@ -420,3 +420,78 @@ func (zeroReader) Read(data []byte) (int, error) {
 	}
 	return len(data), nil
 }
+
+// TestTopologySourceWebhookRejectsInvalidSnapshotContent pins that a webhook answering HTTP 200 with
+// a well-formed but invalid snapshot is rejected under the webhook's own staleness window: before
+// any success the source reports the rejection, after a success the last valid NodeFeature is
+// retained as Stale, and once maxStaleness passes it is removed as Expired.
+func TestTopologySourceWebhookRejectsInvalidSnapshotContent(t *testing.T) {
+	const valid = `{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"inventory-1","nodes":{"node-a":{"topology.kubernetes.io/zone":"zone-a","topology.gpustack.ai/rack":"rack-a"}}}`
+	tests := []struct {
+		name    string
+		invalid string
+	}{
+		{name: "unknown node", invalid: `{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"inventory-2","nodes":{"ghost":{"topology.kubernetes.io/zone":"zone-a","topology.gpustack.ai/rack":"rack-a"}}}`},
+		{name: "different standard zone", invalid: `{"apiVersion":"topology.gpustack.ai/v1alpha1","revision":"inventory-2","nodes":{"node-a":{"topology.kubernetes.io/zone":"zone-b","topology.gpustack.ai/rack":"rack-a"}}}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var body atomic.Value
+			body.Store(tc.invalid)
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(body.Load().(string)))
+			}))
+			defer server.Close()
+			ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+			source := webhookTopologySource(server.URL)
+			source.ObjectMeta = meta.ObjectMeta{Name: "inventory", UID: "source"}
+			source.Spec.NodeSelector = meta.LabelSelector{MatchLabels: map[string]string{"test.gpustack.ai/topology": "enabled"}}
+			source.Spec.Levels = []string{core.LabelTopologyZone, topologySourceRackLabel}
+			source.Spec.Webhook.PollInterval = meta.Duration{Duration: 10 * time.Second}
+			configMap := &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Namespace: "gpustack-system", Name: "ca"}, Data: map[string]string{"ca.crt": string(ca)}}
+			node := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-a", Labels: map[string]string{
+				"test.gpustack.ai/topology": "enabled", core.LabelTopologyZone: "zone-a",
+			}}}
+			cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(source, configMap, webhookTokenSecret("inventory-token"), node).
+				WithStatusSubresource(&workercore.TopologySource{}).Build()
+			now := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+			r := &TopologySourceReconciler{Client: cli, Now: func() time.Time { return now }}
+			request := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: source.Name}}
+			reconcile := func() ctrlreconcile.Result {
+				t.Helper()
+				var result ctrlreconcile.Result
+				require.NotPanics(t, func() {
+					var err error
+					result, err = r.Reconcile(context.Background(), request)
+					require.NoError(t, err)
+				})
+				return result
+			}
+
+			reconcile()
+			assertSourceReadyReason(t, cli, source.Name, "SnapshotInvalid")
+			assertSourceNodeFeatureLabel(t, cli, source.UID, topologySourceRackLabel, "")
+
+			body.Store(valid)
+			reconcile()
+			assertSourceReadyReason(t, cli, source.Name, "Observed")
+			assertSourceNodeFeatureLabel(t, cli, source.UID, topologySourceRackLabel, "rack-a")
+
+			body.Store(tc.invalid)
+			now = now.Add(30 * time.Second)
+			result := reconcile()
+			assert.Equal(t, 10*time.Second, result.RequeueAfter)
+			assertSourceReadyReason(t, cli, source.Name, "Stale")
+			assertSourceNodeFeatureLabel(t, cli, source.UID, topologySourceRackLabel, "rack-a")
+			got := new(workercore.TopologySource)
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: source.Name}, got))
+			assert.Equal(t, "SnapshotInvalid", TopologySourceConditionValid.GetReason(got))
+			assert.Equal(t, "inventory-1", got.Status.LastSuccessfulRevision)
+
+			now = now.Add(2 * time.Minute)
+			reconcile()
+			assertSourceReadyReason(t, cli, source.Name, "Expired")
+			assertSourceNodeFeatureLabel(t, cli, source.UID, topologySourceRackLabel, "")
+		})
+	}
+}
