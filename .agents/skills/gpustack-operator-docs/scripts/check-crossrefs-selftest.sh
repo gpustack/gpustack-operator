@@ -37,7 +37,7 @@ build() {
   rm -rf "$TREE"
   mkdir -p "$TREE/specs" "$TREE/docs" "$TREE/.claude/skills" "$TREE/pkg"
   : > "$TREE/README.md"
-  : > "$TREE/CLAUDE.md"
+  : > "$TREE/AGENTS.md"
   # A citation that lands where it should, and whose figure the target does state.
   cat > "$TREE/specs/good.md" <<'EOF'
 # Spec: Good

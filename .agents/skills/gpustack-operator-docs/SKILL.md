@@ -88,7 +88,7 @@ make lint docs                                                             # the
 bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh --report   # while writing
 ```
 
-It verifies relative links and `#anchor`s across `README.md`, `CLAUDE.md`, `docs/**` and
+It verifies relative links and `#anchor`s across `README.md`, `AGENTS.md`, `docs/**` and
 `.claude/skills/**`; and — for `docs/**` only — each page's `## Contents` against its headings, the four
 header-block fields, a `**See also**` footer at the end, registration in the `## All pages` table of
 `docs/README.md`, the label there against the page's H1, and the three size caps (paragraph, page

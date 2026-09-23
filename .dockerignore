@@ -19,7 +19,6 @@
 *.tfvars
 *.tfvars.*
 !AGENTS.md
-!CLAUDE.md
 
 # Dirs
 /.idea

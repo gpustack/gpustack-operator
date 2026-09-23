@@ -78,7 +78,7 @@ fi
 echo
 echo "=== MUST REPORT: a decorative symbol in a comment ==="
 plant pkg/thing/thing.go '// 🚀 ships it' reported "an emoji outside the BMP, in a Go comment"
-plant pkg/thing/thing.go '// gate (switch ①) is on' reported "a circled digit, which CLAUDE.md names"
+plant pkg/thing/thing.go '// gate (switch ①) is on' reported "a circled digit, which AGENTS.md names"
 plant hack/run.sh '# ⛔ do not do this' reported "a no-entry sign opening a shell comment"
 plant hack/run.sh '# ⭐ the good part' reported "a star opening a shell comment"
 plant hack/run.sh '# ── a section ───────' reported "box drawing used as a divider"

@@ -3,7 +3,7 @@
 #
 # Scope is code. Markdown is checked by `make lint docs` and is not this gate's subject.
 #
-# CLAUDE.md asks that comments state the point in words: no emoji, no decorative symbols, no
+# AGENTS.md asks that comments state the point in words: no emoji, no decorative symbols, no
 # circled digits. The rule was written down and nothing was in the room when it was broken, which
 # is how ten such lines reached main across seven files, the most recent of them in a file merged
 # the same week this check was written.

@@ -6,7 +6,7 @@
 # `.opencodereview/rule.json` carries an `exclude` array, and `.github/copilot-instructions.md`
 # carries an `## Out of scope` list. The second one states in its own words that it mirrors the
 # first "verbatim and in the same order", and until now nothing held it to that. The docs gate
-# cannot: check-docs.sh builds its page set from README.md, AGENTS.md, CLAUDE.md, docs/** and
+# cannot: check-docs.sh builds its page set from README.md, AGENTS.md, docs/** and
 # .claude/skills/**, and `.github/` is in none of them.
 #
 # The failure this exists for is silent by construction. Two reviewers disagreeing about which

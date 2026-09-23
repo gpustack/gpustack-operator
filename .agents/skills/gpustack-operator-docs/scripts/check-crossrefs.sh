@@ -78,7 +78,7 @@ prompts=0
 err() { printf '  %s\n' "$*"; errors=$((errors + 1)); }
 
 MD="README.md
-CLAUDE.md"
+AGENTS.md"
 for d in specs docs .claude/skills; do
   if [ -d "$d" ]; then
     MD="$MD
