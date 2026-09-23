@@ -387,6 +387,10 @@ function gpustack::helm::lint() {
 # default "v<.Chart.AppVersion>" is never a real image in development. cleanupOnUninstall
 # is written into the release at install, so the uninstall between iterations runs the
 # cleanup hooks that remove the cluster-scoped leftovers.
+#
+# A failed uninstall does NOT fail chart-testing: it prints "Error deleting Helm release:"
+# and exits 0, so a broken delete hook would stay green while every run waited out the
+# timeout. The output is therefore kept and that line fails the test here.
 function gpustack::helm::test() {
   local target="$1"
 
@@ -394,7 +398,8 @@ function gpustack::helm::test() {
   chart_repos=$(gpustack::helm::ct::chart_repos "${target}")
 
   gpustack::log::info "testing ${target} ..."
-  docker run \
+  local output
+  output="$(docker run \
     --rm \
     --network host \
     --volume "${ROOT_DIR}:/workspace" \
@@ -405,5 +410,10 @@ function gpustack::helm::test() {
     --charts "${target#"${ROOT_DIR}/"}" \
     --chart-repos "${chart_repos}" \
     --helm-extra-args '--timeout 600s' \
-    --helm-extra-set-args '--set=image.tag=dev --set=cleanupOnUninstall=true'
+    --helm-extra-set-args '--set=image.tag=dev --set=cleanupOnUninstall=true' \
+    2>&1 | tee /dev/stderr)"
+
+  if grep -q '^Error deleting Helm release:' <<<"${output}"; then
+    gpustack::log::fatal "chart-testing could not uninstall ${target}; see \"Error deleting Helm release\" above"
+  fi
 }

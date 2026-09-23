@@ -209,8 +209,9 @@ strip CRs. Regenerate it with the commands above.
    passes `image.tag=dev` and `cleanupOnUninstall=true` through `--helm-extra-set-args`, so the leg needs
    network egress.
 
-   The post-delete cleanup Job currently fails with `BackoffLimitExceeded` on every uninstall, and chart-testing
-   only prints that error, so a green run does not prove the cluster was cleaned. An **interrupted** run leaves debris, and
+   chart-testing only prints a failed uninstall and still exits 0, so `hack/lib/helm.sh` fails the run on its
+   `Error deleting Helm release:` line: a hook Job that fails, or an uninstall that waits out its `--timeout`, is a
+   red run. An **interrupted** run leaves debris, and
    Helm names only one object per failure, so sweep by annotation instead of discovering them one run at a time:
 
    ```bash

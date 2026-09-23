@@ -41,7 +41,15 @@ echo "[cleanup] namespace=${NS} release=${RELEASE}"
 #    context the script would print "done" having deleted nothing — or worse, sweep a cluster
 #    the caller never meant to touch (the patterns are broad by assumption). Refuse to run
 #    blind, and name the context so a surprise is visible before anything is deleted.
-if ! kubectl get --raw=/healthz --request-timeout=10s >/dev/null 2>&1; then
+#    The check carries NO --request-timeout. That flag, like --server or --token, changes the
+#    client configuration, and kubectl then stops falling back to the in-cluster one: inside the
+#    hook Pod it would dial localhost:8080 and fail every time. timeout(1) bounds it instead,
+#    where there is one.
+healthz=(kubectl get --raw=/healthz)
+if command -v timeout >/dev/null 2>&1; then
+  healthz=(timeout 10 "${healthz[@]}")
+fi
+if ! "${healthz[@]}" >/dev/null 2>&1; then
   echo "[cleanup] FATAL: cannot reach the API server of the current kubectl context" \
     "($(kubectl config current-context 2>/dev/null || echo 'none set')) — fix KUBECONFIG/context and re-run" >&2
   exit 1

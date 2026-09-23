@@ -81,6 +81,15 @@ on a delete hook after `--timeout` (5m by default) and fails the uninstall. Both
 cache tier needs `--set cleanupDrainBudgetSeconds=<n>` AND a larger `--timeout`; raising either on
 its own changes nothing. Whatever has not drained is reported, and the post-delete Job removes it
 by force.
+{{- if .Values.kueue.enabled }}
+
+A second pre-delete Job then scales the worker to zero and deletes the Kueue objects it created
+(its ClusterQueues, ResourceFlavors, Topologies and AdmissionChecks, chosen by the worker's own
+labels) while Kueue is still up to finalize them; without it `helm uninstall --wait` waits on the
+Kueue CRDs until `--timeout`. It runs only where the Kueue in the cluster is this release's, and
+it FAILS the uninstall when Kueue has not finalized them within 120s, naming what is left; retry
+the uninstall, or pass `--no-hooks` to skip every hook.
+{{- end }}
 {{- else }}
 
 NOTE: `helm uninstall` removes only what this release owns. The controllers go first, so the
