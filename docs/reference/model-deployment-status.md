@@ -177,6 +177,22 @@ admitted again or the deployment is deleted.
 > preempted the deployment, which is outside this object and outside this operator. That is a
 > decision, so it is reported rather than made.
 
+The cost of the wait lands on the queue, not on this deployment. The replicas that kept their quota
+hold accelerators while the set cannot serve in full, and Kueue accounts that quota as used: the
+next workload drawing from the same ClusterQueue is refused with `insufficient unused quota`. A
+deployment preempted in part starves whatever is queued behind it.
+
+What to do about it:
+
+- **Add capacity.** The reclaimed replicas are admitted again on their own once capacity returns.
+  The state self-heals but is UNBOUNDED — no timeout, no give-up, nothing makes the holder yield, so
+  capacity that never comes back leaves it standing.
+- **Delete and recreate the deployment.** Deleting is the other release for the quota the kept
+  replicas hold.
+- **Move the roles apart.** Each role draws from the ClusterQueue its own `instanceType` resolves
+  to; giving the roles different types keeps one preemption from reclaiming both halves out of the
+  same queue.
+
 **`CacheAttached`** — whether the cache is observed to be in effect, which is a different question
 from whether it was configured. It is judged downstream of the engine and **never** on a rendered flag
 or a log line.
