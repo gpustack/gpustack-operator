@@ -2442,10 +2442,10 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	Type:        "object",
 																	Properties: map[string]v1.JSONSchemaProps{
 																		"memberAddressing": {
-																			Description: "MemberAddressing selects how a member is told to find the master once an election runs. Both\nforms reach the leader that is serving, by different routes, and they are rendered into the\nsame one variable — so changing this rolls every member group.\n- Lease: the member is handed the Lease's coordinates and reads the current holder itself.\nThis needs the member to talk to the API server, which is why the member image has to\ncarry the leadership backend at all.\n- Service: the member is handed the leader Service's address, exactly as it is without high\navailability. The Service publishes only READY endpoints and a standby deliberately is not\nready, so the address resolves to the serving leader — the open part is whether the\nclient's reconnect follows that endpoint across an election, and how long it takes.\nNEITHER FORM HAS BEEN MEASURED against the other. The default is Lease because that is what\nthis operator has always rendered, not because it won a comparison, and the number that would\nsettle it is how long a member cannot reach a master after the leader pod is deleted. Until\nthat is measured on a cluster, treat Service as the one to try rather than the one to trust.",
+																			Description: "MemberAddressing selects how a member is told to find the master once an election runs. Both\nforms reach the leader that is serving, by different routes, and they are rendered into the\nsame one variable — so changing this rolls every member group.\n- Lease: the member is handed the Lease's coordinates and reads the current holder itself.\nThis needs the member to talk to the API server, which is why the member image has to\ncarry the leadership backend at all.\n- Service: the member is handed the leader Service's address, exactly as it is without high\navailability. The Service publishes only READY endpoints and a standby deliberately is not\nready, so the address resolves to the serving leader — the open part is whether the\nclient's reconnect follows that endpoint across an election, and how long it takes.\nService is the default. In one failover comparison the two forms differed by 0.13 seconds,\nwithin the noise of one run. Both first failed at 31.41 seconds and converged around 60.6\nseconds, so leader election dominated that comparison. Recheck after changing election timing.\nThe Service route's endpoint transition was inferred from the result, not observed directly.",
 																			Type:        "string",
 																			Default: &v1.JSON{
-																				Raw: []byte(`"Lease"`),
+																				Raw: []byte(`"Service"`),
 																			},
 																			Enum: []v1.JSON{
 																				{
@@ -3152,7 +3152,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 											Nullable: true,
 										},
 										"conditions": {
-											Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,\nCapacityObserved, Deletable, RolloutComplete, and — each only where it has something to be a\nverdict about — SnapshotStorageShared and ElectionObserved. Every one is derived from an\nobserved document.",
+											Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,\nCapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has\nsomething to be a verdict about — SnapshotStorageShared and ElectionObserved. Every one is\nderived from an observed document.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{

@@ -114,14 +114,16 @@ func DecodeLeaderHealth(body []byte) (LeaderHealth, error) {
 	return health, nil
 }
 
-// The exposition families this operator reads. Nothing else is copied into status: the leader
-// already serves its own counters on a scrapeable endpoint, and a status field would be a second
-// and staler copy of them.
+// The exposition families this operator reads. Counters are used only for the PoolWrites
+// condition; their cumulative values are not copied into status.
 const (
 	metricTotalCapacityBytes     = "master_total_capacity_bytes"
 	metricAllocatedBytes         = "master_allocated_bytes"
 	metricTotalFileCapacityBytes = "master_total_file_capacity_bytes"
 	metricAllocatedFileSizeBytes = "master_allocated_file_size_bytes"
+	metricPutStartRequests       = "master_put_start_requests_total"
+	metricPutEndRequests         = "master_put_end_requests_total"
+	metricPutRevokeRequests      = "master_put_revoke_requests_total"
 )
 
 // LeaderCapacity is what the exposition reports.
@@ -135,16 +137,19 @@ type LeaderCapacity struct {
 	AllocatedBytes     *int64
 	TotalFileBytes     *int64
 	AllocatedFileBytes *int64
+	PutStartRequests   *int64
+	PutEndRequests     *int64
+	PutRevokeRequests  *int64
 }
 
-// DecodeLeaderCapacity reads the four families this operator uses out of a Prometheus exposition.
+// DecodeLeaderCapacity reads capacity and put activity from a Prometheus exposition.
 //
 // It parses the text itself rather than through the upstream parser, and that is a deliberate trade:
 // the upstream one requires setting a PROCESS-WIDE metric-name validation mode before first use, and
-// this process already hosts the operator's own metrics registry. Reaching for four numbers is not
+// this process already hosts the operator's own metrics registry. Reaching for these numbers is not
 // worth a global switch that another registry in the same binary would inherit.
 //
-// The four are plain unlabelled gauges. The per-segment figures the leader also exposes carry both
+// The selected families are unlabelled. The per-segment figures the leader also exposes carry both
 // labels and different names, so the name lookup below excludes them without a rule of its own: a
 // labeled sample's name includes its label set and matches nothing here.
 func DecodeLeaderCapacity(body []byte) (LeaderCapacity, error) {
@@ -154,6 +159,9 @@ func DecodeLeaderCapacity(body []byte) (LeaderCapacity, error) {
 	wanted[metricAllocatedBytes] = &capacity.AllocatedBytes
 	wanted[metricTotalFileCapacityBytes] = &capacity.TotalFileBytes
 	wanted[metricAllocatedFileSizeBytes] = &capacity.AllocatedFileBytes
+	wanted[metricPutStartRequests] = &capacity.PutStartRequests
+	wanted[metricPutEndRequests] = &capacity.PutEndRequests
+	wanted[metricPutRevokeRequests] = &capacity.PutRevokeRequests
 
 	var sawAnySample bool
 	for _, line := range strings.Split(string(body), "\n") {
@@ -256,6 +264,8 @@ type SegmentDetail struct {
 	// TEEndpoint is the member's transfer-engine address, and it is how a listing entry is joined
 	// back to the Pod it belongs to.
 	TEEndpoint string
+	// AllocatorUsedBytes is the member's current allocation. Nil means the leader did not report it.
+	AllocatorUsedBytes *uint64
 }
 
 type segmentListingBody struct {
@@ -267,12 +277,13 @@ type segmentListingBody struct {
 	// as an empty listing it would clear membership and report NoSegments, which points an operator
 	// at the store instead of at the address.
 	Segments *[]struct {
-		SegmentID   string `json:"segment_id"`
-		ClientID    string `json:"client_id"`
-		SegmentName string `json:"segment_name"`
-		Status      string `json:"status"`
-		Protocol    string `json:"protocol"`
-		TEEndpoint  string `json:"te_endpoint"`
+		SegmentID          string  `json:"segment_id"`
+		ClientID           string  `json:"client_id"`
+		SegmentName        string  `json:"segment_name"`
+		Status             string  `json:"status"`
+		Protocol           string  `json:"protocol"`
+		TEEndpoint         string  `json:"te_endpoint"`
+		AllocatorUsedBytes *uint64 `json:"allocator_used_bytes"`
 	} `json:"segments"`
 }
 
@@ -318,12 +329,13 @@ func DecodeSegmentListing(body []byte) ([]SegmentDetail, error) {
 				ErrMalformedBody, adminPathSegments)
 		}
 		segments = append(segments, SegmentDetail{
-			ID:         s.SegmentID,
-			ClientID:   s.ClientID,
-			Name:       s.SegmentName,
-			State:      s.Status,
-			Protocol:   s.Protocol,
-			TEEndpoint: s.TEEndpoint,
+			ID:                 s.SegmentID,
+			ClientID:           s.ClientID,
+			Name:               s.SegmentName,
+			State:              s.Status,
+			Protocol:           s.Protocol,
+			TEEndpoint:         s.TEEndpoint,
+			AllocatorUsedBytes: s.AllocatorUsedBytes,
 		})
 	}
 	return segments, nil

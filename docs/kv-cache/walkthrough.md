@@ -180,12 +180,13 @@ endpoints never include a process that cannot serve. During a healthy failover `
 as the old leader steps down. Both readings are normal.
 
 ⛔ **Crossing `replicas: 1` in either direction restarts the leader and rolls every member**, because
-the member's master entry changes shape with it. The store's cached contents do not survive the
-crossing, so make this edit before the cache is worth keeping — or accept a cold start.
+the HA accounts and token mounts change. With an explicit `Lease` address, the member's master entry
+also changes shape. The store's cached contents do not survive the crossing, so make this edit before
+the cache is worth keeping — or accept a cold start.
 
 **`leader.highAvailability.memberAddressing` chooses how members find the master**, and defaults to
-`Lease`. The alternative is `Service`; neither has been measured against the other, and the field's
-own reference entry says so — see [High availability](leader.md#high-availability).
+`Service`. An explicit `Lease` value uses the member's API access to read the current holder. See
+[High availability](leader.md#high-availability) for the measured failover limits.
 
 Two conditions appear at this point that the phase deliberately does not summarize:
 

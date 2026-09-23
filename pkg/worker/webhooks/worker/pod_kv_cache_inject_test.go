@@ -220,6 +220,27 @@ func TestPodKVCacheInject_TheMatchedGroupsTransport(t *testing.T) {
 		return objs
 	}
 
+	t.Run("unconstrained engine refuses mixed groups", func(t *testing.T) {
+		pod := kvCachePod()
+		err := admit(t, pod, twoGroupBackend(workercore.KVCacheBackendMember{
+			NodeSelector: map[string]string{"kvcache": "true"},
+			Medium:       "VRAM", CapacityPerMember: resource.MustParse("16Gi"),
+			Transport: &workercore.KVCacheBackendMemberTransport{Protocol: "RDMA"},
+		})...)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `["tcp" "rdma"]`)
+		assert.Contains(t, err.Error(), "NotSupportedTransport")
+	})
+
+	t.Run("unconstrained engine accepts one effective transport", func(t *testing.T) {
+		pod := kvCachePod()
+		require.NoError(t, admit(t, pod, twoGroupBackend(workercore.KVCacheBackendMember{
+			NodeSelector: map[string]string{"kvcache": "true"},
+			Medium:       "DRAM", CapacityPerMember: resource.MustParse("16Gi"),
+			Transport: &workercore.KVCacheBackendMemberTransport{Protocol: "TCP"},
+		})...))
+	})
+
 	t.Run("refused when no group serves the engine's transport", func(t *testing.T) {
 		pod := ascendPod()
 		err := admit(t, pod, twoGroupBackend(workercore.KVCacheBackendMember{

@@ -36,6 +36,33 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 )
 
+func TestReportKVCacheBackendPoolWrites(t *testing.T) {
+	zero := uint64(0)
+	used := uint64(10)
+	cases := []struct {
+		name     string
+		metrics  mooncake.LeaderCapacity
+		segments []mooncake.SegmentDetail
+		status   string
+		reason   string
+	}{
+		{"idle", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](0), PutEndRequests: ptr.To[int64](0), PutRevokeRequests: ptr.To[int64](0)}, []mooncake.SegmentDetail{{AllocatorUsedBytes: &zero}}, "Unknown", "NoWritesObserved"},
+		{"failed write", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](1), PutEndRequests: ptr.To[int64](0), PutRevokeRequests: ptr.To[int64](1)}, []mooncake.SegmentDetail{{AllocatorUsedBytes: &zero}}, "False", "WritesRevoked"},
+		{"completed write", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](1), PutEndRequests: ptr.To[int64](1), PutRevokeRequests: ptr.To[int64](0)}, []mooncake.SegmentDetail{{AllocatorUsedBytes: &zero}}, "True", "WriteObserved"},
+		{"allocated data", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](0), PutEndRequests: ptr.To[int64](0), PutRevokeRequests: ptr.To[int64](0)}, []mooncake.SegmentDetail{{AllocatorUsedBytes: &used}}, "True", "AllocationObserved"},
+		{"write in flight", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](1), PutEndRequests: ptr.To[int64](0), PutRevokeRequests: ptr.To[int64](0)}, []mooncake.SegmentDetail{{AllocatorUsedBytes: &zero}}, "Unknown", "WriteIncomplete"},
+		{"allocation missing", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](1), PutEndRequests: ptr.To[int64](0), PutRevokeRequests: ptr.To[int64](1)}, []mooncake.SegmentDetail{{}}, "Unknown", "AllocationMissing"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			holder := &workercore.KVCacheBackend{}
+			reportKVCacheBackendPoolWrites(holder, &tc.metrics, tc.segments)
+			assert.Equal(t, tc.status, KVCacheBackendConditionPoolWrites.GetStatus(holder))
+			assert.Equal(t, tc.reason, KVCacheBackendConditionPoolWrites.GetReason(holder))
+		})
+	}
+}
+
 // newKVCacheBackendObject builds a managed backend with the given consumers already recorded in
 // status, which is the only input this task's status derivation reads.
 // withReconcilerDiskTier declares a local disk tier on the canonical group.
@@ -1325,22 +1352,11 @@ func TestKVCacheBackendReconciler_ConvergesAHighAvailabilitySwitch(t *testing.T)
 	onMember := memberPod()
 	require.NotNil(t, onMember.AutomountServiceAccountToken)
 	assert.True(t, *onMember.AutomountServiceAccountToken,
-		"the member reads the same Lease, so it needs a token too")
+		"the member account remains mounted while addressing is resolved")
 	assert.Equal(t, mooncake.MemberRBACObjectName(kvcb), onMember.ServiceAccountName,
 		"under its own account, which cannot take the Lease the way the leader's can")
-	// The invariant that ties the two sides together: the Lease a member is told to READ is the one
-	// the leader is told to TAKE. Read out of the leader's own rendered argv rather than restated as
-	// a literal, because two literals agree until one of the two derivations moves -- and a member
-	// following a Lease nobody holds looks exactly like a member waiting for a leader to come up.
-	var leaderConnstring string
-	for _, arg := range on.Containers[0].Args {
-		if entry, ok := strings.CutPrefix(arg, "-ha_backend_connstring="); ok {
-			leaderConnstring = entry
-		}
-	}
-	require.NotEmpty(t, leaderConnstring, "the leader was rendered with a connection string")
-	assert.Equal(t, "k8s://"+leaderConnstring, memberMaster(onMember),
-		"the member reads the same Lease the leader takes, through the scheme its client parses")
+	assert.Equal(t, mooncake.LeaderServiceHost(kvcb)+":50051", memberMaster(onMember),
+		"the member connects through the Service that fronts the elected leader")
 
 	setHA(false)
 	assert.Equal(t, expect(false), present(t),
@@ -1728,6 +1744,30 @@ func reconcileWithAdmin(
 	got := new(workercore.KVCacheBackend)
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: kvcb.Name}, got))
 	return got
+}
+
+func TestKVCacheBackendPoolWrites_PublishedOnBackend(t *testing.T) {
+	cases := []struct {
+		name   string
+		end    string
+		used   string
+		status string
+	}{
+		{"writes revoked", "0", "0", "False"},
+		{"writes completed", "1", "0", "True"},
+		{"allocation present", "0", "10", "True"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := reconcileWithAdmin(t, newKVCacheBackendObject(), map[string]adminResponse{
+				"/health": {body: healthServing},
+				"/metrics": {body: metricsPopulated + "master_put_start_requests_total 1\n" +
+					"master_put_end_requests_total " + tc.end + "\nmaster_put_revoke_requests_total 1\n"},
+				"/get_segments_detail": {body: `{"segments":[{"segment_id":"s1","client_id":"c1","segment_name":"n1","allocator_used_bytes":` + tc.used + `}]}`},
+			})
+			assert.Equal(t, tc.status, KVCacheBackendConditionPoolWrites.GetStatus(got))
+		})
+	}
 }
 
 func TestKVCacheBackendCapacity_PublishesWhatTheLeaderReports(t *testing.T) {

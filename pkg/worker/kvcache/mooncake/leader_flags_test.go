@@ -204,8 +204,8 @@ func leaderBackend(leader workercore.KVCacheBackendLeader) *workercore.KVCacheBa
 //
 // -rpc_address is in the group for a reason that is not obvious from its name: the artifact folds it
 // with -rpc_port into the string it campaigns with, so it is the election's identity AND the address
-// the Lease hands to members. Its 0.0.0.0 default would give every replica one identity and send
-// every member to an address that resolves back to itself.
+// the Lease hands to members that explicitly choose Lease addressing. Its 0.0.0.0 default would
+// give every replica one identity and send those members to an address that resolves to itself.
 func TestRenderLeaderFlags_HighAvailability(t *testing.T) {
 	kvcb := leaderBackend(workercore.KVCacheBackendLeader{
 		Replicas:           ptr.To[int32](3),

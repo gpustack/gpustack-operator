@@ -408,12 +408,12 @@ type KVCacheBackendLeaderHighAvailability struct {
 	//     ready, so the address resolves to the serving leader — the open part is whether the
 	//     client's reconnect follows that endpoint across an election, and how long it takes.
 	//
-	// NEITHER FORM HAS BEEN MEASURED against the other. The default is Lease because that is what
-	// this operator has always rendered, not because it won a comparison, and the number that would
-	// settle it is how long a member cannot reach a master after the leader pod is deleted. Until
-	// that is measured on a cluster, treat Service as the one to try rather than the one to trust.
+	// Service is the default. In one failover comparison the two forms differed by 0.13 seconds,
+	// within the noise of one run. Both first failed at 31.41 seconds and converged around 60.6
+	// seconds, so leader election dominated that comparison. Recheck after changing election timing.
+	// The Service route's endpoint transition was inferred from the result, not observed directly.
 	//
-	// +k8s:validation:default="Lease"
+	// +k8s:validation:default="Service"
 	// +k8s:validation:enum=["Lease","Service"]
 	MemberAddressing string `json:"memberAddressing,omitempty" protobuf:"bytes,2,opt,name=memberAddressing"`
 }
@@ -977,9 +977,9 @@ type KVCacheBackendStatus struct {
 	PhaseMessage string `json:"phaseMessage,omitempty" protobuf:"bytes,2,opt,name=phaseMessage"`
 
 	// Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,
-	// CapacityObserved, Deletable, RolloutComplete, and — each only where it has something to be a
-	// verdict about — SnapshotStorageShared and ElectionObserved. Every one is derived from an
-	// observed document.
+	// CapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has
+	// something to be a verdict about — SnapshotStorageShared and ElectionObserved. Every one is
+	// derived from an observed document.
 	//
 	// +patchMergeKey=type
 	// +patchStrategy=merge

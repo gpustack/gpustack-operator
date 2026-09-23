@@ -154,10 +154,9 @@ func TestMatchTransport(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		// Declaration order decides among the offers an engine accepts, so the answer is stable
-		// across reconciles rather than whichever group happened to be read first.
+		// Existing bindings retain the deterministic first-offer synthesis rule.
 		{
-			name:   "an unconstrained engine takes the first offer",
+			name:   "an unconstrained engine keeps the first offer",
 			engine: EngineVLLM, offers: []string{"rdma", "tcp"}, want: "rdma",
 		},
 		{
@@ -194,6 +193,42 @@ func TestMatchTransport(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestValidateBindingTransport(t *testing.T) {
+	cases := []struct {
+		name    string
+		engine  Engine
+		offers  []string
+		refused bool
+	}{
+		{"mixed unconstrained", EngineVLLM, []string{"rdma", "tcp"}, true},
+		{"one effective transport", EngineVLLM, []string{"rdma", "", "rdma"}, false},
+		{"constrained engine", EngineVLLMAscend, []string{"tcp", "ascend"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateBindingTransport(tc.engine, tc.offers)
+			if tc.refused {
+				require.Error(t, err)
+				assert.Equal(t, ReasonTransportUnsupported, reasonOf(t, err))
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateBindingTransport_MixedOffersMessage(t *testing.T) {
+	err := ValidateBindingTransport(EngineVLLM, []string{"rdma", "", "tcp", "rdma"})
+	require.Error(t, err)
+	message := err.Error()
+	assert.Contains(t, message, `["rdma" "tcp"]`)
+	assert.Contains(t, message, "declares no required transport")
+	assert.Contains(t, message, "only one transport")
+	assert.Contains(t, message, "NotSupportedTransport")
+	assert.Contains(t, message, "spec.transport.protocol")
+	assert.Contains(t, message, "member group's transport.protocol")
 }
 
 // TestMatchTransport_MessageNamesEveryOffer is the plural counterpart of the singular message pin:

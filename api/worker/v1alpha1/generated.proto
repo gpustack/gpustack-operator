@@ -1596,12 +1596,12 @@ message KVCacheBackendLeaderHighAvailability {
   //     ready, so the address resolves to the serving leader — the open part is whether the
   //     client's reconnect follows that endpoint across an election, and how long it takes.
   //
-  // NEITHER FORM HAS BEEN MEASURED against the other. The default is Lease because that is what
-  // this operator has always rendered, not because it won a comparison, and the number that would
-  // settle it is how long a member cannot reach a master after the leader pod is deleted. Until
-  // that is measured on a cluster, treat Service as the one to try rather than the one to trust.
+  // Service is the default. In one failover comparison the two forms differed by 0.13 seconds,
+  // within the noise of one run. Both first failed at 31.41 seconds and converged around 60.6
+  // seconds, so leader election dominated that comparison. Recheck after changing election timing.
+  // The Service route's endpoint transition was inferred from the result, not observed directly.
   //
-  // +k8s:validation:default="Lease"
+  // +k8s:validation:default="Service"
   // +k8s:validation:enum=["Lease","Service"]
   optional string memberAddressing = 2;
 }
@@ -2312,9 +2312,9 @@ message KVCacheBackendStatus {
   optional string phaseMessage = 2;
 
   // Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,
-  // CapacityObserved, Deletable, RolloutComplete, and — each only where it has something to be a
-  // verdict about — SnapshotStorageShared and ElectionObserved. Every one is derived from an
-  // observed document.
+  // CapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has
+  // something to be a verdict about — SnapshotStorageShared and ElectionObserved. Every one is
+  // derived from an observed document.
   //
   // +patchMergeKey=type
   // +patchStrategy=merge
@@ -3193,11 +3193,9 @@ message ModelDeploymentPort {
 // nothing at all: it adds or removes instances, and every instance that stays keeps running,
 // keeps the accelerators it was admitted with and keeps whatever cache it holds.
 //
-// ADDING OR REMOVING A ROLE REACHES NO FURTHER THAN THE ROLE IT NAMES. A replica's group is named
-// from the deployment, the role and that replica's ordinal, and from nothing else -- not from how
-// many roles the deployment declares -- so a second role arriving leaves the first role's replicas
-// exactly where they were. Renaming a role is what moves that role's own replicas: each of its
-// ordinals derives a new group and is replaced.
+// THE SET OF ROLES IS FIXED AFTER CREATION. Admission refuses adding, removing or renaming a role.
+// A replica's group is named from the deployment, its role and its ordinal, so edits to one role's
+// running configuration do not rename a sibling role's groups.
 //
 // A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A ROLLOUT. The replica that left is replaced on
 // its own, under a new name, while its siblings keep serving — see

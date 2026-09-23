@@ -501,14 +501,8 @@ func RenderMemberDaemonSet(
 					// that has no use for one -- on the host-fabric paths an image that also holds
 					// two capabilities.
 					//
-					// With HA it does talk to the API server, for one thing: MOONCAKE_MASTER becomes
-					// a k8s:// entry and the client reads the Lease to find the leader. That read is
-					// all this token buys, and its account grants nothing else. Both fields move
-					// together -- an account with no token mounted authenticates as nobody.
-					//
-					// The member's failure without it is LOUD, unlike the leader's: the client
-					// retries the read twenty times and then the entrypoint raises, so the Pod
-					// CrashLoopBackOffs rather than sitting not-ready forever.
+					// Under HA the default Service address does not use this token. An
+					// explicit Lease address does, so the member account stays mounted.
 					AutomountServiceAccountToken: ptr.To(leaderNeedsAPIAccess(
 						kvcb.Spec.Connection.Managed.Leader)),
 					ServiceAccountName: memberServiceAccountName(kvcb),
@@ -588,31 +582,13 @@ func memberContainerSpec(
 	}
 }
 
-// MemberMasterEntry is what a member is told to connect to, and it takes one of two forms.
-//
-// Without HA it is an address: the leader Service and the RPC port, byte-identical to what this
-// operator rendered before HA existed, and the client connects to it directly.
-//
-// With HA it is "<backend>://<connstring>", which the client reads as "discover the leader through
-// this backend instead" -- it splits on "://", validates the scheme against the same backend enum
-// the master uses, then reads the current holder and follows it. That is the whole of this
-// operator's part in failover: no Service selector moves, and nothing here watches an election.
-//
-// REQUIRED: a scheme without HA names a Lease no leader ever takes, so the two forms are not
-// interchangeable in that direction. The other direction is a CHOICE rather than a rule, and
-// leader.highAvailability.memberAddressing is where it is made: the Service publishes only ready
-// endpoints and a standby is not ready, so the address does resolve to the serving leader. Which of
-// the two recovers faster after the leader pod is deleted has not been measured, which is why the
-// default is the shape this operator has always rendered rather than the one that reads better --
-// tracked at github.com/gpustack/gpustack-operator/issues/279.
-//
-// The member's API access does NOT move with this setting. Under the Service form the client never
-// reads the Lease, so the account it is given goes unused; withdrawing it as well would make the
-// two forms differ in two things at once, and the measurement that has to tell them apart wants one.
+// MemberMasterEntry gives a member the leader Service address by default. An explicit Lease choice
+// gives the client Lease coordinates when HA runs. The Service publishes only ready endpoints, so a
+// standby does not answer as the serving leader.
 func MemberMasterEntry(kvcb *workercore.KVCacheBackend) string {
 	leader := kvcb.Spec.Connection.Managed.Leader
 	if leaderNeedsAPIAccess(leader) &&
-		leader.HighAvailability.MemberAddressing != MemberAddressingService {
+		leader.HighAvailability.MemberAddressing == MemberAddressingLease {
 		return fmt.Sprintf("k8s://%s/%s", kuberess.SystemNamespaceName, LeaderObjectName(kvcb))
 	}
 

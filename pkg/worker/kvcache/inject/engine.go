@@ -168,15 +168,11 @@ func checkTransport(engine Engine, protocol string) error {
 // the caller through mooncake.MemberProtocols.
 //
 // THE MATCH IS THE FIRST OFFER IN DECLARATION ORDER THAT THE ENGINE'S CONSTRAINT ACCEPTS — and the
-// first offer outright for an unconstrained engine, which accepts them all. Nothing matches an
-// engine to a specific group: a pool names exactly one backend, and the engine only learns the
-// master address, so the rule has to pick without a binding. Declaration order is deterministic
-// and costs nothing to explain, and every accepted offer is one the engine can run on.
+// first offer outright for an unconstrained engine. Existing deployments keep this synthesis rule;
+// new bindings to mixed pools are checked by ValidateBindingTransport at admission.
 //
-// A refusal means NO group satisfies the constraint, which is the case worth failing loudly for:
-// admitted, the engine's store backend raises at startup on every group the pool has, and the
-// container never serves a request. An engine with no measured entry claims less and is let
-// through, on the same rule as the singular check.
+// A refusal here means no group satisfies the engine's required transport. An engine with no
+// measured entry claims less and is let through, on the same rule as the singular check.
 //
 // An empty offer list is NOT a transport answer: it is the no-store shape, which Render refuses
 // for its own reason, so this returns no protocol and no error rather than borrowing that case.
@@ -213,6 +209,37 @@ func MatchTransport(engine Engine, offers []string) (string, error) {
 			"field defaults to Auto, which the backend resolves to one concrete transport rather "+
 			"than to whatever an engine wants",
 		engine, facts.Required, offers, facts.Version, facts.Source, facts.RequiredAPIValue)
+}
+
+// ValidateBindingTransport rejects a new binding that would configure an unconstrained engine
+// with one transport while its pool serves blocks through several. Existing bindings keep their
+// rendered configuration, so this check belongs to admission rather than connector synthesis.
+func ValidateBindingTransport(engine Engine, offers []string) error {
+	if engineTransportConstraint[engine].Required != "" {
+		return nil
+	}
+	unique := make([]string, 0, len(offers))
+	seen := make(map[string]struct{}, len(offers))
+	for _, offer := range offers {
+		if offer == "" {
+			continue
+		}
+		if _, ok := seen[offer]; !ok {
+			seen[offer] = struct{}{}
+			unique = append(unique, offer)
+		}
+	}
+	if len(unique) < 2 {
+		return nil
+	}
+	return newRefusal(ReasonTransportUnsupported,
+		"engine %q declares no required transport and this pool offers %q. The engine can be "+
+			"configured with only one transport; when it reads a block from a group using another, "+
+			"the client reads that target segment's protocol and fails with NotSupportedTransport. "+
+			"Set that backend's spec.transport.protocol and any overriding member group's "+
+			"transport.protocol to one common transport, or bind this workload to a pool with one "+
+			"effective transport",
+		engine, unique)
 }
 
 // ConfigSourceKeys are the keys that switch an engine to a configuration source THIS OPERATOR DOES

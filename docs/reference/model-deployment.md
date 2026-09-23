@@ -8,9 +8,9 @@
 A `ModelDeployment` is N replicas of one or more inference-engine roles attached to a KV cache pool, so
 that the replicas hit each other's cached prefixes instead of each re-computing the same prefill.
 
-It renders **Pods** directly, which is why it needs no new admission gate: a Pod is a first-class
-citizen of the chain in [Admission](../architecture/admission.md), so every rule there applies to a
-replica unchanged.
+It renders **Pods** directly. The deployment's own validating webhook checks a new KV cache
+binding's transport, because these generated Pods do not pass through the KV cache Pod injection
+path; ordinary Pod admission still applies to each replica.
 
 ## Contents
 
@@ -461,7 +461,7 @@ between the halves:
 
 - **This operator's own refusal is the one an administrator meets.** On a pool left at its default
   transport, the renderer [refuses the vLLM-Ascend
-  half](kv-cache-injection.md#vllm-ascend-requires-the-ascend-transport) — the rule and its
+  half](kv-cache-injection.md#transport-compatibility-at-binding) — the rule and its
   remediation are stated there. The check is one-sided — it fires for a single-manufacturer Ascend
   deployment just the same — and it is the only one of the three that produces a message;
   following its remediation clears only this refusal; the next two apply regardless.
@@ -885,12 +885,15 @@ depends on the `InstanceType` the role names.
 | a `poolRef` outside this namespace | nothing — it is unrepresentable in the type |
 | a self-declared reuse domain | nothing — the field does not exist |
 | an EMPTY `poolRef.name` | the Binding as the authorization point, and that an empty reference names none |
+| a new binding to a pool with mixed member protocols for an unconstrained engine | each effective protocol and why one installed transport cannot read blocks on the others; use one protocol across the groups or another pool |
 
-**Most rules above are answered from the submitted object, and three are not.** Whether the named
-`InstanceType` offers the mode a role asks for, whether the role's card count fits what that type
-hands out at once, and whether a shared type is acceleratable are facts about another object;
-everything else is decided without leaving the request. All three read the type from the API server
-rather than from a cache, because a cache that is behind decides the outcome in both directions.
+**Most rules above are answered from the submitted object.** Resource mode, card count and a shared
+type's acceleratability depend on `InstanceType`; new cache binding compatibility depends on its
+Binding, pool and backend. The webhook reads these objects from the API server so a stale cache
+cannot decide admission. An unchanged binding stays editable if its backend later becomes mixed.
+
+An older binding still renders its first offered transport. It can remain healthy while reads of
+blocks on another transport fail, so repair the pool even though an unrelated update is accepted.
 
 **Any rule that reads an `InstanceType` declines for a deployment being deleted**, in the mutating
 half and the validating half alike. Such a rule refuses when the type is absent, so leaving it on
