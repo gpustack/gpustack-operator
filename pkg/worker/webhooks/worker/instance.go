@@ -996,9 +996,15 @@ func validatePartitionedAcceleratorRequest(
 
 // validateExclusiveAcceleratorRequest checks a whole-card (exclusive) accelerator request: it may
 // not be negative, must be a whole number of cards, and may not exceed the InstanceType's
-// whole-card OnceMaxRequest — which is zero for a pool with no free unpartitioned card, so an
-// all-partitioned pool rejects a positive claim here. A nil request is left to defaulting. It is
-// shared by a non-sliceable type and by a zero-percentage (whole-card) request on a sliceable type.
+// whole-card Capacity — which is zero for a pool with no unpartitioned card, so an all-partitioned
+// pool rejects a positive claim here. A nil request is left to defaulting. It is shared by a
+// non-sliceable type and by a zero-percentage (whole-card) request on a sliceable type.
+//
+// The ceiling is Capacity rather than OnceMaxRequest because the latter counts the cards free right
+// now: bounding by it refused every Instance submitted while the pool was busy, where the request
+// should wait in the queue. Capacity sums the whole pool, so a request larger than the largest node
+// but within the total is admitted and stays queued; the status carries no per-node capacity to
+// bound it tighter.
 func validateExclusiveAcceleratorRequest(
 	instType *worker.InstanceType, instRess *workercore.InstanceResources,
 ) field.ErrorList {
@@ -1018,7 +1024,7 @@ func validateExclusiveAcceleratorRequest(
 			field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
 			"accelerator request must be a whole number of cards")}
 	}
-	if instRess.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
+	if instRess.Accelerator.Cmp(instType.Status.Accelerator.Capacity) > 0 {
 		return field.ErrorList{field.Invalid(
 			field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
 			fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name))}

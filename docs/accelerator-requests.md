@@ -407,6 +407,9 @@ The webhook rejects these at admission rather than leaving the Instance Pending:
 - a profile **and** a slice percentage together (`a hardware partition and a logical slice percentage are
   mutually exclusive`);
 - an `accelerator` count other than `1` for a slice or a partition request;
+- a whole-accelerator count over the pool's whole-accelerator **capacity** (`status.accelerator.capacity`),
+  never over what is free right now: an Instance submitted while every accelerator is held is admitted
+  and waits in its queue;
 - **a slice percentage against a pool that offers no logical slicing** — a tightening; such a request
   used to be silently reshaped into a whole-accelerator one and served. On an all-partitioned pool the
   message points at `spec.resources.acceleratorPartitionedProfile` instead.
@@ -461,6 +464,10 @@ DaemonSet, then let the workloads reschedule.
   its profile by a plain prefix strip. Those variants cannot be requested.
 - **One accelerator per slice or partition request** (rules 2 and 3), for the different reasons given
   above.
+- **The whole-accelerator bound is the pool's total, not one node's.** A count above the largest node's
+  accelerators but within the pool's total is admitted and then stays queued, because one Pod's
+  accelerators come from one node and `InstanceType.status` carries no per-node capacity to refuse it
+  with. It applies to an `Instance` and a `ModelDeployment` role alike.
 - **Hand-carving a partition outside GPUStack is unsupported on a managed node.** Every node-level key —
   per-profile capacity, partition token health, the admission check — comes from the Pod annotations the
   device plugin writes, and an instance made with `nvidia-smi mig -cgi` produces none.

@@ -1551,8 +1551,8 @@ func acceleratableInstanceType(name string, acceleratable bool) *worker.Instance
 }
 
 // servingInstanceType is an acceleratable InstanceType whose status the reconciler has computed: a
-// non-empty Manufacturer is what marks the detail ready, and the ceiling is what the pool hands out
-// at once.
+// non-empty Manufacturer is what marks the detail ready, and the ceiling is the pool's whole-card
+// capacity. The pool is idle, so every one of those cards is free as well; saturated takes that away.
 //
 // It offers NEITHER slicing NOR partitioning unless an option adds one, because those are the two
 // capabilities the mode rule reads and a fixture that quietly offered both would let a refusal case
@@ -1564,12 +1564,21 @@ func servingInstanceType(
 	instType := acceleratableInstanceType(name, true)
 	instType.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
 	instType.Status.Accelerator.OnceMaxRequest = *resource.NewQuantity(ceiling, resource.DecimalSI)
+	instType.Status.Accelerator.Remaining = *resource.NewQuantity(ceiling, resource.DecimalSI)
+	instType.Status.Accelerator.Capacity = *resource.NewQuantity(ceiling, resource.DecimalSI)
 
 	for _, opt := range opts {
 		opt(instType)
 	}
 
 	return instType
+}
+
+// saturated makes every whole card of the pool held by a running workload: the free view reads zero
+// while the capacity stays what it was.
+func saturated(instType *worker.InstanceType) {
+	instType.Status.Accelerator.OnceMaxRequest = *resource.NewQuantity(0, resource.DecimalSI)
+	instType.Status.Accelerator.Remaining = *resource.NewQuantity(0, resource.DecimalSI)
 }
 
 // offeringLogicalSlices makes the pool report a logically sliceable card. The count is what the
@@ -2359,6 +2368,9 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 	// whole-card ceiling and a valid partitioned request disagree, and without it an acceptance case
 	// for one partitioned card passes whether or not the ceiling is applied to it.
 	allPartitioned := servingInstanceType("h20-mig", 0, offeringPartitionProfiles("1g.10gb"))
+	// A POOL WHOSE EVERY CARD IS HELD. The ceiling bounds what the pool can EVER serve; what is free
+	// right now is the queue's question, and a deployment admitted here waits in it for a card.
+	busy := servingInstanceType("h20-8x", 8, saturated)
 
 	cards := func(n int64) *resource.Quantity { return resource.NewQuantity(n, resource.DecimalSI) }
 	const (
@@ -2395,6 +2407,16 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 			name: "whole_card_over_the_ceiling", instType: plain,
 			ress:   &workercore.ModelDeploymentRoleResources{Accelerator: cards(9)},
 			refuse: []string{accelPath},
+		},
+		{
+			name: "whole_card_on_a_saturated_pool", instType: busy,
+			ress: &workercore.ModelDeploymentRoleResources{Accelerator: cards(8)},
+		},
+		{
+			name: "whole_card_over_the_capacity_of_a_saturated_pool", instType: busy,
+			ress:   &workercore.ModelDeploymentRoleResources{Accelerator: cards(9)},
+			refuse: []string{accelPath},
+			says:   "8",
 		},
 		{
 			name: "sliced_on_a_type_that_offers_slicing", instType: sliceable,

@@ -1081,7 +1081,7 @@ func TestInstanceWebhook_ValidateCreate_SlicedPercentages(t *testing.T) {
 				},
 				Status: workercore.InstanceTypeStatus{
 					Detail:      sliceableDetail,
-					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
+					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Capacity: resource.MustParse("4")},
 				},
 			}
 			w := newInstanceWebhook(instType)
@@ -1139,7 +1139,7 @@ func TestInstanceWebhook_ValidateCreate_ResourceCaps(t *testing.T) {
 					LocalStorage:  c.localCap,
 				},
 				Status: workercore.InstanceTypeStatus{
-					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("100")},
+					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("100"), Capacity: resource.MustParse("100")},
 					CPU:         workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("100")},
 				},
 			}
@@ -1184,7 +1184,7 @@ func TestInstanceWebhook_ValidateCreate_AcceleratedCPU(t *testing.T) {
 		},
 		Status: workercore.InstanceTypeStatus{
 			// A real accelerated type reports the three-view; Status.CPU stays zero.
-			Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
+			Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Capacity: resource.MustParse("4")},
 		},
 	}
 	w := newInstanceWebhook(instType)
@@ -1375,7 +1375,7 @@ func TestInstanceWebhook_ValidateUpdate_StartRevalidatesResources(t *testing.T) 
 		},
 		Status: workercore.InstanceTypeStatus{
 			Detail:      sliceableDetail,
-			Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("1")},
+			Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("1"), Capacity: resource.MustParse("1")},
 		},
 	}
 
@@ -1654,7 +1654,7 @@ func TestInstanceWebhook_ValidateCreate_SlicedAccelerator(t *testing.T) {
 				},
 				Status: workercore.InstanceTypeStatus{
 					Detail:      sliceableDetail,
-					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
+					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Capacity: resource.MustParse("4")},
 				},
 			}
 			w := newInstanceWebhook(instType)
@@ -1710,7 +1710,7 @@ func TestInstanceWebhook_ValidateCreate_WholeCardOnLogicallySliceable(t *testing
 				},
 				Status: workercore.InstanceTypeStatus{
 					Detail:      sliceableDetail,
-					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
+					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Capacity: resource.MustParse("4")},
 				},
 			}
 			w := newInstanceWebhook(instType)
@@ -1726,6 +1726,54 @@ func TestInstanceWebhook_ValidateCreate_WholeCardOnLogicallySliceable(t *testing
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+// TestInstanceWebhook_ValidateCreate_WholeCardOnASaturatedPool pins that the whole-card ceiling is the
+// pool's capacity, not what is free right now. Every card of this pool is held, so its free view reads
+// zero; a request the pool can serve once a card is released is admitted and waits in its queue,
+// while one larger than every card the pool has is still refused.
+func TestInstanceWebhook_ValidateCreate_WholeCardOnASaturatedPool(t *testing.T) {
+	const typeName = "t4-2x"
+
+	cases := []struct {
+		name    string
+		acc     string
+		wantErr bool
+	}{
+		{name: "one card accepted", acc: "1"},
+		{name: "every card of the pool accepted", acc: "2"},
+		{name: "more cards than the pool has rejected", acc: "3", wantErr: true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			instType := &worker.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: typeName},
+				Spec:       workercore.InstanceTypeSpec{Acceleratable: true},
+				Status: workercore.InstanceTypeStatus{
+					Detail: workercore.InstanceTypeDetail{Manufacturer: "nvidia"},
+					Accelerator: workercore.InstanceTypeResource{
+						OnceMaxRequest: resource.MustParse("0"),
+						Remaining:      resource.MustParse("0"),
+						Capacity:       resource.MustParse("2"),
+					},
+				},
+			}
+			w := newInstanceWebhook(instType)
+
+			inst := webhookInstance("a", typeName)
+			q := resource.MustParse(c.acc)
+			inst.Spec.Resources = &workercore.InstanceResources{Accelerator: &q}
+
+			_, err := w.ValidateCreate(context.Background(), inst)
+			if c.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "exceeds the maximum accelerator request")
+				return
+			}
+			assert.NoError(t, err)
 		})
 	}
 }
@@ -1956,7 +2004,7 @@ func TestInstanceWebhook_ValidateCreate_PoolCannotServe(t *testing.T) {
 		{name: "exclusive on a logically sliceable pool accepted", instType: sliceType},
 		{name: "logical slice on a logically sliceable pool accepted", instType: sliceType, memPct: 50, coresPct: 50},
 		{
-			// Its whole-card OnceMaxRequest is zero — the view counts free unpartitioned cards
+			// Its whole-card Capacity is zero — the view counts unpartitioned cards
 			// and it has none — so the generic cap check rejects the claim.
 			name: "exclusive on an all-partitioned pool rejected", instType: partType,
 			wantErr: true, wantMessage: "exceeds the maximum accelerator request",
