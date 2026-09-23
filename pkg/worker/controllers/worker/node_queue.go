@@ -535,14 +535,13 @@ func dropsFlavorReference(current, desired []kueue.ResourceGroup) bool {
 }
 
 // drainOrEmptyClusterQueue handles a queue whose pool has lost all its flavors: it empties the
-// quota, but only once every reservation has cleared so Kueue never counts negative. While
-// reservations remain it optionally drives HoldAndDrain (gated by the setting) and requeues;
-// an already-empty queue is a no-op.
+// quota through the held migration, switching only once every reservation has cleared so Kueue
+// never counts negative. The drain setting decides only whether remaining reservations are drained
+// (HoldAndDrain) or waited out without holding; a queue with nothing reserved is always held before
+// it is emptied, and an already-empty queue is a no-op.
 func (r *NodeQueueReconciler) drainOrEmptyClusterQueue(
 	ctx context.Context, cq *kueue.ClusterQueue,
 ) (ctrl.Result, error) {
-	logger := ctrllog.FromContext(ctx)
-
 	if cq.Annotations[_TASQueueMigrationPhaseAnnotation] != "" {
 		return r.migrateClusterQueueResourceGroups(ctx, cq, nil, false)
 	}
@@ -551,27 +550,20 @@ func (r *NodeQueueReconciler) drainOrEmptyClusterQueue(
 	}
 
 	drain := settings.InstanceTypeDrainWhenNoFlavors.ShouldValueBool(ctx)
-	if drain {
-		if cq.Annotations == nil {
-			cq.Annotations = make(map[string]string)
-		}
-		// Emptying the last flavor reference is the same identity-stable plan migration as a
-		// profile replacement. The migration marker preserves the prior stop policy and lets a
-		// returning flavor join the in-progress plan before admission is restored.
-		return r.migrateClusterQueueResourceGroups(ctx, cq, nil, false)
-	} else if hasReserved(cq) {
+	if !drain && hasReserved(cq) {
 		// Without automatic drain, wait for reservations to clear on their own.
 		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
 
-	// Every reservation is zero: empty the quota (an empty resource-group list is valid).
-	cq.Spec.ResourceGroups = nil
-	if err := r.Client.Update(ctx, cq); err != nil {
-		logger.Error(err, "empty cluster queue resource groups")
-		return ctrl.Result{}, err
+	if cq.Annotations == nil {
+		cq.Annotations = make(map[string]string)
 	}
-	logger.V(2).Info("emptied cluster queue resource groups")
-	return ctrl.Result{}, nil
+	// Emptying the last flavor reference is the same identity-stable plan migration as a
+	// profile replacement, also when nothing is reserved: holding first closes the race in which a
+	// reservation lands between the zero check and the switch. The migration marker preserves the
+	// prior stop policy and lets a returning flavor join the in-progress plan before admission is
+	// restored.
+	return r.migrateClusterQueueResourceGroups(ctx, cq, nil, false)
 }
 
 // hasReserved reports whether the ClusterQueue still holds reserved quota or

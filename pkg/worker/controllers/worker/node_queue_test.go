@@ -1220,3 +1220,37 @@ func TestNodeQueueReconciler_PoolConservationCountsOnlyContributingNodes(t *test
 		assert.Positive(t, res.RequeueAfter, "a non-conserved plan is retried once the missing flavor appears")
 	})
 }
+
+// TestNodeQueueReconciler_HoldsBeforeEmptyingUnreservedQueue pins that emptying the last flavor
+// reference holds the queue first even with automatic drain off and nothing reserved, so no
+// reservation can land between the zero check and the switch.
+func TestNodeQueueReconciler_HoldsBeforeEmptyingUnreservedQueue(t *testing.T) {
+	require.False(t, settings.InstanceTypeDrainWhenNoFlavors.ShouldValueBool(context.Background()),
+		"this case covers the automatic-drain-off path")
+	key := "generic"
+	name := nodeQueueName(key)
+	flavor := "gpustack-generic-linux-amd64-4c"
+	cq := newInstanceTypeQueue(key, false, cpuResourceGroup(flavor, 4))
+	cli := buildNodeQueueClient(cq)
+
+	res := reconcileNodeQueueN(t, cli, name, 1)
+	assert.Positive(t, res.RequeueAfter)
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+	assert.Equal(t, _TASQueueMigrationPhaseDraining, got.Annotations[_TASQueueMigrationPhaseAnnotation])
+	require.Len(t, got.Spec.ResourceGroups, 1, "the reference stays until Kueue observes the hold")
+
+	markClusterQueueStopped(t, cli, name)
+	reconcileNodeQueueN(t, cli, name, 1)
+	got, err = getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Empty(t, got.Spec.ResourceGroups)
+
+	markClusterQueueStopped(t, cli, name)
+	reconcileNodeQueueN(t, cli, name, 1)
+	got, err = getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, kueue.None, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+	assert.NotContains(t, got.Annotations, _TASQueueMigrationPhaseAnnotation)
+}

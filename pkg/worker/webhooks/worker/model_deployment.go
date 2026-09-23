@@ -666,7 +666,8 @@ func validateModelDeploymentRoleTopology(md *workercore.ModelDeployment) field.E
 		}
 		if topology.RequiredLevel == core.LabelHostname {
 			errs = append(errs, field.Forbidden(path,
-				"kubernetes.io/hostname is implicit; omit requiredLevel for hostname-only placement"))
+				"kubernetes.io/hostname is implicit and cannot be required; "+
+					"omitting requiredLevel leaves placement unconstrained, it does not keep the Pods on one Node"))
 		}
 	}
 	return errs

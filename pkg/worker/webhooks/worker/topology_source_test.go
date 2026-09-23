@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -119,4 +120,12 @@ func TestValidateModelDeploymentRoleTopology(t *testing.T) {
 			assert.Equal(t, tc.valid, len(validateModelDeploymentRoleTopology(md)) == 0)
 		})
 	}
+
+	t.Run("hostname refusal does not promise same-Node placement", func(t *testing.T) {
+		md := &workercore.ModelDeployment{Spec: workercore.ModelDeploymentSpec{Roles: []workercore.ModelDeploymentRole{{Topology: &workercore.ModelDeploymentRoleTopology{RequiredLevel: "kubernetes.io/hostname"}}}}}
+		errs := validateModelDeploymentRoleTopology(md)
+		require.Len(t, errs, 1)
+		assert.Contains(t, errs[0].Detail, "unconstrained")
+		assert.NotContains(t, errs[0].Detail, "hostname-only placement")
+	})
 }
