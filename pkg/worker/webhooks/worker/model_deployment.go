@@ -319,6 +319,15 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentPoolTransport(
 		return nil, field.InternalError(path, fmt.Errorf("get kv cache backend: %w", err))
 	}
 	offers := mooncake.MemberProtocols(backend)
+	nonempty := sets.New[string]()
+	for _, offer := range offers {
+		if offer != "" {
+			nonempty.Insert(offer)
+		}
+	}
+	if nonempty.Len() < 2 {
+		return nil, nil
+	}
 	seen := make(map[string]struct{}, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
@@ -338,7 +347,7 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentPoolTransport(
 		if err != nil {
 			return nil, field.InternalError(path, err)
 		}
-		if _, err := inject.MatchTransport(engine, offers); err != nil {
+		if err := inject.ValidateBindingTransport(engine, offers); err != nil {
 			return field.ErrorList{field.Forbidden(path, err.Error())}, nil
 		}
 	}

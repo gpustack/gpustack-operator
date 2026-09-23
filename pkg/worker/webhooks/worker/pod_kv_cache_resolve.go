@@ -100,7 +100,11 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 	// The match refuses an unsupported transport and a mixed pool whose unconstrained engine
 	// could install only one of its offers. Both are binding failures, so this Pod is refused
 	// here at admission rather than started with a client that cannot reach some segments.
-	protocol, err := inject.MatchTransport(engine, mooncake.MemberProtocols(backend))
+	offers := mooncake.MemberProtocols(backend)
+	if err := inject.ValidateBindingTransport(engine, offers); err != nil {
+		return nil, err
+	}
+	protocol, err := inject.MatchTransport(engine, offers)
 	if err != nil {
 		return nil, err
 	}

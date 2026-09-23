@@ -892,6 +892,9 @@ type's acceleratability depend on `InstanceType`; new cache binding compatibilit
 Binding, pool and backend. The webhook reads these objects from the API server so a stale cache
 cannot decide admission. An unchanged binding stays editable if its backend later becomes mixed.
 
+An older binding still renders its first offered transport. It can remain healthy while reads of
+blocks on another transport fail, so repair the pool even though an unrelated update is accepted.
+
 **Any rule that reads an `InstanceType` declines for a deployment being deleted**, in the mutating
 half and the validating half alike. Such a rule refuses when the type is absent, so leaving it on
 would let a deleted `InstanceType` block the very update that clears the deployment's finalizer — an

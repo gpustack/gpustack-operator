@@ -154,14 +154,10 @@ func TestMatchTransport(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		// Repeated offers are one effective transport and remain admissible.
+		// Existing bindings retain the deterministic first-offer synthesis rule.
 		{
-			name:   "an unconstrained engine accepts one effective transport",
-			engine: EngineVLLM, offers: []string{"rdma", "rdma"}, want: "rdma",
-		},
-		{
-			name:   "an unconstrained engine refuses mixed offers",
-			engine: EngineVLLM, offers: []string{"rdma", "tcp"}, wantErr: true,
+			name:   "an unconstrained engine keeps the first offer",
+			engine: EngineVLLM, offers: []string{"rdma", "tcp"}, want: "rdma",
 		},
 		{
 			name:   "a constrained engine takes the first offer it accepts",
@@ -199,8 +195,32 @@ func TestMatchTransport(t *testing.T) {
 	}
 }
 
-func TestMatchTransport_MixedOffersMessage(t *testing.T) {
-	_, err := MatchTransport(EngineVLLM, []string{"rdma", "", "tcp", "rdma"})
+func TestValidateBindingTransport(t *testing.T) {
+	cases := []struct {
+		name    string
+		engine  Engine
+		offers  []string
+		refused bool
+	}{
+		{"mixed unconstrained", EngineVLLM, []string{"rdma", "tcp"}, true},
+		{"one effective transport", EngineVLLM, []string{"rdma", "", "rdma"}, false},
+		{"constrained engine", EngineVLLMAscend, []string{"tcp", "ascend"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateBindingTransport(tc.engine, tc.offers)
+			if tc.refused {
+				require.Error(t, err)
+				assert.Equal(t, ReasonTransportUnsupported, reasonOf(t, err))
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateBindingTransport_MixedOffersMessage(t *testing.T) {
+	err := ValidateBindingTransport(EngineVLLM, []string{"rdma", "", "tcp", "rdma"})
 	require.Error(t, err)
 	message := err.Error()
 	assert.Contains(t, message, `["rdma" "tcp"]`)

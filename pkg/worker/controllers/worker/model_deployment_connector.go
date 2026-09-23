@@ -63,8 +63,8 @@ type ModelDeploymentConnectorInput struct {
 	// Protocols is what the pool's backend offers, in the artifact's own spelling and in group
 	// declaration order: each member group's effective protocol, ALREADY MAPPED by
 	// `mooncake.MemberProtocols`. It is a list because groups may disagree — a VRAM group on a
-	// fabric beside a DRAM group on TCP. `inject.MatchTransport` refuses that mix for an
-	// unconstrained engine, which cannot select a transport per target segment.
+	// fabric beside a DRAM group on TCP. Admission refuses a new binding of an unconstrained
+	// engine to such a pool; synthesis retains the first-offer rule for an existing binding.
 	//
 	// It feeds the store client alone. The point-to-point leg does not read it -- the two data
 	// planes declare separately, and vllmKVTransferProtocol says why. Empty is the no-store
@@ -417,8 +417,8 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 
 	// Which of the pool's offers the engine is handed is decided HERE and not at resolution,
 	// because the answer needs the engine and the connection is resolved per deployment while the
-	// engine varies per role. The match refuses unsupported offers and a mixed pool an
-	// unconstrained engine cannot use with a single installed transport.
+	// engine varies per role. A constrained engine takes the first accepted offer; an
+	// unconstrained engine takes the first for an existing binding admitted before the mix check.
 	protocol, err := inject.MatchTransport(engine, in.Protocols)
 	if err != nil {
 		return ModelDeploymentConnectorRender{}, err
