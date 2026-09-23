@@ -1746,6 +1746,30 @@ func reconcileWithAdmin(
 	return got
 }
 
+func TestKVCacheBackendPoolWrites_PublishedOnBackend(t *testing.T) {
+	cases := []struct {
+		name   string
+		end    string
+		used   string
+		status string
+	}{
+		{"writes revoked", "0", "0", "False"},
+		{"writes completed", "1", "0", "True"},
+		{"allocation present", "0", "10", "True"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := reconcileWithAdmin(t, newKVCacheBackendObject(), map[string]adminResponse{
+				"/health": {body: healthServing},
+				"/metrics": {body: metricsPopulated + "master_put_start_requests_total 1\n" +
+					"master_put_end_requests_total " + tc.end + "\nmaster_put_revoke_requests_total 1\n"},
+				"/get_segments_detail": {body: `{"segments":[{"segment_id":"s1","client_id":"c1","segment_name":"n1","allocator_used_bytes":` + tc.used + `}]}`},
+			})
+			assert.Equal(t, tc.status, KVCacheBackendConditionPoolWrites.GetStatus(got))
+		})
+	}
+}
+
 func TestKVCacheBackendCapacity_PublishesWhatTheLeaderReports(t *testing.T) {
 	got := reconcileWithAdmin(t, newKVCacheBackendObject(), map[string]adminResponse{
 		"/health":  {body: healthServing},
