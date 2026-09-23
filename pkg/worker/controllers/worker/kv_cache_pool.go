@@ -1800,15 +1800,16 @@ func (r *KVCachePoolReconciler) teardownKVCachePool(
 		return ctrl.Result{}, err
 	}
 
-	// Resolved once, for every removal below. A nil client is a master that is GONE rather than one
-	// that could not be reached, and the difference decides whether anything is still owed to it.
+	// Resolved once, for every removal below. A nil client is a master that is GONE, or one declared
+	// without a ledger, rather than one that could not be reached, and the difference decides whether
+	// anything is still owed to it.
 	admin, kvcb, unreachable, err := r.resolveKVCachePoolAdmin(ctx, kvcp, holder)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	// Observed once, for the ownership rule below. Taken only when there is a master to ask: a nil
-	// client is one that is gone, and an unreachable one has already turned every removal below into
+	// client is one that is gone or holds no ledger, and an unreachable one has already turned every removal below into
 	// a hold. A snapshot that cannot be TAKEN is an error rather than a pass that proceeds without
 	// one, on the same terms as the ledger listing inside deleteTenantQuotas — deleting an entry
 	// without knowing whose it is is the loss this rule exists to prevent.
@@ -1924,8 +1925,12 @@ func (r *KVCachePoolReconciler) teardownKVCachePool(
 		if unreachable {
 			return deleting(ctrl.Result{RequeueAfter: kvCachePoolObserveInterval})
 		}
-		if err = r.releaseQuotaPolicyOfPool(ctx, admin, kvcb, kvcp); err != nil {
+		held, err := r.releaseQuotaPolicyOfPool(ctx, admin, kvcb, kvcp, holder)
+		if err != nil {
 			return ctrl.Result{}, err
+		}
+		if held {
+			return deleting(ctrl.Result{RequeueAfter: kvCachePoolObserveInterval})
 		}
 	}
 
@@ -1965,7 +1970,8 @@ func deletingKVCachePoolStatus(holder *workercore.KVCachePool) workercore.KVCach
 // A nil client with unreachable FALSE is a master that is GONE, and nothing is owed: the backend took
 // its ledger with it, and a pool that waited for one would be undeletable for as long as the backend
 // stayed gone — which is the ordinary order a stack comes down in. The same answer covers a pool that
-// never named a usable backend, because it registered nothing.
+// never named a usable backend, because it registered nothing, and a managed backend declared without
+// multi-tenancy, whose master holds no ledger to owe anything to — that one returns the backend too.
 //
 // Unreachable TRUE is a backend that exists and publishes no address. That one holds, with the
 // Condition already written: the entries may well still be there, and an entry left behind is
@@ -2006,6 +2012,18 @@ func (r *KVCachePoolReconciler) resolveKVCachePoolAdmin(
 		return nil, nil, false, nil
 	}
 
+	// The declaration is exact for a managed backend, on the terms convergeTenantLedger already takes
+	// it: this operator renders the flag onto the leader's command line, so a leader started without
+	// it holds no ledger, and the serving pass never asks it about one. The teardown must not ask
+	// either. There is no entry on that master for this pool to remove, and the policy document is
+	// rendered from the cluster alone, so asking would only make the pool's deletion depend on a
+	// leader that is running — and a leader that never came up would then hold the pool, which holds
+	// the backend, with nothing left able to move.
+	if managed := kvcb.Spec.Connection.Managed; managed != nil && !managed.Leader.MultiTenancy {
+		logger.V(2).Info("tearing down a pool on a backend declared without a tenant ledger")
+		return nil, kvcb, false, nil
+	}
+
 	_, adminAddress := kvCacheBackendAddresses(kvcb)
 	if adminAddress == "" {
 		KVCachePoolConditionReleasable.False(holder, KVCachePoolReasonLedgerNotReleased,
@@ -2041,11 +2059,13 @@ func (r *KVCachePoolReconciler) releaseQuotaPolicyOfPool(
 	ctx context.Context,
 	admin *mooncake.AdminClient,
 	kvcb *workercore.KVCacheBackend,
-	kvcp *workercore.KVCachePool,
-) error {
+	kvcp, holder *workercore.KVCachePool,
+) (held bool, err error) {
+	logger := ctrllog.FromContext(ctx)
+
 	master, err := r.observeKVCachePoolMaster(ctx, kvcb)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	tenants := make([]mooncake.QuotaPolicyTenant, 0, len(master.tenants))
@@ -2068,10 +2088,23 @@ func (r *KVCachePoolReconciler) releaseQuotaPolicyOfPool(
 	// A master with multi-tenancy OFF is the exception, on the same terms deleteTenantQuotas takes it:
 	// it holds no ledger, so there is no entry the listing could be hiding and the document is rendered
 	// from the desired tenants alone. Held here instead, this write is the one the pool's finalizer
-	// never completes — and the seed would go on carrying tenants of a pool that is gone.
-	observed, err := admin.ListTenantQuotas(ctx)
-	if err != nil && !errors.Is(err, mooncake.ErrMultiTenancyDisabled) {
-		return fmt.Errorf("list tenant quotas before re-rendering the quota policy: %w", err)
+	// never completes — and the seed would go on carrying tenants of a pool that is gone. A nil client
+	// is the same case known from the backend's declaration, so the master is not asked at all.
+	//
+	// The hold is a Condition and a timed requeue rather than an error. The master is not an object
+	// this reconciler watches, so an error would only retry under a growing backoff while the pool's
+	// status said nothing about why it is still there.
+	var observed []mooncake.TenantQuota
+	if admin != nil {
+		observed, err = admin.ListTenantQuotas(ctx)
+		if err != nil && !errors.Is(err, mooncake.ErrMultiTenancyDisabled) {
+			KVCachePoolConditionReleasable.False(holder, KVCachePoolReasonLedgerNotReleased,
+				fmt.Sprintf("deletion is held: the master's tenant ledger could not be read, so the "+
+					"quota policy document cannot be re-rendered without guessing what sibling pools "+
+					"still hold. Deletion resumes once the master answers: %v", err))
+			logger.Error(err, "list tenant quotas before re-rendering the quota policy")
+			return true, nil
+		}
 	}
 	for i := range observed {
 		entry := &observed[i]
@@ -2112,7 +2145,7 @@ func (r *KVCachePoolReconciler) releaseQuotaPolicyOfPool(
 	// seed container falls back to when the ConfigMap is absent, so the two paths leave the master
 	// in the same state — and deleting an object this controller does not own is a wider act than
 	// this one needs.
-	return r.syncQuotaPolicyConfigMap(ctx, kvcb, tenants)
+	return false, r.syncQuotaPolicyConfigMap(ctx, kvcb, tenants)
 }
 
 // kvCachePoolRegisteredBy reports whether one of the named pool's Bindings carries this domain.
@@ -2149,8 +2182,8 @@ func (r *KVCachePoolReconciler) deleteTenantQuotas(
 ) (held bool) {
 	logger := ctrllog.FromContext(ctx)
 
-	// A nil client is a master that is GONE, not one that could not be reached, and nothing is owed to
-	// a ledger that no longer exists. resolveKVCachePoolAdmin's contract already says so; enforcing it
+	// A nil client is a master that is GONE, or one declared without a ledger, not one that could not
+	// be reached, and nothing is owed to a ledger that does not exist. resolveKVCachePoolAdmin's contract already says so; enforcing it
 	// HERE rather than at each call site is what makes it true for every caller, because the callers
 	// distinguish only `unreachable`, which is FALSE on exactly this path.
 	if admin == nil {
@@ -2173,7 +2206,8 @@ func (r *KVCachePoolReconciler) deleteTenantQuotas(
 		}
 		KVCachePoolConditionReleasable.False(holder, KVCachePoolReasonLedgerNotReleased,
 			fmt.Sprintf("deletion is held: the master's tenant ledger could not be read, so whether "+
-				"its entries are this operator's to remove is unknown: %v", err))
+				"its entries are this operator's to remove is unknown. Deletion resumes once the "+
+				"master answers: %v", err))
 		logger.Error(err, "list tenant quotas while tearing down a pool")
 		return true
 	}

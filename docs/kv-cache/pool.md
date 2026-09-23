@@ -298,6 +298,25 @@ master leaves capacity nothing can reclaim: the ledger records no owner.
 **A pool is held while a Binding still references it**, and a backend while a pool still claims it.
 Each layer names what to remove in its own condition message.
 
+**A pool's deletion needs its master only when that master can hold a ledger.** A managed backend
+declared without multi-tenancy holds none, so its pools are released without asking the master, and a
+leader that never started does not hold them. On any other backend the pool may still have entries on
+the master; while the master does not answer, the pool stays `Deleting` with `Releasable=False`,
+reason `LedgerNotReleased`, and the pass is retried every 30 seconds.
+
+**There are two ways out of that hold.** Restore the master, so that it answers on its admin address,
+and the next pass completes the release. Or, once the master's ledger is known to be gone or its
+entries no longer matter, remove the finalizer by hand:
+
+```bash
+kubectl patch kvcp <pool> --type=merge -p '{"metadata":{"finalizers":null}}'
+```
+
+**Removing it by hand skips what the teardown still owed.** The pool's quota entries stay on the
+master with no record of which pool created them, so nothing reclaims that capacity; the seed policy
+document keeps the pool's tenants until a sibling pool re-renders it, or indefinitely if this was the
+last pool. Its deleting Bindings are released once it is gone, and its claim no longer holds the backend.
+
 **A claimed backend cannot have its multi-tenancy withdrawn**, which is refused on the backend itself
 — see [KV Cache Backend](backend.md#operating-notes) for the rule and the remedy. What it protects on
 this side is a pool's own exit: releasing a pool means releasing every quota it registered.

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -801,8 +802,7 @@ func TestKVCachePoolTeardown_AMissingLedgerIsAlreadyReleased(t *testing.T) {
 		// asserting only that a missing ledger issues none would pass on a teardown that never
 		// removes anything at all.
 		wantDeletes int
-		// wantHeldBy is the Releasable reason a pool that is not released must carry. Empty, with
-		// wantReleased false, means the pass is expected to FAIL outright instead.
+		// wantHeldBy is the Releasable reason a pool that is not released must carry.
 		wantHeldBy string
 	}{
 		{
@@ -816,9 +816,10 @@ func TestKVCachePoolTeardown_AMissingLedgerIsAlreadyReleased(t *testing.T) {
 			wantReleased: true,
 		},
 		{
-			name:         "while a ledger that merely did not answer fails the re-render",
+			name:         "while a ledger that merely did not answer holds the re-render",
 			refuseStatus: 503,
 			refuseBody:   ledgerNotAnswering,
+			wantHeldBy:   KVCachePoolReasonLedgerNotReleased,
 		},
 		{
 			name:         "a pool with a domain of its own has its entry removed",
@@ -894,16 +895,136 @@ func TestKVCachePoolTeardown_AMissingLedgerIsAlreadyReleased(t *testing.T) {
 				return
 			}
 
-			require.NoError(t, getErr, "a pool that is not released is still there")
-			if tc.wantHeldBy == "" {
-				require.Error(t, err,
-					"a read that says nothing about whether the entries are still there must not "+
-						"be taken as permission to let go")
-				return
-			}
+			require.NoError(t, getErr,
+				"a read that says nothing about whether the entries are still there must not be "+
+					"taken as permission to let go")
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantHeldBy, conditionReason(t, kvcp, KVCachePoolConditionReleasable))
 			assert.Equal(t, KVCachePoolPhaseDeleting, kvcp.Status.Phase)
+		})
+	}
+}
+
+// unreachableAddress is an address nothing listens on: a master whose Pod is not running, the state a
+// backend reaches when its leader never starts.
+func unreachableAddress(t *testing.T) string {
+	t.Helper()
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	address := lis.Addr().String()
+	require.NoError(t, lis.Close())
+	return address
+}
+
+// TestKVCachePoolTeardown_AnUnreachableMaster pins what a pool's deletion owes a master that does not
+// answer at all, which turns on whether the backend DECLARES a ledger.
+//
+// A managed backend declared without multi-tenancy holds none, and the serving pass already never asks
+// its master about one. The teardown asked anyway, so a leader that never came up left the pool and
+// its backend waiting for each other with nothing in any status saying why. Every other backend may
+// hold entries this pool registered, and holds -- but visibly, on the same condition the ledger
+// removal writes, rather than as an error retried under backoff.
+func TestKVCachePoolTeardown_AnUnreachableMaster(t *testing.T) {
+	testCases := []struct {
+		name       string
+		newBackend func(name, admin string) *workercore.KVCacheBackend
+		// registered puts a reuse domain of this pool's on the master first, which routes the
+		// teardown through the ledger removal as well as through the re-render.
+		registered bool
+
+		wantReleased bool
+	}{
+		{
+			name:         "a backend declared without multi-tenancy releases a pool that registered nothing",
+			newBackend:   newManagedSingleTenantReconcileBackend,
+			wantReleased: true,
+		},
+		{
+			name:         "and releases one whose binding named a domain",
+			newBackend:   newManagedSingleTenantReconcileBackend,
+			registered:   true,
+			wantReleased: true,
+		},
+		{
+			name:       "a multi-tenant backend holds a pool that registered nothing",
+			newBackend: newManagedReconcileBackend,
+		},
+		{
+			name:       "and holds one whose binding named a domain",
+			newBackend: newManagedReconcileBackend,
+			registered: true,
+		},
+		{
+			name:       "an external backend, which declares nothing, holds too",
+			newBackend: newReconcileBackend,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			master := newFakeMaster()
+			address := master.start(t)
+
+			objs := []ctrlcli.Object{
+				tc.newBackend("mooncake-dram", address),
+				newTestKVCachePool("shared", "mooncake-dram"),
+			}
+			if tc.registered {
+				objs = append(objs, newBoundBinding("team-a", "chat", "shared", "team-a-chat",
+					resource.MustParse("20Ti")))
+			}
+			r, cli := newReconciler(objs...)
+
+			reconcilePool(t, r, "shared")
+			if tc.registered {
+				require.NotEmpty(t, readPool(t, cli, "shared").Status.Domains)
+				require.Contains(t, readQuotaPolicyDocument(t, cli, "mooncake-dram"), "team-a-chat",
+					"the tenant has to be in the document before its removal from it means anything")
+				deleteObject(t, cli, readBinding(t, cli, "team-a", "chat"))
+			}
+
+			// The leader goes away: the backend still publishes its admin address, and nothing
+			// answers on it.
+			kvcb := readBackend(t, cli, "mooncake-dram")
+			for i := range kvcb.Status.Endpoints {
+				if kvcb.Status.Endpoints[i].Name == workercore.KVCacheBackendEndpointNameAdmin {
+					kvcb.Status.Endpoints[i].Address = unreachableAddress(t)
+				}
+			}
+			require.NoError(t, cli.Status().Update(ctx, kvcb))
+			deleteObject(t, cli, readPool(t, cli, "shared"))
+
+			result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: ctrlcli.ObjectKey{Name: "shared"}})
+			require.NoError(t, err,
+				"an unanswering master is an observation to report, not an error to retry under backoff")
+
+			kvcp := new(workercore.KVCachePool)
+			getErr := cli.Get(ctx, ctrlcli.ObjectKey{Name: "shared"}, kvcp)
+
+			if tc.wantReleased {
+				assert.True(t, kerrors.IsNotFound(getErr),
+					"a backend with no ledger owes its master nothing, got %v", getErr)
+				if tc.registered {
+					assert.True(t, bindingIsGone(t, cli, "team-a", "chat"),
+						"and the binding it was holding goes with it")
+					assert.NotContains(t, readQuotaPolicyDocument(t, cli, "mooncake-dram"),
+						"team-a-chat", "the seed is re-rendered from the cluster alone")
+				}
+				assert.Empty(t, readBackend(t, cli, "mooncake-dram").Status.UsedBy,
+					"the claim is dropped, which is what lets the backend's own deletion proceed")
+				return
+			}
+
+			require.NoError(t, getErr, "a pool whose entries may still be on the master is kept")
+			assert.Equal(t, KVCachePoolReasonLedgerNotReleased,
+				conditionReason(t, kvcp, KVCachePoolConditionReleasable))
+			assert.Contains(t, KVCachePoolConditionReleasable.GetMessage(kvcp), "resumes once the master answers",
+				"the message says what ends the hold")
+			assert.Equal(t, KVCachePoolPhaseDeleting, kvcp.Status.Phase)
+			assert.Equal(t, kvCachePoolObserveInterval, result.RequeueAfter,
+				"nothing in the cluster changes when the master comes back, so the pass asks again on a timer")
 		})
 	}
 }
