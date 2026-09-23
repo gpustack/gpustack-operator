@@ -397,5 +397,5 @@ function gpustack::helm::test() {
     ct install \
     --charts "${target#"${ROOT_DIR}/"}" \
     --chart-repos "${chart_repos}" \
-    --helm-extra-args '--timeout 600s'
+    --helm-extra-args '--timeout 600s --set image.tag=dev --set cleanupOnUninstall=true'
 }

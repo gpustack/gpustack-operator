@@ -514,6 +514,7 @@ kueue:
       kind: Configuration
       featureGates:
         AssignQueueLabelsForPods: false
+        TopologyAwareScheduling: true
         TASBalancedPlacement: true
         # Enables resources.quotaCheckStrategy below (alpha in Kueue 0.18). The bundled
         # controller image is always 0.18, so the gate is always available.
@@ -1007,3 +1008,63 @@ csi-driver-s3:
   rbac:
     # -- Prefix of the driver's ClusterRole and ClusterRoleBinding names.
     name: csi-s3
+
+# -- [Topograph](https://github.com/NVIDIA/topograph) discovers physical topology and writes its
+# own Kubernetes Node labels. It is disabled until an administrator selects a production provider.
+# @default -- see the `topograph.*` keys below
+topograph:
+  # -- Deploy the bundled Topograph chart. Enabled installs require Kubernetes 1.27+, a non-test
+  # provider, and Topograph's Kubernetes engine.
+  enabled: false
+  provider:
+    # -- Topograph production provider name, such as `aws`, `dra`, or `infiniband-k8s`. `test` is
+    # retained while disabled only because it is the upstream chart default and is rejected on enable.
+    name: test
+    # -- Provider-specific configuration, including only the credentials or discovery inputs the
+    # selected provider documents.
+    params: {}
+  engine:
+    # -- Keep Topograph's Kubernetes engine as the sole publisher of Topograph Node labels.
+    name: k8s
+    # -- Kubernetes engine configuration accepted by the pinned Topograph chart.
+    params: {}
+  image:
+    # -- Topograph image repository. Set this to a mirrored repository for air-gapped installs.
+    repository: docker.io/gpustack/mirrored-nvidia-topograph
+    # -- Topograph image tag. Empty uses the pinned chart application version.
+    tag: ""
+    # -- Image pull policy for every Topograph workload.
+    pullPolicy: IfNotPresent
+  # -- Pull secrets for the Topograph API server, node observer, and node-data-broker images.
+  imagePullSecrets: []
+  serviceAccount:
+    # -- Create the Topograph API ServiceAccount. Set false with a name when cloud identity is
+    # managed outside this release.
+    create: true
+    # -- Existing Topograph API ServiceAccount name when create is false.
+    name: ""
+  config:
+    # -- Existing Secret containing provider credentials, as documented by the selected provider.
+    credentialsSecret: ""
+  # -- Security context for the Topograph API server.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
+  nodeDataBroker:
+    # -- Deploy Topograph's per-node data broker. Provider examples can restrict it without
+    # changing the shared API server or node observer placement.
+    enabled: true
+    # -- Node selector applied only to Topograph's node-data-broker DaemonSet.
+    nodeSelector: {}
+    # -- Security context for the node-data-broker container.
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL

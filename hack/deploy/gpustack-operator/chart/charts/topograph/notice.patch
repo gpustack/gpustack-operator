@@ -1,0 +1,11 @@
+diff --git a/NOTICE b/NOTICE
+new file mode 100644
+index 0000000..ba672f5
+--- /dev/null
++++ b/NOTICE
+@@ -0,0 +1,5 @@
++Topograph Helm chart 1.0.0
++Copyright (c) NVIDIA Corporation.
++
++Source: https://github.com/NVIDIA/topograph
++Licensed under the Apache License, Version 2.0.
