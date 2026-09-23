@@ -262,14 +262,28 @@ func TestAdminDecodeCapacity_ANumberThatIsNotAByteCountIsMalformed(t *testing.T)
 }
 
 func TestAdminDecodeSegments(t *testing.T) {
-	t.Run("identity and status fields are read and the allocator counts left behind", func(t *testing.T) {
+	t.Run("identity, status, and allocation are read", func(t *testing.T) {
 		got, err := DecodeSegmentListing(fixture(t, "segments-detail.json"))
 		require.NoError(t, err)
 
+		used := uint64(2738041651)
 		assert.Equal(t, []SegmentDetail{
-			{ID: "6e1f...", ClientID: "a1b2...", Name: "n7-dram", State: "OK", Protocol: "tcp", TEEndpoint: "10.42.0.11:15002"},
-			{ID: "7c2a...", ClientID: "b3c4...", Name: "n8-dram", State: "OK", Protocol: "rdma", TEEndpoint: "10.42.0.12:15002"},
-		}, got, "the fixture carries twelve fields per entry; nothing in this scope reads the rest")
+			{ID: "6e1f...", ClientID: "a1b2...", Name: "n7-dram", State: "OK", Protocol: "tcp", TEEndpoint: "10.42.0.11:15002", AllocatorUsedBytes: &used},
+			{ID: "7c2a...", ClientID: "b3c4...", Name: "n8-dram", State: "OK", Protocol: "rdma", TEEndpoint: "10.42.0.12:15002", AllocatorUsedBytes: &used},
+		}, got)
+	})
+
+	t.Run("zero allocation differs from an absent count", func(t *testing.T) {
+		got, err := DecodeSegmentListing(fixture(t, "segments-detail-unknown-state.json"))
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.NotNil(t, got[0].AllocatorUsedBytes)
+		assert.Zero(t, *got[0].AllocatorUsedBytes)
+
+		got, err = DecodeSegmentListing([]byte(`{"segments":[{"segment_id":"s1","client_id":"c1","segment_name":"n1"}]}`))
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Nil(t, got[0].AllocatorUsedBytes)
 	})
 
 	t.Run("a body with no segments field is not an empty listing", func(t *testing.T) {

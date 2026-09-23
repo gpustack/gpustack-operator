@@ -256,6 +256,8 @@ type SegmentDetail struct {
 	// TEEndpoint is the member's transfer-engine address, and it is how a listing entry is joined
 	// back to the Pod it belongs to.
 	TEEndpoint string
+	// AllocatorUsedBytes is the member's current allocation. Nil means the leader did not report it.
+	AllocatorUsedBytes *uint64
 }
 
 type segmentListingBody struct {
@@ -267,12 +269,13 @@ type segmentListingBody struct {
 	// as an empty listing it would clear membership and report NoSegments, which points an operator
 	// at the store instead of at the address.
 	Segments *[]struct {
-		SegmentID   string `json:"segment_id"`
-		ClientID    string `json:"client_id"`
-		SegmentName string `json:"segment_name"`
-		Status      string `json:"status"`
-		Protocol    string `json:"protocol"`
-		TEEndpoint  string `json:"te_endpoint"`
+		SegmentID          string  `json:"segment_id"`
+		ClientID           string  `json:"client_id"`
+		SegmentName        string  `json:"segment_name"`
+		Status             string  `json:"status"`
+		Protocol           string  `json:"protocol"`
+		TEEndpoint         string  `json:"te_endpoint"`
+		AllocatorUsedBytes *uint64 `json:"allocator_used_bytes"`
 	} `json:"segments"`
 }
 
@@ -318,12 +321,13 @@ func DecodeSegmentListing(body []byte) ([]SegmentDetail, error) {
 				ErrMalformedBody, adminPathSegments)
 		}
 		segments = append(segments, SegmentDetail{
-			ID:         s.SegmentID,
-			ClientID:   s.ClientID,
-			Name:       s.SegmentName,
-			State:      s.Status,
-			Protocol:   s.Protocol,
-			TEEndpoint: s.TEEndpoint,
+			ID:                 s.SegmentID,
+			ClientID:           s.ClientID,
+			Name:               s.SegmentName,
+			State:              s.Status,
+			Protocol:           s.Protocol,
+			TEEndpoint:         s.TEEndpoint,
+			AllocatorUsedBytes: s.AllocatorUsedBytes,
 		})
 	}
 	return segments, nil
