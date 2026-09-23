@@ -226,6 +226,9 @@ type ModelDeploymentRenderInput struct {
 	// Connector is what the engine needs to reach the pool. Its zero value renders a replica with
 	// no connector at all, which is what a deployment whose Binding has not been resolved yet gets.
 	Connector ModelDeploymentConnectorRender
+	// InterfaceResource is the extended resource selected from the role's effective fabric
+	// protocol. It is empty when the role requests no interface.
+	InterfaceResource core.ResourceName
 	// There is NO ConfigMap name here, and there is no object to name: the client configuration
 	// travels in Connector.PodAnnotations and reaches the container as a downwardAPI projection of
 	// it. The field this struct used to carry was never filled by anything, so the mount it guarded
@@ -446,6 +449,12 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		StartupProbe:   startupProbe,
 		ReadinessProbe: readinessProbe,
 		LivenessProbe:  livenessProbe,
+	}
+	if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
+		if in.InterfaceResource == "" {
+			return nil, fmt.Errorf("role %q requests interfaces without a fabric resource", role.Name)
+		}
+		mainC.Resources.Limits[in.InterfaceResource] = role.Resources.Interface.DeepCopy()
 	}
 	if role.Privileged {
 		mainC.SecurityContext = &core.SecurityContext{Privileged: ptr.To(true)}

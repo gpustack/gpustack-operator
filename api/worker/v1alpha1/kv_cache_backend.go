@@ -685,8 +685,8 @@ type KVCacheBackendMember struct {
 	// The count changes placement density: one member can use shared-token capacity, while a count
 	// above one limits a node to its endpoint count divided by the count.
 	//
-	// EFA advertises one resource per node, so an EFA count above one is unsatisfiable and the member
-	// stays Pending. That is the intended failure for a node that cannot serve the requested fabric.
+	// EFA capacity is node-specific. A count above the device plugin's advertised quantity leaves
+	// the member Pending, which makes an unavailable multi-interface request visible to the user.
 	//
 	// +k8s:validation:default=1
 	// +k8s:validation:minimum=1

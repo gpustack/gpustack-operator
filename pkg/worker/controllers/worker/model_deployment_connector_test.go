@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/ptr"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -782,6 +784,80 @@ func TestModelDeploymentConnector_RoutedPairWithoutKVCacheUsesKVTransferOnly(t *
 		"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
 		"kv_connector_extra_config":{"mooncake_protocol":"tcp"}
 	}`, byRole["decode"])
+}
+
+func TestModelDeploymentConnector_PureDirectEFARequestsDevice(t *testing.T) {
+	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.KVCache = nil
+		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "efa"}
+		for i := range md.Spec.Roles {
+			md.Spec.Roles[i].Resources = &workercore.ModelDeploymentRoleResources{
+				Interface: ptr.To(resource.MustParse("1")),
+			}
+		}
+	})
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	for _, pod := range replicaPods(t, cli) {
+		qtyEqual(t, qty("1"), pod.Spec.Containers[0].Resources.Limits["vpc.amazonaws.com/efa"],
+			"pure direct transfer grants EFA to each engine role")
+	}
+}
+
+func TestModelDeploymentConnector_CacheFabricReachesPod(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol string
+		count    string
+		resource core.ResourceName
+	}{
+		{name: "one RDMA", protocol: "RDMA", count: "1", resource: "device.gpustack.ai/rdma.shared"},
+		{name: "two RDMA", protocol: "RDMA", count: "2", resource: "device.gpustack.ai/rdma"},
+		{name: "two EFA", protocol: "EFA", count: "2", resource: "vpc.amazonaws.com/efa"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					Interface: ptr.To(resource.MustParse(tc.count)),
+				}
+			})
+			backend := newRenderBackend()
+			backend.Spec.Transport.Protocol = tc.protocol
+			cli := newModelDeploymentClient(md, newRenderInstanceType(),
+				newRenderBinding(), newRenderPool(), backend)
+			_, err := reconcileModelDeployment(t, cli)
+			require.NoError(t, err)
+			pods := replicaPods(t, cli)
+			require.NotEmpty(t, pods)
+			for i := range pods {
+				qtyEqual(t, qty(tc.count), pods[i].Spec.Containers[0].Resources.Limits[tc.resource],
+					"the resource is read from the rendered engine Pod")
+			}
+		})
+	}
+}
+
+func TestModelDeploymentConnector_CacheFabricBeforeEndpoint(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+			Interface: ptr.To(resource.MustParse("1")),
+		}
+	})
+	pool := newRenderPool()
+	pool.Status.ClientEndpoint = ""
+	backend := newRenderBackend()
+	backend.Spec.Transport.Protocol = "RDMA"
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), newRenderBinding(), pool, backend)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	pods := replicaPods(t, cli)
+	require.NotEmpty(t, pods)
+	for i := range pods {
+		qtyEqual(t, qty("1"), pods[i].Spec.Containers[0].Resources.Limits["device.gpustack.ai/rdma.shared"],
+			"the backend declaration selects the resource before its endpoint is ready")
+	}
 }
 
 // ascendRenderInstanceType is the render fixture's InstanceType with the pool's vendor flipped to

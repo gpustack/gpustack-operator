@@ -220,8 +220,17 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		logger.Error(err, "resolve kv cache connection")
 		return ctrl.Result{}, err
 	}
+	var interfaceProtocols []string
+	if connection != nil {
+		interfaceProtocols = connection.Protocols
+	} else if modelDeploymentRequestsInterfaces(md) && md.Spec.KVCache != nil {
+		interfaceProtocols, err = r.resolveModelDeploymentInterfaceProtocols(ctx, md)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
-	desired, err := r.renderModelDeploymentPods(ctx, md, connection)
+	desired, err := r.renderModelDeploymentPods(ctx, md, connection, interfaceProtocols)
 	if err != nil {
 		// A render failure is the InstanceType not being ready, or a role the renderer cannot build
 		// a container from. The pass aborts before any status is written, so an Event is the only
@@ -1024,7 +1033,7 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentOwnedChildren(
 // two members is what the stamp writes: a name, a hostname and an index label.
 func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	ctx context.Context, md *workercore.ModelDeployment,
-	connection *ModelDeploymentConnectorInput,
+	connection *ModelDeploymentConnectorInput, interfaceProtocols []string,
 ) (map[string]map[int][]*core.Pod, error) {
 	// The overcommit setting is the Instance path's, deliberately: it decides how a declared
 	// resource becomes a request, and this renderer derives the same values the Instance webhook
@@ -1116,6 +1125,21 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 				return nil, fmt.Errorf("role %q cannot be given a cache client: %w", role.Name, err)
 			}
 			in.Connector = connector
+		}
+		if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
+			count, whole := role.Resources.Interface.AsInt64()
+			if !whole {
+				return nil, fmt.Errorf("role %q requests a fractional interface count", role.Name)
+			}
+			var protocols []string
+			if len(role.Command) == 0 {
+				protocols = interfaceProtocols
+			}
+			in.InterfaceResource, err = ModelDeploymentInterfaceResource(protocols,
+				ModelDeploymentDirectInterfaceProtocol(md, role, instType.Status.Detail.Manufacturer), count)
+			if err != nil {
+				return nil, fmt.Errorf("role %q interface request: %w", role.Name, err)
+			}
 		}
 
 		template, err := renderModelDeploymentPodTemplate(ctx, in)

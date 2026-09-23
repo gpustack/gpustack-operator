@@ -292,6 +292,32 @@ func (r *ModelDeploymentReconciler) getModelDeploymentBinding(
 	return kvcpb, nil
 }
 
+// resolveModelDeploymentInterfaceProtocols reads the backend declaration independently of its
+// published endpoint. Device allocation must be stable while the cache domain is still starting.
+func (r *ModelDeploymentReconciler) resolveModelDeploymentInterfaceProtocols(
+	ctx context.Context, md *workercore.ModelDeployment,
+) ([]string, error) {
+	binding, err := r.getModelDeploymentBinding(ctx, md)
+	if err != nil {
+		return nil, err
+	}
+	if binding == nil {
+		return nil, fmt.Errorf("cache binding %q is not available for interface allocation", md.Spec.KVCache.PoolRef.Name)
+	}
+	pool := &workercore.KVCachePool{}
+	if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: binding.Spec.PoolRef.Name}, pool); err != nil {
+		return nil, fmt.Errorf("get kv cache pool %q for interface allocation: %w", binding.Spec.PoolRef.Name, err)
+	}
+	if len(pool.Spec.Backends) == 0 {
+		return nil, fmt.Errorf("kv cache pool %q has no backend for interface allocation", pool.Name)
+	}
+	backend := &workercore.KVCacheBackend{}
+	if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: pool.Spec.Backends[0]}, backend); err != nil {
+		return nil, fmt.Errorf("get kv cache backend %q for interface allocation: %w", pool.Spec.Backends[0], err)
+	}
+	return mooncake.MemberProtocols(backend), nil
+}
+
 // resolveModelDeploymentConnection reads what the pool and its backend published: the half of the
 // synthesis input that is the same for every role of one deployment.
 //

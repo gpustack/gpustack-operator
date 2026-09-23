@@ -2574,7 +2574,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																			XListType: ptr.To[string]("map"),
 																		},
 																		"fabricInterfaceCount": {
-																			Description: "FabricInterfaceCount is how many distinct host-fabric interfaces each member requires.\nLeft unset, it defaults to one. An RDMA count of one asks for a shared resource; a count above\none asks for exclusive resources, because a second shared token can be a second claim on the\nsame endpoint and would otherwise satisfy a multi-interface request without an error.\nThe count changes placement density: one member can use shared-token capacity, while a count\nabove one limits a node to its endpoint count divided by the count.\nEFA advertises one resource per node, so an EFA count above one is unsatisfiable and the member\nstays Pending. That is the intended failure for a node that cannot serve the requested fabric.",
+																			Description: "FabricInterfaceCount is how many distinct host-fabric interfaces each member requires.\nLeft unset, it defaults to one. An RDMA count of one asks for a shared resource; a count above\none asks for exclusive resources, because a second shared token can be a second claim on the\nsame endpoint and would otherwise satisfy a multi-interface request without an error.\nThe count changes placement density: one member can use shared-token capacity, while a count\nabove one limits a node to its endpoint count divided by the count.\nEFA capacity is node-specific. A count above the device plugin's advertised quantity leaves\nthe member Pending, which makes an unavailable multi-interface request visible to the user.",
 																			Type:        "integer",
 																			Format:      "int32",
 																			Default: &v1.JSON{
@@ -4538,6 +4538,20 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																	Format:      "int32",
 																	Maximum:     ptr.To[float64](100),
 																	Minimum:     ptr.To[float64](0),
+																},
+																"interface": {
+																	Description: "Interface is the number of fabric interfaces one role Pod requests, as a whole number.\nUnset or zero requests none. A positive count selects the device-plugin resource of the\neffective cache or direct-transfer protocol. A single RDMA interface uses the shared\nresource; multiple RDMA interfaces use the exclusive resource. EFA uses its own plugin\nresource. Conflicting effective protocols are refused rather than assigned one of the\navailable device families. Admission enforces the whole number and the protocol rules,\nthe same as for accelerator; the schema carries no bound of its own.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
 																},
 															},
 															Nullable: true,

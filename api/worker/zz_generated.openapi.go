@@ -5761,7 +5761,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref common.Referen
 					},
 					"fabricInterfaceCount": {
 						SchemaProps: spec.SchemaProps{
-							Description: "FabricInterfaceCount is how many distinct host-fabric interfaces each member requires.\n\nLeft unset, it defaults to one. An RDMA count of one asks for a shared resource; a count above one asks for exclusive resources, because a second shared token can be a second claim on the same endpoint and would otherwise satisfy a multi-interface request without an error.\n\nThe count changes placement density: one member can use shared-token capacity, while a count above one limits a node to its endpoint count divided by the count.\n\nEFA advertises one resource per node, so an EFA count above one is unsatisfiable and the member stays Pending. That is the intended failure for a node that cannot serve the requested fabric.",
+							Description: "FabricInterfaceCount is how many distinct host-fabric interfaces each member requires.\n\nLeft unset, it defaults to one. An RDMA count of one asks for a shared resource; a count above one asks for exclusive resources, because a second shared token can be a second claim on the same endpoint and would otherwise satisfy a multi-interface request without an error.\n\nThe count changes placement density: one member can use shared-token capacity, while a count above one limits a node to its endpoint count divided by the count.\n\nEFA capacity is node-specific. A count above the device plugin's advertised quantity leaves the member Pending, which makes an unavailable multi-interface request visible to the user.",
 							Minimum:     ptr.To[float64](1),
 							Type:        []string{"integer"},
 							Format:      "int32",
@@ -7691,7 +7691,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRoleResources is what one Pod of a role asks of an accelerator.\n\nIt deliberately mirrors the accelerator fields of InstanceResources — the same names, the same meanings — rather than inventing a second vocabulary for one request, and it deliberately omits that type's CPU, RAM and LocalStorage, which are derived here rather than declared.",
+				Description: "ModelDeploymentRoleResources is what one Pod of a role asks of accelerators and fabric interfaces.\n\nIt deliberately mirrors the accelerator fields of InstanceResources — the same names, the same meanings — rather than inventing a second vocabulary for one request, and it deliberately omits that type's CPU, RAM and LocalStorage, which are derived here rather than declared.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"accelerator": {
@@ -7724,6 +7724,12 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common
 							MaxLength:   ptr.To[int64](64),
 							Type:        []string{"string"},
 							Format:      "",
+						},
+					},
+					"interface": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Interface is the number of fabric interfaces one role Pod requests, as a whole number. Unset or zero requests none. A positive count selects the device-plugin resource of the effective cache or direct-transfer protocol. A single RDMA interface uses the shared resource; multiple RDMA interfaces use the exclusive resource. EFA uses its own plugin resource. Conflicting effective protocols are refused rather than assigned one of the available device families. Admission enforces the whole number and the protocol rules, the same as for accelerator; the schema carries no bound of its own.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
 				},

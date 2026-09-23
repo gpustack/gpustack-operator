@@ -168,6 +168,181 @@ func cards(n int64) *workercore.ModelDeploymentRoleResources {
 	}
 }
 
+func TestValidateModelDeploymentInterfaceQuantity(t *testing.T) {
+	tests := []struct {
+		name string
+		qty  string
+		bad  bool
+	}{
+		{name: "zero", qty: "0"},
+		{name: "one", qty: "1"},
+		{name: "multiple", qty: "2"},
+		{name: "negative", qty: "-1", bad: true},
+		{name: "fraction", qty: "0.5", bad: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			role := role(func(r *workercore.ModelDeploymentRole) {
+				r.Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(resource.MustParse(tc.qty))}
+			})
+			errs := validateModelDeploymentRoleResources(&role, field.NewPath("spec", "roles").Index(0))
+			if tc.bad {
+				require.Len(t, errs, 1)
+				assert.Equal(t, "spec.roles[0].resources.interface", errs[0].Field)
+				return
+			}
+			assert.Empty(t, errs)
+		})
+	}
+}
+
+func TestModelDeploymentWebhook_InterfaceProtocol(t *testing.T) {
+	tests := []struct {
+		name       string
+		store      []string
+		direct     string
+		pureDirect bool
+		custom     bool
+		wantErr    string
+	}{
+		{name: "cache RDMA", store: []string{"rdma"}},
+		{name: "pure direct EFA", direct: "efa", pureDirect: true},
+		{name: "mixed cache groups", store: []string{"tcp", "rdma"}, wantErr: "conflicting protocols"},
+		{name: "mixed legs", store: []string{"rdma"}, direct: "efa", wantErr: "rdma and efa"},
+		{name: "no fabric", store: []string{"tcp"}, wantErr: "no effective RDMA or EFA"},
+		{name: "custom command has no managed fabric", store: []string{"rdma"}, custom: true, wantErr: "no effective RDMA or EFA"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+			md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+				Interface: ptr.To(resource.MustParse("1")),
+			}
+			if tc.custom {
+				md.Spec.Roles[0].Command = []string{"custom-server"}
+			}
+			objs := []ctrlcli.Object{servingInstanceType("h20-8x", 8)}
+			if tc.pureDirect || tc.direct != "" {
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
+					r.Name = "decode"
+					r.Kind = workercore.ModelDeploymentRoleKindDecode
+				}))
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: tc.direct}
+			}
+			if tc.pureDirect {
+				md.Spec.KVCache = nil
+			} else {
+				md.Spec.KVCache.PoolRef.Name = "chat"
+				cache := kvCacheFixture()
+				backend := cache[2].(*workercore.KVCacheBackend)
+				backend.Spec.Transport.Protocol = strings.ToUpper(tc.store[0])
+				if len(tc.store) > 1 {
+					backend.Spec.Connection.Managed = &workercore.KVCacheBackendManaged{Members: []workercore.KVCacheBackendMember{
+						{NodeSelector: map[string]string{"cache": "dram"}, Medium: "DRAM", CapacityPerMember: resource.MustParse("64Gi")},
+						{
+							NodeSelector: map[string]string{"cache": "vram"}, Medium: "VRAM", CapacityPerMember: resource.MustParse("16Gi"),
+							Transport: &workercore.KVCacheBackendMemberTransport{Protocol: strings.ToUpper(tc.store[1])},
+						},
+					}}
+				}
+				objs = append(objs, cache...)
+			}
+			w := newModelDeploymentWebhookWith(objs)
+			errs, err := w.validateModelDeploymentInterfaceRequests(context.Background(), md)
+			require.NoError(t, err)
+			if tc.wantErr != "" {
+				require.Len(t, errs, 1)
+				assert.Equal(t, "spec.roles[0].resources.interface", errs[0].Field)
+				assert.Contains(t, errs[0].Error(), tc.wantErr)
+				return
+			}
+			assert.Empty(t, errs)
+		})
+	}
+}
+
+func TestModelDeploymentWebhook_InterfaceCreate(t *testing.T) {
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name = "prefill"
+			r.Kind = workercore.ModelDeploymentRoleKindPrefill
+			r.Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(resource.MustParse("1"))}
+		}),
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name = "decode"
+			r.Kind = workercore.ModelDeploymentRoleKindDecode
+		}),
+	)
+	md.Spec.KVCache = nil
+	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "efa"}
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+	_, err := w.ValidateCreate(context.Background(), md)
+	require.NoError(t, err, "pure direct transfer needs no cache backend to select EFA")
+
+	md.Spec.KVTransfer.Protocol = "tcp"
+	_, err = w.ValidateCreate(context.Background(), md)
+	require.ErrorContains(t, err, "spec.roles[0].resources.interface")
+	require.ErrorContains(t, err, "no effective RDMA or EFA")
+}
+
+func TestModelDeploymentWebhook_InterfaceUpdateRejectsProtocolChange(t *testing.T) {
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name = "prefill"
+			r.Kind = workercore.ModelDeploymentRoleKindPrefill
+			r.Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(resource.MustParse("1"))}
+		}),
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name = "decode"
+			r.Kind = workercore.ModelDeploymentRoleKindDecode
+		}),
+	)
+	md.Spec.KVCache = nil
+	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "efa"}
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+	old := md.DeepCopy()
+	md.Spec.KVTransfer.Protocol = "tcp"
+	_, err := w.ValidateUpdate(context.Background(), old, md)
+	require.ErrorContains(t, err, "spec.roles[0].resources.interface")
+	require.ErrorContains(t, err, "no effective RDMA or EFA")
+}
+
+// TestModelDeploymentWebhook_InterfaceUpdateRefusesACountChange pins why the fabric check on
+// update runs only when kvTransfer or router moved: a count change with both untouched is refused
+// by the role-resources freeze, so no changed count reaches the fabric check. The raised count is
+// one EFA accepts, so only the freeze can refuse it. The unchanged update is the baseline.
+func TestModelDeploymentWebhook_InterfaceUpdateRefusesACountChange(t *testing.T) {
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name = "prefill"
+			r.Kind = workercore.ModelDeploymentRoleKindPrefill
+			r.Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(resource.MustParse("1"))}
+		}),
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name = "decode"
+			r.Kind = workercore.ModelDeploymentRoleKindDecode
+		}),
+	)
+	md.Spec.KVCache = nil
+	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "efa"}
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+	old := md.DeepCopy()
+	_, err := w.ValidateUpdate(context.Background(), old, md)
+	require.NoError(t, err, "an unchanged update is admitted")
+
+	md.Spec.Roles[0].Resources.Interface = ptr.To(resource.MustParse("2"))
+	_, err = w.ValidateUpdate(context.Background(), old, md)
+	require.ErrorContains(t, err, "spec.roles[0].resources")
+	require.ErrorContains(t, err, modelDeploymentIdentityMessage)
+	require.NotContains(t, err.Error(), "spec.roles[0].resources.interface",
+		"the freeze refuses the count, not the fabric check")
+}
+
 func TestValidateModelDeployment(t *testing.T) {
 	testCases := []struct {
 		name string

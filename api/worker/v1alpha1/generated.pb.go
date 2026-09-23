@@ -5627,6 +5627,18 @@ func (m *ModelDeploymentRoleResources) MarshalToSizedBuffer(dAtA []byte) (int, e
 	_ = i
 	var l int
 	_ = l
+	if m.Interface != nil {
+		{
+			size, err := m.Interface.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x2a
+	}
 	i -= len(m.AcceleratorPartitionedProfile)
 	copy(dAtA[i:], m.AcceleratorPartitionedProfile)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.AcceleratorPartitionedProfile)))
@@ -8633,6 +8645,10 @@ func (m *ModelDeploymentRoleResources) Size() (n int) {
 	n += 1 + sovGenerated(uint64(m.AcceleratorSlicedCoresPercentage))
 	l = len(m.AcceleratorPartitionedProfile)
 	n += 1 + l + sovGenerated(uint64(l))
+	if m.Interface != nil {
+		l = m.Interface.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
 	return n
 }
 
@@ -10550,6 +10566,7 @@ func (this *ModelDeploymentRoleResources) String() string {
 		`AcceleratorSlicedMemoryPercentage:` + fmt.Sprintf("%v", this.AcceleratorSlicedMemoryPercentage) + `,`,
 		`AcceleratorSlicedCoresPercentage:` + fmt.Sprintf("%v", this.AcceleratorSlicedCoresPercentage) + `,`,
 		`AcceleratorPartitionedProfile:` + fmt.Sprintf("%v", this.AcceleratorPartitionedProfile) + `,`,
+		`Interface:` + strings.Replace(fmt.Sprintf("%v", this.Interface), "Quantity", "resource.Quantity", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -28149,6 +28166,42 @@ func (m *ModelDeploymentRoleResources) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.AcceleratorPartitionedProfile = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Interface", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Interface == nil {
+				m.Interface = &resource.Quantity{}
+			}
+			if err := m.Interface.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

@@ -1000,6 +1000,103 @@ func TestRenderModelDeploymentPod_AcceleratorRequest(t *testing.T) {
 	qtyEqual(t, qty("128Gi"), limits[core.ResourceMemory], "the host memory is derived, not declared")
 }
 
+func TestRenderModelDeploymentPod_InterfaceRequest(t *testing.T) {
+	tests := []struct {
+		name     string
+		count    string
+		resource core.ResourceName
+	}{
+		{name: "absent"},
+		{name: "one RDMA interface", count: "1", resource: "device.gpustack.ai/rdma.shared"},
+		{name: "two RDMA interfaces", count: "2", resource: "device.gpustack.ai/rdma"},
+		{name: "two EFA interfaces", count: "2", resource: "vpc.amazonaws.com/efa"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment()
+			if tc.count != "" {
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					Interface: ptr.To(resource.MustParse(tc.count)),
+				}
+			}
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				InterfaceResource: tc.resource,
+			})
+			require.NoError(t, err)
+			limits := pod.Spec.Containers[0].Resources.Limits
+			if tc.resource == "" {
+				assert.NotContains(t, limits, core.ResourceName("device.gpustack.ai/rdma.shared"))
+				assert.NotContains(t, limits, core.ResourceName("device.gpustack.ai/rdma"))
+				assert.NotContains(t, limits, core.ResourceName("vpc.amazonaws.com/efa"))
+				return
+			}
+			qtyEqual(t, qty(tc.count), limits[tc.resource], "the requested interface count reaches the engine")
+		})
+	}
+}
+
+func TestModelDeploymentInterfaceResource(t *testing.T) {
+	tests := []struct {
+		name    string
+		store   []string
+		direct  string
+		count   int64
+		want    core.ResourceName
+		wantErr string
+	}{
+		{name: "store RDMA shared", store: []string{"rdma"}, count: 1, want: "device.gpustack.ai/rdma.shared"},
+		{name: "store RDMA exclusive", store: []string{"rdma"}, count: 2, want: "device.gpustack.ai/rdma"},
+		{name: "pure direct EFA", direct: "efa", count: 2, want: "vpc.amazonaws.com/efa"},
+		{name: "same fabric once", store: []string{"efa"}, direct: "efa", count: 1, want: "vpc.amazonaws.com/efa"},
+		{name: "TCP group with direct fabric", store: []string{"tcp"}, direct: "rdma", count: 1, want: "device.gpustack.ai/rdma.shared"},
+		{name: "mixed groups", store: []string{"tcp", "rdma"}, direct: "rdma", count: 1, wantErr: "tcp, rdma"},
+		{name: "mixed legs", store: []string{"rdma"}, direct: "efa", count: 1, wantErr: "rdma and efa"},
+		{name: "no fabric", store: []string{"tcp"}, direct: "tcp", count: 1, wantErr: "no effective RDMA or EFA"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ModelDeploymentInterfaceResource(tc.store, tc.direct, tc.count)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
+	tests := []struct {
+		name         string
+		engine       string
+		manufacturer string
+		command      []string
+		want         string
+	}{
+		{name: "native vLLM", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, want: "efa"},
+		{name: "Ascend ignores declaration", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerAscend},
+		{name: "unobserved manufacturer cannot select device", engine: workercore.ModelDeploymentEngineVLLM},
+		{name: "SGLang ignores declaration", engine: workercore.ModelDeploymentEngineSGLang, manufacturer: nodefeature.ManufacturerNVIDIA},
+		{name: "user command owns transfer", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, command: []string{"custom"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = tc.engine
+				md.Spec.KVCache = nil
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "efa"}
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles[0].Command = tc.command
+				md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode})
+			})
+			assert.Equal(t, tc.want, ModelDeploymentDirectInterfaceProtocol(md, &md.Spec.Roles[0], tc.manufacturer))
+		})
+	}
+}
+
 // TestRenderModelDeploymentPod_Ports pins that a replica is always reachable: a role naming no port
 // still gets one, because the Service fronting the deployment needs a target.
 func TestRenderModelDeploymentPod_Ports(t *testing.T) {

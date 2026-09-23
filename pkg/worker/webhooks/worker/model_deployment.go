@@ -354,6 +354,84 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentPoolTransport(
 	return nil, nil
 }
 
+// validateModelDeploymentInterfaceRequests checks the device key against the resolved cache
+// backend and the direct leg each role actually renders. An unresolved cache binding cannot
+// justify a positive device request, because it may later resolve to another fabric.
+func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
+	ctx context.Context, md *workercore.ModelDeployment,
+) (field.ErrorList, error) {
+	var requested []int
+	for i := range md.Spec.Roles {
+		ress := md.Spec.Roles[i].Resources
+		if ress != nil && ress.Interface != nil && ress.Interface.Sign() > 0 {
+			requested = append(requested, i)
+		}
+	}
+	if len(requested) == 0 {
+		return nil, nil
+	}
+
+	firstPath := field.NewPath("spec", "roles").Index(requested[0]).Child("resources", "interface")
+	var protocols []string
+	if md.Spec.KVCache != nil {
+		binding := &workercore.KVCachePoolBinding{}
+		if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{
+			Namespace: md.Namespace, Name: md.Spec.KVCache.PoolRef.Name,
+		}, binding); err != nil {
+			if kerrors.IsNotFound(err) {
+				return field.ErrorList{field.Forbidden(firstPath, "cache binding must resolve before requesting interfaces")}, nil
+			}
+			return nil, field.InternalError(firstPath, fmt.Errorf("get kv cache pool binding: %w", err))
+		}
+		pool := &workercore.KVCachePool{}
+		if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: binding.Spec.PoolRef.Name}, pool); err != nil {
+			if kerrors.IsNotFound(err) {
+				return field.ErrorList{field.Forbidden(firstPath, "cache pool must resolve before requesting interfaces")}, nil
+			}
+			return nil, field.InternalError(firstPath, fmt.Errorf("get kv cache pool: %w", err))
+		}
+		if len(pool.Spec.Backends) == 0 {
+			return field.ErrorList{field.Forbidden(firstPath, "cache backend must resolve before requesting interfaces")}, nil
+		}
+		backend := &workercore.KVCacheBackend{}
+		if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: pool.Spec.Backends[0]}, backend); err != nil {
+			if kerrors.IsNotFound(err) {
+				return field.ErrorList{field.Forbidden(firstPath, "cache backend must resolve before requesting interfaces")}, nil
+			}
+			return nil, field.InternalError(firstPath, fmt.Errorf("get kv cache backend: %w", err))
+		}
+		protocols = mooncake.MemberProtocols(backend)
+	}
+
+	var errs field.ErrorList
+	for _, i := range requested {
+		role := &md.Spec.Roles[i]
+		count, whole := role.Resources.Interface.AsInt64()
+		if !whole {
+			continue
+		}
+		manufacturer := ""
+		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
+			instType, err := r.getInstanceType(ctx, role.InstanceType, i)
+			if err != nil {
+				return nil, err
+			}
+			manufacturer = instType.Status.Detail.Manufacturer
+		}
+		roleProtocols := protocols
+		if len(role.Command) > 0 {
+			roleProtocols = nil
+		}
+		_, err := workerctrl.ModelDeploymentInterfaceResource(roleProtocols,
+			workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer), count)
+		if err != nil {
+			errs = append(errs, field.Invalid(field.NewPath("spec", "roles").Index(i).Child("resources", "interface"),
+				role.Resources.Interface.String(), err.Error()))
+		}
+	}
+	return errs, nil
+}
+
 func (r *ModelDeploymentWebhook) ValidateCreate(
 	ctx context.Context, obj runtime.Object,
 ) (ctrladmission.Warnings, error) {
@@ -371,6 +449,13 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 		return nil, err
 	}
 	errs = append(errs, typeErrs...)
+	if len(errs) == 0 {
+		interfaceErrs, err := r.validateModelDeploymentInterfaceRequests(ctx, md)
+		if err != nil {
+			return nil, err
+		}
+		errs = append(errs, interfaceErrs...)
+	}
 	if len(errs) == 0 {
 		transportErrs, err := r.validateModelDeploymentPoolTransport(ctx, nil, md)
 		if err != nil {
@@ -415,6 +500,14 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 		return nil, err
 	}
 	errs = append(errs, typeErrs...)
+	if len(errs) == 0 && old != nil && (!kubemeta.DeepEqual(old.Spec.KVTransfer, md.Spec.KVTransfer) ||
+		!kubemeta.DeepEqual(old.Spec.Router, md.Spec.Router)) {
+		interfaceErrs, err := r.validateModelDeploymentInterfaceRequests(ctx, md)
+		if err != nil {
+			return nil, err
+		}
+		errs = append(errs, interfaceErrs...)
+	}
 	if len(errs) == 0 {
 		transportErrs, err := r.validateModelDeploymentPoolTransport(ctx, old, md)
 		if err != nil {
@@ -1715,17 +1808,28 @@ func validateModelDeploymentRoleResources(
 	role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
 	ress := role.Resources
-	if ress == nil || ress.AcceleratorPartitionedProfile == "" {
+	if ress == nil {
 		return nil
+	}
+	var errs field.ErrorList
+	if ress.Interface != nil {
+		count, whole := ress.Interface.AsInt64()
+		if !whole || count < 0 {
+			errs = append(errs, field.Invalid(rolePath.Child("resources", "interface"),
+				ress.Interface.String(), "interface count must be a non-negative whole number"))
+		}
+	}
+	if ress.AcceleratorPartitionedProfile == "" {
+		return errs
 	}
 
 	if ress.AcceleratorSlicedMemoryPercentage == 0 && ress.AcceleratorSlicedCoresPercentage == 0 {
-		return nil
+		return errs
 	}
 
 	ressPath := rolePath.Child("resources")
 
-	return field.ErrorList{field.Invalid(
+	return append(errs, field.Invalid(
 		ressPath.Child("acceleratorPartitionedProfile"), ress.AcceleratorPartitionedProfile,
 		fmt.Sprintf(
 			"a partition profile cannot be combined with %s or %s: hardware partitioning and "+
@@ -1733,7 +1837,7 @@ func validateModelDeploymentRoleResources(
 			ressPath.Child("acceleratorSlicedMemoryPercentage"),
 			ressPath.Child("acceleratorSlicedCoresPercentage"),
 		),
-	)}
+	))
 }
 
 // validateRoleResourcesAgainstInstanceTypes applies the rules that need the InstanceType a role

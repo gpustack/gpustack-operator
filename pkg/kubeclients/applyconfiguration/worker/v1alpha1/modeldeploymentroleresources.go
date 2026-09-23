@@ -9,7 +9,7 @@ import (
 // ModelDeploymentRoleResourcesApplyConfiguration represents a declarative configuration of the ModelDeploymentRoleResources type for use
 // with apply.
 //
-// ModelDeploymentRoleResources is what one Pod of a role asks of an accelerator.
+// ModelDeploymentRoleResources is what one Pod of a role asks of accelerators and fabric interfaces.
 //
 // It deliberately mirrors the accelerator fields of InstanceResources — the same names, the same
 // meanings — rather than inventing a second vocabulary for one request, and it deliberately omits
@@ -40,6 +40,14 @@ type ModelDeploymentRoleResourcesApplyConfiguration struct {
 	// the two slice percentages: hardware partitioning and software slicing cannot both apply to one
 	// accelerator. It is ignored by an InstanceType offering no partition.
 	AcceleratorPartitionedProfile *string `json:"acceleratorPartitionedProfile,omitempty"`
+	// Interface is the number of fabric interfaces one role Pod requests, as a whole number.
+	// Unset or zero requests none. A positive count selects the device-plugin resource of the
+	// effective cache or direct-transfer protocol. A single RDMA interface uses the shared
+	// resource; multiple RDMA interfaces use the exclusive resource. EFA uses its own plugin
+	// resource. Conflicting effective protocols are refused rather than assigned one of the
+	// available device families. Admission enforces the whole number and the protocol rules,
+	// the same as for accelerator; the schema carries no bound of its own.
+	Interface *resource.Quantity `json:"interface,omitempty"`
 }
 
 // ModelDeploymentRoleResourcesApplyConfiguration constructs a declarative configuration of the ModelDeploymentRoleResources type for use with
@@ -77,5 +85,13 @@ func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithAcceleratorSlicedCo
 // If called multiple times, the AcceleratorPartitionedProfile field is set to the value of the last call.
 func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithAcceleratorPartitionedProfile(value string) *ModelDeploymentRoleResourcesApplyConfiguration {
 	b.AcceleratorPartitionedProfile = &value
+	return b
+}
+
+// WithInterface sets the Interface field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Interface field is set to the value of the last call.
+func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithInterface(value resource.Quantity) *ModelDeploymentRoleResourcesApplyConfiguration {
+	b.Interface = &value
 	return b
 }

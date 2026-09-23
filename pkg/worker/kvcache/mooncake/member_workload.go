@@ -349,7 +349,7 @@ var memberProtocols = map[string]string{
 // It is UNEXPORTED, and was not always: admission used to ask the same question, because the device
 // resource was declared on the object and a declared name is consequential only on these protocols.
 // That rule is gone with the field, and the pair is now stated in exactly two places, both in this
-// file and both total over it — here and in fabricDeviceResource. A second spelling anywhere else
+// file and both total over it — here and in FabricDeviceResource. A second spelling anywhere else
 // is what would let them drift apart the day a third fabric joins.
 func memberProtocolIsHostFabric(protocol string) bool {
 	return protocol == memberProtocolRDMA || protocol == memberProtocolEFA
@@ -977,12 +977,12 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string, interfaceCount int32
 	// runs on a Pod and deliberately NOT on a pod template, so this DaemonSet stores exactly what
 	// is rendered here — which is what keeps the whole-Resources comparison in the controller from
 	// rewriting the template on every pass.
-	// Guarded rather than indexed directly: fabricDeviceResource names its protocols, so a fabric
+	// Guarded rather than indexed directly: FabricDeviceResource names its protocols, so a fabric
 	// added to memberProtocolIsHostFabric and not to it returns the empty resource here. Rendering
 	// that would put an empty key in the list, which is a request no node can satisfy and no
 	// message explains; skipping it leaves the member asking for no device, which is what the rest
 	// of this rendering already treats as the visible failure.
-	device := fabricDeviceResource(protocol, interfaceCount)
+	device := FabricDeviceResource(protocol, interfaceCount)
 	if device == "" {
 		return
 	}
@@ -997,7 +997,7 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string, interfaceCount int32
 	container.Resources.Limits[device] = *resource.NewQuantity(int64(interfaceCount), resource.DecimalSI)
 }
 
-// fabricDeviceResource is the extended resource one host-fabric protocol asks for, and it NAMES ITS
+// FabricDeviceResource is the extended resource one host-fabric protocol asks for, and it NAMES ITS
 // PROTOCOLS rather than falling through to one of them.
 //
 // The fallthrough is the thing to avoid here, not a style preference. Both spellings are correct
@@ -1014,7 +1014,7 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string, interfaceCount int32
 // asks for the SHARED mode because a member wants a seat on an adapter rather than the whole
 // adapter. More than one asks for EXCLUSIVE mode because shared tokens can repeat one endpoint,
 // silently satisfying the quantity without granting distinct interfaces.
-func fabricDeviceResource(protocol string, interfaceCount int32) core.ResourceName {
+func FabricDeviceResource(protocol string, interfaceCount int32) core.ResourceName {
 	switch protocol {
 	case memberProtocolRDMA:
 		if interfaceCount > 1 {
