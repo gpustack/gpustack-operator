@@ -1260,8 +1260,153 @@ func TestNodeQueueReconciler_HoldsBeforeEmptyingUnreservedQueue(t *testing.T) {
 	reconcileNodeQueueN(t, cli, name, 1)
 	got, err = getClusterQueue(t, cli, name)
 	require.NoError(t, err)
-	assert.Equal(t, kueue.None, ptr.Deref(got.Spec.StopPolicy, kueue.None))
-	assert.NotContains(t, got.Annotations, _TASQueueMigrationPhaseAnnotation)
+	assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(got.Spec.StopPolicy, kueue.None),
+		"the emptied queue stays held")
+	assert.Equal(t, _TASQueueMigrationPhaseSwitched, got.Annotations[_TASQueueMigrationPhaseAnnotation])
+}
+
+// TestNodeQueueReconciler_KeepsEmptiedQueueHeld pins that a queue emptied because its pool lost
+// every flavor stays held. With quotaCheckStrategy IgnoreUndeclared, Kueue admits any Workload onto
+// a queue that declares no resource, and assigns it no flavor, so no AdmissionCheck applies either.
+// The queue keeps its migration marker so the InstanceTypeReconciler does not mirror the hold into
+// Inactive, and a returning flavor switches the held queue to the new plan before the stop policy
+// saved at the start of the drain is restored.
+func TestNodeQueueReconciler_KeepsEmptiedQueueHeld(t *testing.T) {
+	tests := []struct {
+		name       string
+		stopPolicy *kueue.StopPolicy
+	}{
+		{name: "saved None", stopPolicy: ptr.To(kueue.None)},
+		{name: "saved admin Hold", stopPolicy: ptr.To(kueue.Hold)},
+		{name: "saved unset", stopPolicy: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			key := "generic"
+			name := nodeQueueName(key)
+			flavor := newNodesFlavor("gpustack-generic-linux-amd64-4c", key, 4, 4)
+			cq := newInstanceTypeQueue(key, false, cpuResourceGroup(flavor.Name, 4))
+			cq.Spec.StopPolicy = tc.stopPolicy
+			cli := buildNodeQueueClient(cq, flavor)
+			require.NoError(t, cli.Delete(context.Background(), flavor))
+
+			// Hold, switch to the empty plan, then reconcile the emptied queue twice more.
+			reconcileNodeQueueN(t, cli, name, 1)
+			for range 3 {
+				markClusterQueueStopped(t, cli, name)
+				reconcileNodeQueueN(t, cli, name, 1)
+			}
+			got, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Empty(t, got.Spec.ResourceGroups)
+			assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(got.Spec.StopPolicy, kueue.None),
+				"a queue without resource groups admits every Workload unless it is held")
+			assert.Equal(t, _TASQueueMigrationPhaseSwitched, got.Annotations[_TASQueueMigrationPhaseAnnotation],
+				"the marker keeps the InstanceTypeReconciler from mirroring the hold into Inactive")
+			assert.Equal(t, encodeStopPolicy(tc.stopPolicy), got.Annotations[_TASQueueMigrationStopPolicyAnnotation])
+
+			flavor.ResourceVersion = ""
+			flavor.DeletionTimestamp = nil
+			flavor.Finalizers = nil
+			require.NoError(t, cli.Create(context.Background(), flavor))
+			reconcileNodeQueueN(t, cli, name, 1)
+			got, err = getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			require.Len(t, got.Spec.ResourceGroups, 1)
+			assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(got.Spec.StopPolicy, kueue.None),
+				"the returning plan stays held until Kueue observes it")
+
+			markClusterQueueStopped(t, cli, name)
+			reconcileNodeQueueN(t, cli, name, 1)
+			got, err = getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, tc.stopPolicy, got.Spec.StopPolicy)
+			assert.NotContains(t, got.Annotations, _TASQueueMigrationPhaseAnnotation)
+			assert.NotContains(t, got.Annotations, _TASQueueMigrationStopPolicyAnnotation)
+		})
+	}
+}
+
+// TestNodeQueueReconciler_HoldsQueueWithoutResourceGroups pins that a queue that never had resource
+// groups is put on Hold, marked as this reconciler's, whether its pool has no flavors or its
+// flavors fail validation: a queue that declares no resource admits every Workload. It is Hold,
+// not HoldAndDrain, so the Instances of the type are not stopped, and an admin Hold stays unmarked.
+func TestNodeQueueReconciler_HoldsQueueWithoutResourceGroups(t *testing.T) {
+	const key = "generic"
+	name := nodeQueueName(key)
+
+	t.Run("no flavors", func(t *testing.T) {
+		cli := buildNodeQueueClient(newInstanceTypeQueue(key, false))
+		reconcileNodeQueueN(t, cli, name, 1)
+		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		assert.Equal(t, kueue.Hold, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+		assert.Equal(t, "true", got.Annotations[_TASQueueEmptyPlanHoldAnnotation])
+
+		held := got.ResourceVersion
+		reconcileNodeQueueN(t, cli, name, 2)
+		got, err = getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		assert.Equal(t, held, got.ResourceVersion, "a held queue is not written again")
+	})
+
+	t.Run("flavors fail validation", func(t *testing.T) {
+		first := newNodesFlavor("gpustack-generic-linux-amd64-4c-a", key, 4, 4)
+		second := newNodesFlavor("gpustack-generic-linux-amd64-4c-b", key, 4, 4)
+		cli := buildNodeQueueClient(newInstanceTypeQueue(key, false), first, second)
+		reconcileNodeQueueN(t, cli, name, 1)
+		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		assert.Equal(t, "OverlappingSelectors", nodeQueueConditionTopologyReady.GetReason(got))
+		assert.Empty(t, got.Spec.ResourceGroups)
+		assert.Equal(t, kueue.Hold, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+		assert.Equal(t, "true", got.Annotations[_TASQueueEmptyPlanHoldAnnotation])
+	})
+
+	t.Run("admin Hold stays unmarked", func(t *testing.T) {
+		cq := newInstanceTypeQueue(key, false)
+		cq.Spec.StopPolicy = ptr.To(kueue.Hold)
+		cli := buildNodeQueueClient(cq)
+		reconcileNodeQueueN(t, cli, name, 1)
+		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		assert.Equal(t, kueue.Hold, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+		assert.NotContains(t, got.Annotations, _TASQueueEmptyPlanHoldAnnotation)
+	})
+}
+
+// TestNodeQueueReconciler_UnmarksItsHoldWithTheFirstPlan pins that the update that fills a queue's
+// first resource groups, together with its AdmissionCheck references, drops the empty-plan marker
+// and leaves the Hold for the InstanceTypeReconciler to release. That reconciler reads Inactive, so
+// a type an admin marked Inactive before the plan arrived is never released, even for one update.
+func TestNodeQueueReconciler_UnmarksItsHoldWithTheFirstPlan(t *testing.T) {
+	enableInstanceTypeDerivedFromNode(t)
+	key := "nvidia-a10g"
+	name := nodeQueueName(key)
+	cq := newInstanceTypeQueue(key, true)
+	cq.Spec.StopPolicy = ptr.To(kueue.Hold)
+	cq.Annotations = map[string]string{_TASQueueEmptyPlanHoldAnnotation: "true"}
+	nodeDevices := jointCheck(true)
+	nodeDevices.Name = _NodeDevicesAdmissionCheckName
+	nodeDevices.Spec.ControllerName = _NodeDevicesControllerName
+	rf := newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-1d", key, 1, 4, accelerated(nodefeature.ManufacturerNVIDIA))
+	cli := buildNodeQueueClient(cq, rf, nodeDevices, jointCheck(true))
+
+	reconcileNodeQueueN(t, cli, name, 1)
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, kueue.Hold, ptr.Deref(got.Spec.StopPolicy, kueue.None),
+		"the InstanceTypeReconciler releases the Hold")
+	assert.NotContains(t, got.Annotations, _TASQueueEmptyPlanHoldAnnotation)
+	require.Len(t, got.Spec.ResourceGroups, 1)
+	require.NotNil(t, got.Spec.AdmissionChecksStrategy)
+	checks := make([]kueue.AdmissionCheckReference, 0, len(got.Spec.AdmissionChecksStrategy.AdmissionChecks))
+	for _, rule := range got.Spec.AdmissionChecksStrategy.AdmissionChecks {
+		checks = append(checks, rule.Name)
+	}
+	assert.ElementsMatch(t, []kueue.AdmissionCheckReference{
+		_NodeDevicesAdmissionCheckName, _JointAdmissionCheckName,
+	}, checks)
 }
 
 // observeQueueUsage records the status Kueue writes for the queue's current spec: the Active

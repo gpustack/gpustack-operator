@@ -145,8 +145,11 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 //	| None (active)            | true          | forward: set StopPolicy=Hold      |
 //	| Hold (admin)             | true          | stable                            |
 //	| Hold (admin)             | false         | forward: set StopPolicy=None      |
+//	| Hold (admin), no groups  | false         | hand over: mark it NodeQueue's    |
 //	| HoldAndDrain (NodeQueue)  | true         | stable                            |
 //	| HoldAndDrain (NodeQueue)  | false        | mirror: backfill Spec.Inactive    |
+//	| Hold, marked (NodeQueue)  | either       | stable                            |
+//	| any, migrating (NodeQueue)| either       | forward onto the saved policy     |
 //
 // It evaluates the forward direction (Inactive drives the Hold<->None pair) first; the
 // NodeQueueReconciler owns HoldAndDrain (teardown / no-flavors drain), so the forward direction
@@ -156,15 +159,38 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 // non-oscillating; a pool that recovered from a full-drain stays inactive (its leftover
 // Inactive=true re-Holds the reactivated queue) until an admin clears the flag. At most one
 // guarded write happens per call; a stable state writes nothing. While NodeQueue carries its
-// topology-migration marker, this synchronization pauses because that controller temporarily owns
-// StopPolicy. It reports whether it wrote.
+// topology-migration marker, that controller owns the live StopPolicy, so the forward direction
+// writes the stop policy the migration restores instead and the mirror pauses. A Hold NodeQueue
+// marked as its own, on a queue that has no resource groups yet, is neither released nor
+// mirrored; NodeQueue drops the marker with the queue's first resource groups, and the forward
+// direction then releases the Hold unless the type is Inactive. Clearing Inactive on a queue
+// without resource groups marks its Hold rather than releasing it, because a queue that declares
+// no resource admits every Workload for as long as it is None. It reports whether it wrote.
 func (r *InstanceTypeReconciler) syncInactive(
 	ctx context.Context, it *workercore.InstanceType, cq *kueue.ClusterQueue,
 ) (bool, error) {
 	// NodeQueue owns StopPolicy for the whole topology migration window. In particular, its
 	// temporary HoldAndDrain must not be mirrored into the administrator-facing Inactive field;
-	// otherwise the restored active policy is immediately converted into a sticky Hold.
+	// otherwise the restored active policy is immediately converted into a sticky Hold. The
+	// Hold<->None pair still converges, onto the stop policy the migration restores: a queue
+	// emptied by its pool stays in the migration until a flavor returns, and restoring the policy
+	// saved before an Inactive change would admit onto a type an admin has since marked Inactive.
 	if cq.Annotations[_TASQueueMigrationPhaseAnnotation] != "" {
+		saved := cq.Annotations[_TASQueueMigrationStopPolicyAnnotation]
+		want := saved
+		switch {
+		case it.Spec.Inactive && (saved == string(kueue.None) || saved == _TASQueueMigrationStopPolicyUnset):
+			want = string(kueue.Hold)
+		case !it.Spec.Inactive && saved == string(kueue.Hold):
+			want = string(kueue.None)
+		}
+		if want == saved {
+			return false, nil
+		}
+		cq.Annotations[_TASQueueMigrationStopPolicyAnnotation] = want
+		return true, r.Client.Update(ctx, cq)
+	}
+	if cq.Annotations[_TASQueueEmptyPlanHoldAnnotation] != "" {
 		return false, nil
 	}
 
@@ -176,7 +202,14 @@ func (r *InstanceTypeReconciler) syncInactive(
 		}
 	case kueue.Hold:
 		if !it.Spec.Inactive {
-			cq.Spec.StopPolicy = ptr.To(kueue.None)
+			if len(cq.Spec.ResourceGroups) == 0 {
+				if cq.Annotations == nil {
+					cq.Annotations = make(map[string]string)
+				}
+				cq.Annotations[_TASQueueEmptyPlanHoldAnnotation] = "true"
+			} else {
+				cq.Spec.StopPolicy = ptr.To(kueue.None)
+			}
 			return true, r.Client.Update(ctx, cq)
 		}
 	}
@@ -260,9 +293,12 @@ func (r *InstanceTypeReconciler) ensureClusterQueue(
 }
 
 // createClusterQueue builds the backing ClusterQueue from the InstanceType: the spec-derived
-// schedule labels, an active StopPolicy, and the fixed no-borrow isolation policy written straight
-// into the spec — empty cohort (no cross-queue borrowing to broker), never reclaim or borrow within
-// a nonexistent cohort, only in-queue lower-priority preemption, all-namespace selector.
+// schedule labels, a Hold marked as the NodeQueueReconciler's, and the fixed no-borrow isolation
+// policy written straight into the spec — empty cohort (no cross-queue borrowing to broker), never
+// reclaim or borrow within a nonexistent cohort, only in-queue lower-priority preemption,
+// all-namespace selector. The queue is created held because it has no resource groups yet, and a
+// queue that declares no resource admits every Workload; the NodeQueueReconciler drops the marker in
+// the update that fills the resource groups, and syncInactive then releases the Hold.
 //
 // The NodeQueueReconciler fills the resource groups afterwards, and adds the node-devices
 // AdmissionCheck reference only while the cluster-wide derived-from-node switch is on and that check
@@ -275,12 +311,13 @@ func (r *InstanceTypeReconciler) createClusterQueue(
 
 	cq := &kueue.ClusterQueue{
 		ObjectMeta: meta.ObjectMeta{
-			Name:   it.Name,
-			Labels: instanceTypeScheduleLabels(ctx, it),
+			Name:        it.Name,
+			Labels:      instanceTypeScheduleLabels(ctx, it),
+			Annotations: map[string]string{_TASQueueEmptyPlanHoldAnnotation: "true"},
 		},
 		Spec: kueue.ClusterQueueSpec{
 			NamespaceSelector: &meta.LabelSelector{},
-			StopPolicy:        ptr.To(kueue.None),
+			StopPolicy:        ptr.To(kueue.Hold),
 			FlavorFungibility: &kueue.FlavorFungibility{
 				WhenCanBorrow:  kueue.TryNextFlavor,
 				WhenCanPreempt: kueue.MayStopSearch,

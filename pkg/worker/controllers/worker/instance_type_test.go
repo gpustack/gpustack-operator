@@ -864,8 +864,8 @@ func reconcileInstanceTypeN(t *testing.T, cli ctrlcli.Client, name string, n int
 
 // TestInstanceTypeReconciler_CreatesClusterQueue pins that an admin InstanceType gets a
 // backing ClusterQueue carrying the schedule labels derived from its spec identity, the
-// entrance label, StopPolicy None, and the fixed no-borrow isolation policy stamped into the
-// spec at creation (not gated by derived-from-node) — but no resource groups (the
+// entrance label, a Hold marked as the NodeQueueReconciler's, and the fixed no-borrow isolation
+// policy stamped into the spec at creation (not gated by derived-from-node) — but no resource groups (the
 // NodeQueueReconciler owns the quota) and no unit-spec notes. The finalizer holds the type.
 func TestInstanceTypeReconciler_CreatesClusterQueue(t *testing.T) {
 	key := "generic"
@@ -892,7 +892,9 @@ func TestInstanceTypeReconciler_CreatesClusterQueue(t *testing.T) {
 	assert.Equal(t, "false", cq.Labels[nodefeature.NodeAcceleratableLabelKey], "queue carries the acceleratable=false discriminator")
 	assert.NotContains(t, cq.Labels, featureKeyLabel(false, key), "collapsed pool carries no general key")
 	require.NotNil(t, cq.Spec.StopPolicy)
-	assert.Equal(t, kueue.None, *cq.Spec.StopPolicy, "created active (StopPolicy None)")
+	assert.Equal(t, kueue.Hold, *cq.Spec.StopPolicy, "created held: a queue without resource groups admits every Workload")
+	assert.Equal(t, "true", cq.Annotations[_TASQueueEmptyPlanHoldAnnotation], "the NodeQueueReconciler lifts the Hold")
+	assert.False(t, getInstanceType(t, cli, name).Spec.Inactive, "the Hold is not mirrored into Inactive")
 	assert.Empty(t, cq.Spec.ResourceGroups, "no resource groups (the NodeQueueReconciler owns the quota)")
 
 	// The fixed no-borrow isolation policy is stamped at creation even for an admin
@@ -1257,7 +1259,7 @@ func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
 			"SlicedDetail is not erased on a later reconcile")
 	})
 
-	t.Run("generic collapsed pool: empty Detail, queue activates (not deadlocked)", func(t *testing.T) {
+	t.Run("generic collapsed pool: empty Detail, queue is created (not deadlocked)", func(t *testing.T) {
 		key := "generic"
 		name := nodeQueueName(key)
 		it := &workercore.InstanceType{
@@ -1278,7 +1280,7 @@ func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
 		cq, err := getClusterQueue(t, cli, name)
 		require.NoError(t, err, "the queue is created despite the empty Detail (not deadlocked)")
 		require.NotNil(t, cq.Spec.StopPolicy)
-		assert.Equal(t, kueue.None, *cq.Spec.StopPolicy, "queue is active")
+		assert.Equal(t, kueue.Hold, *cq.Spec.StopPolicy, "queue is held until the NodeQueueReconciler fills it")
 	})
 }
 
@@ -1424,6 +1426,8 @@ func TestInstanceTypeReconciler_EnqueuesInstanceTypesFromDevices(t *testing.T) {
 // direction drives the Hold<->None pair from Spec.Inactive, the one-way mirror backfills
 // Inactive=true for a stopped queue, a HoldAndDrain (owned by the NodeQueueReconciler) is never
 // downgraded to Hold, and every row converges to a state that reconciles without further writes.
+// A queue without resource groups is never released to None: clearing Inactive there hands the Hold
+// to the NodeQueueReconciler instead.
 func TestInstanceTypeReconciler_SyncInactive(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1431,17 +1435,23 @@ func TestInstanceTypeReconciler_SyncInactive(t *testing.T) {
 		startPolicy kueue.StopPolicy
 		inactive    bool
 		migrating   bool
+		marked      bool
+		empty       bool
 
 		wantPolicy   kueue.StopPolicy
 		wantInactive bool
+		wantMarked   bool
 	}{
-		{"active stays active", kueue.None, false, false, kueue.None, false},
-		{"inactive holds the active queue", kueue.None, true, false, kueue.Hold, true},
-		{"held inactive is stable", kueue.Hold, true, false, kueue.Hold, true},
-		{"cleared inactive releases the hold", kueue.Hold, false, false, kueue.None, false},
-		{"draining inactive is not downgraded", kueue.HoldAndDrain, true, false, kueue.HoldAndDrain, true},
-		{"draining backfills inactive (drain wins)", kueue.HoldAndDrain, false, false, kueue.HoldAndDrain, true},
-		{"topology migration does not backfill inactive", kueue.HoldAndDrain, false, true, kueue.HoldAndDrain, false},
+		{"active stays active", kueue.None, false, false, false, false, kueue.None, false, false},
+		{"inactive holds the active queue", kueue.None, true, false, false, false, kueue.Hold, true, false},
+		{"held inactive is stable", kueue.Hold, true, false, false, false, kueue.Hold, true, false},
+		{"cleared inactive releases the hold", kueue.Hold, false, false, false, false, kueue.None, false, false},
+		{"draining inactive is not downgraded", kueue.HoldAndDrain, true, false, false, false, kueue.HoldAndDrain, true, false},
+		{"draining backfills inactive (drain wins)", kueue.HoldAndDrain, false, false, false, false, kueue.HoldAndDrain, true, false},
+		{"topology migration does not backfill inactive", kueue.HoldAndDrain, false, true, false, false, kueue.HoldAndDrain, false, false},
+		{"marked hold is neither released nor mirrored", kueue.Hold, false, false, true, true, kueue.Hold, false, true},
+		{"marked hold under inactive is left alone", kueue.Hold, true, false, true, true, kueue.Hold, true, true},
+		{"cleared inactive hands an empty queue's hold over", kueue.Hold, false, false, false, true, kueue.Hold, false, true},
 	}
 
 	for _, c := range cases {
@@ -1462,10 +1472,18 @@ func TestInstanceTypeReconciler_SyncInactive(t *testing.T) {
 				},
 			}
 			cq := newInstanceTypeQueue(key, true)
+			if !c.empty {
+				cq = newInstanceTypeQueue(key, true, cpuResourceGroup("gpustack-nvidia-a10g-linux-amd64-1d", 4))
+			}
 			cq.Spec.StopPolicy = ptr.To(c.startPolicy)
-			if c.migrating {
+			if cq.Annotations == nil {
 				cq.Annotations = make(map[string]string)
+			}
+			if c.migrating {
 				cq.Annotations[_TASQueueMigrationPhaseAnnotation] = _TASQueueMigrationPhaseDraining
+			}
+			if c.marked {
+				cq.Annotations[_TASQueueEmptyPlanHoldAnnotation] = "true"
 			}
 			cli := buildInstanceTypeClient(it, cq)
 
@@ -1477,6 +1495,7 @@ func TestInstanceTypeReconciler_SyncInactive(t *testing.T) {
 			require.NotNil(t, gotCQ.Spec.StopPolicy)
 			assert.Equal(t, c.wantPolicy, *gotCQ.Spec.StopPolicy, "converged StopPolicy")
 			assert.Equal(t, c.wantInactive, getInstanceType(t, cli, name).Spec.Inactive, "converged Inactive")
+			assert.Equal(t, c.wantMarked, gotCQ.Annotations[_TASQueueEmptyPlanHoldAnnotation] != "", "converged marker")
 
 			// Stable: once converged, further reconciles write nothing (no oscillation).
 			cqRV := gotCQ.ResourceVersion
@@ -1486,6 +1505,67 @@ func TestInstanceTypeReconciler_SyncInactive(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, cqRV, stableCQ.ResourceVersion, "StopPolicy stable (no write)")
 			assert.Equal(t, itRV, getInstanceType(t, cli, name).ResourceVersion, "Inactive stable (no write)")
+		})
+	}
+}
+
+// TestInstanceTypeReconciler_SyncInactiveRecordsIntoTheMigration pins that an admin's Inactive
+// change made while NodeQueue holds the queue in a flavor migration lands on the stop policy the
+// migration restores, not on the live one. A queue emptied by its pool stays in the migration until
+// a flavor returns, and restoring the policy saved before the change would admit onto a type the
+// admin has since marked Inactive, or keep holding one the admin has since cleared.
+func TestInstanceTypeReconciler_SyncInactiveRecordsIntoTheMigration(t *testing.T) {
+	cases := []struct {
+		name      string
+		inactive  bool
+		saved     string
+		wantSaved string
+	}{
+		{name: "inactive set over a saved None", inactive: true, saved: string(kueue.None), wantSaved: string(kueue.Hold)},
+		{name: "inactive set over a saved unset", inactive: true, saved: _TASQueueMigrationStopPolicyUnset, wantSaved: string(kueue.Hold)},
+		{name: "inactive cleared over a saved Hold", inactive: false, saved: string(kueue.Hold), wantSaved: string(kueue.None)},
+		{name: "an agreeing saved policy is kept", inactive: false, saved: string(kueue.None), wantSaved: string(kueue.None)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			key := "nvidia-a10g"
+			name := nodeQueueName(key)
+			it := &workercore.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: name, Finalizers: []string{systemmeta.LockedResourceFinalizer}},
+				Spec: workercore.InstanceTypeSpec{
+					AcceleratorGroup: key,
+					Acceleratable:    true,
+					OS:               "linux",
+					Arch:             "amd64",
+					Inactive:         c.inactive,
+					UnitResources:    workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+					LocalStorage:     "100Gi",
+				},
+			}
+			// The shape a pool that lost every flavor leaves: emptied, held, still migrating.
+			cq := newInstanceTypeQueue(key, true)
+			cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)
+			cq.Annotations = map[string]string{
+				_TASQueueMigrationPhaseAnnotation:      _TASQueueMigrationPhaseSwitched,
+				_TASQueueMigrationStopPolicyAnnotation: c.saved,
+			}
+			cli := buildInstanceTypeClient(it, cq)
+
+			reconcileInstanceTypeN(t, cli, name, 4)
+
+			gotCQ, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, c.wantSaved, gotCQ.Annotations[_TASQueueMigrationStopPolicyAnnotation])
+			assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(gotCQ.Spec.StopPolicy, kueue.None),
+				"the migration keeps owning the live stop policy")
+			assert.Equal(t, c.inactive, getInstanceType(t, cli, name).Spec.Inactive,
+				"the migration's hold is not mirrored into Inactive")
+
+			rv := gotCQ.ResourceVersion
+			reconcileInstanceTypeN(t, cli, name, 2)
+			stable, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, rv, stable.ResourceVersion, "stable (no write)")
 		})
 	}
 }
@@ -1605,8 +1685,8 @@ func enableInstanceTypeDerivedFromNode(t *testing.T) {
 }
 
 // TestInstanceTypeReconciler_AlignsClusterQueue pins the InstanceType-owned metadata of a
-// derived pool's backing ClusterQueue: it is isolated (empty cohort) and Active (StopPolicy
-// None) — but the InstanceTypeReconciler never fills the resource groups (the
+// derived pool's backing ClusterQueue: it is isolated (empty cohort) and held for the
+// NodeQueueReconciler to lift — but the InstanceTypeReconciler never fills the resource groups (the
 // NodeQueueReconciler owns the quota) and never writes the unit spec as a queue note.
 func TestInstanceTypeReconciler_AlignsClusterQueue(t *testing.T) {
 	cases := []struct {
@@ -1646,10 +1726,11 @@ func TestInstanceTypeReconciler_AlignsClusterQueue(t *testing.T) {
 			cq, err := getClusterQueue(t, cli, name)
 			require.NoError(t, err)
 
-			// Isolation + active state.
+			// Isolation + held state.
 			assert.Empty(t, cq.Spec.CohortName, "cohortName empty (isolated)")
 			require.NotNil(t, cq.Spec.StopPolicy)
-			assert.Equal(t, kueue.None, *cq.Spec.StopPolicy, "active (StopPolicy None)")
+			assert.Equal(t, kueue.Hold, *cq.Spec.StopPolicy, "held until the NodeQueueReconciler fills it")
+			assert.Equal(t, "true", cq.Annotations[_TASQueueEmptyPlanHoldAnnotation])
 
 			// The InstanceTypeReconciler does not fill the quota — the NodeQueueReconciler does.
 			assert.Empty(t, cq.Spec.ResourceGroups, "no resource groups (the NodeQueueReconciler owns the quota)")

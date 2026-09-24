@@ -259,6 +259,12 @@ feature key(s) selected by `instance-type-aware-cpu-manufacturer`, `kubernetes.i
 the InstanceType **spec** identity) and the fixed no-borrow **isolation** (empty cohort, no
 reclaim/borrow preemption).
 
+It creates the queue on `Hold`, marked `topology.gpustack.ai/empty-plan-hold`, because the queue has
+no resource groups yet and
+[a queue without them admits every Workload](admission.md#known-behavior-the-deployed-kueue-configuration).
+The `NodeQueueReconciler` drops the marker in the update that fills the groups, and this reconciler
+then releases the `Hold` unless the type is `Inactive`.
+
 It never fills the resource groups or references the AdmissionCheck (the `NodeQueueReconciler` owns
 those), and prunes a stale feature-key label when the group/acceleratable changes so the re-pointed
 queue's selectors match.
@@ -275,6 +281,15 @@ It also syncs `it.Spec.Inactive` with the queue's `StopPolicy` for the **admin `
 when `Inactive` (blocking new admission without evicting running workloads, never `HoldAndDrain`),
 `None` when an admin reactivates, and `Inactive=true` backfilled one-way and stickily whenever the queue
 is stopped by any means. So `Hold↔None` is owned here, `HoldAndDrain` by the `NodeQueueReconciler`.
+
+While the `NodeQueueReconciler` carries its migration marker it owns the live `StopPolicy`, so this
+sync writes the `Hold↔None` pair onto the stop policy the migration saved and later restores, and the
+backfill pauses. An `Inactive` change made while an emptied pool waits for a flavor is therefore what
+the pool comes back with.
+
+This sync neither releases a marked empty-plan `Hold` nor mirrors it into `Inactive`. Once the
+marker is gone it treats the `Hold` like an admin's, released only while the type is not `Inactive`.
+Clearing `Inactive` on a queue that has no resource groups marks its `Hold` rather than releasing it.
 
 ### `NodeQueueReconciler` (`node_queue.go`)
 
@@ -297,15 +312,22 @@ resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
   evicts on delete by itself.
 - **No live flavor left** while the queue carries quota — gated by
   `instance-type-drain-when-no-flavors` (default true): `HoldAndDrain`, requeue until every reservation
-  clears, then empty the groups so Kueue's counters never go negative.
+  clears, then empty the groups so Kueue's counters never go negative. The emptied queue stays
+  `HoldAndDrain` until a flavor returns, so it never admits without resource groups.
+- **No resource groups yet** and not stopped — the pool has no flavor, or its flavors fail topology
+  readiness: `Hold`, marked `topology.gpustack.ai/empty-plan-hold`. The update that fills the groups
+  drops the marker, and the `InstanceTypeReconciler` releases the `Hold` unless the type is
+  `Inactive`. It is `Hold`, not `HoldAndDrain`, so the type's Instances are not stopped; an admin
+  `Hold` carries no marker and is left alone.
 - **Topology readiness** — refuse a partial queue plan when a flavor lacks its profile or Topology,
   selectors overlap, quota changes across the profile split, the same resource would occur in two
   groups, or one resource group would exceed the [flavor limit](topology-aware-scheduling.md#capacity-and-lifecycle-limits).
 
-It **reactivates** (StopPolicy `None`) a queue *it* drained to empty — a `HoldAndDrain`, never an admin
-`Hold` — once flavors return, though the `InstanceTypeReconciler`'s sticky `Inactive` backfill re-holds
-it, so a recovered pool stays inactive until an admin clears `Inactive`. A drained queue also stops its
-running Instances — see [Running-instance stop](admission.md#running-instance-stop).
+Once flavors return it switches the held queue to the new plan, and only then **restores** the stop
+policy the queue had before the drain — `None`, or an admin `Hold`, including one set or cleared while
+it waited. The queue carries its migration marker the whole time, and the `InstanceTypeReconciler`
+does not backfill `Inactive` while it is present, so a recovered pool admits again without an admin.
+A drained queue also stops its running Instances — see [Running-instance stop](admission.md#running-instance-stop).
 
 ### `NodeQueueEntranceReconciler` (`node_queue_entrance.go`)
 
