@@ -2,7 +2,7 @@
 
 > **Purpose** — the two configuration surfaces: settings an administrator changes at runtime with
 > `kubectl`, and the `GPUSTACK_*` environment read once at process startup.
-> **Audience** operators · **Prerequisites** none · **Read time** ~8 min
+> **Audience** operators · **Prerequisites** none · **Read time** ~10 min
 
 GPUStack Operator is configured two ways, and the distinction matters operationally.
 
@@ -46,6 +46,7 @@ kubectl -n gpustack-system patch setting instance-type-derived-from-node --type 
 | `model-deployment-router-image` | `GPUSTACK_MODEL_DEPLOYMENT_ROUTER_IMAGE` | `gpustack/llm-router:v0.1.0` | Image a managed router runs when the `ModelDeployment` does not name one in `spec.router.image`. **It carries every router this operator supports, and which binary runs is decided by the rendered command rather than by the image** — `spec.router.name` picks the binary, and this setting only says where the binaries come from. Its default is safe for every cluster at once in a way `kv-cache-backend-image`'s is not: it runs no model, so it links no accelerator runtime and cannot be paired with the wrong one. The default is this project's own build rather than an upstream tag, because the three routers are compiled from three separate sources and one of them carries a patch this repository ships, so no upstream image holds them together. An image named on the object is used verbatim and is never redirected to the cluster mirror, because it is the user's own reference. |
 | `model-deployment-router-proxy-image` | `GPUSTACK_MODEL_DEPLOYMENT_ROUTER_PROXY_IMAGE` | `gpustack/mirrored-envoy:distroless-v1.33.2` | Proxy fronting a managed router's endpoint picker. It has **no field on the API** to override it: this operator renders the proxy's configuration against one proxy's configuration schema, so swapping the binary would mean swapping that configuration too. The setting exists for registry redirection and for pinning a release back, not for running a different proxy. |
 | `model-deployment-routing-sidecar-image` | `GPUSTACK_MODEL_DEPLOYMENT_ROUTING_SIDECAR_IMAGE` | `gpustack/mirrored-llm-d-router-disagg-sidecar:v0.10.0` | Sidecar a decoder runs to accept a remote prefill handoff. Same terms as the proxy above: this operator renders its arguments, so the setting is for redirection and pinning rather than for a different implementation. |
+| `model-deployment-tcp-tw-reuse` | `GPUSTACK_MODEL_DEPLOYMENT_TCP_TW_REUSE` | `false` | Render `net.ipv4.tcp_tw_reuse=1` on the prefill half of every SGLang prefill/decode pair, which otherwise [runs out of local ports](reference/engine-versions.md#known-failures-at-the-minimum) under sustained load. **Allow the sysctl on the kubelet of every node that can run such a Pod before turning it on**: without that the Pod fails with `SysctlForbidden`, and so does every replacement. The steps, which Pods it reaches and how to confirm the refusal are under [Letting SGLang prefill Pods reuse TIME-WAIT ports](#letting-sglang-prefill-pods-reuse-time-wait-ports). |
 | `instance-access-static-address` | `GPUSTACK_INSTANCE_ACCESS_STATIC_ADDRESS` | *(blank)* | Static access address for all Instances; when unset, the access address is generated from host IPs. |
 | `instance-access-wildcard-dns` | `GPUSTACK_INSTANCE_ACCESS_WILDCARD_DNS` | *(blank)* | Wildcard DNS for all Instances (e.g. `traefik.me`), used to build a per-Instance domain `<instance-host-ip>.<wildcard-dns>`. Only effective when `instance-access-static-address` is not set. |
 | `instance-privileged-allowed` | `GPUSTACK_INSTANCE_PRIVILEGED_ALLOWED` | `false` | Whether an Instance may request privileged mode (`spec.privileged`), which escapes the container boundary and exposes the node's devices and kernel surface. Enforced by the Instance admission webhook whenever an Instance **takes** privileged mode — at creation, or through a later change, including one made while it is stopped. An Instance that already runs privileged keeps it: with this off it stays updatable, editable while stopped, and restartable. Like every setting here, a change takes up to 30s to reach the webhook, so an Instance created in that window is judged against the previous value. |
@@ -98,6 +99,82 @@ kubectl get instancetypeflavor gpustack--nvidia-a10g -o yaml
 
 An InstanceType whose identity matches no entry there backs a ClusterQueue that selects no
 `ResourceFlavor`, so the queue is left with empty resource groups and admits nothing.
+
+### Letting SGLang prefill Pods reuse TIME-WAIT ports
+
+**`model-deployment-tcp-tw-reuse` renders `net.ipv4.tcp_tw_reuse=1` into the Pod
+`securityContext.sysctls` of the prefill half of every SGLang prefill/decode pair, and of no other
+Pod.** The sysctl lets the kernel reuse ports held by `TIME-WAIT` sockets for new outgoing
+connections, in that Pod's own network namespace only.
+
+The prefill half opens a new TCP connection for every transfer, so over `TCP`, with or without a
+store, its `TIME-WAIT` sockets [use up its local
+ports](reference/engine-versions.md#known-failures-at-the-minimum) under sustained load.
+
+It does not reach the decode half, which accepts transfers rather than opening them; a vLLM role,
+which keeps its transfer connections open; or a [KV cache backend](kv-cache/backend.md)'s members.
+A role that replaced its `command` gets nothing either, since the operator did not build what runs
+there. Whether an SGLang server with a store runs out of ports is not measured, and the setting
+does not reach it.
+
+**1. Allow the sysctl on the kubelet of every node that can run such a Pod.** It is not on the
+Kubernetes [safe list](https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/#safe-and-unsafe-sysctls),
+so a kubelet refuses it until told otherwise. Add it to the kubelet configuration and restart the
+kubelet:
+
+```yaml
+# KubeletConfiguration
+allowedUnsafeSysctls:
+  - net.ipv4.tcp_tw_reuse
+```
+
+The command-line form is `--allowed-unsafe-sysctls=net.ipv4.tcp_tw_reuse`. It is one list, so keep
+any name already on it.
+
+**On a managed cluster, set it where the node pool's kubelet configuration comes from**, so a node
+added or replaced later keeps it; an edit made on a running node leaves with that node. On each of
+these it takes effect on newly created nodes:
+
+- **EKS on Amazon Linux 2023** — the launch template's `nodeadm` `NodeConfig`, under
+  `spec.kubelet.config` as above or as the flag under `spec.kubelet.flags`; see the [`nodeadm`
+  API](https://awslabs.github.io/amazon-eks-ami/nodeadm/doc/api/). On Amazon Linux 2, pass the flag
+  through the bootstrap script's `--kubelet-extra-args`.
+- **AKS** — `allowedUnsafeSysctls` in the kubelet configuration a node pool is created with; see
+  [custom node configuration](https://learn.microsoft.com/en-us/azure/aks/custom-node-configuration).
+- **GKE** — `kubeletConfig.allowedUnsafeSysctls` in the node system configuration of a node pool;
+  see [node system
+  configuration](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/node-system-config).
+- A platform that exposes no kubelet configuration cannot run this setting; leave it off there.
+
+**2. Turn the setting on.**
+
+```bash
+kubectl -n gpustack-system patch setting model-deployment-tcp-tw-reuse --type merge -p '{"spec":{"value":"true"}}'
+```
+
+**Flipping it recreates the prefill replicas it reaches**, in either direction, because the sysctl
+is part of the Pod spec their fingerprint covers. Each deployment picks the value up on its next
+reconcile, and a setting change does not wake one. To apply it at once, delete one of the
+deployment's prefill Pods: the reconcile that replaces it renders the new value, and the rollout
+replaces the other prefill replicas. A pair that has already locked up recovers the same way.
+
+**If the kubelet was not changed, the prefill replica never starts.** The node's kubelet refuses the
+Pod, which ends in phase `Failed` with reason `SysctlForbidden`; the operator deletes it and logs
+`removing replica that failed` with that reason, and the replacement is refused the same way, over
+and over. The events outlive the Pods, and their message names the sysctl:
+
+```bash
+kubectl -n <namespace> get events --field-selector reason=SysctlForbidden
+kubectl -n <namespace> get pods -w \
+  -l app.kubernetes.io/instance=<deployment>,app.kubernetes.io/component=<prefill-role>
+```
+
+The second command shows the prefill Pods cycling through `SysctlForbidden`. Allow the sysctl on
+those nodes or turn the setting off; either ends the loop at the next replacement.
+
+A namespace enforcing the `baseline` or `restricted` Pod Security Standard refuses the Pod at
+creation instead, since the sysctl is not on that standard's allowed list either: no Pod appears,
+and the operator logs the refusal.
 
 ## Deploy-time environment variables
 

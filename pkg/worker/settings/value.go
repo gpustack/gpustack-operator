@@ -157,6 +157,35 @@ var (
 		setting.AllowContainerImageReference(),
 	)
 
+	// ModelDeploymentTCPTWReuse renders net.ipv4.tcp_tw_reuse=1 into the Pod security context of
+	// the prefill half of every SGLang prefill/decode pair.
+	//
+	// That half opens a new TCP connection for every transfer, to its decode half and to each store
+	// member, and closes it first, so the TIME-WAIT sockets pile up in its network namespace until
+	// they hold every ephemeral port; from then on every transfer fails until the Pod is recreated.
+	// The sysctl lets the kernel reuse a TIME-WAIT port for a new outgoing connection. It changes
+	// nothing on the accepting side, which is why the decode half and the store members do not get
+	// it, and a vLLM pair keeps its transfer connections open across requests, so it does not get it
+	// either.
+	//
+	// IT IS OFF BY DEFAULT BECAUSE THE KUBELET REFUSES IT UNTIL TOLD OTHERWISE. The sysctl is
+	// namespaced but not on the kubelet's safe list, so a node whose kubelet does not allow it
+	// through --allowed-unsafe-sysctls rejects the Pod with SysctlForbidden, and the replacement is
+	// rejected the same way. The kubelet change is the cluster administrator's, not this operator's.
+	//
+	// Flipping it moves the spec hash of the Pods it targets, so their replicas are recreated at the
+	// deployment's next reconcile.
+	ModelDeploymentTCPTWReuse = settings.NewEditable(
+		"model-deployment-tcp-tw-reuse",
+		"Indicates to render net.ipv4.tcp_tw_reuse=1 on the prefill half of every SGLang "+
+			"prefill/decode pair, which otherwise runs out of local ports under sustained load. "+
+			"Every node that runs such a Pod must allow the sysctl through the kubelet's "+
+			"--allowed-unsafe-sysctls first; without it the Pod fails with SysctlForbidden, "+
+			"reported as an event in the deployment's namespace, and every replacement fails the same way.",
+		setting.InitializeFromEnv("false"),
+		setting.AllowBool(),
+	)
+
 	// InstanceAccessStaticAddress is the access static address for all Instances,
 	// which is used to access Instances.
 	InstanceAccessStaticAddress = settings.NewEditable(

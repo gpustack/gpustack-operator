@@ -23,6 +23,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
@@ -2545,4 +2546,205 @@ func TestRenderModelDeploymentPod_DecodeWithoutTheProxyFlagRunsAlone(t *testing.
 	require.Less(t, at+1, len(pod.Spec.Containers[0].Command))
 	assert.Equal(t, "8000", pod.Spec.Containers[0].Command[at+1],
 		"the proxy is what moves the engine off the published port, and there is none")
+}
+
+// newTCPTWReusePair builds a deployment declaring both halves of an SGLang pair behind the managed
+// router, which is the shape whose prefill half the tcp_tw_reuse setting targets.
+func newTCPTWReusePair(mutate ...func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Engine = workercore.ModelDeploymentEngine{
+			Name: workercore.ModelDeploymentEngineSGLang, Version: "0.5.18",
+		}
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		md.Spec.Roles = []workercore.ModelDeploymentRole{
+			{
+				Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
+				Replicas: 1, InstanceType: "h20-8x", Image: "lmsysorg/sglang:v0.5.18",
+			},
+			{
+				Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
+				Replicas: 1, InstanceType: "h20-8x", Image: "lmsysorg/sglang:v0.5.18",
+			},
+		}
+	})
+	for _, m := range mutate {
+		m(md)
+	}
+
+	return md
+}
+
+// TestRenderModelDeploymentPod_TCPTWReuse pins where the tcp_tw_reuse setting lands: on the
+// prefill half of an SGLang pair, the side that opens a new TCP connection for every transfer and
+// so holds the TIME-WAIT sockets, and on no other Pod. Every row renders twice, with the setting on
+// and off, so each target row is its own baseline: a render that never wrote the sysctl fails
+// there, and a render that wrote it everywhere fails on the rows that must stay untouched.
+//
+// The spec hash is compared across the two renders as well, because it is how flipping the setting
+// reaches a running replica: a target Pod must move so the recreate rollout replaces it, and every
+// other Pod must keep its fingerprint so the flip rolls nothing else.
+func TestRenderModelDeploymentPod_TCPTWReuse(t *testing.T) {
+	store := ModelDeploymentConnectorInput{MasterServerAddress: "master:50051", Protocols: []string{"tcp"}}
+
+	for _, tc := range []struct {
+		name      string
+		md        *workercore.ModelDeployment
+		role      string
+		kvStore   bool
+		kvDirect  bool
+		wantReuse bool
+	}{
+		{
+			name: "an SGLang prefill half with a store over TCP",
+			md:   newTCPTWReusePair(), role: "prefill", kvStore: true, kvDirect: true, wantReuse: true,
+		},
+		{
+			name: "an SGLang prefill half with no store, which runs out of ports as well",
+			md:   newTCPTWReusePair(), role: "prefill", kvDirect: true, wantReuse: true,
+		},
+		{
+			name: "an SGLang decode half, which accepts transfers rather than opening them",
+			md:   newTCPTWReusePair(), role: "decode", kvStore: true, kvDirect: true,
+		},
+		{
+			name: "a vLLM prefill half, whose transfer connections persist",
+			md: newTCPTWReusePair(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine = workercore.ModelDeploymentEngine{
+					Name: workercore.ModelDeploymentEngineVLLM, Version: "0.29.0",
+				}
+			}),
+			role: "prefill", kvStore: true, kvDirect: true,
+		},
+		{
+			name: "an SGLang server with a store, which is not one half of a pair",
+			md: newTCPTWReusePair(func(md *workercore.ModelDeployment) {
+				md.Spec.Router = nil
+				md.Spec.Roles = md.Spec.Roles[:1]
+				md.Spec.Roles[0].Name = "server"
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+			}),
+			role: "server", kvStore: true,
+		},
+		{
+			name: "a lone SGLang prefill role with a store, which runs undivided",
+			md: newTCPTWReusePair(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles = md.Spec.Roles[:1]
+			}),
+			role: "prefill", kvStore: true,
+		},
+		{
+			name: "an SGLang prefill half that replaced its command line",
+			md: newTCPTWReusePair(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Command = []string{"/bin/my-prefill"}
+			}),
+			role: "prefill", kvStore: true, kvDirect: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var role *workercore.ModelDeploymentRole
+			for i := range tc.md.Spec.Roles {
+				if tc.md.Spec.Roles[i].Name == tc.role {
+					role = &tc.md.Spec.Roles[i]
+				}
+			}
+			require.NotNil(t, role)
+
+			in := ModelDeploymentConnectorInput{}
+			if tc.kvStore {
+				in = store
+			}
+			in.Engine = tc.md.Spec.Engine.Name
+			in.Kind = role.Kind
+			in.Disaggregated = ModelDeploymentDeclaresBothHalves(tc.md)
+			in.KVTransfer = tc.kvDirect
+			connector, err := SynthesizeModelDeploymentConnector(in)
+			require.NoError(t, err)
+
+			render := func(reuse bool) *core.Pod {
+				pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+					Deployment: tc.md, Role: role, InstanceType: newRenderInstanceType(),
+					Connector: connector, TCPTWReuse: reuse,
+				})
+				require.NoError(t, err)
+
+				return pod
+			}
+			on, off := render(true), render(false)
+
+			assert.Nil(t, off.Spec.SecurityContext,
+				"with the setting off the Pod renders exactly as it did before the setting existed")
+			onHash := on.Annotations[modelDeploymentPodSpecHashAnnotation]
+			offHash := off.Annotations[modelDeploymentPodSpecHashAnnotation]
+			if !tc.wantReuse {
+				assert.Nil(t, on.Spec.SecurityContext, "the setting reaches no Pod outside its target")
+				assert.Equal(t, offHash, onHash, "so flipping it rolls nothing here")
+
+				return
+			}
+			require.NotNil(t, on.Spec.SecurityContext)
+			assert.Equal(t, []core.Sysctl{{Name: "net.ipv4.tcp_tw_reuse", Value: "1"}},
+				on.Spec.SecurityContext.Sysctls)
+			assert.NotEqual(t, offHash, onHash, "flipping the setting must roll the target replica")
+		})
+	}
+}
+
+// TestRenderModelDeploymentPod_TCPTWReuseKeepsPrivileged pins the merge with what a role states
+// itself. A role has no Pod-level security context of its own -- `privileged` is the only security
+// field it carries, and it lands on the main container -- so the sysctl is written beside it and
+// takes nothing from it.
+func TestRenderModelDeploymentPod_TCPTWReuseKeepsPrivileged(t *testing.T) {
+	md := newTCPTWReusePair(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Privileged = true })
+	connector, err := SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
+		Engine: md.Spec.Engine.Name, Kind: workercore.ModelDeploymentRoleKindPrefill,
+		Disaggregated: true, KVTransfer: true,
+	})
+	require.NoError(t, err)
+
+	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+		Connector: connector, TCPTWReuse: true,
+	})
+	require.NoError(t, err)
+
+	require.NotNil(t, pod.Spec.SecurityContext)
+	assert.Equal(t, []core.Sysctl{{Name: "net.ipv4.tcp_tw_reuse", Value: "1"}}, pod.Spec.SecurityContext.Sysctls)
+	require.NotNil(t, pod.Spec.Containers[0].SecurityContext)
+	assert.Equal(t, ptr.To(true), pod.Spec.Containers[0].SecurityContext.Privileged,
+		"the role's own privileged mode stays on its container")
+}
+
+// TestRenderModelDeploymentPods_TCPTWReuseFollowsTheSetting pins the one read of the setting: the
+// reconciler takes it once per pass and hands it to every role, and only the prefill half turns it
+// into a sysctl. The default-off pass is the baseline that shows the read is what moves the render.
+func TestRenderModelDeploymentPods_TCPTWReuseFollowsTheSetting(t *testing.T) {
+	sysctls := func(t *testing.T) map[string][]core.Sysctl {
+		t.Helper()
+
+		md := newTCPTWReusePair()
+		r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+		desired, err := r.renderModelDeploymentPods(context.Background(), md, nil, nil)
+		require.NoError(t, err)
+
+		got := map[string][]core.Sysctl{}
+		for role, replicas := range desired {
+			require.Len(t, replicas[0], 1)
+			if sc := replicas[0][0].Spec.SecurityContext; sc != nil {
+				got[role] = sc.Sysctls
+			}
+		}
+
+		return got
+	}
+
+	t.Run("default off renders no sysctl", func(t *testing.T) {
+		assert.Empty(t, sysctls(t))
+	})
+
+	t.Run("on renders the sysctl on the prefill half alone", func(t *testing.T) {
+		settingtest.MergeDelegatedSettings(t, map[string]string{"model-deployment-tcp-tw-reuse": "true"})
+		assert.Equal(t, map[string][]core.Sysctl{
+			"prefill": {{Name: "net.ipv4.tcp_tw_reuse", Value: "1"}},
+		}, sysctls(t))
+	})
 }

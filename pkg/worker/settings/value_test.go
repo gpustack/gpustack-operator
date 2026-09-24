@@ -64,6 +64,21 @@ func TestInstanceHostAccessSettings(t *testing.T) {
 	}
 }
 
+// TestModelDeploymentTCPTWReuseSetting pins the switch that renders net.ipv4.tcp_tw_reuse onto
+// SGLang prefill Pods: its stable name (which drives the GPUSTACK_ env mapping), its default-off
+// boot value, and that it stays an editable boolean. It must default off because the sysctl is
+// not on the kubelet's safe list, so a cluster that has not allowed it refuses every Pod carrying it.
+func TestModelDeploymentTCPTWReuseSetting(t *testing.T) {
+	s := ModelDeploymentTCPTWReuse
+	assert.Equal(t, "model-deployment-tcp-tw-reuse", s.Name(), "name drives the GPUSTACK_ env mapping")
+	assert.Equal(t, "false", s.DefaultValue(), "the sysctl needs a kubelet change, so the default is off")
+	assert.True(t, s.Editable(), "must stay editable for runtime adjustment")
+
+	t.Setenv("GPUSTACK_MODEL_DEPLOYMENT_TCP_TW_REUSE", "true")
+	assert.Equal(t, "true", setting.InitializeFromEnv("false")(s.Name()),
+		"env GPUSTACK_MODEL_DEPLOYMENT_TCP_TW_REUSE must override the default")
+}
+
 // TestInstanceTypeManagementSettingsEnvMapping pins the operator-facing contract
 // that each setting resolves its boot value from GPUSTACK_${UPPER_SNAKE(name)},
 // with an env override winning over the default.

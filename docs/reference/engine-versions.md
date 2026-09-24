@@ -67,8 +67,8 @@ prefill/decode pair. The first column gives both spellings; `Auto`, the store de
 
 | Transport (store / direct) | Engine | Store leg | Direct leg |
 |---|---|---|---|
-| `TCP` / `tcp` | vLLM | **Works**, default images | **Works**, default images |
-| `TCP` / `tcp` | SGLang | **Works**, with a published store image on [its client's line](#the-minimum-per-shape), named by hand; beside a direct leg, [it runs out of ports](#known-failures-at-the-minimum) | **Works**, default images |
+| `TCP` / `tcp` | vLLM | **Works**, default images; beside a direct leg it keeps its store connections open too and did not [run out of ports](#known-failures-at-the-minimum) where measured | **Works**, default images; it keeps its connections open and did not [run out of ports](#known-failures-at-the-minimum) where measured |
+| `TCP` / `tcp` | SGLang | **Works**, with a published store image on [its client's line](#the-minimum-per-shape), named by hand; beside a direct leg, [it runs out of ports](#known-failures-at-the-minimum) unless [`model-deployment-tcp-tw-reuse`](../settings.md#letting-sglang-prefill-pods-reuse-time-wait-ports) is on | **Works**, default images; under sustained load [it runs out of ports](#known-failures-at-the-minimum), and [`model-deployment-tcp-tw-reuse`](../settings.md#letting-sglang-prefill-pods-reuse-time-wait-ports) is the remedy, run so far only beside a store |
 | `TCP` / `tcp` | vLLM-Ascend | **Not supported**: refused at admission, its store client accepts `CANN` only | **Not supported**: the value is ignored, the leg runs `ascend` |
 | `RDMA` / `rdma` | vLLM | **Not verified** | **Not verified** |
 | `RDMA` / `rdma` | SGLang | **Not verified** | **Not supported**: the operator grants SGLang's direct leg no device |
@@ -108,15 +108,35 @@ On AWS the `RDMA` rows do not apply — [choose `EFA` or
 - **SGLang with a store** holds a pinned host pool and needs the node's available memory above a
   fixed reserve plus that pool — see [SGLang's host-memory
   tier](kv-cache-injection.md#sglangs-host-memory-tier).
-- **SGLang prefill/decode with a store over `TCP` runs out of local ports under sustained load.**
-  The prefill half opens a new connection for every transfer, and its direct transfers and store
-  writes draw on the same ephemeral ports of its container. Connections left in `TIME-WAIT` use
-  them up; from then on every request through that pair fails and keeps failing until the engine
-  Pods are restarted.
+- **SGLang prefill/decode over `TCP` runs out of local ports under sustained load, with or without
+  a store.** The prefill half opens a new connection for every transfer, to the decode half and to
+  each store member, all from the same ephemeral ports of its container. Connections left in
+  `TIME-WAIT` use them up; from then on every request through that pair fails and keeps failing
+  until the engine Pods are restarted.
 
-  Widening `net.ipv4.ip_local_port_range` only delays the lock-up, and a `ModelDeployment` role
-  has no field for Pod sysctls. Whether a fabric transport, which opens no kernel TCP connection
-  per transfer, avoids it is not verified.
+  **Turning on [`model-deployment-tcp-tw-reuse`](../settings.md#letting-sglang-prefill-pods-reuse-time-wait-ports)
+  avoids it**, after a kubelet change on every node the prefill half can run on.
+
+  An SGLang `0.5.18` pair with a `TCP` store, sent short chat requests one after another, locked
+  up after about 183 requests in one run and 940 in another. A pair with no store, behind
+  `sglang-gateway`, locked up after about 285, every `TIME-WAIT` socket pointing at the decode half;
+  the gateway then answered `503` with `No available prefill workers`.
+
+  With `net.ipv4.tcp_tw_reuse=1` set by hand in the prefill half's network namespace, the value the
+  setting renders there, the pair with a store answered 1905 requests with none failing, holding
+  about 19,500 sockets in `TIME-WAIT` against the 28,232 ports of the range. The pair without a
+  store has not been run with it.
+
+  Widening `net.ipv4.ip_local_port_range` only delays the lock-up. Whether a fabric transport,
+  which opens no kernel TCP connection per transfer, avoids it is not verified.
+
+  **vLLM is not this shape where it was measured**: its prefill half keeps its transfer connections
+  open. Over a direct leg with no store, it kept four open and held at most nine sockets in
+  `TIME-WAIT` across 729 requests.
+
+  With a `TCP` store beside the direct leg, on vLLM `0.29.0`, it kept four open to the decode half
+  and four to each of the two store members, and held at most 16 in `TIME-WAIT` across 720
+  requests with none failing. The decode half's count leveled off below 200.
 
 ---
 

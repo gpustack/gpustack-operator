@@ -240,6 +240,9 @@ type ModelDeploymentRenderInput struct {
 	// GeneralResourcesOvercommit mirrors the Instance path's overcommit setting, which decides
 	// whether the derived CPU and memory are requested at full size or scaled down.
 	GeneralResourcesOvercommit bool
+	// TCPTWReuse mirrors the model-deployment-tcp-tw-reuse setting. It is the cluster's answer, not
+	// the role's: which Pods turn it into a sysctl is decided by modelDeploymentTakesTCPTWReuse.
+	TCPTWReuse bool
 	// NativeSidecar decides which shape a direct decoder's routing proxy is rendered in: a native
 	// sidecar -- an init container carrying restartPolicy: Always -- when the cluster keeps that
 	// field, or a classic regular container when it does not. The reconciler resolves it from the
@@ -512,6 +515,13 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	if in.RuntimeClassName != "" {
 		pod.Spec.RuntimeClassName = ptr.To(in.RuntimeClassName)
 	}
+	// The Pod security context is written here alone: a role carries no Pod-level security field,
+	// and its privileged mode lands on the main container above, so there is nothing to merge with.
+	if in.TCPTWReuse && modelDeploymentTakesTCPTWReuse(md, role, in.Connector) {
+		pod.Spec.SecurityContext = &core.PodSecurityContext{
+			Sysctls: []core.Sysctl{{Name: modelDeploymentTCPTWReuseSysctl, Value: "1"}},
+		}
+	}
 
 	// No nodeSelector entry is rendered for the accelerator model. A role takes whatever flavor its
 	// pool assigns, which is what every role did before per-role model selection existed and what
@@ -549,6 +559,39 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	}
 
 	return pod, nil
+}
+
+// modelDeploymentTCPTWReuseSysctl lets the kernel reuse a port held by a TIME-WAIT socket for a new
+// outgoing connection. It is namespaced, so it changes the Pod's network namespace and not the node's.
+const modelDeploymentTCPTWReuseSysctl = "net.ipv4.tcp_tw_reuse"
+
+// modelDeploymentTakesTCPTWReuse reports whether a role's Pods carry modelDeploymentTCPTWReuseSysctl
+// while the setting is on: the prefill half of an SGLang pair whose transfer leg this operator
+// rendered, and nothing else.
+//
+// THE PREFILL HALF IS THE SIDE THAT OPENS THE CONNECTIONS. SGLang's Mooncake transfer engine opens a
+// new TCP connection for every transfer, to the decode half and to each store member, and closes it
+// first, so the TIME-WAIT sockets are held in the prefill half's network namespace. The sysctl only
+// changes how the kernel picks a port for an outgoing connection, so the side that accepts gains
+// nothing from it, and the decode half writes nothing to a store because it runs no hierarchical
+// cache.
+//
+// THE PROTOCOL IS NOT READ. The operator grants SGLang's direct leg no fabric device, so every shape
+// that leg has run in is TCP, and on a leg that opens no kernel TCP connection the sysctl does
+// nothing; reading the protocol would add an input and change no Pod.
+//
+// A vLLM pair keeps its transfer connections open across requests, and without a store it built up
+// no TIME-WAIT sockets, so it does not get the sysctl: every Pod carrying it is one more node whose
+// kubelet must allow it. A role that replaced its command line gets nothing, because the operator
+// cannot know what the replacement opens -- the rule the connector follows too.
+func modelDeploymentTakesTCPTWReuse(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	connector ModelDeploymentConnectorRender,
+) bool {
+	return md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang &&
+		len(role.Command) == 0 &&
+		connector.KVTransfer &&
+		ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindPrefill
 }
 
 func modelDeploymentMetricsAnnotations(port int32, scheme core.URIScheme) map[string]string {
