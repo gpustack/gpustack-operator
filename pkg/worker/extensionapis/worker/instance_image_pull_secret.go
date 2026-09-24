@@ -84,6 +84,8 @@ var (
 	_ rest.Patcher           = (*InstanceImagePullSecretHandler)(nil)
 	_ rest.GracefulDeleter   = (*InstanceImagePullSecretHandler)(nil)
 	_ rest.CollectionDeleter = (*InstanceImagePullSecretHandler)(nil)
+
+	_ extensionapi.DryRunHandler = (*InstanceImagePullSecretHandler)(nil)
 )
 
 func (h *InstanceImagePullSecretHandler) New() runtime.Object {
@@ -91,6 +93,12 @@ func (h *InstanceImagePullSecretHandler) New() runtime.Object {
 }
 
 func (h *InstanceImagePullSecretHandler) Destroy() {
+}
+
+// SupportsDryRun reports true: OnCreate and OnUpdate write the Secret once each, and pass the
+// options on to that write.
+func (h *InstanceImagePullSecretHandler) SupportsDryRun() bool {
+	return true
 }
 
 func (h *InstanceImagePullSecretHandler) OnCreate(ctx context.Context, obj runtime.Object, opts ctrlcli.CreateOptions) (runtime.Object, error) {
@@ -274,7 +282,7 @@ func convertSecretFromInstanceImagePullSecret(instImgPullSec *worker.InstanceIma
 					auth["email"] = instImgPullSec.Spec.Email
 				}
 				return auth
-			},
+			}(),
 		},
 	}
 	dcrCfgJson := json.MustMarshal(dcrCfg)

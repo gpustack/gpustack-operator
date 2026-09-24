@@ -28,6 +28,24 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/gox"
 )
 
+// DryRunHandler is an interface for a handler whose OnCreate and OnUpdate pass the dry-run option on to
+// every write they make.
+//
+// A dry-run create or update reaches OnCreate or OnUpdate only through a handler that supports dry
+// run: the api server behind it then runs its admission, webhooks included, and persists nothing, so
+// the dry run is refused wherever the real request is. For any other handler the dry run stops before
+// OnCreate or OnUpdate and skips that admission. It has to: a write there that drops the option
+// persists what the caller only asked to check.
+type DryRunHandler interface {
+	// SupportsDryRun reports whether OnCreate and OnUpdate pass the dry-run option on to every write.
+	SupportsDryRun() bool
+}
+
+func supportsDryRun(h any) bool {
+	drh, ok := h.(DryRunHandler)
+	return ok && drh.SupportsDryRun()
+}
+
 type (
 	// CreateHandler is an interface for a creation handler.
 	CreateHandler interface {
@@ -82,7 +100,7 @@ func (s CreateOperation) Create(
 		}
 	}
 
-	if dryrun.IsDryRun(options.DryRun) {
+	if dryrun.IsDryRun(options.DryRun) && !supportsDryRun(s.Handler) {
 		getter, ok := s.Handler.(rest.Getter)
 		if !ok {
 			// If the handler does not support get, we cannot check for existence.
@@ -536,7 +554,7 @@ func (s UpdateOperation) Update(
 		}
 	}
 
-	if dryrun.IsDryRun(options.DryRun) {
+	if dryrun.IsDryRun(options.DryRun) && !supportsDryRun(s.Handler) {
 		return obj, false, nil
 	}
 
@@ -1317,6 +1335,18 @@ func (h _CurdProxyHandler[DO, DOL, UO, UOL]) OnUpdate(
 		return nil, err
 	}
 	return h.CastObjectFrom(ctx, uo), nil
+}
+
+// SupportsDryRun reports true unless the handler replaces OnCreate or OnUpdate, in which case the
+// handler answers for itself: the proxy's own OnCreate and OnUpdate make one upstream write each, and
+// pass the options on to it.
+func (h _CurdProxyHandler[DO, DOL, UO, UOL]) SupportsDryRun() bool {
+	_, replacesCreate := h.CurdProxyHandler.(_CreateHandlerWithoutNew)
+	_, replacesUpdate := h.CurdProxyHandler.(_UpdateHandlerWithoutNew)
+	if replacesCreate || replacesUpdate {
+		return supportsDryRun(h.CurdProxyHandler)
+	}
+	return true
 }
 
 func (h _CurdProxyHandler[DO, DOL, UO, UOL]) OnDelete(
