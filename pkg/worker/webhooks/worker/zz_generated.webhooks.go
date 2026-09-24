@@ -58,6 +58,7 @@ func GetMutatingWebhookConfiguration(n string, c v1.WebhookClientConfig) *v1.Mut
 			mwh_pkg_worker_webhooks_worker_ModelDeploymentWebhook(c),
 			mwh_pkg_worker_webhooks_worker_PodKVCacheWebhook(c),
 			mwh_pkg_worker_webhooks_worker_PodWebhook(c),
+			mwh_pkg_worker_webhooks_worker_WorkloadWebhook(c),
 		},
 	}
 }
@@ -751,6 +752,59 @@ func vwh_pkg_worker_webhooks_worker_TopologySourceWebhook(c v1.WebhookClientConf
 		TimeoutSeconds: ptr.To[int32](10),
 		AdmissionReviewVersions: []string{
 			"v1",
+		},
+	}
+}
+
+func (*WorkloadWebhook) DefaultPath() string {
+	return "/mutate-gpustack-worker-kueue-x-k8s-io-v1beta2-workload"
+}
+
+func mwh_pkg_worker_webhooks_worker_WorkloadWebhook(c v1.WebhookClientConfig) v1.MutatingWebhook {
+	path := "/mutate-gpustack-worker-kueue-x-k8s-io-v1beta2-workload"
+
+	cc := c.DeepCopy()
+	if cc.Service != nil {
+		cc.Service.Path = &path
+	} else if c.URL != nil {
+		cc.URL = ptr.To(*c.URL + path)
+	}
+
+	return v1.MutatingWebhook{
+		Name:         "mutate.gpustack-worker.kueue.x-k8s.io.v1beta2.workload",
+		ClientConfig: *cc,
+		Rules: []v1.RuleWithOperations{
+			{
+				Rule: v1.Rule{
+					APIGroups: []string{
+						"kueue.x-k8s.io",
+					},
+					APIVersions: []string{
+						"v1beta2",
+					},
+					Resources: []string{
+						"workloads",
+					},
+					Scope: ptr.To[v1.ScopeType]("Namespaced"),
+				},
+				Operations: []v1.OperationType{
+					"CREATE",
+					"UPDATE",
+				},
+			},
+		},
+		FailurePolicy:  ptr.To[v1.FailurePolicyType]("Ignore"),
+		MatchPolicy:    ptr.To[v1.MatchPolicyType]("Equivalent"),
+		SideEffects:    ptr.To[v1.SideEffectClass]("None"),
+		TimeoutSeconds: ptr.To[int32](10),
+		AdmissionReviewVersions: []string{
+			"v1",
+		},
+		MatchConditions: []v1.MatchCondition{
+			{
+				Name:       "gpustack-local-queue",
+				Expression: "has(object.spec.queueName) && object.spec.queueName.startsWith('gpustack-fnv64-')",
+			},
 		},
 	}
 }

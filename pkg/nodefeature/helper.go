@@ -586,8 +586,12 @@ func generalFeatureAnnotation(node *core.Node, name string) string {
 //
 // which is always 31 characters long.
 func FormatLocalQueueName(clusterQueueName string) string {
-	return "gpustack-fnv64-" + stringx.SumByFNV64a(clusterQueueName)
+	return LocalQueueNamePrefix + stringx.SumByFNV64a(clusterQueueName)
 }
+
+// LocalQueueNamePrefix starts the name of every LocalQueue this operator creates, see
+// FormatLocalQueueName.
+const LocalQueueNamePrefix = "gpustack-fnv64-"
 
 // GetAcceleratableCreditsResourceName returns the accelerator credits resource name for the given manufacturer.
 func GetAcceleratableCreditsResourceName(manufacturer string) core.ResourceName {

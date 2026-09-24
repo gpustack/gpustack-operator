@@ -136,7 +136,8 @@ builds, and does not rely on a name alone:
 
 1. The operator names every LocalQueue it creates `gpustack-fnv64-<hash of the ClusterQueue name>`
    (`nodefeature.FormatLocalQueueName`). The webhook registration carries a `matchConditions`
-   expression on `object.spec.queueName.startsWith('gpustack-fnv64-')`, so other Workloads never
+   expression on `has(object.spec.queueName) && object.spec.queueName.startsWith('gpustack-fnv64-')`,
+   so other Workloads never
    reach the webhook. An API server too old for `matchConditions` drops the field and sends every
    Workload, and the checks below still hold.
 2. The LocalQueue `<namespace>/<spec.queueName>` must exist, and its `spec.clusterQueue` names the
@@ -354,6 +355,11 @@ a mocked accelerator NodeFeature and a mocked per-card `Devices` ledger. Node A 
   and a mutating webhook is not re-run on a status change. → Documented. Only a spec update before
   reservation, or a new Workload, can pick the pin up. A new Workload arrives when a job is recreated
   or a workload slice scales up.
+- **A Workload moved to another accelerator group's queue before reservation.** The webhook adds the
+  new group's pin and keeps the old one, because it never removes an expression it did not just
+  write. → Accepted. Only a hand edit of a Kueue-built spec moves a queue this way; Kueue's own
+  rebuild replaces the spec whole. The result is a pending Workload that names node affinity, never
+  an oversubscribed accelerator.
 - **Webhook unavailable.** `failurePolicy: Ignore` leaves the Workload unpinned. → Gate 3 `Retry`,
   today's behavior. Kueue can always create Workloads.
 - **Effect on the kube-scheduler and the kubelet.** They never see the pin, because it stays on the
@@ -528,9 +534,9 @@ proves the whole path.
       - Its table covers four cases. A change only in fit labels is false. Any other label change is true. A fit change together with another change is true. No change is false.
       Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestNodeLabelsChangedIgnoringFit$' -v`
 
-- [ ] **T5 · The Workload webhook**
+- [x] **T5 · The Workload webhook**
       Blocked by: T0, T1, T4
-      Owns: `pkg/worker/webhooks/worker/workload.go`, `pkg/worker/webhooks/worker/workload_test.go`, `pkg/worker/webhooks/setup.go`, `pkg/worker/webhooks/worker/zz_generated.webhooks.go`
+      Owns: `pkg/worker/webhooks/worker/workload.go`, `pkg/worker/webhooks/worker/workload_test.go`, `pkg/worker/webhooks/setup.go`, `pkg/worker/webhooks/worker/zz_generated.webhooks.go`, plus `nodefeature.LocalQueueNamePrefix` in `pkg/nodefeature/helper.go` and `IsInstanceTypeClusterQueue` in `pkg/worker/controllers/worker/node_queue.go`
       Gate: review
       Acceptance:
       - `WorkloadWebhook` implements only `Default`, and it returns nil on every path, so it never denies.
@@ -538,15 +544,16 @@ proves the whole path.
         - group `kueue.x-k8s.io`, version `v1beta2`, resource `workloads`, scope Namespaced;
         - operations CREATE and UPDATE;
         - `failurePolicy: Ignore`, `sideEffects: None`, `matchPolicy: Equivalent`, `timeoutSeconds` 10;
-        - `matchConditions` with `object.spec.queueName.startsWith('gpustack-fnv64-')`;
+        - `matchConditions` with `has(object.spec.queueName) && object.spec.queueName.startsWith('gpustack-fnv64-')`. The `has` guard keeps a Workload without a queue name from making the expression error;
         - the name prefix `gpustack-worker`.
       - Ownership follows the Proposal's chain: the LocalQueue, then the ClusterQueue carrying the `instancetypes` mark, then the same-named InstanceType and its `spec.acceleratorGroup`. Reads use the cached client.
-      - The pin per PodSet comes from `PodSetFitDemand`. It is ANDed into every required term, deduplicated.
+      - The pin per PodSet comes from `PodSetFitDemand`. It is ANDed into every required term, and added only when an identical expression is absent.
+      - An empty term, and a required selector that exists with no term, are left alone, because each matches no node. An existing expression on the same key is kept, so a stricter one still holds.
       - The setting is read on each call.
       - An UPDATE is acted on only when `workload.HasQuotaReservation(old)` is false.
       - `make generate` regenerates `zz_generated.webhooks.go`.
       - The tests cover:
-        - `TestWorkloadWebhook_Default`: a slice pinned `Gt 799999`; a shared request of 2 pinned `Gt 1`; a shared request of 1, exclusive, a partition and a plain PodSet unchanged; two PodSets pinned each with its own demand; existing terms ANDed into; a second pass that adds nothing.
+        - `TestWorkloadWebhook_Default`: a slice pinned `Gt 799999`; a shared request of 2 pinned `Gt 1`; a shared request of 1, exclusive, a partition and a plain PodSet unchanged; two PodSets pinned each with its own demand; existing terms ANDed into; a stricter same-key requirement kept beside the pin; an empty term and a term-less required selector left matching nothing; a second pass that adds nothing.
         - `TestWorkloadWebhook_ForeignWorkloadsUntouched`: a Workload on a foreign queue name; a `gpustack-fnv64-` name without a LocalQueue; a LocalQueue on an unmarked ClusterQueue; a marked ClusterQueue without an InstanceType; an InstanceType without a group. Each requests `.sliced.units` and must come out deep-equal to its input.
         - `TestWorkloadWebhook_Update`: an unreserved old Workload is pinned; a reserved one is left unchanged.
         - `TestWorkloadWebhook_SettingOff`: with the setting off, nothing is pinned.

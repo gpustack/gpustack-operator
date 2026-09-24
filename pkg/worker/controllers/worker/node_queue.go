@@ -73,6 +73,13 @@ var _ ctrlreconcile.Reconciler = (*NodeQueueReconciler)(nil)
 // ClusterQueue this reconciler owns.
 const _ClusterQueueResType = "instancetypes"
 
+// IsInstanceTypeClusterQueue reports whether a ClusterQueue is one this operator backs an
+// InstanceType with, by the resource-type mark it stamps on each one it creates. The InstanceType
+// shares the ClusterQueue's name.
+func IsInstanceTypeClusterQueue(cq *kueue.ClusterQueue) bool {
+	return systemmeta.MatchResource(cq, _ClusterQueueResType)
+}
+
 const (
 	_TASQueueAnnotation                    = "topology.gpustack.ai/tas-queue"
 	_TASQueueMigrationPhaseAnnotation      = "topology.gpustack.ai/migration-phase"
