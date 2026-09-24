@@ -160,6 +160,59 @@ func TestRenderLLMD_CarriesTheMetricsContract(t *testing.T) {
 	assert.Contains(t, config, "port: 8000")
 }
 
+// TestRenderLLMD_NamesTheEngineAPodWithoutALabelIsReadAs pins which metric names the picker reads a
+// model server's metrics by. Its extractor picks them by the Pod's engine-type label and reads a Pod
+// without one as its default engine, which upstream defaults to vllm, and no model-server Pod
+// carries that label. An SGLang deployment left on that default is read by vLLM's names, which its
+// servers do not export, so no endpoint ever has fresh metrics.
+//
+// vLLM is held to rendering WITHOUT the key rather than with it spelled out: the document is hashed
+// into the router Pod, so writing the value upstream already holds would roll every existing vLLM
+// router for nothing. The SGLang case is what makes that absence mean something - the same parse
+// finds the key there.
+func TestRenderLLMD_NamesTheEngineAPodWithoutALabelIsReadAs(t *testing.T) {
+	for _, tc := range []struct {
+		engine string
+		want   string
+	}{
+		{engine: "vllm", want: ""},
+		{engine: "sglang", want: "sglang"},
+	} {
+		t.Run(tc.engine, func(t *testing.T) {
+			metrics, err := MetricsForEngine(tc.engine)
+			require.NoError(t, err)
+			output, err := Render(LLMD, Input{
+				Roles:   []Role{{Kind: "server", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"}},
+				Metrics: metrics,
+			})
+			require.NoError(t, err)
+
+			var rendered struct {
+				Plugins []struct {
+					Type       string         `json:"type"`
+					Parameters map[string]any `json:"parameters"`
+				} `json:"plugins"`
+			}
+			require.NoError(t, yaml.Unmarshal([]byte(output.Document), &rendered))
+
+			extractors := 0
+			for _, plugin := range rendered.Plugins {
+				if plugin.Type != "core-metrics-extractor" {
+					continue
+				}
+				extractors++
+				defaultEngine, present := plugin.Parameters["defaultEngine"]
+				if tc.want == "" {
+					assert.False(t, present, "the upstream default is left to upstream")
+				} else {
+					assert.Equal(t, tc.want, defaultEngine)
+				}
+			}
+			require.Equal(t, 1, extractors)
+		})
+	}
+}
+
 func TestRenderLLMD_CarriesTheKVEventsContract(t *testing.T) {
 	rendered, err := Render(LLMD, Input{
 		Roles: []Role{

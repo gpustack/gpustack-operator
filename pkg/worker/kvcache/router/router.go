@@ -265,7 +265,7 @@ func renderLLMD(input Input) (Output, error) {
 	)
 	metricsExtractor := map[string]any{"type": "core-metrics-extractor"}
 	if input.Metrics.Engine != "" {
-		metricsExtractor["parameters"] = map[string]any{
+		parameters := map[string]any{
 			"engineConfigs": []any{map[string]any{
 				"name":                input.Metrics.Engine,
 				"queuedRequestsSpec":  input.Metrics.QueuedRequests,
@@ -273,6 +273,15 @@ func renderLLMD(input Input) (Output, error) {
 				"kvUsageSpec":         input.Metrics.KVCacheUtilization,
 			}},
 		}
+		// The extractor reads a Pod by the engine its engine-type label names, and a Pod without
+		// that label as the default engine; no model-server Pod carries the label, so every Pod is
+		// read as the default. Left to upstream's default, an SGLang server is read by vLLM's
+		// metric names, which it does not export, so no endpoint ever has fresh metrics and the
+		// queue and KV-cache scorers score every endpoint alike.
+		if input.Metrics.Engine != llmdDefaultMetricsEngine {
+			parameters["defaultEngine"] = input.Metrics.Engine
+		}
+		metricsExtractor["parameters"] = parameters
 	}
 	plugins = append(plugins, metricsExtractor)
 
@@ -328,6 +337,17 @@ func renderLLMD(input Input) (Output, error) {
 	// anything derived from this input.
 	return Output{Command: []string{"epp"}, Document: string(encoded)}, nil
 }
+
+// llmdDefaultMetricsEngine is the engine the picker's metrics extractor reads a Pod without an
+// engine-type label as when its configuration names none
+// (`llm-d/llm-d-router@v0.10.0:pkg/epp/framework/plugins/datalayer/extractor/metrics/factories.go:148-149`,
+// applied at `:178-180`, the label read at `extractor.go:201-217`).
+//
+// IT IS NOT WRITTEN FOR THE ENGINE IT ALREADY IS: the rendered document is hashed into the router
+// Pod, so spelling out a value upstream already holds would roll every existing vLLM router for a
+// change nothing reads. The cost is that this value has to agree with upstream's by convention, so a
+// version bump of the picker re-reads the reference above.
+const llmdDefaultMetricsEngine = "vllm"
 
 // llmdDefaultNonCachedTokens is what the picker's decider keeps when the field is unset. It is the
 // value this renderer has always written, so an absent field renders what it rendered before.
