@@ -1,12 +1,12 @@
 # Model Deployment Routing Reference
 
-> **Purpose** — which replica each managed router sends a request to by default, and how to change
-> that choice through `spec.router.extraArgs`.
+> **Purpose** — which replica each managed router sends a request to by default, how to change
+> that choice through `spec.router.extraArgs`, and the router series that show where requests went.
 > **Audience** users, operators · **Prerequisites** [Model Deployment
 > Reference](model-deployment.md) · **Read time** ~5 min
 
-A router only chooses when a role has more than one replica. Everything measured here ran on a
-server role; on a prefill/decode pair, where each half is chosen separately, none of it has been run.
+A router only chooses when a role has more than one replica. Every routing choice measured here ran
+on a server role; on a prefill/decode pair, where each half is chosen separately, none has been run.
 
 ## Contents
 
@@ -14,6 +14,7 @@ server role; on a prefill/decode pair, where each half is chosen separately, non
 - [Shared prefixes land on one replica](#shared-prefixes-land-on-one-replica)
 - [Switching to round robin](#switching-to-round-robin)
 - [llm-d-router takes no policy flag](#llm-d-router-takes-no-policy-flag)
+- [Seeing where requests went](#seeing-where-requests-went)
 
 ## Each router's default
 
@@ -98,6 +99,25 @@ those has been run either.
 **`llm-d-router` cannot be switched through `extraArgs`.** Its scorers and their weights are in the
 configuration document the operator renders and mounts, and `--config-file`, which would point the
 router at another one, is refused there. No field sets them either.
+
+## Seeing where requests went
+
+The deployment's [metrics snapshot](model-deployment-metrics.md) does not say which replica served a
+request. Each router's own `/metrics` does, for the series below, all seen exported in runs. A
+`worker` label is the worker's URL, which carries its Pod address.
+
+| `spec.router.name` | Series | What it shows |
+|---|---|---|
+| `vllm-router` | `vllm_router_processed_requests_total{worker}` | requests sent to each worker, in both modes |
+| `vllm-router` | `vllm_router_policy_decisions_total{policy,worker}` | picks each policy made, per worker |
+| `vllm-router` | `vllm_router_pd_prefill_requests_total{worker}`, `vllm_router_pd_decode_requests_total{worker}` | in P/D mode, requests sent to each prefill and each decode worker |
+| `sglang-gateway` | `smg_worker_requests_active{worker}` | requests in flight to each worker at the scrape |
+| `sglang-gateway` | `smg_worker_selection_total{worker_type,policy}` | picks per policy and per `regular`, `prefill` or `decode` worker type, not per worker |
+| `llm-d-router` | `llm_d_epp_per_endpoint_queue_size{model_server_endpoint}` | requests queued at each endpoint at the scrape |
+| `llm-d-router` | `llm_d_epp_disagg_decision_total{decision_type}` | requests sent through a prefill replica (`prefill-decode`) or straight to decode (`decode-only`) |
+
+Neither `sglang-gateway` nor `llm-d-router` keeps a running count per replica. Behind them, compare
+the engine Pods' own counts instead, such as each Pod's TTFT histogram `_count`.
 
 ---
 
