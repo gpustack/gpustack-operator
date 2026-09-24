@@ -262,10 +262,11 @@ metadata:
 spec:
   engine:
     name: vllm
-    # The newest vLLM the runner project publishes. Inert here -- the role names its image
-    # explicitly, so nothing is synthesized from it -- but a version no runner ships would read as
-    # the version under test, and this case tests nothing about an engine.
-    version: "0.27.1"
+    # The minimum vLLM docs/reference/engine-versions.md supports. Inert here -- the role names its
+    # image explicitly, so nothing is synthesized from it -- but a version no runner ships, or one
+    # below that minimum, would read as the version under test, and this case tests nothing about
+    # an engine.
+    version: "0.29.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
   kvCache:

@@ -85,10 +85,10 @@ type transportFacts struct {
 // that would have worked, too loose admits a container that raises before it serves anything.
 var engineTransportConstraint = map[Engine]transportFacts{
 	EngineVLLM: {
-		Version: "v0.25.1",
-		// protocol appears three times and is never compared: declared on the config class at :108,
-		// read out of the file at :132, handed to store.setup() at :1045. No branch reads its value.
-		Source:           "vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py:108,132,1045",
+		Version: "v0.29.0",
+		// protocol appears three times and is never compared: declared on the config class at :138,
+		// read out of the file at :163, handed to store.setup() at :1489. No branch reads its value.
+		Source:           "vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py:138,163,1489",
 		Required:         "",
 		RequiredAPIValue: "",
 	},
