@@ -304,7 +304,7 @@ func TestRenderModelDeploymentPod_ListenFlagSpellings(t *testing.T) {
 			// appended after it, exactly as for --port itself.
 			name: "an_abbreviated_port_is_the_roles_own", engine: vllm,
 			extraArgs: []string{"--por", "9100"},
-			wantFill:  []string{"--host", "0.0.0.0"},
+			wantFill:  []string{"--host", "0.0.0.0"}, wantScheme: core.URISchemeHTTP,
 		},
 		{
 			name: "an_abbreviated_host_is_the_roles_own", engine: sglang,
@@ -1856,17 +1856,54 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		}
 	})
 
-	t.Run("a role configuring its own listening endpoint is not gated", func(t *testing.T) {
-		// TWO WAYS TO DO IT, and both strand a replica that is serving. --host and --port move WHERE
-		// the engine listens, and the operator then leaves them alone, so the engine moves without
-		// the Service following. Demanding a CLIENT certificate is the other: the kubelet has none
+	t.Run("a role moving its port alone is gated on the port the engine opens", func(t *testing.T) {
+		// THE CONTAINER PORT FOLLOWS THE ENGINE'S, so the Service's targetPort and the gate both
+		// read the port the role named. Withdrawing the gates here would leave a replica that
+		// answers nowhere graded as serving.
+		for _, extraArgs := range [][]string{
+			{"--port", "9100"},
+			{"--port=9100"},
+			{"--por", "9100"},
+			{"--ssl-certfile", "/etc/tls/tls.crt", "--port", "9100"},
+		} {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ExtraArgs = extraArgs
+			})
+
+			c := renderOne(t, md, newRenderInstanceType()).Spec.Containers[0]
+			assert.Equal(t, int32(9100), c.Ports[0].ContainerPort, "%v", extraArgs)
+			for _, probe := range []*core.Probe{c.StartupProbe, c.ReadinessProbe, c.LivenessProbe} {
+				require.NotNil(t, probe, "%v", extraArgs)
+				assert.Equal(t, intstr.FromInt32(9100), probe.HTTPGet.Port, "%v", extraArgs)
+			}
+		}
+	})
+
+	t.Run("a declared port the engine was moved off is not gated", func(t *testing.T) {
+		// ADMISSION REFUSES THIS SHAPE, but only for what it admits from now on: an object stored
+		// before the rule still renders, and its Service keeps the declared port while the engine
+		// listens on the other one. A gate on either port would grade the other fact.
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 9000, Protocol: core.ProtocolTCP}}
+			md.Spec.Roles[0].ExtraArgs = []string{"--port", "9100"}
+		})
+
+		c := renderOne(t, md, newRenderInstanceType()).Spec.Containers[0]
+		assert.Equal(t, int32(9000), c.Ports[0].ContainerPort, "the declared port is the role's own")
+		assert.Nil(t, c.StartupProbe)
+		assert.Nil(t, c.ReadinessProbe)
+		assert.Nil(t, c.LivenessProbe)
+	})
+
+	t.Run("a role moving its host or demanding a client certificate is not gated", func(t *testing.T) {
+		// TWO WAYS TO DO IT, and both strand a replica that is serving. --host moves WHERE the
+		// engine listens, and the operator then leaves it alone, so it cannot know whether a probe
+		// reaches the address. Demanding a CLIENT certificate is the other: the kubelet has none
 		// to present, so the gate would fail against a listener serving every real client correctly.
 		//
 		// THAT SECOND ONE NEEDS TLS ACTUALLY TURNED ON to mean anything, which is why the case below
 		// carries a certificate. --ssl-cert-reqs by itself is covered as a GATED case further down.
 		for _, extraArgs := range [][]string{
-			{"--port", "9100"},
-			{"--port=9100"},
 			{"--host", "127.0.0.1"},
 			{"--host=127.0.0.1"},
 			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs", "2"},
@@ -1886,7 +1923,6 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs=-1"},
 			// The last occurrence is the one the engine's parser keeps.
 			{"--ssl-certfile", "/etc/tls/tls.crt", "--ssl-cert-reqs=0", "--ssl-cert-reqs=2"},
-			{"--ssl-certfile", "/etc/tls/tls.crt", "--port", "9100"},
 		} {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles[0].ExtraArgs = extraArgs

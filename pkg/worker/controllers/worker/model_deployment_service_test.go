@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -362,6 +363,154 @@ func TestRenderModelDeploymentService_Port(t *testing.T) {
 	}
 }
 
+// TestRenderModelDeploymentService_TargetFollowsTheEnginesPort covers a role that names its
+// engine's port in its own arguments and declares no ports: the engine listens where the role said,
+// so the container port, the Service's targetPort and the probes follow it there, while the
+// Service's own port and the published endpoint stay on the declared or default port a caller
+// already dials.
+func TestRenderModelDeploymentService_TargetFollowsTheEnginesPort(t *testing.T) {
+	testCases := []struct {
+		name      string
+		engine    string
+		extraArgs []string
+		command   []string
+		ports     []workercore.ModelDeploymentPort
+		// directDecode renders the role as an llm-d decoder fronted by its routing proxy.
+		directDecode bool
+		// wantPort is the Service's own port and the published endpoint's.
+		wantPort int32
+		// wantTargetPort is where the Service sends traffic, and where the probes grade.
+		wantTargetPort int32
+		// wantEnginePort is the main container's first port, the one its engine opens.
+		wantEnginePort int32
+		// wantProbes is false for a role the operator renders no probes for.
+		wantProbes bool
+	}{
+		{
+			// THE POSITIVE BASELINE: without it, an implementation that moved every Service to
+			// 9100 would pass the cases below.
+			name:     "no_port_flag_leaves_the_default",
+			wantPort: 8000, wantTargetPort: 8000, wantEnginePort: 8000, wantProbes: true,
+		},
+		{
+			name:      "a_flag_sharing_a_stem_moves_nothing",
+			extraArgs: []string{"--pooler-config", "{}"},
+			wantPort:  8000, wantTargetPort: 8000, wantEnginePort: 8000, wantProbes: true,
+		},
+		{
+			name:      "an_explicit_port_is_followed",
+			extraArgs: []string{"--port", "9100"},
+			wantPort:  8000, wantTargetPort: 9100, wantEnginePort: 9100, wantProbes: true,
+		},
+		{
+			name:      "an_inline_port_is_followed",
+			extraArgs: []string{"--port=9100"},
+			wantPort:  8000, wantTargetPort: 9100, wantEnginePort: 9100, wantProbes: true,
+		},
+		{
+			name:      "an_abbreviated_port_is_followed",
+			extraArgs: []string{"--por", "9100"},
+			wantPort:  8000, wantTargetPort: 9100, wantEnginePort: 9100, wantProbes: true,
+		},
+		{
+			name:      "an_abbreviated_inline_port_is_followed",
+			extraArgs: []string{"--por=9100"},
+			wantPort:  8000, wantTargetPort: 9100, wantEnginePort: 9100, wantProbes: true,
+		},
+		{
+			name:      "the_last_spelling_wins",
+			extraArgs: []string{"--port", "9000", "--por", "9100"},
+			wantPort:  8000, wantTargetPort: 9100, wantEnginePort: 9100, wantProbes: true,
+		},
+		{
+			// "--po" is ambiguous on vLLM, which also registers --pooler-config; SGLang reads it.
+			name: "sglang_reads_its_own_abbreviation", engine: workercore.ModelDeploymentEngineSGLang,
+			extraArgs: []string{"--po", "9100"},
+			wantPort:  8000, wantTargetPort: 9100, wantEnginePort: 9100, wantProbes: true,
+		},
+		{
+			name:      "a_declared_port_that_agrees_is_gated_on_it",
+			ports:     []workercore.ModelDeploymentPort{{Port: 9100, Protocol: core.ProtocolTCP}},
+			extraArgs: []string{"--port", "9100"},
+			wantPort:  9100, wantTargetPort: 9100, wantEnginePort: 9100, wantProbes: true,
+		},
+		{
+			// A take-over role gets no probes, but its Service still has to reach the engine.
+			name:     "a_take_over_command_is_followed",
+			command:  []string{"vllm", "serve", "m", "--port", "9100"},
+			wantPort: 8000, wantTargetPort: 9100, wantEnginePort: 9100,
+		},
+		{
+			// THE PROXY OWNS THE SERVING PORT, and the role's --port names the engine behind it.
+			name:         "a_direct_decoder_keeps_the_proxy_in_front",
+			extraArgs:    []string{"--port", "9100"},
+			directDecode: true,
+			wantPort:     8000, wantTargetPort: 8000, wantEnginePort: 9100, wantProbes: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				if tc.engine != "" {
+					md.Spec.Engine.Name = tc.engine
+				}
+				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
+				md.Spec.Roles[0].Command = tc.command
+				md.Spec.Roles[0].Ports = tc.ports
+				if tc.directDecode {
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+				}
+			})
+			in := ModelDeploymentRenderInput{
+				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				NativeSidecar: true,
+			}
+			if tc.directDecode {
+				in.Connector = ModelDeploymentConnectorRender{
+					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
+				}
+			}
+			pod, err := renderModelDeploymentPod(context.Background(), in)
+			require.NoError(t, err)
+
+			svcs := renderModelDeploymentServices(md, nil)
+			require.Len(t, svcs, 2)
+			for _, svc := range svcs {
+				require.Len(t, svc.Spec.Ports, 1, svc.Name)
+				assert.Equal(t, tc.wantPort, svc.Spec.Ports[0].Port, svc.Name)
+				assert.Equal(t, tc.wantTargetPort, svc.Spec.Ports[0].TargetPort.IntVal, svc.Name)
+			}
+			assert.Equal(t, "http://qwen.team-a.svc:"+strconv.Itoa(int(tc.wantPort)), modelDeploymentEndpoint(md))
+
+			main := pod.Spec.Containers[len(pod.Spec.Containers)-1]
+			require.Equal(t, modelDeploymentMainContainerName, main.Name)
+			assert.Equal(t, tc.wantEnginePort, main.Ports[0].ContainerPort)
+			served := false
+			for _, c := range append(slices.Clone(pod.Spec.InitContainers), pod.Spec.Containers...) {
+				for _, p := range c.Ports {
+					served = served || p.ContainerPort == tc.wantTargetPort
+				}
+			}
+			assert.True(t, served, "some container in the Pod opens the port the Service targets")
+
+			if !tc.wantProbes {
+				assert.Nil(t, main.StartupProbe)
+				assert.Nil(t, main.ReadinessProbe)
+				assert.Nil(t, main.LivenessProbe)
+
+				return
+			}
+			for _, probe := range []*core.Probe{main.StartupProbe, main.ReadinessProbe, main.LivenessProbe} {
+				require.NotNil(t, probe)
+				assert.Equal(t, tc.wantTargetPort, probe.HTTPGet.Port.IntVal,
+					"the gate grades the address the Service sends traffic to")
+			}
+		})
+	}
+}
+
 // TestModelDeploymentEndpoint pins the address a user is handed. It is derived from the Service's
 // name and namespace rather than read back off the object, because a ClusterIP is neither what
 // callers use nor stable across a recreate.
@@ -440,9 +589,9 @@ func TestModelDeploymentEndpoint_Scheme(t *testing.T) {
 			expected:  "https://qwen.team-a.svc:8000",
 		},
 		{
-			// Moving WHERE it listens withdraws the gate without touching the transport, which is
-			// the other half of the pair above.
-			name:      "moving the port alone leaves the transport as it was",
+			// Moving WHERE it listens moves the Service's targetPort, not the published address, and
+			// leaves the transport as it was.
+			name:      "moving the port alone leaves the published address and its transport as they were",
 			extraArgs: []string{"--port", "9100"},
 			expected:  "http://qwen.team-a.svc:8000",
 		},
@@ -572,6 +721,10 @@ func TestModelDeploymentEndpointReadsEveryFlagTheEngineGets(t *testing.T) {
 		assert.True(t, gradable,
 			"%s: an operator-supplied listen flag would move the engine where the published "+
 				"address cannot see it", engine)
+		_, err := modelDeploymentCommandPort(engine, operatorArgs)
+		assert.Error(t, err,
+			"%s: an operator-supplied --port would move the engine where the Service's target, read "+
+				"from the role's arguments alone, cannot see it", engine)
 	}
 }
 

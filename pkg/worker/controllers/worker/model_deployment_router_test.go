@@ -343,6 +343,26 @@ func TestRenderModelDeploymentRouterObjects_RefusesDifferentServingPorts(t *test
 	require.EqualError(t, err, "router requires every role to use the same serving port; got [8000 8100]")
 }
 
+// TestRenderModelDeploymentRouterObjects_TargetsThePortTheEngineOpens covers roles that move their
+// engine's port with their own --port and declare no ports: the router dials a Pod directly, so it
+// has to dial where the engine listens rather than the port the Services publish.
+func TestRenderModelDeploymentRouterObjects_TargetsThePortTheEngineOpens(t *testing.T) {
+	md := twoRoleDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		for i := range md.Spec.Roles {
+			md.Spec.Roles[i].ExtraArgs = []string{"--por", "9100"}
+		}
+	})
+
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "9100", objects.ConfigMap.Data[modelDeploymentRouterTargetPortsKey])
+
+	md.Spec.Roles[1].ExtraArgs = nil
+	_, err = renderModelDeploymentRouterObjects(context.Background(), md, nil)
+	require.EqualError(t, err, "router requires every role to use the same serving port; got [8000 9100]")
+}
+
 func TestRenderModelDeploymentRouterObjects_ProbesBothRouterContainers(t *testing.T) {
 	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
 	require.NoError(t, err)
