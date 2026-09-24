@@ -110,6 +110,8 @@ DOM_B="dom-b-${SFX}"
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 # All three labels, and each one is load-bearing. The instance label alone also selects the members,
 # which run the same image and would answer an exec with a different process. The component value for
@@ -213,9 +215,7 @@ fi
 POD="$(leader_pod)"
 if [ -z "$POD" ]; then
   record FAIL "leader pod found" "no pod carries the backend's label; the rest cannot run"
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  for r in "${ROWS[@]}"; do echo "$r" | tr '|' ' '; done
+  print_rows
   exit 1
 fi
 
@@ -822,11 +822,6 @@ else
 fi
 
 # Results.
-echo
-echo "STATUS | CHECK | OBJECT"
-# Split on the delimiter `record` actually wrote, not on whitespace. Nearly every CHECK name here is
-# multi-word, and flattening the `|` first made awk tokenize on spaces: the CHECK column collapsed to
-# its first word and the rest of the name leaked into OBJECT.
-for r in "${ROWS[@]}"; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+print_rows
 [ "$FAILS" -eq 0 ] || { echo "[case-43] ${FAILS} check(s) FAILED"; exit 1; }
 echo "[case-43] all checks passed"

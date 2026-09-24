@@ -126,11 +126,8 @@ FAILS=0
 ROWS=()
 CQ_WATCH_PID=""
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
-print_rows() {
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  for r in "${ROWS[@]}"; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
-}
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 # An input-required exit still owes the rows already recorded: a FAIL measured before the missing
 # input was noticed is a real failure, and exit 2 alone would report it as "input required".
 exit_input_required() {

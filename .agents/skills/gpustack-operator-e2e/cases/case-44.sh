@@ -111,6 +111,8 @@ LEASE_LAPSE=15
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 # count_lines exists because `grep -c … || echo 0` APPENDS a zero rather than substituting one: grep -c
 # already prints 0 when it matches nothing, and exits 1 while doing so, so the two together produce
@@ -202,9 +204,7 @@ YAML
 
 if ! wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Ready 180 >/dev/null; then
   record FAIL "backend ready" "the master did not reach Ready in 180s; nothing below can run"
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  for r in "${ROWS[@]}"; do echo "$r" | tr '|' ' '; done
+  print_rows
   exit 1
 fi
 
@@ -246,9 +246,7 @@ if [ -n "$missing" ]; then
   record FAIL "the pool and its binding exist" \
     "absent after the apply:${missing} — so nothing below has a subject. The apply said: \
 $(printf '%s' "${apply_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  for r in "${ROWS[@]}"; do echo "$r" | tr '|' ' '; done
+  print_rows
   exit 1
 fi
 
@@ -590,10 +588,6 @@ else
 fi
 
 # Results.
-echo
-echo "STATUS | CHECK | OBJECT"
-# Split on the delimiter `record` actually wrote, not on whitespace — see case-43 for what the
-# whitespace split did to multi-word CHECK names.
-for r in "${ROWS[@]}"; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+print_rows
 [ "$FAILS" -eq 0 ] || { echo "[case-44] ${FAILS} check(s) FAILED"; exit 1; }
 echo "[case-44] all checks passed"

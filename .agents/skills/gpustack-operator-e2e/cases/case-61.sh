@@ -84,7 +84,7 @@ record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0
 # API returns.
 #
 # THE LIST COMES BACK SORTED BY NAME AND CARRIES TYPES ON THEIR WAY OUT. Case 68 creates its own
-# `case68-nowhere` and deletes it without waiting, and that name sorts before an ordinary derived
+# `case68-held` and deletes it without waiting, and that name sorts before an ordinary derived
 # type -- so a case running straight after it picks a type that is already terminating. Naming one
 # is refused at admission, and the run then dies at fixture time for a reason that has nothing to do
 # with what it measures. Inactive is excluded for the mirror reason: a deployment on one is admitted

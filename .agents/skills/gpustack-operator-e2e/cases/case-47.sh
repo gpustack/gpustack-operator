@@ -10,16 +10,14 @@
 #              observed without an accelerator: what the operator RENDERED onto each replica, and
 #              what the store does with those values.
 #
-# THE ENGINE IS SGLANG AND THAT IS THE WHOLE DESIGN OF THIS CASE, not a preference. On the vLLM
-# family no tenant travels to the store at the versions this project ships, so two deployments on one
-# Binding render byte-identical configurations and both land in the tenant named `default`. "They
-# share" would then pass with the Binding doing nothing whatsoever -- a tautology in the shape of an
-# assertion. SGLang forwards the reuse domain as MOONCAKE_TENANT_ID, so same Binding means same
-# tenant and different Bindings mean different tenants, and the two halves below become two
+# THE ENGINE IS SGLANG BECAUSE OF WHERE ITS TENANT TRAVELS, not because it is the only engine given
+# one. Every engine is rendered the Binding's reuse domain: the vLLM family reads it as `tenant_id` in
+# a client config projected from a Pod annotation, SGLang as MOONCAKE_TENANT_ID on the container. The
+# variable is one value read straight off the Pod spec, so this case stays about the Binding rather
+# than about decoding a config; case-55 reads both carriers engine by engine. What still has to be
+# ruled out is a shared value that comes from a default rather than from the Binding, which is why the
+# pair must carry the Binding's own domain and the third deployment a different one -- two
 # observations instead of one.
-#   Which engines forward a tenant is `inject.SupportsTenant`'s answer, carried beside the version it
-#   was measured at. This case states no answer of its own; it asserts what came back for the engine
-#   it uses, and it fails if that changes.
 #
 # THE REPLICAS ARE NOT EXPECTED TO RUN. They are rendered from a client image that carries no engine,
 # so no container starts -- and nothing here needs one. Every value this case reads is on the Pod
@@ -231,7 +229,7 @@ TC="$(rendered_tenant case47-c)"
 if [ -z "$TA" ] || [ -z "$TB" ]; then
   record FAIL "the operator renders a tenant for an engine that reads one" \
     "MOONCAKE_TENANT_ID is empty on case47-a ('${TA}') or case47-b ('${TB}'); either the renderer \
-stopped emitting it, the facts table flipped for sglang, or no replica was rendered"
+stopped emitting it, SGLang stopped carrying the tenant in that variable, or no replica was rendered"
 elif [ "$TA" = "$TB" ] && [ "$TA" = "$DOMAIN" ]; then
   record PASS "two deployments on one Binding are rendered the same reuse domain" \
     "both carry MOONCAKE_TENANT_ID=${TA}, which is the Binding's own domain — sharing is a rendered \

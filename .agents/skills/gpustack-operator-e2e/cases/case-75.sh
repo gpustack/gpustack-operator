@@ -75,11 +75,11 @@ LEADER_SEL="app.kubernetes.io/name=kv-cache-backend,app.kubernetes.io/instance=$
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 results() {
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  for r in ${ROWS[@]+"${ROWS[@]}"}; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+  print_rows
   [ "$FAILS" -eq 0 ] || { echo "[case-${CASE_ID}] ${FAILS} check(s) FAILED"; return 1; }
   echo "[case-${CASE_ID}] all checks passed"
   return 0
@@ -205,9 +205,7 @@ for ((i = 0; i < 300; i += 5)); do
   [ -n "$EVENT_MSG" ] && [ "$UPD" = "3" ] && [ "$RDY" = "1" ] && break
   sleep 5
 done
-# The results table splits rows on '|', so a message carrying one is cut in half by the printer;
-# the trajectory's phase|rollout pairs are re-joined with a space before they reach a row.
-TRAJECTORY="$(awk -F'|' '!seen[$0]++ {printf "%s%s", (NR>1 ? " -> " : ""), $0}' "$TRAJ_FILE" | tr '|' ' ')"
+TRAJECTORY="$(awk -F'|' '!seen[$0]++ {printf "%s%s", (NR>1 ? " -> " : ""), $0}' "$TRAJ_FILE")"
 rm -f "$TRAJ_FILE"
 
 # ------------------------------------------------------------- the verdicts

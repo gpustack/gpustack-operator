@@ -52,6 +52,8 @@ trap restore EXIT
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 # The general InstanceType carries no unit spec by default; the Instance webhook needs one to size
 # the Pod. Set it and confirm it stuck (the validating webhook may be briefly unready after deploy).
@@ -264,8 +266,6 @@ else
 fi
 
 # Results.
-echo
-echo "STATUS | CHECK | OBJECT"
-for r in "${ROWS[@]}"; do echo "$r" | tr '|' ' ' | awk '{printf "%s | %s | %s\n", $1, $2, substr($0, index($0,$3))}'; done
+print_rows
 [ "$FAILS" -eq 0 ] || { echo "[case-37] ${FAILS} check(s) FAILED"; exit 1; }
 echo "[case-37] all checks passed"

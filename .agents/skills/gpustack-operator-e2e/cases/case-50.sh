@@ -65,12 +65,14 @@ GATE="kueue.x-k8s.io/admission"
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 # The first InstanceType A DEPLOYMENT CAN ACTUALLY NAME, which is not the same as the first one the
 # API returns.
 #
 # THE LIST COMES BACK SORTED BY NAME AND CARRIES TYPES ON THEIR WAY OUT. Case 68 creates its own
-# `case68-nowhere` and deletes it without waiting, and that name sorts before an ordinary derived
+# `case68-held` and deletes it without waiting, and that name sorts before an ordinary derived
 # type -- so a case running straight after it picks a type that is already terminating. Naming one
 # is refused at admission, and the run then dies at fixture time for a reason that has nothing to do
 # with what it measures. Inactive is excluded for the mirror reason: a deployment on one is admitted
@@ -531,13 +533,7 @@ $(role_block decode decode 1)"
   fi
 fi
 
-# Results. Split on the first two separators only: an OBJECT may itself carry "|" -- the QuotaReserved
-# row quotes a status|reason|message reading -- and splitting on every one cuts it at the first.
-echo
-echo "STATUS | CHECK | OBJECT"
-for r in "${ROWS[@]}"; do
-  rest="${r#*|}"
-  printf '%s | %s | %s\n' "${r%%|*}" "${rest%%|*}" "${rest#*|}"
-done
+# Results.
+print_rows
 [ "$FAILS" -eq 0 ] || { echo "[case-50] ${FAILS} check(s) FAILED"; exit 1; }
 echo "[case-50] all checks passed"

@@ -116,6 +116,8 @@ record() {
   [ "$1" = SKIP ] && SKIPS=$((SKIPS + 1))
   return 0
 }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 
 # kvi_wait_for polls one jsonpath until it equals want.
@@ -505,12 +507,7 @@ kvi_admission_refuses() {
 # kvi_results prints the table every case ends with, and sets the exit status.
 kvi_results() {
   local case_id="$1"
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  # Split on the delimiter `record` actually wrote, not on whitespace: a CHECK name is several words.
-  # Guarded for the same bash 3.2 reason as kvi_wait_for: a setup that fails before the first record
-  # leaves ROWS empty, and the banner would abort instead of printing the failure that caused it.
-  for r in ${ROWS[@]+"${ROWS[@]}"}; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+  print_rows
   [ "$FAILS" -eq 0 ] || { echo "[case-${case_id}] ${FAILS} check(s) FAILED"; return 1; }
   # A skipped check is not a passed one, and the footer has to say so. "all checks passed" over a
   # table of SKIPs is the shape this suite exists to avoid: a run that verified nothing, reported in

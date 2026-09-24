@@ -67,12 +67,14 @@ fi
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 # Every InstanceType A DEPLOYMENT CAN ACTUALLY NAME, in the API's order, which is not the same as
 # every one the API returns.
 #
 # THE LIST COMES BACK SORTED BY NAME AND CARRIES TYPES ON THEIR WAY OUT. Case 68 creates its own
-# `case68-nowhere` and deletes it without waiting, and that name sorts before an ordinary derived
+# `case68-held` and deletes it without waiting, and that name sorts before an ordinary derived
 # type -- so a case running straight after it picks a type that is already terminating. Naming one
 # is refused at admission, and the run then dies at fixture time for a reason that has nothing to do
 # with what it measures. Inactive is excluded for the mirror reason: a deployment on one is admitted
@@ -480,8 +482,6 @@ else
 fi
 
 # Results.
-echo
-echo "STATUS | CHECK | OBJECT"
-for r in "${ROWS[@]}"; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+print_rows
 [ "$FAILS" -eq 0 ] || { echo "[case-51] ${FAILS} check(s) FAILED"; exit 1; }
 echo "[case-51] all checks passed"
