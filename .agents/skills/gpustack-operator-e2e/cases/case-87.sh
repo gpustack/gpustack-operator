@@ -1275,10 +1275,12 @@ fi
 tas_md_force_release "$NS" "${PREFIX}-omit"
 kubectl -n "$NS" delete modeldeployment "${PREFIX}-omit" --wait=false >/dev/null 2>&1
 
-# Workload deletion releases Kueue quota before the Pods disappear and before the worker's
-# live-capacity ledger forgets their requests. The next carrier is an Instance, whose admission
-# reads that ledger, so crossing the boundary early would test deletion latency instead of whether
-# a plain Instance remains compatible with a topology-aware queue.
+# Workload deletion releases Kueue quota before the Pods disappear, and the InstanceType's
+# status.cpu.remaining (nominal quota less the ClusterQueue's reservation) follows the ClusterQueue
+# only once the InstanceType is reconciled again. Instance admission bounds a CPU request by
+# status.cpu.capacity, so neither refuses the next carrier; an Instance created early would instead
+# wait for quota or for a node to free up, and its bounded wait would test deletion latency instead
+# of whether a plain Instance remains compatible with a topology-aware queue.
 PRIOR_PODS_RELEASED=no
 for _ in $(seq 1 60); do
   PRIOR_PODS="$(kubectl -n "$NS" get pods \

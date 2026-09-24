@@ -63,10 +63,6 @@ says it works.
 
 ## Known failures at the minimum
 
-- **vLLM `0.29.0`, a pair with a store, behind `vllm-router`**: the decode engine aborts on its
-  first request with an assertion in vLLM's store connector, while the store write succeeds. The
-  same pair behind `llm-d-router` has served with both connectors moving bytes; what separates the
-  two runs has not been isolated.
 - **SGLang with a store** holds a pinned host pool and needs the node's available memory above a
   fixed reserve plus that pool — see [SGLang's host-memory
   tier](kv-cache-injection.md#sglangs-host-memory-tier).
