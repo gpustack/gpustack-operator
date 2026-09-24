@@ -114,8 +114,18 @@ spec:
 EOF
 )
 rc=$?
-if [ $rc -ne 0 ] && echo "$err" | grep -qiE "denied|memory|admission|webhook"; then
-  record PASS "memoryless .sliced rejected" "webhook denied: $(echo "$err" | tr '\n' ' ' | grep -oiE 'admission webhook[^;]*' | cut -c1-48)"
+# The PASS needs the webhook's OWN wording for the missing memory budget. A refusal for anything else
+# — a quantity the API server will not parse, or another rule of the same webhook — must not pass,
+# and the reason is printed whole so a reader can see which one fired.
+#
+# The wording is also the attribution. The webhook refuses with an Invalid status, which the API
+# server relays as its own "The Pod ... is invalid:" envelope, with no "admission webhook" prefix to
+# key on; the sentence itself is written only by the Pod webhook.
+reason=$(echo "$err" | tr '\n' ' ' | sed 's/  */ /g')
+if [ $rc -ne 0 ] && echo "$reason" | grep -qF "request must set ${MEMPCT} or ${SLICED}.memory-mib"; then
+  record PASS "memoryless .sliced rejected" "webhook denied: $(echo "$reason" | cut -c1-320)"
+elif [ $rc -ne 0 ]; then
+  record FAIL "memoryless .sliced rejected" "refused, but not for the missing memory budget: $(echo "$reason" | cut -c1-320)"
 else
   # If it slipped through, clean it up and fail.
   kubectl -n default delete pod "$POD_BAD" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true
