@@ -1,6 +1,6 @@
 # Spec: Per-Card Fit Labels
 
-Status: Building
+Status: Shipped
 Blocked on: nothing. It waited on #577, which makes Gate 3 judge a shared request on the node TAS
 assigned. The shared label is equivalent to Gate 3 only under that judgment. #577 has merged, and the
 build starts from `origin/main` after it.
@@ -462,7 +462,7 @@ proves the whole path.
       Acceptance:
       - `FitSlicedMaxFreeUnitsLabelKey(aKey)` returns `sliced-max-free-units.fit.gpustack.ai/<aKey>`.
       - `FitSharedFreeCardsLabelKey(aKey)` returns `shared-free-cards.fit.gpustack.ai/<aKey>`.
-      - `IsFitLabelKey` accepts exactly those two shapes. It rejects `fit.gpustack.ai/x`, `x.fit.gpustack.ai.evil/y` and an empty name part.
+      - `IsFitLabelKey` accepts exactly those two shapes, and only as valid label keys. It rejects `fit.gpustack.ai/x`, `x.fit.gpustack.ai.evil/y`, an empty name part, and a model that is not label grammar. The reconciler and the webhook both skip a key it rejects, because an administrator's InstanceType group and a Devices group ID are checked against label grammar nowhere else.
       - `EqualIgnoringFitLabels(a, b)` compares two label maps with every fit key left out, and `FilterFitLabels` returns only the fit keys of a map.
       - A table case builds a key from a 63-character `aKey` and checks it with `validation.IsQualifiedName`.
       Verify: `go test ./pkg/nodefeature/ -run 'TestFitLabelKeys$|TestIsFitLabelKey$|TestEqualIgnoringFitLabels$' -v`
@@ -581,7 +581,7 @@ proves the whole path.
       - The scheduling-chain page gains a short section on the two labels, their writer, the Workload pin, the shared-Kueue identification, and why the pin never reaches a Pod.
       Verify: `make lint docs </dev/null`
 
-- [ ] **T8 · End-to-end case on kind**
+- [x] **T8 · End-to-end case on kind**
       Blocked by: T2, T3, T4, T5, T6
       Owns: `.agents/skills/gpustack-operator-e2e/cases/case-96.sh`, `.agents/skills/gpustack-operator-e2e/SKILL.md`
       Gate: review
@@ -593,6 +593,16 @@ proves the whole path.
       - The SKILL.md case table gains row 96 with its trigger paths.
       - The case has been run on a local kind cluster built from the branch image, and its table is recorded in the PR.
       Verify: `KUBECONFIG=<scratch> bash .agents/skills/gpustack-operator-e2e/cases/case-96.sh <NS>`
+      Result: passed on a local kind cluster, one control-plane node and two workers, with the chart deployed from the branch image. The worker's binary reported the branch head's own code commit (`gpustack-operator --version`). Cases 1 and 4 passed beside it. The run was repeated after rebasing onto the change that lets several slices share an accelerator in the node-devices check, and again after the review fixes, with the same readings.
+
+      | Check | Reading |
+      |---|---|
+      | fit labels follow the ledgers | A=640000, B=1600000 |
+      | without the pin the fragmented node livelocks | reserved four times in 110 s, every time on A; each reservation answered `Retry`; never admitted |
+      | the labels stay published with the pin off | A=640000 after that leg |
+      | with the pin TAS takes the roomy node first | reserved once, on B; check `Pending` then `Ready`; admitted |
+      | the Pod carries no fit key | `nodeSelector` hostname B; no `fit.gpustack.ai` anywhere in the Pod spec |
+      | with no node fitting the Workload holds no quota | `doesn't allow to fit any of 1 pod(s). Total nodes: 2; excluded: affinity: 2` |
 
 ### Test Plan
 
