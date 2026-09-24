@@ -1369,6 +1369,12 @@ func TestInstanceWebhook_ValidateUpdate(t *testing.T) {
 			phase:        workerctrl.InstancePhaseStopped,
 			registerType: "live",
 		},
+		{
+			name:    "stop starting allowed",
+			oldType: "live", newType: "live",
+			oldStop: false, newStop: true,
+			phase: workerctrl.InstancePhaseStarting,
+		},
 	}
 
 	for _, c := range cases {
@@ -1399,10 +1405,8 @@ func TestInstanceWebhook_ValidateUpdate(t *testing.T) {
 
 // admittingInstanceClient builds a fake client that passes every Instance spec update through
 // InstanceWebhook.ValidateUpdate against the stored object, as the API server does. A status write
-// goes to the status subresource, which the webhook does not match, so it is not validated. When
-// stopFails is non-nil it is consulted on each admitted update that sets spec.stop, and a non-nil
-// return fails that update in place of the write.
-func admittingInstanceClient(stopFails func() error, objs ...ctrlcli.Object) ctrlcli.Client {
+// goes to the status subresource, which the webhook does not match, so it is not validated.
+func admittingInstanceClient(objs ...ctrlcli.Object) ctrlcli.Client {
 	w := &InstanceWebhook{}
 	cli := ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
@@ -1422,11 +1426,6 @@ func admittingInstanceClient(stopFails func() error, objs ...ctrlcli.Object) ctr
 				}
 				if _, err := w.ValidateUpdate(ctx, old, inst); err != nil {
 					return err
-				}
-				if stopFails != nil && !old.Spec.Stop && inst.Spec.Stop {
-					if err := stopFails(); err != nil {
-						return err
-					}
 				}
 				return c.Update(ctx, obj, opts...)
 			},
@@ -1469,15 +1468,14 @@ func assertInstanceStopped(t *testing.T, cli ctrlcli.Client, key ctrlcli.ObjectK
 }
 
 // TestInstanceWebhook_AdmitsTheDrainStopOfAStartingInstance runs the Instance controller against
-// this webhook. The webhook refuses to stop an Instance whose phase is Starting, and a Pod that is
-// pulling its image, failing its readiness probe, or crash-looping keeps the Instance Starting for as
-// long as a drain lasts. The controller's stop must still be admitted, and once spec.stop is written
-// the Instance stays stopped after the queue leaves HoldAndDrain: its Pod is deleted and not
-// recreated.
+// this webhook. A Pod that is pulling its image, failing its readiness probe, or crash-looping keeps
+// the Instance Starting for as long as a drain lasts, so the controller's stop must be admitted in
+// that phase. Once spec.stop is written the Instance stays stopped after the queue leaves
+// HoldAndDrain: its Pod is deleted and not recreated.
 func TestInstanceWebhook_AdmitsTheDrainStopOfAStartingInstance(t *testing.T) {
 	const typeName = "draining-type"
 	key := ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}
-	cli := admittingInstanceClient(nil, startingInstanceUnderDrain(typeName)...)
+	cli := admittingInstanceClient(startingInstanceUnderDrain(typeName)...)
 
 	require.NoError(t, reconcileInstanceThroughWebhook(cli, key), "the drain stop is admitted")
 	got := &workercore.Instance{}
@@ -1496,30 +1494,47 @@ func TestInstanceWebhook_AdmitsTheDrainStopOfAStartingInstance(t *testing.T) {
 	assertInstanceStopped(t, cli, key)
 }
 
-// TestInstanceWebhook_DrainStopRetriesAFailedSpecWrite pins what the order of the drain stop's two
-// writes leaves behind when the second one fails: the phase is marked Stopping on the status
-// subresource first, then spec.stop is written. A failed spec write leaves the Instance Stopping with
-// its Pod still running, and the next reconcile must retry the stop rather than stay there.
-func TestInstanceWebhook_DrainStopRetriesAFailedSpecWrite(t *testing.T) {
-	const typeName = "draining-type"
+// TestInstanceWebhook_AdmitsAUserStopOfACrashLoopingInstance runs a user's stop through this webhook
+// and the Instance controller. A crash-looping Pod summarizes to Starting and stays there for as long
+// as it keeps crashing, so a stop refused in that phase would leave the user no way to stop the
+// Instance. The stop is admitted, and the controller deletes the Pod and marks the Instance Stopped.
+func TestInstanceWebhook_AdmitsAUserStopOfACrashLoopingInstance(t *testing.T) {
+	const typeName = "active-type"
 	key := ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}
-	failed := false
-	cli := admittingInstanceClient(func() error {
-		if failed {
-			return nil
-		}
-		failed = true
-		return errors.New("injected spec write failure")
-	}, startingInstanceUnderDrain(typeName)...)
+	cli := admittingInstanceClient(
+		webhookInstance("inst", typeName),
+		&core.Pod{
+			ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"},
+			Spec:       core.PodSpec{NodeName: "node-1"},
+			Status: core.PodStatus{
+				Phase: core.PodRunning,
+				Conditions: []core.PodCondition{
+					{Type: core.PodScheduled, Status: core.ConditionTrue},
+					{Type: core.PodInitialized, Status: core.ConditionTrue},
+					{Type: core.PodReady, Status: core.ConditionFalse, Reason: "ContainersNotReady"},
+				},
+				ContainerStatuses: []core.ContainerStatus{{
+					Name: "main",
+					State: core.ContainerState{Waiting: &core.ContainerStateWaiting{
+						Reason:  "CrashLoopBackOff",
+						Message: "back-off 10s restarting failed container",
+					}},
+				}},
+			},
+		},
+		&core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-1"}},
+		&worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: typeName}},
+		&kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: typeName}},
+	)
 
-	err := reconcileInstanceThroughWebhook(cli, key)
-	require.ErrorContains(t, err, "injected spec write failure")
+	require.NoError(t, reconcileInstanceThroughWebhook(cli, key))
 	got := &workercore.Instance{}
 	require.NoError(t, cli.Get(context.Background(), key, got))
-	require.False(t, got.Spec.Stop, "the failed spec write left spec.stop unset")
-	require.Equal(t, workerctrl.InstancePhaseStopping, got.Status.Phase,
-		"the status write landed before the spec write failed")
-	require.NoError(t, cli.Get(context.Background(), key, &core.Pod{}), "the Pod is still running")
+	require.Equal(t, workerctrl.InstancePhaseStarting, got.Status.Phase,
+		"a crash-looping Pod summarizes to Starting")
+
+	got.Spec.Stop = true
+	require.NoError(t, cli.Update(context.Background(), got), "the user's stop is admitted")
 
 	for range 3 {
 		require.NoError(t, reconcileInstanceThroughWebhook(cli, key))
