@@ -1184,15 +1184,14 @@ func TestKVCacheBackendReconciler_ConvergesAnEFASwitch(t *testing.T) {
 	setProtocol("EFA")
 	efa := memberPod()
 	assert.True(t, efa.HostNetwork, "switching to EFA takes the host network")
-	require.Len(t, efa.Volumes, 1, "the device tree, shared with RDMA")
+	assert.Empty(t, efa.Volumes,
+		"and no device tree, as on RDMA: the plugin injects the nodes it grants, and the tree "+
+			"would add the ungranted ones, which libfabric's EFA provider fails on")
 	assert.True(t, hasEFADevice(efa))
 
 	setProtocol("RDMA")
 	rdma := memberPod()
-	assert.Empty(t, rdma.Volumes,
-		"RDMA shares the host-network base and the capabilities, and NOT the mount: switching to "+
-			"it has to take the device tree back off on the same render, or the Pod keeps a tree "+
-			"that the protocol it now names does not ask for")
+	assert.Empty(t, rdma.Volumes, "neither host fabric mounts the device tree")
 	rdmaDevice := rdma.Containers[0].Resources.Limits["device.gpustack.ai/rdma.shared"]
 	assert.Equal(t, int64(1), rdmaDevice.Value(),
 		"and gains its own request in the same render")

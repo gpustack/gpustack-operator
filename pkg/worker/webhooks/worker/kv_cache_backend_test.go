@@ -359,24 +359,24 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			}
 		}, ""},
 		{"a group mounting over the device tree on tcp", func(k *workercore.KVCacheBackend) {
-			// Refused even though this backend's protocol renders no such mount: the protocol is a
+			// Refused even though this backend's protocol is granted no device: the protocol is a
 			// field an update may change, while a mount path is judged only when it is written.
 			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
 				{Path: "/dev/infiniband", MountPath: "/dev/infiniband"},
 			}
-		}, "overlaps where an EFA group's device tree is mounted"},
+		}, "overlaps where a host fabric's device plugin injects"},
 		{"a group mounting the parent of the device tree", func(k *workercore.KVCacheBackend) {
-			// The renderer appends its own mounts first, so this one lands after the device tree and
-			// whether it shadows it is the runtime's decision rather than this operator's.
+			// This one lands over the device nodes a plugin injects under the tree, and whether it
+			// shadows them is the runtime's decision rather than this operator's.
 			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
 				{Path: "/dev", MountPath: "/dev"},
 			}
-		}, "overlaps where an EFA group's device tree is mounted"},
+		}, "overlaps where a host fabric's device plugin injects"},
 		{"a group mounting inside the device tree", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
 				{Path: "/dev/infiniband/uverbs0", MountPath: "/dev/infiniband/uverbs0"},
 			}
-		}, "overlaps where an EFA group's device tree is mounted"},
+		}, "overlaps where a host fabric's device plugin injects"},
 		{"a group mounting a sibling the device tree only prefixes as a string", func(k *workercore.KVCacheBackend) {
 			// /dev/infiniband2 is NOT under /dev/infiniband, and a plain string prefix would have
 			// said it was. This is the case that keeps the rule from refusing legitimate paths.
@@ -455,9 +455,10 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			"",
 		},
 
-		// The tier and the RDMA device tree are mounted into ONE container, so an overlap is
-		// resolved by the kubelet — one shadows the other — rather than reported on this object.
-		// Refused whatever the transport is today, because the transport is editable.
+		// The tier and the device nodes a host fabric's plugin injects land in ONE container, so an
+		// overlap is resolved by the container runtime — one shadows the other — rather than
+		// reported on this object. Refused whatever the transport is today, because the transport
+		// is editable.
 		{
 			"a disk path that is the RDMA device tree", withDiskPath("/dev/infiniband"),
 			"must not overlap /dev/infiniband",
@@ -471,8 +472,9 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			"must not overlap /dev/infiniband",
 		},
 		{
-			// The device tree is the only mount either host fabric adds, so the AWS EFA install
-			// prefix is an ordinary path here: an EFA member takes its libfabric from the image.
+			// Neither host fabric makes the renderer mount anything of its own, so the AWS EFA
+			// install prefix is an ordinary path here: an EFA member takes its libfabric from the
+			// image.
 			"a disk path that is the EFA install prefix on a node", withDiskPath("/opt/amazon/efa"),
 			"",
 		},

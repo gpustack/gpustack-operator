@@ -210,9 +210,9 @@ Five rules the path has to satisfy, all enforced at apply time:
 - It **may not begin or end with whitespace**, spaces and tabs alike.
 
 > **Why** — the root directory would mount the node's whole filesystem into a third-party container.
-> The EFA transport mounts `/dev/infiniband` into this same container; two mounts on one
-> path are resolved by the kubelet with one shadowing the other, which nothing on the object would
-> record. That rule holds whatever
+> A host fabric's device plugin injects the granted device nodes under `/dev/infiniband` in this
+> same container; a tier on that path would shadow them or be shadowed, which nothing on the object
+> would record. That rule holds whatever
 > `spec.transport.protocol` says today, because the field is editable. The
 > `..` rule mirrors the store's own, which refuses such a path before checking whether the directory
 > exists. The whitespace rule exists because the path is mounted exactly as written, so a trailing

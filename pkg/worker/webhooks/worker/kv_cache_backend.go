@@ -770,11 +770,11 @@ func validateKVCacheBackendMember(
 
 // pathsOverlap reports whether two mount paths are the same path or one contains the other.
 //
-// CONTAINMENT and not just equality, because the renderer appends its own mounts BEFORE a group's
-// declared ones: a declared /dev would be mounted after the device tree at /dev/infiniband, and
-// whether the later mount shadows the earlier one is decided by the container runtime rather than by
-// anything here. A rule that depends on an ordering nobody in this repository verified is not a rule,
-// so the overlap is refused instead and the question never arises.
+// CONTAINMENT and not just equality, because a declared /dev would be mounted over the device nodes
+// a host fabric's plugin injects under /dev/infiniband, and which of the two the container sees is
+// decided by the container runtime rather than by anything here. A rule that depends on an ordering
+// nobody in this repository verified is not a rule, so the overlap is refused instead and the
+// question never arises.
 //
 // Compared by path ELEMENT, so /dev/infiniband2 does not read as being under /dev/infiniband the way
 // a plain string prefix would have it. Both sides are cleaned first: the schema requires an absolute
@@ -797,8 +797,8 @@ func pathsOverlap(a, b string) bool {
 // whole reason these are refused here rather than left to the Pod, and it is why EVERY comparison
 // below is by overlap rather than by equality.
 //
-// The device tree's path is refused UNCONDITIONALLY, including on a group whose protocol renders no
-// such mount today: the protocol is a field an update may change while a mount path is judged only
+// The device tree's path is refused UNCONDITIONALLY, including on a group whose protocol is granted
+// no device today: the protocol is a field an update may change while a mount path is judged only
 // when it is written, so admitting it under tcp would leave a collision that arrives on the day
 // somebody edits an unrelated field. The disk tier's path is judged against the group's CURRENT
 // localDisks instead, because that path is itself declared right there — a group that moves its
@@ -831,9 +831,10 @@ func validateKVCacheBackendMemberHostPaths(
 		// group with none must meet it just the same.
 		if pathsOverlap(mountPath, mooncake.RDMADevicePath) {
 			errs = append(errs, field.Invalid(mountPathPath, mountPath,
-				"overlaps where an EFA group's device tree is mounted ("+mooncake.RDMADevicePath+
-					"), and is refused under every protocol because the protocol is editable: "+
-					"declaring it here would collide with that mount the day the group becomes EFA"))
+				"overlaps where a host fabric's device plugin injects the granted device nodes ("+
+					mooncake.RDMADevicePath+"), and is refused under every protocol because the "+
+					"protocol is editable: declaring it here would collide with those nodes the "+
+					"day the group becomes RDMA or EFA"))
 			continue
 		}
 
@@ -955,16 +956,18 @@ func validateKVCacheBackendLocalDisk(
 			"must not be the root directory: it would mount the node's whole filesystem into a "+
 				"third-party container"))
 	case pathOverlaps(filepath.Clean(path), mooncake.RDMADevicePath):
-		// The two mounts land in ONE container, so a collision is resolved by the kubelet rather
-		// than reported here — one mount shadows the other, and which one wins is not something
-		// this object records. Refused whatever the transport is today, because the transport is
-		// editable: a tier that merely does not collide yet would start colliding the moment
-		// someone switched the backend to a host fabric. The device tree is the only mount either
-		// host fabric adds; an EFA member takes its libfabric from the image.
+		// The tier and the device nodes a host fabric's plugin injects land in ONE container, so a
+		// collision is resolved by the container runtime rather than reported here — one shadows
+		// the other, and which one wins is not something this object records. Refused whatever
+		// the transport is today, because the transport is editable: a tier that merely does not
+		// collide yet would start colliding the moment someone switched the backend to a host
+		// fabric. Neither host fabric makes the renderer mount anything of its own; an EFA member
+		// takes its libfabric from the image.
 		errs = append(errs, field.Invalid(pathPath, disk.Path, fmt.Sprintf(
-			"must not overlap %s, which the EFA transport mounts into the same container: "+
-				"one mount would shadow the other, and the transport can be switched to it after "+
-				"this path is set", mooncake.RDMADevicePath)))
+			"must not overlap %s, where a host fabric's device plugin injects the granted device "+
+				"nodes into the same container: the tier would shadow them or be shadowed, and "+
+				"the transport can be switched to one after this path is set",
+			mooncake.RDMADevicePath)))
 	}
 
 	// The capacity is a resource.Quantity, so it is a string in the schema and no marker can bound

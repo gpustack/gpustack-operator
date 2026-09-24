@@ -382,15 +382,14 @@ wants it back says so in `protocol` rather than by leaving a field empty.
 > device cgroup, and the store reported no error: it discovered zero HCAs and installed `TCP` while
 > the object still read `RDMA`. Nothing in the cluster said the fabric was not in use.
 
-**Only `EFA` mounts `/dev/infiniband`.** The RDMA grant carries the verbs character device of each
-endpoint it allocates, so mounting the tree beside it would add every adapter the member was **not**
-granted — visible, unopenable, and enumerated by the store on its way to skipping them.
+**No member mounts `/dev/infiniband`.** Each fabric's plugin injects the verbs character device of
+every device it grants, so mounting the tree beside that grant would add every adapter the member
+was **not** granted — visible and unopenable.
 
-**EFA keeps the mount, and no longer because nothing has been read.** The reading exists: an EFA Pod
-requesting the resource and mounting nothing initialized the fabric and completed a cross-node
-transfer, and so did a rendered member with the mount patched out. AWS's plugin injects the device
-node it allocates, so the mount is redundant **under this plugin** — which is a property of that
-allocator rather than of EFA, and is why the mount stays until something asks for it to go.
+**On `EFA` the mount breaks a partial grant.** A member granted fewer EFA devices than its node has
+would see the rest through the tree, and `open()` on one returns `EPERM` from the device cgroup.
+libfabric's EFA provider gives up its whole device list on the first `EPERM`, so the store reports
+`No available EFA devices` and the container restarts in a loop. Without the mount it initializes.
 
 Nothing is mounted from a host EFA install — the libfabric an `EFA` member runs on is in the image.
 
@@ -468,8 +467,8 @@ two declares a protocol that does not ask for them.
 Each `hostPaths[]` entry is `{path, mountPath, type, readOnly}`. Name a `type` — left empty the
 kubelet checks nothing, so a missing path becomes an empty directory in the container and the member
 starts anyway. A mount path is refused if it duplicates another entry's, if it is `/dev/infiniband`
-(the tree an `EFA` group is rendered, refused under every protocol since that can change later), or
-if it is this group's own `localDisks[].path`.
+(where a fabric's device plugin injects the granted device nodes, refused under every protocol since
+that can change later), or if it is this group's own `localDisks[].path`.
 
 Two worked groups. The NVIDIA one needs no mounts at all, because the container runtime injects the
 driver once the variable tells it which devices to inject:
