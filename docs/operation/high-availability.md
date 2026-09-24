@@ -27,6 +27,11 @@ that, surplus replicas stay `Pending` forever. This page assumes three replicas 
 fewer, lower the counts or use `ScheduleAnyway`, a preference. The components tolerate control-plane
 taints, so three control-plane nodes spread fine.
 
+They tolerate **those taints and no others**, a cordon's included, so a pod evicted by a drain never
+lands back on the node being drained. Where your nodes carry a taint of your own, add it to each
+component's `tolerations`. Earlier releases let the Kueue controller manager, the NFD master and the NFD
+gc tolerate every taint; an install that relied on that must set their three lists before upgrading.
+
 ## The knobs, per component
 
 | Component | Replicas | PodDisruptionBudget | Node spread |

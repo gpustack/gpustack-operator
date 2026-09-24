@@ -472,10 +472,24 @@ kueue:
     # items:
     #   type: object
     # @schema
-    # -- Tolerations for the Kueue controller manager. Defaults tolerate every taint, so
-    # the manager keeps admitting workloads wherever the control plane runs.
+    # -- Tolerations for the Kueue controller manager. Defaults tolerate only the control-plane
+    # taints, as the worker's do. A blanket `operator: "Exists"` would also tolerate
+    # `node.kubernetes.io/unschedulable`, sending an evicted pod straight back to the node being
+    # drained, and would opt out of the default five-minute eviction from an unreachable node. Where
+    # the only nodes left for it carry a taint of your own, add that taint here.
     tolerations:
-      - operator: "Exists"
+      - key: "node-role.kubernetes.io/master"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/controlplane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "CriticalAddonsOnly"
+        operator: "Exists"
+        effect: "NoSchedule"
     manager:
       image:
         # -- Kueue controller manager image repository.
@@ -683,10 +697,24 @@ node-feature-discovery:
     # items:
     #   type: object
     # @schema
-    # -- Tolerations for the NFD master. Defaults tolerate every taint, so labelling keeps
-    # working wherever the control plane runs.
+    # -- Tolerations for the NFD master. Defaults tolerate only the control-plane taints, as the
+    # worker's do. A blanket `operator: "Exists"` would also tolerate
+    # `node.kubernetes.io/unschedulable`, sending an evicted pod straight back to the node being
+    # drained, and would opt out of the default five-minute eviction from an unreachable node. Where
+    # the only nodes left for it carry a taint of your own, add that taint here.
     tolerations:
-      - operator: "Exists"
+      - key: "node-role.kubernetes.io/master"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/controlplane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "CriticalAddonsOnly"
+        operator: "Exists"
+        effect: "NoSchedule"
     config:
       # -- What the NFD master is allowed to write. Every value here restates an NFD default,
       # stated because the whole chain depends on it: labels, taints, annotations and extended
@@ -774,10 +802,24 @@ node-feature-discovery:
     # items:
     #   type: object
     # @schema
-    # -- Tolerations for the NFD gc. Defaults tolerate every taint, so stale NodeFeature and
-    # NodeResourceTopology objects are collected wherever the control plane runs.
+    # -- Tolerations for the NFD gc. Defaults tolerate only the control-plane taints, as the
+    # worker's do. A blanket `operator: "Exists"` would also tolerate
+    # `node.kubernetes.io/unschedulable`, sending an evicted pod straight back to the node being
+    # drained, and would opt out of the default five-minute eviction from an unreachable node. Where
+    # the only nodes left for it carry a taint of your own, add that taint here.
     tolerations:
-      - operator: "Exists"
+      - key: "node-role.kubernetes.io/master"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/controlplane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "CriticalAddonsOnly"
+        operator: "Exists"
+        effect: "NoSchedule"
 
 # -- [csi-driver-nfs](https://github.com/kubernetes-csi/csi-driver-nfs) subchart (chart
 # 4.13.4).

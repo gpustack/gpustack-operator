@@ -1138,7 +1138,7 @@
               "type": "integer"
             },
             "tolerations": {
-              "description": "Tolerations for the Kueue controller manager. Defaults tolerate every taint, so\nthe manager keeps admitting workloads wherever the control plane runs.",
+              "description": "Tolerations for the Kueue controller manager. Defaults tolerate only the control-plane\ntaints, as the worker's do. A blanket `operator: \"Exists\"` would also tolerate\n`node.kubernetes.io/unschedulable`, sending an evicted pod straight back to the node being\ndrained, and would opt out of the default five-minute eviction from an unreachable node. Where\nthe only nodes left for it carry a taint of your own, add that taint here.",
               "items": {
                 "required": [],
                 "type": "object"
@@ -1280,7 +1280,7 @@
               "type": "object"
             },
             "tolerations": {
-              "description": "Tolerations for the NFD gc. Defaults tolerate every taint, so stale NodeFeature and\nNodeResourceTopology objects are collected wherever the control plane runs.",
+              "description": "Tolerations for the NFD gc. Defaults tolerate only the control-plane taints, as the\nworker's do. A blanket `operator: \"Exists\"` would also tolerate\n`node.kubernetes.io/unschedulable`, sending an evicted pod straight back to the node being\ndrained, and would opt out of the default five-minute eviction from an unreachable node. Where\nthe only nodes left for it carry a taint of your own, add that taint here.",
               "items": {
                 "required": [],
                 "type": "object"
@@ -1502,7 +1502,7 @@
               "type": "object"
             },
             "tolerations": {
-              "description": "Tolerations for the NFD master. Defaults tolerate every taint, so labelling keeps\nworking wherever the control plane runs.",
+              "description": "Tolerations for the NFD master. Defaults tolerate only the control-plane taints, as the\nworker's do. A blanket `operator: \"Exists\"` would also tolerate\n`node.kubernetes.io/unschedulable`, sending an evicted pod straight back to the node being\ndrained, and would opt out of the default five-minute eviction from an unreachable node. Where\nthe only nodes left for it carry a taint of your own, add that taint here.",
               "items": {
                 "required": [],
                 "type": "object"
