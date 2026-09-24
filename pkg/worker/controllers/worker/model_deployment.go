@@ -319,6 +319,26 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			continue
 		}
 
+		// A FAILED POD IS A REPLICA THAT HAS ALREADY LEFT, though nothing deleted it: the kubelet
+		// evicting it under node pressure, or rejecting it at admission, leaves it in Failed with no
+		// deletion timestamp, and a Failed Pod never runs again. Counted as live it would still hold
+		// its ordinal and the current render's hash, so the pass would create nothing for the slot and
+		// report the replica current. It is deleted here, and its Workload with it below, on the same
+		// terms as any departure this pass initiates: the Workload is what releases Kueue's finalizer
+		// on the Pod, and the replacement is a fresh admission once the ordinal reads empty. A Member of
+		// a larger replica goes the same way, and its surviving Members are left short, which the
+		// rollout below turns over as a whole.
+		if pod.Status.Phase == core.PodFailed {
+			logger.Info("removing replica that failed", "pod", pod.Name, "reason", pod.Status.Reason)
+			if err = r.Client.Delete(ctx, pod); err != nil && !kerrors.IsNotFound(err) {
+				logger.Error(err, "delete failed replica", "pod", pod.Name)
+				return ctrl.Result{}, err
+			}
+			departed = append(departed, *pod)
+
+			continue
+		}
+
 		liveByRole[role] = append(liveByRole[role], pod)
 	}
 

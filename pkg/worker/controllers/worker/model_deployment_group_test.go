@@ -914,6 +914,132 @@ func TestModelDeployment_AWorkloadWithAMemberStillStandingSurvivesADeparture(t *
 			"member too, which is a serving replica paying for a departed one")
 }
 
+// TestModelDeployment_AFailedReplicaIsReplaced covers the replica the kubelet ends without deleting
+// it: an eviction under node pressure, or a Pod the kubelet rejects at admission. Either leaves the
+// Pod in phase Failed with no deletion timestamp, and a Failed Pod never runs again.
+//
+// LEFT ALONE IT HOLDS ITS ORDINAL FOREVER. It still carries its ordinal and the current render's
+// hash, so a pass reading only those counts it as a current replica: nothing is created for the
+// ordinal, and the rollout axis reports every replica up to date while the role serves one short.
+//
+// THE UIDs ARE STAMPED for the reason the stranded-Workload case above states: with none, every Pod
+// is the same owner to every Workload, and the case could not tell the failed replica's Workload from
+// its sibling's.
+func TestModelDeployment_AFailedReplicaIsReplaced(t *testing.T) {
+	ctx := context.Background()
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaPods(t, cli), 4)
+
+	for _, pod := range replicaPods(t, cli) {
+		stamped := pod.DeepCopy()
+		stamped.UID = types.UID("uid-" + pod.Name)
+		require.NoError(t, cli.Update(ctx, stamped))
+	}
+	pods := replicaPods(t, cli)
+	for i := range pods {
+		require.NoError(t, cli.Create(ctx,
+			replicaGroupWorkload(pods[i].Labels[kueuepodconst.GroupNameLabel], pods[i])))
+	}
+
+	// decode loses one replica the way the kubelet takes it: phase Failed, reason Evicted, Kueue's
+	// finalizer still on it, and no delete issued by anyone.
+	var failed, sibling *core.Pod
+	for i := range pods {
+		if modelDeploymentPodRole(&pods[i]) != "decode" {
+			continue
+		}
+		if failed == nil {
+			failed = pods[i].DeepCopy()
+		} else {
+			sibling = pods[i].DeepCopy()
+		}
+	}
+	require.NotNil(t, failed, "the fixture must hold a decode replica to lose")
+	require.NotNil(t, sibling, "the fixture must hold a second decode replica to leave alone")
+	failed.Finalizers = []string{kueuepodconst.PodFinalizer}
+	require.NoError(t, cli.Update(ctx, failed))
+	failed.Status.Phase = core.PodFailed
+	failed.Status.Reason = _PodReasonEvicted
+	failed.Status.Message = "Pod was rejected: The node had condition: [DiskPressure]."
+	require.NoError(t, cli.Status().Update(ctx, failed))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	observed := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: failed.Name}, observed))
+	assert.NotNil(t, observed.DeletionTimestamp,
+		"the failed replica is deleted: it never runs again, and while it stands its ordinal reads taken")
+	assert.True(t, kerrors.IsNotFound(cli.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: "team-a", Name: failed.Labels[kueuepodconst.GroupNameLabel],
+	}, new(kueue.Workload))),
+		"the failed replica's Workload is deleted: it is what releases Kueue's finalizer on the Pod")
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: "team-a", Name: sibling.Labels[kueuepodconst.GroupNameLabel],
+	}, new(kueue.Workload)),
+		"the sibling replica's Workload is untouched: nothing about it failed")
+
+	md := new(workercore.ModelDeployment)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}, md))
+	assert.Equal(t, "False", ModelDeploymentConditionReplicasUpToDate.GetStatus(md),
+		"a role serving one replica short does not read as up to date: %s",
+		ModelDeploymentConditionReplicasUpToDate.GetMessage(md))
+
+	// Kueue releases the finalizer once the Workload is gone, and the ordinal reads empty.
+	observed.Finalizers = nil
+	require.NoError(t, cli.Update(ctx, observed))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]int{"decode": 2, "prefill": 2}, replicaRoleCounts(t, cli),
+		"the replacement lands on the freed ordinal beside the untouched sibling")
+	for _, pod := range replicaPods(t, cli) {
+		assert.NotEqual(t, core.PodFailed, pod.Status.Phase, "no failed replica is left standing")
+	}
+}
+
+// TestModelDeployment_AFailedMemberTurnsItsReplicaOver is the multi-Member shape of the case above.
+// A replica's Members share one Kueue group, so one Failed Member condemns the replica: deleting the
+// group's Workload to release the failed Member makes Kueue stop the survivors anyway, and a Member
+// seated alone beside them would join a group whose collective has already lost a rank.
+func TestModelDeployment_AFailedMemberTurnsItsReplicaOver(t *testing.T) {
+	ctx := context.Background()
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaPods(t, cli), 2, "the instance is two Members before anything fails")
+
+	pods := replicaPods(t, cli)
+	failed := pods[1].DeepCopy()
+	failed.Status.Phase = core.PodFailed
+	failed.Status.Reason = _PodReasonEvicted
+	require.NoError(t, cli.Status().Update(ctx, failed))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Empty(t, replicaPods(t, cli),
+		"both Members leave: the failed one, and the survivor whose group lost it")
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	rebuilt := replicaPods(t, cli)
+	assert.Len(t, rebuilt, 2, "the replica comes back whole")
+	for _, pod := range rebuilt {
+		assert.NotEqual(t, core.PodFailed, pod.Status.Phase, "no failed Member is left standing")
+	}
+}
+
 // TestModelDeployment_RedistributingReplicasMovesEachRolesOwnOrdinals is the case a type-keyed
 // group cannot survive.
 //
