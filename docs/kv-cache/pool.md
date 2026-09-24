@@ -86,9 +86,12 @@ a tenant id to the identity of whoever sent it. A workload that knows another na
 
 The one thing a tenant id must be is *registered*: a multi-tenant master refuses a name absent from
 its ledger, and a Binding is what puts one there (see the next section). That constrains which names
-**exist**, never who may use one. A backend running without multi-tenancy has no ledger and makes no
-such check â€” a `KVCachePool` over a *managed* backend in that state is refused at admission, but an
-external backend is not inspected, so there the id is accepted as sent.
+**exist**, never who may use one.
+
+A backend running without multi-tenancy has no ledger and makes no such check. A `KVCachePool` over a
+*managed* backend in that state is admitted with a **warning** that no per-tenant quota is in force;
+an external backend is not inspected at admission. Once the pool reports the missing ledger, its
+workloads are configured with no tenant id at all, so every write lands in the store's default tenant.
 
 What a Binding governs is who is *granted* capacity and under which name: provisioning and accounting.
 Real enforcement needs an authenticated proxy or network isolation between workloads and the store,
@@ -270,9 +273,12 @@ condition from `QuotaObserved` because the master answers perfectly throughout â
 successful observation, and a Binding that reported Ready on observation alone would send a workload
 to a cache that refuses every byte, which is the reading this whole status exists to prevent.
 
-The same shape covers the two backend preconditions. A store started without multi-tenancy has no
-per-tenant ledger at all, and a policy file it cannot rewrite cannot receive ceilings; both surface as
-a False condition and a non-Ready pool rather than as a pool that quietly grants nothing.
+The same shape covers a policy file the store cannot rewrite: it cannot receive ceilings, and that
+surfaces as a False condition and a non-Ready pool rather than as a pool that quietly grants nothing.
+
+A store started without multi-tenancy is the exception. It has no per-tenant ledger at all, which is
+a declared single-tenant topology rather than a fault: `QuotaLedgerAvailable` reads False with reason
+`MultiTenancyDisabled`, and the pool stays `Ready` with a message saying it serves one reuse domain.
 
 ## Operating notes
 

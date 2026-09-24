@@ -231,6 +231,12 @@ edit touches only the InstanceType, never a Node or the ClusterQueue notes.
   `spec.cpu` (generic) or `spec.accelerator.cpu` (accelerated).
 - **Instance validating** — enforces the unit spec on **Create and Update**: a submission's RAM must not
   exceed `unitRAM × count`, its local storage not the InstanceType's `LocalStorage`.
+  - On a non-accelerated type, create and start also bound the CPU request by the pool's CPU
+    **capacity** (`status.cpu.capacity`), never by what is unrequested right now: an Instance submitted
+    while every core is requested is admitted and waits in its queue.
+  - **The CPU bound is the pool's total, not one node's.** A request above the largest node's cores but
+    within the pool's total is admitted and cannot run until a node that large joins, because one Pod's
+    cores come from one node and `InstanceType.status` carries no per-node capacity to refuse it with.
 
 ## The KV cache injection webhook is not a gate
 

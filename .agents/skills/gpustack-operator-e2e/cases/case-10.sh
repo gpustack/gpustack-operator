@@ -58,11 +58,13 @@ for _ in $(seq 1 15); do
 done
 [ -n "$unit_ram" ] || { echo "no unit spec on ${IT} (validating webhook not ready?)"; exit 1; }
 
-# The non-accelerated CPU cap this case exercises, plus a value comfortably above it.
-CAP=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.cpu.onceMaxRequest}' 2>/dev/null)
+# The non-accelerated CPU cap this case exercises, plus a value comfortably above it. The cap is the
+# pool's capacity, not its once-max request: the latter falls with occupancy, and the webhook no
+# longer bounds by it.
+CAP=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.cpu.capacity}' 2>/dev/null)
 [ -n "$CAP" ] || CAP=1
 OVER=$((CAP + 1000))
-echo "[case-10] InstanceType ${IT}, Status.CPU.OnceMaxRequest=${CAP}, over-cap request=${OVER}"
+echo "[case-10] InstanceType ${IT}, Status.CPU.Capacity=${CAP}, over-cap request=${OVER}"
 
 # 0. Control: create-time rejects an over-cap CPU request outright (the contract start must match).
 if kubectl apply -f - >/dev/null 2>&1 <<EOF
@@ -80,7 +82,7 @@ then
   record FAIL "create rejects over-cap CPU" "create with cpu=${OVER} was admitted (expected reject)"
   kubectl -n default delete instance "${INST}-ctl" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true
 else
-  record PASS "create rejects over-cap CPU" "cpu=${OVER} > OnceMaxRequest ${CAP} rejected at create"
+  record PASS "create rejects over-cap CPU" "cpu=${OVER} > Capacity ${CAP} rejected at create"
 fi
 
 # 1. Create a valid Instance (cpu=1) and let it reach Ready, then stop it.
@@ -118,8 +120,8 @@ got=$(kubectl -n default get instance "$INST" -o jsonpath='{.spec.resources.cpu}
 err=$(kubectl -n default patch instance "$INST" --type=merge -p '{"spec":{"stop":false}}' 2>&1 >/dev/null)
 rc=$?
 # Match the rejected FIELD, not one wording of it: the CPU rejection names the pool's actual state
-# (over the maximum / no capacity / fully requested), so pinning one phrase would fail on a pool that
-# is degraded rather than merely full — which is not what this case is asserting.
+# (over the maximum / no capacity), so pinning one phrase would fail on a pool that is degraded
+# rather than merely too small — which is not what this case is asserting.
 if [ "$rc" -ne 0 ] && echo "$err" | grep -qiE 'spec\.resources\.cpu|maximum CPU'; then
   record PASS "start re-validates resized resources" "start rejected cpu=${OVER} (same as create)"
 else

@@ -868,9 +868,15 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 			field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
 			"CPU request cannot be negative"))
 	} else if !instType.Spec.Acceleratable &&
-		instRess.CPU.Cmp(instType.Status.CPU.OnceMaxRequest) > 0 {
+		instRess.CPU.Cmp(instType.Status.CPU.Capacity) > 0 {
 		// Only a non-accelerated type has a CPU capacity view; an accelerated type's
 		// Status.CPU is zero (its CPU derives from unitCPU × count, bounded elsewhere).
+		//
+		// The ceiling is Capacity rather than OnceMaxRequest because the latter is bounded by the
+		// cores not yet requested: bounding by it refused every Instance submitted while the pool
+		// was busy, where the request should wait in the queue. Capacity sums the whole pool, so a
+		// request larger than the largest node but within the total is admitted and cannot run
+		// until a node that large joins; the status carries no per-node capacity to bound it tighter.
 		errs = append(errs, field.Invalid(
 			field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
 			cpuRequestRejection(instType)))
@@ -893,25 +899,19 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 }
 
 // cpuRequestRejection explains why a CPU request does not fit a non-accelerated InstanceType. A
-// zero maximum does not mean "the limit is small", and the two ways to reach it read very
-// differently to an administrator: a pool whose nodes are all drained or unmanaged keeps its
-// ClusterQueue admitting — so it reports phase Active with a capacity of zero — and a bare
-// "exceeds the maximum" then sends the reader looking for a limit that was never the problem.
-// Name the actual state instead, and carry the maximum in the ordinary case as the RAM and local
-// storage messages already do.
+// zero capacity does not mean "the limit is small": a pool whose nodes are all drained or
+// unmanaged keeps its ClusterQueue admitting — so it reports phase Active with a capacity of zero
+// — and a bare "exceeds the maximum" then sends the reader looking for a limit that was never the
+// problem. Name that state instead, and carry the capacity in the ordinary case as the RAM and
+// local storage messages carry their maximum.
 func cpuRequestRejection(instType *worker.InstanceType) string {
 	cpu := instType.Status.CPU
-	switch {
-	case cpu.Capacity.IsZero():
+	if cpu.Capacity.IsZero() {
 		return fmt.Sprintf("instance type %s has no CPU capacity: no managed node currently backs it",
 			instType.Name)
-	case cpu.OnceMaxRequest.IsZero():
-		return fmt.Sprintf("instance type %s has no CPU available: its capacity %s is fully requested",
-			instType.Name, cpu.Capacity.String())
-	default:
-		return fmt.Sprintf("exceeds the maximum CPU request %s of instance type %s",
-			cpu.OnceMaxRequest.String(), instType.Name)
 	}
+	return fmt.Sprintf("exceeds the maximum CPU request %s of instance type %s",
+		cpu.Capacity.String(), instType.Name)
 }
 
 // validateSingleCardRequest checks that a request holding a fraction of ONE card — a logical

@@ -1140,7 +1140,7 @@ func TestInstanceWebhook_ValidateCreate_ResourceCaps(t *testing.T) {
 				},
 				Status: workercore.InstanceTypeStatus{
 					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("100"), Capacity: resource.MustParse("100")},
-					CPU:         workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("100")},
+					CPU:         workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("100"), Capacity: resource.MustParse("100")},
 				},
 			}
 			w := newInstanceWebhook(instType)
@@ -1218,9 +1218,10 @@ func TestInstanceWebhook_ValidateCreate_AcceleratedCPU(t *testing.T) {
 }
 
 // TestInstanceWebhook_ValidateCreate_CPURejectionMessage pins what a rejected CPU request tells the
-// administrator. A zero maximum is not a small limit: a drained pool keeps its ClusterQueue
+// administrator. A zero capacity is not a small limit: a drained pool keeps its ClusterQueue
 // admitting, so it reports a healthy phase with a capacity of zero, and "exceeds the maximum" then
-// describes a limit that was never the problem. Each state names itself instead.
+// describes a limit that was never the problem. That state names itself instead, and an ordinary
+// refusal carries the capacity it was measured against, not the once-max request.
 func TestInstanceWebhook_ValidateCreate_CPURejectionMessage(t *testing.T) {
 	const typeName = "gpustack-generic-linux-amd64"
 
@@ -1236,15 +1237,11 @@ func TestInstanceWebhook_ValidateCreate_CPURejectionMessage(t *testing.T) {
 			wantMsg: "has no CPU capacity: no managed node currently backs it",
 		},
 		{
-			name: "saturated pool names the exhausted capacity", capacity: "48", onceMax: "0", cpu: "1",
-			wantMsg: "has no CPU available: its capacity 48 is fully requested",
+			name: "over the capacity carries the capacity", capacity: "48", onceMax: "16", cpu: "49",
+			wantMsg: "exceeds the maximum CPU request 48 of instance type " + typeName,
 		},
 		{
-			name: "over the maximum carries the maximum", capacity: "48", onceMax: "16", cpu: "32",
-			wantMsg: "exceeds the maximum CPU request 16 of instance type " + typeName,
-		},
-		{
-			name: "within the maximum accepted", capacity: "48", onceMax: "16", cpu: "16",
+			name: "within the capacity accepted", capacity: "48", onceMax: "16", cpu: "16",
 		},
 	}
 
@@ -1277,6 +1274,58 @@ func TestInstanceWebhook_ValidateCreate_CPURejectionMessage(t *testing.T) {
 				return
 			}
 			assert.ErrorContains(t, err, c.wantMsg)
+		})
+	}
+}
+
+// TestInstanceWebhook_ValidateCreate_CPUOnASaturatedPool pins that the CPU ceiling of a
+// non-accelerated type is the pool's capacity, not what is unrequested right now. Every core of this
+// pool is requested, so its once-max request and remaining read zero; a request the pool can serve
+// once a core is released is admitted and waits in its queue, while one larger than every core the
+// pool has is still refused.
+func TestInstanceWebhook_ValidateCreate_CPUOnASaturatedPool(t *testing.T) {
+	const typeName = "gpustack-generic-linux-amd64"
+
+	cases := []struct {
+		name    string
+		cpu     string
+		wantErr bool
+	}{
+		{name: "one core accepted", cpu: "1"},
+		{name: "every core of the pool accepted", cpu: "48"},
+		{name: "more cores than the pool has rejected", cpu: "49", wantErr: true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			instType := &worker.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: typeName},
+				Spec: workercore.InstanceTypeSpec{
+					UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+					LocalStorage:  "64Gi",
+				},
+				Status: workercore.InstanceTypeStatus{
+					CPU: workercore.InstanceTypeResource{
+						OnceMaxRequest: resource.MustParse("0"),
+						Remaining:      resource.MustParse("0"),
+						Capacity:       resource.MustParse("48"),
+					},
+				},
+			}
+			inst := webhookInstance("a", typeName)
+			inst.Spec.Resources = &workercore.InstanceResources{
+				CPU:          resource.MustParse(c.cpu),
+				RAM:          resource.MustParse("2Gi"),
+				LocalStorage: resource.MustParse("10Gi"),
+			}
+
+			_, err := newInstanceWebhook(instType).ValidateCreate(context.Background(), inst)
+			if c.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "exceeds the maximum CPU request 48")
+				return
+			}
+			assert.NoError(t, err)
 		})
 	}
 }
@@ -1363,7 +1412,7 @@ func TestInstanceWebhook_ValidateUpdate_StartRevalidatesResources(t *testing.T) 
 			LocalStorage:  "64Gi",
 		},
 		Status: workercore.InstanceTypeStatus{
-			CPU: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("48")},
+			CPU: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("48"), Capacity: resource.MustParse("48")},
 		},
 	}
 	sliceable := &worker.InstanceType{
