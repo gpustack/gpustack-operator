@@ -37,10 +37,11 @@
 #              - after the patch, the event exists, read from namespace default;
 #              - the event's cumulative count equals the lease's leaseTransitions after the rollout
 #                (on a fresh backend the baseline is 0, so the count also equals the delta);
-#              - every leader pod runs the target image and started after the patch (all three are
-#                rollout replacements), with exactly one of them ready;
-#              - the backend settles back to Ready with every condition True and
-#                RolloutComplete=True/Complete.
+#              - every leader pod runs the target image and is not one of the pods present before
+#                the patch (all three are rollout replacements), with exactly one of them ready;
+#              - the backend settles back to Ready with RolloutComplete=True/Complete and every
+#                health condition True -- PoolWrites, which reports write activity rather than
+#                health, reads Unknown/NoWritesObserved on this idle backend and is accepted so.
 #
 # Cleanup:     Trap deletes the KVCacheBackend; owner references cascade to the Deployment,
 #              Service, Lease, and accounts. Nothing else is touched. Idempotent, runs on pass AND
@@ -175,6 +176,10 @@ fi
 
 # THE ONLY MUTATION. A hand-deleted pod is the OTHER trigger family (the failover cases own it);
 # using it here would make every observation below attributable to two causes at once.
+# The leader pods BEFORE the patch, by UID, which is what "a replacement" is measured against below.
+# Start times are second-granular and a replacement can start in the very second of the patch, so a
+# time comparison cannot tell it from a leftover; a UID can.
+PRE_UIDS="$(kubectl -n "$NS" get pod -l "$LEADER_SEL" -o jsonpath='{range .items[*]}{.metadata.uid}{" "}{end}' 2>/dev/null)"
 T0="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if ! kubectl patch kvcachebackends.worker.gpustack.ai "$BACKEND" --type merge \
   -p "{\"spec\":{\"image\":\"${IMAGE_ROLL_TO}\"}}" >/dev/null 2>&1; then
@@ -230,26 +235,29 @@ else
     "message count '${COUNT_IN_MSG:-<none parsed>}' vs leaseTransitions='${TRANS_AFTER}' (baseline ${TRANS_BEFORE})"
 fi
 
-# Every pod must be a rollout replacement: on the target image AND born after the patch. RFC3339 Z
-# timestamps compare correctly as strings, so a start time not after T0 is a leftover of the old
-# ReplicaSet and fails the row that claims the set was replaced.
+# Every pod must be a rollout replacement: on the target image AND not one of the pods that existed
+# before the patch. A pre-patch set that could not be read makes "none of them survived" true of
+# nothing, so it fails the row rather than passing it.
 POD_LINES="$(kubectl -n "$NS" get pod -l "$LEADER_SEL" \
-  -o jsonpath='{range .items[*]}{.spec.containers[0].image}{"|"}{.status.startTime}{"\n"}{end}' 2>/dev/null)"
+  -o jsonpath='{range .items[*]}{.metadata.uid}{"|"}{.spec.containers[0].image}{"|"}{.status.startTime}{"\n"}{end}' 2>/dev/null)"
 NEW_COUNT=0
-while IFS='|' read -r img started; do
-  [ -z "$img" ] && continue
-  if [ "$img" = "$IMAGE_ROLL_TO" ] && [[ "$started" > "$T0" ]]; then
-    NEW_COUNT=$((NEW_COUNT + 1))
-  fi
+while IFS='|' read -r uid img _; do
+  [ -z "$uid" ] && continue
+  case " $PRE_UIDS " in *" $uid "*) continue ;; esac
+  [ "$img" = "$IMAGE_ROLL_TO" ] && NEW_COUNT=$((NEW_COUNT + 1))
 done <<EOF2
 $POD_LINES
 EOF2
-if [ "$NEW_COUNT" = "3" ]; then
+PRE_COUNT="$(echo "$PRE_UIDS" | wc -w | tr -d ' ')"
+if [ "$PRE_COUNT" = "0" ]; then
+  record FAIL "every leader pod is a replacement on the new image" \
+    "the leader pods before the patch could not be read, so no pod can be shown to be a replacement"
+elif [ "$NEW_COUNT" = "3" ]; then
   record PASS "every leader pod is a replacement on the new image" \
-    "3 of 3 pods on ${IMAGE_ROLL_TO}, all started after the patch (${T0}); no pod was deleted by hand"
+    "3 of 3 pods on ${IMAGE_ROLL_TO}, none of them among the ${PRE_COUNT} pods present before the patch (${T0}); no pod was deleted by hand"
 else
   record FAIL "every leader pod is a replacement on the new image" \
-    "${NEW_COUNT} of 3 pods are post-patch replacements on ${IMAGE_ROLL_TO}; pods (image startTime): $(echo "$POD_LINES" | tr '|' ' ' | tr '\n' ' ')"
+    "${NEW_COUNT} of 3 pods are post-patch replacements on ${IMAGE_ROLL_TO}; pods (uid image startTime): $(echo "$POD_LINES" | tr '|' ' ' | tr '\n' ' ')"
 fi
 
 RDY_FINAL="$(kubectl -n "$NS" get deployment "$LEADER" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)"
@@ -274,15 +282,19 @@ fi
 
 ROLL_STATUS="$(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND" \
   -o jsonpath='{.status.conditions[?(@.type=="RolloutComplete")].status}/{.status.conditions[?(@.type=="RolloutComplete")].reason}' 2>/dev/null)"
+# PoolWrites is the one condition that is not a health verdict: it reports write activity since the
+# current leader process started, and a backend nothing writes to reads Unknown/NoWritesObserved. That
+# exact reading is the expected one here, because this case writes nothing; any other non-True
+# PoolWrites -- a revoked write, counters the leader could not report -- is still a finding.
 NOT_TRUE="$(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND" \
-  -o jsonpath='{range .status.conditions[*]}{.type}={.status}{" "}{end}' 2>/dev/null \
-  | tr ' ' '\n' | /usr/bin/grep -v '=True$' | tr '\n' ' ')"
+  -o jsonpath='{range .status.conditions[*]}{.type}={.status}/{.reason}{" "}{end}' 2>/dev/null \
+  | tr ' ' '\n' | /usr/bin/grep -v -e '=True/' -e '^PoolWrites=Unknown/NoWritesObserved$' -e '^$' | tr '\n' ' ')"
 if [ "$ROLL_STATUS" = "True/Complete" ] && [ -z "$NOT_TRUE" ]; then
-  record PASS "RolloutComplete=True/Complete and every condition True" \
+  record PASS "RolloutComplete=True/Complete and every health condition True" \
     "conditions: $(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{range .status.conditions[*]}{.type}={.status}/{.reason}{" "}{end}' 2>/dev/null)"
 else
-  record FAIL "RolloutComplete=True/Complete and every condition True" \
-    "RolloutComplete='${ROLL_STATUS}'; conditions not True: ${NOT_TRUE:-<none>}"
+  record FAIL "RolloutComplete=True/Complete and every health condition True" \
+    "RolloutComplete='${ROLL_STATUS}'; conditions not True (PoolWrites=Unknown/NoWritesObserved excepted): ${NOT_TRUE:-<none>}"
 fi
 
 results

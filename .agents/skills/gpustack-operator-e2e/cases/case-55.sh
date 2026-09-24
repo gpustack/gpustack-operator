@@ -5,12 +5,12 @@
 #
 #   case-55.sh <NS>
 #
-# Goal:        This is the honesty gate. A Binding declares a reuse domain, and whether that domain
-#              becomes real depends on the ENGINE: SGLang reads MOONCAKE_TENANT_ID and is given the
-#              domain, while vLLM's configuration class has no tenant key at the version measured and
-#              is given none. The webhook never refuses over this - refusing would mean one namespace's
-#              Binding stops another namespace's Pods, and a Pod's author caused none of it - so the
-#              injection record is where the decision is visible.
+# Goal:        This is the honesty gate. A Binding declares a reuse domain, and the webhook writes
+#              that domain into every engine it configures - the vLLM family reads it as `tenant_id`
+#              from its projected client config, SGLang as MOONCAKE_TENANT_ID from its environment.
+#              The webhook never refuses over whether the engine BUILD will honour it - refusing would
+#              mean one namespace's Binding stops another namespace's Pods, and a Pod's author caused
+#              none of it - so the injection record is where the decision is visible.
 #
 #              What the record says is deliberately an ACTION and not an outcome: `tenantInjected`,
 #              never "isolated". Whether an injected tenant takes effect depends on the engine BUILD,
@@ -19,9 +19,12 @@
 #              build predates would otherwise be stamped as isolated while sharing a cache.
 #              Over-claiming in that direction is the failure this case exists to prevent.
 #
-#              The control is the engine table itself. Both answers appear in it, and the loop fails
-#              unless it observed both - a webhook that injected nothing, and one that injected
-#              everywhere, each fail on one side. That is what a single-answer table could not do.
+#              The control is the ARTIFACT, per engine. Every engine now receives the tenant, so a
+#              stamp reading "injected" everywhere is the correct answer rather than a suspicious one;
+#              what separates it from a stamp hard-coded that way is that each engine's own vehicle
+#              carries the Binding's domain, and the OTHER engine's vehicle does not. A webhook that
+#              stamped the action without writing it, or wrote it where the engine does not read it,
+#              fails on one side or the other.
 #
 # Environment: a cluster with the operator installed and a node able to run the Mooncake image. The
 #              case stands up its own KVCacheBackend (multi-tenancy on, TCP), KVCachePool, namespace
@@ -29,9 +32,16 @@
 # Inputs:      Pods on each accepted engine value against the real domain-carrying Binding. Nothing
 #              is mocked.
 # Expected:    a domain-carrying Binding is INJECTED, never refused; the record carries the domain and
-#              no engine version; a vLLM container receives no tenant key in any spelling while an
-#              SGLang container receives the Binding's own domain as MOONCAKE_TENANT_ID; and across
-#              the engines this fixture can reach BOTH tenant answers appear.
+#              no engine version; a vLLM container receives the Binding's domain as `tenant_id` in its
+#              client config and no MOONCAKE_TENANT_ID, while an SGLang container receives it as
+#              MOONCAKE_TENANT_ID; and for every engine this fixture can reach the stamp and the
+#              artifact agree.
+#
+#              NOT COVERED HERE: the other answer, tenantInjected=false. It is reached only through a
+#              pool whose master holds no tenant ledger (QuotaLedgerAvailable False for
+#              MultiTenancyDisabled), and this fixture builds a multi-tenant one; the renderer and the
+#              resolver pin it in TestRender_TenantOmittedForAnEmptyDomain and
+#              TestPodKVCacheResolve_QuotaLedgerGate.
 #
 #              ONE SKIP, and it is MEASURED rather than declared: the vLLM-Ascend row of the control
 #              loop. That value is no longer one the engine annotation takes, and the spelling that
@@ -41,24 +51,18 @@
 #              server said, so the skip retires itself if either refusal is ever lifted. A dry run
 #              that fails for any OTHER reason is a FAILURE, not a skip. The count the loop is held
 #              to is derived from what was skipped for the same reason, and a count that does not add
-#              up is recorded rather than passed over. The remaining two carry both tenant answers,
-#              which is what the control needs; an engine whose Pod never appears is still a FAILURE.
+#              up is recorded rather than passed over. An engine whose Pod never appears is still a
+#              FAILURE.
 # Cleanup:     the trap removes the Pods, the Binding, the namespace, the pool and the backend, in
 #              that order and idempotently, on pass AND fail. The Binding is given 60s before its
 #              finalizer is forced: a domain still holding objects makes the master refuse to drop
 #              its quota, and forcing it earlier is how a run leaves a namespace Terminating forever.
 #              It changes no shared baseline - every object it touches is one it created.
 #
-# EXERCISED 2026-09-04 on a three-node k3s cluster: 7 checks, all passing. RE-RUN the same day
-# EXERCISED 2026-09-04 (second host) on a single-node docker-desktop cluster, arm64, k8s v1.36.1,
-# against an operator built from this branch, with the webhook rendering AscendStoreConnector for
-# vllm-ascend: 7 checks, all passing again. That rendering change moves no expectation here - the
-# stamp this case reads is tenantInjected, and that engine still forwards no tenant - and the re-run
-# is what turns that sentence from a prediction into a measurement.
-#
-# The table has caught an engine moving sides TWICE, in opposite directions, which is the whole
-# point of it carrying both answers: an engine that changes sides turns this red rather than sliding
-# through. Both times the case failed before the oracle was updated, never after.
+# The table has caught an engine moving sides three times, which is the whole point of it reading
+# every engine: an engine that changes sides turns this red rather than sliding through. Every time
+# the case failed before the oracle was updated, never after - the third was the tenant becoming
+# unconditional for every engine, when the vLLM rows here still expected none.
 #
 # What this case does NOT check, and never did: which connector name is rendered. Every Pod here runs
 # a stub image, so no engine ever resolves that name. The engine loop is three annotation values, not
@@ -95,79 +99,83 @@ domain="$(kvi_stamp stamped domain)"
 # carries what admission did, never what it measured nothing about.
 
 if [ "$domain" = "$DOMAIN" ]; then
-  record PASS "the stamp names the domain that is not in effect" "domain=${domain}"
+  record PASS "the stamp names the Binding's domain" "domain=${domain}"
 else
-  record FAIL "the stamp names the domain that is not in effect" \
+  record FAIL "the stamp names the Binding's domain" \
     "domain='${domain:-<absent>}', expected '${DOMAIN}'"
 fi
 
-# What was DONE about the tenant. For an engine that reads none, the writes land on the store's own
-# default, and on a multi-tenant master - the only kind a pool accepts - that name must be registered
-# or every put fails with TENANT_NOT_REGISTERED rather than merely sharing a cache. Measured on a live
-# cluster: omitting tenant_id and passing tenant_id="default" failed identically, a registered domain
-# succeeded, and registering a Binding whose domain is "default" turned the same client's put into a
-# success.
+# The tenant as each vehicle carries it, "config=<tenant_id in the projected client config> env=<the
+# container's MOONCAKE_TENANT_ID>", either side empty when absent. Both are read for every engine,
+# because the control below is that each engine's own vehicle carries the domain AND the other one
+# does not: a tenant written where the engine does not read it is decoration that reads as a
+# guarantee.
+tenant_vehicles() {
+  local pod="$1" cfg env
+  cfg="$(kubectl -n "$TEST_NS" get pod "$pod" \
+    -o "jsonpath={.metadata.annotations.kvcache\.gpustack\.ai/client-config}" 2>/dev/null \
+    | python3 -c "import json,sys; d=sys.stdin.read().strip(); print(json.loads(d).get('tenant_id','') if d else '')" 2>/dev/null)"
+  env="$(kvi_env "$pod" MOONCAKE_TENANT_ID)"
+  echo "config=${cfg} env=${env}"
+}
+
+# What was DONE about the tenant. The webhook writes a non-empty domain into every engine it
+# configures and leaves compatibility with the image to whoever chose it; an engine build that reads
+# no tenant writes under the store's own "default" name, which is why a pool serving one needs a
+# Binding registering that name. The stamp records the write, never whether isolation resulted.
 injected="$(kvi_stamp stamped tenantInjected)"
-if [ "$injected" = False ] || [ "$injected" = false ]; then
-  record PASS "the stamp records the tenant ACTION, and for vLLM it is 'none'" \
-    "tenantInjected=${injected}: this engine reads no tenant, so its writes land on the store's own \
-default and the pool needs a Binding registering that name. The field says what was DONE, never \
-whether isolation resulted - that depends on the engine build, which is not checked here"
+if [ "$injected" = True ] || [ "$injected" = true ]; then
+  record PASS "the stamp records the tenant ACTION, and for vLLM it is 'written'" \
+    "tenantInjected=${injected}: the domain was written into this engine's client config. The field \
+says what was DONE, never whether isolation resulted - that depends on the engine build, which is not \
+checked here"
 else
-  record FAIL "the stamp records the tenant ACTION, and for vLLM it is 'none'" \
-    "tenantInjected='${injected:-<absent>}' on a vLLM Pod, whose config class has no tenant key"
+  record FAIL "the stamp records the tenant ACTION, and for vLLM it is 'written'" \
+    "tenantInjected='${injected:-<absent>}' on a vLLM Pod against a domain-carrying Binding; every \
+engine is given the tenant"
 fi
 
-# Whether a tenant is written is per ENGINE, and both directions are checked here because neither
-# means anything alone: the negative half passes against a webhook that injects nothing at all, the
-# positive one against a webhook that injects everywhere.
-#
-# vLLM's config class has no tenant key at the version measured, so writing one would be decoration
-# that reads as a guarantee. SGLang's does read MOONCAKE_TENANT_ID, so withholding it would throw away
-# an isolation this stack can actually have.
-config="$(kubectl -n "$TEST_NS" get pod stamped \
-  -o "jsonpath={.metadata.annotations.kvcache\.gpustack\.ai/client-config}" 2>/dev/null)"
-whole="$(kubectl -n "$TEST_NS" get pod stamped -o json 2>/dev/null)"
-if echo "${config}${whole}" | grep -qi 'tenant_id\|MOONCAKE_TENANT_ID'; then
-  record FAIL "no tenant key reaches a vLLM container" \
-    "a tenant appears in the injected artifacts; this engine reads none, so it would be a guarantee \
-nothing keeps"
+# The vLLM family's vehicle is the projected client config, and only that: MOONCAKE_TENANT_ID is
+# SGLang's, and this engine does not read it.
+got="$(tenant_vehicles stamped)"
+if [ "$got" = "config=${DOMAIN} env=" ]; then
+  record PASS "the reuse domain reaches a vLLM container through its client config" \
+    "tenant_id=${DOMAIN} in the projected config, and no MOONCAKE_TENANT_ID - that variable is \
+SGLang's vehicle and this engine does not read it"
 else
-  record PASS "no tenant key reaches a vLLM container" \
-    "neither tenant_id nor MOONCAKE_TENANT_ID appears in the config or anywhere on the Pod"
+  record FAIL "the reuse domain reaches a vLLM container through its client config" \
+    "read ${got}; expected config=${DOMAIN} and no environment variable"
 fi
 
 # The paired half, on its own Pod because the engine is fixed per Pod.
 kvi_pod_manifest sg-stamped sglang | kubectl apply -f - >/dev/null 2>&1
 if ! kvi_wait_for pods sg-stamped '{.metadata.name}' sg-stamped 60 "$TEST_NS" >/dev/null; then
   record FAIL "the reuse domain reaches an SGLang container as its tenant" \
-    "the Pod was never stored, so the paired half did not run and the vLLM half above is unverified: \
-nothing here shows the webhook can emit a tenant at all"
+    "the Pod was never stored, so the paired half did not run and the vLLM half above is unpaired: \
+nothing here shows the webhook routes the tenant by engine at all"
 else
   sg_tenant="$(kvi_env sg-stamped MOONCAKE_TENANT_ID)"
   if [ "$sg_tenant" = "$DOMAIN" ]; then
     record PASS "the reuse domain reaches an SGLang container as its tenant" \
-      "MOONCAKE_TENANT_ID=${sg_tenant}, which is the Binding's own reuse domain - this engine reads \
-it, so the domain is real here rather than merely declared"
+      "MOONCAKE_TENANT_ID=${sg_tenant}, which is the Binding's own reuse domain"
   else
     record FAIL "the reuse domain reaches an SGLang container as its tenant" \
       "MOONCAKE_TENANT_ID='${sg_tenant:-<absent>}', expected '${DOMAIN}'"
   fi
 fi
 
-# THE CONTROL, and it is a real one now. This text used to say the discriminating control could not be
-# built from outside the binary, because every shipped engine answered false and the table is compiled
-# in - so the case settled for asserting UNIFORMITY. That stopped being true when two engines were
-# re-measured as forwarding: the compiled table now holds BOTH answers, so the loop below requires
-# both to appear, and a stamp hard-coded either way fails it.
-#
-# The description outlived the situation by one change, which is its own lesson: a note explaining why
-# something is impossible does not notice when it becomes possible.
+# THE CONTROL. It used to require both stamp answers to appear, because the compiled table then held
+# both - some engines were given a tenant and some were not. The tenant is unconditional now, so
+# "injected" on every engine is the correct reading and the table has one answer; requiring two would
+# fail against a correct webhook. What still separates a real decision from a hard-coded one is the
+# artifact: each engine carries the domain in its OWN vehicle and not in the other's, so the loop
+# requires the stamp and the artifact to agree per engine, and requires BOTH vehicles to have been
+# observed across the engines it reached.
 ok=1
 checked=0
 skipped=0
-seen_true=0
-seen_false=0
+seen_config=0
+seen_env=0
 for engine in vllm vllm-ascend sglang; do
   pod="ctl-${engine//-/}"
   # vLLM-Ascend is not reachable from this fixture, and TWO refusals stand in front of it - neither
@@ -190,24 +198,22 @@ for engine in vllm vllm-ascend sglang; do
   # the row - and it is a SKIP rather than a FAIL naming a Pod that never appeared, which is what a
   # reader would otherwise go and chase.
   #
-  # The Go side made this move first and for the first reason alone:
-  # TestPodKVCacheInject_StampTenantFollowsTheEngine dropped its vllm-ascend row as unreachable
-  # through the annotation, and the answer is pinned where the engine IS reachable, in
-  # TestSupportsTenant_PinsTheMeasuredAnswerPerEngine. What no test replaces is the cluster half.
+  # The Go side pins the answer where the engine IS reachable: TestRender_TenantGoesToEveryEngineThatReadsOne
+  # renders every engine, vLLM-Ascend included. What no test replaces is the cluster half.
   if [ "$engine" = vllm-ascend ]; then
     why="$(kvi_admission_refuses "$(kvi_pod_manifest "$pod" "$engine")")" && rc=0 || rc=$?
     case "$rc" in
       0)
         skipped=$((skipped + 1))
-        record SKIP "the tenant action follows the engine (${engine})" \
-          "admission refuses this row on this fixture, so its tenant answer is UNVERIFIED on a \
-cluster - it is pinned only in the inject package's own table \
-(TestSupportsTenant_PinsTheMeasuredAnswerPerEngine). The server said: ${why}"
+        record SKIP "the stamp and the artifact agree per engine (${engine})" \
+          "admission refuses this row on this fixture, so its tenant is UNVERIFIED on a cluster - it \
+is pinned only in the inject package's own test (TestRender_TenantGoesToEveryEngineThatReadsOne). The \
+server said: ${why}"
         continue
         ;;
       2)
         ok=0
-        record FAIL "the tenant action follows the engine" \
+        record FAIL "the stamp and the artifact agree per engine" \
           "engine ${engine}: the dry run failed for something other than this webhook's refusal, so \
 whether the row is reachable was never established and it was neither run nor skipped: ${why}"
         continue
@@ -216,60 +222,59 @@ whether the row is reachable was never established and it was neither run nor sk
     # rc=1: admission accepts it now, so the row RUNS like any other - which is the whole point of
     # asking rather than deciding here.
   fi
-  # What this engine is expected to have injected. Two answers appear in this table, and that is what
-  # gives the loop its discriminating power: a webhook that injected nothing, or one that injected
-  # everywhere, fails on one side or the other. A table with one answer could not tell either from a
-  # correct one.
+  # The vehicle this engine reads the tenant from; the other one must stay empty.
   case "$engine" in
-    # Only SGLang reads a tenant on the path this webhook renders. vLLM-Ascend does NOT, and the
-    # reason changed without the expectation changing: the webhook now renders that engine's own
-    # AscendStoreConnector, and v0.19.1rc1 has no tenant anywhere (grep over vllm_ascend/, tests
-    # excluded: zero hits). An earlier version of this comment said the store was tenant-aware and
-    # merely unselected - both halves were wrong, and the second half predicted this row would flip
-    # once we selected it. It did not.
-    sglang) want=false_is_wrong; expect=True ;;
-    *)      want=true_is_wrong;  expect=False ;;
+    sglang) want="config= env=${DOMAIN}" ;;
+    *)      want="config=${DOMAIN} env=" ;;
   esac
   kvi_pod_manifest "$pod" "$engine" | kubectl apply -f - >/dev/null 2>&1
   if ! kvi_wait_for pods "$pod" '{.metadata.name}' "$pod" 60 "$TEST_NS" >/dev/null; then
     # A control that did not run is recorded, never passed over. Skipping it silently would leave a
     # smaller set of engines checked while the summary below still claimed all of them.
     ok=0
-    record FAIL "the tenant action follows the engine" \
+    record FAIL "the stamp and the artifact agree per engine" \
       "engine ${engine} never produced a Pod, so its answer was not observed at all"
     continue
   fi
   checked=$((checked + 1))
-  got="$(kvi_stamp "$pod" tenantInjected)"
-  case "$got" in
-    True | true)   seen_true=1;  [ "$expect" = True ]  || { ok=0; record FAIL "the tenant action follows the engine" \
-                     "engine ${engine} stamped tenantInjected=${got}, but it reads no tenant (${want})" ; } ;;
-    False | false) seen_false=1; [ "$expect" = False ] || { ok=0; record FAIL "the tenant action follows the engine" \
-                     "engine ${engine} stamped tenantInjected=${got}, but it does read one (${want})" ; } ;;
-    *) ok=0; record FAIL "the tenant action follows the engine" \
-         "engine ${engine} stamped tenantInjected='${got:-<absent>}', which is neither answer" ;;
+  stamp="$(kvi_stamp "$pod" tenantInjected)"
+  got="$(tenant_vehicles "$pod")"
+  case "$stamp" in
+    True | true) ;;
+    *) ok=0; record FAIL "the stamp and the artifact agree per engine" \
+         "engine ${engine} stamped tenantInjected='${stamp:-<absent>}' against a domain-carrying Binding"
+       continue ;;
+  esac
+  if [ "$got" != "$want" ]; then
+    ok=0
+    record FAIL "the stamp and the artifact agree per engine" \
+      "engine ${engine} stamped the write, but its vehicles read ${got}; expected ${want}"
+    continue
+  fi
+  case "$engine" in
+    sglang) seen_env=1 ;;
+    *)      seen_config=1 ;;
   esac
 done
 # The count the loop is held to is DERIVED from what was skipped, never written as a constant. The
 # skip above is asked of admission and can stop firing, and a hard-coded 2 would then leave a third
 # row running with nothing holding the loop to it - no PASS, no FAIL, the case green by omission.
-# The discriminating property survives either way: two answers still have to appear.
 if [ "$ok" -eq 1 ] && [ "$checked" -eq $((3 - skipped)) ]; then
-  if [ "$seen_true" -eq 1 ] && [ "$seen_false" -eq 1 ]; then
-    record PASS "the tenant action follows the engine" \
-      "${checked} of 3 engines observed and ${skipped} skipped as unreachable, and BOTH answers \
-appeared - at least one engine was given a tenant and at least one was not. Seeing both is what \
-separates this from a stamp hard-coded either way; a skipped engine is NOT part of this claim"
+  if [ "$seen_config" -eq 1 ] && [ "$seen_env" -eq 1 ]; then
+    record PASS "the stamp and the artifact agree per engine" \
+      "${checked} of 3 engines observed and ${skipped} skipped as unreachable; each stamped the write \
+and carried the domain in its own vehicle only, and BOTH vehicles appeared - which is what separates a \
+per-engine write from a stamp hard-coded to 'injected'. A skipped engine is NOT part of this claim"
   else
-    record FAIL "the tenant action follows the engine" \
-      "all ${checked} observed but only one answer appeared, so this run cannot tell a per-engine \
-decision from a constant"
+    record FAIL "the stamp and the artifact agree per engine" \
+      "all ${checked} observed but only one vehicle appeared, so this run cannot tell a per-engine \
+write from one written the same way everywhere"
   fi
 elif [ "$ok" -eq 1 ]; then
   # Counts that do not add up, with no FAIL from the loop to explain them. Recorded rather than
   # passed over, because the loop's own rule is that a control which did not run is never dropped in
   # silence - and this is the one arm where that could otherwise happen.
-  record FAIL "the tenant action follows the engine" \
+  record FAIL "the stamp and the artifact agree per engine" \
     "observed ${checked} engines and skipped ${skipped} of 3, which do not add up: the reachable set \
 changed under the loop and no row reported it"
 fi

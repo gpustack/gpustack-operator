@@ -475,6 +475,11 @@ $(role_block decode decode 1)"
   # observeModelDeploymentQuota wrote onto the ModelDeployment, and a regression that stopped
   # reporting the wait entirely would leave both rows above green.
   #
+  # IT NAMES THE WAITING ROLES, NOT A QUEUE. Each role names its own instanceType and so its own
+  # queue, so a multi-role deployment has no single queue to name; the operator names a queue only in
+  # its single-role wording. What this deployment is waiting on is the two roles, and a message that
+  # left either out would tell an operator the other one is not held.
+  #
   # Polled rather than sampled, because the condition is written by a reconcile that follows the
   # admission decision rather than accompanying it.
   QR=""
@@ -484,21 +489,28 @@ $(role_block decode decode 1)"
     case "$QR" in False\|Pending\|*) break ;; esac
     sleep 3
   done
+  QR_MSG="${QR#*|*|}"
+  QR_ROLES="$(printf '%s' "$QR_MSG" | sed -n 's/.*the replicas of roles \([^.]*\)\..*/\1/p')"
+  # Word-padded so each role is matched whole: "prefill" must not be found inside a longer name.
+  QR_WORDS=" $(printf '%s' "$QR_ROLES" | tr ',' ' ' | tr -s ' ') "
   case "$QR" in
-    False\|Pending\|*"$CQ"*)
-      record PASS "the deployment reports the wait, naming the queue" \
-        "QuotaReserved=False reason=Pending naming ${CQ}"
-      ;;
     False\|Pending\|*)
-      record FAIL "the deployment reports the wait, naming the queue" \
-        "QuotaReserved=False reason=Pending but the message does not name ${CQ}: ${QR}"
+      case "$QR_WORDS" in *" prefill "*) HAS_P=yes ;; *) HAS_P=no ;; esac
+      case "$QR_WORDS" in *" decode "*) HAS_D=yes ;; *) HAS_D=no ;; esac
+      if [ "$HAS_P" = yes ] && [ "$HAS_D" = yes ]; then
+        record PASS "the deployment reports the wait, naming the waiting roles" \
+          "QuotaReserved=False reason=Pending naming roles ${QR_ROLES}"
+      else
+        record FAIL "the deployment reports the wait, naming the waiting roles" \
+          "QuotaReserved=False reason=Pending but the waiting roles read '${QR_ROLES}', not both prefill and decode: ${QR_MSG}"
+      fi
       ;;
     "")
-      record FAIL "the deployment reports the wait, naming the queue" \
+      record FAIL "the deployment reports the wait, naming the waiting roles" \
         "no QuotaReserved condition was written at all while the group sat unadmitted"
       ;;
     *)
-      record FAIL "the deployment reports the wait, naming the queue" \
+      record FAIL "the deployment reports the wait, naming the waiting roles" \
         "expected False/Pending while the pool is short, got: ${QR}"
       ;;
   esac
@@ -519,9 +531,13 @@ $(role_block decode decode 1)"
   fi
 fi
 
-# Results.
+# Results. Split on the first two separators only: an OBJECT may itself carry "|" -- the QuotaReserved
+# row quotes a status|reason|message reading -- and splitting on every one cuts it at the first.
 echo
 echo "STATUS | CHECK | OBJECT"
-for r in "${ROWS[@]}"; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+for r in "${ROWS[@]}"; do
+  rest="${r#*|}"
+  printf '%s | %s | %s\n' "${r%%|*}" "${rest%%|*}" "${rest#*|}"
+done
 [ "$FAILS" -eq 0 ] || { echo "[case-50] ${FAILS} check(s) FAILED"; exit 1; }
 echo "[case-50] all checks passed"

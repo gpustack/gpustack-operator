@@ -433,7 +433,15 @@ trap 'exit 143' TERM
 
 tas_zone_shape
 
-CPU_NODES="$(kubectl get nodes -o json | jq -r '.items[] | select(.spec.unschedulable != true) | .metadata.name')"
+# The Nodes this case labels and places on are the ones tas_zone_shape counts: Linux, zoned,
+# schedulable, and carrying no NoSchedule or NoExecute taint. Selecting on unschedulable alone let a
+# tainted control-plane with no zone label in, and the writing sources then fed its null zone to jq
+# -- the case died there and then waited out every timeout it had.
+TAS_NODE_JQ='select(.metadata.labels["kubernetes.io/os"] == "linux")
+  | select((.metadata.labels["topology.kubernetes.io/zone"] // "") != "")
+  | select(.spec.unschedulable != true)
+  | select([(.spec.taints // [])[] | select(.effect == "NoSchedule" or .effect == "NoExecute")] | length == 0)'
+CPU_NODES="$(kubectl get nodes -o json | jq -r ".items[] | ${TAS_NODE_JQ} | .metadata.name")"
 while read -r node; do
   [ -n "$node" ] && kubectl label node "$node" topology.gpustack.ai/e2e-rack=enabled --overwrite >/dev/null
 done <<EOF
@@ -448,11 +456,11 @@ NATIVE_PAIRS_BEFORE="$(native_region_zone_pairs)"
 # Leave one real Node outside the native source. It remains hostname-only while the other three
 # retain their cloud region/zone labels, making exclusion from an explicit zone/rack request an
 # observable capacity fact rather than an inferred one.
-NATIVE_NODES="$(kubectl get nodes -o json | jq -r '
+NATIVE_NODES="$(kubectl get nodes -o json | jq -r "
   [.items
-   | map(select(.spec.unschedulable != true))
-   | group_by(.metadata.labels["topology.kubernetes.io/zone"])[]] as $zones |
-  ($zones[0][] | .metadata.name), ($zones[1][0] | .metadata.name)' | sort -u)"
+   | map(${TAS_NODE_JQ})
+   | group_by(.metadata.labels[\"topology.kubernetes.io/zone\"])[]] as \$zones |
+  (\$zones[0][] | .metadata.name), (\$zones[1][0] | .metadata.name)" | sort -u)"
 while read -r node; do
   [ -n "$node" ] && kubectl label node "$node" topology.gpustack.ai/e2e-native=enabled --overwrite >/dev/null
 done <<EOF
@@ -1341,9 +1349,10 @@ fi
 kubectl -n "$NS" delete instance "${PREFIX}-instance" --ignore-not-found --wait=false >/dev/null 2>&1
 
 # THE SHORTAGE MUST BE A SHORTAGE. Borrowing through a cohort or a second schedulable flavor would
-# let the starved deployment reserve anyway. A cordoned GPU Node can leave a CPU ResourceFlavor in
-# this queue, but it cannot contribute a live TAS domain. Both cohort spellings are read because the
-# served version carries either.
+# let the starved deployment reserve anyway. A cordoned GPU Node, or a Node tainted NoSchedule or
+# NoExecute such as a kind control-plane, can leave a CPU ResourceFlavor in this queue, but it cannot
+# contribute a live TAS domain for Pods that tolerate neither. Both cohort spellings are read because
+# the served version carries either.
 PRE_RAW="$(kubectl get clusterqueue.kueue.x-k8s.io "$CQ" \
   -o jsonpath='{.apiVersion}|{.spec.cohort}{.spec.cohortName}|{range .spec.resourceGroups[*].flavors[*]}{.name}{" "}{end}' 2>/dev/null)"
 PRE_VER="${PRE_RAW%%|*}"
@@ -1357,6 +1366,7 @@ PRE_REACHABLE="$(kubectl get clusterqueue.kueue.x-k8s.io "$CQ" -o json | jq -r \
       $flavors[0].items[] | select(.metadata.name == $name) as $flavor |
       select(any($nodes[0].items[];
         .spec.unschedulable != true and
+        ([(.spec.taints // [])[] | select(.effect == "NoSchedule" or .effect == "NoExecute")] | length == 0) and
         (.metadata.labels as $labels |
           all($flavor.spec.nodeLabels | to_entries[]; $labels[.key] == .value)))) |
       .metadata.name] | unique | .[]' 2>/dev/null)"

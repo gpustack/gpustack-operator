@@ -29,7 +29,8 @@
 #              constraint, not a defect).
 #
 # Inputs:      All real, nothing mocked. One KVCacheBackend (3-replica HA leader, multi-tenancy
-#              on, no snapshot, no Pool, no Binding at first); a tenant namespace holding a probe
+#              on, no snapshot, no Pool, no Binding at first, the leader's read-lease TTL passed
+#              through as 10s so the teardown drain can finish); a tenant namespace holding a probe
 #              Pod on the store image plus a RoleBinding -- in <NS> -- to the backend's rendered
 #              member Role (get leases, the least the k8s:// path needs); the probe runs a small
 #              python client via kubectl exec. THE TENANT RIDES THE KEYWORD ARGUMENT tenant_id=:
@@ -52,7 +53,9 @@
 #                as removed -- a domain that still holds objects holds the Pool's deletion
 #                open-ended (measured: the Pool sits in Deleting until the domain drains), so the
 #                case drains what it wrote. Graded on one call this row failed on a lease that had
-#                not expired yet, which is the timing and not the drain.
+#                not expired yet, which is the timing and not the drain; with the operator's own
+#                five-minute lease it failed on the deadline for the same reason, which is why the
+#                backend passes a shorter one.
 #
 # Cleanup:     Trap deletes the Binding, the Pool, the backend, the RoleBinding in <NS> and the
 #              tenant namespace, in that order, all without waiting (a held deletion must not hang
@@ -68,6 +71,9 @@ E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/
 
 NS="${1:?usage: case-77.sh <NS>}"
 CASE_ID=77
+# The leader's read-lease TTL for this backend, well inside the drain's 60s deadline; see the backend
+# manifest for why it is overridden at all.
+KV_LEASE_TTL=10s
 IMAGE="${E2E_MOONCAKE_IMAGE:-gpustack/mirrored-mooncake:0.3.13.post1-cpu}"
 
 # The suffix keeps two runs of this case apart: the backend and the pool are cluster-scoped, and
@@ -201,6 +207,13 @@ spec:
         replicas: 3
         multiTenancy: true
         highAvailability: {}
+        # The read-lease TTL, shortened for the teardown drain alone. The read-back after the admitted
+        # put grants the key a lease of the leader's -default_kv_lease_ttl, a remove is refused with
+        # OBJECT_HAS_LEASE until it expires, and the operator renders five minutes -- longer than
+        # the drain's deadline, so the drain failed on the lease and left the Pool, the Binding and
+        # the backend held in Deleting. The flag is the one rendered flag the passthrough may
+        # override, and nothing this case asserts depends on its value.
+        extraArgs: ["-default_kv_lease_ttl=${KV_LEASE_TTL}"]
       members:
         - nodeSelector: {kubernetes.io/os: linux}
           medium: DRAM

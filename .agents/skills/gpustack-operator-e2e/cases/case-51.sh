@@ -68,8 +68,8 @@ FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
-# The first InstanceType A DEPLOYMENT CAN ACTUALLY NAME, which is not the same as the first one the
-# API returns.
+# Every InstanceType A DEPLOYMENT CAN ACTUALLY NAME, in the API's order, which is not the same as
+# every one the API returns.
 #
 # THE LIST COMES BACK SORTED BY NAME AND CARRIES TYPES ON THEIR WAY OUT. Case 68 creates its own
 # `case68-nowhere` and deletes it without waiting, and that name sorts before an ordinary derived
@@ -77,33 +77,40 @@ record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0
 # is refused at admission, and the run then dies at fixture time for a reason that has nothing to do
 # with what it measures. Inactive is excluded for the mirror reason: a deployment on one is admitted
 # and then never scheduled, so the case waits out every timeout it has.
-usable_instance_type() {
+#
+# AN ACCELERATED TYPE WITH NO WHOLE CARD IS EXCLUDED TOO. A role that names no accelerator count is
+# defaulted to one card, and the webhook refuses a count above the type's whole-card capacity -- so
+# naming a type whose pool has no card left (the accelerated type a mock in an earlier case leaves
+# behind, Active with zero cards) is refused for a reason none of these rows is about.
+usable_instance_types() {
   kubectl get instancetypes.worker.gpustack.ai \
-    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}{"\n"}{end}' \
+    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.spec.acceleratable}|{.status.accelerator.capacity}{"\n"}{end}' \
     2>/dev/null \
-    | while IFS='|' read -r name deleting inactive; do
+    | while IFS='|' read -r name deleting inactive acceleratable capacity; do
         [ -n "$name" ] || continue
         [ -z "$deleting" ] || continue
         [ "$inactive" = true ] && continue
+        if [ "$acceleratable" = true ]; then
+          case "$capacity" in "" | 0) continue ;; esac
+        fi
         echo "$name"
-        break
       done
 }
 
 if [ -z "$IT" ]; then
-  IT="$(usable_instance_type)"
+  IT="$(usable_instance_types | sed -n '1p')"
 fi
 if [ -z "$IT" ]; then
   echo "[case-51] no InstanceType in the cluster; run case-1 first" >&2
   exit 2
 fi
 
-# A SECOND InstanceType is what the one-instanceType row needs, and it may not exist: a CPU-only
+# A SECOND InstanceType is what the two-instanceType row needs, and it may not exist: a CPU-only
 # cluster materializes exactly one pool. The row reports SKIP rather than inventing a name, because
-# a name no InstanceType carries would be refused by the CONTROLLER for not resolving, and this row
-# is about the WEBHOOK refusing two of them.
-IT2="$(kubectl get instancetypes.worker.gpustack.ai \
-  -o jsonpath='{.items[1].metadata.name}' 2>/dev/null)"
+# a name no InstanceType carries would be refused for not resolving. It is chosen by the same rule
+# as the first -- a type a deployment can actually name -- rather than by list position, which is how
+# this row once picked a zero-card mock type and reported the webhook refusing two types.
+IT2="$(usable_instance_types | grep -v -x -F "$IT" | sed -n '1p')"
 
 # Emit a manifest whose roles block is supplied whole by the caller. Unlike case-45's, the roles are
 # the variable here: every rule below is about the SET of roles rather than about one role's fields.
@@ -150,10 +157,12 @@ two_roles() {
 YAML
 }
 
-# Assert that a roles block is refused AND that the refusal quotes $2. A refusal carrying somebody
-# else's message is a FAIL: it means the manifest tripped a rule this row is not about.
+# Assert that a roles block is refused AND that the refusal quotes $2 -- and every further fragment
+# passed after the roles block. A refusal carrying somebody else's message is a FAIL: it means the
+# manifest tripped a rule this row is not about.
 refuses() {
-  local check="$1" want="$2" roles="$3" out
+  local check="$1" want="$2" roles="$3" out w
+  shift 3
   out="$(manifest "$roles" | kubectl apply --dry-run=server -f - 2>&1 | tr '\n' ' ')"
   # An EMPTY $out must not pass: deleting anything from "" leaves "", so a `-z` test on the stripped
   # string is TRUE when the command produced nothing at all. See case-45 for the same guard.
@@ -162,10 +171,13 @@ refuses() {
 
     return 0
   fi
-  case "$out" in
-    *"$want"*) record PASS "$check" "refused naming: ${want}" ;;
-    *) record FAIL "$check" "refused with the wrong message, or accepted: ${out:0:220}" ;;
-  esac
+  for w in "$want" "$@"; do
+    case "$out" in
+      *"$w"*) ;;
+      *) record FAIL "$check" "refused with the wrong message, or accepted (missing '${w}'): ${out:0:220}"; return 0 ;;
+    esac
+  done
+  record PASS "$check" "refused naming: ${want}${*:+ + $*}"
 }
 
 # THE POSITIVE SIDE OF THE SAME INSTRUMENT, and it exists because one rule this case asserted was
@@ -214,14 +226,19 @@ refuses "eleven roles are refused naming THIS PROJECT's cap" \
 # on `name`, so the API server rejects the duplicate during validation and the webhook's own rule --
 # which names the merge, and reads far better -- never runs. Asserting that better wording here would
 # fail against a correct operator.
+#
+# TWO FRAGMENTS, because the API server prints the duplicate key in a version-dependent form -- one
+# release writes `{"name":"worker"}`, a later one `map[string]interface {}{"name":"worker"}`. What
+# both keep is the field path with the schema's own verdict, and the key itself.
 refuses "two roles sharing a name are refused BY THE SCHEMA" \
-  'Duplicate value: {"name"' \
+  'spec.roles[1]: Duplicate value:' \
   "  - name: worker
     instanceType: ${IT}
     replicas: 1
   - name: worker
     instanceType: ${IT}
-    replicas: 1"
+    replicas: 1" \
+  '{"name":"worker"}'
 
 # THIS ROW WAS A REFUSAL AND IS NOW AN ACCEPTANCE, because the rule behind it was deleted rather
 # than reworded. While a role was the admission unit, one Workload carried one queue name and roles
@@ -245,7 +262,7 @@ if [ -n "${IT2:-}" ]; then
     replicas: 1"
 else
   record SKIP "two instanceTypes are ACCEPTED, which is the joint barrier's whole premise" \
-    "needs a second real InstanceType and this cluster materialized one. NOT closed by a synthetic name, which is now refused for not existing; CASE 68 covers the same premise by CREATING its second type"
+    "needs a second InstanceType a deployment can name, and this cluster has none besides ${IT}. NOT closed by a synthetic name, which is now refused for not existing; CASE 68 covers the same premise by CREATING its second type"
 fi
 
 refuses "kind: server beside another kind is refused" \
@@ -259,8 +276,13 @@ refuses "kind: server beside another kind is refused" \
     instanceType: ${IT}
     replicas: 1"
 
-ENGINE=sglang refuses "a kind the engine cannot be told is refused NAMING THE ENGINE" \
-  "has no rendering term for kind" "$(two_roles)"
+# THIS ROW WAS A REFUSAL AND IS NOW AN ACCEPTANCE, for the reason the rule's own comment gives: both
+# engines render all three kinds, so no engine this API accepts is refused by it today. The rule stays
+# for an engine added to the renderer without a table entry, which an API-valid manifest cannot
+# name. SGLang prefill/decode is the pair that rule once refused, so its acceptance is the row that
+# reports the refusal coming back.
+ENGINE=sglang accepts "an sglang prefill/decode pair is ACCEPTED: every engine renders every kind" \
+  "$(two_roles)"
 
 # --- the schema's rules, which run BEFORE the webhook and must not be confused with it ---
 

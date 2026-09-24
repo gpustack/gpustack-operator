@@ -16,9 +16,9 @@
 #              sampled RolloutComplete is a benign state -- Unknown/UpdateNotObserved (the update
 #              not yet observed), False/Progressing (observed, in flight), True/Complete -- and
 #              never a deadline-ish stall reason; the update converges with updated=3 and exactly
-#              one ready; every condition settles True; and the transient phase dip the image bump
-#              causes (the member DaemonSet rolls too, and re-registration briefly degrades the
-#              backend) clears within its bounded window.
+#              one ready; every health condition settles True; and the transient phase dip the
+#              image bump causes (the member DaemonSet rolls too, and re-registration briefly
+#              degrades the backend) clears within its bounded window.
 #
 # Environment: Any cluster; no GPU, no RDMA (members are DRAM over TCP). <NS> must be the
 #              operator's system namespace. THE IMAGE PAIR IS A DIRECTIONAL CONTRACT, shared with
@@ -41,7 +41,9 @@
 #                Unknown/UpdateNotObserved, False/Progressing, True/Complete, and no sample carries
 #                a deadline-ish reason -- the predicate never misreports a stall;
 #              - final: updated=3, exactly one ready (the election gate intact);
-#              - final: backend Ready and every condition True;
+#              - final: backend Ready and every health condition True -- PoolWrites, which reports
+#                write activity rather than health, reads Unknown/NoWritesObserved on this idle
+#                backend and is accepted so;
 #              - the phase dip (Provisioning/Degraded while members re-register) clears within
 #                DIP_BOUND_SECS of the second patch -- measured ~34-50s here, ~2 min on an older
 #                backend, so the bound carries margin rather than the fastest reading.
@@ -316,16 +318,20 @@ fi
 # re-registration its own bounded wait (gating only -- the verdict is the row below, so the check
 # is judged once, on fresh reads), so a stuck-but-Ready lie cannot pass on the phase alone.
 wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.conditions[?(@.type=="RolloutComplete")].status}' True 300 >/dev/null
+# PoolWrites is the one condition that is not a health verdict: it reports write activity since the
+# current leader process started, and a backend nothing writes to reads Unknown/NoWritesObserved. That
+# exact reading is the expected one here, because this case writes nothing; any other non-True
+# PoolWrites -- a revoked write, counters the leader could not report -- is still a finding.
 NOT_TRUE="$(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND" \
-  -o jsonpath='{range .status.conditions[*]}{.type}={.status}{" "}{end}' 2>/dev/null \
-  | tr ' ' '\n' | /usr/bin/grep -v '=True$' | tr '\n' ' ')"
+  -o jsonpath='{range .status.conditions[*]}{.type}={.status}/{.reason}{" "}{end}' 2>/dev/null \
+  | tr ' ' '\n' | /usr/bin/grep -v -e '=True/' -e '^PoolWrites=Unknown/NoWritesObserved$' -e '^$' | tr '\n' ' ')"
 PH_FINAL="$(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{.status.phase}' 2>/dev/null)"
 if [ "$PH_FINAL" = "Ready" ] && [ -z "$NOT_TRUE" ]; then
-  record PASS "the backend settles Ready with every condition True" \
+  record PASS "the backend settles Ready with every health condition True" \
     "conditions: $(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND" -o jsonpath='{range .status.conditions[*]}{.type}={.status}/{.reason}{" "}{end}' 2>/dev/null)"
 else
-  record FAIL "the backend settles Ready with every condition True" \
-    "phase='${PH_FINAL}'; conditions not True: ${NOT_TRUE:-<none>}"
+  record FAIL "the backend settles Ready with every health condition True" \
+    "phase='${PH_FINAL}'; conditions not True (PoolWrites=Unknown/NoWritesObserved excepted): ${NOT_TRUE:-<none>}"
 fi
 
 results

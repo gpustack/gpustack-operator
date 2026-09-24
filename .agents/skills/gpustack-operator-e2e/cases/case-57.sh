@@ -22,47 +22,31 @@
 #              message naming the wrong subject is a failure rather than a near miss. Nothing is
 #              mocked.
 # Expected:    each submission below is rejected, and each message names the annotation, container,
-#              key or object the author has to look at.
+#              key or object the author has to look at. The last check is one layer up: turning
+#              multi-tenancy off on the backend a live pool consumes is refused, naming that pool.
 #
 #              SKIPS: none. This case has no conditional half - every check either runs or FAILS, and
 #              a precondition it cannot meet is recorded as a failure rather than passed over. The
 #              footer counts any SKIP separately from the passes, so a skipped check can never be read
 #              off the PASS count.
+#
+#              NOT COVERED HERE: the Pod-side refusal of a pool whose ledger is gone. It used to be
+#              reached by turning multi-tenancy off under the live pool; that edit is now refused at
+#              backend admission (the last check), which is the rule that closed the degradation, so
+#              a pool without a ledger is met only during an outage of its master. The resolver pins
+#              that refusal in TestPodKVCacheResolve_QuotaLedgerGate.
 # Cleanup:     the trap removes the Pods, the Binding, the namespace, the pool and the backend, in
 #              that order and idempotently, on pass AND fail. The Binding is given 60s before its
 #              finalizer is forced: a domain still holding objects makes the master refuse to drop
 #              its quota, and forcing it earlier is how a run leaves a namespace Terminating forever.
-#              It also RESTORES multi-tenancy on the backend before any delete, because the state the
-#              last check creates deliberately - multi-tenancy turned OFF on a live backend - is the
-#              state that makes the pool and the backend
-#              undeletable, and it ABORTS the deletion if that restore does not converge - the objects
-#              are repairable only while they are not being deleted. EXERCISED 2026-09-04: the restore
-#              ran and converged ("multi-tenancy restored after ~30s; the pool is deletable again").
-#              Before that it sat unexercised because it was written after a run had already wedged two
-#              objects, and the cluster went to another window before it could be run - and a review
-#              round found the first version of it deleting anyway when the restore failed. Worth
-#              keeping: an unexercised path was already wrong before it ever ran once.
-#              It changes no shared baseline - every object it touches is one it created.
+#              The multi-tenancy check is a server-side dry run and persists nothing, so the backend
+#              is never left without a ledger - the state that once wedged a pool and its backend
+#              undeletable for hours on a shared cluster. It changes no shared baseline - every
+#              object it touches is one it created.
 #
-# EXERCISED 2026-09-04 (second host) on a single-node docker-desktop cluster, arm64, k8s v1.36.1,
-# against an operator built from this branch: 15 checks, all passing, and the
-# restore converged. Still NOT exercised: the marker moving ahead of the destructive patch. That is
-# invisible on a run which completes - it shows only on one interrupted between those two lines, and
-# every run so far has completed.
-#
-# EXERCISED 2026-09-04 on a three-node k3s cluster: 15 checks, all passing. Two were added after the
-# first run and one after that:
-#
-#   shell wrapper (both spellings) - command+args are concatenated by Kubernetes, so a check written
-#     against either field alone catches one and misses the other.
-#   a pool whose ledger is gone   - reached by turning multiTenancy off on a live backend, since a
-#     create-time invariant does not protect against a later edit. Measured here: QuotaLedgerAvailable
-#     went False ~30s after the patch. That number is why the step polls instead of sleeping - any
-#     plausible fixed sleep would have been too short, and the check would have reported green while
-#     its precondition was unmet. THAT SAME RUN LEFT THE POOL AND THE BACKEND WEDGED for 3h51m on a
-#     shared cluster, which is what the restore described under Cleanup now exists to prevent. The
-#     underlying product behaviour - a finalizer that cannot finish once the ledger is gone - is
-#     filed separately; it is reachable without any of this and is not a test defect.
+# The shell-wrapper check was added after the first run, in both spellings: command+args are
+# concatenated by Kubernetes, so a check written against either field alone catches one and misses
+# the other.
 #
 # One earlier failure was this case's own: a sed keyed on the fixture's launch line stopped matching
 # when that line changed, so the Pod carried no MOONCAKE_TENANT_ID at all - and the check reported
@@ -76,72 +60,8 @@ CASE_ID=57
 
 # Armed BEFORE setup, not after: kvi_setup creates the cluster-scoped backend on its first line and
 # has five failure exits after that, so arming afterwards leaks whatever a failed setup left behind.
-# The specialized trap below replaces this one; until it does, multi-tenancy is still on and the
-# plain teardown is the correct cleanup.
 trap kvi_teardown EXIT
 kvi_setup || { kvi_results "$CASE_ID"; exit 1; }
-
-# The F4b step at the end turns multi-tenancy OFF on a live backend, and THAT STATE IS WHAT MAKES BOTH
-# OBJECTS UNDELETABLE: the pool's finalizer teardown reads the tenant ledger, the master no longer
-# holds one, and the backend cannot go while the pool is still there. Observed on the shared cluster
-# after the first run of this case: a pool and its backend wedged for 3h51m with identical
-# deletionTimestamps, until a finalizer was removed by hand.
-#
-# Patching the flag back once deletion has started does NOT help. The backend is already Deleting, so
-# its controller stops reconciling children: the leader Deployment kept its old args (gen=2,
-# observed=2), the leader pod never restarted, and 120s of polling showed no movement. It is an
-# irreversible transition, not slow convergence.
-#
-# So the flag is restored BEFORE anything is deleted, and the restore waits for the CONDITION to come
-# back rather than for the patch to be accepted - the patch was accepted in the wedged case too.
-CASE57_TENANCY_OFF=0
-
-case57_restore_multi_tenancy() {
-  [ "$CASE57_TENANCY_OFF" -eq 1 ] || return 0
-  kubectl patch kvcachebackends.worker.gpustack.ai "$BACKEND" --type=merge \
-    -p '{"spec":{"connection":{"managed":{"leader":{"multiTenancy":true}}}}}' >/dev/null 2>&1
-  local i
-  for i in $(seq 1 40); do
-    if [ "$(kubectl get kvcachepools.worker.gpustack.ai "$POOL" \
-        -o 'jsonpath={.status.conditions[?(@.type=="QuotaLedgerAvailable")].status}' 2>/dev/null)" = True ]; then
-      echo "[case-57] multi-tenancy restored after ~$((i * 3))s; the pool is deletable again"
-      return 0
-    fi
-    sleep 3
-  done
-  echo "[case-57] WARNING: QuotaLedgerAvailable did not return to True within 120s."
-  return 1
-}
-
-# Deletion is the step that makes the damage permanent, so a failed restore STOPS it.
-#
-# The first version of this teardown called the restore and then deleted regardless. That is the
-# same mistake the restore exists to prevent: while the objects are merely misconfigured they can
-# still be repaired by hand, and once they are Deleting they cannot - the controller stops
-# reconciling children, so putting multi-tenancy back no longer reaches the running master.
-#
-# So a failed restore leaves everything in place and says what to do. Objects left behind on a shared
-# cluster are a cost; objects left behind that NOBODY can remove are a different thing entirely.
-case57_teardown() {
-  local rc=$?
-  if ! case57_restore_multi_tenancy; then
-    echo "[case-57] NOT DELETING ANYTHING. multi-tenancy is still off on ${BACKEND}, and deleting \
-now is what makes the pool and the backend unremovable. They are repairable exactly while they are \
-not being deleted. To finish by hand: patch the backend's \
-spec.connection.managed.leader.multiTenancy back to true, wait for KVCachePool ${POOL} to report \
-QuotaLedgerAvailable=True, and then delete. Left in place: backend ${BACKEND}, pool ${POOL}, \
-namespace ${TEST_NS}."
-    # `return` from an EXIT trap does not change the script's status - bash keeps the one that
-    # triggered the trap - so a run whose assertions all passed would report success while leaving
-    # the cluster misconfigured. exit is what actually sets it.
-    exit 1
-  fi
-  kvi_teardown
-  return "$rc"
-}
-# Replaces the plain kvi_teardown armed above, now that the run is about to reach the step that can
-# turn multi-tenancy off.
-trap case57_teardown EXIT
 
 # A Pod that is legal except for one thing. Each check below breaks exactly one, so a message that
 # names the wrong subject is a failure rather than a near miss.
@@ -329,14 +249,6 @@ else
 workaround a patched-engine operator has"
 fi
 
-# F4b, LAST because it takes the shared pool out of service.
-#
-# This refusal looked unreachable at first: a KVCachePool is refused at creation when its backend has
-# no tenant ledger, so how does a Pod ever meet a pool whose ledger is gone? By the backend being
-# changed afterwards - multiTenancy can be flipped to false on a live backend and nothing rejects it.
-# A CREATE-TIME INVARIANT DOES NOT PROTECT AGAINST A LATER EDIT, and F4b is the last link of that
-# degradation chain rather than a duplicate of the pool's own check.
-#
 # A Binding that exists but is being DELETED
 # The refusal this covers is the one that needs no mistake: deleting a Binding is routine operations,
 # and a plain Pod is not in status.usedBy, so the finalizer protecting declared consumers cannot see
@@ -414,46 +326,33 @@ print(json.dumps({'metadata':{'finalizers':f}}))" > /tmp/kvc-term-release-${SFX}
   rm -f "/tmp/kvc-term-release-${SFX}.json"
 fi
 
-# Two cheaper routes were rejected first: a pool pointing at a nonexistent backend cannot be created
-# at all (its reference is validated at admission), and holding a pool with a finalizer risks leaving
-# one wedged on a shared cluster.
+# Multi-tenancy withdrawn under a live pool, LAST because it is the one check about the backend.
 #
-# This paragraph used to end "flipping the flag leaves both objects ordinary, so the trap removes them
-# normally". A run disproved it: flipping the flag IS what wedges them, for the reasons recorded at
-# the teardown above. The route is still the right one - it is the only way to reach F4b at all - but
-# it has a cleanup cost, and believing it had none is what left objects on a shared cluster.
-echo "[case-57] turning multi-tenancy off on the backend to reach the last check"
-# The restore marker is armed BEFORE the patch, never after. An interruption in the window between
-# the two - SIGINT, a kill, a set -u error - runs the EXIT trap with the flag still 0, skips the
-# restore, and leaves the pool and the backend undeletable: the exact state this case's own teardown
-# notes record as having already stranded two objects on a shared cluster for 3h51m. The asymmetry
-# decides the order - a restore attempted on a backend that was never patched is a no-op, while a
-# restore skipped on one that was patched needs manual finalizer surgery to undo.
-CASE57_TENANCY_OFF=1
-kubectl patch kvcachebackends.worker.gpustack.ai "$BACKEND" --type=merge \
-  -p '{"spec":{"connection":{"managed":{"leader":{"multiTenancy":false}}}}}' >/dev/null 2>&1
-
-# Polled, never slept on, and a timeout FAILS rather than SKIPs: a check whose precondition silently
-# went unmet would otherwise report green while asserting nothing. The elapsed time is printed because
-# nothing had measured it before - how long a backend edit takes to reach the pool's condition.
-ledger_off=0
-for i in $(seq 1 40); do
-  if [ "$(kubectl get kvcachepools.worker.gpustack.ai "$POOL" \
-      -o 'jsonpath={.status.conditions[?(@.type=="QuotaLedgerAvailable")].status}' 2>/dev/null)" = False ]; then
-    ledger_off=$((i * 3))
-    break
-  fi
-  sleep 3
-done
-
-if [ "$ledger_off" -eq 0 ]; then
-  record FAIL "a pool whose ledger is gone refuses the Pod" \
-    "QuotaLedgerAvailable never went False within 120s of turning multi-tenancy off, so this refusal \
-was never reached - the check did not run rather than passed"
+# This is where the degradation chain now ends. A KVCachePool is refused at creation when its backend
+# has no tenant ledger, and turning the flag off afterwards used to be the way past that rule: the
+# pool kept running on a master with no ledger, its Pods met the webhook's ledger refusal, and its
+# finalizer could no longer release what it had registered - which wedged a pool and its backend
+# undeletable on a shared cluster. Backend admission now refuses the withdrawal while anything
+# consumes the backend, naming the consumers, so the check asserts that refusal.
+#
+# A SERVER-SIDE DRY RUN, never a real patch: it runs the same admission and persists nothing, so a
+# regression that admitted the withdrawal is reported without leaving a backend in the state this
+# refusal exists to prevent. It names the v1alpha1 CRD explicitly: the aggregated worker.gpustack.ai/v1
+# API answers a server-side dry run without running the CRD's admission, so a dry run through it
+# would read as admitted whatever the rule says.
+WITHDRAW="$(kubectl patch kvcachebackends.v1alpha1.worker.gpustack.ai "$BACKEND" --dry-run=server --type=merge \
+  -p '{"spec":{"connection":{"managed":{"leader":{"multiTenancy":false}}}}}' 2>&1)" && rc=0 || rc=$?
+WITHDRAW="$(echo "$WITHDRAW" | tr '\n' ' ')"
+if [ "$rc" -eq 0 ]; then
+  record FAIL "multi-tenancy cannot be withdrawn under a live pool" \
+    "the dry run was ADMITTED, so a backend a pool consumes can lose its tenant ledger again: ${WITHDRAW:0:160}"
+elif echo "$WITHDRAW" | grep -qF "multi-tenancy cannot be turned off while" \
+  && echo "$WITHDRAW" | grep -qF "KVCachePool/${POOL}"; then
+  record PASS "multi-tenancy cannot be withdrawn under a live pool" \
+    "refused at backend admission, naming KVCachePool/${POOL} as the consumer to remove first"
 else
-  echo "[case-57] QuotaLedgerAvailable went False after ~${ledger_off}s"
-  kvi_refused "a pool whose ledger is gone refuses the Pod" \
-    "$POOL" "$(pod_without r-noledger none)"
+  record FAIL "multi-tenancy cannot be withdrawn under a live pool" \
+    "refused, but not by the withdrawal rule naming KVCachePool/${POOL}: ${WITHDRAW:0:200}"
 fi
 
 kvi_results "$CASE_ID"
