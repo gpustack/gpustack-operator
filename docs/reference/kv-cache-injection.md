@@ -200,6 +200,10 @@ ambiguity nothing reports. `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` and
 injected variables present and unread. Each key, the engine it applies to and why it is refused are
 under [Refusals and their fixes](#refusals-and-their-fixes).
 
+A flag is refused in every spelling the engine's own parser reads as it — a unique prefix, and on
+the vLLM family an underscored or dotted form — by the rule under
+[What the operator owns](model-deployment.md#what-the-operator-owns).
+
 This applies only to `env`: a value supplied through `envFrom` is invisible to the check and **will
 be overwritten with no symptom**, so declare Mooncake variables in `env`.
 

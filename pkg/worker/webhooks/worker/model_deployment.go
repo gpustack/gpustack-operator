@@ -1627,16 +1627,22 @@ func validateModelDeploymentRoleExtraArgs(
 
 	argsPath := rolePath.Child("extraArgs")
 	for i, arg := range role.ExtraArgs {
-		name := workerctrl.ModelDeploymentArgName(arg)
-		if !workerctrl.ModelDeploymentOwnsArg(engine, name) {
+		owned, ok := workerctrl.ModelDeploymentOwnedArg(engine, arg)
+		if !ok {
 			continue
 		}
 
+		// A spelling the engine reads as the owned key is named beside the key, or the refusal
+		// would cite a flag the user never wrote.
+		subject := fmt.Sprintf("%q", owned)
+		if name := workerctrl.ModelDeploymentArgName(arg); name != owned {
+			subject = fmt.Sprintf("%q is %q, which", name, owned)
+		}
 		errs = append(errs, field.Invalid(argsPath.Index(i), arg, fmt.Sprintf(
-			"%q is set by the operator for engine %q and must not be supplied here, because two "+
+			"%s is set by the operator for engine %q and must not be supplied here, because two "+
 				"values for it cannot be told apart; replace the whole command line through "+
 				"%s to own it instead",
-			name, engine, rolePath.Child("command"),
+			subject, engine, rolePath.Child("command"),
 		)))
 	}
 

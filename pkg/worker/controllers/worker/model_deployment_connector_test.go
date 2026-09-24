@@ -1305,6 +1305,121 @@ func TestModelDeploymentArgName(t *testing.T) {
 	}
 }
 
+func TestModelDeploymentResolveArg(t *testing.T) {
+	vllmKeys := []string{"--kv-transfer-config", "--kv-events-config"}
+	sglangKeys := []string{
+		"--hicache-storage-backend", "--hicache-storage-backend-extra-config",
+		"--disaggregation-mode", "--disaggregation-transfer-backend",
+		"--disaggregation-bootstrap-port",
+	}
+
+	testCases := []struct {
+		name   string
+		engine string
+		arg    string
+		keys   []string
+		want   string
+		wantOK bool
+	}{
+		{
+			name:   "registered_spelling",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: "--kv-transfer-config", keys: vllmKeys,
+			want: "--kv-transfer-config", wantOK: true,
+		},
+		{
+			name:   "registered_spelling_with_inline_value",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: `--kv-transfer-config={"a":1}`, keys: vllmKeys,
+			want: "--kv-transfer-config", wantOK: true,
+		},
+		{
+			name:   "vllm_rewrites_underscores",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: `--kv_transfer_config={"a":1}`, keys: vllmKeys,
+			want: "--kv-transfer-config", wantOK: true,
+		},
+		{
+			name:   "vllm_merges_a_dotted_member_into_the_whole_document",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: "--kv-transfer-config.kv_role=kv_producer", keys: vllmKeys,
+			want: "--kv-transfer-config", wantOK: true,
+		},
+		{
+			name:   "vllm_rewrites_underscores_in_a_dotted_member",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: "--kv_events_config.endpoint", keys: vllmKeys,
+			want: "--kv-events-config", wantOK: true,
+		},
+		{
+			name:   "vllm_reads_a_unique_prefix_as_the_whole_flag",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: `--kv-transfer-conf={"a":1}`, keys: vllmKeys,
+			want: "--kv-transfer-config", wantOK: true,
+		},
+		{
+			name:   "vllm_reads_a_prefix_of_a_dotted_member",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: "--kv-transfer.kv_role=kv_producer", keys: vllmKeys,
+			want: "--kv-transfer-config", wantOK: true,
+		},
+		{
+			// The engine refuses this as ambiguous itself; refusing it here too costs nothing.
+			name:   "a_prefix_of_several_keys_resolves_to_the_first",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: "--kv", keys: vllmKeys,
+			want: "--kv-transfer-config", wantOK: true,
+		},
+		{
+			name:   "a_longer_flag_is_not_the_key",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: "--kv-transfer-configs", keys: vllmKeys,
+		},
+		{
+			name:   "an_ordinary_flag_sharing_a_stem_is_not_the_key",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: "--kv-cache-dtype=fp8", keys: vllmKeys,
+		},
+		{
+			name:   "a_value_is_not_a_flag",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: `{"kv_connector":"Other"}`, keys: vllmKeys,
+		},
+		{
+			name:   "the_end_of_options_marker_is_not_a_prefix",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: "--", keys: vllmKeys,
+		},
+		{
+			name:   "sglang_reads_a_unique_prefix_as_the_whole_flag",
+			engine: workercore.ModelDeploymentEngineSGLang, arg: "--disaggregation-mo", keys: sglangKeys,
+			want: "--disaggregation-mode", wantOK: true,
+		},
+		{
+			name:   "sglang_reads_a_unique_prefix_with_an_inline_value",
+			engine: workercore.ModelDeploymentEngineSGLang, arg: "--disaggregation-mod=decode", keys: sglangKeys,
+			want: "--disaggregation-mode", wantOK: true,
+		},
+		{
+			// SGLang's parser is plain argparse: this spelling is an unknown flag it refuses itself.
+			name:   "sglang_does_not_rewrite_underscores",
+			engine: workercore.ModelDeploymentEngineSGLang, arg: "--disaggregation_mode", keys: sglangKeys,
+		},
+		{
+			name:   "sglang_does_not_merge_a_dotted_member",
+			engine: workercore.ModelDeploymentEngineSGLang, arg: "--hicache-storage-backend.x", keys: sglangKeys,
+		},
+		{
+			// An exact spelling of another owned flag wins over the prefix, as it does in argparse.
+			name:   "an_exact_owned_spelling_is_not_a_prefix_of_another_key",
+			engine: workercore.ModelDeploymentEngineSGLang, arg: "--hicache-storage-backend",
+			keys: []string{"--hicache-storage-backend-extra-config"},
+		},
+		{
+			name:   "a_prefix_past_an_exact_owned_spelling_is_the_longer_key",
+			engine: workercore.ModelDeploymentEngineSGLang, arg: "--hicache-storage-backend-ex",
+			keys: []string{"--hicache-storage-backend-extra-config"},
+			want: "--hicache-storage-backend-extra-config", wantOK: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ModelDeploymentResolveArg(tc.engine, tc.arg, tc.keys)
+			assert.Equal(t, tc.wantOK, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestModelDeploymentOwnership(t *testing.T) {
 	testCases := []struct {
 		name     string

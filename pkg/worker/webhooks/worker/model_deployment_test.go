@@ -621,6 +621,44 @@ func TestValidateModelDeployment(t *testing.T) {
 			wantMessage: "--hicache-storage-backend-extra-config",
 		},
 		{
+			// vLLM rewrites the underscores before matching, so this is the owned flag.
+			name: "extra_args_owned_key_underscore_spelling",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.ExtraArgs = []string{`--kv_transfer_config={"kv_connector":"Other"}`}
+			})),
+			wantMessage: `"--kv_transfer_config" is "--kv-transfer-config"`,
+		},
+		{
+			// vLLM merges a dotted member into a whole document that replaces the operator's.
+			name: "extra_args_owned_key_dotted_member",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.ExtraArgs = []string{"--kv-transfer-config.kv_role=kv_producer"}
+			})),
+			wantMessage: `"--kv-transfer-config.kv_role" is "--kv-transfer-config"`,
+		},
+		{
+			name: "extra_args_owned_key_prefix",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.ExtraArgs = []string{`--kv-transfer-conf={"kv_connector":"Other"}`}
+			})),
+			wantMessage: `"--kv-transfer-conf" is "--kv-transfer-config"`,
+		},
+		{
+			name: "extra_args_owned_key_prefix_sglang",
+			md: modelDeployment(workercore.ModelDeploymentEngineSGLang, role(func(r *workercore.ModelDeploymentRole) {
+				r.ExtraArgs = []string{"--disaggregation-mo", "decode"}
+			})),
+			wantMessage: `"--disaggregation-mo" is "--disaggregation-mode"`,
+		},
+		{
+			// The baseline for the three spellings above: a flag sharing the owned keys' stem that is
+			// neither a prefix of one nor starts with one is an ordinary argument.
+			name: "extra_args_unowned_key_sharing_a_stem",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM, role(func(r *workercore.ModelDeploymentRole) {
+				r.ExtraArgs = []string{"--kv-cache-dtype=fp8"}
+			})),
+		},
+		{
 			// Ownership is per (engine, key): a vLLM-owned key is an ordinary user argument on
 			// SGLang, and refusing it there would refuse something harmless.
 			name: "extra_args_owned_key_wrong_engine",

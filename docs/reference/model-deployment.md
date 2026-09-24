@@ -632,8 +632,8 @@ Ownership is per **(engine, key)**: a key one engine owns is an ordinary user ar
 
 | Engine | Owned arguments | Owned environment |
 |---|---|---|
-| `vllm` | `--kv-transfer-config`, `--kv-events-config` | `MOONCAKE_CONFIG_PATH`, `VLLM_MOONCAKE_BOOTSTRAP_PORT` |
-| `sglang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config`, `--disaggregation-mode`, `--disaggregation-transfer-backend`, `--disaggregation-bootstrap-port` | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
+| `vllm` | `--kv-transfer-config`, `--kv-events-config` — each also in every spelling vLLM reads as it: a unique prefix (`--kv-transfer-conf`), underscores (`--kv_transfer_config`), or a dotted member (`--kv-transfer-config.kv_role`), which vLLM merges into a whole document that replaces the operator's | `MOONCAKE_CONFIG_PATH`, `VLLM_MOONCAKE_BOOTSTRAP_PORT` |
+| `sglang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config`, `--disaggregation-mode`, `--disaggregation-transfer-backend`, `--disaggregation-bootstrap-port` — each also as a unique prefix (`--disaggregation-mo`) | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
 
 One `vllm` row covers **both backends**. The owned keys follow the engine while only the connector
 name follows the accelerator backend, so an Ascend pool and an NVIDIA pool running `vllm` own exactly

@@ -9,8 +9,10 @@ import (
 
 	core "k8s.io/api/core/v1"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/systemname"
+	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
@@ -109,7 +111,7 @@ func (r *PodKVCacheWebhook) injectPod(pod *core.Pod, res *resolution, out *injec
 	if err != nil {
 		return err
 	}
-	if err = checkOwnedKeys(pod, ctr, out); err != nil {
+	if err = checkOwnedKeys(pod, ctr, res.Input.Engine, out); err != nil {
 		return err
 	}
 	if err = checkConfigSourceKeys(ctr, res.Input.Engine); err != nil {
@@ -158,7 +160,7 @@ func (r *PodKVCacheWebhook) injectPod(pod *core.Pod, res *resolution, out *injec
 	}
 	var defaultedArgs []string
 	for _, group := range out.DefaultedArgs {
-		if hasFlag(ctr.Args, group[0]) || hasFlag(ctr.Command, group[0]) {
+		if _, found := containerFlag(ctr, res.Input.Engine, group[0]); found {
 			continue
 		}
 		defaultedArgs = append(defaultedArgs, group...)
@@ -272,10 +274,10 @@ func checkConfigSourceKeys(ctr *core.Container, engine inject.Engine) error {
 		}
 	}
 	for _, flag := range args {
-		if hasFlag(ctr.Args, flag) || hasFlag(ctr.Command, flag) {
+		if spelled, found := containerFlag(ctr, engine, flag); found {
 			return fmt.Errorf("container %q passes %s, which outranks the environment engine %q "+
 				"would otherwise read its store configuration from, so the injected variables would "+
-				"be present and unused", ctr.Name, flag, engine)
+				"be present and unused", ctr.Name, spelled, engine)
 		}
 	}
 
@@ -288,7 +290,7 @@ func checkConfigSourceKeys(ctr *core.Container, engine inject.Engine) error {
 // It refuses rather than merging because every one of these produces an ambiguity nothing reports: two
 // connector flags on one command line, or two mounts at one path. Taking over is an explicit opt-out -
 // set the inject label to "false", or leave it off.
-func checkOwnedKeys(pod *core.Pod, ctr *core.Container, out *inject.Result) error {
+func checkOwnedKeys(pod *core.Pod, ctr *core.Container, engine inject.Engine, out *inject.Result) error {
 	// Only what THIS render will write can collide. The owned lists span every engine, so scanning
 	// them unfiltered refused Pods over keys the render was never going to add: an SGLang container
 	// setting MOONCAKE_CONFIG_PATH - SGLang selects its file with SGLANG_HICACHE_MOONCAKE_CONFIG_PATH,
@@ -309,10 +311,9 @@ func checkOwnedKeys(pod *core.Pod, ctr *core.Container, out *inject.Result) erro
 		if !slices.Contains(out.Args, flag) {
 			continue
 		}
-		// command is scanned as well as args, because a user may put the flag in either.
-		if hasFlag(ctr.Args, flag) || hasFlag(ctr.Command, flag) {
+		if spelled, found := containerFlag(ctr, engine, flag); found {
 			return fmt.Errorf("container %q already passes %s, so it already has a KV cache "+
-				"configured; two of them on one command line is undiagnosable", ctr.Name, flag)
+				"configured; two of them on one command line is undiagnosable", ctr.Name, spelled)
 		}
 	}
 
@@ -866,10 +867,28 @@ func isShellCommandFlag(arg string) bool {
 }
 
 // hasFlag reports whether a flag appears in an argument list, including in its --flag=value form.
-func hasFlag(args []string, flag string) bool {
-	return slices.ContainsFunc(args, func(arg string) bool {
-		return arg == flag || strings.HasPrefix(arg, flag+"=")
-	})
+// containerFlag reports whether the container passes flag in any spelling the engine's own parser
+// reads as it, and describes the entry that does. Command is scanned as well as args, because a user
+// may put the flag in either.
+//
+// vLLM-Ascend is a plugin that vLLM's own parser launches, so it reads vLLM's spellings.
+func containerFlag(ctr *core.Container, engine inject.Engine, flag string) (string, bool) {
+	parser := string(engine)
+	if engine == inject.EngineVLLMAscend {
+		parser = workercore.ModelDeploymentEngineVLLM
+	}
+
+	for _, arg := range slices.Concat(ctr.Args, ctr.Command) {
+		if _, found := workerctrl.ModelDeploymentResolveArg(parser, arg, []string{flag}); !found {
+			continue
+		}
+		if name := workerctrl.ModelDeploymentArgName(arg); name != flag {
+			return fmt.Sprintf("%s, which engine %q reads as %s", name, engine, flag), true
+		}
+		return flag, true
+	}
+
+	return "", false
 }
 
 // containerNames lists container names for a refusal a reader can act on.

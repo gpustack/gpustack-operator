@@ -356,7 +356,70 @@ var modelDeploymentDefaultedEnvNames = []string{"MC_TE_METRIC", inject.MooncakeF
 // Ownership is PER (ENGINE, KEY): a key one engine owns is an ordinary user argument on another, so
 // the engine is not optional and a caller that does not have one has no question to ask.
 func ModelDeploymentOwnsArg(engine, arg string) bool {
-	return slices.Contains(modelDeploymentOwnedKeys[engine].Args, ModelDeploymentArgName(arg))
+	_, owned := ModelDeploymentOwnedArg(engine, arg)
+	return owned
+}
+
+// ModelDeploymentOwnedArg reports which owned argument the engine's own parser reads a command-line
+// entry as, so a refusal can name the key a differently spelled entry reaches.
+func ModelDeploymentOwnedArg(engine, arg string) (string, bool) {
+	return ModelDeploymentResolveArg(engine, arg, modelDeploymentOwnedKeys[engine].Args)
+}
+
+// ModelDeploymentResolveArg reports which of keys the engine's own parser reads a command-line entry
+// as, and false when it reads it as none of them.
+//
+// The rules are the engine's, the same ones the parallelism parse follows. vLLM rewrites the
+// underscores of a long flag to dashes up to its first dot, and merges a dotted entry
+// ("--kv-transfer-config.kv_role=x") into one whole document for the flag before the dot, appended
+// after every other argument so it replaces the operator's. Both engines resolve a long flag by
+// argparse's unique-prefix abbreviation. SGLang rewrites and merges nothing.
+//
+// A PREFIX OF ANY KEY RESOLVES TO IT, without counting how many flags the engine registers under that
+// prefix, because the full table is the engine's and not known here. That errs toward refusing: a
+// prefix the engine calls ambiguous is refused at engine start anyway, and argparse prefers an exact
+// registered spelling over an abbreviation, so the only entry wrongly resolved is one exactly equal
+// to another registered flag that is also a prefix of a key. The owned flags are the registered
+// flags known here, so an exact owned spelling is never read as a prefix of a longer owned key.
+func ModelDeploymentResolveArg(engine, arg string, keys []string) (string, bool) {
+	name := ModelDeploymentArgName(arg)
+	if engine == workercore.ModelDeploymentEngineVLLM {
+		name, _, _ = strings.Cut(modelDeploymentVLLMFlagKey(name), ".")
+	}
+	// "--" alone ends the options rather than abbreviating one.
+	if !strings.HasPrefix(name, "--") || len(name) == len("--") {
+		return "", false
+	}
+
+	if slices.Contains(keys, name) {
+		return name, true
+	}
+	if slices.Contains(modelDeploymentOwnedKeys[engine].Args, name) {
+		return "", false
+	}
+	for _, key := range keys {
+		if strings.HasPrefix(key, name) {
+			return key, true
+		}
+	}
+
+	return "", false
+}
+
+// modelDeploymentVLLMFlagKey applies vLLM's own rewrite of a flag key: every underscore between the
+// leading "--" and the first dot becomes a dash. Anything that is not a long flag is returned as is.
+func modelDeploymentVLLMFlagKey(key string) string {
+	if !strings.HasPrefix(key, "--") {
+		return key
+	}
+
+	head, tail, dotted := strings.Cut(key, ".")
+	head = strings.ReplaceAll(head, "_", "-")
+	if !dotted {
+		return head
+	}
+
+	return head + "." + tail
 }
 
 // ModelDeploymentOwnsEnv reports whether the named environment variable belongs to the operator on
