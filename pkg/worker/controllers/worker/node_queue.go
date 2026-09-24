@@ -49,12 +49,16 @@ import (
 //     itself. (This covers both an admin's direct delete and the InstanceType teardown's delete.)
 //   - Flavors present: fill the resource groups from the flavors, smallest per-node count
 //     first so Kueue packs small nodes before large ones, reference the node-devices
-//     AdmissionCheck on an accelerated derived queue once it is Active, and reactivate a queue
-//     that had been drained to empty (StopPolicy None).
+//     AdmissionCheck on an accelerated derived queue once it is Active, reactivate a queue
+//     that had been drained to empty (StopPolicy None), and lift the Hold this reconciler placed
+//     on a queue that had no resource groups yet.
 //   - No flavors, quota still defined: gated by instance-type-drain-when-no-flavors, drive the
 //     queue to HoldAndDrain and requeue until every reservation clears, then empty the resource
 //     groups — so Kueue's reservation counters never go negative — and keep the emptied queue
 //     held until a flavor returns.
+//   - No resource groups yet, and not stopped: Hold the queue and mark the Hold as this
+//     reconciler's, whether the pool has no flavors or its flavors fail validation. A queue that
+//     declares no resource would admit every Workload.
 //
 // Reactivation fires only on a queue whose resource groups are already empty, so it never
 // contends with a drain still in progress.
@@ -75,6 +79,7 @@ const (
 	_TASQueueMigrationPhaseDraining        = "draining"
 	_TASQueueMigrationPhaseSwitched        = "switched"
 	_TASQueueMigrationStopPolicyUnset      = "unset"
+	_TASQueueEmptyPlanHoldAnnotation       = "topology.gpustack.ai/empty-plan-hold"
 	_TASQueueMigrationRequeueAfter         = 5 * time.Second
 	_maxQueueFlavors                       = 64
 
@@ -275,6 +280,16 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 		cq.Spec.StopPolicy = ptr.To(kueue.None)
 		changed = true
 	}
+	// Lift the Hold holdEmptyClusterQueue placed in the same update that gives the queue its
+	// resource groups, so Kueue never sees the queue admitting without them. An admin Hold carries
+	// no marker and stays.
+	if cq.Annotations[_TASQueueEmptyPlanHoldAnnotation] != "" && len(eGroups) > 0 {
+		delete(cq.Annotations, _TASQueueEmptyPlanHoldAnnotation)
+		if ptr.Deref(cq.Spec.StopPolicy, kueue.None) == kueue.Hold {
+			cq.Spec.StopPolicy = ptr.To(kueue.None)
+		}
+		changed = true
+	}
 	if planChanged {
 		cq.Spec.ResourceGroups = eGroups
 		changed = true
@@ -408,6 +423,11 @@ func (r *NodeQueueReconciler) rejectClusterQueue(
 	ctx context.Context, cq *kueue.ClusterQueue, failure *nodeQueueValidationError,
 ) (ctrl.Result, error) {
 	ctrllog.FromContext(ctx).Error(failure, "reject topology-aware cluster queue")
+	// A refused plan leaves the last complete one serving; a queue that has none must not admit
+	// meanwhile.
+	if err := r.holdEmptyClusterQueue(ctx, cq); err != nil {
+		return ctrl.Result{}, err
+	}
 	result := ctrl.Result{}
 	// NodeQueue does not watch Nodes: a missing Topology or a flavor that does not yet count every
 	// pool Node heals only through a later ResourceFlavor event, so both are retried.
@@ -607,7 +627,7 @@ func (r *NodeQueueReconciler) drainOrEmptyClusterQueue(
 		return r.migrateClusterQueueResourceGroups(ctx, cq, nil, false)
 	}
 	if len(cq.Spec.ResourceGroups) == 0 {
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, r.holdEmptyClusterQueue(ctx, cq)
 	}
 
 	drain := settings.InstanceTypeDrainWhenNoFlavors.ShouldValueBool(ctx)
@@ -625,6 +645,31 @@ func (r *NodeQueueReconciler) drainOrEmptyClusterQueue(
 	// prior stop policy and lets a returning flavor join the in-progress plan before admission is
 	// restored.
 	return r.migrateClusterQueueResourceGroups(ctx, cq, nil, false)
+}
+
+// holdEmptyClusterQueue puts a queue that has no resource groups and is not stopped on Hold, and
+// marks the Hold so that fillClusterQueue lifts it once the queue has resource groups. Such a queue
+// declares no resource, and Kueue ignores undeclared resources (quotaCheckStrategy
+// IgnoreUndeclared), so it would admit every Workload with no flavor and therefore no
+// AdmissionCheck. It is Hold, not HoldAndDrain: the queue reserves no quota to drain, and
+// HoldAndDrain would also stop the Instances of its InstanceType. A queue in the flavor migration
+// is held by the migration instead, and an admin Hold is left alone.
+func (r *NodeQueueReconciler) holdEmptyClusterQueue(ctx context.Context, cq *kueue.ClusterQueue) error {
+	if len(cq.Spec.ResourceGroups) != 0 || cq.Annotations[_TASQueueMigrationPhaseAnnotation] != "" ||
+		ptr.Deref(cq.Spec.StopPolicy, kueue.None) != kueue.None {
+		return nil
+	}
+	if cq.Annotations == nil {
+		cq.Annotations = make(map[string]string)
+	}
+	cq.Annotations[_TASQueueEmptyPlanHoldAnnotation] = "true"
+	cq.Spec.StopPolicy = ptr.To(kueue.Hold)
+	if err := r.Client.Update(ctx, cq); err != nil {
+		ctrllog.FromContext(ctx).Error(err, "hold cluster queue without resource groups")
+		return err
+	}
+	ctrllog.FromContext(ctx).V(2).Info("held cluster queue without resource groups")
+	return nil
 }
 
 // hasReserved reports whether the ClusterQueue still holds reserved quota or

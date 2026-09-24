@@ -259,6 +259,11 @@ feature key(s) selected by `instance-type-aware-cpu-manufacturer`, `kubernetes.i
 the InstanceType **spec** identity) and the fixed no-borrow **isolation** (empty cohort, no
 reclaim/borrow preemption).
 
+It creates the queue on `Hold`, marked `topology.gpustack.ai/empty-plan-hold`, because the queue has
+no resource groups yet and
+[a queue without them admits every Workload](admission.md#known-behavior-the-deployed-kueue-configuration).
+The `NodeQueueReconciler` lifts that Hold in the update that fills the groups.
+
 It never fills the resource groups or references the AdmissionCheck (the `NodeQueueReconciler` owns
 those), and prunes a stale feature-key label when the group/acceleratable changes so the re-pointed
 queue's selectors match.
@@ -275,6 +280,11 @@ It also syncs `it.Spec.Inactive` with the queue's `StopPolicy` for the **admin `
 when `Inactive` (blocking new admission without evicting running workloads, never `HoldAndDrain`),
 `None` when an admin reactivates, and `Inactive=true` backfilled one-way and stickily whenever the queue
 is stopped by any means. So `Hold↔None` is owned here, `HoldAndDrain` by the `NodeQueueReconciler`.
+
+A marked empty-plan `Hold` belongs to the `NodeQueueReconciler`: this sync neither releases it nor
+mirrors it into `Inactive`. Marking the type `Inactive` adopts it as the admin's `Hold` by dropping
+the marker, so it is not lifted when the groups fill. Clearing `Inactive` on a queue that has no
+resource groups hands the `Hold` back by marking it rather than releasing it.
 
 ### `NodeQueueReconciler` (`node_queue.go`)
 
@@ -298,8 +308,11 @@ resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
 - **No live flavor left** while the queue carries quota — gated by
   `instance-type-drain-when-no-flavors` (default true): `HoldAndDrain`, requeue until every reservation
   clears, then empty the groups so Kueue's counters never go negative. The emptied queue stays
-  `HoldAndDrain` until a flavor returns: under `IgnoreUndeclared` a queue that declares no resource
-  admits every Workload, with no flavor and so no AdmissionCheck.
+  `HoldAndDrain` until a flavor returns, so it never admits without resource groups.
+- **No resource groups yet** and not stopped — the pool has no flavor, or its flavors fail topology
+  readiness: `Hold`, marked `topology.gpustack.ai/empty-plan-hold` and lifted in the update that fills
+  the groups. It is `Hold`, not `HoldAndDrain`, so the type's Instances are not stopped; an admin
+  `Hold` carries no marker and is left alone.
 - **Topology readiness** — refuse a partial queue plan when a flavor lacks its profile or Topology,
   selectors overlap, quota changes across the profile split, the same resource would occur in two
   groups, or one resource group would exceed the [flavor limit](topology-aware-scheduling.md#capacity-and-lifecycle-limits).

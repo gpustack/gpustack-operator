@@ -159,7 +159,7 @@ Workloads, switches the complete flavor plan, and restores the queue's previous 
 owns eviction and readmission; serving workloads can be interrupted.
 
 A plan with no flavor left is the exception: the emptied queue stays held until a flavor returns,
-because under `IgnoreUndeclared` Kueue admits every Workload onto a queue that declares no resource.
+because [a queue without resource groups admits every Workload](admission.md#known-behavior-the-deployed-kueue-configuration).
 
 A dropped flavor that Kueue reports idle, an added flavor, or a quota-only change is updated in
 place without a hold. The decision reads only a queue status Kueue wrote for the current generation;

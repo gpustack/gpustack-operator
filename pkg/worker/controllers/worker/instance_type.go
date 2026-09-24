@@ -145,8 +145,11 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 //	| None (active)            | true          | forward: set StopPolicy=Hold      |
 //	| Hold (admin)             | true          | stable                            |
 //	| Hold (admin)             | false         | forward: set StopPolicy=None      |
+//	| Hold (admin), no groups  | false         | hand over: mark it NodeQueue's    |
 //	| HoldAndDrain (NodeQueue)  | true         | stable                            |
 //	| HoldAndDrain (NodeQueue)  | false        | mirror: backfill Spec.Inactive    |
+//	| Hold, marked (NodeQueue)  | true         | adopt: drop the marker            |
+//	| Hold, marked (NodeQueue)  | false        | stable                            |
 //
 // It evaluates the forward direction (Inactive drives the Hold<->None pair) first; the
 // NodeQueueReconciler owns HoldAndDrain (teardown / no-flavors drain), so the forward direction
@@ -157,7 +160,12 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 // Inactive=true re-Holds the reactivated queue) until an admin clears the flag. At most one
 // guarded write happens per call; a stable state writes nothing. While NodeQueue carries its
 // topology-migration marker, this synchronization pauses because that controller temporarily owns
-// StopPolicy. It reports whether it wrote.
+// StopPolicy. A Hold NodeQueue marked as its own, on a queue that has no resource groups yet, is
+// NodeQueue's to lift: it is neither released nor mirrored, and an admin marking the type Inactive
+// adopts it by dropping the marker, so NodeQueue no longer lifts it. The reverse hand-over applies
+// when an admin clears Inactive on a queue without resource groups: the Hold is marked rather than
+// released, because a queue that declares no resource admits every Workload for as long as it is
+// None. It reports whether it wrote.
 func (r *InstanceTypeReconciler) syncInactive(
 	ctx context.Context, it *workercore.InstanceType, cq *kueue.ClusterQueue,
 ) (bool, error) {
@@ -166,6 +174,13 @@ func (r *InstanceTypeReconciler) syncInactive(
 	// otherwise the restored active policy is immediately converted into a sticky Hold.
 	if cq.Annotations[_TASQueueMigrationPhaseAnnotation] != "" {
 		return false, nil
+	}
+	if cq.Annotations[_TASQueueEmptyPlanHoldAnnotation] != "" {
+		if !it.Spec.Inactive {
+			return false, nil
+		}
+		delete(cq.Annotations, _TASQueueEmptyPlanHoldAnnotation)
+		return true, r.Client.Update(ctx, cq)
 	}
 
 	switch ptr.Deref(cq.Spec.StopPolicy, kueue.None) {
@@ -176,7 +191,14 @@ func (r *InstanceTypeReconciler) syncInactive(
 		}
 	case kueue.Hold:
 		if !it.Spec.Inactive {
-			cq.Spec.StopPolicy = ptr.To(kueue.None)
+			if len(cq.Spec.ResourceGroups) == 0 {
+				if cq.Annotations == nil {
+					cq.Annotations = make(map[string]string)
+				}
+				cq.Annotations[_TASQueueEmptyPlanHoldAnnotation] = "true"
+			} else {
+				cq.Spec.StopPolicy = ptr.To(kueue.None)
+			}
 			return true, r.Client.Update(ctx, cq)
 		}
 	}
@@ -260,9 +282,12 @@ func (r *InstanceTypeReconciler) ensureClusterQueue(
 }
 
 // createClusterQueue builds the backing ClusterQueue from the InstanceType: the spec-derived
-// schedule labels, an active StopPolicy, and the fixed no-borrow isolation policy written straight
-// into the spec — empty cohort (no cross-queue borrowing to broker), never reclaim or borrow within
-// a nonexistent cohort, only in-queue lower-priority preemption, all-namespace selector.
+// schedule labels, a Hold marked as the NodeQueueReconciler's, and the fixed no-borrow isolation
+// policy written straight into the spec — empty cohort (no cross-queue borrowing to broker), never
+// reclaim or borrow within a nonexistent cohort, only in-queue lower-priority preemption,
+// all-namespace selector. The queue is created held because it has no resource groups yet, and a
+// queue that declares no resource admits every Workload; the NodeQueueReconciler lifts the Hold in
+// the update that fills the resource groups.
 //
 // The NodeQueueReconciler fills the resource groups afterwards, and adds the node-devices
 // AdmissionCheck reference only while the cluster-wide derived-from-node switch is on and that check
@@ -275,12 +300,13 @@ func (r *InstanceTypeReconciler) createClusterQueue(
 
 	cq := &kueue.ClusterQueue{
 		ObjectMeta: meta.ObjectMeta{
-			Name:   it.Name,
-			Labels: instanceTypeScheduleLabels(ctx, it),
+			Name:        it.Name,
+			Labels:      instanceTypeScheduleLabels(ctx, it),
+			Annotations: map[string]string{_TASQueueEmptyPlanHoldAnnotation: "true"},
 		},
 		Spec: kueue.ClusterQueueSpec{
 			NamespaceSelector: &meta.LabelSelector{},
-			StopPolicy:        ptr.To(kueue.None),
+			StopPolicy:        ptr.To(kueue.Hold),
 			FlavorFungibility: &kueue.FlavorFungibility{
 				WhenCanBorrow:  kueue.TryNextFlavor,
 				WhenCanPreempt: kueue.MayStopSearch,

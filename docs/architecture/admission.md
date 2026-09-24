@@ -339,6 +339,11 @@ or only the manufacturer `credits`) does not reject a Workload for the Pod resou
 (`memory`/`ephemeral-storage`). Its `resources.transformations` list is generated from `pkg/nodefeature`
 by `make generate chart`.
 
+The same strategy makes a queue with **no resource groups** admit every Workload: it declares no
+resource, so nothing is checked, the Workload gets no flavor, and with no flavor it carries no
+AdmissionCheck. The operator never leaves such a queue admitting — see the
+[`NodeQueueReconciler`](scheduling-chain.md#nodequeuereconciler-node_queuego).
+
 ---
 
 **See also** — [Accelerator Requests](../accelerator-requests.md) (the normative request contract) ·

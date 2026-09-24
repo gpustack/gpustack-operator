@@ -1327,6 +1327,86 @@ func TestNodeQueueReconciler_KeepsEmptiedQueueHeld(t *testing.T) {
 	}
 }
 
+// TestNodeQueueReconciler_HoldsQueueWithoutResourceGroups pins that a queue that never had resource
+// groups is put on Hold, marked as this reconciler's, whether its pool has no flavors or its
+// flavors fail validation: a queue that declares no resource admits every Workload. It is Hold,
+// not HoldAndDrain, so the Instances of the type are not stopped, and an admin Hold stays unmarked.
+func TestNodeQueueReconciler_HoldsQueueWithoutResourceGroups(t *testing.T) {
+	const key = "generic"
+	name := nodeQueueName(key)
+
+	t.Run("no flavors", func(t *testing.T) {
+		cli := buildNodeQueueClient(newInstanceTypeQueue(key, false))
+		reconcileNodeQueueN(t, cli, name, 1)
+		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		assert.Equal(t, kueue.Hold, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+		assert.Equal(t, "true", got.Annotations[_TASQueueEmptyPlanHoldAnnotation])
+
+		held := got.ResourceVersion
+		reconcileNodeQueueN(t, cli, name, 2)
+		got, err = getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		assert.Equal(t, held, got.ResourceVersion, "a held queue is not written again")
+	})
+
+	t.Run("flavors fail validation", func(t *testing.T) {
+		first := newNodesFlavor("gpustack-generic-linux-amd64-4c-a", key, 4, 4)
+		second := newNodesFlavor("gpustack-generic-linux-amd64-4c-b", key, 4, 4)
+		cli := buildNodeQueueClient(newInstanceTypeQueue(key, false), first, second)
+		reconcileNodeQueueN(t, cli, name, 1)
+		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		assert.Equal(t, "OverlappingSelectors", nodeQueueConditionTopologyReady.GetReason(got))
+		assert.Empty(t, got.Spec.ResourceGroups)
+		assert.Equal(t, kueue.Hold, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+		assert.Equal(t, "true", got.Annotations[_TASQueueEmptyPlanHoldAnnotation])
+	})
+
+	t.Run("admin Hold stays unmarked", func(t *testing.T) {
+		cq := newInstanceTypeQueue(key, false)
+		cq.Spec.StopPolicy = ptr.To(kueue.Hold)
+		cli := buildNodeQueueClient(cq)
+		reconcileNodeQueueN(t, cli, name, 1)
+		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		assert.Equal(t, kueue.Hold, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+		assert.NotContains(t, got.Annotations, _TASQueueEmptyPlanHoldAnnotation)
+	})
+}
+
+// TestNodeQueueReconciler_LiftsItsHoldWithTheFirstPlan pins that the Hold this reconciler placed on
+// a queue without resource groups is lifted by the update that fills them, which also carries the
+// AdmissionCheck references, so Kueue never sees the queue admitting without quota or checks.
+func TestNodeQueueReconciler_LiftsItsHoldWithTheFirstPlan(t *testing.T) {
+	enableInstanceTypeDerivedFromNode(t)
+	key := "nvidia-a10g"
+	name := nodeQueueName(key)
+	cq := newInstanceTypeQueue(key, true)
+	cq.Spec.StopPolicy = ptr.To(kueue.Hold)
+	cq.Annotations = map[string]string{_TASQueueEmptyPlanHoldAnnotation: "true"}
+	nodeDevices := jointCheck(true)
+	nodeDevices.Name = _NodeDevicesAdmissionCheckName
+	nodeDevices.Spec.ControllerName = _NodeDevicesControllerName
+	rf := newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-1d", key, 1, 4, accelerated(nodefeature.ManufacturerNVIDIA))
+	cli := buildNodeQueueClient(cq, rf, nodeDevices, jointCheck(true))
+
+	reconcileNodeQueueN(t, cli, name, 1)
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, kueue.None, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+	assert.NotContains(t, got.Annotations, _TASQueueEmptyPlanHoldAnnotation)
+	require.Len(t, got.Spec.ResourceGroups, 1)
+	require.NotNil(t, got.Spec.AdmissionChecksStrategy)
+	checks := make([]kueue.AdmissionCheckReference, 0, len(got.Spec.AdmissionChecksStrategy.AdmissionChecks))
+	for _, rule := range got.Spec.AdmissionChecksStrategy.AdmissionChecks {
+		checks = append(checks, rule.Name)
+	}
+	assert.ElementsMatch(t, []kueue.AdmissionCheckReference{
+		_NodeDevicesAdmissionCheckName, _JointAdmissionCheckName,
+	}, checks)
+}
+
 // observeQueueUsage records the status Kueue writes for the queue's current spec: the Active
 // condition at the current generation, and one reservation and usage entry per referenced flavor
 // with the given CPU quantity (zero when the flavor is absent from usage).
