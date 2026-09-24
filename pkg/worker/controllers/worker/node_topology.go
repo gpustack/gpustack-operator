@@ -23,6 +23,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
@@ -255,8 +256,7 @@ func (r *NodeTopologyReconciler) SetupController(_ context.Context, opts control
 			ctrlbuilder.WithPredicates(ctrlpredicate.Funcs{
 				DeleteFunc: func(ctrlevent.DeleteEvent) bool { return false },
 				UpdateFunc: func(event ctrlevent.UpdateEvent) bool {
-					oldNode, newNode := event.ObjectOld.(*core.Node), event.ObjectNew.(*core.Node)
-					return !kubemeta.DeepEqual(oldNode.Labels, newNode.Labels)
+					return nodeLabelsChangedIgnoringFit(event.ObjectOld.(*core.Node), event.ObjectNew.(*core.Node))
 				},
 			}),
 		).
@@ -272,4 +272,11 @@ func (r *NodeTopologyReconciler) SetupController(_ context.Context, opts control
 			})),
 		).
 		Complete(r)
+}
+
+// nodeLabelsChangedIgnoringFit reports whether a Node update changed any label other than a fit
+// label. The fit labels move on almost every accelerator allocation and name no topology level, so
+// a watcher deriving topology from labels ignores an update that moved only them.
+func nodeLabelsChangedIgnoringFit(oldNd, newNd *core.Node) bool {
+	return !nodefeature.EqualIgnoringFitLabels(oldNd.Labels, newNd.Labels)
 }

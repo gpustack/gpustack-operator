@@ -518,9 +518,9 @@ proves the whole path.
       - `TestFitLabelsAgreeWithNodeDevicesFeasibility` is a parity table. For each ledger and demand, `sliced-max-free-units > U-1` must equal a Ready verdict from `nodeDevicesFeasibility` for one Pod with one card on that node. `shared-free-cards > N-1` must equal a Ready verdict for one shared Pod with N cards. The table includes a mixed-mode ledger and a partitioned card.
       Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestDesiredFitLabels$|TestBuildFitLabelPatch$|TestFitLabelsAgreeWithNodeDevicesFeasibility$|TestNodeFitLabelReconciler_Reconcile$|TestFitSignatureChanged$' -v`
 
-- [ ] **T3 · Topology predicates ignore fit-only label changes**
+- [x] **T3 · Topology predicates ignore fit-only label changes**
       Blocked by: T1
-      Owns: `pkg/worker/controllers/worker/node_topology.go`, `pkg/worker/controllers/worker/node_topology_test.go`, `pkg/worker/controllers/worker/topology_source.go`, `pkg/worker/controllers/worker/topology_source_test.go`
+      Owns: `pkg/worker/controllers/worker/node_topology.go`, `pkg/worker/controllers/worker/node_topology_test.go`, `pkg/worker/controllers/worker/topology_source.go`
       Acceptance:
       - The two inline `!kubemeta.DeepEqual(old.Labels, new.Labels)` predicates become one named function, `nodeLabelsChangedIgnoringFit`, which uses `nodefeature.EqualIgnoringFitLabels`.
       - Its table covers four cases. A change only in fit labels is false. Any other label change is true. A fit change together with another change is true. No change is false.

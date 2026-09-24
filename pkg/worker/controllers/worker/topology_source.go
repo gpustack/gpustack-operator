@@ -176,8 +176,7 @@ func (r *TopologySourceReconciler) SetupController(_ context.Context, opts contr
 			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(time.Second, r.enqueueTopologySourcesWhenNodeChanged),
 			ctrlbuilder.WithPredicates(ctrlpredicate.Funcs{
 				UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
-					oldNode, newNode := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
-					return !kubemeta.DeepEqual(oldNode.Labels, newNode.Labels)
+					return nodeLabelsChangedIgnoringFit(e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node))
 				},
 			}),
 		).
