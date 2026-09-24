@@ -108,8 +108,8 @@ run the cleanup script to strip the leaked v0.5.x objects.
 ```bash
 NS=gpustack-system
 
-# 1. Upgrade in place.
-helm upgrade gpustack-operator gpustack/gpustack-operator -n "$NS" --version 0.6.0 --reuse-values
+# 1. Upgrade in place. The chart README's "Upgrading the Chart" says why this flag.
+helm upgrade gpustack-operator gpustack/gpustack-operator -n "$NS" --version 0.6.0 --reset-then-reuse-values
 
 # 2. Wait for the v0.6.x worker to be healthy.
 kubectl -n "$NS" rollout status deploy/gpustack-operator-worker

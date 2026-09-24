@@ -92,7 +92,7 @@ trap restore EXIT
 
 # 1. Hand csi-driver-nfs out of the operator release, so the stand-in can install it instead.
 echo "== helm upgrade ${RELEASE}: csi-driver-nfs.enabled=false =="
-if ! "$HELM" upgrade "$RELEASE" "$CHART" -n "$NS" --reuse-values \
+if ! "$HELM" upgrade "$RELEASE" "$CHART" -n "$NS" --reset-then-reuse-values \
   --set 'csi-driver-nfs.enabled=false' --timeout 10m; then
   record FAIL "release drops the subchart" "helm upgrade failed"
   report
@@ -129,7 +129,7 @@ fi
 # 3. The negative half: re-enabling the subchart must be REFUSED without the flag. A pass here is a
 #    failed upgrade — anything else means Helm silently took objects it does not own.
 echo "== helm upgrade ${RELEASE}: re-enable csi-driver-nfs WITHOUT --take-ownership (must fail) =="
-err=$("$HELM" upgrade "$RELEASE" "$CHART" -n "$NS" --reuse-values \
+err=$("$HELM" upgrade "$RELEASE" "$CHART" -n "$NS" --reset-then-reuse-values \
   --set 'csi-driver-nfs.enabled=true' --timeout 10m 2>&1)
 rc=$?
 if [ "$rc" -eq 0 ]; then
@@ -149,7 +149,7 @@ fi
 
 # 4. The positive half: the documented one-time upgrade.
 echo "== helm upgrade ${RELEASE}: re-enable csi-driver-nfs WITH --take-ownership =="
-if "$HELM" upgrade "$RELEASE" "$CHART" -n "$NS" --reuse-values \
+if "$HELM" upgrade "$RELEASE" "$CHART" -n "$NS" --reset-then-reuse-values \
   --set 'csi-driver-nfs.enabled=true' --take-ownership --timeout 10m; then
   record PASS "upgrade accepted with the flag" "--take-ownership"
 else

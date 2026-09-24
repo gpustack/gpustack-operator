@@ -117,7 +117,7 @@ wait_for() {
 
 upgrade_operator() {
   local repository="$1" tag="$2"
-  helm upgrade "$RELEASE" "$CHART" -n "$NS" --reuse-values \
+  helm upgrade "$RELEASE" "$CHART" -n "$NS" --reset-then-reuse-values \
     --set worker.image.repository="$repository" --set worker.image.tag="$tag" --set worker.image.pullPolicy=IfNotPresent >/dev/null &&
     kubectl -n "$NS" rollout status "deployment/${RELEASE}-worker" --timeout=300s >/dev/null
 }

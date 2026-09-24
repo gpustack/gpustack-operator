@@ -113,7 +113,7 @@ failed attempt, and install again — a reinstall that reports success while eve
 release held, CRDs included, is gone.
 
   to replace it       bash ${HERE}/teardown.sh ${NS}   (then re-run this)
-  to change the image helm upgrade ${RELEASE} ${CHART} -n ${NS} --reuse-values \\
+  to change the image helm upgrade ${RELEASE} ${CHART} -n ${NS} --reset-then-reuse-values \\
                         --set image.tag=${TAG} --set image.pullPolicy=IfNotPresent
                       kubectl -n ${NS} rollout restart deploy/${RELEASE}-worker
 USAGE

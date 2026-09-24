@@ -13,7 +13,7 @@
 #              least REPLICAS schedulable nodes — the case AUTO-SKIPS below that, because the
 #              documented spread is whenUnsatisfiable: DoNotSchedule and would leave pods Pending.
 #              No GPU. Needs a helm client and the chart source tree.
-# Inputs:      A values overlay applied with `helm upgrade --reuse-values`, carrying the same knobs
+# Inputs:      A values overlay applied with `helm upgrade --reset-then-reuse-values`, carrying the same knobs
 #              docs/operation/high-availability.md ships (worker / kueue.controllerManager /
 #              node-feature-discovery.master / both csi-driver-*.controller). Nothing mocked: the
 #              leader is a real pod, deleted for real.
@@ -140,7 +140,7 @@ csi-driver-s3:
 EOF
 
 echo "== helm upgrade ${RELEASE} to ${REPLICAS} control-plane replicas =="
-if ! "$HELM" upgrade "$RELEASE" "$CHART" -n "$NS" --reuse-values -f "$HA" --timeout 10m; then
+if ! "$HELM" upgrade "$RELEASE" "$CHART" -n "$NS" --reset-then-reuse-values -f "$HA" --timeout 10m; then
   record FAIL "ha upgrade" "helm upgrade rejected the HA values"
   report
   exit 1
