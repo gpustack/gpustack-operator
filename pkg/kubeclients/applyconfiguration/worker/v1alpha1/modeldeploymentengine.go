@@ -19,7 +19,7 @@ type ModelDeploymentEngineApplyConfiguration struct {
 	// while Version answers which build runs and stays editable — stated here because one object
 	// reading otherwise would freeze the pair together.
 	Name *string `json:"name,omitempty"`
-	// Version is the engine's own version, e.g. "0.25.1" for vllm or "0.5.18" for sglang.
+	// Version is the engine's own version, e.g. "0.29.0" for vllm or "0.5.18" for sglang.
 	//
 	// - It is OPTIONAL, and the obligation sits with the roles instead: a role that names no image
 	// of its own has one synthesized from this version, so admission refuses an empty version

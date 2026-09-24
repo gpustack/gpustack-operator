@@ -46,9 +46,8 @@ spec:
           capacityPerMember: 4Gi
 ```
 
-⚠️ The example's `0.3.13` tag is on the wrong minor line for current runner builds — pin `spec.image`
-per [The store version must match the engine's
-client](#the-store-version-must-match-the-engines-client) before copying it.
+⚠️ The example's `0.3.13` line fits vLLM's clients and not SGLang's — pick `spec.image` from the
+[Engine Versions Reference](../reference/engine-versions.md) before copying it.
 
 `connection.managed` and `connection.external` are both optional pointers and **exactly one** must be
 set; neither and both are refused at admission with a message naming the two. Several member groups
@@ -188,9 +187,10 @@ Beside the `-cpu` default, this project publishes `mirrored-mooncake` in one bui
 — `cuda`, `cann`, `rocm` — whose base images are dispatch-time build arguments. Tags carry the
 toolchain version: `<mooncake-version>-<variant><toolchain>`, such as `0.3.13.post1-cuda13.0`.
 
-Each variant is built on both Mooncake lines this project carries: `0.3.13.post1`, matching engine
-clients from vLLM 0.28.0 on, and `0.3.10.post2` for the ones before. Which line a backend needs is
-[the version table](#the-store-version-must-match-the-engines-client)'s question, not this one's.
+Each variant is built on `0.3.13.post1`, the line vLLM's supported clients are on, and on
+`0.3.10.post2`, which serves only engines below the [supported
+minimum](../reference/engine-versions.md). SGLang's clients are on the 0.3.12 line, which this
+project does not build. Which line a backend needs is that table's question.
 
 **A VRAM group needs a build with VRAM segments compiled in (`USE_VRAM_SEGMENT=ON`), and the stock
 `-cpu` default is not one.** VRAM segments exist only on the `0.3.13` line — the `0.3.10.post2`
@@ -230,55 +230,28 @@ tag by the same rule the API server would have applied** — `Always` for `:late
 
 **A store and an engine-embedded Mooncake client interoperate only within one minor line.** The
 criterion is the RPC wire signature, not the version string: the handshake answers `2.0.0` for every
-0.3.x release, so a mismatched pair is not refused at startup — every probe reads green, and the
-first write fails at transfer time. Measured: a 0.3.13.post1 store against a 0.3.10.post2 client
-starts fully healthy and then fails every write with `RPC_FAIL (-900)`.
+0.3.x release, so a mismatched pair is not refused at startup — every probe reads green, and every
+write then fails at transfer time with `RPC_FAIL (-900)`.
 
-| pair | interoperates | basis |
-|---|---|---|
-| identical release (0.3.10.post2 ↔ 0.3.10.post2) | yes | measured end to end |
-| same minor, different post (0.3.12 ↔ 0.3.12.post1) | yes | RPC signatures unchanged between the two tags; the risk is confined to a method only the newer side knows |
-| 0.3.10 ↔ 0.3.13 | no | measured, above |
-| 0.3.11 ↔ 0.3.12 | no | 0.3.12 adds `tenant_id` to `GetReplicaList` and its batch form |
-| 0.3.12 ↔ 0.3.13 | no | 0.3.13 replaces the key string with a new `ObjectMeta` struct in `PutEnd`/`UpsertEnd` and extends `GetReplicaListResponse`; the method names are unchanged, so the client reaches the handler and mis-decodes the arguments |
+Two posts of one minor line share their RPC signatures and interoperate. The 0.3.12 and 0.3.13
+lines do not: the method names are unchanged, so the client reaches the handler and mis-decodes the
+arguments. Multi-tenancy moves neither: with it off — the master's own default — every request
+resolves to the default tenant.
 
-Multi-tenancy moves none of these lines. With it off — the master's own default — every request
-resolves to the default tenant and no write is refused, and the cross-minor failures above were all
-measured with it off.
+**The client's version is a property of the engine image, not of anything on this CR.** Which
+client each supported engine's runner image carries, and so which line its store runs, is in the
+[Engine Versions Reference](../reference/engine-versions.md); an engine below its minimum there is
+not supported.
 
-**The client's version is a property of the engine image, not of anything on this CR**, and it is
-not one number across images — not even across images of one vLLM version. A CUDA build inherits
-whatever its upstream base carries, and upstream changed how that is pinned: releases through 0.27.1
-install a wheel pinned by URL, while 0.28.0 and later resolve `mooncake-transfer-engine >= 0.3.12`
-from PyPI at build time. A ROCm build compiles its own from a pinned Mooncake tag.
-
-A lower bound is not a pin, so two images of one vLLM version built on different days can carry
-different clients. Read the client off the image in hand rather than off a vLLM version. Measured
-from the published images, by unpacking each one's `dist-info`:
-
-| runner image | embedded client |
-|---|---|
-| `cuda13.0-vllm0.25.1`, `cuda13.0-vllm0.27.1` | 0.3.10.post2 |
-| `rocm7.2-vllm0.27.1` | 0.3.11.post1 |
-| `cuda13.0-vllm0.29.0` | 0.3.13.post1 |
-| `cuda12.9-vllm0.29.0` | 0.3.13.post1 |
-| `cuda12.9-sglang0.5.18` | 0.3.12.post1 |
-
-Backends serving the first two rows name `spec.image` on the 0.3.10 and the 0.3.11 line
-respectively, and the [default](../settings.md) fails both as measured above; it matches the third
-and fourth rows exactly. The SGLang row needs a 0.3.12 store, such as `kvcacheai/mooncake:0.3.12.post1`.
-**An image absent from the table was not measured, and a neighbouring row is not evidence for it** —
-the first two rows are one vLLM version and different lines.
+For any other image, read the client off the image in hand rather than off an engine version. A
+CUDA build resolves `mooncake-transfer-engine` against a lower bound at build time, so two images of
+one vLLM version built on different days can carry different clients.
 
 Direct P/D transfer (`MooncakeConnector`, no `spec.kvCache`) is engine to engine and exempt from this
-matching, but not from the client's version: its `tcp` leg is
-[pinned](../reference/model-deployment.md#the-direct-transfers-transport) through `MC_FORCE_TCP`,
-which only clients from 0.3.12 on read. On an image embedding 0.3.10.post2 — the first row — the leg
-cannot run over TCP between hosts without RDMA; use an image carrying 0.3.12 or later.
+matching.
 
-Two boundaries, recorded so nobody rediscovers them: upstream has **no 0.3.12.post2** — the 0.3.12
-line ends at 0.3.12.post1 — and nothing older than 0.3.10 is built or exercised by this project.
-High availability carries its own per-version rule — it needs a master from 0.3.12 on — see
+Upstream has **no 0.3.12.post2** — the 0.3.12 line ends at 0.3.12.post1. High availability carries
+its own per-version rule — it needs a master from 0.3.12 on — see
 [High availability](leader.md#high-availability).
 
 ## The metadata plane

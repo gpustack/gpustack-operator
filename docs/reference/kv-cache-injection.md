@@ -64,7 +64,7 @@ spec:
     spec:
       containers:
         - name: server
-          image: vllm/vllm-openai:v0.28.0
+          image: vllm/vllm-openai:v0.29.0
           command: ["vllm"]
           args: ["serve", "--model", "Qwen/Qwen3-8B"]
 ```
@@ -88,7 +88,7 @@ metadata:
 spec:
   containers:
     - name: server
-      image: vllm/vllm-openai:v0.28.0
+      image: vllm/vllm-openai:v0.29.0
       command: ["vllm"]
       args: ["serve", "--model", "Qwen/Qwen2.5-72B-Instruct"]
 ```

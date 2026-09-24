@@ -38,7 +38,7 @@ spec:
     name: Qwen/Qwen2.5-72B-Instruct      # served, never provisioned
   engine:                                # vllm | sglang
     name: vllm
-    version: "0.27.1"                    # free-form; you guarantee alignment
+    version: "0.29.0"                    # free-form; you guarantee alignment
   kvCache:                               # OPTIONAL; omit it and no shared pool is attached
     poolRef:
       name: team-a-dram                  # a KVCachePoolBinding IN THIS NAMESPACE
@@ -260,7 +260,7 @@ spec:
     name: Qwen/Qwen2.5-72B-Instruct
   engine:                                # vllm | sglang; this example walks the vLLM pair
     name: vllm
-    version: "0.27.1"
+    version: "0.29.0"
   router:
     name: llm-d-router                 # required to pair the roles; takes either engine
   roles:
@@ -408,8 +408,8 @@ it: `tcp` renders `--disaggregation-transfer-backend mooncake_tcp`, anything els
 **`tcp` is enforced, not only requested**: the transfer engine picks its transport from the host,
 and with no RDMA device a build with multi-node NVLink installs NVLink between hosts with no NVLink
 path. So native vLLM also gets the [defaulted](#what-the-operator-owns) `MC_FORCE_TCP=1`. Both pins
-are process-wide, so neither renders beside a store on another transport, and only [clients from
-0.3.12 on](../kv-cache/backend.md#the-store-version-must-match-the-engines-client) honor them.
+are process-wide, so neither renders beside a store on another transport, and every client at
+its engine's [supported minimum](engine-versions.md) honors them.
 
 It is read on the direct-transfer leg, which every **admitted router-and-engine pair** renders on its
 `prefill` and `decode` roles — a prefiller that cannot hand a decoder its blocks is not
@@ -708,7 +708,7 @@ hardware its InstanceType observed. A stated image always wins.
 gpustack/runner:<backend><runtimeVersion>[-<variant>]-<engine><version>
 ```
 
-`gpustack/runner:cuda12.9-vllm0.27.1` on an NVIDIA pool; `gpustack/runner:cann9.0-910b-sglang0.5.18`
+`gpustack/runner:cuda12.9-vllm0.29.0` on an NVIDIA pool; `gpustack/runner:cann9.0-910b-sglang0.5.18`
 on an Ascend 910B one. The shape is verified against the runner project's 338 published records with
 zero mismatches. The platform is **not** part of the tag: no published tag carries an architecture,
 and the 338 records collapse to 208 distinct names, the signature of one multi-arch manifest each.

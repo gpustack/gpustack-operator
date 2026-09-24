@@ -41,6 +41,7 @@ one, not to widen the overview.
 | Standing a cache up end to end, or which object comes first: the pasteable four-object sequence | `docs/kv-cache/walkthrough.md` |
 | How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/reference/kv-cache-injection.md` |
 | A `ModelDeployment` metrics snapshot, cache-hit scope or Pod scrape annotation | `docs/reference/model-deployment-metrics.md` |
+| The lowest engine release a deployment shape runs on, the Mooncake client its runner image carries, the store line it needs | `docs/reference/engine-versions.md` |
 | A resource key, a request rule, a request example | `docs/accelerator-requests.md` |
 | How many RDMA endpoints a workload asks for, setting or reading the kubelet TopologyManager policy, what to do about RDMA keys no queue meters | `docs/operation/rdma.md` |
 | Enabling Topograph, publishing topology snapshots, webhook trust, requesting a level, TAS diagnosis or EKS validation | `docs/operation/topology-aware-scheduling.md` |
