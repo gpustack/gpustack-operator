@@ -463,6 +463,75 @@ func TestModelDeploymentJointAdmission_UnresolvableIsNotForeign(t *testing.T) {
 	})
 }
 
+// TestModelDeploymentJointAdmission_OnlyAPodOwnerLeadsToADeployment pins which owner references the
+// barrier follows from a Workload to its deployment: a v1 Pod, and nothing else.
+//
+// Every refusing case names the replica Pod that does exist, so the walk would reach the deployment
+// through it if the reference's kind were not checked. An answer of "not ours" there is the check's
+// doing, not a missing fixture's.
+func TestModelDeploymentJointAdmission_OnlyAPodOwnerLeadsToADeployment(t *testing.T) {
+	pod := jointGroupPod("qwen-prefill-0", "qwen-group", "qwen")
+	owner := func(apiVersion, kind, name string) meta.OwnerReference {
+		return meta.OwnerReference{APIVersion: apiVersion, Kind: kind, Name: name, UID: pod.UID}
+	}
+
+	cases := []struct {
+		name        string
+		owners      []meta.OwnerReference
+		wantMD      string
+		wantDecided bool
+	}{
+		{
+			name:        "a_pod_owner_leads_to_its_deployment",
+			owners:      []meta.OwnerReference{owner("v1", "Pod", pod.Name)},
+			wantMD:      "qwen",
+			wantDecided: true,
+		},
+		{
+			name:        "another_kind_under_the_pod's_name_is_not_followed",
+			owners:      []meta.OwnerReference{owner("v1", "ConfigMap", pod.Name)},
+			wantDecided: true,
+		},
+		{
+			name:        "a_pod_kind_of_another_api_version_is_not_followed",
+			owners:      []meta.OwnerReference{owner("example.com/v1", "Pod", pod.Name)},
+			wantDecided: true,
+		},
+		{
+			name: "a_pod_owner_after_a_foreign_one_is_still_followed",
+			owners: []meta.OwnerReference{
+				owner("v1", "ConfigMap", pod.Name), owner("v1", "Pod", pod.Name),
+			},
+			wantMD:      "qwen",
+			wantDecided: true,
+		},
+		{
+			name:        "a_pod_owner_that_cannot_be_read_is_undecided",
+			owners:      []meta.OwnerReference{owner("v1", "Pod", "qwen-prefill-gone")},
+			wantDecided: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wl := jointWorkload("wl", true)
+			wl.OwnerReferences = tc.owners
+			cli := newJointClient(pod, jointDeployment("qwen", "l4-1x"))
+			r := &ModelDeploymentJointAdmissionReconciler{Client: cli}
+
+			md, decided, err := r.workloadModelDeployment(context.Background(), wl)
+			require.NoError(t, err)
+
+			got := ""
+			if md != nil {
+				got = md.Name
+			}
+			assert.Equal(t, tc.wantMD, got)
+			assert.Equal(t, tc.wantDecided, decided)
+		})
+	}
+}
+
 // TestModelDeploymentJointAdmission_SkipsWhatItMustNotTouch pins the gates.
 //
 // A Workload without a reservation has nothing to confirm; an admitted one has already passed the

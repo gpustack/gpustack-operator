@@ -624,7 +624,7 @@ func (r *ModelDeploymentJointAdmissionReconciler) workloadModelDeployment(
 	missing := false
 
 	for _, ref := range wl.OwnerReferences {
-		if ref.Kind != "Pod" || ref.APIVersion != "v1" {
+		if !modelDeploymentOwnerRefNamesAPod(ref) {
 			continue
 		}
 

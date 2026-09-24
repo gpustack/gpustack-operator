@@ -731,13 +731,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 					return ctrl.Result{}, err
 				}
 				requeue = true
-			} else {
-				// The rollout holds rather than proceeding short. Nothing this deployment owns
-				// observes the admission that releases it -- the verdict lands on a Workload no
-				// watch here follows -- so the requeue is the poll that notices, exactly as it is
-				// for the departure the create gate waits out.
-				requeue = true
 			}
+			// Otherwise the rollout holds rather than proceeding short, and it asks for no requeue.
+			// The admission that releases it moves the waiting replica's Workload, and the Workload
+			// watch wakes this deployment on that move; the guard then reads the Workloads on the
+			// API server, which is at least as fresh as the cache the event came from.
 		}
 
 		// THE CREATE GATE, PER MISSING ORDINAL: an ordinal with no live Pod in the cached list is
