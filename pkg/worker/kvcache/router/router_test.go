@@ -213,6 +213,89 @@ func TestRenderLLMD_NamesTheEngineAPodWithoutALabelIsReadAs(t *testing.T) {
 	}
 }
 
+// TestRenderLLMD_CarriesTheCacheCapacityBesideTheApproximateProducer pins where the picker learns a
+// server's KV cache capacity from. Naming an engine in engineConfigs replaces upstream's built-in
+// entry for it, so a capacity field this renderer leaves out is one upstream never reads, and the
+// approximate producer, which sizes each server's prefix index by that capacity, falls back to its
+// own default.
+//
+// The expected names are written out rather than read back from the engine table, so a table edit
+// that drops or renames one fails here instead of agreeing with itself. SGLang is held to its two
+// gauges and to NO info-style spec: the info gauge upstream's built-in entry reads is one SGLang no
+// longer exports, and a spec naming an absent metric records an extraction error on every scrape.
+//
+// The precise case is what makes the absence mean something: the same parse finds the fields
+// beside the approximate producer, and the precise producer reads none of them, so rendering them
+// there would roll every such router for a value nothing reads.
+func TestRenderLLMD_CarriesTheCacheCapacityBesideTheApproximateProducer(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		engine   string
+		kvEvents KVEvents
+		want     map[string]any
+	}{
+		{
+			name:   "sglang",
+			engine: "sglang",
+			want: map[string]any{
+				"cacheBlockSizeSpec": "sglang:page_size",
+				"cacheNumBlocksSpec": "sglang:num_pages",
+			},
+		},
+		{
+			name:   "vllm",
+			engine: "vllm",
+			want:   map[string]any{"cacheInfoSpec": "vllm:cache_config_info"},
+		},
+		{
+			name:     "vllm with the precise producer",
+			engine:   "vllm",
+			kvEvents: KVEvents{Engine: "vllm", Port: 5557, ReplayPort: 5558, Topic: "kv@"},
+			want:     map[string]any{},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metrics, err := MetricsForEngine(tc.engine)
+			require.NoError(t, err)
+			output, err := Render(LLMD, Input{
+				Roles:    []Role{{Kind: "server", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"}},
+				Metrics:  metrics,
+				KVEvents: tc.kvEvents,
+			})
+			require.NoError(t, err)
+
+			var rendered struct {
+				Plugins []struct {
+					Type       string `json:"type"`
+					Parameters struct {
+						EngineConfigs []map[string]any `json:"engineConfigs"`
+					} `json:"parameters"`
+				} `json:"plugins"`
+			}
+			require.NoError(t, yaml.Unmarshal([]byte(output.Document), &rendered))
+
+			var configs []map[string]any
+			for _, plugin := range rendered.Plugins {
+				if plugin.Type == "core-metrics-extractor" {
+					configs = append(configs, plugin.Parameters.EngineConfigs...)
+				}
+			}
+			require.Len(t, configs, 1)
+			assert.Equal(t, tc.engine, configs[0]["name"])
+
+			capacity := map[string]any{}
+			for key, value := range configs[0] {
+				switch key {
+				case "cacheInfoSpec", "cacheBlockSizeLabelName", "cacheNumBlocksLabelName",
+					"cacheBlockSizeSpec", "cacheNumBlocksSpec":
+					capacity[key] = value
+				}
+			}
+			assert.Equal(t, tc.want, capacity)
+		})
+	}
+}
+
 func TestRenderLLMD_CarriesTheKVEventsContract(t *testing.T) {
 	rendered, err := Render(LLMD, Input{
 		Roles: []Role{
