@@ -17,6 +17,8 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -1393,6 +1395,136 @@ func TestInstanceWebhook_ValidateUpdate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// admittingInstanceClient builds a fake client that passes every Instance spec update through
+// InstanceWebhook.ValidateUpdate against the stored object, as the API server does. A status write
+// goes to the status subresource, which the webhook does not match, so it is not validated. When
+// stopFails is non-nil it is consulted on each admitted update that sets spec.stop, and a non-nil
+// return fails that update in place of the write.
+func admittingInstanceClient(stopFails func() error, objs ...ctrlcli.Object) ctrlcli.Client {
+	w := &InstanceWebhook{}
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithStatusSubresource(&workercore.Instance{}).
+		WithObjects(objs...).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Update: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object,
+				opts ...ctrlcli.UpdateOption,
+			) error {
+				inst, ok := obj.(*workercore.Instance)
+				if !ok {
+					return c.Update(ctx, obj, opts...)
+				}
+				old := &workercore.Instance{}
+				if err := c.Get(ctx, ctrlcli.ObjectKeyFromObject(inst), old); err != nil {
+					return err
+				}
+				if _, err := w.ValidateUpdate(ctx, old, inst); err != nil {
+					return err
+				}
+				if stopFails != nil && !old.Spec.Stop && inst.Spec.Stop {
+					if err := stopFails(); err != nil {
+						return err
+					}
+				}
+				return c.Update(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	w.Client, w.APIReader = cli, cli
+	return cli
+}
+
+// startingInstanceUnderDrain returns an Instance whose Pod exists but is not ready, so the Instance
+// reports Starting, together with its InstanceType and a HoldAndDrain ClusterQueue backing it.
+func startingInstanceUnderDrain(typeName string) []ctrlcli.Object {
+	inst := webhookInstance("inst", typeName)
+	inst.Status.Phase = workerctrl.InstancePhaseStarting
+	return []ctrlcli.Object{
+		inst,
+		&core.Pod{ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"}},
+		&worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: typeName}},
+		&kueue.ClusterQueue{
+			ObjectMeta: meta.ObjectMeta{Name: typeName},
+			Spec:       kueue.ClusterQueueSpec{StopPolicy: ptr.To(kueue.HoldAndDrain)},
+		},
+	}
+}
+
+func reconcileInstanceThroughWebhook(cli ctrlcli.Client, key ctrlcli.ObjectKey) error {
+	r := &workerctrl.InstanceReconciler{Client: cli, APIReader: cli}
+	_, err := r.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: key})
+	return err
+}
+
+func assertInstanceStopped(t *testing.T, cli ctrlcli.Client, key ctrlcli.ObjectKey) {
+	t.Helper()
+	err := cli.Get(context.Background(), key, &core.Pod{})
+	assert.True(t, kerrors.IsNotFound(err), "the Pod is deleted and not recreated, got %v", err)
+	got := &workercore.Instance{}
+	require.NoError(t, cli.Get(context.Background(), key, got))
+	assert.True(t, got.Spec.Stop, "Spec.Stop")
+	assert.Equal(t, workerctrl.InstancePhaseStopped, got.Status.Phase, "Status.Phase")
+}
+
+// TestInstanceWebhook_AdmitsTheDrainStopOfAStartingInstance runs the Instance controller against
+// this webhook. The webhook refuses to stop an Instance whose phase is Starting, and a Pod that is
+// pulling its image, failing its readiness probe, or crash-looping keeps the Instance Starting for as
+// long as a drain lasts. The controller's stop must still be admitted, and once spec.stop is written
+// the Instance stays stopped after the queue leaves HoldAndDrain: its Pod is deleted and not
+// recreated.
+func TestInstanceWebhook_AdmitsTheDrainStopOfAStartingInstance(t *testing.T) {
+	const typeName = "draining-type"
+	key := ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}
+	cli := admittingInstanceClient(nil, startingInstanceUnderDrain(typeName)...)
+
+	require.NoError(t, reconcileInstanceThroughWebhook(cli, key), "the drain stop is admitted")
+	got := &workercore.Instance{}
+	require.NoError(t, cli.Get(context.Background(), key, got))
+	require.True(t, got.Spec.Stop, "the stop is persisted in the spec")
+
+	// The drain ends, and with it the signal the stop was taken on.
+	cq := &kueue.ClusterQueue{}
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: typeName}, cq))
+	cq.Spec.StopPolicy = ptr.To(kueue.None)
+	require.NoError(t, cli.Update(context.Background(), cq))
+
+	for range 3 {
+		require.NoError(t, reconcileInstanceThroughWebhook(cli, key))
+	}
+	assertInstanceStopped(t, cli, key)
+}
+
+// TestInstanceWebhook_DrainStopRetriesAFailedSpecWrite pins what the order of the drain stop's two
+// writes leaves behind when the second one fails: the phase is marked Stopping on the status
+// subresource first, then spec.stop is written. A failed spec write leaves the Instance Stopping with
+// its Pod still running, and the next reconcile must retry the stop rather than stay there.
+func TestInstanceWebhook_DrainStopRetriesAFailedSpecWrite(t *testing.T) {
+	const typeName = "draining-type"
+	key := ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}
+	failed := false
+	cli := admittingInstanceClient(func() error {
+		if failed {
+			return nil
+		}
+		failed = true
+		return errors.New("injected spec write failure")
+	}, startingInstanceUnderDrain(typeName)...)
+
+	err := reconcileInstanceThroughWebhook(cli, key)
+	require.ErrorContains(t, err, "injected spec write failure")
+	got := &workercore.Instance{}
+	require.NoError(t, cli.Get(context.Background(), key, got))
+	require.False(t, got.Spec.Stop, "the failed spec write left spec.stop unset")
+	require.Equal(t, workerctrl.InstancePhaseStopping, got.Status.Phase,
+		"the status write landed before the spec write failed")
+	require.NoError(t, cli.Get(context.Background(), key, &core.Pod{}), "the Pod is still running")
+
+	for range 3 {
+		require.NoError(t, reconcileInstanceThroughWebhook(cli, key))
+	}
+	assertInstanceStopped(t, cli, key)
 }
 
 // TestInstanceWebhook_ValidateUpdate_StartRevalidatesResources pins that starting a stopped

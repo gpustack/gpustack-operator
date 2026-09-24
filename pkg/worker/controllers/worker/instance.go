@@ -277,8 +277,22 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// on a phase transition, StopPolicy change, or deletion, so the stop stays level-based even when no
 	// Pod event fires.
 	if instTypeGone || instType.DeletionTimestamp != nil || draining {
-		// Persist the stop intent first so the instance reliably stays stopped
-		// even if the status update below fails.
+		// Mark the Instance as stopping before writing the stop, as the stop branch above does. The
+		// Instance webhook refuses to stop an Instance whose phase is Starting, and a Pod that is
+		// pulling its image, failing its readiness probe, or crash-looping keeps that phase for as long
+		// as a drain lasts. The webhook does not validate the status subresource, so this write is
+		// admitted whatever the phase.
+		if inst.Status.Phase != InstancePhaseStopping {
+			inst.Status.Phase = InstancePhaseStopping
+			err = r.Client.Status().Update(ctx, inst)
+			if err != nil {
+				logger.Error(err, "update instance status to stopping")
+				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+			}
+		}
+
+		// Persist the stop intent in the spec, so the Instance stays stopped after the signal it was
+		// taken on clears; the stop branch above then deletes the Pod and marks the Instance Stopped.
 		inst.Spec.Stop = true
 		err = r.Client.Update(ctx, inst)
 		if err != nil {
