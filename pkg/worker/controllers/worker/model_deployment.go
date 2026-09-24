@@ -14,6 +14,7 @@ import (
 	rbac "k8s.io/api/rbac/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -21,18 +22,21 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
 	ctrlhandler "sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
+	kueueworkload "sigs.k8s.io/kueue/pkg/workload"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
 	kubeapistatus "gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubediscovery"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemmeta"
@@ -1715,6 +1719,21 @@ func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts cont
 			&workercore.KVCacheBackend{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentBackend),
 		).
+		Watches(
+			// Kueue's verdict on a replica is written to the replica's Workload and nowhere else: the
+			// Workload appearing, reserving quota and being admitted change neither this deployment
+			// nor its Pods, which Kueue leaves untouched until it lifts their gates. The status reads
+			// those verdicts, so without this watch the QuotaReserved condition keeps the answer of
+			// whichever pass last ran -- a replica "with no workload yet" whose Workload already
+			// exists -- until something unrelated wakes the deployment.
+			//
+			// The Workload is owned by its Pods with plain references, so the mapping walks to the
+			// Pods and from them to their controller. The predicate passes only the changes the
+			// status reads; Kueue's scheduling bookkeeping moves far more often than its verdicts.
+			&kueue.Workload{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentWorkload),
+			ctrlbuilder.WithPredicates(modelDeploymentWorkloadPredicate()),
+		).
 		Complete(r)
 }
 
@@ -1840,4 +1859,109 @@ func (r *ModelDeploymentReconciler) mapModelDeploymentBinding(
 	}
 
 	return reqs
+}
+
+// mapModelDeploymentWorkload enqueues the deployments whose replicas a Workload names as owners.
+//
+// Kueue owns a replica's Workload from its Pods, one plain owner reference per member and no
+// controller reference, so the path runs Workload to Pod to the Pod's controlling deployment. A Pod
+// is matched the way the Pod watch matches it: it has to carry this deployment's resource note and
+// be controlled by a ModelDeployment.
+//
+// A Pod the cache no longer holds maps to nothing rather than being retried. Its own deletion
+// already woke its deployment through the Pod watch, and the other members of the same Workload
+// are still resolved.
+func (r *ModelDeploymentReconciler) mapModelDeploymentWorkload(
+	ctx context.Context, obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	mdGVK := workercore.SchemeGroupVersionKind("ModelDeployment")
+
+	var reqs []ctrlreconcile.Request
+	for _, ref := range obj.GetOwnerReferences() {
+		if !modelDeploymentOwnerRefNamesAPod(ref) {
+			continue
+		}
+
+		pod := new(core.Pod)
+		err := r.Client.Get(ctx,
+			ctrlcli.ObjectKey{Namespace: obj.GetNamespace(), Name: ref.Name}, pod, ctrlclix.WithoutQuorum)
+		if err != nil {
+			if !kerrors.IsNotFound(err) {
+				ctrllog.FromContext(ctx).Error(err, "get pod for workload",
+					"workload", ctrlcli.ObjectKeyFromObject(obj), "pod", ref.Name)
+			}
+
+			continue
+		}
+		if !modelDeploymentOwnedResource(pod) || !kubemeta.IsControlledByGVK(pod, mdGVK) {
+			continue
+		}
+
+		req := ctrlreconcile.Request{NamespacedName: types.NamespacedName{
+			Namespace: pod.Namespace,
+			Name:      kubemeta.GetOwnerRefOfNoCopy(pod, mdGVK).Name,
+		}}
+		if !slices.Contains(reqs, req) { // a group's members share one deployment
+			reqs = append(reqs, req)
+		}
+	}
+
+	return reqs
+}
+
+// modelDeploymentWorkloadPredicate passes a Workload's create and delete, and an update only when
+// it moves something the deployment's status reads.
+//
+// Those are the owner references (which replicas the Workload admits), spec.active (the joint
+// barrier parking it), and from the status the conditions, the admission and the admission checks.
+// Conditions and checks are compared without their timestamps: the status reads their type,
+// status, reason and message, and a timestamp moving alone changes no answer. Everything else Kueue
+// writes -- requeue state, scheduling stats, resource requests -- is scheduling bookkeeping that
+// moves on every attempt, and passing it would reconcile every deployment waiting for capacity on
+// each scheduler cycle.
+func modelDeploymentWorkloadPredicate() ctrlpredicate.Predicate {
+	return ctrlpredicate.Funcs{
+		UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+			oldWl, ok := e.ObjectOld.(*kueue.Workload)
+			if !ok {
+				return true
+			}
+			newWl, ok := e.ObjectNew.(*kueue.Workload)
+			if !ok {
+				return true
+			}
+
+			return modelDeploymentWorkloadVerdictMoved(oldWl, newWl)
+		},
+	}
+}
+
+// modelDeploymentWorkloadVerdictMoved reports whether an update changed what the deployment's
+// status reads off a Workload.
+func modelDeploymentWorkloadVerdictMoved(oldWl, newWl *kueue.Workload) bool {
+	oldConditions, oldChecks := modelDeploymentWorkloadVerdict(oldWl)
+	newConditions, newChecks := modelDeploymentWorkloadVerdict(newWl)
+
+	return kueueworkload.IsActive(oldWl) != kueueworkload.IsActive(newWl) ||
+		!kubemeta.DeepEqual(oldWl.OwnerReferences, newWl.OwnerReferences) ||
+		!kubemeta.DeepEqual(oldWl.Status.Admission, newWl.Status.Admission) ||
+		!kubemeta.DeepEqual(oldConditions, newConditions) ||
+		!kubemeta.DeepEqual(oldChecks, newChecks)
+}
+
+// modelDeploymentWorkloadVerdict copies a Workload's conditions and admission checks without their
+// timestamps.
+func modelDeploymentWorkloadVerdict(wl *kueue.Workload) ([]meta.Condition, []kueue.AdmissionCheckState) {
+	conditions := make([]meta.Condition, 0, len(wl.Status.Conditions))
+	for _, c := range wl.Status.Conditions {
+		conditions = append(conditions, meta.Condition{
+			Type: c.Type, Status: c.Status, Reason: c.Reason, Message: c.Message,
+		})
+	}
+	checks := make([]kueue.AdmissionCheckState, 0, len(wl.Status.AdmissionChecks))
+	for _, c := range wl.Status.AdmissionChecks {
+		checks = append(checks, kueue.AdmissionCheckState{Name: c.Name, State: c.State, Message: c.Message})
+	}
+
+	return conditions, checks
 }

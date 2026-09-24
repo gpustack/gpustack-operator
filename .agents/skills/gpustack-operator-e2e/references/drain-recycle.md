@@ -96,9 +96,9 @@ tombstone** — `NodeFlavorReconciler` *deletes* the flavor when no node contrib
 `NodeQueueReconciler` puts the CQ on `HoldAndDrain` — also when nothing is reserved — empties its
 resource groups, and keeps the emptied queue held until a flavor returns; the returning flavor is
 written into the held queue before its saved `StopPolicy` is restored. So the case asserts the flavor
-is **deleted**, the InstanceType **survives** with its queue's resource groups emptied, and restoring
-the nodes refills the queue and reactivates the type — *not* a `schedule.gpustack.ai/drain=true`
-annotation.
+is **deleted**, the InstanceType **survives** with its queue's resource groups emptied and the queue
+still held, and restoring the nodes refills the queue and reactivates the type — *not* a
+`schedule.gpustack.ai/drain=true` annotation.
 
 Non-obvious: a managed toggle changes only `gpustack.ai/managed` — no feature label — so it converges
 **only if** `NodeFlavorReconciler`'s Node-watch predicate includes `systemname.ManagedLabelKey`.
