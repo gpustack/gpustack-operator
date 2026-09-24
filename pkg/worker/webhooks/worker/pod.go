@@ -3,6 +3,8 @@ package worker
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -29,7 +31,8 @@ import (
 //     whole card (100), and its per-card VRAM budget (.sliced.memory-percentage or
 //     .sliced.memory-mib) is folded into the credit-counting .sliced.units, while a partition
 //     request folds the profile's VRAM into .partitioned.units. Any client-supplied units value is
-//     ignored and recomputed, since it is webhook-derived only.
+//     ignored and recomputed, since it is webhook-derived only. A shared request of two or more
+//     cards is pinned to nodes carrying that many cards (see pinSharedCardCount).
 //   - Validating: it enforces the normative accelerator request rules (see
 //     validatePodAcceleratorRequest) plus the per-family shape checks.
 //
@@ -344,6 +347,73 @@ func (r *PodWebhook) Default(ctx context.Context, obj runtime.Object) error {
 		}
 	}
 
+	return r.pinSharedCardCount(ctx, pod)
+}
+
+// pinSharedCardCount confines a shared request of N >= 2 to nodes carrying at least N cards of the
+// pool's accelerator, by requiring the per-node card-count label every accelerated flavor and node
+// carries to be greater than N-1. N is the largest container's request, not the Pod's sum: the
+// device plugin allocates each container's tokens on their own, so containers may share cards.
+//
+// A shared request names N distinct cards, but a node advertises ten shared tokens per card, so
+// neither Kueue's flavor assignment nor TAS can tell a one-card node from a four-card one by the
+// resource alone. The pool's flavors are tried smallest node first and an AdmissionCheck eviction
+// restarts that scan, so without the label a request TAS places on too few cards is evicted and
+// placed there again for good, even while a larger node has room. Kueue matches a flavor's own
+// nodeLabels against the Pod's required node affinity, which is why the pin is expressed there.
+//
+// The label is the node's total card count, partitioned cards included, and only Pods reach this
+// webhook, so a Workload Kueue builds from a Job template before any Pod exists is not pinned.
+func (r *PodWebhook) pinSharedCardCount(ctx context.Context, pod *core.Pod) error {
+	var cards int64
+	for _, pc := range podContainers(pod) {
+		for _, base := range containerClaims(pc.ctr)[nodefeature.ResourceFamilyShared] {
+			if q, ok := containerResource(pc.ctr, base+nodefeature.SharedResourceNameSuffix); ok {
+				cards = max(cards, q.Value())
+			}
+		}
+	}
+	if cards < 2 {
+		return nil
+	}
+
+	it, err := r.frontingInstanceType(ctx, pod)
+	if err != nil {
+		return err
+	}
+	if it.Spec.AcceleratorGroup == "" {
+		return fmt.Errorf("instance type %s names no accelerator group, so a shared request of %d cannot be pinned to nodes with that many cards",
+			it.Name, cards)
+	}
+	pin := core.NodeSelectorRequirement{
+		Key:      nodefeature.AcceleratableFeatureLabelPrefix + it.Spec.AcceleratorGroup + ".count",
+		Operator: core.NodeSelectorOpGt,
+		Values:   []string{strconv.FormatInt(cards-1, 10)},
+	}
+
+	if pod.Spec.Affinity == nil {
+		pod.Spec.Affinity = &core.Affinity{}
+	}
+	if pod.Spec.Affinity.NodeAffinity == nil {
+		pod.Spec.Affinity.NodeAffinity = &core.NodeAffinity{}
+	}
+	na := pod.Spec.Affinity.NodeAffinity
+	if na.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		na.RequiredDuringSchedulingIgnoredDuringExecution = &core.NodeSelector{}
+	}
+	required := na.RequiredDuringSchedulingIgnoredDuringExecution
+	// Terms are ORed, so the pin joins every one of them; a Pod requiring nothing gets one term.
+	if len(required.NodeSelectorTerms) == 0 {
+		required.NodeSelectorTerms = []core.NodeSelectorTerm{{}}
+	}
+	for i := range required.NodeSelectorTerms {
+		term := &required.NodeSelectorTerms[i]
+		if !slices.ContainsFunc(term.MatchExpressions, func(e core.NodeSelectorRequirement) bool {
+			return e.Key == pin.Key && e.Operator == pin.Operator && slices.Equal(e.Values, pin.Values)
+		}) {
+			term.MatchExpressions = append(term.MatchExpressions, pin)
+		}
+	}
 	return nil
 }
 

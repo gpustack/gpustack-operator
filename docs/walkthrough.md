@@ -15,7 +15,8 @@ until section 5 flips it on.
 Watch three columns: **UNIT(CPU/RAM)/STORAGE**, the per-unit request the InstanceType charges; **CPU**,
 the collapsed CPU pool's `remaining/capacity` cores; **ACCELERATOR(EX/SH/SL/PT)**, the
 `onceMaxRequest/remaining` of each [four-view](./architecture/admission.md#four-view-status)
-projection.
+projection. This run predates the shared card-count reading, so its `SH` once-max figures are
+shares, not accelerators ([Pre-release breaks](./accelerator-requests.md#pre-release-breaks)).
 
 Each accelerator counts in exactly one of `EX`/`SH`/`SL` (unpartitioned) or `PT` (partitioned), so
 `0/0` under `PT` throughout means none is in a partitioning mode. For the all-partitioned and **mixed**

@@ -753,10 +753,11 @@ func poolDevicesSelector(cqLabels map[string]string) map[string]string {
 //
 // Capacity is each group's whole pool seen as that mode (cards, cards×10, cards×100, and the
 // partitioned cards' instance ceilings), Remaining sums each node's availability.
-// OnceMaxRequest is the largest single allocation: the largest single node's availability for
-// exclusive/shared (one allocation can span a node's cards), the freest single card for sliced
-// (VRAM is per-card), and — for partitioned — 1 while any card can still host an instance, since
-// a partition request is capped at one instance on one card.
+// OnceMaxRequest is the largest single allocation: for exclusive and shared, the largest single
+// node's count of cards that can take one (an allocation can span a node's cards, and a shared one
+// takes one share on each of that many distinct cards, so a card's spare shares do not add to it);
+// the freest single card for sliced (VRAM is per-card); and — for partitioned — 1 while any card
+// can still host an instance, since a partition request is capped at one instance on one card.
 func getAcceleratorResources(devices []workercore.Devices, acceleratorKey string) (
 	exclusive, shared, sliced workercore.InstanceTypeResource,
 	partitioned workercore.InstanceTypePartitionedResource,
@@ -779,7 +780,7 @@ func getAcceleratorResources(devices []workercore.Devices, acceleratorKey string
 		caps := acceleratorCapabilities(dev)
 		part.addNode(dev, acceleratorKey)
 
-		var nodeCards, nodeLogicalCards, nodeExcl, nodeShared, nodeSliced int64
+		var nodeCards, nodeLogicalCards, nodeExcl, nodeShared, nodeSharedCards, nodeSliced int64
 		for j := range dev.Status.Groups {
 			g := &dev.Status.Groups[j]
 			if !acceleratorGroupMatches(g.Manufacturer, g.ID, acceleratorKey) {
@@ -802,6 +803,9 @@ func getAcceleratorResources(devices []workercore.Devices, acceleratorKey string
 				}
 				if free || a.Mode == workercore.DeviceAllocationModeShared {
 					nodeShared += rem / sharedUnit
+					if rem >= sharedUnit {
+						nodeSharedCards++
+					}
 				}
 				// The logical-slice views count only the cards that actually admit a logical
 				// slice. Not being partitioned is not enough: a card reporting neither
@@ -830,7 +834,7 @@ func getAcceleratorResources(devices []workercore.Devices, acceleratorKey string
 		remShared += nodeShared
 		remSliced += nodeSliced
 		ormExcl = max(ormExcl, nodeExcl)
-		ormShared = max(ormShared, nodeShared)
+		ormShared = max(ormShared, nodeSharedCards)
 		// ormSliced is tracked per-card in the loop above (a slice request is single-card), not
 		// per-node; the partition view's own once-max-request is owned by poolPartitionView.
 	}

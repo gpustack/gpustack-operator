@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -79,11 +80,23 @@ type familyDemand struct {
 	// It is carried for the verdict message only, never for matching: a group-wide "not enough
 	// cards" that does not say which role fell short is a message nobody can act on.
 	podSets []kueue.PodSetReference
+	// sharedNeeds carries a shared demand's holders: each container instance is one holder that
+	// needs its own count of distinct cards, one share on each. The device plugin allocates each
+	// container's tokens on their own, so two holders may share a card, and cards alone, a sum over
+	// every holder, cannot say how many distinct cards any one of them needs.
+	sharedNeeds []sharedNeed
 	// node is the hostname Kueue's topology-aware scheduling assigned these Pods to, empty when the
 	// podset carries no hostname-level topology assignment. A non-empty node confines the demand to
 	// that node's cards: the Pods are pinned there by nodeSelector once admitted, so a free card on
 	// another node of the pool cannot host them.
 	node string
+}
+
+// sharedNeed is how many container instances of a shared demand need the same count of distinct
+// cards.
+type sharedNeed struct {
+	cards      int32
+	containers int32
 }
 
 // parseFamilyDemands reads the accelerator demands off a Workload's pod templates, one
@@ -102,11 +115,7 @@ func parseFamilyDemands(wl *kueue.Workload) []familyDemand {
 		for _, d := range podSetFamilyDemands(ps, ps.Count) {
 			d.flavor = flavor
 			d.podSets = []kueue.PodSetReference{ps.Name}
-			// The shared family stays judged across the pool. Its card key counts ownership shares,
-			// which this check reads as distinct cards, so scoping it to one node would hold a
-			// multi-share request on a single-card node for good; what that key means has to be
-			// settled before it can be judged per node.
-			if len(nodes) == 0 || d.family == nodefeature.ResourceFamilyShared {
+			if len(nodes) == 0 {
 				demands = mergeDemand(demands, d)
 				continue
 			}
@@ -273,6 +282,9 @@ func podSetFamilyDemands(ps *kueue.PodSet, count int32) []familyDemand {
 				}
 			case isCardKey(name, family):
 				d.cards += clampInt32(qty.Value())
+				if family == nodefeature.ResourceFamilyShared && qty.Value() > 0 {
+					d.sharedNeeds = mergeSharedNeeds(d.sharedNeeds, []sharedNeed{{cards: clampInt32(qty.Value()), containers: 1}}, 1)
+				}
 			default:
 				// One profile per Pod is a request rule, but the Pod webhook enforces it on a
 				// Pod and Kueue builds this Workload from a pod TEMPLATE before any Pod exists —
@@ -299,6 +311,7 @@ func podSetFamilyDemands(ps *kueue.PodSet, count int32) []familyDemand {
 		if d.cards <= 0 {
 			continue
 		}
+		d.sharedNeeds = mergeSharedNeeds(nil, d.sharedNeeds, count)
 		out = append(out, *d)
 	}
 	sortDemands(out)
@@ -367,11 +380,33 @@ func mergeDemand(demands []familyDemand, d familyDemand) []familyDemand {
 			demands[i].flavor == d.flavor &&
 			demands[i].node == d.node {
 			demands[i].cards = clampInt32(int64(demands[i].cards) + int64(d.cards))
+			demands[i].sharedNeeds = mergeSharedNeeds(demands[i].sharedNeeds, d.sharedNeeds, 1)
 			demands[i].podSets = append(demands[i].podSets, d.podSets...)
 			return demands
 		}
 	}
 	return append(demands, d)
+}
+
+// mergeSharedNeeds returns acc with every need of add folded in, add's container counts scaled by
+// times first, one entry per distinct card count, largest card count first. It never mutates
+// either input, since demands are copied by value and would otherwise share the slice.
+func mergeSharedNeeds(acc, add []sharedNeed, times int32) []sharedNeed {
+	byCards := make(map[int32]int64, len(acc)+len(add))
+	for _, n := range acc {
+		byCards[n.cards] += int64(n.containers)
+	}
+	for _, n := range add {
+		byCards[n.cards] += int64(n.containers) * int64(times)
+	}
+	var out []sharedNeed
+	for _, cards := range slices.Sorted(maps.Keys(byCards)) {
+		if containers := clampInt32(byCards[cards]); containers > 0 {
+			out = append(out, sharedNeed{cards: cards, containers: containers})
+		}
+	}
+	slices.Reverse(out)
+	return out
 }
 
 // sortDemands orders demands most constrained first — a partition request before a scalar
@@ -409,13 +444,11 @@ func clampInt32(v int64) int32 {
 }
 
 // unitsPerCardFor returns the allocatable units one card must still have free to host a
-// single card of a scalar demand: a whole card for exclusive, one owner's share for shared,
-// and the requested per-card units for a logical slice. A logical slice the Pod webhook did
-// not shape carries no budget, so any card with room fits.
+// single card of a scalar demand: a whole card for exclusive, and the requested per-card units
+// for a logical slice. A logical slice the Pod webhook did not shape carries no budget, so any
+// card with room fits.
 func unitsPerCardFor(d familyDemand) int32 {
 	switch d.family {
-	case nodefeature.ResourceFamilyShared:
-		return nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize
 	case nodefeature.ResourceFamilySliced:
 		return d.unitsPerCard
 	default:
@@ -593,12 +626,14 @@ func (c cardLedger) servesFamily(family nodefeature.ResourceFamily) bool {
 }
 
 // cardBudget records what a Workload's already-checked demands claimed from one card, so a
-// later demand cannot spend the same room twice. A scalar demand takes the whole card; a
-// partition demand takes one of the several placements a card may host. The two never
-// contend for the same card — the populations are disjoint by capability — so a single
-// budget per card is enough.
+// later demand cannot spend the same room twice. An exclusive or logical-slice demand takes the
+// whole card; a shared demand takes one of its ownership shares per holder; a partition demand
+// takes one of the several placements a card may host. Partitions never contend with the rest —
+// the populations are disjoint by capability — so a single budget per card is enough, and a card
+// carrying shares is not whole for any other family, as the device plugin holds it in shared mode.
 type cardBudget struct {
 	whole      bool
+	shares     int32
 	placements int32
 }
 
@@ -636,9 +671,12 @@ func nodeDevicesFeasibility(pool []scopedDevices, demands []familyDemand) (kueue
 	budgets := make([]cardBudget, len(cards))
 	for _, d := range demands {
 		var state kueue.CheckState
-		if d.family == nodefeature.ResourceFamilyPartitioned {
+		switch d.family {
+		case nodefeature.ResourceFamilyPartitioned:
 			state, message = fitPartitionDemand(cards, budgets, d)
-		} else {
+		case nodefeature.ResourceFamilyShared:
+			state, message = fitSharedDemand(cards, budgets, d)
+		default:
 			state, message = fitScalarDemand(cards, budgets, d)
 		}
 		if state != kueue.CheckStateReady {
@@ -659,7 +697,7 @@ func withoutRoles(demands []familyDemand) []familyDemand {
 	return bare
 }
 
-// fitScalarDemand gates an exclusive/shared/logical-slice demand on the scalar per-card
+// fitScalarDemand gates an exclusive or logical-slice demand on the scalar per-card
 // remaining ledger, which seeds every card at ResourceMaxUnits and subtracts each pod's
 // allocation, so a card carrying any allocation has Remaining below a whole card and never
 // satisfies an exclusive demand. Its cards count is a card count: each of them needs its
@@ -668,7 +706,7 @@ func fitScalarDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (
 	units := unitsPerCardFor(d)
 	var fit int32
 	for i := range cards {
-		if budgets[i].whole || !cards[i].coveredBy(d) ||
+		if budgets[i].whole || budgets[i].shares > 0 || !cards[i].coveredBy(d) ||
 			!cards[i].servesFamily(d.family) || cards[i].remaining < units {
 			continue
 		}
@@ -678,6 +716,53 @@ func fitScalarDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (
 		}
 	}
 	return kueue.CheckStateRetry, demandVerdictMessage(kueue.CheckStateRetry, d)
+}
+
+// fitSharedDemand gates a shared demand holder by holder. Each holder needs its own count of
+// distinct cards on one node, one ownership share on each, and a card hosts as many holders as it
+// has free shares, because the device plugin allocates each container's tokens on their own and
+// charges one share per card it grants. Only a free card or one already held in shared mode can
+// take a share.
+//
+// Holders are placed largest first, each on the node with the most cards that still have a free
+// share, and there on the cards with the most free shares. Spending the fullest cards last keeps
+// the most cards available to the holders still to come, which is what lets several Pods share a
+// node instead of each being judged against a card of its own.
+func fitSharedDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (kueue.CheckState, string) {
+	const share = nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize
+	freeShares := func(i int) int32 {
+		c := &cards[i]
+		if budgets[i].whole || !c.coveredBy(d) || !c.servesFamily(d.family) ||
+			(c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeShared) {
+			return 0
+		}
+		return c.remaining/share - budgets[i].shares
+	}
+
+	for _, need := range d.sharedNeeds {
+		for range need.containers {
+			byNode := make(map[string][]int)
+			for i := range cards {
+				if freeShares(i) > 0 {
+					byNode[cards[i].hostname] = append(byNode[cards[i].hostname], i)
+				}
+			}
+			var chosen []int
+			for _, host := range slices.Sorted(maps.Keys(byNode)) {
+				if len(byNode[host]) > len(chosen) {
+					chosen = byNode[host]
+				}
+			}
+			if int32(len(chosen)) < need.cards {
+				return kueue.CheckStateRetry, demandVerdictMessage(kueue.CheckStateRetry, d)
+			}
+			slices.SortStableFunc(chosen, func(a, b int) int { return cmp.Compare(freeShares(b), freeShares(a)) })
+			for _, i := range chosen[:need.cards] {
+				budgets[i].shares++
+			}
+		}
+	}
+	return kueue.CheckStateReady, demandVerdictMessage(kueue.CheckStateReady, d)
 }
 
 // fitPartitionDemand gates a partition demand on the per-card placement-aware ledger: a

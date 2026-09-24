@@ -108,7 +108,7 @@ is now 80 % sliceable, and no longer available whole. `kubectl delete instance s
 | Ask | `resources.limits` |
 |---|---|
 | **Exclusive** — 2 whole accelerators | `nvidia.com/gpu: "2"` |
-| **Shared** — 3 of an accelerator's 10 ownership slots | `nvidia.com/gpu.shared: "3"` |
+| **Shared** — 2 accelerators, one of each accelerator's 10 ownership slots | `nvidia.com/gpu.shared: "2"` |
 | **Logical slice** — 20 % of one accelerator's VRAM at 40 % of its compute | `nvidia.com/gpu.sliced: "1"`<br>`nvidia.com/gpu.sliced.memory-percentage: "20"`<br>`nvidia.com/gpu.sliced.cores-percentage: "40"` |
 | **Physical partition** — one MIG `3g.40gb` instance | `nvidia.com/gpu.partitioned: "1"`<br>`nvidia.com/gpu.partitioned.mig-3g.40gb: "1"` |
 

@@ -400,6 +400,91 @@ func TestResourceServer_Allocate_CrossMode(t *testing.T) {
 	}
 }
 
+// TestResourceServer_Allocate_SharedNeedsDistinctCards pins that a shared request of N is N
+// distinct accelerators, one ownership share on each. kubelet picks tokens freely once the hint
+// cannot be met, so it can hand one accelerator several of a container's shared tokens; the ledger
+// charges one share per accelerator, so accepting that would grant fewer accelerators than asked
+// and under-record what kubelet consumed. Allocate refuses it instead, and only for the shared
+// family: a slice's tokens on one accelerator are a pool position, not a count of accelerators.
+func TestResourceServer_Allocate_SharedNeedsDistinctCards(t *testing.T) {
+	const nodeName = "node-sh"
+	share := uint64(nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize)
+	sameCard := []string{"grp-0:dev-0:0000", "grp-0:dev-0:" + padIndex(share)}
+
+	cases := []struct {
+		name      string
+		mode      workercore.DeviceAllocationMode
+		deviceIDs []string
+		// wantIn lists the substrings the refusal must carry; empty means the Allocate succeeds.
+		wantIn []string
+	}{
+		{
+			name:      "shared tokens on two distinct accelerators are allocated",
+			mode:      workercore.DeviceAllocationModeShared,
+			deviceIDs: []string{"grp-0:dev-0:0000", "grp-0:dev-1:0000"},
+		},
+		{
+			name:      "two shared tokens on one accelerator are refused",
+			mode:      workercore.DeviceAllocationModeShared,
+			deviceIDs: sameCard,
+			wantIn:    []string{"2 distinct accelerators", "grp-0:dev-0", "2 of its tokens"},
+		},
+		{
+			name:      "two sliced tokens on one accelerator are not refused by the shared rule",
+			mode:      workercore.DeviceAllocationModeSliced,
+			deviceIDs: []string{"grp-0:dev-0:0000", "grp-0:dev-0:0001"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			resName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, c.mode)
+			pod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "uid-sh"},
+				Spec: core.PodSpec{
+					NodeName: nodeName,
+					Containers: []core.Container{{
+						Name: "main",
+						Resources: core.ResourceRequirements{
+							Limits: core.ResourceList{resName: *resource.NewQuantity(int64(len(c.deviceIDs)), resource.DecimalSI)},
+						},
+					}},
+				},
+			}
+			cli := nodeFixture(twoCardDevices(nodeName, workercore.DeviceAllocationModeNone), pod)
+			rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+			s := &ResourceServer{
+				Manufacturer:   nodefeature.ManufacturerNVIDIA,
+				AllocationMode: c.mode,
+				Reconciler:     rec,
+				Responder:      stubResponder{},
+			}
+
+			_, err := s.Allocate(context.Background(), &AllocateRequest{
+				ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: slices.Clone(c.deviceIDs)}},
+			})
+
+			got := new(core.Pod)
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
+			_, annotated := got.Annotations[AllocatedAcceleratorAnnoKey]
+			_, reserved := reservedWorkload(rec, "uid-sh")
+
+			if len(c.wantIn) == 0 {
+				require.NoError(t, err)
+				assert.True(t, annotated, "a permitted Allocate must patch the allocation annotation")
+				return
+			}
+			require.Error(t, err)
+			assert.Equal(t, grpccodes.FailedPrecondition, grpcstatus.Code(err), err.Error())
+			for _, s := range c.wantIn {
+				assert.Contains(t, grpcstatus.Convert(err).Message(), s)
+			}
+			assert.False(t, annotated, "a refused Allocate must not patch the allocation annotation")
+			assert.False(t, reserved, "a refused Allocate must not reserve the accelerators")
+		})
+	}
+}
+
 // twoCardDevices builds a two-accelerator node inventory (dev-0, dev-1). When dev0Status is not
 // None the ledger Status records dev-0 held in that mode (Remaining 0) and dev-1 free.
 func twoCardDevices(nodeName string, dev0Status workercore.DeviceAllocationMode) *workercore.Devices {

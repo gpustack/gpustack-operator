@@ -342,6 +342,12 @@ For most manufacturers the injection is the device-visibility env (`NVIDIA_VISIB
 `ASCEND_VISIBLE_DEVICES` / …), which their container runtime turns into device nodes. AMD, Cambricon,
 MetaX and Hygon inject the nodes themselves, so a node of theirs needs the vendor driver alone.
 
+A shared grant of N is N [distinct accelerators on one node](../accelerator-requests.md#the-resource-keys):
+the allocation hint offers one token per accelerator, and the ledger charges one share per accelerator.
+`Allocate` refuses a grant the kubelet put two tokens of on one accelerator (`FailedPrecondition`), rather
+than hand the container fewer accelerators than it asked for. The response is the same visibility
+injection as an exclusive grant.
+
 AMD injects `/dev/kfd` plus each granted accelerator's `/dev/dri/card<N>` and `/dev/dri/renderD<N>`,
 every one of them required, and sets `AMD_VISIBLE_DEVICES=none`: the variable and the injected nodes
 union rather than reconcile, so leaving it live would be a second grant channel.
