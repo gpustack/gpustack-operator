@@ -25,6 +25,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/extensionapi"
 	"gpustack.ai/gpustack/pkg/utils/httpx"
+	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
 const (
@@ -430,8 +431,25 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 		})
 		return
 	}
+	var sglangHost, sglangStorage bool
+	if md.Spec.Engine.Name == "sglang" {
+		sglangHost, sglangStorage = modelDeploymentSGLangPodTiers(&read.pod)
+	}
 	for scope, current := range read.value.counters {
 		previous, ok := h.replaceCounter(md, &read.pod, scope, current, read.at)
+		// SGLang exports every tier's hit counter from start, and a tier the Pod does not build
+		// keeps its counter at zero, which would read as a measured miss rather than an absent tier.
+		if md.Spec.Engine.Name == "sglang" && (scope == "host-prefix" && !sglangHost ||
+			scope == "storage-prefix" && !sglangStorage) {
+			reason := modelDeploymentSGLangNoHostTier
+			if scope == "storage-prefix" {
+				reason = modelDeploymentSGLangNoStorageTier
+			}
+			result.Missing = append(result.Missing, worker.ModelDeploymentMetricMissing{
+				Pod: read.pod.Name, Source: scope, Reason: reason,
+			})
+			continue
+		}
 		// vLLM exports its external prefix cache counters with or without a KV connector, and
 		// without one they never move. A query counter that has moved proves a connector, so
 		// only a still-zero one on a Pod rendering none is declared unsupported.
@@ -508,6 +526,63 @@ func modelDeploymentPodRendersKVConnector(pod *core.Pod) bool {
 	return false
 }
 
+// modelDeploymentSGLangHostTierArgs are the SGLang arguments that select a tree cache reporting host
+// hits, the host_hit mode of sglang:prefill_effective_tokens_total, at v0.5.18: the tree cache's
+// host_hit_length is what split_cached_prefix_by_tier (managers/schedule_batch.py:203-215) counts as
+// host, and the plain RadixCache the selection chain falls back to reports none. The operator
+// renders only the first, and a user may add any of them.
+var modelDeploymentSGLangHostTierArgs = []string{
+	// server_args.py:2668 enable_hierarchical_cache selects HiRadixCache (mem_cache/registry.py:124-132),
+	// whose match sets host_hit_length (mem_cache/hiradix_cache.py:1754-1768).
+	"--enable-hierarchical-cache",
+	// server_args.py:3010 enable_lmcache selects LMCRadixCache (mem_cache/registry.py:138-148),
+	// whose match sets host_hit_length (mem_cache/storage/lmcache/lmc_radix_cache.py:245).
+	"--enable-lmcache",
+	// server_args.py:3022 enable_flexkv selects the FlexKV cache (mem_cache/registry.py:151-165),
+	// whose match sets host_hit_length (mem_cache/storage/flexkv/flexkv_radix_cache.py:232).
+	"--enable-flexkv",
+}
+
+const (
+	// modelDeploymentSGLangRadixBackendArg names a registered tree cache in place of the selection
+	// chain (server_args.py:1742-1746, default None; mem_cache/registry.py:223-236). It selects a
+	// host tier only with the value modelDeploymentSGLangRadixBackendFlexKV, the one backend v0.5.18
+	// registers (mem_cache/storage/flexkv/__init__.py:82); any other name is a backend nothing here
+	// knows the tiers of.
+	modelDeploymentSGLangRadixBackendArg    = "--radix-cache-backend"
+	modelDeploymentSGLangRadixBackendFlexKV = "flexkv"
+	// modelDeploymentSGLangStorageBackendArg enables the storage tier at start
+	// (managers/scheduler.py:444), and at v0.5.18 only that tier sets the storage_hit mode
+	// (managers/scheduler.py:3317-3325). The operator owns it and renders it exactly where the
+	// deployment attaches a KV cache pool.
+	modelDeploymentSGLangStorageBackendArg = "--hicache-storage-backend"
+)
+
+// modelDeploymentSGLangPodTiers reports whether an SGLang engine Pod's arguments build a host tier
+// and a storage tier, matching each flag by SGLang's own spelling rules.
+func modelDeploymentSGLangPodTiers(pod *core.Pod) (host, storage bool) {
+	engine := workercore.ModelDeploymentEngineSGLang
+	for _, container := range pod.Spec.Containers {
+		args := slices.Concat(container.Command, container.Args)
+		for i, arg := range args {
+			if _, ok := workerctrl.ModelDeploymentResolveArg(engine, arg, modelDeploymentSGLangHostTierArgs); ok {
+				host = true
+			}
+			if _, ok := workerctrl.ModelDeploymentResolveArg(engine, arg, []string{modelDeploymentSGLangStorageBackendArg}); ok {
+				storage = true
+			}
+			if _, ok := workerctrl.ModelDeploymentResolveArg(engine, arg, []string{modelDeploymentSGLangRadixBackendArg}); ok {
+				_, value, inline := strings.Cut(arg, "=")
+				if !inline && i+1 < len(args) {
+					value = args[i+1]
+				}
+				host = host || value == modelDeploymentSGLangRadixBackendFlexKV
+			}
+		}
+	}
+	return host, storage
+}
+
 func isModelDeploymentPD(md *workercore.ModelDeployment) bool {
 	hasPrefill, hasDecode := false, false
 	for _, role := range md.Spec.Roles {
@@ -539,6 +614,10 @@ const (
 	modelDeploymentVLLMExternalNotStore = "unsupported source: vLLM counts every token any KV connector loads as an " +
 		"external prefix cache hit, and this Pod's are not the shared store's alone: it attaches no KV cache pool, " +
 		"or it is the decode half of a pair, whose store hits cannot be told from the blocks the prefill half sends"
+	modelDeploymentSGLangNoHostTier = "unsupported source: the Pod renders no SGLang argument that selects a tree " +
+		"cache with a host tier, so SGLang counts no host hit"
+	modelDeploymentSGLangNoStorageTier = "unsupported source: the Pod renders no SGLang storage backend, so SGLang " +
+		"counts no storage hit"
 	modelDeploymentIdleWindow = "idle sampling window: the Pod's TTFT histogram recorded no new request, so this " +
 		"source has no new sample"
 )
@@ -554,6 +633,8 @@ var modelDeploymentNotPartialReasons = []string{
 	modelDeploymentVLLMRouterPDNoProcessing,
 	modelDeploymentVLLMNoKVConnector,
 	modelDeploymentVLLMExternalNotStore,
+	modelDeploymentSGLangNoHostTier,
+	modelDeploymentSGLangNoStorageTier,
 	modelDeploymentIdleWindow,
 }
 
