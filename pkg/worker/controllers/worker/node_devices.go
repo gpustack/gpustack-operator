@@ -32,8 +32,10 @@ import (
 // (so it can only ever guess the "generic" sentinel). Mirroring both lets a queue's Devices be
 // selected by the same labels as its ResourceFlavor. The CPU key distinguishes hardware pools; the
 // topology profile keeps device admission inside the exact TAS capacity partition Kueue assigned.
+// It also deletes the Devices of a node that is gone (see deleteDevicesOfAbsentNode).
 type NodeDevicesReconciler struct {
-	Client ctrlcli.Client
+	Client    ctrlcli.Client
+	APIReader ctrlcli.Reader
 }
 
 var _ ctrlreconcile.Reconciler = (*NodeDevicesReconciler)(nil)
@@ -41,8 +43,7 @@ var _ ctrlreconcile.Reconciler = (*NodeDevicesReconciler)(nil)
 func (r *NodeDevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
 
-	// Fetch the Devices (named after the node). Gone → nothing to sync; it is
-	// garbage-collected with its owning NodeFeature/Node.
+	// Fetch the Devices (named after the node). Gone → nothing to sync.
 	devs := new(workercore.Devices)
 	err := r.Client.Get(ctx, req.NamespacedName, devs)
 	if err != nil {
@@ -58,13 +59,13 @@ func (r *NodeDevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	// Read the node. A missing node leaves the Devices untouched: it is about to be
-	// garbage-collected with the node.
+	// Read the node. A missing node means the Devices describes accelerators that are gone, so it is
+	// deleted here rather than left to the garbage collector.
 	nd := new(core.Node)
 	err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: req.Name}, nd)
 	if err != nil {
 		if kerrors.IsNotFound(err) {
-			return ctrl.Result{}, nil
+			return ctrl.Result{}, r.deleteDevicesOfAbsentNode(ctx, devs)
 		}
 		logger.Error(err, "fetch node")
 		return ctrl.Result{}, err
@@ -90,6 +91,41 @@ func (r *NodeDevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	logger.V(2).Info("synced control labels onto devices", "labels", want)
 	return ctrl.Result{}, nil
+}
+
+// deleteDevicesOfAbsentNode deletes a Devices whose Node is gone.
+//
+// The Node owns the Devices, but the garbage collector reaches Devices through the worker's
+// aggregated API, which is the preferred version of the group. While the worker is down, as it is
+// when it ran on the departed node, the collector cannot delete the object, and once the worker is
+// back it retries only when its backoff expires, which grows to many minutes. Every consumer of the
+// ledger keeps counting the departed node's accelerators until then.
+//
+// The absence is confirmed by an uncached read first: a node that has just joined may not be in the
+// cache yet, and deleting its fresh Devices would hide its accelerators until the DeviceManager's
+// next pass. Such a node's own add event enqueues the Devices again. The UID precondition keeps a
+// Devices written for a new node of the same name from being deleted in its place.
+func (r *NodeDevicesReconciler) deleteDevicesOfAbsentNode(ctx context.Context, devs *workercore.Devices) error {
+	logger := ctrllog.FromContext(ctx)
+
+	err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: devs.Name}, new(core.Node))
+	if err == nil {
+		logger.V(3).Info("node is absent from the cache only, keep devices")
+		return nil
+	}
+	if !kerrors.IsNotFound(err) {
+		logger.Error(err, "confirm node absence")
+		return err
+	}
+
+	err = r.Client.Delete(ctx, devs, ctrlcli.Preconditions{UID: &devs.UID})
+	if err != nil && !kerrors.IsNotFound(err) {
+		logger.Error(err, "delete devices of absent node")
+		return err
+	}
+
+	logger.V(2).Info("deleted devices of absent node")
+	return nil
 }
 
 // nodeDevicesControlLabelKey reports whether a label key is one the worker owns on a Devices object:
@@ -129,6 +165,7 @@ func nodeDevicesControlInSync(a, b map[string]string) bool {
 
 func (r *NodeDevicesReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
+	r.APIReader = opts.Manager.GetAPIReader()
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("nodedevices").
@@ -153,7 +190,8 @@ func (r *NodeDevicesReconciler) SetupController(_ context.Context, opts controll
 			),
 		).
 		Watches(
-			// Watch Nodes and enqueue the same-named Devices when a control label changes.
+			// Watch Nodes and enqueue the same-named Devices when a control label changes or the
+			// node is deleted.
 			&core.Node{},
 			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(
 				5*time.Second,

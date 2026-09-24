@@ -239,6 +239,11 @@ the node, stamped with the accelerator flavors' selector labels (the feature key
 > is unresolvable and would leave it uncollected. Cluster-scoped to cluster-scoped, it is collected
 > with the node it describes.
 
+> **Why the worker deletes it too** — the collector reaches `Devices` through the worker's aggregated
+> API, the group's preferred version. A worker that went down with the departed node leaves the
+> ledger counting that node's cards until the collector's backoff expires, many minutes after the
+> worker is back. So `NodeDevicesReconciler` deletes a `Devices` whose Node an uncached read finds gone.
+
 Its `.status` holds the per-accelerator **`AcceleratorAllocation` ledger**: each accelerator's `mode`
 (free / exclusive / shared / sliced / partitioned) and `Remaining` credit budget, plus, for a
 hardware-partitioned one, its allocated and still-placeable partition profiles. This is the **single
