@@ -1331,8 +1331,8 @@ func TestModelDeploymentReconciler_TheRolloutGuardCountsAdmittedReplicas(t *test
 		wlList := new(kueue.WorkloadList)
 		require.NoError(t, cli.List(context.Background(), wlList, ctrlcli.InNamespace("team-a")))
 		assert.Len(t, wlList.Items, 2, "and neither replica's Workload was taken")
-		assert.Positive(t, res.RequeueAfter,
-			"the held rollout polls for the admission that releases it")
+		assert.Zero(t, res.RequeueAfter,
+			"the held rollout waits for the admission's own event rather than polling for it")
 	})
 
 	t.Run("admitted lets it proceed one replica at a time", func(t *testing.T) {

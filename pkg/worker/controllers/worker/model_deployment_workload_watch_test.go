@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -283,4 +284,63 @@ func TestModelDeploymentWorkloadWatch_EnqueuesTheDeployment(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestModelDeploymentWorkloadWatch_ReleasesAHeldRollout walks a rollout held for admission to the
+// event that releases it.
+//
+// A held rollout comes back for no timer: the pass that holds asks for no requeue, and what brings
+// the deployment back is Kueue admitting the waiting replicas, an event on their Workloads alone.
+// The case drives that event through the watch's predicate and handler, and the pass the watch
+// enqueues is the one that turns a replica over.
+func TestModelDeploymentWorkloadWatch_ReleasesAHeldRollout(t *testing.T) {
+	ctx := context.Background()
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaNames(t, cli), 2)
+	standInForKueue(t, cli, false)
+
+	changed := getModelDeployment(t, cli)
+	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
+	require.NoError(t, cli.Update(ctx, changed))
+
+	res, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	require.Len(t, replicaNames(t, cli), 2, "the rollout must be held for this case to release it")
+	assert.Zero(t, res.RequeueAfter, "the held rollout waits for the admission's own event, not a poll")
+
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+	predicate := modelDeploymentWorkloadPredicate()
+	handler := ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentWorkload)
+	queue := workqueue.NewTypedRateLimitingQueue(
+		workqueue.DefaultTypedControllerRateLimiter[ctrlreconcile.Request]())
+	defer queue.ShutDown()
+
+	wlList := new(kueue.WorkloadList)
+	require.NoError(t, cli.List(ctx, wlList, ctrlcli.InNamespace("team-a")))
+	require.Len(t, wlList.Items, 2)
+	for i := range wlList.Items {
+		held := wlList.Items[i].DeepCopy()
+		admitted := held.DeepCopy()
+		admitted.Status.Conditions = append(admitted.Status.Conditions, meta.Condition{
+			Type: kueue.WorkloadAdmitted, Status: meta.ConditionTrue, Reason: "Admitted",
+			LastTransitionTime: meta.Now(),
+		})
+		require.NoError(t, cli.Update(ctx, admitted))
+
+		e := ctrlevent.UpdateEvent{ObjectOld: held, ObjectNew: admitted}
+		if predicate.Update(e) {
+			handler.Update(ctx, e, queue)
+		}
+	}
+
+	if assert.Equal(t, 1, queue.Len(), "both admissions wake the one deployment, once") {
+		req, _ := queue.Get()
+		assert.Equal(t, types.NamespacedName{Namespace: "team-a", Name: "qwen"}, req.NamespacedName)
+	}
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Len(t, replicaNames(t, cli), 1, "the woken pass turns exactly one outdated replica over")
 }
