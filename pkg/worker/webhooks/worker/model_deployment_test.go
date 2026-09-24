@@ -908,6 +908,16 @@ func TestValidateModelDeployment(t *testing.T) {
 			wantMessage: "managed router supports plaintext engine endpoints only",
 		},
 		{
+			// vLLM rewrites the underscores and reads the key, so the listener is on TLS.
+			name: "router_role_uses_tls_underscore_spelling",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Roles[0].ExtraArgs = []string{"--ssl_keyfile=/tls/key.pem"}
+				return md
+			}(),
+			wantMessage: "managed router supports plaintext engine endpoints only",
+		},
+		{
 			// The ZMQ publisher is synthesized onto the same container, so the collision is two
 			// processes binding one port -- which the replica reports as a crash, not admission.
 			name: "router_role_declares_kv_events_port",
@@ -1125,6 +1135,59 @@ func TestValidateModelDeployment(t *testing.T) {
 				return md
 			}(),
 			wantMessage: `role "decode" passes --port=8000, the port its Service publishes`,
+		},
+		{
+			// The engine reads a unique prefix as --port, so the check does too.
+			name: "router_direct_decode_binds_the_serving_port_abbreviated",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
+						r.ExtraArgs = []string{"--por=8000"}
+					}),
+				)
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			}(),
+			wantMessage: `role "decode" passes --port=8000, the port its Service publishes`,
+		},
+		{
+			// The engine keeps the last entry naming the flag in any spelling, so this one listens on 8000.
+			name: "router_direct_decode_binds_the_serving_port_last_spelling_wins",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
+						r.ExtraArgs = []string{"--port=9000", "--por", "8000"}
+					}),
+				)
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			}(),
+			wantMessage: `role "decode" passes --port=8000, the port its Service publishes`,
+		},
+		{
+			// The baseline of the row above: the last entry moves the model server off the serving port.
+			name: "router_direct_decode_leaves_the_serving_port_last_spelling_wins",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
+						r.ExtraArgs = []string{"--por", "8000", "--port=9000"}
+					}),
+				)
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			}(),
 		},
 		{
 			// Any other value is the proxy's own target port and is exactly what the render wants.

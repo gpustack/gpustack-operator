@@ -210,6 +210,38 @@ const (
 	modelDeploymentLivenessFailureThreshold int32 = 6
 )
 
+// modelDeploymentListenArgs are the listen and TLS flags each engine registers: the set the render
+// reads back off a command line, through ModelDeploymentResolveArg, to learn where and how the
+// engine listens. It is per engine because the sets differ -- SGLang registers no --ssl-cert-reqs,
+// so "--ssl-cert" is its certificate flag, while vLLM calls the same prefix ambiguous.
+//
+// A PREFIX OF A KEY IS READ AS THAT KEY, and that is the engine's own reading wherever the engine
+// starts at all: no flag either engine registers is a strict prefix of one of these, so a prefix
+// the engine accepts is one it resolved to the key, and a prefix it calls ambiguous stops it before
+// anything listens, which leaves nothing to read back. That premise is engine behavior nothing here
+// enforces. Re-check it on an engine bump by listing, for each key, the option strings of the
+// engine's parser that are a strict prefix of it (vLLM's make_arg_parser, SGLang's
+// ServerArgs.add_cli_args); a non-empty list means that spelling is read as the wrong flag here.
+var modelDeploymentListenArgs = map[string][]string{
+	workercore.ModelDeploymentEngineVLLM: {
+		modelDeploymentEngineHostArg, modelDeploymentEnginePortArg,
+		modelDeploymentEngineTLSCertArg, modelDeploymentEngineTLSKeyArg,
+		modelDeploymentEngineTLSClientAuthArg,
+	},
+	workercore.ModelDeploymentEngineSGLang: {
+		modelDeploymentEngineHostArg, modelDeploymentEnginePortArg,
+		modelDeploymentEngineTLSCertArg, modelDeploymentEngineTLSKeyArg,
+	},
+}
+
+// ModelDeploymentListenArg reports which listen or TLS flag the engine's own parser reads a
+// command-line entry as, and "" for any other entry.
+func ModelDeploymentListenArg(engine, arg string) string {
+	key, _ := ModelDeploymentResolveArg(engine, arg, modelDeploymentListenArgs[engine])
+
+	return key
+}
+
 // ModelDeploymentRenderInput is everything one replica's Pod is rendered from.
 //
 // The InstanceType and the connector arrive as values rather than being read here, because the
@@ -394,10 +426,10 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		// narrower list here than appendModelDeploymentBindArgs scans is how the two would come to
 		// disagree: a connector argument carrying one of these flags would be honored by the fill
 		// and invisible to the gate.
-		scheme, gradable = modelDeploymentEngineTransport(command)
-		command = appendModelDeploymentBindArgs(command, enginePort)
+		scheme, gradable = modelDeploymentEngineTransport(md.Spec.Engine.Name, command)
+		command = appendModelDeploymentBindArgs(md.Spec.Engine.Name, command, enginePort)
 		if directDecode {
-			enginePort, err = modelDeploymentCommandPort(command)
+			enginePort, err = modelDeploymentCommandPort(md.Spec.Engine.Name, command)
 			if err != nil {
 				return nil, fmt.Errorf("role %q cannot place its routing proxy: %w", role.Name, err)
 			}
@@ -736,9 +768,9 @@ func stampModelDeploymentRankEnv(
 	}
 }
 
-func modelDeploymentCommandPort(command []string) (int32, error) {
+func modelDeploymentCommandPort(engine string, command []string) (int32, error) {
 	for i := len(command) - 1; i >= 0; i-- {
-		if ModelDeploymentArgName(command[i]) != modelDeploymentEnginePortArg {
+		if ModelDeploymentListenArg(engine, command[i]) != modelDeploymentEnginePortArg {
 			continue
 		}
 		_, value, inline := strings.Cut(command[i], "=")
@@ -994,16 +1026,16 @@ func convertModelDeploymentAdditionalVolumes(
 // sends to and the address the engine opens ONE decision instead of two defaults that happen to
 // agree on one engine.
 //
-// A FLAG THE ROLE ALREADY PASSED IS LEFT ALONE, matching "--flag value" and "--flag=value" alike.
+// A FLAG THE ROLE ALREADY PASSED IS LEFT ALONE, in every spelling the engine reads as it.
 // These are filled, not owned: a user who names a port keeps it, and the collision that ownership
 // exists to prevent -- two values for one flag with no way to tell which won -- cannot arise,
 // because nothing is appended when one is already there.
-func appendModelDeploymentBindArgs(command []string, port int32) []string {
+func appendModelDeploymentBindArgs(engine string, command []string, port int32) []string {
 	for _, kv := range [][2]string{
 		{modelDeploymentEngineHostArg, modelDeploymentEngineBindHost},
 		{modelDeploymentEnginePortArg, strconv.Itoa(int(port))},
 	} {
-		if modelDeploymentArgsName(command, kv[0]) {
+		if modelDeploymentArgsName(engine, command, kv[0]) {
 			continue
 		}
 
@@ -1013,11 +1045,11 @@ func appendModelDeploymentBindArgs(command []string, port int32) []string {
 	return command
 }
 
-// modelDeploymentArgsName reports whether a command line already carries this flag, in either
-// spelling.
-func modelDeploymentArgsName(command []string, name string) bool {
+// modelDeploymentArgsName reports whether a command line already carries this listen flag, in any
+// spelling the engine reads as it.
+func modelDeploymentArgsName(engine string, command []string, name string) bool {
 	for _, arg := range command {
-		if ModelDeploymentArgName(arg) == name {
+		if ModelDeploymentListenArg(engine, arg) == name {
 			return true
 		}
 	}
@@ -1054,11 +1086,11 @@ func modelDeploymentArgsName(command []string, name string) bool {
 // Everything else about TLS stays gated: the address is still the operator's own, only the transport
 // moved, and the kubelet does not verify the server certificate on an HTTPS probe, so a self-signed
 // pair is graded as readily as a public one.
-func modelDeploymentEngineTransport(command []string) (core.URIScheme, bool) {
+func modelDeploymentEngineTransport(engine string, command []string) (core.URIScheme, bool) {
 	var tls, clientAuth, moved bool
 
 	for i, arg := range command {
-		switch ModelDeploymentArgName(arg) {
+		switch ModelDeploymentListenArg(engine, arg) {
 		case modelDeploymentEngineHostArg, modelDeploymentEnginePortArg:
 			moved = true
 		case modelDeploymentEngineTLSCertArg, modelDeploymentEngineTLSKeyArg:

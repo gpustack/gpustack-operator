@@ -379,8 +379,9 @@ func ModelDeploymentOwnedArg(engine, arg string) (string, bool) {
 // prefix, because the full table is the engine's and not known here. That errs toward refusing: a
 // prefix the engine calls ambiguous is refused at engine start anyway, and argparse prefers an exact
 // registered spelling over an abbreviation, so the only entry wrongly resolved is one exactly equal
-// to another registered flag that is also a prefix of a key. The owned flags are the registered
-// flags known here, so an exact owned spelling is never read as a prefix of a longer owned key.
+// to another registered flag that is also a prefix of a key. The owned flags and the listen flags
+// are the registered flags known here, so an exact spelling of either is never read as a prefix of
+// a longer key.
 func ModelDeploymentResolveArg(engine, arg string, keys []string) (string, bool) {
 	name := ModelDeploymentArgName(arg)
 	if engine == workercore.ModelDeploymentEngineVLLM {
@@ -394,7 +395,8 @@ func ModelDeploymentResolveArg(engine, arg string, keys []string) (string, bool)
 	if slices.Contains(keys, name) {
 		return name, true
 	}
-	if slices.Contains(modelDeploymentOwnedKeys[engine].Args, name) {
+	if slices.Contains(modelDeploymentOwnedKeys[engine].Args, name) ||
+		slices.Contains(modelDeploymentListenArgs[engine], name) {
 		return "", false
 	}
 	for _, key := range keys {
