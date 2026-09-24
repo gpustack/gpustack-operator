@@ -259,7 +259,9 @@ transition, so do not "modernize" its version numbers.
 **Owns** — lookup tables with provenance. Today: the per-product unit-resources presets
 (`instance-type-unit-resources.md`), every command the binary offers with its flags and exit codes
 (`commands.md`), and the KV cache injection contract — opt-in keys, what each engine receives, every
-refusal with its fix (`kv-cache-injection.md`).
+refusal with its fix (`kv-cache-injection.md`), and the lowest engine release each deployment
+shape has been run with, with its runner image's Mooncake client and store line
+(`engine-versions.md`).
 
 **Not** — `commands.md` states what a flag does, not when to reach for the command. The procedure a
 one-shot belongs to lives on its operator page (`docs/operation/preflight.md` for `device-manager
@@ -274,6 +276,9 @@ which carries the line numbers to re-read from.
 by path. Do not rename it or reshape its tables. `commands.md` has no test behind it: its flag tables
 are only as true as the last person who ran `--help`, so change a flag and change the row in the same
 commit.
+
+`engine-versions.md` is the one place an engine's minimum is stated. A paragraph elsewhere that
+explains why a release below it fails is collapsed into a link to it, not kept beside it.
 
 **Rule** — these pages are exempt from the ten-`##` cap: a lookup page is meant to be flat.
 

@@ -160,7 +160,7 @@ type ModelDeploymentEngine struct {
 	// +k8s:validation:enum=["vllm","sglang"]
 	Name string `json:"name" protobuf:"bytes,1,name=name"`
 
-	// Version is the engine's own version, e.g. "0.25.1" for vllm or "0.5.18" for sglang.
+	// Version is the engine's own version, e.g. "0.29.0" for vllm or "0.5.18" for sglang.
 	//
 	//   - It is OPTIONAL, and the obligation sits with the roles instead: a role that names no image
 	//     of its own has one synthesized from this version, so admission refuses an empty version

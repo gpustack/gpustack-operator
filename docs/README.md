@@ -90,6 +90,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Command Reference](reference/commands.md) | Every command the binary offers: what each does, who runs it, its flags, and a runnable invocation | operators, developers | ~10 min |
 | [KV Cache Injection Reference](reference/kv-cache-injection.md) | How any Pod joins a KV cache pool with one label: the contract, what is injected per engine, every refusal, and what a cache changes about a workload | users, operators | ~14 min |
 | [Model Deployment Reference](reference/model-deployment.md) | The `ModelDeployment` contract: the inherited reuse domain, the three override tiers and the owned-key table, and the runner-image formula | users, operators, contributors | ~10 min |
+| [Engine Versions Reference](reference/engine-versions.md) | The lowest vLLM, vLLM-Ascend and SGLang release each deployment shape has been run with, the Mooncake client its runner image carries, and the store line it needs | users, operators | reference |
 | [Model Deployment Metrics Reference](reference/model-deployment-metrics.md) | The structured metrics subresource, source scopes, windowed cache hits and Pod scrape annotations | users, operators, console developers | ~5 min |
 | [Model Deployment Status Reference](reference/model-deployment-status.md) | What each `ModelDeployment` status condition and published field means, and how to read them when a deployment misbehaves | users, operators | ~8 min |
 
