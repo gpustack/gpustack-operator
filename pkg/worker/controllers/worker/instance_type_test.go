@@ -232,9 +232,10 @@ func wantView(t *testing.T, v workercore.InstanceTypeResource, orm, rem, capacit
 
 // TestAcceleratorFourViews is the end-to-end acceptance oracle: the five-step
 // pooling sequence on an 8× A10G node must reproduce the four-view progression
-// exactly. On a single node OnceMaxRequest == Remaining for the exclusive and shared
-// views; the sliced OnceMaxRequest is per-card (the freest card's percent), so it stays
-// 100 while any card is free. Capacity stays the whole pool (8 / ×10 / ×100) throughout.
+// exactly. On a single node OnceMaxRequest == Remaining for the exclusive view; the shared
+// OnceMaxRequest counts the node's cards that still have a free ownership share, since a
+// shared request names that many distinct cards; the sliced OnceMaxRequest is per-card (the
+// freest card's percent), so it stays 100 while any card is free. Capacity stays the whole pool (8 / ×10 / ×100) throughout.
 // No card here is in a partitioning mode, so the partitioned view stays zero at every
 // step — the two populations are disjoint, and this pool has nothing in the second one.
 func TestAcceleratorFourViews(t *testing.T) {
@@ -242,36 +243,38 @@ func TestAcceleratorFourViews(t *testing.T) {
 		name                 string
 		cards                []workercore.AcceleratorAllocation
 		excl, shared, sliced int64
+		// sharedCards is the shared OnceMaxRequest: the cards with at least one free share.
+		sharedCards int64
 	}{
 		{
 			name:  "init: 8 free",
 			cards: repeatCard(8, cardFree()),
-			excl:  8, shared: 80, sliced: 800,
+			excl:  8, shared: 80, sliced: 800, sharedCards: 8,
 		},
 		{
 			name:  "step 1: 2 exclusive, 6 free",
 			cards: concatCards(repeatCard(2, cardExclusive()), repeatCard(6, cardFree())),
-			excl:  6, shared: 60, sliced: 600,
+			excl:  6, shared: 60, sliced: 600, sharedCards: 6,
 		},
 		{
 			name:  "step 2: 2 exclusive, 2 shared (9 free each), 4 free",
 			cards: concatCards(repeatCard(2, cardExclusive()), repeatCard(2, cardShared(9)), repeatCard(4, cardFree())),
-			excl:  4, shared: 58, sliced: 400,
+			excl:  4, shared: 58, sliced: 400, sharedCards: 6,
 		},
 		{
 			name:  "step 3: +2 sliced (80% free each), 2 free",
 			cards: concatCards(repeatCard(2, cardExclusive()), repeatCard(2, cardShared(9)), repeatCard(2, cardSliced(80)), repeatCard(2, cardFree())),
-			excl:  2, shared: 38, sliced: 360,
+			excl:  2, shared: 38, sliced: 360, sharedCards: 4,
 		},
 		{
 			name:  "step 4: the two sliced cards drop to 78% free",
 			cards: concatCards(repeatCard(2, cardExclusive()), repeatCard(2, cardShared(9)), repeatCard(2, cardSliced(78)), repeatCard(2, cardFree())),
-			excl:  2, shared: 38, sliced: 356,
+			excl:  2, shared: 38, sliced: 356, sharedCards: 4,
 		},
 		{
 			name:  "step 5: +1 exclusive, 1 free",
 			cards: concatCards(repeatCard(3, cardExclusive()), repeatCard(2, cardShared(9)), repeatCard(2, cardSliced(78)), repeatCard(1, cardFree())),
-			excl:  1, shared: 28, sliced: 256,
+			excl:  1, shared: 28, sliced: 256, sharedCards: 3,
 		},
 	}
 
@@ -281,7 +284,7 @@ func TestAcceleratorFourViews(t *testing.T) {
 			devices := []workercore.Devices{nodeDevicesWithCapability("node-a", unpartitionedCards(c.cards...)...)}
 			excl, shared, sliced, partitioned := getAcceleratorResources(devices, testAcceleratorKey)
 			wantView(t, excl, c.excl, c.excl, 8, "exclusive")
-			wantView(t, shared, c.shared, c.shared, 80, "shared")
+			wantView(t, shared, c.sharedCards, c.shared, 80, "shared")
 			// Every step above leaves at least one free card, so the freest-card sliced OnceMaxRequest is 100.
 			wantView(t, sliced, 100, c.sliced, 800, "sliced")
 			wantView(t, partitioned.InstanceTypeResource, 0, 0, 0, "partitioned")
@@ -291,7 +294,8 @@ func TestAcceleratorFourViews(t *testing.T) {
 
 // TestAcceleratorFourViews_MultiNode pins the per-node rollup: Remaining sums across nodes;
 // exclusive/shared OnceMaxRequest is the largest single node (one allocation can span a node's
-// cards), while sliced OnceMaxRequest is per-card (the freest card — 100 here, all free).
+// cards, and never another node's), while sliced OnceMaxRequest is per-card (the freest card — 100
+// here, all free).
 func TestAcceleratorFourViews_MultiNode(t *testing.T) {
 	devices := []workercore.Devices{
 		nodeDevicesWithCapability("a", unpartitionedCards(repeatCard(4, cardFree())...)...),
@@ -299,7 +303,7 @@ func TestAcceleratorFourViews_MultiNode(t *testing.T) {
 	}
 	excl, shared, sliced, _ := getAcceleratorResources(devices, testAcceleratorKey)
 	wantView(t, excl, 4, 6, 6, "exclusive")
-	wantView(t, shared, 40, 60, 60, "shared")
+	wantView(t, shared, 4, 60, 60, "shared")
 	wantView(t, sliced, 100, 600, 600, "sliced")
 }
 
@@ -312,6 +316,18 @@ func TestAcceleratorFourViews_SlicedOnceMaxIsPerCard(t *testing.T) {
 	}
 	_, _, sliced, _ := getAcceleratorResources(devices, testAcceleratorKey)
 	wantView(t, sliced, 40, 90, 300, "sliced")
+}
+
+// TestAcceleratorFourViews_SharedOnceMaxCountsCards pins that the shared OnceMaxRequest is a card
+// count, not a share count. A shared request names distinct cards, one ownership share on each, so
+// a card with nine free shares still serves one card of it and a card with none serves nothing,
+// while Remaining keeps counting the shares themselves.
+func TestAcceleratorFourViews_SharedOnceMaxCountsCards(t *testing.T) {
+	devices := []workercore.Devices{
+		nodeDevicesWithCapability("a", unpartitionedCards(cardShared(9), cardShared(0), cardFree())...),
+	}
+	_, shared, _, _ := getAcceleratorResources(devices, testAcceleratorKey)
+	wantView(t, shared, 2, 19, 30, "shared")
 }
 
 // TestAcceleratorFourViews_NeitherFamilyCard pins that a card reporting NEITHER slicing
@@ -328,7 +344,7 @@ func TestAcceleratorFourViews_NeitherFamilyCard(t *testing.T) {
 	)}
 	excl, shared, sliced, partitioned := getAcceleratorResources(devices, testAcceleratorKey)
 	wantView(t, excl, 3, 3, 3, "exclusive")
-	wantView(t, shared, 30, 30, 30, "shared")
+	wantView(t, shared, 3, 30, 30, "shared")
 	// Only the one logically sliceable card backs the sliced view — capacity included.
 	wantView(t, sliced, 100, 100, 100, "sliced")
 	wantView(t, partitioned.InstanceTypeResource, 0, 0, 0, "partitioned")
@@ -355,7 +371,7 @@ func TestAcceleratorViews_LogicalOnlyPool(t *testing.T) {
 	}
 	excl, shared, sliced, partitioned := getAcceleratorResources(devices, testAcceleratorKey)
 	wantView(t, excl, 1, 1, 2, "exclusive")
-	wantView(t, shared, 10, 10, 20, "shared")
+	wantView(t, shared, 1, 10, 20, "shared")
 	wantView(t, sliced, 100, 180, 200, "sliced")
 	wantView(t, partitioned.InstanceTypeResource, 0, 0, 0, "partitioned")
 }
@@ -390,7 +406,7 @@ func TestAcceleratorViews_MixedPool(t *testing.T) {
 	}
 	excl, shared, sliced, partitioned := getAcceleratorResources(devices, testAcceleratorKey)
 	wantView(t, excl, 1, 1, 1, "exclusive")
-	wantView(t, shared, 10, 10, 10, "shared")
+	wantView(t, shared, 1, 10, 10, "shared")
 	wantView(t, sliced, 100, 100, 100, "sliced")
 	wantView(t, partitioned.InstanceTypeResource, 1, 7, 7, "partitioned")
 }

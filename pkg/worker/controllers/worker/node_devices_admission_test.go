@@ -60,6 +60,16 @@ func devicesWithRemaining(remaining ...int32) workercore.Devices {
 	}
 }
 
+// withMode marks every card of devs as held in mode.
+func withMode(devs workercore.Devices, mode workercore.DeviceAllocationMode) workercore.Devices {
+	for gi := range devs.Status.Groups {
+		for ai := range devs.Status.Groups[gi].Accelerators {
+			devs.Status.Groups[gi].Accelerators[ai].Mode = mode
+		}
+	}
+	return devs
+}
+
 // oneFlavorPool presents a fixture's ledgers the way a single-podset Workload's pool reaches the
 // check: every node claimed by ONE assigned flavor, whose accelerator key is derived per device
 // group so the flavor covers every card the fixture carries. It is the shape every case predating
@@ -149,8 +159,53 @@ func TestNodeDevicesFeasibility(t *testing.T) {
 		{
 			name:    "shared fits when a free owner slot remains",
 			devices: []workercore.Devices{devicesWithRemaining(slot, slot, 0, 0)},
-			demands: []familyDemand{{family: shared, cards: 2}},
+			demands: []familyDemand{{family: shared, cards: 2, sharedNeeds: []sharedNeed{{cards: 2, containers: 1}}}},
 			want:    kueue.CheckStateReady,
+		},
+		{
+			// Each container's tokens are allocated on their own, and a card takes one share per
+			// holder, so two holders of one card each fit on a card with two free shares.
+			name:    "two shared containers of one card each share one card",
+			devices: []workercore.Devices{devicesWithRemaining(2 * slot)},
+			demands: []familyDemand{{family: shared, cards: 2, sharedNeeds: []sharedNeed{{cards: 1, containers: 2}}}},
+			want:    kueue.CheckStateReady,
+		},
+		{
+			name:    "shared holders beyond a card's free shares are held",
+			devices: []workercore.Devices{devicesWithRemaining(2 * slot)},
+			demands: []familyDemand{{family: shared, cards: 3, sharedNeeds: []sharedNeed{{cards: 1, containers: 3}}}},
+			want:    kueue.CheckStateRetry,
+		},
+		{
+			// A card this Workload already shares is not a free whole card for its exclusive role,
+			// whichever of the two demands is fitted first.
+			name:    "a card one role shares cannot also serve another role exclusively",
+			devices: []workercore.Devices{devicesWithRemaining(whole)},
+			demands: []familyDemand{
+				{family: shared, cards: 1, sharedNeeds: []sharedNeed{{cards: 1, containers: 1}}},
+				{family: exclusive, cards: 1},
+			},
+			want: kueue.CheckStateRetry,
+		},
+		{
+			// A slice the Pod webhook did not shape carries no units, so it is fitted after shared:
+			// the order in which a card this Workload already shares would be handed out whole
+			// a second time.
+			name:    "a card one role shares cannot also host another role's unshaped slice",
+			devices: []workercore.Devices{devicesWithRemaining(whole)},
+			demands: []familyDemand{
+				{family: shared, cards: 1, sharedNeeds: []sharedNeed{{cards: 1, containers: 1}}},
+				{family: sliced, cards: 1},
+			},
+			want: kueue.CheckStateRetry,
+		},
+		{
+			// The device plugin refuses a shared grant on a card another mode holds, however much
+			// of that card is still free.
+			name:    "shared is not placed on a card held in sliced mode",
+			devices: []workercore.Devices{withMode(devicesWithRemaining(half), workercore.DeviceAllocationModeSliced)},
+			demands: []familyDemand{{family: shared, cards: 1, sharedNeeds: []sharedNeed{{cards: 1, containers: 1}}}},
+			want:    kueue.CheckStateRetry,
 		},
 		{
 			name:    "feasibility aggregates whole cards across devices",
@@ -205,7 +260,7 @@ func TestNodeDevicesFeasibilityScopesEveryFamilyToItsPopulation(t *testing.T) {
 		},
 		{
 			name: "shared is not feasible against a partitioned card", devices: partitioned,
-			demand: familyDemand{family: nodefeature.ResourceFamilyShared, cards: 1},
+			demand: familyDemand{family: nodefeature.ResourceFamilyShared, cards: 1, sharedNeeds: []sharedNeed{{cards: 1, containers: 1}}},
 			want:   kueue.CheckStateRetry,
 		},
 		{
@@ -553,7 +608,19 @@ func TestParseFamilyDemands(t *testing.T) {
 			name:     "shared",
 			podCount: 1,
 			reqs:     map[core.ResourceName]string{core.ResourceName(sharedCard): "3"},
-			want:     []familyDemand{{family: nodefeature.ResourceFamilyShared, cards: 3}},
+			want: []familyDemand{{
+				family: nodefeature.ResourceFamilyShared, cards: 3,
+				sharedNeeds: []sharedNeed{{cards: 3, containers: 1}},
+			}},
+		},
+		{
+			name:     "shared counts one holder per container per Pod",
+			podCount: 2,
+			reqs:     map[core.ResourceName]string{core.ResourceName(sharedCard): "2"},
+			want: []familyDemand{{
+				family: nodefeature.ResourceFamilyShared, cards: 4,
+				sharedNeeds: []sharedNeed{{cards: 2, containers: 2}},
+			}},
 		},
 		{
 			name:     "partitioned reads profile, card count and per-card units",
@@ -2280,9 +2347,11 @@ func TestNodeDevicesAdmission_ReadsTheNodeTASAssigned(t *testing.T) {
 	whole := int32(nodefeature.ResourceMaxUnits)
 	half := whole / 2
 	fragment := whole * 2 / 5
+	share := whole / nodefeature.SharedResourceMaxSize
 
 	exclusiveCard := core.ResourceList{core.ResourceName(base): resource.MustParse("1")}
 	halfSlice := core.ResourceList{slicedCard: resource.MustParse("1"), slicedUnits: *resource.NewQuantity(int64(half), resource.DecimalSI)}
+	oneShare := core.ResourceList{sharedCard: resource.MustParse("1")}
 	twoShares := core.ResourceList{sharedCard: resource.MustParse("2")}
 
 	poolLabels := map[string]string{
@@ -2366,12 +2435,52 @@ func TestNodeDevicesAdmission_ReadsTheNodeTASAssigned(t *testing.T) {
 			wantIn: "the assigned flavor pool",
 		},
 		{
-			name:     "a shared request stays judged across the pool",
-			free:     map[string][]int32{"node-a": {whole}, "node-b": {whole}},
+			name:     "shared on a one-card node is held though another node has two free cards",
+			free:     map[string][]int32{"node-a": {whole}, "node-b": {whole, whole}},
+			requests: twoShares, pods: 1,
+			assigned: map[string]int32{"host-a": 1},
+			want:     kueue.CheckStateRetry,
+			wantIn:   "may assign the same node again",
+		},
+		{
+			name:     "shared on a node whose two cards each keep one free share is ready",
+			free:     map[string][]int32{"node-a": {share, share}},
 			requests: twoShares, pods: 1,
 			assigned: map[string]int32{"host-a": 1},
 			want:     kueue.CheckStateReady,
-			wantIn:   "the assigned flavor pool",
+			wantIn:   `the node "host-a" Kueue assigned has enough free cards`,
+		},
+		{
+			name:     "two Pods each asking one shared card share a one-card node",
+			free:     map[string][]int32{"node-a": {whole}},
+			requests: oneShare, pods: 2,
+			assigned: map[string]int32{"host-a": 2},
+			want:     kueue.CheckStateReady,
+			wantIn:   `the node "host-a" Kueue assigned has enough free cards`,
+		},
+		{
+			name:     "two Pods each asking two shared cards share a two-card node",
+			free:     map[string][]int32{"node-a": {whole, whole}},
+			requests: twoShares, pods: 2,
+			assigned: map[string]int32{"host-a": 2},
+			want:     kueue.CheckStateReady,
+			wantIn:   `the node "host-a" Kueue assigned has enough free cards`,
+		},
+		{
+			name:     "Pods beyond the node's free shares on a card are held",
+			free:     map[string][]int32{"node-a": {2 * share}, "node-b": {whole}},
+			requests: oneShare, pods: 3,
+			assigned: map[string]int32{"host-a": 3},
+			want:     kueue.CheckStateRetry,
+			wantIn:   `"host-a"`,
+		},
+		{
+			name:     "shared on a node whose second card has no free share left is held",
+			free:     map[string][]int32{"node-a": {whole, share - 1}, "node-b": {whole, whole}},
+			requests: twoShares, pods: 1,
+			assigned: map[string]int32{"host-a": 1},
+			want:     kueue.CheckStateRetry,
+			wantIn:   `"host-a"`,
 		},
 	}
 	for _, c := range cases {

@@ -680,6 +680,9 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		}
 		allocatedResTokensMap[resToken.Resource] = append(allocatedResTokensMap[resToken.Resource], resToken)
 	}
+	if err := s.rejectRepeatedSharedCards(len(allocatedDeviceIDs), allocatedResTokensMap); err != nil {
+		return nil, err
+	}
 
 	// A responder that places logical geometry is called twice: once inside the mutex to pick the
 	// window, once after it is released to render the response from what was picked. Resolved once
@@ -1351,6 +1354,34 @@ func (s *ResourceServer) rejectCrossModeCards(
 	}
 
 	return nil
+}
+
+// rejectRepeatedSharedCards refuses a shared allocation that lands two or more of its tokens on one
+// accelerator. A shared request of N is N distinct accelerators with one ownership share on each,
+// and the ledger charges one share per accelerator, so accepting the repeat would grant fewer
+// accelerators than asked while recording less than kubelet consumed. kubelet picks tokens freely
+// once the hint cannot be met, which is how a node with fewer free accelerators than N reaches here.
+// The lowest repeated accelerator is named, so the message is the same on every call.
+func (s *ResourceServer) rejectRepeatedSharedCards(requested int, cardTokens map[Resource][]ResourceToken) error {
+	if s.AllocationMode != workercore.DeviceAllocationModeShared {
+		return nil
+	}
+	var repeated []Resource
+	for res, tokens := range cardTokens {
+		if len(tokens) > 1 {
+			repeated = append(repeated, res)
+		}
+	}
+	if len(repeated) == 0 {
+		return nil
+	}
+
+	res := slices.MinFunc(repeated, func(a, b Resource) int { return cmp.Compare(a.String(), b.String()) })
+	s.Logger.Error(nil, "shared allocation with a repeated accelerator rejected",
+		"card", res.String(), "tokens", len(cardTokens[res]), "requested", requested)
+	return grpcstatus.Errorf(grpccodes.FailedPrecondition,
+		"a shared request of %d needs %d distinct accelerators, but accelerator %s was handed %d of its tokens",
+		requested, requested, res, len(cardTokens[res]))
 }
 
 // accumulateAllocation charges each accelerator the tokens land on for the units this container

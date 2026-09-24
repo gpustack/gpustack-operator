@@ -48,7 +48,7 @@ no `.partitioned*` keys at all.
 | Key | Served by | Accelerators that serve it | Request value | Node value |
 |---|---|---|---|---|
 | `<base>` | device plugin (Exclusive) | unpartitioned only | accelerator count | Σ healthy tokens |
-| `<base>.shared` | device plugin (Shared) | unpartitioned only | ownership shares (10 per accelerator) | Σ healthy tokens |
+| `<base>.shared` | device plugin (Shared) | unpartitioned only | distinct accelerators on one node, one ownership share on each (10 per accelerator) | Σ healthy tokens |
 | `<base>.sliced` | device plugin (Sliced) | logically sliceable only | always `1` | Σ healthy tokens |
 | `<base>.sliced.units` | node capacity | logically sliceable | **webhook-derived**, per accelerator | Σ accelerators × 1,600,000 |
 | `<base>.sliced.cores-percentage` | node capacity | logically sliceable | per accelerator, `(0,100]` | Σ per-accelerator budget |
@@ -80,11 +80,22 @@ All four are Pods submitted on a pool's entrance `LocalQueue` (`kueue.x-k8s.io/q
 resources: { limits: { nvidia.com/gpu: "2" } }
 ```
 
-**Shared** — 3 of an accelerator's 10 ownership shares:
+**Shared** — two accelerators on one node, one of each accelerator's 10 ownership shares:
 
 ```yaml
-resources: { limits: { nvidia.com/gpu.shared: "3" } }
+resources: { limits: { nvidia.com/gpu.shared: "2" } }
 ```
+
+The value counts accelerators, never shares of one: `"2"` needs a node with two accelerators that each
+still have a free share. It is per container, and each container is one holder: two Pods, or two
+containers of one Pod, may hold a share of the same accelerator. A share carries no memory or compute
+cap — up to 10 holders use the whole accelerator side by side; isolating them is a logical slice's job.
+
+The Pod webhook pins a request of two or more — its largest container's — to nodes with that many
+accelerators. It adds
+`acceleratable.feature.gpustack.ai/<group>.count Gt N-1` to every required node-affinity term, reading
+`<group>` from the `InstanceType` fronting the queue, and rejects the Pod when that cannot be read.
+Ten tokens per accelerator hide a node's accelerator count from Kueue and the scheduler; the label does not.
 
 **Logical slice** — half of one accelerator's VRAM, capped at 40 % of its compute:
 
@@ -419,7 +430,7 @@ instance does not ask for a whole accelerator's worth.
 
 ## Pre-release breaks
 
-No released version is marked stable, so both of the following are clean breaks with **no** translation
+No released version is marked stable, so each of the following is a clean break with **no** translation
 layer.
 
 **The old MIG key is gone.** A MIG profile used to be requested through the *logical* family: a
@@ -456,6 +467,15 @@ DaemonSet, then let the workloads reschedule.
 > occupied one. The rebuild cannot recover — the occupancy is exactly what became unreadable — so it
 > logs loudly, naming the Pod.
 
+**`<base>.shared: N` counts accelerators now.** It used to be read as N shares of one accelerator in
+some places and N accelerators in others; it is N distinct accelerators on one node, one share on each.
+A manifest asking `"3"` for a heavier share of one accelerator now needs a node with three.
+
+`InstanceType.status.acceleratorShared.onceMaxRequest` moved with it: it counts a node's accelerators
+with a free share, where it used to sum their shares. Output recorded before the change, in the
+[Walkthrough](./walkthrough.md) and [NVIDIA MIG Operations](./operation/nvidia-mig.md), still shows the
+old reading under `SH` — `10/10` on one free accelerator now reads `1/10`.
+
 ## Limitations
 
 - **Media-engine and graphics profile variants are not exposed.** A profile whose name is not a valid
@@ -489,6 +509,20 @@ DaemonSet, then let the workloads reschedule.
   Full procedure: [NVIDIA MIG Operations](./operation/nvidia-mig.md#enabling-partitioning-on-a-node) ·
   [T-Head MIG Operations](./operation/thead-mig.md#enabling-partitioning-on-a-node) ·
   [Hygon MIG Operations](./operation/hygon-mig.md#enabling-partitioning-on-a-node).
+- **A shared request on a node with fewer free accelerators than it names fails for good.** Each
+  accelerator advertises 10 shared tokens, so the scheduler fits `.shared: "2"` on a one-accelerator
+  node; the device plugin refuses the two tokens the kubelet picked there rather than grant one short.
+  The Pod ends `Failed` with `UnexpectedAdmissionError` and must be recreated.
+
+  A pool's queue holds such a request first
+  ([Admission](./architecture/admission.md#gate-3--the-per-accelerator-admissioncheck)), so a Pod
+  reaches this only by skipping the queue or racing another allocation.
+- **The shared card-count pin has two gaps.** Where it misses, a request placed on too few
+  accelerators retries for good ([Admission](./architecture/admission.md#gate-3--the-per-accelerator-admissioncheck)).
+  - *Workloads built from a template.* Kueue builds a batch Job's, a JobSet's or a RayJob's Workload
+    from its Pod template before any Pod exists, and the webhook only sees Pods, so none is pinned.
+  - *Partitioned accelerators count.* `.count` is the node's total, so a node whose accelerators are
+    mostly in a partitioning mode still passes the pin with too few left to share.
 - **A non-default `TopologyManager` policy can mis-align a partition.** The Partitioned resource reports
   no NUMA topology (the plugin may not use the accelerator the kubelet aligned to), so under
   `single-numa-node` the CPU and memory providers can settle on one socket while the only accelerator

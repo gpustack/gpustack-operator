@@ -82,21 +82,25 @@ and ends at `kubernetes.io/hostname`, so Kueue writes the node into the Workload
 node named there must host its own share of the PodSet from its own accelerators.
 
 - A PodSet without a hostname-level assignment is judged across the flavor's whole node pool.
-- The shared family stays pool-wide: its key counts ownership shares, which the check reads as
-  distinct accelerators, so judging it per node would hold a multi-share request on a one-accelerator
-  node for good.
 - A node whose `Node` object is gone serves no node-scoped demand, so the Workload is held.
 
 > **Known behavior: a fragmented node livelocks.** TAS sums each node's capacity keys, so it cannot see
-> that a node's free `.sliced.units` are spread over accelerators none of which fits the request.
+> how the free capacity is spread over the node's accelerators:
+>
+> - a node's free `.sliced.units` may be spread over accelerators none of which fits the slice;
+> - a node's 10 shared tokens per accelerator let a node with too few accelerators take `.shared: N`.
+>   The Pod webhook's card-count pin keeps such a request off those nodes and their flavors. Where the
+>   pin misses ([Limitations](../accelerator-requests.md#limitations)) it never frees, since Kueue
+>   restarts the flavor scan at the smallest node after every eviction.
 >
 > - TAS places the request there, and prefers it: it orders nodes by least free capacity.
 > - The check answers `Retry`, Kueue evicts, and TAS re-places it from the same totals on the same node.
 > - So the Workload retries every 30 s until that node's accelerators free, even while another node has
 >   room, and the verdict message says so.
 >
-> Reading the pool instead let such a request through, and `Allocate`, which does not gate a slice on
-> units, oversubscribed one accelerator's memory.
+> Reading the pool instead let such a request through: `Allocate`, which does not gate a slice on
+> units, oversubscribed one accelerator's memory, and refuses a shared request its node cannot spread
+> over distinct accelerators, failing the Pod.
 
 Each family gets one correlated `(accelerators, per-accelerator demand, profile)` tuple scoped to the
 accelerators that can serve it, so an exclusive or shared request is never judged feasible against a
@@ -191,7 +195,9 @@ shown capacity a partitioned accelerator could not serve.
 
 `OnceMaxRequest` differs per view:
 
-- `EX`, `SH` — the largest single *node*'s availability; one request can span a node's accelerators;
+- `EX` — the largest single *node*'s free accelerators; one request can span a node's accelerators;
+- `SH` — the largest single *node*'s accelerators that still have a free share, since a shared request
+  of N names N distinct accelerators on one node — a node's spare shares on one accelerator do not add;
 - `SL` — the freest single *accelerator*'s; a slice targets one accelerator;
 - `PT` — `1` while any accelerator can host an instance, else `0`; a partition request is validated to
   be exactly one instance on one accelerator, so nothing larger is requestable.

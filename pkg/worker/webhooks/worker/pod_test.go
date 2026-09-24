@@ -775,3 +775,111 @@ func TestPodWebhook_VisibilityResourceIsNotAMode(t *testing.T) {
 	_, err := w.ValidateCreate(context.Background(), pod)
 	assert.NoError(t, err, "main(sliced) + sshd(visibility) is a single accelerator mode")
 }
+
+// TestPodWebhook_DefaultSharedPinsTheCardCount pins the node affinity a shared request of N >= 2
+// carries. The node advertises ten shared tokens per card, so neither Kueue's flavor assignment
+// nor TAS can tell a one-card node from a four-card one by the resource alone, and a Workload
+// placed on too few cards is evicted and re-placed on the same flavor every time. The per-node
+// card-count label every accelerated flavor and node carries is what rules those nodes out.
+func TestPodWebhook_DefaultSharedPinsTheCardCount(t *testing.T) {
+	sharedCard := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeShared)
+	const group = "nvidia-g0"
+	countKey := nodefeature.AcceleratableFeatureLabelPrefix + group + ".count"
+	pin := core.NodeSelectorRequirement{Key: countKey, Operator: core.NodeSelectorOpGt, Values: []string{"1"}}
+	zone := core.NodeSelectorRequirement{Key: core.LabelTopologyZone, Operator: core.NodeSelectorOpIn, Values: []string{"a"}}
+	host := core.NodeSelectorRequirement{Key: core.LabelHostname, Operator: core.NodeSelectorOpNotIn, Values: []string{"h"}}
+
+	required := func(terms ...[]core.NodeSelectorRequirement) *core.Affinity {
+		sel := &core.NodeSelector{}
+		for _, t := range terms {
+			sel.NodeSelectorTerms = append(sel.NodeSelectorTerms, core.NodeSelectorTerm{MatchExpressions: t})
+		}
+		return &core.Affinity{NodeAffinity: &core.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: sel}}
+	}
+
+	cases := []struct {
+		name   string
+		shared string
+		// sibling, when set, is a second app container's shared request.
+		sibling string
+		// group is the fronting InstanceType's accelerator group; "-" means no InstanceType.
+		group    string
+		affinity *core.Affinity
+		// runs is how many times the webhook defaults the Pod; zero means once.
+		runs    int
+		want    *core.Affinity
+		wantErr bool
+	}{
+		{
+			name:   "a one-card shared request is not pinned",
+			shared: "1", group: group,
+			want: nil,
+		},
+		{
+			name:   "a two-card shared request is pinned to nodes with more than one card",
+			shared: "2", group: group,
+			want: required([]core.NodeSelectorRequirement{pin}),
+		},
+		{
+			// The device plugin allocates each container's tokens on their own, so two containers
+			// of two cards each are served by the same two cards.
+			name:   "a Pod is pinned to its largest container's card count, not the sum",
+			shared: "2", sibling: "2", group: group,
+			want: required([]core.NodeSelectorRequirement{pin}),
+		},
+		{
+			name:   "the pin is ANDed into every term the Pod already requires",
+			shared: "2", group: group,
+			affinity: required([]core.NodeSelectorRequirement{zone}, []core.NodeSelectorRequirement{host}),
+			want:     required([]core.NodeSelectorRequirement{zone, pin}, []core.NodeSelectorRequirement{host, pin}),
+		},
+		{
+			name:   "defaulting the Pod again pins it once",
+			shared: "2", group: group, runs: 2,
+			want: required([]core.NodeSelectorRequirement{pin}),
+		},
+		{
+			name:   "a shared request whose InstanceType cannot be read is rejected",
+			shared: "2", group: "-",
+			wantErr: true,
+		},
+		{
+			name:   "a shared request whose InstanceType names no accelerator group is rejected",
+			shared: "2", group: "",
+			wantErr: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var objs []ctrlcli.Object
+			if c.group != "-" {
+				it := instanceTypeWithEntrance("")
+				it.Spec.AcceleratorGroup = c.group
+				objs = append(objs, it)
+			}
+			w := newPodWebhook(objs...)
+			pod := slicedPod(map[core.ResourceName]string{sharedCard: c.shared})
+			if c.sibling != "" {
+				q := core.ResourceList{sharedCard: resource.MustParse(c.sibling)}
+				pod.Spec.Containers = append(pod.Spec.Containers, core.Container{
+					Name: "sibling", Resources: core.ResourceRequirements{Requests: q, Limits: q.DeepCopy()},
+				})
+			}
+			pod.Spec.Affinity = c.affinity
+
+			var err error
+			for range max(c.runs, 1) {
+				if err = w.Default(context.Background(), pod); err != nil {
+					break
+				}
+			}
+			if c.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, c.want, pod.Spec.Affinity)
+		})
+	}
+}
