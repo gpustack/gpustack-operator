@@ -38,30 +38,23 @@ const (
 	// entrypoint's own default. Later groups offset from it; see memberRESTPort for why.
 	memberRESTPortBase int32 = 8080
 
-	// RDMADevicePath is the device tree an EFA member needs from its host. RDMA devices surface
-	// here too, but an RDMA member no longer mounts it: this operator's own device plugin injects
-	// the verbs node of each endpoint it grants, so the tree would add every OTHER adapter on the
-	// node to a container granted one of them.
+	// RDMADevicePath is the host's device tree, and NO member mounts it. Each host fabric's device
+	// plugin injects the verbs node of every device it grants, at this same path inside the
+	// container: this operator's own Device Manager for RDMA, AWS's plugin for EFA.
 	//
-	// EFA keeps the mount here, and exactly one reason is left. Measurements on EFA hosts have since
-	// removed the mount while keeping the resource request and moved 25 GB across nodes between two
-	// members THIS RENDERER produced, byte counts agreeing between the application, the initiator's
-	// adapter counters and the target's. So "it was never read" and "it never carried traffic" are
-	// both answered, and neither is why the mount stays.
+	// Mounting the tree beside that grant is not merely redundant, it breaks a partial one. The tree
+	// carries every OTHER adapter on the node into a container granted some of them, and the verbs
+	// library lists a device by finding its node, so the ungranted ones are listed too. Opening one
+	// of those is refused by the device cgroup with EPERM, and libfabric's EFA provider abandons its
+	// whole device list on the first EPERM it meets: a member granted fewer EFA devices than its node
+	// has fails to initialize the fabric at all, while the same member without the mount starts.
 	//
-	// What stays is that the redundancy belongs to THAT VENDOR'S PLUGIN rather than to the protocol:
-	// it injects the verbs node itself, and an allocator that injects nothing turns this mount back
-	// into the only way the device node reaches the container. Dropping it is therefore a decision
-	// about which allocators an EFA member may run against, not a missing reading, and it belongs to
-	// a change that says so rather than to this one.
+	// An allocator that injects nothing is therefore not served by mounting the tree back: the mount
+	// makes a device visible, and only the request makes it openable.
 	//
-	// The opposite removal is what this whole rendering rests on: taking the REQUEST away instead
-	// failed loudly, with the device node present and world-readable and open() still refused. The
-	// mount makes a device visible; the request makes it openable.
-	//
-	// Exported because admission has to refuse a disk tier that would land on top of it: the two
-	// mounts are rendered into one container, and a collision there is resolved by the kubelet
-	// rather than reported by this operator.
+	// Exported because admission has to refuse a declared mount that would land on the injected
+	// device nodes: both end up in one container, and a collision there is resolved by the container
+	// runtime rather than reported by this operator.
 	RDMADevicePath = "/dev/infiniband"
 
 	// MemberPodSpecHashAnnotation carries the fingerprint of a member's pod template, minus its node
@@ -100,19 +93,17 @@ const (
 	// spec asked for. See memberTerminationGracePeriodSeconds.
 	memberShutdownSeconds int64 = 60
 
-	// rdmaDeviceVolumeName names that mount.
-	rdmaDeviceVolumeName = "rdma-devices"
-
 	// memberProtocolRDMA and memberProtocolEFA are the two RESOLVED protocols that reach the host's
-	// fabric, in the store's own spelling rather than the API's. They are constants because three
-	// places have to agree on the pair -- the predicate admission shares, the mount, and the
-	// resource derived from it -- and a fourth spelling of "efa" is how two of them would drift.
+	// fabric, in the store's own spelling rather than the API's. They are constants because two
+	// places have to agree on the pair -- the host-fabric predicate and the resource derived from
+	// it -- and a third spelling of "efa" is how the two would drift.
 	memberProtocolRDMA = "rdma"
 	memberProtocolEFA  = "efa"
 
 	// efaDeviceResource is the extended resource AWS's EFA device plugin advertises. EFA is AWS's own
 	// fabric and its plugin advertises exactly one name, so the protocol selects the resource family.
-	// The plugin advertises one unit per node, so an EFA member requesting more than one stays Pending.
+	// The plugin advertises one unit per EFA interface, so a member asking for more than its node
+	// has stays Pending.
 	//
 	// IT IS WHAT MAKES THE DEVICE OPENABLE. Mounting /dev/infiniband carries the device node into
 	// the container's mount namespace and does nothing else: the device cgroup still denies open(),
@@ -134,7 +125,7 @@ const (
 	// suffixed with the entry's position.
 	//
 	// The position and not the path, because a name derived from user input can collide with the
-	// two names above and a DNS label cannot hold a path anyway. The position already identifies an
+	// name above and a DNS label cannot hold a path anyway. The position already identifies an
 	// entry everywhere else, so the mapping needs no state to remember it.
 	memberHostPathVolumeNamePrefix = "host-path"
 
@@ -343,8 +334,7 @@ var memberProtocols = map[string]string{
 //
 // Both of the two DO get a device request. The effective protocol selects its resource family and
 // the member's interface count selects its quantity and RDMA allocation mode, so this predicate
-// answers "is a device granted" as well. Only one of them also mounts the device tree;
-// RDMADevicePath says which and why.
+// answers "is a device granted" as well. Neither mounts the device tree; RDMADevicePath says why.
 //
 // It is UNEXPORTED, and was not always: admission used to ask the same question, because the device
 // resource was declared on the object and a declared name is consequential only on these protocols.
@@ -917,7 +907,8 @@ func memberResources(member workercore.KVCacheBackendMember) core.ResourceRequir
 //     stays Pending, and that is the wanted failure — a cluster whose nodes cannot serve the fabric
 //     is a cluster whose backend should say TCP, said in the object rather than discovered later in
 //     a store log.
-//   - Only EFA mounts the device tree, and RDMADevicePath says why the other one stopped.
+//   - Neither mounts the device tree: the plugin injects the nodes it grants, and RDMADevicePath
+//     says why the tree beside them breaks a partial grant.
 //   - The libfabric an EFA member runs on travels in the image, so there is no host install prefix
 //     to mount and no environment to render.
 //   - Every other path, including the Auto that resolved to tcp, is left exactly as rendered: no
@@ -942,28 +933,6 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string, interfaceCount int32
 			// memory limit that pinning runs into. Two operations, two capabilities.
 			Add: []core.Capability{"IPC_LOCK", "SYS_RESOURCE"},
 		},
-	}
-
-	if protocol == memberProtocolEFA {
-		// Typed, so a node with no device tree stops the member at the mount rather than starting,
-		// finding no device, installing TCP and serving while the object still says the fabric it
-		// was asked for. An untyped hostPath is not a weaker check but no check: the kubelet's
-		// mounter returns immediately for the empty type and never looks at the path. Directory
-		// and not DirectoryOrCreate, because only the OrCreate forms make a missing path, and an
-		// empty directory where the devices should be is that same silent start.
-		podSpec.Volumes = append(podSpec.Volumes, core.Volume{
-			Name: rdmaDeviceVolumeName,
-			VolumeSource: core.VolumeSource{
-				HostPath: &core.HostPathVolumeSource{
-					Path: RDMADevicePath,
-					Type: ptr.To(core.HostPathDirectory),
-				},
-			},
-		})
-		container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
-			Name:      rdmaDeviceVolumeName,
-			MountPath: RDMADevicePath,
-		})
 	}
 
 	// The device allocation, and nothing else. The libfabric an EFA member runs on travels in the
@@ -1031,7 +1000,7 @@ func FabricDeviceResource(protocol string, interfaceCount int32) core.ResourceNa
 // applyMemberHostPaths mounts what the group declared it needs from its nodes.
 //
 // The volume name is derived from the entry's POSITION and never from anything the entry carries,
-// which is what keeps it from colliding with the two volumes this renderer owns or with another
+// which is what keeps it from colliding with the one volume this renderer owns or with another
 // entry. An entry's mount path is the operator's to keep unique; admission refuses a duplicate.
 //
 // A group that declared none is left exactly as rendered, so this feature does not move the Pod

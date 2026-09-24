@@ -605,7 +605,7 @@ func TestMemberWorkload_DeclaredSecurityContextOnATCPGroupStandsAlone(t *testing
 
 // TestMemberWorkload_DeclaredHostPathsMountInOrder pins the vendor-driver path: the mounts appear in
 // the order declared, and each volume is named from its POSITION so it can collide with neither
-// another entry nor the two volumes this renderer owns.
+// another entry nor the one volume this renderer owns.
 func TestMemberWorkload_DeclaredHostPathsMountInOrder(t *testing.T) {
 	kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
 		k.Spec.Connection.Managed.Members[0].HostPaths = []workercore.KVCacheBackendMemberHostPath{
@@ -1284,20 +1284,18 @@ func TestMemberWorkload_EFAContext(t *testing.T) {
 	assert.True(t, podSpec.HostNetwork)
 	assert.Equal(t, core.DNSClusterFirstWithHostNet, podSpec.DNSPolicy)
 
-	require.Len(t, podSpec.Volumes, 1, "the device tree, and only the device tree")
-	require.NotNil(t, podSpec.Volumes[0].HostPath)
-	assert.Equal(t, "/dev/infiniband", podSpec.Volumes[0].HostPath.Path)
-	require.NotNil(t, podSpec.Volumes[0].HostPath.Type)
-	assert.Equal(t, core.HostPathDirectory, *podSpec.Volumes[0].HostPath.Type,
-		"the type is on the shared base, so EFA gets the loud missing-device-tree failure too")
-	require.Len(t, container.VolumeMounts, 1)
-	assert.Equal(t, "/dev/infiniband", container.VolumeMounts[0].MountPath)
+	assert.Empty(t, podSpec.Volumes,
+		"the EFA path mounts nothing either. AWS's plugin injects the verbs node of each device it "+
+			"grants, and the tree beside them would list the ungranted ones too: opening one is "+
+			"refused with EPERM, and libfabric's EFA provider gives up its whole device list on it")
+	assert.Empty(t, container.VolumeMounts,
+		"asserted beside the volume rather than instead of it: a mount referencing no volume and a "+
+			"volume nothing mounts are different defects")
 
 	efa := container.Resources.Limits[efaDeviceResource]
 	assert.Equal(t, int64(1), efa.Value(),
-		"one EFA device, asked for through the plugin: the hostPath above carries the device node "+
-			"into the mount namespace, and the device cgroup still refuses to open it without an "+
-			"allocation. A member that cannot open it discovers no HCA and starts TCP instead")
+		"one EFA device, asked for through the plugin: the allocation is what lets the device "+
+			"cgroup open it. A member that cannot open it discovers no HCA and starts TCP instead")
 
 	env := map[string]string{}
 	for _, e := range container.Env {
@@ -1926,13 +1924,13 @@ func TestMemberWorkload_SurveyQuotesThePathAgainstTheShell(t *testing.T) {
 }
 
 // TestMemberWorkload_FabricGrantFollowsTheProtocol pins the whole grant matrix: which extended
-// resource each protocol makes a member request, and whether the host's device tree is mounted
+// resource each protocol makes a member request, and that the host's device tree is never mounted
 // beside it.
 //
 // The two are asserted together in every row because they used to move together and no longer do.
-// A request asserted on its own would leave the mount free to come back on the RDMA path, and that
-// mount is exactly what the per-endpoint grant replaces: it carries every adapter on the node into
-// a container granted one of them.
+// A request asserted on its own would leave the mount free to come back, and that mount is exactly
+// what breaks a partial grant: it carries every adapter on the node into a container granted some
+// of them, and an EFA member granted fewer devices than its node has then fails to initialize.
 //
 // THE NAMES ARE LITERALS ON PURPOSE. Deriving the expected RDMA key from the function the renderer
 // calls would make the row pass by construction. What has to hold is that this request matches what
@@ -1957,7 +1955,6 @@ func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 		interfaceCount int32
 		want           core.ResourceName
 		wantCount      int64
-		wantMount      bool
 	}{
 		{
 			name:     "an omitted interface count preserves the shared RDMA request",
@@ -1980,9 +1977,14 @@ func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 			want: rdmaSharedKey, wantCount: 1,
 		},
 		{
-			name:     "EFA asks for the name AWS's own plugin advertises, and keeps the tree",
+			name:     "EFA asks for the name AWS's own plugin advertises, and mounts no tree",
 			protocol: "EFA", medium: "DRAM",
-			want: efaKey, wantCount: 1, wantMount: true,
+			want: efaKey, wantCount: 1,
+		},
+		{
+			name:     "EFA with one declared interface asks for one and mounts no tree",
+			protocol: "EFA", medium: "DRAM", interfaceCount: 1,
+			want: efaKey, wantCount: 1,
 		},
 		{
 			name:     "a group overriding the backend's TCP with RDMA is granted the fabric",
@@ -2032,32 +2034,20 @@ func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 			// Read by path rather than by counting volumes: another medium may render a volume of
 			// its own, and a count would then fail for a reason that has nothing to do with the
 			// fabric.
-			mounted := false
 			for _, v := range podSpec.Volumes {
-				if v.HostPath != nil && v.HostPath.Path == RDMADevicePath {
-					mounted = true
-					require.NotNil(t, v.HostPath.Type,
-						"an untyped hostPath is not a weaker check, it is no check: the kubelet's "+
-							"mounter returns without looking at the path at all")
-					assert.Equal(t, core.HostPathDirectory, *v.HostPath.Type,
-						"a node with no device tree has to stop the member at the mount rather "+
-							"than start, find nothing, install TCP and serve under an object that "+
-							"says otherwise")
+				if v.HostPath != nil {
+					assert.NotEqual(t, RDMADevicePath, v.HostPath.Path,
+						"the plugin injects the nodes it grants, and the tree beside them lists "+
+							"the ungranted ones too, which libfabric's EFA provider fails on")
 				}
 			}
-			assert.Equal(t, c.wantMount, mounted,
-				"only EFA still mounts the tree, and RDMADevicePath carries the reading that "+
-					"would be needed before its half could go too")
 
-			mountedInContainer := false
+			// Asserted beside the volume, never instead of it: a volume nothing mounts and a mount
+			// referencing no volume are different defects.
 			for _, m := range podSpec.Containers[0].VolumeMounts {
-				if m.MountPath == RDMADevicePath {
-					mountedInContainer = true
-				}
+				assert.NotEqual(t, RDMADevicePath, m.MountPath,
+					"no member mounts the device tree, whichever fabric it was granted")
 			}
-			assert.Equal(t, c.wantMount, mountedInContainer,
-				"asserted beside the volume, never instead of it: a volume nothing mounts and a "+
-					"mount referencing no volume are different defects")
 		})
 	}
 }

@@ -402,6 +402,11 @@ only against an allocator that injects the verbs node itself?** AWS's does; this
 it, and an allocator that injects nothing turns the mount back into the only path. Answer that and
 F3 can change in a follow-up.
 
+**Answered: yes, and EFA no longer mounts the tree.** The mount broke a partial grant: a member
+granted fewer EFA devices than its node has saw the rest through it, got `EPERM` opening one, and
+libfabric's EFA provider abandons its whole device list on the first `EPERM`. An allocator that
+injects nothing is not rescued by the mount either, since the request is what makes a node openable.
+
 ⚠️ One related fact for whoever writes it, measured in the same round and easy to mistake for a
 reason to keep `hostNetwork`: **RDMA's sysfs is namespaced**, so a Pod without `hostNetwork` cannot
 see `/sys/class/infiniband` at all. That does NOT affect the data plane — 25 GB crossed nodes with
