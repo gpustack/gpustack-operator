@@ -3,6 +3,9 @@ package worker
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,6 +20,7 @@ import (
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueueadmissioncheck "sigs.k8s.io/kueue/pkg/util/admissioncheck"
+	kueuetas "sigs.k8s.io/kueue/pkg/util/tas"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
@@ -2259,4 +2263,187 @@ func TestCandidateDevicesOrderIsStable(t *testing.T) {
 	}
 	assert.Equal(t, []string{"node-a", "node-b", "node-c"}, got,
 		"candidate order must not depend on map iteration order")
+}
+
+// TestNodeDevicesAdmission_ReadsTheNodeTASAssigned pins which cards the check judges once Kueue
+// TAS has already chosen the node. Every ClusterQueue this operator builds is TAS-only with the
+// hostname as its lowest level, so by the time the check runs the Workload carries the node its
+// Pods will be pinned to. Free cards on a different node of the same pool cannot host those Pods.
+//
+// The nodes' hostname labels deliberately differ from their names: the assignment names hostnames,
+// the Devices ledger is named after the Node, and a check that confused the two would read nothing.
+func TestNodeDevicesAdmission_ReadsTheNodeTASAssigned(t *testing.T) {
+	base := string(nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive))
+	slicedCard := core.ResourceName(base + nodefeature.SlicedResourceNameSuffix)
+	slicedUnits := core.ResourceName(base + nodefeature.SlicedUnitsResourceNameSuffix)
+	sharedCard := core.ResourceName(base + nodefeature.SharedResourceNameSuffix)
+	whole := int32(nodefeature.ResourceMaxUnits)
+	half := whole / 2
+	fragment := whole * 2 / 5
+
+	exclusiveCard := core.ResourceList{core.ResourceName(base): resource.MustParse("1")}
+	halfSlice := core.ResourceList{slicedCard: resource.MustParse("1"), slicedUnits: *resource.NewQuantity(int64(half), resource.DecimalSI)}
+	twoShares := core.ResourceList{sharedCard: resource.MustParse("2")}
+
+	poolLabels := map[string]string{
+		"feature.gpustack.ai/nvidia":                  "true",
+		"acceleratable.feature.gpustack.ai/nvidia-g0": "true",
+	}
+
+	cases := []struct {
+		name string
+		// free lists, per node name, the units still free on each of its cards.
+		free map[string][]int32
+		// gone names nodes that have a Devices ledger but no Node object.
+		gone     []string
+		requests core.ResourceList
+		pods     int32
+		// assigned maps each hostname TAS placed Pods on to how many; nil means no topology assignment.
+		assigned map[string]int32
+		want     kueue.CheckState
+		// wantIn is a substring the verdict message must carry.
+		wantIn string
+	}{
+		{
+			name:     "exclusive on a node whose only card is partly sliced is held despite another node's free card",
+			free:     map[string][]int32{"node-a": {half}, "node-b": {whole}},
+			requests: exclusiveCard, pods: 1,
+			assigned: map[string]int32{"host-a": 1},
+			want:     kueue.CheckStateRetry,
+			wantIn:   `no card on the node "host-a" Kueue assigned`,
+		},
+		{
+			name:     "a slice on a node whose cards are fragmented is held despite another node's room",
+			free:     map[string][]int32{"node-a": {fragment, fragment}, "node-b": {whole}},
+			requests: halfSlice, pods: 1,
+			assigned: map[string]int32{"host-a": 1},
+			want:     kueue.CheckStateRetry,
+			wantIn:   "may assign the same node again",
+		},
+		{
+			name:     "exclusive on the node that has the free card is ready",
+			free:     map[string][]int32{"node-a": {half}, "node-b": {whole}},
+			requests: exclusiveCard, pods: 1,
+			assigned: map[string]int32{"host-b": 1},
+			want:     kueue.CheckStateReady,
+			wantIn:   `the node "host-b" Kueue assigned has enough free cards`,
+		},
+		{
+			name:     "a podset split over two nodes is ready when each node hosts its own share",
+			free:     map[string][]int32{"node-a": {whole}, "node-b": {whole}},
+			requests: exclusiveCard, pods: 2,
+			assigned: map[string]int32{"host-a": 1, "host-b": 1},
+			want:     kueue.CheckStateReady,
+		},
+		{
+			name:     "a node given more Pods than it has free cards is held though the pool has enough",
+			free:     map[string][]int32{"node-a": {whole, half}, "node-b": {whole, whole}},
+			requests: exclusiveCard, pods: 2,
+			assigned: map[string]int32{"host-a": 2},
+			want:     kueue.CheckStateRetry,
+			wantIn:   `"host-a"`,
+		},
+		{
+			name:     "a node whose Node object is gone is held rather than admitted",
+			free:     map[string][]int32{"node-a": {whole}},
+			gone:     []string{"node-a"},
+			requests: exclusiveCard, pods: 1,
+			assigned: map[string]int32{"host-a": 1},
+			want:     kueue.CheckStateRetry,
+		},
+		{
+			name:     "a pool whose only node has no free card is held",
+			free:     map[string][]int32{"node-a": {half}},
+			requests: exclusiveCard, pods: 1,
+			assigned: map[string]int32{"host-a": 1},
+			want:     kueue.CheckStateRetry,
+		},
+		{
+			name:     "without a topology assignment the pool is judged as a whole",
+			free:     map[string][]int32{"node-a": {half}, "node-b": {whole}},
+			requests: exclusiveCard, pods: 1,
+			want:   kueue.CheckStateReady,
+			wantIn: "the assigned flavor pool",
+		},
+		{
+			name:     "a shared request stays judged across the pool",
+			free:     map[string][]int32{"node-a": {whole}, "node-b": {whole}},
+			requests: twoShares, pods: 1,
+			assigned: map[string]int32{"host-a": 1},
+			want:     kueue.CheckStateReady,
+			wantIn:   "the assigned flavor pool",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			objs := []ctrlcli.Object{
+				&kueue.ResourceFlavor{ObjectMeta: meta.ObjectMeta{Name: "gpu-pool"}, Spec: kueue.ResourceFlavorSpec{NodeLabels: poolLabels}},
+				&kueue.AdmissionCheck{ObjectMeta: meta.ObjectMeta{Name: _NodeDevicesAdmissionCheckName}, Spec: kueue.AdmissionCheckSpec{ControllerName: _NodeDevicesControllerName}},
+			}
+			for name, free := range c.free {
+				if !slices.Contains(c.gone, name) {
+					hostname := "host-" + strings.TrimPrefix(name, "node-")
+					objs = append(objs, &core.Node{ObjectMeta: meta.ObjectMeta{Name: name, Labels: map[string]string{core.LabelHostname: hostname}}})
+				}
+				devs := devicesWithRemaining(free...)
+				for gi := range devs.Spec.Groups {
+					for ai := range devs.Spec.Groups[gi].Accelerators {
+						devs.Spec.Groups[gi].Accelerators[ai].ID = name + "-" + devs.Spec.Groups[gi].Accelerators[ai].ID
+						devs.Status.Groups[gi].Accelerators[ai].ID = devs.Spec.Groups[gi].Accelerators[ai].ID
+					}
+				}
+				devs.ObjectMeta = meta.ObjectMeta{Name: name, Labels: poolLabels}
+				objs = append(objs, &devs)
+			}
+
+			psa := kueue.PodSetAssignment{
+				Name:    "main",
+				Flavors: map[core.ResourceName]kueue.ResourceFlavorReference{creditsResource: "gpu-pool"},
+				Count:   ptr.To(c.pods),
+			}
+			if c.assigned != nil {
+				ta := &kueuetas.TopologyAssignment{Levels: []string{core.LabelHostname}}
+				for _, hostname := range slices.Sorted(maps.Keys(c.assigned)) {
+					ta.Domains = append(ta.Domains, kueuetas.TopologyDomainAssignment{Values: []string{hostname}, Count: c.assigned[hostname]})
+				}
+				psa.TopologyAssignment = kueuetas.V1Beta2From(ta)
+			}
+			wl := &kueue.Workload{
+				ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "w"},
+				Spec: kueue.WorkloadSpec{PodSets: []kueue.PodSet{{
+					Name: "main", Count: c.pods,
+					Template: core.PodTemplateSpec{Spec: core.PodSpec{Containers: []core.Container{{
+						Name: "c", Resources: core.ResourceRequirements{Requests: c.requests},
+					}}}},
+				}}},
+				Status: kueue.WorkloadStatus{
+					Conditions: []meta.Condition{{
+						Type: kueue.WorkloadQuotaReserved, Status: meta.ConditionTrue,
+						Reason: "QuotaReserved", Message: "quota reserved", LastTransitionTime: meta.Now(),
+					}},
+					Admission: &kueue.Admission{PodSetAssignments: []kueue.PodSetAssignment{psa}},
+					AdmissionChecks: []kueue.AdmissionCheckState{{
+						Name: _NodeDevicesAdmissionCheckName, State: kueue.CheckStatePending,
+					}},
+				},
+			}
+			objs = append(objs, wl)
+
+			cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+				WithObjects(objs...).
+				WithStatusSubresource(&kueue.Workload{}).
+				Build()
+			r := &NodeDevicesAdmissionReconciler{Client: cli, APIReader: cli}
+
+			_, err := r.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "default", Name: "w"}})
+			require.NoError(t, err)
+
+			got := new(kueue.Workload)
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: "default", Name: "w"}, got))
+			acs := kueueadmissioncheck.FindAdmissionCheck(got.Status.AdmissionChecks, _NodeDevicesAdmissionCheckName)
+			require.NotNil(t, acs)
+			assert.Equal(t, c.want, acs.State, acs.Message)
+			assert.Contains(t, acs.Message, c.wantIn)
+		})
+	}
 }
