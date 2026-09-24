@@ -35,7 +35,7 @@ type KVCacheBackendMemberStatusApplyConfiguration struct {
 	// distinguish a member on its way out from one that is simply gone. That is the whole reason
 	// it carries the store's vocabulary instead of a summary of it.
 	// - It carries no "unreached" sentinel, because there is no pass that would write one: a
-	// listing that cannot be read leaves the PREVIOUS entries in place and says so through
+	// listing read that fails leaves the PREVIOUS entries in place and says so through
 	// MembersMounted, rather than rewriting them as blank. Whether what is here was just
 	// refreshed is that condition's question, and this field never answers it.
 	// - It carries no enum marker, deliberately, unlike every enum on the spec side. The value's

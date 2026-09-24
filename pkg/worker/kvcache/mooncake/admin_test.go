@@ -542,7 +542,7 @@ func TestAdminClient_DistinguishesEveryFailure(t *testing.T) {
 			"the address is in the message: an operator needs to know what was unreachable")
 	})
 
-	t.Run("an unexpected status is its own outcome", func(t *testing.T) {
+	t.Run("404 is a route the leader does not serve", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		}))
@@ -551,10 +551,30 @@ func TestAdminClient_DistinguishesEveryFailure(t *testing.T) {
 		_, err := newTestAdminClient(srv).Segments(context.Background())
 
 		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrRouteNotServed,
+			"a master older than the route answers 404 for it, and the caller reports that "+
+				"as a version fact rather than as a failed read")
 		assert.NotErrorIs(t, err, ErrServicePlaneInactive,
-			"404 must never be collapsed into 503: the first means this operator asked for a "+
-				"path the leader does not serve, which is a bug here, not a phase")
+			"404 must never be collapsed into 503: the first is a route this leader's version "+
+				"lacks, the second a leader that is starting")
+		assert.NotErrorIs(t, err, ErrMalformedBody)
 		assert.Contains(t, err.Error(), "404")
+	})
+
+	t.Run("an unexpected status is its own outcome", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer srv.Close()
+
+		_, err := newTestAdminClient(srv).Segments(context.Background())
+
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrRouteNotServed,
+			"a 5xx is a leader failing a route it serves, which is a failed read")
+		assert.NotErrorIs(t, err, ErrServicePlaneInactive)
+		assert.NotErrorIs(t, err, ErrMalformedBody)
+		assert.Contains(t, err.Error(), "500")
 	})
 }
 
@@ -610,6 +630,7 @@ func TestAdminClient_ErrorsAreComparable(t *testing.T) {
 	wrapped := errors.Join(ErrServicePlaneInactive, errors.New("context"))
 	assert.ErrorIs(t, wrapped, ErrServicePlaneInactive)
 	assert.NotErrorIs(t, wrapped, ErrMalformedBody)
+	assert.NotErrorIs(t, wrapped, ErrRouteNotServed)
 }
 
 func TestAdminSegmentState(t *testing.T) {

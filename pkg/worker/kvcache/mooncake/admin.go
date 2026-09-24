@@ -32,8 +32,8 @@ const (
 const adminReadLimit = 8 << 20
 
 // The distinguishable failures. They are sentinels because the caller BRANCHES on them: one maps to
-// a phase, one to a condition message, and the rest to a retry — and a caller that could only see
-// "an error" would report a starting leader as a broken one.
+// a phase, one to a condition message, one to a condition that cannot be observed, and the rest to a
+// retry — and a caller that could only see "an error" would report a starting leader as a broken one.
 var (
 	// ErrServicePlaneInactive is the leader answering that it is not serving yet.
 	//
@@ -47,6 +47,12 @@ var (
 	// failure on purpose: the first says this leader is answering with something unexpected, the
 	// second says nothing answered, and only the first is worth showing an operator verbatim.
 	ErrMalformedBody = errors.New("kvcache: leader returned a body that does not parse")
+
+	// ErrRouteNotServed is the leader answering 404: the master version it runs has no such route.
+	// It is a fact about that version and not a failed read, and the route it reaches in practice is
+	// the segment listing, which Mooncake serves from 0.3.12 on: the 0.3.10 and 0.3.11 lines answer
+	// 404 there while /health and /metrics serve normally.
+	ErrRouteNotServed = errors.New("kvcache: leader does not serve this route")
 )
 
 // LeaderHealth is the leader's /health document.
@@ -379,7 +385,7 @@ func (c *AdminClient) Capacity(ctx context.Context) (LeaderCapacity, error) {
 }
 
 // Segments reads /get_segments_detail, which IS gated: it answers ErrServicePlaneInactive until the
-// leader is serving.
+// leader is serving. A master older than 0.3.12 has no such route and answers ErrRouteNotServed.
 func (c *AdminClient) Segments(ctx context.Context) ([]SegmentDetail, error) {
 	body, err := c.get(ctx, adminPathSegments)
 	if err != nil {
@@ -425,9 +431,12 @@ func (c *AdminClient) get(ctx context.Context, path string) ([]byte, error) {
 
 	if resp.StatusCode == http.StatusServiceUnavailable {
 		// The gated routes answer this until the leader's service plane comes up. It is a phase,
-		// not a fault, and it must never be collapsed into a 404 — that one would mean this
-		// operator asked for a path the leader does not serve, which is a bug here.
+		// not a fault, and it must never be collapsed into a 404 — that one means the leader's
+		// version does not serve the path at all, which waiting does not change.
 		return nil, fmt.Errorf("%w: %s: %s", ErrServicePlaneInactive, path, excerpt(body))
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("%w: %s: status 404: %s", ErrRouteNotServed, path, excerpt(body))
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("request %s: unexpected status %d: %s",

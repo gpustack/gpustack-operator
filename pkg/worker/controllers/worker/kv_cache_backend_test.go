@@ -57,11 +57,44 @@ func TestReportKVCacheBackendPoolWrites(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			holder := &workercore.KVCacheBackend{}
-			reportKVCacheBackendPoolWrites(holder, &tc.metrics, tc.segments)
+			reportKVCacheBackendPoolWrites(holder, &tc.metrics, tc.segments, true)
 			assert.Equal(t, tc.status, KVCacheBackendConditionPoolWrites.GetStatus(holder))
 			assert.Equal(t, tc.reason, KVCacheBackendConditionPoolWrites.GetReason(holder))
 		})
 	}
+}
+
+// TestReportKVCacheBackendPoolWrites_WithoutASegmentListing pins what a leader that serves no
+// listing can still say. A completed put is read off /metrics alone, so it is reported; every other
+// verdict needs the members' allocations, which only the listing carries.
+func TestReportKVCacheBackendPoolWrites_WithoutASegmentListing(t *testing.T) {
+	cases := []struct {
+		name    string
+		metrics mooncake.LeaderCapacity
+		served  bool
+		status  string
+		reason  string
+	}{
+		{"completed write", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](32), PutEndRequests: ptr.To[int64](32), PutRevokeRequests: ptr.To[int64](0)}, false, "True", "WriteObserved"},
+		{"revoked write", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](1), PutEndRequests: ptr.To[int64](0), PutRevokeRequests: ptr.To[int64](1)}, false, "Unknown", "SegmentListingNotServed"},
+		{"counters missing", mooncake.LeaderCapacity{}, false, "Unknown", "SegmentListingNotServed"},
+		// The contrast: a listing the leader serves and failed to answer is a failed read, even
+		// with a completed put in the counters.
+		{"a failed listing read", mooncake.LeaderCapacity{PutStartRequests: ptr.To[int64](1), PutEndRequests: ptr.To[int64](1), PutRevokeRequests: ptr.To[int64](0)}, true, "Unknown", "ReadFailed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			holder := &workercore.KVCacheBackend{}
+			reportKVCacheBackendPoolWrites(holder, &tc.metrics, nil, tc.served)
+			assert.Equal(t, tc.status, KVCacheBackendConditionPoolWrites.GetStatus(holder))
+			assert.Equal(t, tc.reason, KVCacheBackendConditionPoolWrites.GetReason(holder))
+		})
+	}
+
+	holder := &workercore.KVCacheBackend{}
+	reportKVCacheBackendPoolWrites(holder, nil, nil, false)
+	assert.Equal(t, "ReadFailed", KVCacheBackendConditionPoolWrites.GetReason(holder),
+		"metrics that could not be read are a failed read whatever the listing route")
 }
 
 // newKVCacheBackendObject builds a managed backend with the given consumers already recorded in
@@ -3873,6 +3906,198 @@ func TestKVCacheBackendStatus_ExternalFailureTextCannotImpersonateMigration(t *t
 	assert.Equal(t, kvcb.Status.Members, got.Status.Members,
 		"far-end text cannot make a current listing look like a legacy one")
 	assert.Equal(t, "ListingFailed", KVCacheBackendConditionMembersMounted.GetReason(got))
+}
+
+// TestKVCacheBackendStatus_ListingNotServedIsNotAFailedRead pins the three outcomes of the listing
+// read against one another. A master older than the listing route answers 404 for it, which is a
+// fact about its version and not a failure, so membership is Unknown and the phase does not move to
+// Degraded for it. A 5xx is a leader failing a route it serves and still reads as a failed listing.
+func TestKVCacheBackendStatus_ListingNotServedIsNotAFailedRead(t *testing.T) {
+	metricsWritten := metricsPopulated + "master_put_start_requests_total 32\n" +
+		"master_put_end_requests_total 32\nmaster_put_revoke_requests_total 0\n"
+	metricsIdle := metricsPopulated + "master_put_start_requests_total 0\n" +
+		"master_put_end_requests_total 0\nmaster_put_revoke_requests_total 0\n"
+	previous := []workercore.KVCacheBackendMemberStatus{{
+		SegmentID:   "segment-9",
+		ClientID:    "client-9",
+		SegmentName: "10.42.0.11:15002",
+		NodeName:    "n7",
+		Medium:      "DRAM",
+		Protocol:    "tcp",
+		State:       "OK",
+	}}
+
+	cases := []struct {
+		name        string
+		listing     adminResponse
+		metrics     string
+		wantPhase   string
+		wantMembers []workercore.KVCacheBackendMemberStatus
+		membersStat string
+		membersWhy  string
+		writesStat  string
+		writesWhy   string
+	}{
+		{
+			name:        "not served, after a completed write",
+			listing:     adminResponse{status: http.StatusNotFound},
+			metrics:     metricsWritten,
+			wantPhase:   KVCacheBackendPhaseReady,
+			membersStat: "Unknown",
+			membersWhy:  "SegmentListingNotServed",
+			writesStat:  "True",
+			writesWhy:   "WriteObserved",
+		},
+		{
+			name:        "not served, before any write",
+			listing:     adminResponse{status: http.StatusNotFound},
+			metrics:     metricsIdle,
+			wantPhase:   KVCacheBackendPhaseReady,
+			membersStat: "Unknown",
+			membersWhy:  "SegmentListingNotServed",
+			writesStat:  "Unknown",
+			writesWhy:   "SegmentListingNotServed",
+		},
+		{
+			name:        "served and failing",
+			listing:     adminResponse{status: http.StatusInternalServerError, body: "Failed to get segments detail"},
+			metrics:     metricsWritten,
+			wantPhase:   KVCacheBackendPhaseDegraded,
+			wantMembers: previous,
+			membersStat: "False",
+			membersWhy:  "ListingFailed",
+			writesStat:  "Unknown",
+			writesWhy:   "ReadFailed",
+		},
+		{
+			name:      "served",
+			listing:   adminResponse{body: segmentsOneOK},
+			metrics:   metricsWritten,
+			wantPhase: KVCacheBackendPhaseReady,
+			wantMembers: []workercore.KVCacheBackendMemberStatus{{
+				SegmentID: "segment-1", ClientID: "client-1", SegmentName: "10.42.0.11",
+				NodeName: "n7", Medium: "DRAM", Protocol: "tcp", State: "OK",
+			}},
+			membersStat: "True",
+			membersWhy:  "Mounted",
+			writesStat:  "True",
+			writesWhy:   "WriteObserved",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			kvcb := newKVCacheBackendObject()
+			kvcb.Status.Members = slices.Clone(previous)
+			KVCacheBackendConditionMembersMounted.True(kvcb, "Mounted", "the leader lists 1 segment(s)")
+
+			got := reconcileWithAdminAndPods(t, kvcb, map[string]adminResponse{
+				"/health":              {body: healthServing},
+				"/metrics":             {body: c.metrics},
+				"/get_segments_detail": c.listing,
+			}, runningMemberPod(t, kvcb, "n7", "10.42.0.11"))
+
+			assert.Equal(t, c.wantPhase, got.Status.Phase)
+			assert.Equal(t, c.membersStat, KVCacheBackendConditionMembersMounted.GetStatus(got))
+			assert.Equal(t, c.membersWhy, KVCacheBackendConditionMembersMounted.GetReason(got))
+			assert.Equal(t, c.writesStat, KVCacheBackendConditionPoolWrites.GetStatus(got))
+			assert.Equal(t, c.writesWhy, KVCacheBackendConditionPoolWrites.GetReason(got))
+			assert.Equal(t, c.wantMembers, got.Status.Members,
+				"rows are kept across a failed read and dropped on a leader that lists nothing: "+
+					"they belong to an earlier leader process")
+			if c.wantPhase == KVCacheBackendPhaseReady {
+				assert.Empty(t, got.Status.PhaseMessage)
+			}
+		})
+	}
+}
+
+// TestKVCacheBackendStatus_ListingNotServedStillReportsAStuckMember pins that a leader without a
+// listing does not hide what the member Pods say themselves. A member whose container will not start
+// is never going to mount, and that is readable off the Pod whatever the leader's version.
+func TestKVCacheBackendStatus_ListingNotServedStillReportsAStuckMember(t *testing.T) {
+	listingNotServed := map[string]adminResponse{
+		"/health":              {body: healthServing},
+		"/metrics":             {body: metricsPopulated},
+		"/get_segments_detail": {status: http.StatusNotFound},
+	}
+
+	kvcb := newKVCacheBackendObject()
+	got := reconcileWithAdminAndPods(t, kvcb, listingNotServed,
+		runningMemberPod(t, kvcb, "n7", "10.42.0.11"),
+		crashingMemberPod(t, kvcb, "n8"))
+
+	assert.True(t, KVCacheBackendConditionMembersMounted.IsFalse(got))
+	assert.Equal(t, "MemberCrashLooping", KVCacheBackendConditionMembersMounted.GetReason(got))
+	assert.Contains(t, KVCacheBackendConditionMembersMounted.GetMessage(got), "libascendcl.so")
+	assert.Contains(t, KVCacheBackendConditionMembersMounted.GetMessage(got),
+		"does not serve the segment listing")
+	assert.Equal(t, KVCacheBackendPhaseDegraded, got.Status.Phase)
+
+	// The baseline: the same leader with every member Pod healthy.
+	kvcb = newKVCacheBackendObject()
+	got = reconcileWithAdminAndPods(t, kvcb, listingNotServed,
+		runningMemberPod(t, kvcb, "n7", "10.42.0.11"),
+		runningMemberPod(t, kvcb, "n8", "10.42.0.12"))
+
+	assert.Equal(t, "SegmentListingNotServed",
+		KVCacheBackendConditionMembersMounted.GetReason(got))
+	assert.Equal(t, KVCacheBackendPhaseReady, got.Status.Phase)
+}
+
+// TestKVCacheBackendStatus_ListingNotServedReadsZeroCapacityAsNoSegments pins what the capacity
+// gauge says on a leader without a listing. A total of zero is every member unmounted, which the
+// listing would have reported as NoSegments; a total the exposition did not carry says nothing.
+//
+// The gauge is the one THIS pass read. The last two cases start from a capacity an earlier pass
+// published, and neither may stand in for the current scrape: a stale zero must not report an
+// empty store over a scrape that failed, and a stale total must not hide one that reads zero now.
+func TestKVCacheBackendStatus_ListingNotServedReadsZeroCapacityAsNoSegments(t *testing.T) {
+	zero := &workercore.KVCacheBackendCapacity{
+		Total: resource.NewQuantity(0, resource.BinarySI),
+		Used:  resource.NewQuantity(0, resource.BinarySI),
+	}
+	mounted := &workercore.KVCacheBackendCapacity{
+		Total: resource.NewQuantity(512<<20, resource.BinarySI),
+		Used:  resource.NewQuantity(0, resource.BinarySI),
+	}
+
+	cases := []struct {
+		name      string
+		prior     *workercore.KVCacheBackendCapacity
+		metrics   adminResponse
+		crashing  bool
+		wantStat  string
+		wantWhy   string
+		wantPhase string
+	}{
+		{"zero capacity", nil, adminResponse{body: metricsZeroed}, false, "False", "NoSegments", KVCacheBackendPhaseDegraded},
+		{"capacity not observed", nil, adminResponse{body: metricsWithoutOurFamilies}, false, "Unknown", "SegmentListingNotServed", KVCacheBackendPhaseReady},
+		{"zero capacity and a stuck member", nil, adminResponse{body: metricsZeroed}, true, "False", "MemberCrashLooping", KVCacheBackendPhaseDegraded},
+		{"a stale zero over a failed scrape", zero, adminResponse{status: http.StatusInternalServerError}, false, "Unknown", "SegmentListingNotServed", KVCacheBackendPhaseReady},
+		{"a stale total over a zero scrape", mounted, adminResponse{body: metricsZeroed}, false, "False", "NoSegments", KVCacheBackendPhaseDegraded},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			kvcb := newKVCacheBackendObject()
+			kvcb.Status.Capacity = c.prior
+			pods := []ctrlcli.Object{startingMemberPod(t, kvcb, "n7", "10.42.0.11")}
+			if c.crashing {
+				pods = append(pods, crashingMemberPod(t, kvcb, "n8"))
+			}
+
+			got := reconcileWithAdminAndPods(t, kvcb, map[string]adminResponse{
+				"/health":              {body: healthServing},
+				"/metrics":             c.metrics,
+				"/get_segments_detail": {status: http.StatusNotFound},
+			}, pods...)
+
+			assert.Equal(t, c.wantStat, KVCacheBackendConditionMembersMounted.GetStatus(got))
+			assert.Equal(t, c.wantWhy, KVCacheBackendConditionMembersMounted.GetReason(got))
+			assert.Equal(t, c.wantPhase, got.Status.Phase)
+			assert.Empty(t, got.Status.Members)
+		})
+	}
 }
 
 // TestKVCacheBackendStatus_Phases walks the five phases over the documents that produce them.

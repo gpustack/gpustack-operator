@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -52,8 +53,9 @@ const (
 	// KVCacheBackendPhaseProvisioning is reported while the backend is coming up and nothing has
 	// been observed serving yet.
 	KVCacheBackendPhaseProvisioning = "Provisioning"
-	// KVCacheBackendPhaseReady is reported when the leader serves and at least one member is
-	// mounted.
+	// KVCacheBackendPhaseReady is reported when the leader serves and no member group is observed
+	// short: at least one member is mounted, or the leader's master version serves no segment
+	// listing to observe membership by, no member Pod is stuck and its capacity is not zero.
 	KVCacheBackendPhaseReady = "Ready"
 	// KVCacheBackendPhaseDegraded is reported when the leader serves but a member group is short
 	// of the nodes its selector matches.
@@ -594,8 +596,8 @@ func (r *KVCacheBackendReconciler) observeLeader(
 		fmt.Sprintf("the leader serves in role %q", clipFaultDetail(health.Role)))
 
 	metrics := r.observeCapacity(ctx, kvcb, holder, client)
-	segments := r.observeMembers(ctx, kvcb, holder, client)
-	reportKVCacheBackendPoolWrites(holder, metrics, segments)
+	segments, listingServed := r.observeMembers(ctx, kvcb, holder, client)
+	reportKVCacheBackendPoolWrites(holder, metrics, segments, listingServed)
 }
 
 // leaderPodIsReady reports whether the leader's Deployment has an available replica.
@@ -821,15 +823,54 @@ func (r *KVCacheBackendReconciler) observeCapacity(
 // not list holds nothing, however healthy that Pod looks. Two fields the listing cannot supply —
 // which node a member runs on and which medium it contributes — are joined in from the member Pod
 // whose address matches, and are left EMPTY when no Pod matches rather than guessed at.
+//
+// It also reports whether the leader serves a listing at all, because PoolWrites has to tell a read
+// that failed from one that this leader's version cannot answer.
 func (r *KVCacheBackendReconciler) observeMembers(
 	ctx context.Context,
 	kvcb *workercore.KVCacheBackend,
 	holder *workercore.KVCacheBackend,
 	client *mooncake.AdminClient,
-) []mooncake.SegmentDetail {
+) ([]mooncake.SegmentDetail, bool) {
 	logger := ctrllog.FromContext(ctx)
 
 	segments, err := adminRead(ctx, client.Segments)
+	if errors.Is(err, mooncake.ErrRouteNotServed) {
+		// A master before 0.3.12 serves no listing, so which members are mounted cannot be asked of
+		// it. That is Unknown and not a failed read: waiting changes nothing, and False would hold a
+		// serving backend at Degraded for as long as it runs that version.
+		//
+		// The rows are dropped, unlike on a failed read. A leader that lists nothing did not produce
+		// them — they are from an earlier leader process on a version that did list — and rows that
+		// look observed beside a condition saying membership is not observable contradict it.
+		//
+		// A stuck member Pod is still reported. It says so on the Pod whatever the leader's version,
+		// and Unknown over it would read Ready over a group that holds nothing.
+		//
+		// So is a capacity of zero, which is every member unmounted: the gauge sums the segments
+		// mounted, and the listing would have reported that state as NoSegments. Reading it from
+		// status reads THIS pass's scrape: observeLeader clears the field before any read, and
+		// observeCapacity, which runs first, publishes a figure only when it observed one. A capacity
+		// it did not observe says nothing either way.
+		holder.Status.Members = nil
+		message := "the leader's master version does not serve the segment listing, which Mooncake " +
+			"serves from 0.3.12 on, so which members are mounted cannot be observed"
+		if faults := r.memberPodFaults(ctx, kvcb); len(faults) > 0 {
+			KVCacheBackendConditionMembersMounted.False(holder, faults[0].reason,
+				fmt.Sprintf("%s; %d selected member pod(s) will not start; %s",
+					message, len(faults), faults[0].detail))
+			return nil, false
+		}
+		if capacity := holder.Status.Capacity; capacity != nil && capacity.Total != nil &&
+			capacity.Total.IsZero() {
+			KVCacheBackendConditionMembersMounted.False(holder, "NoSegments",
+				"the leader reports zero capacity, so no member has mounted a segment; its master "+
+					"version does not serve the segment listing that would name them")
+			return nil, false
+		}
+		KVCacheBackendConditionMembersMounted.Unknown(holder, "SegmentListingNotServed", message)
+		return nil, false
+	}
 	if err != nil {
 		// The previous schema-valid listing is KEPT, which is the opposite of what a failed capacity
 		// scrape does, and the difference is in the types. Capacity is two pointers, so it has an
@@ -842,7 +883,7 @@ func (r *KVCacheBackendReconciler) observeMembers(
 		setMembersObservationFailed(holder, "ListingFailed",
 			fmt.Sprintf("the leader's segment listing could not be read, so membership is as of "+
 				"the last successful read: %v", err))
-		return nil
+		return nil, true
 	}
 
 	if size := segmentListingSize(segments); len(segments) > kvCacheBackendMaxMembers ||
@@ -856,7 +897,7 @@ func (r *KVCacheBackendReconciler) observeMembers(
 				"object past the size the api server accepts, and every status write would fail "+
 				"from then on — including this one",
 				len(segments), size, kvCacheBackendMaxMembers, kvCacheBackendMaxMembersBytes))
-		return nil
+		return nil, true
 	}
 
 	pods, ready, joinErr := r.listMemberPods(ctx, kvcb)
@@ -996,7 +1037,7 @@ func (r *KVCacheBackendReconciler) observeMembers(
 		KVCacheBackendConditionMembersMounted.True(holder, "Mounted",
 			fmt.Sprintf("the leader lists %d segment(s)", len(members)))
 	}
-	return segments
+	return segments, true
 }
 
 // reportKVCacheBackendPoolWrites uses the current leader process as its observation window.
@@ -1004,12 +1045,17 @@ func (r *KVCacheBackendReconciler) observeMembers(
 // writes. An unfinished PutStart has neither PutEnd nor PutRevoke and remains Unknown. A False
 // result means a revoke was observed in this process without a put end request or occupied
 // segment; it does not claim every current write is failing.
+//
+// listingServed is false on a leader whose master version has no segment listing. Its counters still
+// answer whether a put completed, which needs no listing; every other verdict here reads the members'
+// allocations, and only the listing carries those.
 func reportKVCacheBackendPoolWrites(
 	holder *workercore.KVCacheBackend,
 	metrics *mooncake.LeaderCapacity,
 	segments []mooncake.SegmentDetail,
+	listingServed bool,
 ) {
-	if metrics == nil || segments == nil {
+	if metrics == nil || (listingServed && segments == nil) {
 		KVCacheBackendConditionPoolWrites.Unknown(holder, "ReadFailed",
 			"the leader's metrics or segment listing could not be read")
 		return
@@ -1017,6 +1063,12 @@ func reportKVCacheBackendPoolWrites(
 	if metrics.PutEndRequests != nil && *metrics.PutEndRequests > 0 {
 		KVCacheBackendConditionPoolWrites.True(holder, "WriteObserved",
 			"the leader saw a put end request since this process started")
+		return
+	}
+	if !listingServed {
+		KVCacheBackendConditionPoolWrites.Unknown(holder, "SegmentListingNotServed",
+			"the leader reports no put end since this process started, and its master version "+
+				"does not serve the segment listing that members' allocations are read from")
 		return
 	}
 	allReported := true
@@ -3150,6 +3202,8 @@ func deriveKVCacheBackendPhase(holder *workercore.KVCacheBackend, renderBlocked 
 		holder.Status.PhaseMessage = KVCacheBackendConditionMembersMounted.GetMessage(holder)
 
 	case KVCacheBackendConditionLeaderAvailable.IsTrue(holder):
+		// MembersMounted=Unknown lands here too: it is a leader whose version serves no listing,
+		// which is a fact about that version and not a shortfall.
 		holder.Status.Phase = KVCacheBackendPhaseReady
 		holder.Status.PhaseMessage = ""
 	}

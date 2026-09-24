@@ -30,7 +30,8 @@ type KVCacheBackendStatusApplyConfiguration struct {
 	// succeeds, and absent again is not the same as reporting zero: an empty object here would be
 	// indistinguishable from a scrape that returned nothing.
 	Capacity *KVCacheBackendCapacityApplyConfiguration `json:"capacity,omitempty"`
-	// Members is one entry per observed store member.
+	// Members is one entry per observed store member. It is empty on a leader whose master version
+	// serves no segment listing, where MembersMounted is Unknown.
 	Members []KVCacheBackendMemberStatusApplyConfiguration `json:"members,omitempty"`
 	// UsedBy names the objects that consume this backend. A non-empty UsedBy is what the
 	// finalizer refuses deletion on, so the field is the enforcement input and not a display.
