@@ -338,11 +338,11 @@ connector; the gateway has no such flag, because its transfer backend is the eng
 
 A router is also **engine-matched**, and a pair outside this table is refused naming both sides:
 
-| `spec.router.name` | Engines it fronts | Shape it renders |
-| --- | --- | --- |
-| `llm-d-router` | `vllm`, `sglang` | An endpoint picker behind a proxy, configured by a mounted document |
-| `vllm-router` | `vllm` | One process, configured entirely by its command line |
-| `sglang-gateway` | `sglang` | One process, configured entirely by its command line |
+| `spec.router.name` | Engines it fronts | Shape it renders | Routing policy |
+| --- | --- | --- | --- |
+| `llm-d-router` | `vllm`, `sglang` | An endpoint picker behind a proxy, configured by a mounted document | [A fixed scoring profile](model-deployment-routing.md#llm-d-router-takes-no-policy-flag) |
+| `vllm-router` | `vllm` | One process, configured entirely by its command line | [`cache_aware` unless `extraArgs` names another](model-deployment-routing.md#switching-to-round-robin) |
+| `sglang-gateway` | `sglang` | One process, configured entirely by its command line | [`cache_aware` unless `extraArgs` names another](model-deployment-routing.md#switching-to-round-robin) |
 
 `llm-d-router` takes both engines because upstream carries a handshake connector and a metrics
 configuration for each. The other two are each one project's router for that project's own engine,
