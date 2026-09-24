@@ -92,6 +92,8 @@ var (
 	_ rest.Patcher           = (*InstanceSSHPublicKeyHandler)(nil)
 	_ rest.GracefulDeleter   = (*InstanceSSHPublicKeyHandler)(nil)
 	_ rest.CollectionDeleter = (*InstanceSSHPublicKeyHandler)(nil)
+
+	_ extensionapi.DryRunHandler = (*InstanceSSHPublicKeyHandler)(nil)
 )
 
 func (h *InstanceSSHPublicKeyHandler) New() runtime.Object {
@@ -99,6 +101,12 @@ func (h *InstanceSSHPublicKeyHandler) New() runtime.Object {
 }
 
 func (h *InstanceSSHPublicKeyHandler) Destroy() {
+}
+
+// SupportsDryRun reports true: OnCreate and OnUpdate write the Secret once each, and pass the
+// options on to that write.
+func (h *InstanceSSHPublicKeyHandler) SupportsDryRun() bool {
+	return true
 }
 
 func (h *InstanceSSHPublicKeyHandler) OnCreate(ctx context.Context, obj runtime.Object, opts ctrlcli.CreateOptions) (runtime.Object, error) {

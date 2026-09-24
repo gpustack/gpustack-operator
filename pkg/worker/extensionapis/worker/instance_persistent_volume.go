@@ -100,6 +100,8 @@ var (
 	_ rest.Patcher           = (*InstancePersistentVolumeHandler)(nil)
 	_ rest.GracefulDeleter   = (*InstancePersistentVolumeHandler)(nil)
 	_ rest.CollectionDeleter = (*InstancePersistentVolumeHandler)(nil)
+
+	_ extensionapi.DryRunHandler = (*InstancePersistentVolumeHandler)(nil)
 )
 
 func (h *InstancePersistentVolumeHandler) New() runtime.Object {
@@ -107,6 +109,12 @@ func (h *InstancePersistentVolumeHandler) New() runtime.Object {
 }
 
 func (h *InstancePersistentVolumeHandler) Destroy() {
+}
+
+// SupportsDryRun reports true: OnCreate and OnUpdate write the PersistentVolumeClaim once each, and
+// pass the options on to that write.
+func (h *InstancePersistentVolumeHandler) SupportsDryRun() bool {
+	return true
 }
 
 const (
