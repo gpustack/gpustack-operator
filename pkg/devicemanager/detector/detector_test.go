@@ -887,6 +887,15 @@ func TestStartHoldsBackAFirstPassThatDetectedNothing(t *testing.T) {
 				monitorPeriod:           10 * time.Millisecond,
 				detectedManufacturersCh: publishedCh,
 			}
+			// The monitor loop also compares the host's network interfaces with the ones the last
+			// report recorded, and the report here never records any: no node is configured, so it
+			// fails before reading them. On linux, where the read succeeds, that comparison alone
+			// would send the loop back to detecting. Seed the record with what the host has now, so
+			// whether the loop detects again turns on the accelerator result alone.
+			if interfaces, err := DetectInterfaces(); err == nil {
+				d.reportedInterfaces = interfaces
+				d.reportedInterfacesKnown = true
+			}
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
