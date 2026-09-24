@@ -25,13 +25,20 @@ on:
       - "v*-dev"
     # NB: ci.yml's list without "deploy/**": pkg/worker/kuberess asserts the chart
     # under deploy/gpustack-operator/chart against the Go code, so a chart-only change has to
-    # run it.
+    # run it. Added to it are two trees no test reads: testing/, the Terraform and scripts for
+    # test clusters, and csrc/, the C sources only the image build compiles.
+    #
+    # It lists what to skip rather than what to run on purpose. The tests read more than Go
+    # sources -- the chart, the operator Dockerfile, testdata, embedded files, cgo headers --
+    # and a path an allow-list forgets skips the run without a trace on the pull request.
     #
     # LIMITED: a markdown-only change still skips this workflow, although two tests read
     # documentation (pkg/nodefeature and pkg/worker/controllers/worker, each against a page
     # under docs/reference/). Such a change is caught by the next run that does trigger.
     paths-ignore:
       - "docs/**"
+      - "testing/**"
+      - "csrc/**"
       - "**.md"
       - "**.mdx"
       - "**.png"
@@ -45,6 +52,8 @@ on:
       - "v*-dev"
     paths-ignore:
       - "docs/**"
+      - "testing/**"
+      - "csrc/**"
       - "**.md"
       - "**.mdx"
       - "**.png"
