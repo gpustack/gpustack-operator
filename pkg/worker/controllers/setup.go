@@ -22,6 +22,7 @@ var setups = []controller.Setup{
 	new(worker.TopologySourceReconciler),
 	new(worker.NodeTopologyReconciler),
 	new(worker.NodeCapacityReconciler),
+	new(worker.NodeFitLabelReconciler),
 	new(worker.NodeFeatureReconciler),
 	new(worker.NodeFlavorReconciler),
 	new(worker.NodeDevicesReconciler),

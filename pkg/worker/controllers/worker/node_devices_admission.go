@@ -721,14 +721,11 @@ func fitExclusiveDemand(cards []cardLedger, budgets []cardBudget, d familyDemand
 // the most cards available to the holders still to come, which is what lets several Pods share a
 // node instead of each being judged against a card of its own.
 func fitSharedDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (kueue.CheckState, string) {
-	const share = nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize
 	freeShares := func(i int) int32 {
-		c := &cards[i]
-		if budgets[i].whole || budgets[i].slices > 0 || !c.coveredBy(d) || !c.servesFamily(d.family) ||
-			(c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeShared) {
+		if budgets[i].whole || budgets[i].slices > 0 || !cards[i].coveredBy(d) {
 			return 0
 		}
-		return c.remaining/share - budgets[i].shares
+		return cards[i].freeShares() - budgets[i].shares
 	}
 
 	for _, need := range d.sharedNeeds {
@@ -772,12 +769,12 @@ func fitSharedDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (
 func fitSlicedDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (kueue.CheckState, string) {
 	freeUnits := func(i int) int32 {
 		c := &cards[i]
-		if budgets[i].whole || budgets[i].shares > 0 || !c.coveredBy(d) || !c.servesFamily(d.family) ||
-			(c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeSliced) ||
+		free := c.freeSliceUnits()
+		if free < 0 || budgets[i].whole || budgets[i].shares > 0 || !c.coveredBy(d) ||
 			budgets[i].slices >= c.capability.LogicalSliced.Count {
 			return -1
 		}
-		return c.remaining - budgets[i].units
+		return free - budgets[i].units
 	}
 
 	for range d.cards {
@@ -794,6 +791,29 @@ func fitSlicedDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (
 		budgets[best].slices++
 	}
 	return kueue.CheckStateReady, demandVerdictMessage(kueue.CheckStateReady, d)
+}
+
+// freeShares returns how many ownership shares the card can still grant before any demand of this
+// Workload is charged: none unless it can serve a whole-card family and is free or already held in
+// shared mode, otherwise one per share of its remaining units.
+func (c cardLedger) freeShares() int32 {
+	const share = nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize
+	if !c.servesFamily(nodefeature.ResourceFamilyShared) ||
+		(c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeShared) {
+		return 0
+	}
+	return c.remaining / share
+}
+
+// freeSliceUnits returns the units the card can still give a logical slice before any demand of
+// this Workload is charged: -1 unless it can serve a logical slice and is free or already held in
+// sliced mode, otherwise its remaining units.
+func (c cardLedger) freeSliceUnits() int32 {
+	if !c.servesFamily(nodefeature.ResourceFamilySliced) ||
+		(c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeSliced) {
+		return -1
+	}
+	return c.remaining
 }
 
 // fitPartitionDemand gates a partition demand on the per-card placement-aware ledger: a

@@ -501,22 +501,24 @@ proves the whole path.
 
 **Phase B — the two halves**
 
-- [ ] **T2 · Fit labels on the Node**
+- [x] **T2 · Fit labels on the Node**
       Blocked by: T1
-      Owns: `pkg/worker/controllers/worker/node_fit_label.go`, `pkg/worker/controllers/worker/node_fit_label_test.go`, `pkg/worker/controllers/setup.go`
+      Owns: `pkg/worker/controllers/worker/node_fit_label.go`, `pkg/worker/controllers/worker/node_fit_label_test.go`, `pkg/worker/controllers/setup.go`, and the `cardLedger.freeShares` and `cardLedger.freeSliceUnits` extractions in `pkg/worker/controllers/worker/node_devices_admission.go`
       Gate: review
       Acceptance:
       - `desiredFitLabels(nd, devs)` joins each `Devices` status card with its spec capability by ID, as `collectCards` does, per `<manufacturer>-<id>`.
-      - The sliced label is the maximum `remaining` over cards where `cardLedger.servesFamily(Sliced)` holds.
-      - The shared label counts cards where `servesFamily(Shared)` holds and `remaining >= unitsPerCardFor(shared)`.
+      - The sliced label is the maximum of `cardLedger.freeSliceUnits` over cards where `servesFamily(Sliced)` holds. That method is the check's own: a card that can serve a slice and is free or already sliced, at its remaining units.
+      - The shared label counts cards with `cardLedger.freeShares() > 0`. That method is also the check's own: a card that can serve a whole-card family, is free or already shared, and keeps at least one 160000-unit share.
       - A population with no card emits no key.
       - An unmanaged node, or a nil `Devices`, yields no fit labels.
       - `buildFitLabelPatch(desired, current)` sets changed keys and nulls stale fit keys. It returns nil when they are equal, and it never names a key outside `IsFitLabelKey`.
       - `NodeFitLabelReconciler` patches `metadata.labels` with a merge patch on a fresh Node object. It is registered in `setup.go`.
-      - It watches Nodes when the managed label, an `acceleratable.` label or a fit label changes.
-      - It watches `Devices` create and delete, and updates whose fit signature changes. The signature is the per-group desired values. The watch uses a 3 s dedup window.
+      - It watches Nodes when the managed label or a fit label changes. The labels are derived from the ledger and the managed mark only, so no other Node label can move them.
+      - It watches every `Devices` create and delete, and updates whose fit signature changes or whose managed mark flips. A deleted ledger must take its node's labels with it, whatever the ledger's own mark. The signature is the per-group desired values. The watch uses a 3 s dedup window.
+      - The mark flip matters because the Device Manager creates a ledger before the mark is synced onto it, and that sync moves no fit value.
+      - Both predicates are the node-devices check's own. The per-card free-share count and free slice units are extracted into `cardLedger.freeShares` and `cardLedger.freeSliceUnits`, and the check and the labels both call them.
       - `TestFitLabelsAgreeWithNodeDevicesFeasibility` is a parity table. For each ledger and demand, `sliced-max-free-units > U-1` must equal a Ready verdict from `nodeDevicesFeasibility` for one Pod with one card on that node. `shared-free-cards > N-1` must equal a Ready verdict for one shared Pod with N cards. The table includes a mixed-mode ledger and a partitioned card.
-      Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestDesiredFitLabels$|TestBuildFitLabelPatch$|TestFitLabelsAgreeWithNodeDevicesFeasibility$|TestNodeFitLabelReconciler_Reconcile$|TestFitSignatureChanged$' -v`
+      Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestDesiredFitLabels$|TestBuildFitLabelPatch$|TestFitLabelsAgreeWithNodeDevicesFeasibility$|TestNodeFitLabelReconciler_Reconcile$|TestFitSignatureChanged$|TestNodeFitLabelNodeUpdated$|TestFitDevicesUpdated$' -v`
 
 - [x] **T3 · Topology predicates ignore fit-only label changes**
       Blocked by: T1
