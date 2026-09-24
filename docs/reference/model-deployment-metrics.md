@@ -56,11 +56,15 @@ is present as zero.
 baseline; a second read within five minutes supplies the window. A counter reset or a window with
 no new queries produces a `missing[]` entry rather than a fabricated zero rate.
 
-vLLM reports `local-prefix` and, when available, `external-store` from separate prefix-cache hit
-and query counters. SGLang reports `device-prefix`, `host-prefix` and `storage-prefix` from
-`prefill_effective_tokens_total` modes. Each SGLang tier uses the sum of `input` and all three hit
-modes as its denominator. Ratios with different scopes or sampling windows stay per Pod; they are
-not averaged into one deployment-wide cache-hit claim.
+vLLM reports `local-prefix` and, on a Pod that renders a KV connector, `external-store` from
+separate prefix-cache hit and query counters. SGLang reports `device-prefix`, `host-prefix` and
+`storage-prefix` from `prefill_effective_tokens_total` modes. Each SGLang tier uses the sum of
+`input` and all three hit modes as its denominator. Ratios with different scopes or sampling
+windows stay per Pod; they are not averaged into one deployment-wide cache-hit claim.
+
+vLLM exports its external prefix cache counters without a KV connector too, and they never move. On
+a Pod whose arguments render no connector and whose external query counter has never moved,
+`missing[]` names `external-store` as an unsupported source rather than a window with no queries.
 
 ## Latency, traffic, and transfer
 
@@ -119,11 +123,23 @@ first counter sample, a reset, incompatible request and error windows, or a wind
 A successful Pod remains in the result when another fails. If no owned Pod can be read, the
 subresource returns Service Unavailable.
 
-Two kinds of `missing[]` entry leave `partial` unset. A router's error counter and SGLang's
-transfer failure counter are labeled counters that export nothing before their first increment. One
-absent while the same scrape read its pair (the router's request counter, the transfer size) is
-listed with that reason and yields no fraction; it is not reported as zero. The other is a source
-the router does not provide for the deployment's shape, described above.
+Three kinds of `missing[]` entry leave `partial` unset. Each is listed with its reason, and none is
+reported as zero. The first is a labeled counter that exports nothing before its first increment,
+absent while the same scrape read its pair: a router's error counter or the vLLM router's
+retries-exhausted counter beside the router's request counter, and SGLang's transfer failure
+counter beside the transfer size. No fraction is derived from it.
+
+The second is a source the deployment's shape does not provide: the vLLM router's P/D processing
+gauges, and `external-store` on a vLLM Pod without a KV connector, both described above.
+
+The third is a Pod that served no request in the sampling window, which its TTFT histogram shows by
+recording none. Its latency histograms and cache-hit counters then have no new sample and are listed
+as an idle sampling window. SGLang exports its inter-token histogram only once a request streams, so
+an idle SGLang server that has answered nothing but its warmup request lists it as not exported yet.
+
+Every other entry sets `partial`, on an idle Pod as on a busy one: an unreadable endpoint, a first
+sample, a reset, or an absent TTFT histogram. A latency or cache-hit source that records nothing
+while TTFT moved, or an SGLang inter-token histogram absent while TTFT moved, also sets it.
 
 A request reads at most 64 owned Pods, with 32 concurrent fetches, a two-second limit per fetch,
 an eight-second whole-request limit and a 1 MiB response cap per Pod. Two rounds of fetches fit in

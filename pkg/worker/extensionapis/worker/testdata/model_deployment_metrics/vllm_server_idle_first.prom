@@ -1,0 +1,21 @@
+# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{engine="0",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting{engine="0",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+# TYPE vllm:prefix_cache_hits_total counter
+vllm:prefix_cache_hits_total{engine="0",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+# TYPE vllm:prefix_cache_queries_total counter
+vllm:prefix_cache_queries_total{engine="0",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+# TYPE vllm:external_prefix_cache_hits_total counter
+vllm:external_prefix_cache_hits_total{engine="0",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+# TYPE vllm:external_prefix_cache_queries_total counter
+vllm:external_prefix_cache_queries_total{engine="0",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+# TYPE vllm:time_to_first_token_seconds histogram
+vllm:time_to_first_token_seconds_count{engine="0",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+vllm:time_to_first_token_seconds_sum{engine="0",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+# TYPE vllm:request_time_per_output_token_seconds histogram
+vllm:request_time_per_output_token_seconds_count{engine="0",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+vllm:request_time_per_output_token_seconds_sum{engine="0",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+# TYPE vllm:inter_token_latency_seconds histogram
+vllm:inter_token_latency_seconds_count{engine="0",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+vllm:inter_token_latency_seconds_sum{engine="0",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0

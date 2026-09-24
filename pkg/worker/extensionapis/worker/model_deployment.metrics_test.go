@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -972,4 +973,269 @@ func TestModelDeploymentMetricsHandler_SGLangTransferFailuresNeedTheirPair(t *te
 			assert.Equal(t, tc.wantPartial, modelDeploymentMissingIsPartial(failures))
 		})
 	}
+}
+
+// metricsFixture parses a trimmed scrape of a Pod the serving matrix read under load.
+func metricsFixture(t *testing.T, name, engine, router string) modelDeploymentScrape {
+	t.Helper()
+	body, err := os.ReadFile("testdata/model_deployment_metrics/" + name + ".prom")
+	require.NoError(t, err)
+	parsed, err := parseModelDeploymentMetrics(body, engine, router)
+	require.NoError(t, err)
+	return parsed
+}
+
+// mergeMetricsWindow merges two reads of one Pod thirty seconds apart and returns what the second
+// read contributed.
+func mergeMetricsWindow(
+	md *workercore.ModelDeployment, pod core.Pod, router bool, first, second modelDeploymentScrape,
+) *worker.ModelDeploymentMetrics {
+	h := &ModelDeploymentMetricsHandler{}
+	at := time.Now()
+	h.mergeMetrics(&worker.ModelDeploymentMetrics{}, md, &modelDeploymentPodScrape{pod: pod, router: router, value: first, at: at})
+	result := &worker.ModelDeploymentMetrics{}
+	h.mergeMetrics(result, md, &modelDeploymentPodScrape{pod: pod, router: router, value: second, at: at.Add(30 * time.Second)})
+	return result
+}
+
+func metricsServerPod(name string, command ...string) core.Pod {
+	return core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Labels: map[string]string{"app.kubernetes.io/component": "server"}},
+		Spec:       core.PodSpec{Containers: []core.Container{{Name: "main", Command: command}}},
+	}
+}
+
+func TestModelDeploymentMetricsHandler_VLLMExternalStoreNeedsAKVConnector(t *testing.T) {
+	serve := []string{"vllm", "serve", "Qwen/Qwen2.5-0.5B-Instruct", "--enable-prefix-caching", "--port", "8000"}
+	connector := append(slices.Clone(serve), "--kv-transfer-config",
+		`{"kv_connector":"MooncakeConnector","kv_role":"kv_consumer","kv_connector_extra_config":{"mooncake_protocol":"tcp"}}`)
+	tests := []struct {
+		name        string
+		command     []string
+		queries     float64
+		want        worker.ModelDeploymentMetricMissing
+		wantPartial bool
+	}{
+		{"no KV connector rendered", serve, 0, worker.ModelDeploymentMetricMissing{Pod: "server", Source: "external-store", Reason: modelDeploymentVLLMNoKVConnector}, false},
+		{"KV connector rendered", connector, 0, worker.ModelDeploymentMetricMissing{Pod: "server", Source: "external-store", Reason: "no queries in the sampling window"}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := metricsModelDeployment()
+			first := metricsFixture(t, "vllm_server_busy_first", "vllm", "")
+			second := metricsFixture(t, "vllm_server_busy_second", "vllm", "")
+			result := mergeMetricsWindow(md, metricsServerPod("server", tc.command...), false, first, second)
+			assert.ElementsMatch(t, []worker.ModelDeploymentMetricMissing{tc.want}, result.Missing)
+			assert.Equal(t, tc.wantPartial, modelDeploymentMissingIsPartial(result.Missing))
+			scopes := map[string]float64{}
+			for _, hit := range result.CacheHits {
+				scopes[hit.Scope] = hit.Queries
+			}
+			assert.Equal(t, map[string]float64{"local-prefix": 37842}, scopes)
+		})
+	}
+
+	// An external query counter that moved proves a connector the Pod arguments do not show, so
+	// its window is read rather than declared unsupported.
+	md := metricsModelDeployment()
+	first := metricsFixture(t, "vllm_server_busy_first", "vllm", "")
+	second := metricsFixture(t, "vllm_server_busy_second", "vllm", "")
+	first.counters["external-store"] = modelDeploymentCounterPair{hits: 2, queries: 8}
+	second.counters["external-store"] = modelDeploymentCounterPair{hits: 6, queries: 16}
+	result := mergeMetricsWindow(md, metricsServerPod("server", serve...), false, first, second)
+	assert.Empty(t, result.Missing)
+	assert.Len(t, result.CacheHits, 2)
+}
+
+func TestModelDeploymentMetricsHandler_VLLMRouterUnexportedRetriesExhaustedIsNotPartial(t *testing.T) {
+	tests := []struct {
+		name        string
+		drop        string
+		wantReason  string
+		wantPartial bool
+	}{
+		{"request counter read in the same scrape", "", modelDeploymentLabeledCounterUnexported, false},
+		{"request counter absent too", "successful-requests", "metric is absent", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := metricsModelDeployment()
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: "vllm-router"}
+			first := metricsFixture(t, "vllm_router_server_first", "", "vllm-router")
+			second := metricsFixture(t, "vllm_router_server_second", "", "vllm-router")
+			delete(first.windows, tc.drop)
+			delete(second.windows, tc.drop)
+			router := core.Pod{ObjectMeta: meta.ObjectMeta{Name: "router", UID: "router-uid"}}
+			result := mergeMetricsWindow(md, router, true, first, second)
+			assert.Contains(t, result.Missing, worker.ModelDeploymentMetricMissing{
+				Pod: "router", Source: "vllm_router_retries_exhausted_total", Reason: tc.wantReason,
+			})
+			assert.Equal(t, tc.wantPartial, modelDeploymentMissingIsPartial(result.Missing))
+		})
+	}
+}
+
+func TestModelDeploymentMetricsHandler_IdleServerHasNoNewSample(t *testing.T) {
+	tests := []struct {
+		name        string
+		engine      string
+		fixture     string
+		change      func(first, second modelDeploymentScrape)
+		want        []worker.ModelDeploymentMetricMissing
+		wantPartial bool
+	}{
+		{
+			name: "vLLM server that served no request", engine: "vllm", fixture: "vllm_server_idle",
+			want: []worker.ModelDeploymentMetricMissing{
+				{Pod: "server", Source: "vllm:time_to_first_token_seconds", Reason: modelDeploymentIdleWindow},
+				{Pod: "server", Source: "vllm:request_time_per_output_token_seconds", Reason: modelDeploymentIdleWindow},
+				{Pod: "server", Source: "vllm:inter_token_latency_seconds", Reason: modelDeploymentIdleWindow},
+				{Pod: "server", Source: "external-store", Reason: modelDeploymentVLLMNoKVConnector},
+				{Pod: "server", Source: "local-prefix", Reason: modelDeploymentIdleWindow},
+			},
+		},
+		{
+			name: "SGLang server that served no request", engine: "sglang", fixture: "sglang_server_idle",
+			want: []worker.ModelDeploymentMetricMissing{
+				{Pod: "server", Source: "sglang:time_to_first_token_seconds", Reason: modelDeploymentIdleWindow},
+				{Pod: "server", Source: "sglang:inter_token_latency_seconds", Reason: modelDeploymentLabeledHistogramUnexported},
+			},
+		},
+		{
+			name: "vLLM server whose TTFT moved while ITL stood still", engine: "vllm", fixture: "vllm_server_busy",
+			change: func(first, second modelDeploymentScrape) { second.windows["itl"] = first.windows["itl"] },
+			want: []worker.ModelDeploymentMetricMissing{
+				{Pod: "server", Source: "vllm:inter_token_latency_seconds", Reason: "no observations in the sampling window"},
+				{Pod: "server", Source: "external-store", Reason: modelDeploymentVLLMNoKVConnector},
+			},
+			wantPartial: true,
+		},
+		{
+			name: "vLLM server whose TTFT moved while its cache queries stood still", engine: "vllm", fixture: "vllm_server_busy",
+			change: func(first, second modelDeploymentScrape) {
+				second.counters["local-prefix"] = first.counters["local-prefix"]
+			},
+			want: []worker.ModelDeploymentMetricMissing{
+				{Pod: "server", Source: "external-store", Reason: modelDeploymentVLLMNoKVConnector},
+				{Pod: "server", Source: "local-prefix", Reason: "no queries in the sampling window"},
+			},
+			wantPartial: true,
+		},
+		{
+			name: "vLLM server that served no request and exports no TTFT", engine: "vllm", fixture: "vllm_server_idle",
+			change: func(first, second modelDeploymentScrape) {
+				delete(first.windows, "ttft")
+				delete(second.windows, "ttft")
+			},
+			want: []worker.ModelDeploymentMetricMissing{
+				{Pod: "server", Source: "vllm:time_to_first_token_seconds", Reason: "metric is absent"},
+				{Pod: "server", Source: "vllm:request_time_per_output_token_seconds", Reason: "no observations in the sampling window"},
+				{Pod: "server", Source: "vllm:inter_token_latency_seconds", Reason: "no observations in the sampling window"},
+				{Pod: "server", Source: "external-store", Reason: modelDeploymentVLLMNoKVConnector},
+				{Pod: "server", Source: "local-prefix", Reason: "no queries in the sampling window"},
+			},
+			wantPartial: true,
+		},
+		{
+			name: "SGLang server whose TTFT moved while ITL is not exported", engine: "sglang", fixture: "sglang_server_busy",
+			change: func(first, second modelDeploymentScrape) {
+				delete(first.windows, "itl")
+				delete(second.windows, "itl")
+			},
+			want: []worker.ModelDeploymentMetricMissing{
+				{Pod: "server", Source: "sglang:inter_token_latency_seconds", Reason: "metric is absent"},
+			},
+			wantPartial: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := metricsModelDeployment()
+			md.Spec.Engine.Name = tc.engine
+			first := metricsFixture(t, tc.fixture+"_first", tc.engine, "")
+			second := metricsFixture(t, tc.fixture+"_second", tc.engine, "")
+			if tc.change != nil {
+				tc.change(first, second)
+			}
+			result := mergeMetricsWindow(md, metricsServerPod("server", "serve"), false, first, second)
+			assert.ElementsMatch(t, tc.want, result.Missing)
+			assert.Equal(t, tc.wantPartial, modelDeploymentMissingIsPartial(result.Missing))
+		})
+	}
+}
+
+// The snapshot a router in front of two servers gives when the router's cache-aware policy sends
+// every request to one of them, read from what such a deployment exported.
+func TestModelDeploymentMetricsHandler_RoutedServersWithOneIdleAreComplete(t *testing.T) {
+	var stage atomic.Int32
+	serve := func(fixture string) *httptest.Server {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			name := fixture + "_first.prom"
+			if stage.Load() == 1 {
+				name = fixture + "_second.prom"
+			}
+			body, err := os.ReadFile("testdata/model_deployment_metrics/" + name)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write(body)
+		}))
+		t.Cleanup(server.Close)
+		return server
+	}
+	md := metricsModelDeployment()
+	md.Spec.Roles[0].Replicas = 2
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: "vllm-router"}
+	pod := func(server *httptest.Server, name string) *core.Pod {
+		u, err := url.Parse(server.URL)
+		require.NoError(t, err)
+		host, port, err := net.SplitHostPort(u.Host)
+		require.NoError(t, err)
+		return metricsEnginePod(md, name, host, port)
+	}
+	busy := pod(serve("vllm_server_busy"), "chat-server-busy")
+	idle := pod(serve("vllm_server_idle"), "chat-server-idle")
+	deployment := &app.Deployment{ObjectMeta: meta.ObjectMeta{
+		Name: "chat-router", Namespace: md.Namespace, UID: "router-deployment",
+		OwnerReferences: []meta.OwnerReference{{APIVersion: "worker.gpustack.ai/v1alpha1", Kind: "ModelDeployment", Name: md.Name, UID: md.UID, Controller: ptr.To(true)}},
+	}}
+	rs := &app.ReplicaSet{ObjectMeta: meta.ObjectMeta{
+		Name: "chat-router-rs", Namespace: md.Namespace, UID: "router-rs",
+		OwnerReferences: []meta.OwnerReference{{APIVersion: "apps/v1", Kind: "Deployment", Name: deployment.Name, UID: deployment.UID, Controller: ptr.To(true)}},
+	}}
+	router := pod(serve("vllm_router_server"), "chat-router-pod")
+	delete(router.Labels, "app.kubernetes.io/component")
+	router.Labels["modeldeployment.gpustack.ai/router"] = "vllm-router"
+	router.OwnerReferences = []meta.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: rs.Name, UID: rs.UID, Controller: ptr.To(true)}}
+	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(md, deployment, rs, router, busy, idle).Build()
+	h := &ModelDeploymentMetricsHandler{APIReader: cli, HTTPClient: http.DefaultClient}
+	key := types.NamespacedName{Namespace: md.Namespace, Name: md.Name}
+
+	obj, err := h.OnGet(context.Background(), key, ctrlcli.GetOptions{})
+	require.NoError(t, err)
+	assert.True(t, obj.(*worker.ModelDeploymentMetrics).Partial, "a first read has no sampling window")
+
+	stage.Store(1)
+	obj, err = h.OnGet(context.Background(), key, ctrlcli.GetOptions{})
+	require.NoError(t, err)
+	result := obj.(*worker.ModelDeploymentMetrics)
+	assert.Equal(t, []worker.ModelDeploymentMetricMissing{
+		{Pod: "chat-router-pod", Source: "vllm_router_request_errors_total", Reason: modelDeploymentLabeledCounterUnexported},
+		{Pod: "chat-router-pod", Source: "vllm_router_retries_exhausted_total", Reason: modelDeploymentLabeledCounterUnexported},
+		{Pod: "chat-server-busy", Source: "external-store", Reason: modelDeploymentVLLMNoKVConnector},
+		{Pod: "chat-server-idle", Source: "external-store", Reason: modelDeploymentVLLMNoKVConnector},
+		{Pod: "chat-server-idle", Source: "local-prefix", Reason: modelDeploymentIdleWindow},
+		{Pod: "chat-server-idle", Source: "vllm:inter_token_latency_seconds", Reason: modelDeploymentIdleWindow},
+		{Pod: "chat-server-idle", Source: "vllm:request_time_per_output_token_seconds", Reason: modelDeploymentIdleWindow},
+		{Pod: "chat-server-idle", Source: "vllm:time_to_first_token_seconds", Reason: modelDeploymentIdleWindow},
+	}, result.Missing)
+	assert.False(t, result.Partial)
+	require.Len(t, result.CacheHits, 1)
+	assert.Equal(t, "chat-server-busy", result.CacheHits[0].Pod)
+	latency := map[string]string{}
+	for _, metric := range result.Latency {
+		latency[metric.Name] = metric.Pod
+	}
+	assert.Equal(t, map[string]string{"ttft": "chat-server-busy", "tpot": "chat-server-busy", "itl": "chat-server-busy"}, latency)
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -413,7 +414,7 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 			mergeModelDeploymentGauge(&result.Processing, gauge)
 		}
 	}
-	h.mergeWindowMetrics(result, md, read)
+	idle := h.mergeWindowMetrics(result, md, read)
 	if read.router {
 		return
 	}
@@ -431,6 +432,15 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 	}
 	for scope, current := range read.value.counters {
 		previous, ok := h.replaceCounter(md, &read.pod, scope, current, read.at)
+		// vLLM exports its external prefix cache counters with or without a KV connector, and
+		// without one they never move. A query counter that has moved proves a connector, so
+		// only a still-zero one on a Pod rendering none is declared unsupported.
+		if scope == "external-store" && current.queries == 0 && !modelDeploymentPodRendersKVConnector(&read.pod) {
+			result.Missing = append(result.Missing, worker.ModelDeploymentMetricMissing{
+				Pod: read.pod.Name, Source: scope, Reason: modelDeploymentVLLMNoKVConnector,
+			})
+			continue
+		}
 		if !ok {
 			result.Missing = append(result.Missing, worker.ModelDeploymentMetricMissing{
 				Pod: read.pod.Name, Source: scope, Reason: "awaiting a second counter sample",
@@ -446,8 +456,12 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 			continue
 		}
 		if queries == 0 {
+			reason := "no queries in the sampling window"
+			if idle {
+				reason = modelDeploymentIdleWindow
+			}
 			result.Missing = append(result.Missing, worker.ModelDeploymentMetricMissing{
-				Pod: read.pod.Name, Source: scope, Reason: "no queries in the sampling window",
+				Pod: read.pod.Name, Source: scope, Reason: reason,
 			})
 			continue
 		}
@@ -465,6 +479,21 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 			PodCount:      1, ObservedAt: meta.NewTime(read.at),
 		})
 	}
+}
+
+// modelDeploymentPodRendersKVConnector reports whether a vLLM engine Pod was given a KV connector.
+// The operator renders every connector a managed role runs, the shared store and the
+// point-to-point prefill/decode leg alike, through this one argument, and admission refuses it
+// among a role's extra arguments.
+func modelDeploymentPodRendersKVConnector(pod *core.Pod) bool {
+	for _, container := range pod.Spec.Containers {
+		for _, arg := range append(slices.Clone(container.Command), container.Args...) {
+			if name, _, _ := strings.Cut(arg, "="); name == "--kv-transfer-config" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isModelDeploymentPD(md *workercore.ModelDeployment) bool {
@@ -489,30 +518,52 @@ func modelDeploymentPodRoleKind(md *workercore.ModelDeployment, pod *core.Pod) w
 const (
 	modelDeploymentLabeledCounterUnexported = "labeled failure or error counter is not exported before its first increment; " +
 		"its paired counter was read in the same scrape"
+	modelDeploymentLabeledHistogramUnexported = "labeled histogram is not exported before its first observation; " +
+		"its paired histogram recorded no new observation in the same window"
 	modelDeploymentVLLMRouterPDNoProcessing = "unsupported source: the vLLM router exports no router processing gauge " +
 		"for a prefill/decode deployment"
+	modelDeploymentVLLMNoKVConnector = "unsupported source: the Pod renders no KV connector, so vLLM queries no " +
+		"external prefix cache"
+	modelDeploymentIdleWindow = "idle sampling window: the Pod's TTFT histogram recorded no new request, so this " +
+		"source has no new sample"
 )
 
-// modelDeploymentMissingIsPartial reports whether a required source is missing. Two listed
-// entries are not: a failure or error counter that a healthy Pod has had no reason to export
-// yet, and a source the router is known not to provide for this deployment's shape. Both stay in
-// missing[] so no value is fabricated, but neither says a readable source failed to contribute.
+// modelDeploymentNotPartialReasons are the listed entries that do not make a snapshot partial: a
+// labeled series that a healthy Pod has had no reason to export yet, a source the router or the
+// Pod's rendered shape is known not to provide, and a source of a Pod that served no request in
+// the sampling window, which has no new sample to give. They stay in missing[] so no value is
+// fabricated, but none says a readable source failed to contribute.
+var modelDeploymentNotPartialReasons = []string{
+	modelDeploymentLabeledCounterUnexported,
+	modelDeploymentLabeledHistogramUnexported,
+	modelDeploymentVLLMRouterPDNoProcessing,
+	modelDeploymentVLLMNoKVConnector,
+	modelDeploymentIdleWindow,
+}
+
+// modelDeploymentMissingIsPartial reports whether a required source is missing.
 func modelDeploymentMissingIsPartial(missing []worker.ModelDeploymentMetricMissing) bool {
 	return slices.ContainsFunc(missing, func(m worker.ModelDeploymentMetricMissing) bool {
-		return m.Reason != modelDeploymentLabeledCounterUnexported && m.Reason != modelDeploymentVLLMRouterPDNoProcessing
+		return !slices.Contains(modelDeploymentNotPartialReasons, m.Reason)
 	})
 }
 
 type modelDeploymentWindowDefinition struct {
 	name, source, area, unit string
 	histogram                bool
-	// pairedWith names the counter that vouches for a labeled failure or error counter. A labeled
-	// counter exports nothing until its first increment, so one absent while its pair was read in
-	// the same scrape is a Pod that has not failed yet, not an unreadable source. Only the entries
-	// listed with a pair get this reading; any other absent counter is still a missing source.
+	// pairedWith names the series that vouches for a labeled one. A labeled series exports nothing
+	// until its first increment or observation. A failure or error counter absent while its pair
+	// was read in the same scrape is a Pod that has not failed yet, not an unreadable source. A
+	// histogram absent while its pair recorded no new observation in the same window had nothing to
+	// observe; beside a pair that moved, its absence would drop real samples, so it stays missing.
+	// Only the entries listed with a pair get this reading; any other absent series is still a
+	// missing source.
 	pairedWith string
 }
 
+// modelDeploymentWindowDefinitions lists the windowed sources of one Pod. A list that reads TTFT
+// names it first: every request the Pod answers passes through it, so the entries after it read
+// its window to tell a Pod that served no request from one that stopped recording.
 func modelDeploymentWindowDefinitions(md *workercore.ModelDeployment, router bool) []modelDeploymentWindowDefinition {
 	if router {
 		switch md.Spec.Router.Name {
@@ -536,10 +587,12 @@ func modelDeploymentWindowDefinitions(md *workercore.ModelDeployment, router boo
 					{"pd-errors", "vllm_router_pd_errors_total", "traffic", "errors/second", false, "pd-requests"},
 				}
 			}
+			// The retries-exhausted counter is labeled by route like the error counter, so it too
+			// is absent until a request first exhausts its attempts.
 			return []modelDeploymentWindowDefinition{
 				{"successful-requests", "vllm_router_requests_total", "traffic", "requests/second", false, ""},
 				{"errors", "vllm_router_request_errors_total", "traffic", "errors/second", false, "successful-requests"},
-				{"retries-exhausted", "vllm_router_retries_exhausted_total", "traffic", "events/second", false, ""},
+				{"retries-exhausted", "vllm_router_retries_exhausted_total", "traffic", "events/second", false, "successful-requests"},
 			}
 		case "sglang-gateway":
 			return []modelDeploymentWindowDefinition{
@@ -556,9 +609,11 @@ func modelDeploymentWindowDefinitions(md *workercore.ModelDeployment, router boo
 			{"itl", "vllm:inter_token_latency_seconds", "latency", "seconds", true, ""},
 		}
 	}
+	// SGLang's inter-token histogram is labeled and observed only when a request streams a second
+	// chunk, so a server that has answered nothing but its unstreamed warmup request exports none.
 	definitions := []modelDeploymentWindowDefinition{
 		{"ttft", "sglang:time_to_first_token_seconds", "latency", "seconds", true, ""},
-		{"itl", "sglang:inter_token_latency_seconds", "latency", "seconds", true, ""},
+		{"itl", "sglang:inter_token_latency_seconds", "latency", "seconds", true, "ttft"},
 	}
 	if isModelDeploymentPD(md) {
 		definitions = append(definitions,
@@ -571,9 +626,11 @@ func modelDeploymentWindowDefinitions(md *workercore.ModelDeployment, router boo
 	return definitions
 }
 
+// mergeWindowMetrics reports whether the Pod is idle: its TTFT histogram recorded no new request in
+// the sampling window, so none of its windowed sources had anything new to observe.
 func (h *ModelDeploymentMetricsHandler) mergeWindowMetrics(
 	result *worker.ModelDeploymentMetrics, md *workercore.ModelDeployment, read *modelDeploymentPodScrape,
-) {
+) bool {
 	scope := "router"
 	if !read.router {
 		scope = "engine/" + read.pod.Labels["app.kubernetes.io/component"]
@@ -582,6 +639,10 @@ func (h *ModelDeploymentMetricsHandler) mergeWindowMetrics(
 	durations := map[string]float64{}
 	starts := map[string]time.Time{}
 	sources := map[string]string{}
+	unobserved := func(name string) bool {
+		count, ok := deltas[name]
+		return ok && count == 0
+	}
 	for _, definition := range modelDeploymentWindowDefinitions(md, read.router) {
 		sources[definition.name] = definition.source
 		// SGLang observes a KV transfer on the half that sends it, the prefill half.
@@ -602,7 +663,12 @@ func (h *ModelDeploymentMetricsHandler) mergeWindowMetrics(
 		current, ok := read.value.windows[definition.name]
 		if !ok {
 			reason := "metric is absent"
-			if _, seen := read.value.windows[definition.pairedWith]; definition.pairedWith != "" && seen {
+			_, seen := read.value.windows[definition.pairedWith]
+			switch {
+			case definition.pairedWith == "":
+			case definition.histogram && unobserved(definition.pairedWith):
+				reason = modelDeploymentLabeledHistogramUnexported
+			case !definition.histogram && seen:
 				reason = modelDeploymentLabeledCounterUnexported
 			}
 			result.Missing = append(result.Missing, worker.ModelDeploymentMetricMissing{
@@ -630,8 +696,14 @@ func (h *ModelDeploymentMetricsHandler) mergeWindowMetrics(
 		durations[definition.name] = window
 		starts[definition.name] = previous.at
 		if count == 0 && definition.histogram {
+			// Only an idle Pod's latency histogram has no new sample to give. One that stands
+			// still beside a TTFT that moved missed requests the Pod served.
+			reason := "no observations in the sampling window"
+			if definition.area == "latency" && unobserved("ttft") {
+				reason = modelDeploymentIdleWindow
+			}
 			result.Missing = append(result.Missing, worker.ModelDeploymentMetricMissing{
-				Pod: read.pod.Name, Source: definition.source, Reason: "no observations in the sampling window",
+				Pod: read.pod.Name, Source: definition.source, Reason: reason,
 			})
 			continue
 		}
@@ -675,6 +747,7 @@ func (h *ModelDeploymentMetricsHandler) mergeWindowMetrics(
 			})
 		}
 	}
+	return unobserved("ttft")
 }
 
 func (h *ModelDeploymentMetricsHandler) replaceWindow(
