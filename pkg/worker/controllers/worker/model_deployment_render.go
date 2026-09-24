@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -226,6 +227,9 @@ type ModelDeploymentRenderInput struct {
 	// Connector is what the engine needs to reach the pool. Its zero value renders a replica with
 	// no connector at all, which is what a deployment whose Binding has not been resolved yet gets.
 	Connector ModelDeploymentConnectorRender
+	// InterfaceResource is the extended resource selected from the role's effective fabric
+	// protocol. It is empty when the role requests no interface.
+	InterfaceResource core.ResourceName
 	// There is NO ConfigMap name here, and there is no object to name: the client configuration
 	// travels in Connector.PodAnnotations and reaches the container as a downwardAPI projection of
 	// it. The field this struct used to carry was never filled by anything, so the mount it guarded
@@ -379,6 +383,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			return nil, err
 		}
 		command = append(command, in.Connector.Args...)
+		command = append(command, modelDeploymentDefaultedArgs(in.Connector.DefaultedArgs, role.ExtraArgs)...)
 		command = append(command, role.ExtraArgs...)
 
 		// READ BEFORE FILLING, and read the SAME list the filling reads. What decides whether the
@@ -446,6 +451,12 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		StartupProbe:   startupProbe,
 		ReadinessProbe: readinessProbe,
 		LivenessProbe:  livenessProbe,
+	}
+	if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
+		if in.InterfaceResource == "" {
+			return nil, fmt.Errorf("role %q requests interfaces without a fabric resource", role.Name)
+		}
+		mainC.Resources.Limits[in.InterfaceResource] = role.Resources.Interface.DeepCopy()
 	}
 	if role.Privileged {
 		mainC.SecurityContext = &core.SecurityContext{Privileged: ptr.To(true)}
@@ -528,8 +539,25 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			pod.Annotations[k] = v
 		}
 	}
+	if !takeOver {
+		if pod.Annotations == nil {
+			pod.Annotations = make(map[string]string, 3)
+		}
+		for key, value := range modelDeploymentMetricsAnnotations(enginePort, scheme) {
+			pod.Annotations[key] = value
+		}
+	}
 
 	return pod, nil
+}
+
+func modelDeploymentMetricsAnnotations(port int32, scheme core.URIScheme) map[string]string {
+	return map[string]string{
+		"prometheus.io/scrape": "true",
+		"prometheus.io/path":   "/metrics",
+		"prometheus.io/port":   strconv.Itoa(int(port)),
+		"prometheus.io/scheme": strings.ToLower(string(scheme)),
+	}
 }
 
 // stampModelDeploymentPod puts the Kueue group metadata on a rendered replica and then writes the
@@ -1209,6 +1237,22 @@ func modelDeploymentUserSetsEnv(userEnv []workercore.ModelDeploymentEnvVar, name
 	}
 
 	return false
+}
+
+// modelDeploymentDefaultedArgs flattens the connector's defaulted argument groups, dropping every
+// group whose flag the role's own arguments already name in either spelling.
+func modelDeploymentDefaultedArgs(groups [][]string, userArgs []string) []string {
+	var out []string
+	for _, group := range groups {
+		if slices.ContainsFunc(userArgs, func(arg string) bool {
+			return ModelDeploymentArgName(arg) == group[0]
+		}) {
+			continue
+		}
+		out = append(out, group...)
+	}
+
+	return out
 }
 
 // deriveModelDeploymentResources turns a role's accelerator request into the full resource request

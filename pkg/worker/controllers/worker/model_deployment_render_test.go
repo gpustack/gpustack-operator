@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -187,6 +188,7 @@ func TestRenderModelDeploymentPod_DecodeUsesRoutingSidecar(t *testing.T) {
 			assert.Contains(t, main.Command, "8200")
 			assert.NotEqual(t, tc.externalPort, main.Ports[0].ContainerPort)
 			assert.Equal(t, int32(8200), main.Ports[0].ContainerPort)
+			assert.Equal(t, "8200", pod.Annotations["prometheus.io/port"])
 			assert.Equal(t, tc.externalPort, main.StartupProbe.HTTPGet.Port.IntVal)
 			assert.Equal(t, tc.externalPort, main.ReadinessProbe.HTTPGet.Port.IntVal)
 			assert.Equal(t, tc.externalPort, main.LivenessProbe.HTTPGet.Port.IntVal)
@@ -573,6 +575,7 @@ func TestRenderModelDeploymentPod_Command(t *testing.T) {
 			engine: workercore.ModelDeploymentEngineSGLang,
 			wantCommand: []string{
 				"python3", "-m", "sglang.launch_server", "--model-path", "Qwen/Qwen2.5-72B-Instruct",
+				"--enable-metrics",
 				"--host", "0.0.0.0", "--port", "8000",
 			},
 		},
@@ -608,6 +611,7 @@ func TestRenderModelDeploymentPod_Command(t *testing.T) {
 			extraArgs: []string{"--host=127.0.0.1"},
 			wantCommand: []string{
 				"python3", "-m", "sglang.launch_server", "--model-path", "Qwen/Qwen2.5-72B-Instruct",
+				"--enable-metrics",
 				"--host=127.0.0.1",
 				"--port", "8000",
 			},
@@ -776,6 +780,132 @@ func TestRenderModelDeploymentPod_ConnectorPortCollision(t *testing.T) {
 		require.Error(t, err, "the engine port must clear every declared port, not only the served one")
 		assert.Contains(t, err.Error(), "9100")
 	})
+}
+
+// TestRenderModelDeploymentPod_TCPPinYieldsToTheRole follows the TCP pin from synthesis onto the
+// Pod: the operator's value lands when the role sets none, and a role's own entry -- any value, the
+// transfer engine reads it for presence -- stands alone. The first row is the second's baseline,
+// so a render that dropped the variable outright fails there rather than passing both.
+func TestRenderModelDeploymentPod_TCPPinYieldsToTheRole(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		roleEnv []workercore.ModelDeploymentEnvVar
+		want    string
+	}{
+		{name: "the operator's pin lands", want: "1"},
+		{
+			name:    "the role's own value stands",
+			roleEnv: []workercore.ModelDeploymentEnvVar{{Name: "MC_FORCE_TCP", Value: "true"}},
+			want:    "true",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles[0].Env = tc.roleEnv
+			})
+			connector, err := SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
+				Engine: md.Spec.Engine.Name, Kind: workercore.ModelDeploymentRoleKindPrefill,
+				Disaggregated: true, KVTransfer: true,
+			})
+			require.NoError(t, err)
+
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Connector: connector,
+			})
+			require.NoError(t, err)
+
+			count := 0
+			for _, e := range pod.Spec.Containers[0].Env {
+				if e.Name == "MC_FORCE_TCP" {
+					count++
+					assert.Equal(t, tc.want, e.Value)
+				}
+			}
+			assert.Equal(t, 1, count, "exactly one MC_FORCE_TCP entry reaches the container")
+		})
+	}
+}
+
+// TestRenderModelDeploymentPod_DefaultedArgsYieldToTheRole follows the SGLang defaulted switches
+// from synthesis onto the argv. A role naming the same flag, in either spelling, keeps its own
+// entry and the operator's whole group is dropped; the rows without one are the baseline that
+// shows the group lands exactly once otherwise.
+func TestRenderModelDeploymentPod_DefaultedArgsYieldToTheRole(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		kind      workercore.ModelDeploymentRoleKind
+		store     bool
+		extraArgs []string
+		flag      string
+		want      []string
+	}{
+		{
+			name: "a decode half gets the retraction backup", kind: workercore.ModelDeploymentRoleKindDecode,
+			flag: "--disaggregation-decode-retraction-backup",
+			want: []string{"--disaggregation-decode-retraction-backup", "cpu_tensor"},
+		},
+		{
+			name: "a decode half's own backup stands", kind: workercore.ModelDeploymentRoleKindDecode,
+			extraArgs: []string{"--disaggregation-decode-retraction-backup=host_pool"},
+			flag:      "--disaggregation-decode-retraction-backup",
+			want:      []string{"--disaggregation-decode-retraction-backup=host_pool"},
+		},
+		{
+			name: "a decode half's own backup stands in two tokens", kind: workercore.ModelDeploymentRoleKindDecode,
+			extraArgs: []string{"--disaggregation-decode-retraction-backup", "host_pool"},
+			flag:      "--disaggregation-decode-retraction-backup",
+			want:      []string{"--disaggregation-decode-retraction-backup", "host_pool"},
+		},
+		{
+			name: "a prefill half with a store gets the hierarchical cache", kind: workercore.ModelDeploymentRoleKindPrefill,
+			store: true, flag: "--enable-hierarchical-cache",
+			want: []string{"--enable-hierarchical-cache"},
+		},
+		{
+			name: "a prefill half's own hierarchical cache is not repeated", kind: workercore.ModelDeploymentRoleKindPrefill,
+			store: true, extraArgs: []string{"--enable-hierarchical-cache"}, flag: "--enable-hierarchical-cache",
+			want: []string{"--enable-hierarchical-cache"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Roles[0].Kind = tc.kind
+				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
+			})
+			in := ModelDeploymentConnectorInput{
+				Engine: workercore.ModelDeploymentEngineSGLang, Kind: tc.kind,
+				Disaggregated: true, KVTransfer: true,
+			}
+			if tc.store {
+				in.MasterServerAddress = "shared-kv-master.gpustack-system.svc:50051"
+				in.Protocols = []string{"tcp"}
+			}
+			connector, err := SynthesizeModelDeploymentConnector(in)
+			require.NoError(t, err)
+
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Connector: connector,
+			})
+			require.NoError(t, err)
+
+			command := pod.Spec.Containers[0].Command
+			var got []string
+			for i, arg := range command {
+				if ModelDeploymentArgName(arg) != tc.flag {
+					continue
+				}
+				got = append(got, arg)
+				if arg == tc.flag && i+1 < len(command) && !strings.HasPrefix(command[i+1], "--") {
+					got = append(got, command[i+1])
+				}
+			}
+			assert.Equal(t, tc.want, got, "the argv carries exactly one answer for %s", tc.flag)
+		})
+	}
 }
 
 // TestRenderModelDeploymentPod_Env covers the merge of the two sources: what the operator owns is
@@ -1000,6 +1130,103 @@ func TestRenderModelDeploymentPod_AcceleratorRequest(t *testing.T) {
 	qtyEqual(t, qty("128Gi"), limits[core.ResourceMemory], "the host memory is derived, not declared")
 }
 
+func TestRenderModelDeploymentPod_InterfaceRequest(t *testing.T) {
+	tests := []struct {
+		name     string
+		count    string
+		resource core.ResourceName
+	}{
+		{name: "absent"},
+		{name: "one RDMA interface", count: "1", resource: "device.gpustack.ai/rdma.shared"},
+		{name: "two RDMA interfaces", count: "2", resource: "device.gpustack.ai/rdma"},
+		{name: "two EFA interfaces", count: "2", resource: "vpc.amazonaws.com/efa"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment()
+			if tc.count != "" {
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					Interface: ptr.To(resource.MustParse(tc.count)),
+				}
+			}
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				InterfaceResource: tc.resource,
+			})
+			require.NoError(t, err)
+			limits := pod.Spec.Containers[0].Resources.Limits
+			if tc.resource == "" {
+				assert.NotContains(t, limits, core.ResourceName("device.gpustack.ai/rdma.shared"))
+				assert.NotContains(t, limits, core.ResourceName("device.gpustack.ai/rdma"))
+				assert.NotContains(t, limits, core.ResourceName("vpc.amazonaws.com/efa"))
+				return
+			}
+			qtyEqual(t, qty(tc.count), limits[tc.resource], "the requested interface count reaches the engine")
+		})
+	}
+}
+
+func TestModelDeploymentInterfaceResource(t *testing.T) {
+	tests := []struct {
+		name    string
+		store   []string
+		direct  string
+		count   int64
+		want    core.ResourceName
+		wantErr string
+	}{
+		{name: "store RDMA shared", store: []string{"rdma"}, count: 1, want: "device.gpustack.ai/rdma.shared"},
+		{name: "store RDMA exclusive", store: []string{"rdma"}, count: 2, want: "device.gpustack.ai/rdma"},
+		{name: "pure direct EFA", direct: "efa", count: 2, want: "vpc.amazonaws.com/efa"},
+		{name: "same fabric once", store: []string{"efa"}, direct: "efa", count: 1, want: "vpc.amazonaws.com/efa"},
+		{name: "TCP group with direct fabric", store: []string{"tcp"}, direct: "rdma", count: 1, want: "device.gpustack.ai/rdma.shared"},
+		{name: "mixed groups", store: []string{"tcp", "rdma"}, direct: "rdma", count: 1, wantErr: "tcp, rdma"},
+		{name: "mixed legs", store: []string{"rdma"}, direct: "efa", count: 1, wantErr: "rdma and efa"},
+		{name: "no fabric", store: []string{"tcp"}, direct: "tcp", count: 1, wantErr: "no effective RDMA or EFA"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ModelDeploymentInterfaceResource(tc.store, tc.direct, tc.count)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
+	tests := []struct {
+		name         string
+		engine       string
+		manufacturer string
+		command      []string
+		want         string
+	}{
+		{name: "native vLLM", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, want: "efa"},
+		{name: "Ascend ignores declaration", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerAscend},
+		{name: "unobserved manufacturer cannot select device", engine: workercore.ModelDeploymentEngineVLLM},
+		{name: "SGLang ignores declaration", engine: workercore.ModelDeploymentEngineSGLang, manufacturer: nodefeature.ManufacturerNVIDIA},
+		{name: "user command owns transfer", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, command: []string{"custom"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = tc.engine
+				md.Spec.KVCache = nil
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "efa"}
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles[0].Command = tc.command
+				md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode})
+			})
+			assert.Equal(t, tc.want, ModelDeploymentDirectInterfaceProtocol(md, &md.Spec.Roles[0], tc.manufacturer))
+		})
+	}
+}
+
 // TestRenderModelDeploymentPod_Ports pins that a replica is always reachable: a role naming no port
 // still gets one, because the Service fronting the deployment needs a target.
 func TestRenderModelDeploymentPod_Ports(t *testing.T) {
@@ -1017,6 +1244,34 @@ func TestRenderModelDeploymentPod_Ports(t *testing.T) {
 	pod = renderOne(t, md, newRenderInstanceType())
 	require.Len(t, pod.Spec.Containers[0].Ports, 1)
 	assert.Equal(t, int32(9000), pod.Spec.Containers[0].Ports[0].ContainerPort)
+}
+
+func TestRenderModelDeploymentPod_MetricsScrape(t *testing.T) {
+	for _, tc := range []struct {
+		name, scheme string
+		port         int32
+		tls          bool
+	}{
+		{name: "default", port: 8000, scheme: "http"},
+		{name: "custom", port: 9000, scheme: "http"},
+		{name: "TLS", port: 8000, scheme: "https", tls: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment()
+			if tc.tls {
+				md.Spec.Roles[0].ExtraArgs = []string{"--ssl-certfile", "/etc/tls/tls.crt"}
+			}
+			if tc.port != 8000 {
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: tc.port}}
+			}
+			pod := renderOne(t, md, newRenderInstanceType())
+			assert.Equal(t, "true", pod.Annotations["prometheus.io/scrape"])
+			assert.Equal(t, "/metrics", pod.Annotations["prometheus.io/path"])
+			assert.Equal(t, strconv.Itoa(int(tc.port)), pod.Annotations["prometheus.io/port"])
+			assert.Equal(t, tc.scheme, pod.Annotations["prometheus.io/scheme"])
+			assert.Equal(t, tc.port, pod.Spec.Containers[0].Ports[0].ContainerPort)
+		})
+	}
 }
 
 // TestRenderModelDeploymentPod_SynthesizesTheImage covers the role that names none.
@@ -1735,22 +1990,23 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // modeldeployment prefix the role-kind label and the spec-hash annotation already carry, so that one
 // reader looking for this deployment's own keys finds all of them under one prefix; and once when
 // the member index became unconditional on every member, so that one equality term in a discovery
-// selector names the Pods that answer the API at every role size. Every digest here moved by intent
+// selector names the Pods that answer the API at every role size; and once when each managed Pod
+// began declaring its metrics listener scheme. Every digest here moved by intent
 // rather than by drift. Each case renders ORDINAL ZERO -- the composite's zero value -- which is the
 // one ordinal a digest can name without the table growing a dimension. To re-baseline after an
 // intended rendering change: empty the table, run this case, and pin the digests the failures
 // print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "077463504e23c8b59a28092878df9bad3f6d5e751ea4a7c2ebc020d6fc0f491f",
-		"a sole server role with a synthesized cache connector":                              "53f99d870f79ab45692006ef32561f1f2cd7b5aad7b64be251c76bd5a407aa29",
+		"a sole server role": "1cb29ab0f4e5a9bd47afa4f6c52b2885ad84fbb1c91d9aaad535acc61958ad23",
+		"a sole server role with a synthesized cache connector":                              "05651de136063e951a141f471d5f78f8982bda1a010446d8f7def9b90454c48e",
 		"a take-over role carrying a connector it must be given no part of":                  "1984284b5fbc1e7245e71bb5ea8c3ed1daccef316d724e398952fa637c4c67cd",
-		"a direct decoder with a native routing sidecar":                                     "7b312926f49ee6a3115f0e4acc38eec600cfdbec3532124748cde1867870e363",
-		"a direct decoder with a classic routing sidecar":                                    "24eebdf8d2209367f2b14ff19b85b54200da3bdcc3302bee9435d100be9b870f",
-		"a role naming no image, synthesized from the observed hardware":                     "7664b696700708f5d4de175ac9a55bfff9b69829ab39c0c2163a9757a9675561",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "c7a42af155f2e1bf67e46463c6e3aaca9e7645b8468d7cc9859dfff0543a6b1b",
-		"the prefill role of a two-role deployment":                                          "cc55b5f877f5a83778404751cb5754f6399d21b85a2beec3ff2dfda753d16bfa",
-		"the decode role of a two-role deployment":                                           "34f9da9b7a3a82873c3eb1ebac1711627533d20f84f694601aec4ea778c45eec",
+		"a direct decoder with a native routing sidecar":                                     "a56ec8ab7a954d66b6badbfacce263227706665ffd1b120460d447c62cce4a93",
+		"a direct decoder with a classic routing sidecar":                                    "7fb447f32c49928352366f174283ad34d4ffafa998f499e4a8e0df725b7344a6",
+		"a role naming no image, synthesized from the observed hardware":                     "ac96f9db31215198c74244b62f8507768f24391f1795148eaf505042e957c19e",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "08df2de2c9cdd21bade33b9ffd747729594d1ce499d372c9d73880b053daecff",
+		"the prefill role of a two-role deployment":                                          "24e9afd8b31c7275286667243479be76bda47f80f71d2ff55d2e27e852732b21",
+		"the decode role of a two-role deployment":                                           "b9e5878c647878bb19ba98e5e325561219430a321e82ce1f27b23a6b929a17a5",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its

@@ -67,7 +67,7 @@ type ModelDeploymentConnectorInput struct {
 	// engine to such a pool; synthesis retains the first-offer rule for an existing binding.
 	//
 	// It feeds the store client alone. The point-to-point leg does not read it -- the two data
-	// planes declare separately, and vllmKVTransferProtocol says why. Empty is the no-store
+	// planes declare separately, and defaultKVTransferProtocol says why. Empty is the no-store
 	// shape, which the renderer refuses for its own reason.
 	Protocols []string
 
@@ -128,6 +128,12 @@ type ModelDeploymentConnectorRender struct {
 	// Duplication here is harmless because last-wins is well defined, so a user's value stands and
 	// no rejection follows.
 	DefaultedEnv []core.EnvVar
+
+	// DefaultedArgs are argument groups the operator supplies only where the role's own ExtraArgs
+	// name none of the same flag. Each group starts with its flag, and a named flag drops the
+	// whole group: last-wins would settle a valued flag, but not a switch that only turns
+	// something on, so the group is dropped rather than overridden.
+	DefaultedArgs [][]string
 
 	// Volumes and VolumeMounts carry the client configuration into the container. Both are empty for
 	// an engine whose vehicle is the environment, because mounting a file that engine never reads
@@ -339,7 +345,11 @@ var modelDeploymentOwnedKeys = map[string]struct {
 // design rests on cannot be measured at all. It is read by the transfer engine rather than by any
 // engine's config class, so it does not depend on which keys that class accepts. A user may turn
 // it off.
-var modelDeploymentDefaultedEnvNames = []string{"MC_TE_METRIC"}
+//
+// MC_FORCE_TCP pins a tcp point-to-point leg to TCP; the renderer emits it only where the pin
+// cannot strip a store in the same process of its fabric. The transfer engine reads it for presence alone, so a user's own
+// entry, whatever its value, asks for the same thing and is left in place.
+var modelDeploymentDefaultedEnvNames = []string{"MC_TE_METRIC", inject.MooncakeForceTCPEnv}
 
 // ModelDeploymentOwnsArg reports whether the named argument belongs to the operator on this engine.
 //
@@ -456,8 +466,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		// MC_TE_METRIC has no counterpart in the shared renderer and should not have one: that
 		// package renders what an engine needs to REACH the pool, while this variable is what this
 		// design needs to MEASURE it. It stays defaulted rather than owned, so a user's own value
-		// wins with no refusal.
-		DefaultedEnv:   []core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}},
+		// wins with no refusal. The renderer's own defaulted entries follow it on the same terms.
+		DefaultedEnv:   append([]core.EnvVar{{Name: "MC_TE_METRIC", Value: "1"}}, res.DefaultedEnv...),
+		DefaultedArgs:  res.DefaultedArgs,
 		Volumes:        res.Volumes,
 		VolumeMounts:   res.VolumeMounts,
 		PodAnnotations: res.PodAnnotations,
@@ -618,7 +629,9 @@ func ModelDeploymentEngineCommand(engine, model string) ([]string, error) {
 	case workercore.ModelDeploymentEngineVLLM:
 		return []string{"vllm", "serve", model}, nil
 	case workercore.ModelDeploymentEngineSGLang:
-		return []string{"python3", "-m", "sglang.launch_server", "--model-path", model}, nil
+		return []string{
+			"python3", "-m", "sglang.launch_server", "--model-path", model, "--enable-metrics",
+		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported engine %q", engine)
 	}

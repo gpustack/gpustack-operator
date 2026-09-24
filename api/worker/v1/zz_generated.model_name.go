@@ -156,6 +156,41 @@ func (in InstanceTypeList) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeployment) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelDeployment"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentCacheHit) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelDeploymentCacheHit"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelDeploymentList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentMetricGauge) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelDeploymentMetricGauge"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentMetricMissing) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelDeploymentMetricMissing"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentMetricWindow) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelDeploymentMetricWindow"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentMetrics) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelDeploymentMetrics"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in NFSInstancePersistentVolumeSource) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.NFSInstancePersistentVolumeSource"
 }

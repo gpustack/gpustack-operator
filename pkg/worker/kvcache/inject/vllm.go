@@ -29,27 +29,6 @@ const (
 	// VLLMMooncakeBootstrapPort is where a prefiller exposes Mooncake's transfer handshake.
 	VLLMMooncakeBootstrapPort int32 = 8998
 
-	// vllmKVTransferProtocol is the transport the prefill-to-decode leg is told to use when
-	// the caller declares none, and it is deliberately NOT resolved from the backend.
-	//
-	// KVCacheBackend.spec.transport defines the data plane the store MEMBERS run. This leg is
-	// engine to engine and never traverses the store, so the two planes have no business sharing
-	// one value -- yet they did: a pair with no store always rendered tcp even on fabric
-	// hardware, and a pair with one inherited the members' transport, an RDMA pool telling
-	// engine Pods to run a fabric this operator gives them no access to. The backend-level field
-	// is also set to become an inherited default once member groups can override it, which would
-	// leave this leg reading a value no group necessarily uses.
-	//
-	// No source can DISCOVER the right value: the accepted set is a property of the mooncake
-	// build inside the engine's own image, which this operator neither ships nor can inspect.
-	// The value is therefore DECLARED, and the declarer is the ModelDeployment's
-	// spec.kvTransfer.protocol. This constant is the default when that field is unset:
-	// "tcp" is the one answer honest from here -- the transport every mooncake build carries,
-	// and what a store-less pair has always rendered. A pair whose engines can speak a fabric
-	// protocol says so through the API; the gating rule below binds the declared value exactly
-	// as it binds this default.
-	vllmKVTransferProtocol = "tcp"
-
 	// vllmStoreConnector is the name vLLM PROPER registers for the Mooncake store
 	// (`kv_connector/factory.py:223-226`, read at v0.25.1).
 	//
@@ -207,6 +186,7 @@ func renderVLLM(in Input) (*Result, error) {
 	// The per-vendor leg arms below also fill what the leg itself needs mounted on the Pod.
 	var legVolumes []core.Volume
 	var legVolumeMounts []core.VolumeMount
+	var forceTCP bool
 	if hasStore {
 		connector, err := vllmConnectorFor(in.Engine)
 		if err != nil {
@@ -231,14 +211,14 @@ func renderVLLM(in Input) (*Result, error) {
 			// working engine into a broken one. A mismatch therefore still raises at startup, in
 			// the container that owns the fact. The rule binds the declared value and the default
 			// alike.
-			protocol := vllmKVTransferProtocol
-			if in.KVTransferProtocol != "" {
-				protocol = in.KVTransferProtocol
-			}
 			direct = vllmTransferConfig{
 				KVConnector: "MooncakeConnector", KVRole: kvRole,
-				KVConnectorExtraConfig: &vllmConnectorExtraConfig{MooncakeProtocol: protocol},
+				KVConnectorExtraConfig: &vllmConnectorExtraConfig{MooncakeProtocol: directLegProtocol(in)},
 			}
+			// The document's protocol key is a request the transfer engine does not read, so a
+			// tcp leg is also pinned through the one switch it does; directLegForcesTCP says when
+			// that is safe for the rest of the process.
+			forceTCP = directLegForcesTCP(in)
 		} else {
 			// The Ascend leg renders NO protocol key: its transfer engine is initialized with
 			// the literal "ascend" (`vllm_ascend/distributed/kv_transfer/utils/mooncake_transfer_engine.py:26`,
@@ -390,6 +370,11 @@ func renderVLLM(in Input) (*Result, error) {
 			Name: "mc-bootstrap", Protocol: core.ProtocolTCP,
 			ContainerPort: VLLMMooncakeBootstrapPort,
 		})
+	}
+	if forceTCP {
+		// Defaulted rather than owned: the transfer engine only checks that the variable is
+		// present, and a user who already sets it -- to any value -- has asked for the same thing.
+		result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{Name: MooncakeForceTCPEnv, Value: "1"})
 	}
 	if !in.PublishKVEvents {
 		return result, nil

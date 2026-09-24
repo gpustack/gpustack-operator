@@ -54,6 +54,17 @@ one adapter is ordinary RDMA practice — the isolation is the firmware's and th
 token count's. Taking a whole adapter exclusively removes it from every other tenant on the node and
 buys nothing the hardware was not already doing.
 
+For a managed `ModelDeployment`, set `spec.roles[].resources.interface` instead of naming the key
+in a Pod template. [Model Deployment Reference](../reference/model-deployment.md) states which key a
+count selects, and the mixed-fabric refusal. The field allocates a device to each rendered engine
+Pod and does not assert that the engine has transferred bytes.
+
+**An EFA leg also needs an EFA build of Mooncake in the engine image.** The default build, which
+the runner engine images carry, has no EFA transport: granted the device, the engine fails at
+startup because its transfer engine cannot initialize; without the grant, the transfer falls back
+to TCP. The EFA builds ship as `mooncake-transfer-engine-efa` and
+`mooncake-transfer-engine-efa-cuda13`, and need libfabric installed in the same image.
+
 ## How many endpoints beside N accelerators
 
 **Ask for one RDMA endpoint per accelerator the container requests.** A host built for collective

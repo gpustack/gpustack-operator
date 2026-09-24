@@ -1865,8 +1865,8 @@ message KVCacheBackendMember {
   // The count changes placement density: one member can use shared-token capacity, while a count
   // above one limits a node to its endpoint count divided by the count.
   //
-  // EFA advertises one resource per node, so an EFA count above one is unsatisfiable and the member
-  // stays Pending. That is the intended failure for a node that cannot serve the requested fabric.
+  // EFA capacity is node-specific. A count above the device plugin's advertised quantity leaves
+  // the member Pending, which makes an unavailable multi-interface request visible to the user.
   //
   // +k8s:validation:default=1
   // +k8s:validation:minimum=1
@@ -2898,6 +2898,7 @@ message KVCachePoolUsage {
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["md"],subResources=["status"]
 // +k8s:crd-gen:printcolumn:name="Engine",type="string",jsonPath=".spec.engine.name"
+// +k8s:crd-gen:printcolumn:name="Roles",type="string",jsonPath=".status.roleSummary"
 // +k8s:crd-gen:printcolumn:name="Phase",type="string",jsonPath=".status.phase"
 // +k8s:crd-gen:printcolumn:name="Endpoint",type="string",jsonPath=".status.endpoint"
 message ModelDeployment {
@@ -3103,11 +3104,18 @@ message ModelDeploymentKVTransfer {
   //     property of the mooncake build inside the engine's own image, which this operator
   //     neither ships nor can inspect: a HIP-compiled build makes "hip" a working point-to-point
   //     transport, and an enum here would hard-code one image's compile set onto another image's
-  //     connector. The value is passed through verbatim, and a value the engine build rejects
+  //     connector. vLLM receives the value verbatim, and a value the engine build rejects
   //     raises at engine startup, in the container that owns the fact.
   //   - UNSET RENDERS "tcp", the transport every mooncake build carries. The default lives in
   //     the renderer rather than in this schema, so the stored object holds exactly what was
   //     asked.
+  //   - "tcp" IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport
+  //     from the host's hardware and does not read the requested one. On vLLM the leg also gets
+  //     MC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's
+  //     transfer backend: "tcp" renders "mooncake_tcp", any other value renders "mooncake", and
+  //     the value itself is not passed through. Neither pin renders while the deployment's store
+  //     runs a transport other than tcp, because it is process-wide and would leave the store
+  //     client without its fabric; the leg then keeps the engine's own selection.
   //   - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted
   //     router-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind
   //     "vllm-router" -- the value is accepted and renders nothing. An Ascend pair behind
@@ -3392,7 +3400,7 @@ message ModelDeploymentRole {
   optional ModelDeploymentRoleTopology topology = 16;
 }
 
-// ModelDeploymentRoleResources is what one Pod of a role asks of an accelerator.
+// ModelDeploymentRoleResources is what one Pod of a role asks of accelerators and fabric interfaces.
 //
 // It deliberately mirrors the accelerator fields of InstanceResources — the same names, the same
 // meanings — rather than inventing a second vocabulary for one request, and it deliberately omits
@@ -3434,6 +3442,17 @@ message ModelDeploymentRoleResources {
   //
   // +k8s:validation:maxLength=64
   optional string acceleratorPartitionedProfile = 4;
+
+  // Interface is the number of fabric interfaces one role Pod requests, as a whole number.
+  // Unset or zero requests none. A positive count selects the device-plugin resource of the
+  // effective cache or direct-transfer protocol. A single RDMA interface uses the shared
+  // resource; multiple RDMA interfaces use the exclusive resource. EFA uses its own plugin
+  // resource. Conflicting effective protocols are refused rather than assigned one of the
+  // available device families. Admission enforces the whole number and the protocol rules,
+  // the same as for accelerator; the schema carries no bound of its own.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity interface = 5;
 }
 
 // ModelDeploymentRoleStatus is one role's observed readiness.
@@ -3903,6 +3922,11 @@ message ModelDeploymentStatus {
   // an empty object here cannot be told apart from a contract whose every string happens to be
   // empty.
   optional ModelDeploymentRouterStatus router = 7;
+
+  // RoleSummary is the current Ready count by role kind, for kubectl's Roles column. R counts
+  // managed router Pods; S, P, and D count server, prefill, and decode instances. A serving
+  // instance may contain several Pods, so the engine figures are not Pod counts.
+  optional string roleSummary = 8;
 }
 
 // TopologySource is the cluster-scoped topology inventory used to form Kueue hierarchies.

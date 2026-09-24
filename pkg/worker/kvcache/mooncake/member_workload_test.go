@@ -2093,7 +2093,7 @@ func TestFabricDeviceResource_NamesItsProtocols(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.want, fabricDeviceResource(c.protocol, c.interfaceCount),
+			assert.Equal(t, c.want, FabricDeviceResource(c.protocol, c.interfaceCount),
 				"a fallthrough here would hand an unnamed fabric the RDMA adapter it was never "+
 					"meant to hold, and nothing downstream would report the substitution")
 		})

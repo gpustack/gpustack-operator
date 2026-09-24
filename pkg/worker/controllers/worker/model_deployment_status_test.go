@@ -24,6 +24,68 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
 
+func TestModelDeploymentRoleSummary(t *testing.T) {
+	tests := []struct {
+		name        string
+		router      *workercore.ModelDeploymentRouter
+		routerReady int32
+		roles       []workercore.ModelDeploymentRoleStatus
+		want        string
+	}{
+		{
+			name:        "plain servers behind one router",
+			router:      &workercore.ModelDeploymentRouter{},
+			routerReady: 1,
+			roles: []workercore.ModelDeploymentRoleStatus{
+				{Kind: workercore.ModelDeploymentRoleKindServer, Desired: 2, Ready: 2},
+			},
+			want: "1R2S",
+		},
+		{
+			name:        "prefill and decode behind one router",
+			router:      &workercore.ModelDeploymentRouter{},
+			routerReady: 1,
+			roles: []workercore.ModelDeploymentRoleStatus{
+				{Kind: workercore.ModelDeploymentRoleKindDecode, Desired: 4, Ready: 4},
+				{Kind: workercore.ModelDeploymentRoleKindPrefill, Desired: 3, Ready: 3},
+			},
+			want: "1R3P4D",
+		},
+		{
+			name: "several server roles without a router",
+			roles: []workercore.ModelDeploymentRoleStatus{
+				{Kind: workercore.ModelDeploymentRoleKindServer, Desired: 2, Ready: 2},
+				{Kind: workercore.ModelDeploymentRoleKindServer, Desired: 3, Ready: 3},
+			},
+			want: "5S",
+		},
+		{
+			name:        "router replicas are counted",
+			router:      &workercore.ModelDeploymentRouter{Replicas: ptr.To(int32(2))},
+			routerReady: 2,
+			roles: []workercore.ModelDeploymentRoleStatus{
+				{Kind: workercore.ModelDeploymentRoleKindServer, Desired: 1, Ready: 1},
+			},
+			want: "2R1S",
+		},
+		{
+			name:   "unready roles remain visible as zero",
+			router: &workercore.ModelDeploymentRouter{},
+			roles: []workercore.ModelDeploymentRoleStatus{
+				{Kind: workercore.ModelDeploymentRoleKindPrefill, Desired: 3, Ready: 1},
+				{Kind: workercore.ModelDeploymentRoleKindDecode, Desired: 4},
+			},
+			want: "0R1P0D",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, modelDeploymentRoleSummary(tc.router, tc.routerReady, tc.roles))
+		})
+	}
+}
+
 // readyReplica builds a replica of the fixture deployment at the given ordinal, Ready or not.
 func readyReplica(md *workercore.ModelDeployment, ordinal int32, ready bool) *core.Pod {
 	pod := &core.Pod{}
@@ -146,6 +208,7 @@ func TestComputeModelDeploymentStatus_Roles(t *testing.T) {
 	require.Len(t, status.Roles, 1)
 	assert.Equal(t, "server", status.Roles[0].Name)
 	assert.Equal(t, int32(3), status.Roles[0].Desired, "desired comes from the spec, not the Pods")
+	assert.Equal(t, "1S", status.RoleSummary)
 	assert.Equal(t, int32(1), status.Roles[0].Ready)
 	assert.False(t, status.Roles[0].Unmanaged)
 }
@@ -1010,6 +1073,7 @@ func TestSyncModelDeploymentStatus_RebuiltWholesale(t *testing.T) {
 		Phase:        ModelDeploymentPhaseReady,
 		PhaseMessage: "a message from a pass that is over",
 		Endpoint:     "http://stale.elsewhere.svc:1234",
+		RoleSummary:  "9S",
 		Roles: []workercore.ModelDeploymentRoleStatus{
 			{Name: "server", Desired: 9, Ready: 9},
 		},
@@ -1027,6 +1091,7 @@ func TestSyncModelDeploymentStatus_RebuiltWholesale(t *testing.T) {
 	assert.Equal(t, "http://qwen.team-a.svc:8000", stored.Status.Endpoint)
 	require.Len(t, stored.Status.Roles, 1)
 	assert.Equal(t, int32(2), stored.Status.Roles[0].Desired, "the stale 9 must not survive")
+	assert.Equal(t, "1S", stored.Status.RoleSummary)
 	assert.Equal(t, int32(1), stored.Status.Roles[0].Ready)
 	assert.Equal(t, int32(0), stored.Status.Roles[0].QuotaReserved,
 		"an observed zero, rebuilt like every other figure rather than carried over")

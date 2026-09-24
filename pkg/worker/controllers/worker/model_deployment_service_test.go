@@ -534,6 +534,9 @@ func TestModelDeploymentEndpointReadsEveryFlagTheEngineGets(t *testing.T) {
 			require.NotEmpty(t, res.Args, "engine %q role %q renders no argument at all", engine, role)
 
 			operatorArgs = append(operatorArgs, res.Args...)
+			for _, group := range res.DefaultedArgs {
+				operatorArgs = append(operatorArgs, group...)
+			}
 			rendered++
 		}
 	}

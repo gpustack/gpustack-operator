@@ -2574,7 +2574,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																			XListType: ptr.To[string]("map"),
 																		},
 																		"fabricInterfaceCount": {
-																			Description: "FabricInterfaceCount is how many distinct host-fabric interfaces each member requires.\nLeft unset, it defaults to one. An RDMA count of one asks for a shared resource; a count above\none asks for exclusive resources, because a second shared token can be a second claim on the\nsame endpoint and would otherwise satisfy a multi-interface request without an error.\nThe count changes placement density: one member can use shared-token capacity, while a count\nabove one limits a node to its endpoint count divided by the count.\nEFA advertises one resource per node, so an EFA count above one is unsatisfiable and the member\nstays Pending. That is the intended failure for a node that cannot serve the requested fabric.",
+																			Description: "FabricInterfaceCount is how many distinct host-fabric interfaces each member requires.\nLeft unset, it defaults to one. An RDMA count of one asks for a shared resource; a count above\none asks for exclusive resources, because a second shared token can be a second claim on the\nsame endpoint and would otherwise satisfy a multi-interface request without an error.\nThe count changes placement density: one member can use shared-token capacity, while a count\nabove one limits a node to its endpoint count divided by the count.\nEFA capacity is node-specific. A count above the device plugin's advertised quantity leaves\nthe member Pending, which makes an unavailable multi-interface request visible to the user.",
 																			Type:        "integer",
 																			Format:      "int32",
 																			Default: &v1.JSON{
@@ -4219,7 +4219,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"protocol": {
-													Description: "Protocol is the transport both ends of the leg are told to use, in the mooncake\nconfiguration's own spelling, e.g. \"tcp\" or \"rdma\".\n- IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\nend, so a per-role field could only express a contradiction -- two ends naming different\nvalues for one connection, which fails at transfer time rather than at admission.\n- THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a\nproperty of the mooncake build inside the engine's own image, which this operator\nneither ships nor can inspect: a HIP-compiled build makes \"hip\" a working point-to-point\ntransport, and an enum here would hard-code one image's compile set onto another image's\nconnector. The value is passed through verbatim, and a value the engine build rejects\nraises at engine startup, in the container that owns the fact.\n- UNSET RENDERS \"tcp\", the transport every mooncake build carries. The default lives in\nthe renderer rather than in this schema, so the stored object holds exactly what was\nasked.\n- IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted\nrouter-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind\n\"vllm-router\" -- the value is accepted and renders nothing. An Ascend pair behind\n\"llm-d-router\" renders the leg but not this value: that engine's transfer leg hardcodes\nits transport, so the declared protocol has no key to land in. Each silence is stated\nhere because an accepted field that quietly does nothing is a promise broken quietly.\n- IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\nargv, so a change rebuilds every Kueue pod group of the deployment. With roles split\nacross InstanceTypes the groups rebuild independently, and a mixed-protocol window\nbetween a prefiller and a decoder exists until both converge -- the same window an\nengine version edit already opens.",
+													Description: "Protocol is the transport both ends of the leg are told to use, in the mooncake\nconfiguration's own spelling, e.g. \"tcp\" or \"rdma\".\n- IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\nend, so a per-role field could only express a contradiction -- two ends naming different\nvalues for one connection, which fails at transfer time rather than at admission.\n- THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a\nproperty of the mooncake build inside the engine's own image, which this operator\nneither ships nor can inspect: a HIP-compiled build makes \"hip\" a working point-to-point\ntransport, and an enum here would hard-code one image's compile set onto another image's\nconnector. vLLM receives the value verbatim, and a value the engine build rejects\nraises at engine startup, in the container that owns the fact.\n- UNSET RENDERS \"tcp\", the transport every mooncake build carries. The default lives in\nthe renderer rather than in this schema, so the stored object holds exactly what was\nasked.\n- \"tcp\" IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport\nfrom the host's hardware and does not read the requested one. On vLLM the leg also gets\nMC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's\ntransfer backend: \"tcp\" renders \"mooncake_tcp\", any other value renders \"mooncake\", and\nthe value itself is not passed through. Neither pin renders while the deployment's store\nruns a transport other than tcp, because it is process-wide and would leave the store\nclient without its fabric; the leg then keeps the engine's own selection.\n- IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted\nrouter-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind\n\"vllm-router\" -- the value is accepted and renders nothing. An Ascend pair behind\n\"llm-d-router\" renders the leg but not this value: that engine's transfer leg hardcodes\nits transport, so the declared protocol has no key to land in. Each silence is stated\nhere because an accepted field that quietly does nothing is a promise broken quietly.\n- IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\nargv, so a change rebuilds every Kueue pod group of the deployment. With roles split\nacross InstanceTypes the groups rebuild independently, and a mixed-protocol window\nbetween a prefiller and a decoder exists until both converge -- the same window an\nengine version edit already opens.",
 													Type:        "string",
 													MaxLength:   ptr.To[int64](64),
 												},
@@ -4539,6 +4539,20 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																	Maximum:     ptr.To[float64](100),
 																	Minimum:     ptr.To[float64](0),
 																},
+																"interface": {
+																	Description: "Interface is the number of fabric interfaces one role Pod requests, as a whole number.\nUnset or zero requests none. A positive count selects the device-plugin resource of the\neffective cache or direct-transfer protocol. A single RDMA interface uses the shared\nresource; multiple RDMA interfaces use the exclusive resource. EFA uses its own plugin\nresource. Conflicting effective protocols are refused rather than assigned one of the\navailable device families. Admission enforces the whole number and the protocol rules,\nthe same as for accelerator; the schema carries no bound of its own.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
 															},
 															Nullable: true,
 														},
@@ -4785,6 +4799,10 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											Description: "PhaseMessage carries the reason for the phase.",
 											Type:        "string",
 										},
+										"roleSummary": {
+											Description: "RoleSummary is the current Ready count by role kind, for kubectl's Roles column. R counts\nmanaged router Pods; S, P, and D count server, prefill, and decode instances. A serving\ninstance may contain several Pods, so the engine figures are not Pod counts.",
+											Type:        "string",
+										},
 										"roles": {
 											Description: "Roles is one entry per declared role.",
 											Type:        "array",
@@ -4996,6 +5014,14 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 							Description: "",
 							Priority:    0,
 							JSONPath:    ".spec.engine.name",
+						},
+						{
+							Name:        "Roles",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.roleSummary",
 						},
 						{
 							Name:        "Phase",

@@ -144,8 +144,10 @@ type Connection struct {
 	// API spelling by the caller. It is backend-wide rather than per-node: one member group renders
 	// one DaemonSet, so a single Pod template cannot carry a different transport per node.
 	//
-	// It feeds the store client alone. The point-to-point leg does not read it -- the two data
-	// planes declare separately, and vllmKVTransferProtocol says why.
+	// It feeds the store client alone. The point-to-point leg does not take its transport from it
+	// -- the two data planes declare separately, and defaultKVTransferProtocol says why; the leg
+	// reads it only to learn whether pinning itself to tcp would strip the store of its fabric,
+	// and directLegForcesTCP says why.
 	Protocol string
 }
 
@@ -221,10 +223,12 @@ type Input struct {
 	KVTransfer bool
 
 	// KVTransferProtocol is the transport the point-to-point leg is told to use, declared by
-	// the caller. Empty selects the renderer's default. It is passed through verbatim: the
-	// accepted set is a property of the mooncake build inside the engine's own image, which this
-	// operator neither ships nor can inspect, so gating it here would hard-code one image's
-	// compile set onto another image's connector. It is read only when KVTransfer is set.
+	// the caller. Empty selects the renderer's default. It is not gated: the accepted set is a
+	// property of the mooncake build inside the engine's own image, which this operator neither
+	// ships nor can inspect, so gating it here would hard-code one image's compile set onto
+	// another image's connector. The vLLM family reads it only when KVTransfer is set; SGLang
+	// reads it on a disaggregated half, whose split follows the pair rather than the flag, and
+	// maps it onto its transfer backend rather than passing it through.
 	KVTransferProtocol string
 
 	// Parallelism is the pair's declared parallel shape, resolved by the caller off each
@@ -240,6 +244,63 @@ type Input struct {
 	// KVEventsHost is the dialable host paired with the publisher's fixed ports. The engine binds a
 	// wildcard address, which cannot be published to a consumer as an endpoint.
 	KVEventsHost string
+}
+
+// defaultKVTransferProtocol is the transport the prefill-to-decode leg is told to use when the
+// caller declares none, and it is deliberately NOT resolved from the backend. Both engines'
+// renderers read it through directLegProtocol, so the default is defined once.
+//
+// KVCacheBackend.spec.transport defines the data plane the store MEMBERS run. This leg is engine
+// to engine and never traverses the store, so the two planes have no business sharing one value
+// -- yet they did: a pair with no store always rendered tcp even on fabric hardware, and a pair
+// with one inherited the members' transport, an RDMA pool telling engine Pods to run a fabric
+// this operator gives them no access to. The backend-level field is also set to become an
+// inherited default once member groups can override it, which would leave this leg reading a
+// value no group necessarily uses.
+//
+// No source can DISCOVER the right value: the accepted set is a property of the mooncake build
+// inside the engine's own image, which this operator neither ships nor can inspect. The value is
+// therefore DECLARED, and the declarer is the ModelDeployment's spec.kvTransfer.protocol. This
+// constant is the default when that field is unset: "tcp" is the one answer honest from here --
+// the transport every mooncake build carries, and what a store-less pair has always rendered. A
+// pair whose engines can speak a fabric protocol says so through the API; the vLLM renderer's
+// gating rule binds the declared value exactly as it binds this default.
+const defaultKVTransferProtocol = "tcp"
+
+// directLegProtocol is the transport the point-to-point leg is told to use: the declared value,
+// or the default when none was declared.
+func directLegProtocol(in Input) string {
+	if in.KVTransferProtocol != "" {
+		return in.KVTransferProtocol
+	}
+
+	return defaultKVTransferProtocol
+}
+
+// MooncakeForceTCPEnv is the variable that makes the Mooncake transfer engine install TCP alone. It
+// is read by the transfer engine rather than by any engine's config class, and only for presence.
+const MooncakeForceTCPEnv = "MC_FORCE_TCP"
+
+// directLegForcesTCP reports whether a leg that resolved to tcp is also PINNED to it, beyond
+// being told so.
+//
+// Telling is not enough: the Mooncake transfer engine selects its transport from the host's
+// hardware and does not read the connector's protocol key, so on a host with no RDMA device a
+// build with multi-node NVLink compiled in installs NVLink even between hosts that have no NVLink
+// path, and the leg moves nothing. The one switch it does read is MooncakeForceTCPEnv, whose
+// mere presence makes the engine install TCP alone.
+//
+// That switch is PROCESS-WIDE: it returns early from the transfer engine's init, and the store
+// client in the same process initializes through that same function. So the leg is pinned only
+// when every transfer engine in the process wants tcp -- a store whose transport is not tcp would
+// otherwise be left without the fabric it was given. With such a store the leg keeps the engine's
+// own selection.
+func directLegForcesTCP(in Input) bool {
+	if directLegProtocol(in) != "tcp" {
+		return false
+	}
+
+	return in.Connection.MasterAddress == "" || in.Connection.Protocol == "tcp"
 }
 
 // Reason classifies a refusal. Callers branch on it; the message that accompanies it is for a human

@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/ptr"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -342,6 +344,23 @@ func TestSynthesizeModelDeploymentConnector_KVTransfer(t *testing.T) {
 	}, got.Ports)
 }
 
+func TestSynthesizeModelDeploymentConnector_SGLangPureTransfer(t *testing.T) {
+	in := connectorInputForKind(
+		workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA,
+		workercore.ModelDeploymentRoleKindPrefill)
+	in.Domain = ""
+	in.MasterServerAddress = ""
+	in.Protocols = nil
+	in.KVTransfer = true
+
+	got, err := SynthesizeModelDeploymentConnector(in)
+	require.NoError(t, err)
+	assert.Empty(t, got.Env)
+	assert.NotContains(t, got.Args, "--hicache-storage-backend")
+	assert.Contains(t, got.Args, "--disaggregation-mode")
+	assert.True(t, got.KVTransfer)
+}
+
 // TestSynthesizeModelDeploymentConnector_KVTransferProtocol pins the thread from the
 // deployment's declaration to the rendered leg: the value passes through unchanged, and the
 // unset case -- the renderer's default -- is pinned by the test above.
@@ -363,6 +382,74 @@ func TestSynthesizeModelDeploymentConnector_KVTransferProtocol(t *testing.T) {
 			{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}
 		]}
 	}`, got.Args[1])
+}
+
+// TestSynthesizeModelDeploymentConnector_ForcesTheTCPLeg pins the TCP pin through synthesis: it
+// arrives DEFAULTED, after the metrics switch, on a native vLLM half whose leg resolves to tcp,
+// and on nothing else. The rdma-store row is the narrowing and the tcp-store row its baseline.
+func TestSynthesizeModelDeploymentConnector_ForcesTheTCPLeg(t *testing.T) {
+	metrics := core.EnvVar{Name: "MC_TE_METRIC", Value: "1"}
+	pin := core.EnvVar{Name: "MC_FORCE_TCP", Value: "1"}
+	for _, tc := range []struct {
+		name         string
+		manufacturer string
+		kind         workercore.ModelDeploymentRoleKind
+		protocols    []string
+		direct       string
+		transfer     bool
+		want         []core.EnvVar
+	}{
+		{
+			name: "prefill without a store", kind: workercore.ModelDeploymentRoleKindPrefill,
+			transfer: true, want: []core.EnvVar{metrics, pin},
+		},
+		{
+			name: "decode without a store", kind: workercore.ModelDeploymentRoleKindDecode,
+			transfer: true, want: []core.EnvVar{metrics, pin},
+		},
+		{
+			name: "prefill with a tcp store", kind: workercore.ModelDeploymentRoleKindPrefill,
+			protocols: []string{"tcp"}, transfer: true, want: []core.EnvVar{metrics, pin},
+		},
+		{
+			name: "prefill with an rdma store", kind: workercore.ModelDeploymentRoleKindPrefill,
+			protocols: []string{"rdma"}, transfer: true, want: []core.EnvVar{metrics},
+		},
+		{
+			name: "decode declaring rdma", kind: workercore.ModelDeploymentRoleKindDecode,
+			direct: "rdma", transfer: true, want: []core.EnvVar{metrics},
+		},
+		{
+			name: "server with a store", kind: workercore.ModelDeploymentRoleKindServer,
+			protocols: []string{"tcp"}, want: []core.EnvVar{metrics},
+		},
+		{
+			name: "prefill on ascend", manufacturer: nodefeature.ManufacturerAscend,
+			kind: workercore.ModelDeploymentRoleKindPrefill, transfer: true, want: []core.EnvVar{metrics},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manufacturer := tc.manufacturer
+			if manufacturer == "" {
+				manufacturer = nodefeature.ManufacturerNVIDIA
+			}
+			in := connectorInputForKind(workercore.ModelDeploymentEngineVLLM, manufacturer, tc.kind)
+			in.Protocols = tc.protocols
+			if len(tc.protocols) == 0 {
+				in.Domain = ""
+				in.MasterServerAddress = ""
+			}
+			in.KVTransfer = tc.transfer
+			in.KVTransferProtocol = tc.direct
+
+			got, err := SynthesizeModelDeploymentConnector(in)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.DefaultedEnv)
+			for _, env := range got.Env {
+				assert.NotEqual(t, "MC_FORCE_TCP", env.Name, "the pin must never arrive as owned")
+			}
+		})
+	}
 }
 
 // connectorPredicateDeployment builds a routed deployment with one role of the given kind.
@@ -782,6 +869,80 @@ func TestModelDeploymentConnector_RoutedPairWithoutKVCacheUsesKVTransferOnly(t *
 		"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
 		"kv_connector_extra_config":{"mooncake_protocol":"tcp"}
 	}`, byRole["decode"])
+}
+
+func TestModelDeploymentConnector_PureDirectEFARequestsDevice(t *testing.T) {
+	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.KVCache = nil
+		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "efa"}
+		for i := range md.Spec.Roles {
+			md.Spec.Roles[i].Resources = &workercore.ModelDeploymentRoleResources{
+				Interface: ptr.To(resource.MustParse("1")),
+			}
+		}
+	})
+	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	for _, pod := range replicaPods(t, cli) {
+		qtyEqual(t, qty("1"), pod.Spec.Containers[0].Resources.Limits["vpc.amazonaws.com/efa"],
+			"pure direct transfer grants EFA to each engine role")
+	}
+}
+
+func TestModelDeploymentConnector_CacheFabricReachesPod(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol string
+		count    string
+		resource core.ResourceName
+	}{
+		{name: "one RDMA", protocol: "RDMA", count: "1", resource: "device.gpustack.ai/rdma.shared"},
+		{name: "two RDMA", protocol: "RDMA", count: "2", resource: "device.gpustack.ai/rdma"},
+		{name: "two EFA", protocol: "EFA", count: "2", resource: "vpc.amazonaws.com/efa"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					Interface: ptr.To(resource.MustParse(tc.count)),
+				}
+			})
+			backend := newRenderBackend()
+			backend.Spec.Transport.Protocol = tc.protocol
+			cli := newModelDeploymentClient(md, newRenderInstanceType(),
+				newRenderBinding(), newRenderPool(), backend)
+			_, err := reconcileModelDeployment(t, cli)
+			require.NoError(t, err)
+			pods := replicaPods(t, cli)
+			require.NotEmpty(t, pods)
+			for i := range pods {
+				qtyEqual(t, qty(tc.count), pods[i].Spec.Containers[0].Resources.Limits[tc.resource],
+					"the resource is read from the rendered engine Pod")
+			}
+		})
+	}
+}
+
+func TestModelDeploymentConnector_CacheFabricBeforeEndpoint(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+			Interface: ptr.To(resource.MustParse("1")),
+		}
+	})
+	pool := newRenderPool()
+	pool.Status.ClientEndpoint = ""
+	backend := newRenderBackend()
+	backend.Spec.Transport.Protocol = "RDMA"
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), newRenderBinding(), pool, backend)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	pods := replicaPods(t, cli)
+	require.NotEmpty(t, pods)
+	for i := range pods {
+		qtyEqual(t, qty("1"), pods[i].Spec.Containers[0].Resources.Limits["device.gpustack.ai/rdma.shared"],
+			"the backend declaration selects the resource before its endpoint is ready")
+	}
 }
 
 // ascendRenderInstanceType is the render fixture's InstanceType with the pool's vendor flipped to
@@ -1291,18 +1452,28 @@ func TestModelDeploymentOwnedAndDefaultedCannotDisagree(t *testing.T) {
 	for _, c := range carriers {
 		for _, kind := range kinds {
 			t.Run(c.engine+"_on_"+c.manufacturer+"_as_"+string(kind), func(t *testing.T) {
-				assertOwnedAndDefaultedAgree(t, c.engine, c.manufacturer, kind)
+				assertOwnedAndDefaultedAgree(t, connectorInputForKind(c.engine, c.manufacturer, kind))
 			})
 		}
 	}
+
+	// THE TRANSFER LEG IS AN AXIS TOO: the keys it renders -- the bootstrap port, the TCP pin --
+	// appear on no store-only render above, so without these rows the table could fail to list
+	// them while every row stays green.
+	for _, kind := range kinds[1:] {
+		t.Run("vllm_transfer_leg_as_"+string(kind), func(t *testing.T) {
+			in := connectorInputForKind(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, kind)
+			in.KVTransfer = true
+			assertOwnedAndDefaultedAgree(t, in)
+		})
+	}
 }
 
-func assertOwnedAndDefaultedAgree(
-	t *testing.T, engine, manufacturer string, kind workercore.ModelDeploymentRoleKind,
-) {
+func assertOwnedAndDefaultedAgree(t *testing.T, in ModelDeploymentConnectorInput) {
 	t.Helper()
 
-	got, err := SynthesizeModelDeploymentConnector(connectorInputForKind(engine, manufacturer, kind))
+	engine := in.Engine
+	got, err := SynthesizeModelDeploymentConnector(in)
 	require.NoError(t, err)
 
 	for _, arg := range got.Args {
@@ -1319,6 +1490,11 @@ func assertOwnedAndDefaultedAgree(
 			"the renderer emits %q as owned but the table does not own it", env.Name)
 		assert.False(t, ModelDeploymentDefaultsEnv(env.Name),
 			"%q is both owned and defaulted, so a user supplying it is both refused and honoured", env.Name)
+	}
+
+	for _, group := range got.DefaultedArgs {
+		assert.False(t, ModelDeploymentOwnsArg(engine, group[0]),
+			"%q is defaulted and owned, so a user supplying it is both refused and honoured", group[0])
 	}
 
 	for _, env := range got.DefaultedEnv {
@@ -1367,6 +1543,7 @@ func TestModelDeploymentEngineCommand(t *testing.T) {
 			want: []string{
 				"python3", "-m", "sglang.launch_server",
 				"--model-path", "Qwen/Qwen2.5-72B-Instruct",
+				"--enable-metrics",
 			},
 		},
 		{

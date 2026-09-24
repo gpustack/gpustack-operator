@@ -335,3 +335,41 @@ func (*InstanceTypeFlavor) Categories() []string {
 		"gpustack",
 	}
 }
+
+var _ rest.Scoper = (*ModelDeployment)(nil)
+
+func (*ModelDeployment) NamespaceScoped() bool {
+	return true
+}
+
+var _ rest.KindProvider = (*ModelDeployment)(nil)
+
+func (*ModelDeployment) Kind() string {
+	return "ModelDeployment"
+}
+
+var _ rest.SingularNameProvider = (*ModelDeployment)(nil)
+
+func (*ModelDeployment) GetSingularName() string {
+	return "modeldeployment"
+}
+
+var _ rest.ShortNamesProvider = (*ModelDeployment)(nil)
+
+func (*ModelDeployment) ShortNames() []string {
+	return []string{}
+}
+
+var _ rest.CategoriesProvider = (*ModelDeployment)(nil)
+
+func (*ModelDeployment) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
+var _ WithStatusSubResource = (*ModelDeployment)(nil)
+
+func (in *ModelDeployment) CopyStatusTo(out runtime.Object) {
+	out.(*ModelDeployment).Status = in.Status
+}

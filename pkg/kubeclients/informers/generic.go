@@ -286,6 +286,8 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().InstanceTypes().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("instancetypeflavors"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().InstanceTypeFlavors().Informer()}, nil
+	case workerv1.SchemeGroupVersion.WithResource("modeldeployments"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().ModelDeployments().Informer()}, nil
 
 		// Group=worker.gpustack.ai, Version=v1alpha1
 	case workerv1alpha1.SchemeGroupVersion.WithResource("devices"):

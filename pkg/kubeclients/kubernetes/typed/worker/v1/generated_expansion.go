@@ -22,3 +22,5 @@ type InstanceSSHPublicKeyExpansion interface{}
 type InstanceTypeExpansion interface{}
 
 type InstanceTypeFlavorExpansion interface{}
+
+type ModelDeploymentExpansion interface{}

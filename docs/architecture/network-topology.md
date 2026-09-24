@@ -172,6 +172,10 @@ manufacturer — a network interface belongs to the node rather than to a vendor
 | `device.gpustack.ai/rdma.shared` | shared | one concurrent use of one interface | 64 |
 | `device.gpustack.ai/rdma.partitioned` | partitioned | one SR-IOV virtual function | 1 per virtual function |
 
+EFA is allocated under none of these keys. AWS's EFA device plugin advertises its own
+`vpc.amazonaws.com/efa` key, and an EFA allocation follows that plugin's capacity rather than
+`Devices.spec.interfaces[]`.
+
 The mode is **read off the node, never chosen** (`pkg/deviceplugin/rdma_endpoint.go`):
 
 | the interface is… | it serves | its endpoints are |

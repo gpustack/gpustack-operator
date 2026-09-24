@@ -147,8 +147,25 @@ func (r *PodKVCacheWebhook) injectPod(pod *core.Pod, res *resolution, out *injec
 			ctr.Env = append(ctr.Env, core.EnvVar{Name: name, Value: "1"})
 		}
 	}
+	// The renderer's defaults yield to the container on the same terms as the two above: a
+	// declaration of the same name, or an argument naming the same flag, is the workload's own
+	// answer. The container's arguments are read BEFORE the rendered ones are appended, so only
+	// what the workload wrote can drop a default.
+	for _, e := range out.DefaultedEnv {
+		if !deviceplugin.ContainerEnvDeclared(ctr, e.Name) {
+			ctr.Env = append(ctr.Env, e)
+		}
+	}
+	var defaultedArgs []string
+	for _, group := range out.DefaultedArgs {
+		if hasFlag(ctr.Args, group[0]) || hasFlag(ctr.Command, group[0]) {
+			continue
+		}
+		defaultedArgs = append(defaultedArgs, group...)
+	}
 
 	ctr.Args = append(ctr.Args, out.Args...)
+	ctr.Args = append(ctr.Args, defaultedArgs...)
 	ctr.VolumeMounts = append(ctr.VolumeMounts, out.VolumeMounts...)
 	pod.Spec.Volumes = append(pod.Spec.Volumes, out.Volumes...)
 

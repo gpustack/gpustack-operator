@@ -1,0 +1,5 @@
+# TYPE smg_router_requests_total counter
+smg_router_requests_total{router_type="http",backend_type="regular",connection_mode="http",model="m",endpoint="chat",streaming="false"} 1
+# TYPE smg_http_responses_total counter
+smg_http_responses_total{status_code="503",error_code="no_available_workers"} 1
+smg_http_responses_total{status_code="200",error_code=""} 1

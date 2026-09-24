@@ -209,21 +209,60 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	if err != nil {
 		return nil, err
 	}
+	holder.Status.RoleSummary = modelDeploymentRoleSummary(md.Spec.Router, routerReady, holder.Status.Roles)
 
-	deriveModelDeploymentPhase(md, holder, routerReady)
+	deriveModelDeploymentPhase(md, holder, routerReady > 0)
 
 	return &holder.Status, nil
+}
+
+func modelDeploymentRoleSummary(
+	router *workercore.ModelDeploymentRouter, routerReady int32,
+	roles []workercore.ModelDeploymentRoleStatus,
+) string {
+	var summary strings.Builder
+	if router != nil {
+		fmt.Fprintf(&summary, "%dR", routerReady)
+	}
+
+	counts := map[workercore.ModelDeploymentRoleKind]int32{}
+	var other strings.Builder
+	for _, role := range roles {
+		switch role.Kind {
+		case workercore.ModelDeploymentRoleKindServer,
+			workercore.ModelDeploymentRoleKindPrefill,
+			workercore.ModelDeploymentRoleKindDecode:
+			counts[role.Kind] += role.Ready
+		default:
+			fmt.Fprintf(&other, "%d%s", role.Ready, strings.ToUpper(string(role.Kind)))
+		}
+	}
+	for _, kind := range []struct {
+		name workercore.ModelDeploymentRoleKind
+		code string
+	}{
+		{workercore.ModelDeploymentRoleKindServer, "S"},
+		{workercore.ModelDeploymentRoleKindPrefill, "P"},
+		{workercore.ModelDeploymentRoleKindDecode, "D"},
+	} {
+		if count, declared := counts[kind.name]; declared {
+			fmt.Fprintf(&summary, "%d%s", count, kind.code)
+		}
+	}
+	summary.WriteString(other.String())
+
+	return summary.String()
 }
 
 func (r *ModelDeploymentReconciler) observeModelDeploymentRouter(
 	ctx context.Context, md *workercore.ModelDeployment, domain *modelDeploymentDomain,
 	holder *workercore.ModelDeployment, manufacturers map[string]string,
-) (bool, error) {
+) (int32, error) {
 	if md.Spec.Router == nil {
 		holder.Status.Router = nil
 		ModelDeploymentConditionRouterReady.True(holder,
 			modelDeploymentReasonRouterNotApplicable, "the deployment declares no router")
-		return true, nil
+		return 0, nil
 	}
 
 	objects, err := renderModelDeploymentRouterObjects(ctx, md, manufacturers)
@@ -234,14 +273,14 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRouter(
 		// the pass is still retried.
 		ModelDeploymentConditionRouterReady.False(holder,
 			modelDeploymentReasonRouterRenderFailed, err.Error())
-		return false, nil
+		return 0, nil
 	}
 	poolEndpoint := ""
 	if domain != nil && domain.KVCache != nil {
 		pool := new(workercore.KVCachePool)
 		err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: domain.KVCache.Pool}, pool)
 		if err != nil && !kerrors.IsNotFound(err) {
-			return false, err
+			return 0, err
 		}
 		if err == nil {
 			poolEndpoint = pool.Status.ClientEndpoint
@@ -255,23 +294,23 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRouter(
 	if kerrors.IsNotFound(err) {
 		ModelDeploymentConditionRouterReady.Unknown(holder,
 			modelDeploymentReasonRouterNotDeployed, "the router's Deployment does not exist yet")
-		return false, nil
+		return 0, nil
 	}
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	if deployment.Status.ReadyReplicas == 0 {
 		ModelDeploymentConditionRouterReady.False(holder,
 			modelDeploymentReasonRouterNoReadyReplica,
 			fmt.Sprintf("router %q has no ready replicas", md.Spec.Router.Name))
-		return false, nil
+		return 0, nil
 	}
 
 	ModelDeploymentConditionRouterReady.True(holder,
 		modelDeploymentReasonRouterReady,
 		fmt.Sprintf("router %q has %d ready replicas", md.Spec.Router.Name, deployment.Status.ReadyReplicas))
 	holder.Status.Endpoint = status.Endpoint
-	return true, nil
+	return deployment.Status.ReadyReplicas, nil
 }
 
 func projectModelDeploymentRouterStatus(

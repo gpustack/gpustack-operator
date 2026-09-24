@@ -2360,6 +2360,11 @@ func (in *ModelDeploymentRoleResources) DeepCopyInto(out *ModelDeploymentRoleRes
 		x := (*in).DeepCopy()
 		*out = &x
 	}
+	if in.Interface != nil {
+		in, out := &in.Interface, &out.Interface
+		x := (*in).DeepCopy()
+		*out = &x
+	}
 	return
 }
 

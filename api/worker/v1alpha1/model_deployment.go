@@ -21,6 +21,7 @@ import (
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["md"],subResources=["status"]
 // +k8s:crd-gen:printcolumn:name="Engine",type="string",jsonPath=".spec.engine.name"
+// +k8s:crd-gen:printcolumn:name="Roles",type="string",jsonPath=".status.roleSummary"
 // +k8s:crd-gen:printcolumn:name="Phase",type="string",jsonPath=".status.phase"
 // +k8s:crd-gen:printcolumn:name="Endpoint",type="string",jsonPath=".status.endpoint"
 type ModelDeployment struct {
@@ -245,11 +246,18 @@ type ModelDeploymentKVTransfer struct {
 	//     property of the mooncake build inside the engine's own image, which this operator
 	//     neither ships nor can inspect: a HIP-compiled build makes "hip" a working point-to-point
 	//     transport, and an enum here would hard-code one image's compile set onto another image's
-	//     connector. The value is passed through verbatim, and a value the engine build rejects
+	//     connector. vLLM receives the value verbatim, and a value the engine build rejects
 	//     raises at engine startup, in the container that owns the fact.
 	//   - UNSET RENDERS "tcp", the transport every mooncake build carries. The default lives in
 	//     the renderer rather than in this schema, so the stored object holds exactly what was
 	//     asked.
+	//   - "tcp" IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport
+	//     from the host's hardware and does not read the requested one. On vLLM the leg also gets
+	//     MC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's
+	//     transfer backend: "tcp" renders "mooncake_tcp", any other value renders "mooncake", and
+	//     the value itself is not passed through. Neither pin renders while the deployment's store
+	//     runs a transport other than tcp, because it is process-wide and would leave the store
+	//     client without its fabric; the leg then keeps the engine's own selection.
 	//   - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted
 	//     router-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind
 	//     "vllm-router" -- the value is accepted and renders nothing. An Ascend pair behind
@@ -592,7 +600,7 @@ type ModelDeploymentAdditionalVolume struct {
 	HostPath *core.HostPathVolumeSource `json:"hostPath,omitempty" protobuf:"bytes,6,opt,name=hostPath"`
 }
 
-// ModelDeploymentRoleResources is what one Pod of a role asks of an accelerator.
+// ModelDeploymentRoleResources is what one Pod of a role asks of accelerators and fabric interfaces.
 //
 // It deliberately mirrors the accelerator fields of InstanceResources — the same names, the same
 // meanings — rather than inventing a second vocabulary for one request, and it deliberately omits
@@ -634,6 +642,17 @@ type ModelDeploymentRoleResources struct {
 	//
 	// +k8s:validation:maxLength=64
 	AcceleratorPartitionedProfile string `json:"acceleratorPartitionedProfile,omitempty" protobuf:"bytes,4,opt,name=acceleratorPartitionedProfile"` // nolint: lll
+
+	// Interface is the number of fabric interfaces one role Pod requests, as a whole number.
+	// Unset or zero requests none. A positive count selects the device-plugin resource of the
+	// effective cache or direct-transfer protocol. A single RDMA interface uses the shared
+	// resource; multiple RDMA interfaces use the exclusive resource. EFA uses its own plugin
+	// resource. Conflicting effective protocols are refused rather than assigned one of the
+	// available device families. Admission enforces the whole number and the protocol rules,
+	// the same as for accelerator; the schema carries no bound of its own.
+	//
+	// +optional
+	Interface *resource.Quantity `json:"interface,omitempty" protobuf:"bytes,5,opt,name=interface"`
 }
 
 // ModelDeploymentRouter is the router that fronts a deployment's roles, and how much of it this
@@ -829,6 +848,11 @@ type ModelDeploymentStatus struct {
 	// an empty object here cannot be told apart from a contract whose every string happens to be
 	// empty.
 	Router *ModelDeploymentRouterStatus `json:"router,omitempty" protobuf:"bytes,7,opt,name=router"`
+
+	// RoleSummary is the current Ready count by role kind, for kubectl's Roles column. R counts
+	// managed router Pods; S, P, and D count server, prefill, and decode instances. A serving
+	// instance may contain several Pods, so the engine figures are not Pod counts.
+	RoleSummary string `json:"roleSummary,omitempty" protobuf:"bytes,8,opt,name=roleSummary"`
 }
 
 // ModelDeploymentRoleStatus is one role's observed readiness.

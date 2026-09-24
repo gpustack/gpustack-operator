@@ -300,6 +300,40 @@ func TestPodKVCacheInject_SGLangCarriesTheEnvironmentVehicle(t *testing.T) {
 		"the renderer supplies the Binding's reuse domain")
 }
 
+// TestPodKVCacheInject_SGLangDefaultedArgsYieldToTheContainer pins the renderer's defaulted
+// arguments on this caller: an SGLang container with a store gets the hierarchical cache the
+// backend hangs off, after the rendered arguments, and a container already naming the flag keeps
+// its own and gets no second one. The first row is the second's baseline.
+func TestPodKVCacheInject_SGLangDefaultedArgsYieldToTheContainer(t *testing.T) {
+	count := func(args []string) int {
+		n := 0
+		for _, arg := range args {
+			if arg == "--enable-hierarchical-cache" {
+				n++
+			}
+		}
+		return n
+	}
+
+	t.Run("absent, so appended", func(t *testing.T) {
+		pod := kvCachePodForEngine("sglang")
+		require.NoError(t, admit(t, pod))
+
+		args := pod.Spec.Containers[0].Args
+		assert.Equal(t, 1, count(args))
+		assert.Equal(t, "--enable-hierarchical-cache", args[len(args)-1],
+			"the default follows the rendered arguments")
+	})
+
+	t.Run("container set, so not repeated", func(t *testing.T) {
+		pod := kvCachePodForEngine("sglang")
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "--enable-hierarchical-cache")
+		require.NoError(t, admit(t, pod))
+
+		assert.Equal(t, 1, count(pod.Spec.Containers[0].Args))
+	})
+}
+
 // TestPodKVCacheInject_StampRecordsWhatWasDecided pins every field, and the isolation one is why the
 // stamp exists: F4a injects rather than refusing, so nothing else on the Pod says the declared domain
 // is not being enforced, and the cost of that - one domain evicting another's blocks - moves no metric.

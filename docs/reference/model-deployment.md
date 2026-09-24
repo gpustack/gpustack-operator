@@ -5,8 +5,8 @@
 > **Audience** users, operators, contributors · **Prerequisites** [KV Cache Pool](../kv-cache/pool.md) ·
 > **Read time** ~12 min
 
-A `ModelDeployment` is N replicas of one or more inference-engine roles attached to a KV cache pool, so
-that the replicas hit each other's cached prefixes instead of each re-computing the same prefill.
+A `ModelDeployment` is N replicas of one or more inference-engine roles. It can attach to a KV
+cache pool so replicas reuse cached prefixes, run a direct prefill/decode pair, or use both paths.
 
 It renders **Pods** directly. The deployment's own validating webhook checks a new KV cache
 binding's transport, because these generated Pods do not pass through the KV cache Pod injection
@@ -127,6 +127,20 @@ The accelerator request of **one Pod** lives in `roles[].resources`, whose field
 [Accelerator Requests](../accelerator-requests.md) — at `size: 1` the Pod and the instance are the
 same request. CPU, memory and ephemeral storage are **derived** from the InstanceType's per-unit
 resources scaled by the card count, so they are not expressible here.
+
+An optional `resources.interface` requests a whole number of fabric interfaces per engine Pod.
+One RDMA interface uses `device.gpustack.ai/rdma.shared`; more than one uses that count of
+`device.gpustack.ai/rdma` devices. EFA uses
+[the EFA device plugin's own key](../architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves).
+An unset or zero count adds no device request.
+
+The key follows the bound cache backend's effective group protocol and any direct prefill/decode
+transport the engine actually renders. Different backend-group protocols or an RDMA and EFA mix
+are refused for a positive count.
+
+A count with no managed RDMA or EFA transfer leg is also refused. The count is frozen with the
+other role resources. See
+[RDMA Operations](../operation/rdma.md) for the allocation and topology limits.
 
 ## Prefill and decode
 
@@ -387,9 +401,15 @@ express two ends naming different protocols for one connection, which fails at t
 than at admission.
 
 It is **declared, not discovered, and not gated**. The set an engine accepts belongs to the mooncake
-build inside the engine's own image — a HIP-compiled build makes `hip` a working transport — so the
-operator passes the value through verbatim, and a value the build rejects fails that container at
-startup.
+build inside the engine's own image — a HIP-compiled build makes `hip` a working transport — so vLLM
+gets the value verbatim, and a value the build rejects fails that container at startup. SGLang maps
+it: `tcp` renders `--disaggregation-transfer-backend mooncake_tcp`, anything else `mooncake`.
+
+**`tcp` is enforced, not only requested**: the transfer engine picks its transport from the host,
+and with no RDMA device a build with multi-node NVLink installs NVLink between hosts with no NVLink
+path. So native vLLM also gets the [defaulted](#what-the-operator-owns) `MC_FORCE_TCP=1`. Both pins
+are process-wide, so neither renders beside a store on another transport, and only [clients from
+0.3.12 on](../kv-cache/backend.md#the-store-version-must-match-the-engines-client) honor them.
 
 It is read on the direct-transfer leg, which every **admitted router-and-engine pair** renders on its
 `prefill` and `decode` roles — a prefiller that cannot hand a decoder its blocks is not
@@ -397,18 +417,13 @@ disaggregated under any router. On every other shape the field is accepted and r
 
 What differs per pair is the handshake, not whether there is a leg: Mooncake's bootstrap server
 under native vLLM, SGLang's own registry under SGLang, and on Ascend the decode sidecar's relay —
-[the one router combination that renders a leg there](#prefill-and-decode).
+[the one router combination that renders a leg there](#prefill-and-decode). There the field is
+ignored: vllm-ascend hardcodes the protocol to `ascend` (upstream `mooncake_transfer_engine.py`,
+verified at v0.23.0 and v0.26.0rc1).
 
-On Ascend the field has no consumer even where the leg renders: vllm-ascend's point-to-point
-connectors initialize their transfer engine with the protocol **hardcoded** to `ascend`, read from
-nothing (upstream `mooncake_transfer_engine.py`, verified at v0.23.0 and v0.26.0rc1 — upstream
-state, not a contract), so a declared value is accepted and ignored unless upstream makes the
-protocol configurable.
-
-It is also **not** the pool's transport. `KVCacheBackend.spec.transport` defines the data plane the
-store members run and feeds the engine's store client; this leg is engine to engine and never
-traverses the store, so the two declare separately — a deployment with no `kvCache` block still has
-this leg to configure.
+It is also **not** the pool's transport. `KVCacheBackend.spec.transport` feeds the engine's store
+client; this leg is engine to engine and never traverses the store, so the two declare separately —
+a deployment with no `kvCache` block still has this leg to configure.
 
 Editing it [turns over every role](#rollout-is-a-rolling-replacement): the value renders into both
 ends' arguments, so every role's replicas turn over one at a time. A prefiller and a decoder can
@@ -632,6 +647,9 @@ way to own it instead.
 `1`, and a user's own value wins with no refusal. It turns on the transfer engine's metrics, without
 which the hit rate this design rests on cannot be measured at all. It is read by the transfer engine
 rather than by an engine's config class, so it does not depend on which keys that class accepts.
+
+So are `MC_FORCE_TCP` [on a `tcp` leg](#the-direct-transfers-transport) and
+[SGLang's two cache switches](kv-cache-injection.md#sglangs-host-memory-tier).
 
 Two of SGLang's owned keys are owned for what a user entry would **destroy** rather than duplicate,
 and the operator does not set either of them:
@@ -888,6 +906,7 @@ depends on the `InstanceType` the role names.
 | an edit to an identity field — `model`, `engine.name`, `kvCache`, or the shape of the roles | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Which fields are the deployment's identity](#which-fields-are-the-deployments-identity) |
 | a resource mode the named `InstanceType` does not offer | the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list |
 | a whole-accelerator count over the type's whole-accelerator capacity | the capacity itself, not only that the request was too large, so the next attempt is not a guess. The bound is the pool's total, not what is free, so a deployment submitted while every accelerator is held is admitted and waits in its queue; one above the largest node but within the total is admitted and stays queued — see [Accelerator Requests](../accelerator-requests.md#limitations) |
+| a negative or fractional `resources.interface`, or one with no effective RDMA/EFA leg | the role's interface field and the protocol that prevents allocation; mixed backend groups and mixed fabric legs are rejected |
 | an explicit `accelerator: 0` on an acceleratable `InstanceType` shared by another role | the accelerator field, the shared type, and two recommended remedies: request at least one accelerator or move the CPU-only role to a non-acceleratable type |
 | a `prefill` and a `decode` role both requesting a **logical slice** from types that draw on the same accelerator group | both roles and the slice field. Whole cards and partition profiles are accepted — including on one card, because partitions are isolated by the device |
 | roles on several `instanceType`s **when `instance-type-derived-from-node` is off** | that setting. The groups are gated as a set by an admission check this operator references from the queues it derives, and with the setting off no queue carries it |
@@ -975,6 +994,7 @@ and therefore neither locates its window.
 the domain · [Accelerator Requests](../accelerator-requests.md) for the request fields
 `roles[].resources` mirrors · [Admission](../architecture/admission.md) for the gates a replica passes
 as an ordinary Pod · [Model Deployment Status](model-deployment-status.md) for what each condition
-and published field means.
+and published field means · [Model Deployment Metrics](model-deployment-metrics.md) for the
+structured snapshot and Pod scrape endpoints.
 
 **Next** → [Accelerator Requests](../accelerator-requests.md)

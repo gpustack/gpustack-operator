@@ -1,0 +1,6 @@
+# TYPE vllm_router_requests_total counter
+vllm_router_requests_total{route="/v1/chat/completions"} 1
+# TYPE vllm_router_retries_exhausted_total counter
+vllm_router_retries_exhausted_total{route="/v1/chat/completions"} 1
+# TYPE vllm_router_active_workers gauge
+vllm_router_active_workers 1

@@ -591,6 +591,133 @@ message InstanceTypeList {
   repeated InstanceType items = 2;
 }
 
+// ModelDeployment is the v1 view of a managed serving deployment.
+//
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],subResources=["status"]
+message ModelDeployment {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelDeploymentSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelDeploymentStatus status = 3;
+}
+
+// ModelDeploymentCacheHit is a token hit ratio over two reads of the same Pod counters.
+// Its source and scope prevent local prefix hits from being mixed with external-store hits.
+message ModelDeploymentCacheHit {
+  optional string pod = 1;
+
+  optional string source = 2;
+
+  optional string scope = 3;
+
+  optional string unit = 4;
+
+  optional double hits = 5;
+
+  optional double queries = 6;
+
+  optional double rate = 7;
+
+  optional double windowSeconds = 8;
+
+  optional int32 podCount = 9;
+
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time observedAt = 10;
+}
+
+// ModelDeploymentList holds the list of ModelDeployments.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelDeploymentList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelDeployment items = 2;
+}
+
+// ModelDeploymentMetricGauge is one compatible sum of current Pod gauges.
+message ModelDeploymentMetricGauge {
+  optional string name = 1;
+
+  optional string source = 2;
+
+  optional string scope = 3;
+
+  optional string unit = 4;
+
+  optional double value = 5;
+
+  optional int32 podCount = 6;
+
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time observedAt = 7;
+}
+
+// ModelDeploymentMetricMissing names one source that could not contribute to the snapshot.
+message ModelDeploymentMetricMissing {
+  optional string pod = 1;
+
+  optional string source = 2;
+
+  optional string reason = 3;
+}
+
+// ModelDeploymentMetricWindow is one Pod's rate or histogram mean over two scrapes.
+// Samples is the number of new events or histogram observations in that window.
+message ModelDeploymentMetricWindow {
+  optional string name = 1;
+
+  optional string pod = 2;
+
+  optional string source = 3;
+
+  optional string scope = 4;
+
+  optional string unit = 5;
+
+  optional double value = 6;
+
+  optional double samples = 7;
+
+  optional double windowSeconds = 8;
+
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time observedAt = 9;
+}
+
+// ModelDeploymentMetrics is a best-effort snapshot of the deployment's serving metrics.
+// Missing measurements are listed explicitly; a measured zero remains a numeric zero.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelDeploymentMetrics {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time timestamp = 2;
+
+  // +listType=atomic
+  repeated ModelDeploymentMetricGauge processing = 3;
+
+  // +listType=atomic
+  repeated ModelDeploymentMetricGauge queueing = 4;
+
+  // +listType=atomic
+  repeated ModelDeploymentCacheHit cacheHits = 5;
+
+  // +listType=atomic
+  repeated ModelDeploymentMetricMissing missing = 6;
+
+  optional bool partial = 7;
+
+  // +listType=atomic
+  repeated ModelDeploymentMetricWindow latency = 8;
+
+  // +listType=atomic
+  repeated ModelDeploymentMetricWindow traffic = 9;
+
+  // +listType=atomic
+  repeated ModelDeploymentMetricWindow transfer = 10;
+}
+
 // NFSInstancePersistentVolumeSource defines the source of NFS.
 message NFSInstancePersistentVolumeSource {
   // Server is the hostname or IP address of the NFS server.

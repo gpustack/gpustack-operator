@@ -120,7 +120,7 @@ kubelet resolves at container start.
 |---|---|---|
 | `vllm` | a projected file | arg `--kv-transfer-config` selecting `MooncakeStoreConnector` and the role; env `MOONCAKE_CONFIG_PATH`; a read-only volume and mount at `/etc/gpustack/kvcache` |
 | `vllm-ascend` | a projected file | the same, except the connector is `AscendStoreConnector` — the two engines share the vehicle and the file's keys, but not a connector registry |
-| `sglang` | environment variables | arg `--hicache-storage-backend mooncake`; the `MOONCAKE_*` variables below; **no** volume and **no** mount |
+| `sglang` | environment variables | arg `--hicache-storage-backend mooncake` and [`--enable-hierarchical-cache`](#sglangs-host-memory-tier); the `MOONCAKE_*` variables below; **no** volume and **no** mount |
 
 The file is a `downwardAPI` projection of the Pod's own `kvcache.gpustack.ai/client-config`
 annotation. No ConfigMap is created, so the webhook needs no RBAC for one and leaves nothing to
@@ -153,17 +153,35 @@ which is the only value correct for every host in one pool — a device is named
 one and `erdma_0` on the next. The documented string `auto-discovery` is not special-cased anywhere in
 the client: it is parsed as a filter naming a device no host has.
 
-Nothing injected here grants the engine Pod the fabric itself. These values **name** a transport; the
-`hostNetwork`, the device tree and — on EFA — the host's libfabric mount that a fabric needs are
-rendered on the backend's member Pods only. On `TCP` that distinction costs nothing; on `RDMA` or
-`EFA`, an engine that is to move bytes over the fabric needs the same access on its own Pod, which
-this operator does not render today.
+Nothing injected here grants the Pod a fabric device. These values **name** a transport; a Pod
+using this opt-in webhook must request the appropriate device-plugin resource itself. A managed
+`ModelDeployment` can instead request a positive `spec.roles[].resources.interface` count, which
+renders an RDMA or EFA resource limit on its engine Pod according to the effective transport.
+The backend's member Pods configure their own host network and device access separately.
 
 The one exception is the Ascend prefill/decode leg, whose engine Pods mount a host driver
 tree read-only — see [Prefill and decode](model-deployment.md#prefill-and-decode).
 
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
 when the container has not spoken about them. A value you set yourself is left alone.
+
+### SGLang's host-memory tier
+
+An SGLang container also gets `--enable-hierarchical-cache`, after the injected arguments, unless its
+own arguments already name that flag. The storage backend hangs off the hierarchical cache's host
+tier: naming the backend alone enables storage prefetch over a plain radix cache, and the first
+request fails with an `AttributeError` (measured at SGLang v0.5.18).
+
+That tier is a pinned host pool of `hicache_ratio` (default 2.0) times the device KV pool. SGLang
+refuses to build it unless the node's available memory — read host-wide, not from the container's
+limit — exceeds a fixed 10 GiB reserve plus the pool, so size the node for it. The container's
+memory limit still has to hold the engine and the pool, or the result is an OOM kill.
+
+A `ModelDeployment` renders the same switch on every SGLang role with a store except a decode half,
+where SGLang forces its radix cache off and refuses the two together. A decode half gets
+`--disaggregation-decode-retraction-backup cpu_tensor` instead: left unset, SGLang infers a host
+pool for retraction and meets the same check with no store at all. A role's own `extraArgs` naming
+either flag drops the operator's.
 
 **An injected variable overrules one you declared yourself.** Injection is opt-in and its opt-out
 is explicit, so a Pod that asked for it and then declares a Mooncake variable has given two answers
@@ -381,9 +399,11 @@ reads back the correct bytes.
 
 The transport is not the limit: the HIXL wiki documents Mooncake's `rdma` transport moving buffers
 directly between an NVIDIA GPU and an Ascend NPU — [Mooncake NPU guide, appendix 2](https://gitcode.com/cann/hixl/wiki/Mooncake%EF%BC%88NPU%20%E7%89%88%EF%BC%89%E5%AE%8C%E6%95%B4%E6%8C%87%E5%8D%97.md).
-What stops the combination today is on this operator's side: `applyMemberFabric` in
-`pkg/worker/kvcache/mooncake/member_workload.go` grants fabric access — host network, a device, a
-mount — only to `rdma` and `efa`, so an Ascend member group is rendered none of it and does not come up.
+
+The operator's `applyMemberFabric` grants host network and device access to backend member groups
+only for `rdma` and `efa`. An `ascend` group receives none of those grants. This rendering alone
+does not establish whether that member starts or can transfer bytes on a particular Ascend node;
+verify both before relying on cross-vendor sharing.
 
 > **Why a page instead of an admission rule** — a rule becomes API semantics, and an upstream
 > improvement on either side would then force an incompatible removal; a documented note only gets
@@ -442,9 +462,10 @@ copied and nothing is allocated twice, so the two are not competing — disablin
 no memory back and loses the engine's own reuse.
 
 Host DRAM is where an overlap could happen, and neither engine puts KV there unless asked. vLLM's
-`--swap-space` is deprecated and ignored, and `kv_offloading_size` defaults off; SGLang's host tier
-needs `--enable-hierarchical-cache`, which is off. This injection renders none of the three, so the
-only host DRAM it adds is the staging buffer above.
+`--swap-space` is deprecated and ignored, and `kv_offloading_size` defaults off, so on vLLM the only
+host DRAM this injection adds is the staging buffer above. SGLang's host tier needs
+`--enable-hierarchical-cache`, which this injection renders because the store hangs off that tier —
+its [host pool](#sglangs-host-memory-tier) is the one host allocation it adds there.
 
 > **NEVER set `kv_offloading_size` on a container this injects into.** Setting it makes vLLM
 > overwrite `kv_connector` with `OffloadingConnector` — unconditionally, with no conflict check,
