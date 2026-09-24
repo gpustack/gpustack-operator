@@ -319,6 +319,9 @@ and defaults to `Auto` whether or not the `transport` block is written at all. *
 `TCP`** — it is not a per-node probe that promotes itself. `MUSA` and `MACA` are intra-node IPC
 transports, not host fabrics, so they take none of the fabric privileges below.
 
+Which engine each value serves, and on which images, is [the transport
+matrix](../reference/engine-versions.md#which-transport-each-engine-can-use).
+
 **`members[].transport.protocol` overrides that value for one group; left unset, the group inherits
 the backend's.** The override exists for the one thing two media do not agree on: a VRAM group
 reaching its peers over a fabric while the DRAM group beside it stays on `TCP`.
@@ -390,6 +393,10 @@ node it allocates, so the mount is redundant **under this plugin** — which is 
 allocator rather than of EFA, and is why the mount stays until something asks for it to go.
 
 Nothing is mounted from a host EFA install — the libfabric an `EFA` member runs on is in the image.
+
+**The engines an `EFA` group serves need an EFA build of Mooncake as well**, which no runner image
+carries — see [what an EFA leg needs from the engine
+image](../operation/rdma.md#what-an-efa-leg-needs-from-the-engine-image).
 
 EFA capability is a property of the instance size rather than of its family — the largest `i7ie`
 sizes carry it while every smaller one does not — so check the size about to run, with
