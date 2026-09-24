@@ -1509,6 +1509,67 @@ func TestInstanceTypeReconciler_SyncInactive(t *testing.T) {
 	}
 }
 
+// TestInstanceTypeReconciler_SyncInactiveRecordsIntoTheMigration pins that an admin's Inactive
+// change made while NodeQueue holds the queue in a flavor migration lands on the stop policy the
+// migration restores, not on the live one. A queue emptied by its pool stays in the migration until
+// a flavor returns, and restoring the policy saved before the change would admit onto a type the
+// admin has since marked Inactive, or keep holding one the admin has since cleared.
+func TestInstanceTypeReconciler_SyncInactiveRecordsIntoTheMigration(t *testing.T) {
+	cases := []struct {
+		name      string
+		inactive  bool
+		saved     string
+		wantSaved string
+	}{
+		{name: "inactive set over a saved None", inactive: true, saved: string(kueue.None), wantSaved: string(kueue.Hold)},
+		{name: "inactive set over a saved unset", inactive: true, saved: _TASQueueMigrationStopPolicyUnset, wantSaved: string(kueue.Hold)},
+		{name: "inactive cleared over a saved Hold", inactive: false, saved: string(kueue.Hold), wantSaved: string(kueue.None)},
+		{name: "an agreeing saved policy is kept", inactive: false, saved: string(kueue.None), wantSaved: string(kueue.None)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			key := "nvidia-a10g"
+			name := nodeQueueName(key)
+			it := &workercore.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: name, Finalizers: []string{systemmeta.LockedResourceFinalizer}},
+				Spec: workercore.InstanceTypeSpec{
+					AcceleratorGroup: key,
+					Acceleratable:    true,
+					OS:               "linux",
+					Arch:             "amd64",
+					Inactive:         c.inactive,
+					UnitResources:    workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+					LocalStorage:     "100Gi",
+				},
+			}
+			// The shape a pool that lost every flavor leaves: emptied, held, still migrating.
+			cq := newInstanceTypeQueue(key, true)
+			cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)
+			cq.Annotations = map[string]string{
+				_TASQueueMigrationPhaseAnnotation:      _TASQueueMigrationPhaseSwitched,
+				_TASQueueMigrationStopPolicyAnnotation: c.saved,
+			}
+			cli := buildInstanceTypeClient(it, cq)
+
+			reconcileInstanceTypeN(t, cli, name, 4)
+
+			gotCQ, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, c.wantSaved, gotCQ.Annotations[_TASQueueMigrationStopPolicyAnnotation])
+			assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(gotCQ.Spec.StopPolicy, kueue.None),
+				"the migration keeps owning the live stop policy")
+			assert.Equal(t, c.inactive, getInstanceType(t, cli, name).Spec.Inactive,
+				"the migration's hold is not mirrored into Inactive")
+
+			rv := gotCQ.ResourceVersion
+			reconcileInstanceTypeN(t, cli, name, 2)
+			stable, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, rv, stable.ResourceVersion, "stable (no write)")
+		})
+	}
+}
+
 // --- shared ResourceFlavor fixtures (the pool the reconciler aggregates) ---
 
 // flavorOpt mutates the notes a test ResourceFlavor carries, so a fixture can be

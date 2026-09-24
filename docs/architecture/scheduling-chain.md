@@ -281,6 +281,11 @@ when `Inactive` (blocking new admission without evicting running workloads, neve
 `None` when an admin reactivates, and `Inactive=true` backfilled one-way and stickily whenever the queue
 is stopped by any means. So `Hold↔None` is owned here, `HoldAndDrain` by the `NodeQueueReconciler`.
 
+While the `NodeQueueReconciler` carries its migration marker it owns the live `StopPolicy`, so this
+sync writes the `Hold↔None` pair onto the stop policy the migration saved and later restores, and the
+backfill pauses. An `Inactive` change made while an emptied pool waits for a flavor is therefore what
+the pool comes back with.
+
 A marked empty-plan `Hold` belongs to the `NodeQueueReconciler`: this sync neither releases it nor
 mirrors it into `Inactive`. Marking the type `Inactive` adopts it as the admin's `Hold` by dropping
 the marker, so it is not lifted when the groups fill. Clearing `Inactive` on a queue that has no
@@ -318,10 +323,10 @@ resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
   groups, or one resource group would exceed the [flavor limit](topology-aware-scheduling.md#capacity-and-lifecycle-limits).
 
 Once flavors return it switches the held queue to the new plan, and only then **restores** the stop
-policy the queue had before the drain — `None`, or an admin `Hold`. The queue carries its migration
-marker the whole time, and the `InstanceTypeReconciler` does not backfill `Inactive` while it is
-present, so a recovered pool admits again without an admin. A drained queue also stops its running
-Instances — see [Running-instance stop](admission.md#running-instance-stop).
+policy the queue had before the drain — `None`, or an admin `Hold`, including one set or cleared while
+it waited. The queue carries its migration marker the whole time, and the `InstanceTypeReconciler`
+does not backfill `Inactive` while it is present, so a recovered pool admits again without an admin.
+A drained queue also stops its running Instances — see [Running-instance stop](admission.md#running-instance-stop).
 
 ### `NodeQueueEntranceReconciler` (`node_queue_entrance.go`)
 

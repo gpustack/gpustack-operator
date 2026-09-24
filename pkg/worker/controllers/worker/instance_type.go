@@ -150,6 +150,7 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 //	| HoldAndDrain (NodeQueue)  | false        | mirror: backfill Spec.Inactive    |
 //	| Hold, marked (NodeQueue)  | true         | adopt: drop the marker            |
 //	| Hold, marked (NodeQueue)  | false        | stable                            |
+//	| any, migrating (NodeQueue)| either       | forward onto the saved policy     |
 //
 // It evaluates the forward direction (Inactive drives the Hold<->None pair) first; the
 // NodeQueueReconciler owns HoldAndDrain (teardown / no-flavors drain), so the forward direction
@@ -159,8 +160,9 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 // non-oscillating; a pool that recovered from a full-drain stays inactive (its leftover
 // Inactive=true re-Holds the reactivated queue) until an admin clears the flag. At most one
 // guarded write happens per call; a stable state writes nothing. While NodeQueue carries its
-// topology-migration marker, this synchronization pauses because that controller temporarily owns
-// StopPolicy. A Hold NodeQueue marked as its own, on a queue that has no resource groups yet, is
+// topology-migration marker, that controller owns the live StopPolicy, so the forward direction
+// writes the stop policy the migration restores instead and the mirror pauses. A Hold NodeQueue
+// marked as its own, on a queue that has no resource groups yet, is
 // NodeQueue's to lift: it is neither released nor mirrored, and an admin marking the type Inactive
 // adopts it by dropping the marker, so NodeQueue no longer lifts it. The reverse hand-over applies
 // when an admin clears Inactive on a queue without resource groups: the Hold is marked rather than
@@ -171,9 +173,24 @@ func (r *InstanceTypeReconciler) syncInactive(
 ) (bool, error) {
 	// NodeQueue owns StopPolicy for the whole topology migration window. In particular, its
 	// temporary HoldAndDrain must not be mirrored into the administrator-facing Inactive field;
-	// otherwise the restored active policy is immediately converted into a sticky Hold.
+	// otherwise the restored active policy is immediately converted into a sticky Hold. The
+	// Hold<->None pair still converges, onto the stop policy the migration restores: a queue
+	// emptied by its pool stays in the migration until a flavor returns, and restoring the policy
+	// saved before an Inactive change would admit onto a type an admin has since marked Inactive.
 	if cq.Annotations[_TASQueueMigrationPhaseAnnotation] != "" {
-		return false, nil
+		saved := cq.Annotations[_TASQueueMigrationStopPolicyAnnotation]
+		want := saved
+		switch {
+		case it.Spec.Inactive && (saved == string(kueue.None) || saved == _TASQueueMigrationStopPolicyUnset):
+			want = string(kueue.Hold)
+		case !it.Spec.Inactive && saved == string(kueue.Hold):
+			want = string(kueue.None)
+		}
+		if want == saved {
+			return false, nil
+		}
+		cq.Annotations[_TASQueueMigrationStopPolicyAnnotation] = want
+		return true, r.Client.Update(ctx, cq)
 	}
 	if cq.Annotations[_TASQueueEmptyPlanHoldAnnotation] != "" {
 		if !it.Spec.Inactive {
