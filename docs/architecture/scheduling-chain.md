@@ -18,7 +18,7 @@ Stages 3 and 4 of the four-stage chain; what a request must then pass is in [Adm
 
 ## Stage 3: capacity profiling
 
-Two Worker controllers turn Node + `Devices` signals into the capacity labels the chain consumes.
+Three Worker controllers turn Node + `Devices` signals into the capacity labels the chain consumes.
 
 - **`NodeFeatureReconciler`** (`node_feature.go`) reports a NodeFeature `${NODE_NAME}-gpustack-worker`
   per Node, stamping `gpustack.ai/managed=true`. Under `GPUSTACK_NODE_MANAGEMENT_MANUAL=true` (read
@@ -27,6 +27,8 @@ Two Worker controllers turn Node + `Devices` signals into the capacity labels th
 - **`NodeCapacityReconciler`** (`node_capacity.go`) builds them via
   `nodefeature.ConstructNodeCapacityLabels` from the Node and its same-named `Devices` CR: the
   general(CPU) presence marker plus both families' per-accelerator capacities.
+- **`NodeFitLabelReconciler`** (`node_fit_label.go`) keeps the [per-card fit
+  labels](#per-card-fit-labels) on each managed Node, from the same `Devices` ledger.
 
 ### Logical-slicing capacities
 
@@ -123,6 +125,38 @@ withholding it is how a node with no usable link stops being selected.
 See [Network Topology](network-topology.md#the-three-node-labels-and-what-a-label-can-carry) for
 which link states count as usable, when each informational key is present, and why the accelerator
 interconnect gets no label at all.
+
+### Per-card fit labels
+
+Every capacity key above is a node total, so it cannot say how the free room is spread over the
+node's accelerators. Two labels per accelerator model say what one accelerator can still give:
+
+| Label | Value |
+|---|---|
+| `sliced-max-free-units.fit.gpustack.ai/<aKey>` | the largest free `units` on any one accelerator of the model that can serve a logical slice |
+| `shared-free-cards.fit.gpustack.ai/<aKey>` | how many accelerators of the model can still grant an ownership share |
+
+- Both values use Gate 3's own per-accelerator predicates. For a single Pod asking for one
+  accelerator, a label admits a node exactly when [Gate 3](admission.md#gate-3--the-per-accelerator-admissioncheck)
+  would.
+- A value is `0` when every accelerator of that population is full. A label disappears when the model
+  has no accelerator of that population, and when the node stops being managed.
+- A label is written only when its value changes, after a 3 s window that coalesces ledger bursts. The
+  cost is at most one Node metadata patch per allocation or release burst per node.
+- The labels filter only; no capacity or quota is ever charged against them.
+
+The Workload webhook turns them into a placement constraint: it ANDs `Gt U-1` or `Gt N-1` into the
+required node affinity of the Workload's PodSet template, which Kueue's topology-aware scheduling
+reads. How it recognizes this operator's Workloads in a shared Kueue, and what it leaves out, is
+under [Gate 3](admission.md#gate-3--the-per-accelerator-admissioncheck).
+
+The pin stays on the Workload and never reaches the Pod; why that must hold is under
+[Gate 3](admission.md#gate-3--the-per-accelerator-admissioncheck) too.
+
+> **Why a label under its own domain** — the key's name part is exactly `<aKey>`, so it is valid for
+> any accelerated device key, and the `fit.gpustack.ai` domains sit outside the `acceleratable.` and
+> `feature.` prefixes other controllers watch, so a value moving on every allocation wakes none of
+> them. The node-topology and topology-source watchers ignore an update that moved only fit labels.
 
 ## The unit spec is not derived from node capacity
 

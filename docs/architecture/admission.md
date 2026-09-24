@@ -26,7 +26,7 @@ produces or consumes the `.sliced.*` / `.partitioned.*` values at a distinct poi
 |---|---|---|---|
 | 1 | Pod webhook (Worker) | the request's shape; folds memory into credits | cluster-wide capacity |
 | 2 | Kueue `credits` | the pool's aggregate total | per-accelerator fragmentation |
-| 3 | `NodeDevicesAdmission` AdmissionCheck | the accelerators of the node Kueue TAS assigned, via the ledger | how to move a Workload off that node: TAS re-places a `Retry` from the same per-node totals |
+| 3 | `NodeDevicesAdmission` AdmissionCheck | the accelerators of the node Kueue TAS assigned, via the ledger | how to move a Workload off that node: for an unpinned Workload, TAS re-places a `Retry` from the same per-node totals |
 | 4 | Default scheduler / kubelet | per-node remaining capacity keys | which accelerator, for the partitioned family |
 | 5 | Device-plugin allocator | the live accelerator state, under a per-node mutex | anything upstream of its own node |
 
@@ -88,8 +88,8 @@ node named there must host its own share of the PodSet from its own accelerators
 - A PodSet without a hostname-level assignment is judged across the flavor's whole node pool.
 - A node whose `Node` object is gone serves no node-scoped demand, so the Workload is held.
 
-> **Known behavior: a fragmented node livelocks.** TAS sums each node's capacity keys, so it cannot see
-> how the free capacity is spread over the node's accelerators:
+> **Known behavior: a fragmented node is skipped only when its Workload is pinned.** TAS sums each
+> node's capacity keys, so it cannot see how the free capacity is spread over the node's accelerators:
 >
 > - a node's free `.sliced.units` may be spread over accelerators none of which fits the slice;
 > - a node's 10 shared tokens per accelerator let a node with too few accelerators take `.shared: N`.
@@ -97,14 +97,43 @@ node named there must host its own share of the PodSet from its own accelerators
 >   pin misses ([Limitations](../accelerator-requests.md#limitations)) it never frees, since Kueue
 >   restarts the flavor scan at the smallest node after every eviction.
 >
-> - TAS places the request there, and prefers it: it orders nodes by least free capacity.
-> - The check answers `Retry`, Kueue evicts, and TAS re-places it from the same totals on the same node.
-> - So the Workload retries every 30 s until that node's accelerators free, even while another node has
->   room, and the verdict message says so.
+> Left alone, TAS prefers such a node, the check answers `Retry`, and TAS places the Workload there
+> again every 30 s. The [per-card fit labels](scheduling-chain.md#per-card-fit-labels) close that
+> loop for a pinned Workload: TAS skips the node, and when no node fits, the Workload stays pending
+> on `excluded: affinity` and holds no quota.
 >
 > Reading the pool instead let such a request through: `Allocate`, which does not gate a slice on
 > units, oversubscribed one accelerator's memory, and refuses a shared request its node cannot spread
 > over distinct accelerators, failing the Pod.
+
+**The Workload fit pin.** A mutating webhook on Kueue `Workload` CREATE and UPDATE adds the pin to each
+PodSet: a logical slice of `U` units per accelerator gets `sliced-max-free-units… Gt U-1`, and a
+shared request of `N >= 2` accelerators gets `shared-free-cards… Gt N-1`. `N` is the largest count
+any one container asks for.
+
+- It changes only a Workload whose LocalQueue points at a ClusterQueue carrying this operator's
+  InstanceType mark, with a same-named InstanceType naming an accelerator group. A `matchConditions`
+  expression on the operator's LocalQueue name prefix keeps other tenants' Workloads away from it in a
+  shared Kueue.
+- It acts on an UPDATE only while the old Workload holds no quota reservation, which is when Kueue
+  rebuilds a suspended job's spec and still lets PodSets change.
+- It never denies. Its `failurePolicy` is `Ignore`, and the setting
+  [`workload-fit-affinity`](../settings.md#online-adjustable-settings) turns it off while the labels keep being published.
+- The pin never reaches the Pod or its owner's template: Kueue copies only labels, annotations, a
+  `nodeSelector`, tolerations and scheduling gates onto them. A Pod-level pin would be unsafe, because
+  the kubelet re-admits running Pods against current node labels when it restarts.
+
+What still retries:
+
+- **A label not yet refreshed.** A Workload placed before the label follows an allocation still reaches
+  this check and retries once; the next placement reads the new value.
+- **Several Pods, or several accelerators, on one node.** The label admits a node when one accelerator
+  fits one Pod, so two Pods of one PodSet, two PodSets, or one template-built Pod asking for two
+  sliced accelerators can still be placed where only one fits. That does not converge by itself.
+- **An unpinned Workload.** One created while the webhook was unavailable or the setting was off, one
+  created before the upgrade, and a template-built slice whose template carries no folded units keep
+  the loop described above. A `Retry` does not repair a missed pin, because Kueue requeues that same
+  object; only a spec update before reservation re-pins it.
 
 Each family gets one correlated `(accelerators, per-accelerator demand, profile)` tuple scoped to the
 accelerators that can serve it, so an exclusive or shared request is never judged feasible against a

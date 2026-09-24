@@ -23,7 +23,7 @@ labels filter only. They are never charged against, and the expression never rea
 ### Goals
 
 Every queue this operator derives is TAS-only, and its lowest topology level is
-`kubernetes.io/hostname` (`pkg/worker/controllers/worker/node_topology.go:101`). At quota
+`kubernetes.io/hostname` (`pkg/worker/controllers/worker/node_topology.go:102`). At quota
 reservation TAS picks one node from that node's `status.allocatable` scalars. The scalars sum the
 node's cards and cannot show how the room is spread between them:
 
@@ -106,7 +106,8 @@ Success criteria:
 - Pinning Workloads created before the upgrade that never change again. The webhook acts on creation,
   and on a spec update before quota is reserved.
 - Repairing a Workload whose creation missed the pin, for example because the webhook was down. Kueue
-  requeues the same Workload after a `Retry`, so it keeps today's behavior for its whole life.
+  requeues the same Workload after a `Retry`, so it keeps today's behavior until a spec update before
+  reservation re-pins it.
 
 ## Proposal
 
@@ -115,8 +116,8 @@ node's `Devices` ledger:
 
 | Label | Value | Published when |
 |---|---|---|
-| `sliced-max-free-units.fit.gpustack.ai/<aKey>` | the largest `remaining` on any one card of the model that can serve a logical slice | the model has at least one such card |
-| `shared-free-cards.fit.gpustack.ai/<aKey>` | the number of cards of the model that can serve a whole-card family and have `remaining >= 160000`, one ownership share | the model has at least one whole-card-capable card |
+| `sliced-max-free-units.fit.gpustack.ai/<aKey>` | the largest `remaining` on any one card of the model that can serve a logical slice and is free or already sliced | the model has at least one card that can serve a logical slice |
+| `shared-free-cards.fit.gpustack.ai/<aKey>` | the number of cards of the model that can serve a whole-card family, are free or already shared, and have `remaining >= 160000`, one ownership share | the model has at least one whole-card-capable card |
 
 `<aKey>` is the accelerated device key, `<manufacturer>-<id>`, the same key as the
 `acceleratable.feature.gpustack.ai/<aKey>` labels and an `InstanceType`'s `spec.acceleratorGroup`.
@@ -137,8 +138,7 @@ builds, and does not rely on a name alone:
 1. The operator names every LocalQueue it creates `gpustack-fnv64-<hash of the ClusterQueue name>`
    (`nodefeature.FormatLocalQueueName`). The webhook registration carries a `matchConditions`
    expression on `has(object.spec.queueName) && object.spec.queueName.startsWith('gpustack-fnv64-')`,
-   so other Workloads never
-   reach the webhook. An API server too old for `matchConditions` drops the field and sends every
+   so other Workloads never reach the webhook. An API server too old for `matchConditions` drops the field and sends every
    Workload, and the checks below still hold.
 2. The LocalQueue `<namespace>/<spec.queueName>` must exist, and its `spec.clusterQueue` names the
    ClusterQueue (`node_queue_entrance.go:101-112`).
@@ -160,8 +160,9 @@ PodSet, the webhook reads the per-Pod demand the way Gate 3 reads it:
   containers of one Pod hold shares on the same card;
 - anything else is left unchanged.
 
-The expression is ANDed into every required node-selector term of the PodSet template, or added as
-the only term when there is none. The Pod and its owner's template are never touched.
+The expression is ANDed into every non-empty required node-selector term of the PodSet template, or
+added as the only term when the template requires nothing. An empty term, and a required selector that
+exists with no term, match no node and are left alone. The Pod and its owner's template are never touched.
 
 ### User Stories
 
@@ -192,7 +193,9 @@ a clear reason and hold no quota, so that it does not keep reserving and releasi
 - A card that is partitioned, or cannot slice, is excluded from the sliced label. A card that cannot
   serve a whole-card family is excluded from the shared label. The exclusion is the same one Gate 3's
   `servesFamily` makes.
-- A shared-label card needs `remaining >= 160000`, the per-share units of Gate 3's `unitsPerCardFor`.
+- A card counts toward a label only in the modes Gate 3 lets it take that family: free or already
+  sliced for the sliced label, free or already shared for the shared label. A shared-label card also
+  needs `remaining >= 160000`, one share, as in Gate 3's `freeShares`.
 - A node with two models carries one label pair per model, each computed from that model's own cards.
 - The labels follow the ledger: after an allocation or a release that changes a value, the Node
   carries the new value.
@@ -202,9 +205,9 @@ a clear reason and hold no quota, so that it does not keep reserving and releasi
 - A change confined to fit labels does not trigger this operator's other Node-watching reconcilers.
   - The capacity, NodeFeature, flavor and Devices-sync predicates already watch other label
     prefixes only.
-  - The node-topology and topology-source predicates fire on any label change today
-    (`node_topology.go:258`, `topology_source.go:180`). They are narrowed to ignore changes in which
-    only fit labels differ.
+  - The node-topology and topology-source predicates fired on any label change before this change.
+    They are narrowed, through `nodeLabelsChangedIgnoringFit`, to ignore changes in which only fit
+    labels differ.
 
 **F2 — the Workload pin.**
 
@@ -355,6 +358,9 @@ a mocked accelerator NodeFeature and a mocked per-card `Devices` ledger. Node A 
   and a mutating webhook is not re-run on a status change. → Documented. Only a spec update before
   reservation, or a new Workload, can pick the pin up. A new Workload arrives when a job is recreated
   or a workload slice scales up.
+- **A PodSet whose accelerator base is not the queue's group.** A Workload on an `nvidia-*` queue that
+  asks for another vendor's slice is pinned with the queue's group key. → Accepted. That queue's flavors
+  carry no such resource, so the Workload is never admitted there with or without the pin.
 - **A Workload moved to another accelerator group's queue before reservation.** The webhook adds the
   new group's pin and keeps the old one, because it never removes an expression it did not just
   write. → Accepted. Only a hand edit of a Kueue-built spec moves a queue this way; Kueue's own
@@ -457,7 +463,7 @@ proves the whole path.
       - `FitSlicedMaxFreeUnitsLabelKey(aKey)` returns `sliced-max-free-units.fit.gpustack.ai/<aKey>`.
       - `FitSharedFreeCardsLabelKey(aKey)` returns `shared-free-cards.fit.gpustack.ai/<aKey>`.
       - `IsFitLabelKey` accepts exactly those two shapes. It rejects `fit.gpustack.ai/x`, `x.fit.gpustack.ai.evil/y` and an empty name part.
-      - `EqualIgnoringFitLabels(a, b)` compares two label maps with every fit key left out.
+      - `EqualIgnoringFitLabels(a, b)` compares two label maps with every fit key left out, and `FilterFitLabels` returns only the fit keys of a map.
       - A table case builds a key from a 63-character `aKey` and checks it with `validation.IsQualifiedName`.
       Verify: `go test ./pkg/nodefeature/ -run 'TestFitLabelKeys$|TestIsFitLabelKey$|TestEqualIgnoringFitLabels$' -v`
 
@@ -546,6 +552,7 @@ proves the whole path.
         - `failurePolicy: Ignore`, `sideEffects: None`, `matchPolicy: Equivalent`, `timeoutSeconds` 10;
         - `matchConditions` with `has(object.spec.queueName) && object.spec.queueName.startsWith('gpustack-fnv64-')`. The `has` guard keeps a Workload without a queue name from making the expression error;
         - the name prefix `gpustack-worker`.
+      - `Default` repeats the LocalQueue name-prefix check in Go, so an API server that dropped `matchConditions` costs only the lookups.
       - Ownership follows the Proposal's chain: the LocalQueue, then the ClusterQueue carrying the `instancetypes` mark, then the same-named InstanceType and its `spec.acceleratorGroup`. Reads use the cached client.
       - The pin per PodSet comes from `PodSetFitDemand`. It is ANDed into every required term, and added only when an identical expression is absent.
       - An empty term, and a required selector that exists with no term, are left alone, because each matches no node. An existing expression on the same key is kept, so a stricter one still holds.
@@ -555,17 +562,18 @@ proves the whole path.
       - The tests cover:
         - `TestWorkloadWebhook_Default`: a slice pinned `Gt 799999`; a shared request of 2 pinned `Gt 1`; a shared request of 1, exclusive, a partition and a plain PodSet unchanged; two PodSets pinned each with its own demand; existing terms ANDed into; a stricter same-key requirement kept beside the pin; an empty term and a term-less required selector left matching nothing; a second pass that adds nothing.
         - `TestWorkloadWebhook_ForeignWorkloadsUntouched`: a Workload on a foreign queue name; a `gpustack-fnv64-` name without a LocalQueue; a LocalQueue on an unmarked ClusterQueue; a marked ClusterQueue without an InstanceType; an InstanceType without a group. Each requests `.sliced.units` and must come out deep-equal to its input.
+        - `TestWorkloadWebhook_LookupErrorLeavesTheWorkloadUnpinned`: a failing ClusterQueue read returns no error and no patch.
         - `TestWorkloadWebhook_Update`: an unreserved old Workload is pinned; a reserved one is left unchanged.
         - `TestWorkloadWebhook_SettingOff`: with the setting off, nothing is pinned.
         - `TestWorkloadWebhook_PatchTouchesOnlyAffinity`: runs the controller-runtime handler on a raw v1beta2 Workload JSON that also carries a field unknown to the vendored type. Every patch operation's path is under `/spec/podSets/<i>/template/spec/affinity`. A foreign Workload gets no patch at all.
         - `TestWorkloadWebhookRegistration`: reads the generated `MutatingWebhook` and asserts the operations, the failure policy and the match condition.
-      Verify: `go test ./pkg/worker/webhooks/... -run 'TestWorkloadWebhook_Default$|TestWorkloadWebhook_ForeignWorkloadsUntouched$|TestWorkloadWebhook_Update$|TestWorkloadWebhook_SettingOff$|TestWorkloadWebhook_PatchTouchesOnlyAffinity$|TestWorkloadWebhookRegistration$' -v`
+      Verify: `go test ./pkg/worker/webhooks/... -run 'TestWorkloadWebhook_Default$|TestWorkloadWebhook_ForeignWorkloadsUntouched$|TestWorkloadWebhook_LookupErrorLeavesTheWorkloadUnpinned$|TestWorkloadWebhook_Update$|TestWorkloadWebhook_SettingOff$|TestWorkloadWebhook_PatchTouchesOnlyAffinity$|TestWorkloadWebhookRegistration$' -v`
 
 **Checkpoint B:** `make lint </dev/null`, then `make generate`, with the before and after comparison. Then `go test ./pkg/...`.
 
 **Phase C — proof and record**
 
-- [ ] **T7 · Documentation**
+- [x] **T7 · Documentation**
       Blocked by: T2, T5
       Owns: `docs/architecture/admission.md`, `docs/architecture/scheduling-chain.md`
       Acceptance:
@@ -578,7 +586,7 @@ proves the whole path.
       Owns: `.agents/skills/gpustack-operator-e2e/cases/case-96.sh`, `.agents/skills/gpustack-operator-e2e/SKILL.md`
       Gate: review
       Acceptance:
-      - `case-96.sh <NS>` mocks, on two kind workers, the accelerator NodeFeature (`nvidia-e2emock`, four cards), the bare `.sliced` pool capacity through the status subresource, and a node-named `Devices` ledger.
+      - `case-96.sh <NS>` mocks, on two kind workers, the accelerator NodeFeature (`nvidia-e2efit`, four cards), the bare `.sliced` pool capacity through the status subresource, and a node-named `Devices` ledger.
       - It asserts the fit labels the worker publishes: A=640000, B=1600000.
       - It then runs the four F3 legs: positive, must-fail with the setting off, no fit, and no fit key on the Pod.
       - Rows follow `_rows-lib.sh`. Cleanup restores the setting and removes every mock.
