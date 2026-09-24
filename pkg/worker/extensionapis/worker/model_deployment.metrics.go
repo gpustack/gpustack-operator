@@ -441,6 +441,18 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 			})
 			continue
 		}
+		// vLLM counts every token any KV connector loads as an external hit, the point-to-point
+		// leg's included. The counters measure the shared store only on a Pod that attaches a pool
+		// and is not the decode half of a pair: that half loads what the prefill half sends, and
+		// the prefill half's own leg never loads anything. A Pod with no connector keeps the one
+		// reason above.
+		if scope == "external-store" && (md.Spec.KVCache == nil || (isModelDeploymentPD(md) &&
+			modelDeploymentPodRoleKind(md, &read.pod) == workercore.ModelDeploymentRoleKindDecode)) {
+			result.Missing = append(result.Missing, worker.ModelDeploymentMetricMissing{
+				Pod: read.pod.Name, Source: scope, Reason: modelDeploymentVLLMExternalNotStore,
+			})
+			continue
+		}
 		if !ok {
 			result.Missing = append(result.Missing, worker.ModelDeploymentMetricMissing{
 				Pod: read.pod.Name, Source: scope, Reason: "awaiting a second counter sample",
@@ -524,6 +536,9 @@ const (
 		"for a prefill/decode deployment"
 	modelDeploymentVLLMNoKVConnector = "unsupported source: the Pod renders no KV connector, so vLLM queries no " +
 		"external prefix cache"
+	modelDeploymentVLLMExternalNotStore = "unsupported source: vLLM counts every token any KV connector loads as an " +
+		"external prefix cache hit, and this Pod's are not the shared store's alone: it attaches no KV cache pool, " +
+		"or it is the decode half of a pair, whose store hits cannot be told from the blocks the prefill half sends"
 	modelDeploymentIdleWindow = "idle sampling window: the Pod's TTFT histogram recorded no new request, so this " +
 		"source has no new sample"
 )
@@ -538,6 +553,7 @@ var modelDeploymentNotPartialReasons = []string{
 	modelDeploymentLabeledHistogramUnexported,
 	modelDeploymentVLLMRouterPDNoProcessing,
 	modelDeploymentVLLMNoKVConnector,
+	modelDeploymentVLLMExternalNotStore,
 	modelDeploymentIdleWindow,
 }
 
@@ -655,8 +671,9 @@ func (h *ModelDeploymentMetricsHandler) mergeWindowMetrics(
 			continue
 		}
 		// The prefill half of a pair answers with the first token alone, so it never observes
-		// a gap between two tokens; expecting one would mark every paired snapshot partial.
-		if definition.name == "itl" && isModelDeploymentPD(md) &&
+		// a gap between two tokens and its time per output token stays at zero; expecting either
+		// would mark every paired snapshot partial or publish a mean that measures nothing.
+		if (definition.name == "itl" || definition.name == "tpot") && isModelDeploymentPD(md) &&
 			modelDeploymentPodRoleKind(md, &read.pod) == workercore.ModelDeploymentRoleKindPrefill {
 			continue
 		}

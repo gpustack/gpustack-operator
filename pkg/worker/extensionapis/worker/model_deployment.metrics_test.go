@@ -1022,6 +1022,7 @@ func TestModelDeploymentMetricsHandler_VLLMExternalStoreNeedsAKVConnector(t *tes
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			md := metricsModelDeployment()
+			md.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "pool"}}
 			first := metricsFixture(t, "vllm_server_busy_first", "vllm", "")
 			second := metricsFixture(t, "vllm_server_busy_second", "vllm", "")
 			result := mergeMetricsWindow(md, metricsServerPod("server", tc.command...), false, first, second)
@@ -1038,6 +1039,7 @@ func TestModelDeploymentMetricsHandler_VLLMExternalStoreNeedsAKVConnector(t *tes
 	// An external query counter that moved proves a connector the Pod arguments do not show, so
 	// its window is read rather than declared unsupported.
 	md := metricsModelDeployment()
+	md.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "pool"}}
 	first := metricsFixture(t, "vllm_server_busy_first", "vllm", "")
 	second := metricsFixture(t, "vllm_server_busy_second", "vllm", "")
 	first.counters["external-store"] = modelDeploymentCounterPair{hits: 2, queries: 8}
@@ -1045,6 +1047,97 @@ func TestModelDeploymentMetricsHandler_VLLMExternalStoreNeedsAKVConnector(t *tes
 	result := mergeMetricsWindow(md, metricsServerPod("server", serve...), false, first, second)
 	assert.Empty(t, result.Missing)
 	assert.Len(t, result.CacheHits, 2)
+}
+
+// metricsVLLMRoleWindow merges two busy vLLM reads of a Pod of the given role: "server" in an
+// unpaired deployment, or "prompt" or "generation" in a prefill/decode pair. Its external prefix
+// cache counters move, so whether the window is read depends on the role and the pool alone.
+func metricsVLLMRoleWindow(t *testing.T, role string, pool bool) *worker.ModelDeploymentMetrics {
+	t.Helper()
+	md := metricsModelDeployment()
+	if role != "server" {
+		md.Spec.Roles = []workercore.ModelDeploymentRole{
+			{Name: "prompt", Kind: workercore.ModelDeploymentRoleKindPrefill},
+			{Name: "generation", Kind: workercore.ModelDeploymentRoleKindDecode},
+		}
+	}
+	if pool {
+		md.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "pool"}}
+	}
+	first := metricsFixture(t, "vllm_server_busy_first", "vllm", "")
+	second := metricsFixture(t, "vllm_server_busy_second", "vllm", "")
+	first.counters["external-store"] = modelDeploymentCounterPair{hits: 2, queries: 8}
+	second.counters["external-store"] = modelDeploymentCounterPair{hits: 6, queries: 16}
+	pod := metricsServerPod("pod", "vllm", "serve", "--kv-transfer-config", `{"kv_connector":"MultiConnector","kv_role":"kv_both"}`)
+	pod.Labels["app.kubernetes.io/component"] = role
+	return mergeMetricsWindow(md, pod, false, first, second)
+}
+
+func TestModelDeploymentMetricsHandler_VLLMExternalStoreIsReadOnlyFromAStore(t *testing.T) {
+	tests := []struct {
+		name     string
+		role     string
+		pool     bool
+		wantRead bool
+	}{
+		{"decode of a pair with a pool", "generation", true, false},
+		{"decode of a pair without a pool", "generation", false, false},
+		{"prefill of a pair without a pool", "prompt", false, false},
+		{"unpaired server without a pool", "server", false, false},
+		{"prefill of a pair with a pool", "prompt", true, true},
+		{"unpaired server with a pool", "server", true, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := metricsVLLMRoleWindow(t, tc.role, tc.pool)
+			scopes := map[string]float64{}
+			for _, hit := range result.CacheHits {
+				scopes[hit.Scope] = hit.Queries
+			}
+			if tc.wantRead {
+				assert.Equal(t, map[string]float64{"local-prefix": 37842, "external-store": 8}, scopes)
+				assert.Empty(t, result.Missing)
+			} else {
+				assert.Equal(t, map[string]float64{"local-prefix": 37842}, scopes)
+				assert.Equal(t, []worker.ModelDeploymentMetricMissing{
+					{Pod: "pod", Source: "external-store", Reason: modelDeploymentVLLMExternalNotStore},
+				}, result.Missing)
+			}
+			assert.False(t, modelDeploymentMissingIsPartial(result.Missing))
+		})
+	}
+}
+
+func TestModelDeploymentMetricsHandler_VLLMPDPrefillDoesNotExpectTPOT(t *testing.T) {
+	tests := []struct {
+		name     string
+		role     string
+		wantTPOT bool
+	}{
+		{"prefill of a pair", "prompt", false},
+		{"decode of a pair", "generation", true},
+		{"unpaired server", "server", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := metricsVLLMRoleWindow(t, tc.role, true)
+			var tpot []string
+			for _, latency := range result.Latency {
+				if latency.Name == "tpot" {
+					tpot = append(tpot, latency.Source)
+				}
+			}
+			if tc.wantTPOT {
+				assert.Equal(t, []string{"vllm:request_time_per_output_token_seconds"}, tpot)
+			} else {
+				assert.Empty(t, tpot)
+			}
+			for _, missing := range result.Missing {
+				assert.NotEqual(t, "vllm:request_time_per_output_token_seconds", missing.Source)
+			}
+			assert.False(t, modelDeploymentMissingIsPartial(result.Missing))
+		})
+	}
 }
 
 func TestModelDeploymentMetricsHandler_VLLMRouterUnexportedRetriesExhaustedIsNotPartial(t *testing.T) {
