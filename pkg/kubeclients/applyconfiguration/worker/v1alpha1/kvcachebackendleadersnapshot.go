@@ -32,11 +32,9 @@ type KVCacheBackendLeaderSnapshotApplyConfiguration struct {
 	// keys, including their tenant names under MultiTenancy. The claim also outlives the backend:
 	// nothing here deletes it.
 	PersistentVolumeClaimName *string `json:"persistentVolumeClaimName,omitempty"`
-	// IntervalSeconds is how long the store waits between snapshots, which is the same thing as HOW
-	// MUCH A FAILOVER LOSES: objects written since the last one are not in the baseline the standby
-	// starts from. Unset renders no flag and leaves the store's own default in place, so a default
-	// that moves upstream shows up as a behavior change to investigate rather than as a value this
-	// API silently re-asserted.
+	// IntervalSeconds is how long the store waits between snapshots. Unset renders no flag and
+	// leaves the store's own default in place, so a default that moves upstream shows up as a
+	// behavior change to investigate rather than as a value this API silently re-asserted.
 	IntervalSeconds *int32 `json:"intervalSeconds,omitempty"`
 	// RetentionCount is how many recent snapshots are kept, older ones being deleted as newer ones
 	// land. Its floor is one because the store refuses to start when snapshots are on and this is

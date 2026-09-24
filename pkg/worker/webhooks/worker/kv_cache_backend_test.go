@@ -219,17 +219,9 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
 			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		}, ""},
-		// The snapshot, in both directions. The claim is what the whole feature rests on -- the
-		// replica that serves writes the snapshot and a standby reads it back -- so a block naming
-		// none is a feature that renders, mounts nothing, and reports itself working.
-		{"a snapshot naming its claim", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
-			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{
-				Snapshot: &workercore.KVCacheBackendLeaderSnapshot{
-					PersistentVolumeClaimName: "mooncake-snapshots",
-				},
-			}
-		}, ""},
+		// The snapshot's claim. The whole block is refused on its own -- see
+		// TestKVCacheBackendWebhook_LeaderSnapshotIsRefused -- and these cases pin that the claim is
+		// still judged beside that refusal, so a block naming none is told about both.
 		{"a snapshot naming no claim", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
 			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{
@@ -247,17 +239,6 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 				},
 			}
 		}, "persistentVolumeClaimName"},
-		// One replica with a snapshot is ACCEPTED, and it is the case that keeps the two gates
-		// apart: the election is inert here while the snapshot is not, because a single leader
-		// restoring its own last snapshot on restart is worth having.
-		{"a snapshot under one replica", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
-			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{
-				Snapshot: &workercore.KVCacheBackendLeaderSnapshot{
-					PersistentVolumeClaimName: "mooncake-snapshots",
-				},
-			}
-		}, ""},
 
 		// The oplog key: refused because the leader cannot START with it, not because this operator
 		// took a view on what it writes. The message says which backend is missing, because the flag
@@ -1153,6 +1134,95 @@ func TestKVCacheBackendWebhook_AGrandfatheredExtraArgIsNotRefusedOnEveryUpdate(t
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 		require.NoError(t, err)
 	})
+}
+
+// TestKVCacheBackendWebhook_LeaderSnapshotIsRefused pins the refusal of the snapshot block and the
+// updates it is scoped to.
+//
+// A refusal is matched by the field it is reported on AND by its reason, because the snapshot's
+// claim rule reports on a path under this one: a match on the path alone would pass on that rule.
+// The accepted rows are the positive baseline, and two of them are the updates the scoping exists
+// for: an object admitted before the refusal must still take an unrelated edit and the removal of
+// its own finalizer, or it could never be deleted.
+func TestKVCacheBackendWebhook_LeaderSnapshotIsRefused(t *testing.T) {
+	const (
+		wantPath   = "spec.connection.managed.leader.highAvailability.snapshot: Forbidden"
+		wantReason = "can serve another key's bytes instead of a miss"
+	)
+	withLeader := func(replicas int32, snapshot bool) func(*workercore.KVCacheBackend) {
+		return func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Replicas = ptr.To(replicas)
+			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+			if snapshot {
+				k.Spec.Connection.Managed.Leader.HighAvailability.Snapshot = &workercore.KVCacheBackendLeaderSnapshot{
+					PersistentVolumeClaimName: "mooncake-snapshots",
+				}
+			}
+		}
+	}
+	then := func(fs ...func(*workercore.KVCacheBackend)) func(*workercore.KVCacheBackend) {
+		return func(k *workercore.KVCacheBackend) {
+			for _, f := range fs {
+				f(k)
+			}
+		}
+	}
+
+	cases := []struct {
+		name string
+		// old nil means the call is a create.
+		old     func(*workercore.KVCacheBackend)
+		new     func(*workercore.KVCacheBackend)
+		refused bool
+	}{
+		{"create: a snapshot under one replica", nil, withLeader(1, true), true},
+		{"create: a snapshot under three replicas", nil, withLeader(3, true), true},
+		{"create: one replica with high availability and no snapshot", nil, withLeader(1, false), false},
+		{"create: three replicas with high availability and no snapshot", nil, withLeader(3, false), false},
+
+		{"update: a snapshot added under one replica", withLeader(1, false), withLeader(1, true), true},
+		{"update: a snapshot added under three replicas", withLeader(3, false), withLeader(3, true), true},
+		{"update: replicas raised from one to three under a snapshot", withLeader(1, true), withLeader(3, true), true},
+		{"update: the snapshot's interval changed", withLeader(1, true), then(withLeader(1, true),
+			func(k *workercore.KVCacheBackend) {
+				k.Spec.Connection.Managed.Leader.HighAvailability.Snapshot.IntervalSeconds = ptr.To[int32](30)
+			}), true},
+
+		{"update: an unrelated edit to an object admitted with a snapshot", withLeader(3, true), then(withLeader(3, true),
+			func(k *workercore.KVCacheBackend) { k.Spec.Image = "example.com/mooncake:v1" }), false},
+		{"update: the finalizer removed from an object admitted with a snapshot", then(withLeader(3, true),
+			func(k *workercore.KVCacheBackend) {
+				k.Finalizers = []string{"example.com/in-use"}
+				k.DeletionTimestamp = ptr.To(meta.Now())
+			}), then(withLeader(3, true),
+			func(k *workercore.KVCacheBackend) { k.DeletionTimestamp = ptr.To(meta.Now()) }), false},
+		{"update: the snapshot removed", withLeader(3, true), withLeader(3, false), false},
+	}
+
+	wh := &KVCacheBackendWebhook{}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			newKvcb := newKVCacheBackend()
+			c.new(newKvcb)
+
+			var err error
+			if c.old == nil {
+				_, err = wh.ValidateCreate(context.Background(), newKvcb)
+			} else {
+				oldKvcb := newKVCacheBackend()
+				c.old(oldKvcb)
+				_, err = wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
+			}
+
+			if !c.refused {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), wantPath)
+			require.Contains(t, err.Error(), wantReason)
+		})
+	}
 }
 
 // TestKVCacheBackendWebhook_ValidateUpdate pins what is frozen under a running backend and, just as

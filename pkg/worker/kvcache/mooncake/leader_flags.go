@@ -139,9 +139,9 @@ func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 			"-cluster_id="+LeaderObjectName(kvcb))
 	}
 
-	// The snapshot group, and it is NOT gated on the election. A single leader restores its own last
-	// snapshot when it restarts, so the field earns its flags below two replicas as well -- see the
-	// API type, which states that difference where someone setting the field will read it.
+	// The snapshot group, and it is NOT gated on the election. Admission refuses the field; this
+	// renders it for an object admitted before that, exactly as it rendered then, at any replica
+	// count -- see the API type for why the field is refused.
 	//
 	// -snapshot_object_store_type is not a field either, for the reason -ha_backend_type is not one:
 	// the artifact's other value is S3, which needs an endpoint, a bucket and a credential this

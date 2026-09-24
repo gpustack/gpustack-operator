@@ -5,29 +5,28 @@ package v1alpha1
 // KVCacheBackendLeaderHighAvailabilityApplyConfiguration represents a declarative configuration of the KVCacheBackendLeaderHighAvailability type for use
 // with apply.
 //
-// KVCacheBackendLeaderHighAvailability turns leader election on, and carries what a standby is
-// allowed to start from.
+// KVCacheBackendLeaderHighAvailability turns leader election on, and carries how members find the
+// leader it elects.
 //
 // DECLARING THE BLOCK IS THE SWITCH, and there is no key inside it to turn the feature back off.
 // An `enabled: false` beside `replicas: 3` would be a third state that admission would have to
 // adjudicate and every reader would have to remember, while presence has no such state. Lease
 // tuning — duration, renew deadline — can also be added here later without a breaking change.
 type KVCacheBackendLeaderHighAvailabilityApplyConfiguration struct {
-	// Snapshot writes the leader's own metadata to storage both leader Pods can reach, so a standby
-	// that takes over starts from that baseline rather than from nothing.
+	// Snapshot is REFUSED AT ADMISSION, at any replica count. It would write the leader's metadata
+	// to a claim for a restarted leader, or a standby taking over, to restore, and that restore can
+	// make the cache serve another key's bytes instead of a miss: the snapshot records where each key
+	// sits in member memory, and nothing checks that the memory still holds that key when the index
+	// is read back. A forced remove, which is how an engine resets its cache, frees it for the next
+	// write, and a standby loads the snapshot once at its own start, before another leader reuses it.
 	//
 	// Without it a standby REPLICATES NOTHING. The store's operation log is the only other way to
-	// feed one, and it runs on a leadership backend this operator's image cannot carry, so the
-	// snapshot is the whole of what a failover can recover. What it recovers is bounded by
-	// IntervalSeconds: the cache comes back partially cold rather than entirely cold.
+	// feed one, and it runs on a leadership backend this operator's image cannot carry, so a
+	// failover or a restart starts from an empty cache.
 	//
-	// - The flags this renders arrive AS SOON AS THIS FIELD IS SET, unlike the election's, which
-	// wait for Replicas to rise above one. A single leader restores its own last snapshot when
-	// it restarts, which is worth having on its own — and it means a store image too old to
-	// carry the snapshot subsystem refuses to start here instead of ignoring the field.
-	// - A snapshot older than the running process is read back without a version check of any
-	// kind. Moving the image BACKWARDS across a snapshot format change is outside what this API
-	// makes any promise about.
+	// The field is kept so that an object admitted before the refusal keeps rendering as it did: its
+	// flags arrive as soon as the field is set, unlike the election's. An update to such an object
+	// is judged only when it moves this field or Replicas.
 	Snapshot *KVCacheBackendLeaderSnapshotApplyConfiguration `json:"snapshot,omitempty"`
 	// MemberAddressing selects how a member is told to find the master once an election runs. Both
 	// forms reach the leader that is serving, by different routes, and they are rendered into the
