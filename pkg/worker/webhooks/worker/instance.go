@@ -157,7 +157,6 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 
 	stopped := instOld.Spec.Stop
 	starting := stopped && !inst.Spec.Stop
-	stopping := !stopped && inst.Spec.Stop
 
 	var errs field.ErrorList
 
@@ -246,8 +245,7 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
 
 	// Validate state transition.
-	switch {
-	case starting:
+	if starting {
 		// Validate the instance is actually stopped before allowing it to be started.
 		if instOld.Status.Phase != workerctrl.InstancePhaseStopped {
 			errs = append(errs, field.Forbidden(
@@ -291,13 +289,6 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 				return nil, kerrors.NewInternalError(fmt.Errorf("instance type %s is not ready yet; retry", instType.Name))
 			}
 			errs = append(errs, validateResourceRequests(instType, inst.Spec.Resources)...)
-		}
-	case stopping:
-		// Validate the instance is not starting when trying to stop it,
-		// to avoid the race condition between starting and stopping an instance.
-		if instOld.Status.Phase == workerctrl.InstancePhaseStarting {
-			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.stop"), "cannot stop starting instance"))
 		}
 	}
 
