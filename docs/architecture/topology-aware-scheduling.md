@@ -158,6 +158,9 @@ report at all, `NodeQueueReconciler` sets `HoldAndDrain`, waits for Kueue to rep
 Workloads, switches the complete flavor plan, and restores the queue's previous stop policy. Kueue
 owns eviction and readmission; serving workloads can be interrupted.
 
+A plan with no flavor left is the exception: the emptied queue stays held until a flavor returns,
+because under `IgnoreUndeclared` Kueue admits every Workload onto a queue that declares no resource.
+
 A dropped flavor that Kueue reports idle, an added flavor, or a quota-only change is updated in
 place without a hold. The decision reads only a queue status Kueue wrote for the current generation;
 until then the queue reports `TopologyReady=Unknown` with reason `AwaitingQueueStatus`. Old flavors

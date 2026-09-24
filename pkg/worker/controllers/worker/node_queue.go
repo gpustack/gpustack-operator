@@ -53,7 +53,8 @@ import (
 //     that had been drained to empty (StopPolicy None).
 //   - No flavors, quota still defined: gated by instance-type-drain-when-no-flavors, drive the
 //     queue to HoldAndDrain and requeue until every reservation clears, then empty the resource
-//     groups — so Kueue's reservation counters never go negative.
+//     groups — so Kueue's reservation counters never go negative — and keep the emptied queue
+//     held until a flavor returns.
 //
 // Reactivation fires only on a queue whose resource groups are already empty, so it never
 // contends with a drain still in progress.
@@ -345,6 +346,15 @@ func (r *NodeQueueReconciler) migrateClusterQueueResourceGroups(
 		return ctrl.Result{RequeueAfter: _TASQueueMigrationRequeueAfter}, nil
 	}
 
+	// A queue without resource groups declares no resource, and Kueue ignores undeclared
+	// resources (quotaCheckStrategy IgnoreUndeclared), so restoring an admitting stop policy here
+	// would admit every Workload with no flavor and therefore no AdmissionCheck. The emptied queue
+	// stays held and keeps its migration annotations until a returning flavor switches it to a
+	// non-empty plan.
+	if len(desired) == 0 {
+		return ctrl.Result{}, r.setTopologyReadyCondition(ctx, cq, true, "Ready", "all queue flavors are topology-aware and quota is conserved")
+	}
+
 	restored, _ := decodeStopPolicy(cq.Annotations[_TASQueueMigrationStopPolicyAnnotation])
 	cq.Spec.StopPolicy = restored
 	delete(cq.Annotations, _TASQueueMigrationPhaseAnnotation)
@@ -587,9 +597,9 @@ func flavorsMayBeInUse(cq *kueue.ClusterQueue, flavors []kueue.ResourceFlavorRef
 
 // drainOrEmptyClusterQueue handles a queue whose pool has lost all its flavors: it empties the
 // quota through the held migration, switching only once every reservation has cleared so Kueue
-// never counts negative. The drain setting decides only whether remaining reservations are drained
-// (HoldAndDrain) or waited out without holding; a queue with nothing reserved is always held before
-// it is emptied, and an already-empty queue is a no-op.
+// never counts negative, and leaves the emptied queue held. The drain setting decides only whether
+// remaining reservations are drained (HoldAndDrain) or waited out without holding; a queue with
+// nothing reserved is always held before it is emptied, and an already-empty queue is a no-op.
 func (r *NodeQueueReconciler) drainOrEmptyClusterQueue(
 	ctx context.Context, cq *kueue.ClusterQueue,
 ) (ctrl.Result, error) {

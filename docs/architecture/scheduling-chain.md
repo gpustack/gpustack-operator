@@ -297,15 +297,18 @@ resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
   evicts on delete by itself.
 - **No live flavor left** while the queue carries quota — gated by
   `instance-type-drain-when-no-flavors` (default true): `HoldAndDrain`, requeue until every reservation
-  clears, then empty the groups so Kueue's counters never go negative.
+  clears, then empty the groups so Kueue's counters never go negative. The emptied queue stays
+  `HoldAndDrain` until a flavor returns: under `IgnoreUndeclared` a queue that declares no resource
+  admits every Workload, with no flavor and so no AdmissionCheck.
 - **Topology readiness** — refuse a partial queue plan when a flavor lacks its profile or Topology,
   selectors overlap, quota changes across the profile split, the same resource would occur in two
   groups, or one resource group would exceed the [flavor limit](topology-aware-scheduling.md#capacity-and-lifecycle-limits).
 
-It **reactivates** (StopPolicy `None`) a queue *it* drained to empty — a `HoldAndDrain`, never an admin
-`Hold` — once flavors return, though the `InstanceTypeReconciler`'s sticky `Inactive` backfill re-holds
-it, so a recovered pool stays inactive until an admin clears `Inactive`. A drained queue also stops its
-running Instances — see [Running-instance stop](admission.md#running-instance-stop).
+Once flavors return it switches the held queue to the new plan, and only then **restores** the stop
+policy the queue had before the drain — `None`, or an admin `Hold`. The queue carries its migration
+marker the whole time, and the `InstanceTypeReconciler` does not backfill `Inactive` while it is
+present, so a recovered pool admits again without an admin. A drained queue also stops its running
+Instances — see [Running-instance stop](admission.md#running-instance-stop).
 
 ### `NodeQueueEntranceReconciler` (`node_queue_entrance.go`)
 
