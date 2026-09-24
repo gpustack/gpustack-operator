@@ -22,6 +22,7 @@ import (
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueueadmissioncheck "sigs.k8s.io/kueue/pkg/util/admissioncheck"
+	kueuetas "sigs.k8s.io/kueue/pkg/util/tas"
 	kueueworkload "sigs.k8s.io/kueue/pkg/workload"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -78,25 +79,85 @@ type familyDemand struct {
 	// It is carried for the verdict message only, never for matching: a group-wide "not enough
 	// cards" that does not say which role fell short is a message nobody can act on.
 	podSets []kueue.PodSetReference
+	// node is the hostname Kueue's topology-aware scheduling assigned these Pods to, empty when the
+	// podset carries no hostname-level topology assignment. A non-empty node confines the demand to
+	// that node's cards: the Pods are pinned there by nodeSelector once admitted, so a free card on
+	// another node of the pool cannot host them.
+	node string
 }
 
 // parseFamilyDemands reads the accelerator demands off a Workload's pod templates, one
 // correlated tuple per (podset, family), merged across podsets only where the assigned flavor,
 // the per-card demand and the profile agree — so the common single-podset Workload yields
 // exactly one tuple per family. A Workload requesting no known accelerator yields none.
+//
+// A podset whose Pods Kueue has already placed on nodes contributes one tuple per assigned node,
+// each sized to the Pods placed there, so every node must host its own share of the podset.
 func parseFamilyDemands(wl *kueue.Workload) []familyDemand {
 	var demands []familyDemand
 	for i := range wl.Spec.PodSets {
 		ps := &wl.Spec.PodSets[i]
 		flavor := assignedFlavor(wl, ps.Name)
-		for _, d := range podSetFamilyDemands(ps) {
+		nodes := assignedNodes(wl, ps.Name)
+		for _, d := range podSetFamilyDemands(ps, ps.Count) {
 			d.flavor = flavor
 			d.podSets = []kueue.PodSetReference{ps.Name}
-			demands = mergeDemand(demands, d)
+			// The shared family stays judged across the pool. Its card key counts ownership shares,
+			// which this check reads as distinct cards, so scoping it to one node would hold a
+			// multi-share request on a single-card node for good; what that key means has to be
+			// settled before it can be judged per node.
+			if len(nodes) == 0 || d.family == nodefeature.ResourceFamilyShared {
+				demands = mergeDemand(demands, d)
+				continue
+			}
+			for _, n := range nodes {
+				nd := podSetFamilyDemand(ps, d.family, n.count)
+				nd.flavor, nd.podSets, nd.node = flavor, d.podSets, n.hostname
+				demands = mergeDemand(demands, nd)
+			}
 		}
 	}
 	sortDemands(demands)
 	return demands
+}
+
+// nodeShare is the number of a podset's Pods Kueue placed on one node, named by its hostname.
+type nodeShare struct {
+	hostname string
+	count    int32
+}
+
+// assignedNodes reads the nodes Kueue's topology-aware scheduling placed one podset's Pods on, with
+// the Pod count each received. It returns nothing when the podset has no topology assignment, or
+// when the assignment's lowest level is not the hostname: a coarser domain names no single node, so
+// the demand is judged across the pool as before.
+//
+// Kueue writes the assignment together with the quota reservation, before any AdmissionCheck
+// settles, and its topology ungater copies the assigned node labels into each Pod's nodeSelector
+// once the Workload is admitted. By the time this check runs the node is therefore already decided.
+func assignedNodes(wl *kueue.Workload, podSet kueue.PodSetReference) []nodeShare {
+	if wl.Status.Admission == nil {
+		return nil
+	}
+	for i := range wl.Status.Admission.PodSetAssignments {
+		psa := &wl.Status.Admission.PodSetAssignments[i]
+		if psa.Name != podSet {
+			continue
+		}
+		ta := psa.TopologyAssignment
+		if ta == nil || !kueuetas.IsLowestLevelHostname(ta.Levels) {
+			return nil
+		}
+		var shares []nodeShare
+		for domain := range kueuetas.InternalSeqFrom(ta) {
+			if len(domain.Values) == 0 || domain.Count <= 0 {
+				continue
+			}
+			shares = append(shares, nodeShare{hostname: domain.Values[len(domain.Values)-1], count: domain.Count})
+		}
+		return shares
+	}
+	return nil
 }
 
 // assignedFlavor returns the ResourceFlavor Kueue assigned to one podset for its ACCELERATOR, empty
@@ -175,7 +236,10 @@ func assignedFlavor(wl *kueue.Workload, podSet kueue.PodSetReference) kueue.Reso
 // Workload unreserved. An admin's queue covering both manufacturers' credits does reach it, and
 // there the merged tuple carries no flavor at all — assignedFlavor refuses to choose between the
 // two, so the demand is held rather than fitted against one model's cards while counting both.
-func podSetFamilyDemands(ps *kueue.PodSet) []familyDemand {
+//
+// count is the number of the podset's Pods the demand is sized for: the whole podset, or the share
+// Kueue placed on one node.
+func podSetFamilyDemands(ps *kueue.PodSet, count int32) []familyDemand {
 	byFamily := make(map[nodefeature.ResourceFamily]*familyDemand)
 	containers := make([]*core.Container, 0, len(ps.Template.Spec.InitContainers)+len(ps.Template.Spec.Containers))
 	for ci := range ps.Template.Spec.InitContainers {
@@ -231,7 +295,7 @@ func podSetFamilyDemands(ps *kueue.PodSet) []familyDemand {
 		// count times a large pod count cannot wrap to a small (or negative) demand. A
 		// sub-key with no card request behind it, and a podset of zero pods, both demand
 		// no card at all.
-		d.cards = clampInt32(int64(d.cards) * int64(ps.Count))
+		d.cards = clampInt32(int64(d.cards) * int64(count))
 		if d.cards <= 0 {
 			continue
 		}
@@ -239,6 +303,17 @@ func podSetFamilyDemands(ps *kueue.PodSet) []familyDemand {
 	}
 	sortDemands(out)
 	return out
+}
+
+// podSetFamilyDemand reads one family's demand of a podset sized for count of its Pods. The family
+// is always one podSetFamilyDemands already returned for the podset, so it is present.
+func podSetFamilyDemand(ps *kueue.PodSet, family nodefeature.ResourceFamily, count int32) familyDemand {
+	for _, d := range podSetFamilyDemands(ps, count) {
+		if d.family == family {
+			return d
+		}
+	}
+	return familyDemand{family: family}
 }
 
 // isCardKey reports whether name is the family's card key — the one whose value is the
@@ -289,7 +364,8 @@ func mergeDemand(demands []familyDemand, d familyDemand) []familyDemand {
 		if demands[i].family == d.family &&
 			demands[i].unitsPerCard == d.unitsPerCard &&
 			demands[i].profile == d.profile &&
-			demands[i].flavor == d.flavor {
+			demands[i].flavor == d.flavor &&
+			demands[i].node == d.node {
 			demands[i].cards = clampInt32(int64(demands[i].cards) + int64(d.cards))
 			demands[i].podSets = append(demands[i].podSets, d.podSets...)
 			return demands
@@ -311,7 +387,10 @@ func sortDemands(demands []familyDemand) {
 		if a.unitsPerCard != b.unitsPerCard {
 			return cmp.Compare(b.unitsPerCard, a.unitsPerCard)
 		}
-		return cmp.Compare(a.family, b.family)
+		if c := cmp.Compare(a.family, b.family); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.node, b.node)
 	})
 }
 
@@ -357,20 +436,25 @@ type cardLedger struct {
 	// matched its node AND whose nodeLabels pin its own accelerator key. A card a mixed-model
 	// node contributes appears once with the flavors that actually cover it, so the per-card
 	// budget below is still spent once no matter how many flavors reach it.
-	flavors           sets.Set[kueue.ResourceFlavorReference]
+	flavors sets.Set[kueue.ResourceFlavorReference]
+	// hostname is the kubernetes.io/hostname label of the card's node, the name a topology
+	// assignment uses for it. Empty when the Node could not be read, so no node-scoped demand
+	// can use the card.
+	hostname          string
 	capability        workercore.AcceleratorStatus
 	mode              workercore.DeviceAllocationMode
 	remaining         int32
 	remainingProfiles []workercore.AcceleratorProfileCount
 }
 
-// coveredBy reports whether this card may serve a demand assigned the given flavor. Matching is
-// plain equality on the reference, in both directions: a production demand carries a real flavor
-// name and is covered only by cards that flavor reaches, while a demand whose assignment could not
-// be read carries none and is covered by nothing — so an unreadable assignment holds the workload
-// with Retry instead of silently widening it to every card in the pool.
-func (c cardLedger) coveredBy(flavor kueue.ResourceFlavorReference) bool {
-	return c.flavors.Has(flavor)
+// coveredBy reports whether this card may serve the demand. Matching the flavor is plain equality on
+// the reference, in both directions: a production demand carries a real flavor name and is covered
+// only by cards that flavor reaches, while a demand whose assignment could not be read carries none
+// and is covered by nothing — so an unreadable assignment holds the workload with Retry instead of
+// silently widening it to every card in the pool. A demand naming a node is further covered only by
+// that node's cards.
+func (c cardLedger) coveredBy(d familyDemand) bool {
+	return c.flavors.Has(d.flavor) && (d.node == "" || c.hostname == d.node)
 }
 
 // flavorScope is one assigned ResourceFlavor's claim on a node: the flavor itself, and the
@@ -400,6 +484,8 @@ type flavorScope struct {
 type scopedDevices struct {
 	devices workercore.Devices
 	scopes  []flavorScope
+	// hostname is the node's kubernetes.io/hostname label, empty when the Node could not be read.
+	hostname string
 }
 
 // collectCards flattens every accelerator across the candidate nodes into one list, joining each
@@ -438,6 +524,7 @@ func collectCards(pool []scopedDevices) []cardLedger {
 				cards = append(cards, cardLedger{
 					manufacturer:      g.Manufacturer,
 					flavors:           covering,
+					hostname:          pool[i].hostname,
 					capability:        capByID[acc.ID],
 					mode:              acc.Mode,
 					remaining:         acc.Remaining,
@@ -581,16 +668,16 @@ func fitScalarDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (
 	units := unitsPerCardFor(d)
 	var fit int32
 	for i := range cards {
-		if budgets[i].whole || !cards[i].coveredBy(d.flavor) ||
+		if budgets[i].whole || !cards[i].coveredBy(d) ||
 			!cards[i].servesFamily(d.family) || cards[i].remaining < units {
 			continue
 		}
 		budgets[i].whole = true
 		if fit++; fit >= d.cards {
-			return kueue.CheckStateReady, verdictMessage(kueue.CheckStateReady, d.podSets)
+			return kueue.CheckStateReady, demandVerdictMessage(kueue.CheckStateReady, d)
 		}
 	}
-	return kueue.CheckStateRetry, verdictMessage(kueue.CheckStateRetry, d.podSets)
+	return kueue.CheckStateRetry, demandVerdictMessage(kueue.CheckStateRetry, d)
 }
 
 // fitPartitionDemand gates a partition demand on the per-card placement-aware ledger: a
@@ -610,7 +697,7 @@ func fitPartitionDemand(cards []cardLedger, budgets []cardBudget, d familyDemand
 	var partitionCards, ledgerReady, fit int32
 	for i := range cards {
 		c := &cards[i]
-		if !c.coveredBy(d.flavor) || !c.servesFamily(nodefeature.ResourceFamilyPartitioned) {
+		if !c.coveredBy(d) || !c.servesFamily(nodefeature.ResourceFamilyPartitioned) {
 			continue
 		}
 		partitionCards++
@@ -633,6 +720,9 @@ func fitPartitionDemand(cards []cardLedger, budgets []cardBudget, d familyDemand
 		take := min(free, d.cards-fit)
 		budgets[i].placements += take
 		if fit += take; fit >= d.cards {
+			if d.node != "" {
+				return kueue.CheckStateReady, assignedNodeMessage(kueue.CheckStateReady, d)
+			}
 			return kueue.CheckStateReady, partitionVerdictMessage(kueue.CheckStateReady, d.profile, d.podSets)
 		}
 	}
@@ -641,6 +731,8 @@ func fitPartitionDemand(cards []cardLedger, budgets []cardBudget, d familyDemand
 		return kueue.CheckStateRetry, partitionNoCardsMessage(d.profile, d.podSets)
 	case ledgerReady == 0:
 		return kueue.CheckStateRetry, partitionLedgerNotReadyMessage(d.podSets)
+	case d.node != "":
+		return kueue.CheckStateRetry, assignedNodeMessage(kueue.CheckStateRetry, d)
 	}
 	return kueue.CheckStateRetry, partitionVerdictMessage(kueue.CheckStateRetry, d.profile, d.podSets)
 }
@@ -884,6 +976,9 @@ func demandsSummary(demands []familyDemand) string {
 	parts := make([]string, 0, len(demands))
 	for _, d := range demands {
 		part := fmt.Sprintf("%s cards=%d", d.family, d.cards)
+		if d.node != "" {
+			part += " node=" + d.node
+		}
 		if d.profile != "" {
 			part += " profile=" + d.profile
 		}
@@ -969,9 +1064,30 @@ func (r *NodeDevicesAdmissionReconciler) candidateDevices(ctx context.Context, w
 	slices.Sort(order)
 	pool := make([]scopedDevices, 0, len(order))
 	for _, name := range order {
-		pool = append(pool, *byName[name])
+		sd := byName[name]
+		hostname, err := r.nodeHostname(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		sd.hostname = hostname
+		pool = append(pool, *sd)
 	}
 	return pool, nil
+}
+
+// nodeHostname reads the kubernetes.io/hostname label of the named Node — a Devices object is named
+// after its Node, while a topology assignment names the node by that label, and the two need not
+// agree. A Node that is gone yields no hostname rather than an error: its cards then serve no
+// node-scoped demand, which holds such a demand instead of admitting it onto a node that has left.
+func (r *NodeDevicesAdmissionReconciler) nodeHostname(ctx context.Context, name string) (string, error) {
+	nd := new(core.Node)
+	if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: name}, nd); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return nd.Labels[core.LabelHostname], nil
 }
 
 // flavorAcceleratorKey reads the accelerator device key a ResourceFlavor pins in its
@@ -1077,6 +1193,29 @@ func desiredCheckStates(
 		}
 	}
 	return desired, changed
+}
+
+// demandVerdictMessage renders a scalar demand's verdict: about the node Kueue assigned when the
+// demand names one, otherwise about the assigned flavor's pool.
+func demandVerdictMessage(state kueue.CheckState, d familyDemand) string {
+	if d.node != "" {
+		return assignedNodeMessage(state, d)
+	}
+	return verdictMessage(state, d.podSets)
+}
+
+// assignedNodeMessage renders the verdict for a demand confined to the node Kueue assigned. The
+// Retry wording states the livelock plainly: Kueue's topology-aware scheduling sums each node's
+// capacity keys and cannot see how the free units are spread over its cards, and it recomputes the
+// placement from the same totals after the eviction, so it keeps choosing this node until the
+// node's own cards free — even while another node of the pool has room.
+func assignedNodeMessage(state kueue.CheckState, d familyDemand) string {
+	if state == kueue.CheckStateReady {
+		return fmt.Sprintf("the node %q Kueue assigned has enough free cards to place the request%s", d.node, forRoles(d.podSets))
+	}
+	return fmt.Sprintf("no card on the node %q Kueue assigned can host the request%s;"+
+		" Kueue's topology-aware scheduling sees only the node's summed capacity and may assign the same node again,"+
+		" so this retries until that node's cards free, even while another node has room", d.node, forRoles(d.podSets))
 }
 
 func verdictMessage(state kueue.CheckState, podSets []kueue.PodSetReference) string {
