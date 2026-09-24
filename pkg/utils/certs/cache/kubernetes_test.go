@@ -13,6 +13,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	clientfeatures "k8s.io/client-go/features"
 	clientfeaturestesting "k8s.io/client-go/features/testing"
 	k8stesting "k8s.io/client-go/testing"
@@ -35,7 +36,8 @@ const (
 	secretNamePrefix = "gpustack-cert-"
 )
 
-// newTestCache builds a cache backed by the given fake client.
+// newTestCache builds a cache backed by the given fake client, returning once the informer
+// behind its read path watches the client.
 func newTestCache(t *testing.T, cli *kubefake.Clientset) certs.Cache {
 	t.Helper()
 
@@ -43,8 +45,31 @@ func newTestCache(t *testing.T, cli *kubefake.Clientset) certs.Cache {
 	// requires, so the informer would never report itself synced.
 	clientfeaturestesting.SetFeatureDuringTest(t, clientfeatures.WatchListClient, false)
 
+	// A fake watch starts from the moment it is opened rather than from the listed resource
+	// version, and the informer reports itself synced after the list but before it opens the
+	// watch. A write landing in between never reaches the read path, so the cache is handed
+	// out only once the watch is open.
+	var (
+		watching = make(chan struct{})
+		once     sync.Once
+	)
+	cli.PrependWatchReactor(testSecrets, func(action k8stesting.Action) (bool, watch.Interface, error) {
+		w, err := cli.Tracker().Watch(action.GetResource(), action.GetNamespace())
+		if err != nil {
+			return false, nil, err
+		}
+		once.Do(func() { close(watching) })
+		return true, w, nil
+	})
+
 	c, err := NewK8sCache(t.Context(), testGroup, cli.CoreV1().Secrets(testNamespace))
 	require.NoError(t, err)
+
+	select {
+	case <-watching:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the informer never watched secrets")
+	}
 	return c
 }
 
