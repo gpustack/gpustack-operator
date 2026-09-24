@@ -15,6 +15,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 func TestTopologyProfileUsesStableFNV64Name(t *testing.T) {
@@ -176,4 +177,44 @@ func readyNodeLabelSource(name string, selector map[string]string, levels ...str
 	}}
 	TopologySourceConditionReady.True(source, "Observed", "ready")
 	return source
+}
+
+func TestNodeLabelsChangedIgnoringFit(t *testing.T) {
+	cases := []struct {
+		name     string
+		old, new map[string]string
+		want     bool
+	}{
+		{
+			name: "no change",
+			old:  map[string]string{core.LabelTopologyZone: "a"},
+			new:  map[string]string{core.LabelTopologyZone: "a"},
+			want: false,
+		},
+		{
+			name: "only a fit label moves",
+			old:  map[string]string{core.LabelTopologyZone: "a", nodefeature.FitSlicedMaxFreeUnitsLabelKey("nvidia-t4"): "1600000"},
+			new:  map[string]string{core.LabelTopologyZone: "a", nodefeature.FitSlicedMaxFreeUnitsLabelKey("nvidia-t4"): "640000", nodefeature.FitSharedFreeCardsLabelKey("nvidia-t4"): "4"},
+			want: false,
+		},
+		{
+			name: "a topology label moves",
+			old:  map[string]string{core.LabelTopologyZone: "a"},
+			new:  map[string]string{core.LabelTopologyZone: "b"},
+			want: true,
+		},
+		{
+			name: "a fit label moves together with another label",
+			old:  map[string]string{core.LabelTopologyZone: "a", nodefeature.FitSlicedMaxFreeUnitsLabelKey("nvidia-t4"): "1600000"},
+			new:  map[string]string{core.LabelTopologyZone: "b", nodefeature.FitSlicedMaxFreeUnitsLabelKey("nvidia-t4"): "640000"},
+			want: true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			oldNd := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "n", Labels: c.old}}
+			newNd := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "n", Labels: c.new}}
+			assert.Equal(t, c.want, nodeLabelsChangedIgnoringFit(oldNd, newNd))
+		})
+	}
 }

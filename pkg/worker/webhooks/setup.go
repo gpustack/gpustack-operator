@@ -22,6 +22,7 @@ var setups = []webhook.Setup{
 	new(worker.TopologySourceWebhook),
 	new(worker.PodWebhook),
 	new(worker.PodKVCacheWebhook),
+	new(worker.WorkloadWebhook),
 }
 
 // cfgGetters is the list of all webhook configuration getters.

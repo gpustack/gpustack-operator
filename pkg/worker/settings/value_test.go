@@ -102,3 +102,13 @@ func TestInstanceTypeManagementSettingsEnvMapping(t *testing.T) {
 		})
 	}
 }
+
+// TestWorkloadFitAffinitySetting pins the switch that lets an administrator turn the Workload
+// fit pin off while the fit labels keep being published, so a verification can ablate the pin
+// alone: its stable name (which drives the GPUSTACK_ env mapping), its default-on boot value, and
+// that it stays an editable boolean read at runtime.
+func TestWorkloadFitAffinitySetting(t *testing.T) {
+	assert.Equal(t, "workload-fit-affinity", WorkloadFitAffinity.Name(), "name drives the GPUSTACK_ env mapping")
+	assert.Equal(t, "true", WorkloadFitAffinity.DefaultValue(), "boot default value")
+	assert.True(t, WorkloadFitAffinity.Editable(), "must stay editable for runtime adjustment")
+}
