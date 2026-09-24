@@ -221,6 +221,10 @@ private-only node still joins the cluster, pulls images and installs packages.
 What it loses is *inbound* reachability — SSH — which is why the flag tracks who
 needs to log in and nothing else.
 
+`clusters/eks` has the same per-group `public_ip` field, with two differences. It defaults to
+`true` on CPU groups as well, and turning it off there moves the group into a private subnet and
+replaces it, because an EKS node without a public address has no route out of a public subnet.
+
 That last paragraph is **documentation-level**, not a guarantee this module
 makes: the default route and its egress gateway arrive with the network Nebius
 hands out, and nothing here creates them, asserts them, or checks that they are
