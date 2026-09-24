@@ -1,0 +1,17 @@
+# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{engine_type="unified",model_name="Qwen/Qwen2.5-0.5B-Instruct",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:num_queue_reqs gauge
+sglang:num_queue_reqs{engine_type="unified",model_name="Qwen/Qwen2.5-0.5B-Instruct",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:prefill_effective_tokens_total counter
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="input",model_name="Qwen/Qwen2.5-0.5B-Instruct",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 14363.0
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="device_hit",model_name="Qwen/Qwen2.5-0.5B-Instruct",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 50081.0
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="host_hit",model_name="Qwen/Qwen2.5-0.5B-Instruct",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="storage_hit",model_name="Qwen/Qwen2.5-0.5B-Instruct",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:time_to_first_token_seconds histogram
+sglang:time_to_first_token_seconds_sum{engine_type="unified",is_streaming="false",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 68.66017680099685
+sglang:time_to_first_token_seconds_count{engine_type="unified",is_streaming="false",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 204.0
+sglang:time_to_first_token_seconds_sum{engine_type="unified",is_streaming="true",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 4.392058683006326
+sglang:time_to_first_token_seconds_count{engine_type="unified",is_streaming="true",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 203.0
+# TYPE sglang:inter_token_latency_seconds histogram
+sglang:inter_token_latency_seconds_sum{engine_type="unified",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 53.688668071985376
+sglang:inter_token_latency_seconds_count{engine_type="unified",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 9534.0

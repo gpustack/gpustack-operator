@@ -67,12 +67,14 @@ if [ "${E2E_EXPECT_PARTIAL:-0}" = 1 ]; then
   else
     record FAIL "partial read names missing sources" "$MD"
   fi
-# A complete read may still list the two entries that do not count as partial: a labeled failure
-# or error counter not yet exported beside its paired counter, and a source the router does not
-# provide for this shape. Any other missing entry is a partial read.
+# A complete read may still list the entries that do not count as partial: a labeled series not yet
+# exported beside its pair, a source this shape does not provide, and a source of a Pod that served
+# no request between the two reads. Any other missing entry is a partial read.
 elif jq -e '.partial == false and all(.missing // [] | .[];
   (.reason | startswith("labeled failure or error counter is not exported")) or
-  (.reason | startswith("unsupported source:")))' <<<"$second" >/dev/null; then
+  (.reason | startswith("labeled histogram is not exported")) or
+  (.reason | startswith("unsupported source:")) or
+  (.reason | startswith("idle sampling window:")))' <<<"$second" >/dev/null; then
   record PASS "complete read" "$MD"
 else
   record FAIL "complete read" "$(jq -c '{partial,missing}' <<<"$second")"
@@ -155,10 +157,13 @@ if [ -n "$router_name" ]; then
   split="$(jq -r 'any(.spec.roles[]; .kind == "prefill")' <<<"$md_json")"
   engine="$(jq -r '.spec.engine.name' <<<"$md_json")"
   # The sources a router does not provide for this shape are a decided contract, so a complete read
-  # lists exactly those as unsupported: the vLLM router's P/D mode exports no processing gauge.
+  # lists exactly those as unsupported on its router Pods: the vLLM router's P/D mode exports no
+  # processing gauge. An engine Pod's own unsupported source is not the router's and is not counted.
   want='[]'
   [ "$router_name/$split" = vllm-router/true ] && want='["vllm_router_active_workers","vllm_router_running_requests"]'
-  got="$(jq -c '[.missing[]? | select(.reason | startswith("unsupported source:")) | .source] | unique' <<<"$second")"
+  router_pods="$(jq -sc '[.[] | select(.metadata.labels["modeldeployment.gpustack.ai/router"] != null) | .metadata.name]' <<<"$managed_pods")"
+  got="$(jq -c --argjson routers "$router_pods" '[.missing[]? | select(.pod as $pod | $routers | index($pod) != null) |
+    select(.reason | startswith("unsupported source:")) | .source] | unique' <<<"$second")"
   if [ "$got" = "$want" ] && jq -e '(.traffic // []) | length > 0' <<<"$second" >/dev/null &&
      { [ "$engine/$split" != sglang/true ] || jq -e '(.transfer // []) | length > 0' <<<"$second" >/dev/null; }; then
     record PASS "router contract for this shape" "$router_name, unsupported $got"

@@ -1,0 +1,12 @@
+# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{engine_type="unified",model_name="Qwen/Qwen2.5-0.5B-Instruct",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:num_queue_reqs gauge
+sglang:num_queue_reqs{engine_type="unified",model_name="Qwen/Qwen2.5-0.5B-Instruct",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:prefill_effective_tokens_total counter
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="input",model_name="Qwen/Qwen2.5-0.5B-Instruct",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 110.0
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="device_hit",model_name="Qwen/Qwen2.5-0.5B-Instruct",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="host_hit",model_name="Qwen/Qwen2.5-0.5B-Instruct",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="storage_hit",model_name="Qwen/Qwen2.5-0.5B-Instruct",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# TYPE sglang:time_to_first_token_seconds histogram
+sglang:time_to_first_token_seconds_sum{engine_type="unified",is_streaming="false",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 8.331696819999706
+sglang:time_to_first_token_seconds_count{engine_type="unified",is_streaming="false",model_name="Qwen/Qwen2.5-0.5B-Instruct"} 1.0
