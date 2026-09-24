@@ -1059,6 +1059,9 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	// resource becomes a request, and this renderer derives the same values the Instance webhook
 	// does. A second knob for one translation would let the two disagree on one cluster.
 	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
+	// Read once per pass so every role renders against one value; the render decides which Pods
+	// turn it into a sysctl.
+	tcpTWReuse := settings.ModelDeploymentTCPTWReuse.ShouldValueBool(ctx)
 
 	// Resolved once per reconcile rather than per role: the answer is the cluster's, not the
 	// role's, and it reads the version snapshot configured at startup, so it costs no API call.
@@ -1101,6 +1104,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			InstanceType:               instType,
 			RuntimeClassName:           r.getModelDeploymentRuntimeClassName(ctx, instType),
 			GeneralResourcesOvercommit: overcommit,
+			TCPTWReuse:                 tcpTWReuse,
 			NativeSidecar:              nativeSidecar,
 		}
 
