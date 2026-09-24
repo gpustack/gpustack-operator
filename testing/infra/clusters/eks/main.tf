@@ -138,12 +138,19 @@ locals {
         # carry a public address, so in a public subnet the node would have no route out and
         # EKS refuses the group with Ec2SubnetInvalidConfiguration. Those nodes are not
         # reachable over SSH either way.
-        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[var.efa_availability_zone_index]] : cfg.availability_zone_index == null ? null : [module.vpc.public_subnets[cfg.availability_zone_index]]
+        #
+        # Without EFA the subnet follows the group's public_ip. A node without a public address
+        # MUST sit in a private subnet: the public subnets route out only through the internet
+        # gateway, which needs a public address, so such a node there has no way out -- it
+        # cannot pull images or join the cluster. The private subnets route out through the
+        # NAT gateway instead. An unpinned group with an address stays null and so inherits
+        # the cluster's public subnets.
+        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[var.efa_availability_zone_index]] : cfg.availability_zone_index == null ? (cfg.public_ip ? null : module.vpc.private_subnets) : [(cfg.public_ip ? module.vpc.public_subnets : module.vpc.private_subnets)[cfg.availability_zone_index]]
         # Under EFA the module substitutes its own interface set, sized and indexed for the
         # instance's network cards, so this group declares none of its own.
         network_interfaces = var.efa_enabled ? [] : [
           {
-            associate_public_ip_address = true
+            associate_public_ip_address = cfg.public_ip
           }
         ]
         block_device_mappings = local.node_block_device_mappings
@@ -189,12 +196,14 @@ locals {
         # sharing one group across node groups is the upstream module's shape to change,
         # not this file's. Keep both ends of a cross-node fabric test in one node group;
         # the README says the same thing where someone running it will read it.
-        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[var.efa_availability_zone_index]] : null
+        #
+        # Without EFA the subnet follows the group's public_ip, for the cpu group's reason.
+        subnet_ids = var.efa_enabled ? [module.vpc.private_subnets[var.efa_availability_zone_index]] : cfg.public_ip ? null : module.vpc.private_subnets
         # Under EFA the module substitutes its own interface set, sized and indexed for
         # the instance's network cards, so this group declares none of its own.
         network_interfaces = var.efa_enabled ? [] : [
           {
-            associate_public_ip_address = true
+            associate_public_ip_address = cfg.public_ip
           }
         ]
         block_device_mappings = local.node_block_device_mappings

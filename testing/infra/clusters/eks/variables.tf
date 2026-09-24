@@ -44,11 +44,21 @@ variable "cpu_instance_types" {
   # --scaling-config desiredSize=N`, which is drift-free precisely because the attribute
   # is ignored here. A group asked for and then emptied is a group that stays, which is
   # why "no group" is an absent key rather than a count of zero.
-  description = "CPU node groups, keyed by node group name (the key IS the name; no prefix is added): candidate instance types, node count at CREATE time (min = max = desired = node_count; desired is ignored on a live group), and an optional public-subnet availability_zone_index. Check types with https://aws.amazon.com/ec2/pricing/on-demand/"
+  #
+  # public_ip is the same per-group field clusters/nebius has, and defaults to true so a
+  # group renders as it did before the field existed. false drops the public address AND
+  # moves the group into the private subnets, because a node without one has no route out
+  # of a public subnet; it then reaches out through the NAT gateway and is not reachable
+  # over SSH. The subnet change REPLACES the group, so flip it when the group is due to be
+  # rotated anyway. Under efa_enabled it is ignored: EFA groups already sit in a private
+  # subnet without a public address. Unlike clusters/nebius, whose single subnet has a
+  # default egress gateway, the address and the subnet cannot be changed apart here.
+  description = "CPU node groups, keyed by node group name (the key IS the name; no prefix is added): candidate instance types, node count at CREATE time (min = max = desired = node_count; desired is ignored on a live group), an optional availability_zone_index that pins the group to one zone's subnet, and public_ip (default true: a public address in the public subnets; false: the private subnets without one, out through the NAT gateway, not SSH-reachable; changing it replaces the group; ignored under efa_enabled). Check types with https://aws.amazon.com/ec2/pricing/on-demand/"
   type = map(object({
     instance_types          = list(string)
     node_count              = number
     availability_zone_index = optional(number)
+    public_ip               = optional(bool, true)
   }))
   default = { cpu = { instance_types = ["c6a.4xlarge", "c7a.4xlarge"], node_count = 1 } }
 
@@ -125,10 +135,13 @@ variable "gpu_instance_types" {
   # leave max under desired. Park or resize a live group with `aws eks
   # update-nodegroup-config --scaling-config desiredSize=N`, which is drift-free
   # precisely because the attribute is ignored here. min_size stays 0.
-  description = "GPU node groups, keyed by node group name (the key IS the name; no prefix is added): candidate instance types for the group and its node count at CREATE time (desired = node_count, ignored on a live group; max = node_count; min = 0; see the comment here). Check with https://docs.aws.amazon.com/dlami/latest/devguide/gpu.html and https://aws.amazon.com/ec2/pricing/on-demand/"
+  #
+  # public_ip follows the same rules as in cpu_instance_types, default true included.
+  description = "GPU node groups, keyed by node group name (the key IS the name; no prefix is added): candidate instance types for the group, its node count at CREATE time (desired = node_count, ignored on a live group; max = node_count; min = 0; see the comment here), and public_ip (same meaning and default as in cpu_instance_types). Check with https://docs.aws.amazon.com/dlami/latest/devguide/gpu.html and https://aws.amazon.com/ec2/pricing/on-demand/"
   type = map(object({
     instance_types = list(string)
     node_count     = number
+    public_ip      = optional(bool, true)
   }))
   default = { gpu-g4dn = { instance_types = ["g4dn.xlarge", "g4dn.12xlarge"], node_count = 1 } }
 
