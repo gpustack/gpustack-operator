@@ -779,9 +779,9 @@ the replica and the lease window on each of three paths — `ReplicaEvicted`, `R
 away has the correlation written down rather than inferred.
 
 **An upgrade can trigger the same turnover without any spec edit.** The fingerprint covers a replica's
-labels and annotations as well as its spec, so a release that adds a key every replica carries leaves
-every existing replica stale and turns it over once. The `role-kind` label listed above did exactly
-that. Nothing is required of you, but on a busy deployment the restart is worth scheduling.
+labels, annotations and spec, so a release that changes what every replica renders turns each one over
+once: the `role-kind` label above did, and so did the [drain](model-deployment-shutdown.md). Nothing
+is required of you, but on a busy deployment the restart is worth scheduling.
 
 ### A replica that leaves is replaced
 

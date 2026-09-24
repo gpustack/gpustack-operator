@@ -464,6 +464,13 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	if role.Privileged {
 		mainC.SecurityContext = &core.SecurityContext{Privileged: ptr.To(true)}
 	}
+	// A take-over role gets no drain, for the reason it gets no probes: the operator did not build
+	// that command line, so it cannot claim the container serves the metrics the hook reads.
+	if !takeOver {
+		mainC.Lifecycle = &core.Lifecycle{
+			PreStop: modelDeploymentDrainHook(md.Spec.Engine.Name, enginePort, scheme),
+		}
+	}
 
 	pod := &core.Pod{
 		ObjectMeta: meta.ObjectMeta{
@@ -489,6 +496,11 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			Containers:       []core.Container{mainC},
 		},
 	}
+	// The grace the drain hook is budgeted against goes with the hook, so a take-over replica keeps
+	// the Pod it rendered before either existed.
+	if !takeOver {
+		pod.Spec.TerminationGracePeriodSeconds = ptr.To(modelDeploymentTerminationGracePeriodSeconds)
+	}
 	if directDecode {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			ctx, role, enginePort, scheme, md.Spec.Engine.Name, in.NativeSidecar,
@@ -506,9 +518,11 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			// after every regular container exits, while a classic one is terminated alongside
 			// them, so a Pod deletion can cut the proxy before the engine finishes draining --
 			// in-flight handoffs reset instead of answering, and the caller's retry lands on
-			// another replica. The startup guarantee it loses buys nothing here: the engine
-			// never dials the proxy, and a request that arrives before the engine listens gets a
-			// 503 the proxy survives, recovering the moment the engine is up.
+			// another replica. The engine's drain hook does not reach this shape: it holds the
+			// engine while the proxy in front of it is already gone, and the proxy's image has no
+			// shell to run a hook of its own. The startup guarantee it loses buys nothing here:
+			// the engine never dials the proxy, and a request that arrives before the engine
+			// listens gets a 503 the proxy survives, recovering the moment the engine is up.
 			pod.Spec.Containers = append([]core.Container{sidecar}, pod.Spec.Containers...)
 		}
 	}

@@ -1985,29 +1985,31 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 //
 // THE ORIGINAL DIGESTS WERE CAPTURED FROM THE RENDERER AS IT STOOD BEFORE IT WAS SPLIT into a
 // template half and a stamp half, and that split had to reproduce every one of them exactly. The
-// table has been RE-BASELINED three times since, each time for a rendering change that was
+// table has been RE-BASELINED five times since, each time for a rendering change that was
 // intended: once for the per-replica groups, where the stamp began naming a (role, ordinal) group,
 // declaring a total of one and writing the ordinal label; once when the ordinal label's key took the
 // modeldeployment prefix the role-kind label and the spec-hash annotation already carry, so that one
-// reader looking for this deployment's own keys finds all of them under one prefix; and once when
+// reader looking for this deployment's own keys finds all of them under one prefix; once when
 // the member index became unconditional on every member, so that one equality term in a discovery
-// selector names the Pods that answer the API at every role size; and once when each managed Pod
-// began declaring its metrics listener scheme. Every digest here moved by intent
+// selector names the Pods that answer the API at every role size; once when each managed Pod
+// began declaring its metrics listener scheme; and once when every Pod whose command line the
+// operator builds began carrying the drain hook and the termination grace it is budgeted against,
+// which left the take-over case's digest where it was. Every digest here moved by intent
 // rather than by drift. Each case renders ORDINAL ZERO -- the composite's zero value -- which is the
 // one ordinal a digest can name without the table growing a dimension. To re-baseline after an
 // intended rendering change: empty the table, run this case, and pin the digests the failures
 // print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "1cb29ab0f4e5a9bd47afa4f6c52b2885ad84fbb1c91d9aaad535acc61958ad23",
-		"a sole server role with a synthesized cache connector":                              "05651de136063e951a141f471d5f78f8982bda1a010446d8f7def9b90454c48e",
+		"a sole server role": "bbd82155b1d685e6906f885fdbebf266890117cafa9d1f58e089e6d678c27ec4",
+		"a sole server role with a synthesized cache connector":                              "42565b50fb7e640fa5d6a1a23c7a6d1920fa98370a3ca2d2080c2bb7e7a0a7d8",
 		"a take-over role carrying a connector it must be given no part of":                  "1984284b5fbc1e7245e71bb5ea8c3ed1daccef316d724e398952fa637c4c67cd",
-		"a direct decoder with a native routing sidecar":                                     "a56ec8ab7a954d66b6badbfacce263227706665ffd1b120460d447c62cce4a93",
-		"a direct decoder with a classic routing sidecar":                                    "7fb447f32c49928352366f174283ad34d4ffafa998f499e4a8e0df725b7344a6",
-		"a role naming no image, synthesized from the observed hardware":                     "ac96f9db31215198c74244b62f8507768f24391f1795148eaf505042e957c19e",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "08df2de2c9cdd21bade33b9ffd747729594d1ce499d372c9d73880b053daecff",
-		"the prefill role of a two-role deployment":                                          "24e9afd8b31c7275286667243479be76bda47f80f71d2ff55d2e27e852732b21",
-		"the decode role of a two-role deployment":                                           "b9e5878c647878bb19ba98e5e325561219430a321e82ce1f27b23a6b929a17a5",
+		"a direct decoder with a native routing sidecar":                                     "f7c36762d7ae4034f5a3642e0670d75a5fde2d05a151126ee82fa121fc11de2f",
+		"a direct decoder with a classic routing sidecar":                                    "4c6b12bd46308005d3d1fccad37d7523525c2993500a7a40d1822c2ee84b6c83",
+		"a role naming no image, synthesized from the observed hardware":                     "c6fbaa790a7663c4d9f601ba5d2183e8cb049b410e168ba05acc62b633b2d5f8",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "a576d65292f1abd652bb02aa5670707da9d6acdc122d5bc990de42e00387cd1c",
+		"the prefill role of a two-role deployment":                                          "108810fcd9c5b7b417bf9fdb3b91af0d8f6031458c45eeffa22083b105cdc5aa",
+		"the decode role of a two-role deployment":                                           "6d5e95c247bf376093f8d2263fc2469983bae32ad30c2f23422a3971f8454dc2",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its
