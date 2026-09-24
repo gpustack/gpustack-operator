@@ -128,6 +128,17 @@ A role replica owns one Workload and its `size` Pods form the fate-sharing PodSe
 `replicas: 3` and `size: 8` produces three independent eight-Pod topology decisions, not one
 twenty-four-Pod decision. Different roles and replicas are not required to share a domain.
 
+Several roles still admit as one set. The [joint admission check](../reference/model-deployment.md#prefill-and-decode)
+holds every group until the whole set has reserved quota, and no role Pod binds to a Node before
+then. While the set waits, a group that fits keeps its quota reservation and topology assignment,
+so the domain it holds stays idle. When no role fits, no Workload of the set reserves anything.
+
+> **Why the check answers `Pending`, never `Retry`** — a `Retry` makes Kueue evict the Workload, and
+> sibling roles waiting on each other would trade the same quota back and forth. The hold ends when
+> the set is admitted, when the deployment is deleted, or when the check parks a set that has not
+> assembled for 30 minutes (`QuotaReserved` reason `Parked` in the
+> [status reference](../reference/model-deployment-status.md#status)).
+
 Omitting `requiredLevel` adds no explicit topology request. The queue is still topology-aware, and
 Kueue may choose any compatible hierarchy. The [field contract](../reference/model-deployment.md#topology-placement)
 defines the implicit hostname level.

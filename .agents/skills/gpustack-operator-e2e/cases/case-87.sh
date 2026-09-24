@@ -44,8 +44,14 @@
 #                 admission check reads Ready; then, with the pool occupied to its last unit, a
 #                 second two-role deployment has every Workload held joint-Pending with no
 #                 admission, no quota reservation and no role Pod bound to a Node, across two
-#                 intervals. Every Workload of a deployment is attributed by following the
-#                 Workload's owner Pod references back to the deployment's Pods -- Kueue's pod
+#                 intervals. That shortage is SYMMETRIC: every live hostname domain is filled, so
+#                 no role fits and "unreserved" is the expected reading. An ASYMMETRIC shortage,
+#                 where one role fits, reads differently and is not asserted here: the fitting
+#                 role holds QuotaReserved=True and a topology assignment while the joint check
+#                 stays Pending and no role Pod binds, until the set admits, the deployment is
+#                 deleted, or the joint check parks it. Every Workload of a deployment is
+#                 attributed by following the Workload's owner Pod references back to the
+#                 deployment's Pods -- Kueue's pod
 #                 integration writes no ModelDeployment owner reference of any kind, so a lookup
 #                 that searched for one would find nothing on a correct cluster and pass vacuously.
 #
@@ -81,8 +87,9 @@
 #              while a reservation is still counted, and never drops an old flavor before that
 #              reservation drains; a fitting two-role deployment has both Workloads
 #              admitted with the joint check Ready;
-#              with the pool occupied, a second two-role deployment has every Workload joint
-#              Pending, unadmitted, unreserved and unbound across two intervals.
+#              with every hostname domain occupied (symmetric shortage), a second two-role
+#              deployment has every Workload joint Pending, unadmitted, unreserved and unbound
+#              across two intervals.
 #
 # Cleanup:     A trap force-releases every Workload owning each deployment's Pods BEFORE deleting
 #              the ModelDeployments (a serving group's finalizer is released by nothing but its

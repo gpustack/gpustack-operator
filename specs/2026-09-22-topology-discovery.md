@@ -482,6 +482,22 @@ partial domain reservations do not deadlock admission. Separate controller cover
 existing two-segment and three-segment manufacturer domain values without parsing or truncating
 them.
 
+> **Corrected after shipping.** The joint-admission lines in the risk table and the Implementation
+> and Test Plans promised "without leaked reservations", which read as "no role of an incomplete set
+> holds quota". That holds only when no role fits. A later live run on a four-Node, two-zone CPU
+> cluster filled three of the four hostname domains, then submitted a two-role deployment: the role
+> that fit reported `QuotaReserved=True` with a topology assignment while the joint check stayed
+> `Pending`, the other role reserved nothing, no role Pod bound, and the whole set was admitted once
+> the filler was deleted. The controller did not change; the rule it already implements is this. In
+> an incomplete set, a group that fits (one role replica) MAY hold its quota reservation and topology
+> assignment until the whole set can be admitted, the deployment is deleted, or the joint check's
+> infeasibility bound parks the set by deactivating its Workloads. The joint check does not answer
+> `Retry` to release it: Kueue would evict that Workload, and sibling groups would trade the same
+> quota back and forth. No role Pod binds to a Node before the whole set is admitted. The cost is
+> capacity that stays idle while the set waits. A leaked reservation is one that outlives those
+> three exits, or one that lets a role Pod bind early. When no group fits, no Workload of the set
+> reserves quota.
+
 ### Notes / Constraints / Caveats
 
 - Topograph's purpose and boundary are confirmed by its
@@ -550,7 +566,7 @@ them.
 | A non-nested pair of topology dimensions is flattened into a false tree | Validate parent tuples and require one explicit hierarchy; keep other labels observable but unschedulable in that profile. |
 | Enabling Topograph deploys privileged code unexpectedly | Default the subchart off and require explicit provider-specific security settings. |
 | Webhook access becomes a cluster-admin confused deputy or SSRF path | Restrict object authorship and credential namespace, require HTTPS, disable redirects, bound time and body size, and document egress policy. |
-| Joint admission reserves incompatible domains for separate roles | Add a live multi-role admission case and block release if the Pod integration cannot converge without leaked reservations. |
+| Joint admission reserves incompatible domains for separate roles | Add a live multi-role admission case and block release if the Pod integration cannot converge without leaked reservations. **Corrected after shipping.** A role that fits may hold its reservation while its set waits; that is intended, not leaked. Block release only on a reservation that outlives admission, deletion, or the park bound, or that lets a role Pod bind before the whole set is admitted (see F6). |
 
 ## Design Details
 
@@ -1039,6 +1055,9 @@ no spec task identifiers.
   across profiles.
 - Joint admission: a multi-role ModelDeployment either admits a mutually compatible set or remains
   wholly unadmitted without leaked reservations. Deleting it returns all quota.
+  **Corrected after shipping.** "Wholly unadmitted" does not mean wholly unreserved: when only some
+  roles fit, a fitting role may keep `QuotaReserved=True` while the joint check stays `Pending` and
+  no role Pod binds. Only a set where no role fits is also unreserved. F6 carries the rule.
 - Live hierarchy transition: add rack after admission, assert the managed ClusterQueue name and UID
   do not change, observe `HoldAndDrain` and zero reserving Workloads before the flavor switch, then
   observe admission restoration, replacement placement, and eventual release of the old

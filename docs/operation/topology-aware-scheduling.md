@@ -311,6 +311,11 @@ A four-node cluster with two Nodes per zone can admit a three-Pod request cluste
 admit it at zone level. Likewise, capacity split between a zone profile and a hostname-only profile
 cannot satisfy one zone-constrained PodSet.
 
+A multi-role deployment can show one Workload with `QuotaReserved=True` and a topology assignment,
+counted in the queue's `status.reservingWorkloads`, while its joint check reads `Pending` and no role
+Pod is bound. That group fits and is [held for its set](../architecture/topology-aware-scheduling.md#a-modeldeployment-request-is-per-replica);
+the other roles are the ones short of a domain. Free their capacity or delete the deployment.
+
 If the [flavor limit](../architecture/topology-aware-scheduling.md#capacity-and-lifecycle-limits)
 is exceeded, reduce profile fragmentation or hardware identity variants, then let reconciliation
 retry the complete plan.
