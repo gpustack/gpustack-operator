@@ -306,7 +306,7 @@ func matchModelDeploymentParallelFlag(
 
 	long := strings.HasPrefix(key, "--")
 	if long && engine == workercore.ModelDeploymentEngineVLLM {
-		key = strings.ReplaceAll(key, "_", "-")
+		key = modelDeploymentVLLMFlagKey(key)
 	}
 
 	for _, flag := range table {

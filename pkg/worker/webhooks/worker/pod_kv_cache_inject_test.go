@@ -945,6 +945,36 @@ func TestPodKVCacheInject_ConflictRefusals(t *testing.T) {
 			wantMsg: "--hicache-storage-backend",
 		},
 		{
+			name: "the connector flag is spelled with underscores",
+			mutate: func(ctr *core.Container, _ *core.Pod) {
+				ctr.Args = append(ctr.Args, `--kv_transfer_config={"kv_connector":"Other"}`)
+			},
+			wantMsg: "--kv_transfer_config, which engine \"vllm\" reads as --kv-transfer-config",
+		},
+		{
+			name: "the connector flag is a dotted member",
+			mutate: func(ctr *core.Container, _ *core.Pod) {
+				ctr.Args = append(ctr.Args, "--kv-transfer-config.kv_role", "kv_producer")
+			},
+			wantMsg: "--kv-transfer-config.kv_role, which engine \"vllm\" reads as --kv-transfer-config",
+		},
+		{
+			name: "the connector flag is abbreviated",
+			mutate: func(ctr *core.Container, _ *core.Pod) {
+				ctr.Args = append(ctr.Args, "--kv-transfer-conf", "{}")
+			},
+			wantMsg: "--kv-transfer-conf, which engine \"vllm\" reads as --kv-transfer-config",
+		},
+		{
+			name:   "the sglang extra-config flag is abbreviated",
+			engine: "sglang",
+			mutate: func(ctr *core.Container, _ *core.Pod) {
+				ctr.Args = append(ctr.Args, "--hicache-storage-backend-extra", "{}")
+			},
+			wantMsg: "--hicache-storage-backend-extra, which engine \"sglang\" reads as " +
+				"--hicache-storage-backend-extra-config",
+		},
+		{
 			name: "the mount path is already taken",
 			mutate: func(ctr *core.Container, _ *core.Pod) {
 				ctr.VolumeMounts = []core.VolumeMount{{Name: "other", MountPath: "/etc/gpustack/kvcache"}}
@@ -980,6 +1010,17 @@ func TestPodKVCacheInject_ConflictRefusals(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.wantMsg)
 		})
 	}
+}
+
+// TestPodKVCacheInject_AdmitsAFlagSharingAStemWithAnOwnedOne is the baseline for the spellings the
+// refusals above read as an owned flag: a flag that is neither a prefix of one nor starts with one
+// is the workload's own.
+func TestPodKVCacheInject_AdmitsAFlagSharingAStemWithAnOwnedOne(t *testing.T) {
+	pod := kvCachePod()
+	pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "--kv-cache-dtype", "fp8")
+
+	require.NoError(t, admit(t, pod))
+	assert.Contains(t, pod.Spec.Containers[0].Args, "--kv-transfer-config")
 }
 
 func TestPodKVCacheInject_TenantFromBindingOverridesAnotherRegisteredDomain(t *testing.T) {
