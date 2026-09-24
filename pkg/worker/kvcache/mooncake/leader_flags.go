@@ -128,7 +128,7 @@ func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 	// it also binds correctly, because the artifact hands the same string to its RPC server.
 	if leaderNeedsAPIAccess(leader) {
 		flags = append(flags,
-			"-enable_ha=true",
+			leaderElectionFlag,
 			"-ha_backend_type=k8s",
 			fmt.Sprintf("-ha_backend_connstring=%s/%s",
 				kuberess.SystemNamespaceName, LeaderObjectName(kvcb)),

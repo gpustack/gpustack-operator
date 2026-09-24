@@ -64,6 +64,10 @@ func TestTheElectionExistsOnlyAboveOneReplica(t *testing.T) {
 		"the same field turns live the moment there is something to elect")
 	assert.True(t, RenderLeaderRBAC(two).Wanted())
 	assert.Equal(t, LeaderServiceHost(two)+":50051", MemberMasterEntry(two))
+
+	// The reader the aligner judges a live template with agrees with the renderer both ways.
+	assert.False(t, LeaderTemplateElects(deploy.Spec.Template))
+	assert.True(t, LeaderTemplateElects(RenderLeaderDeployment(two, "mooncake:v0.3.13").Spec.Template))
 }
 
 // TestRenderLeaderRBAC_FollowsTheField pins that the access exists exactly when the election does.

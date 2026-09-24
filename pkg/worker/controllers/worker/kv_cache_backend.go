@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlrecord "k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -1814,6 +1815,32 @@ func resolveKVCacheBackendImage(ctx context.Context, kvcb *workercore.KVCacheBac
 		settings.KVCacheBackendImage.Name())
 }
 
+// leaderCountRiseMustWait reports whether raising a live leader Deployment past one replica has to
+// wait for the elected template to roll out first.
+//
+// It waits until the live Deployment says three things: its template elects, the Deployment
+// controller has observed the generation that wrote it, and every replica runs it with none of the
+// previous template left. All three are read from the live object, because the renderer is
+// stateless and the object is the only record of which template the running Pods came from.
+//
+// REQUIRED: the observed generation, not the counts alone. Right after the template is written, the
+// counts still describe the rollout BEFORE it -- one replica, updated and total, on the unelected
+// template -- and reading them as this rollout's is exactly the write this gate exists to hold back.
+//
+// Lowering to one never waits. The scaling event there removes elected replicas only, and Recreate
+// then stops the last of them before the unelected master starts.
+func leaderCountRiseMustWait(aDeploy, rendered *apps.Deployment) bool {
+	replicas := ptr.Deref(aDeploy.Spec.Replicas, 1)
+	if ptr.Deref(rendered.Spec.Replicas, 1) <= 1 || replicas > 1 {
+		return false
+	}
+
+	rolledOut := aDeploy.Status.ObservedGeneration >= aDeploy.Generation &&
+		aDeploy.Status.UpdatedReplicas == replicas &&
+		aDeploy.Status.Replicas == replicas
+	return !mooncake.LeaderTemplateElects(aDeploy.Spec.Template) || !rolledOut
+}
+
 // alignLeaderDeploymentFn converges a running leader Deployment onto the rendered one.
 //
 // It compares the fields this operator RENDERS rather than the whole object, and that is not an
@@ -1825,10 +1852,19 @@ func resolveKVCacheBackendImage(ctx context.Context, kvcb *workercore.KVCacheBac
 // spec.selector is never touched: it is immutable, and an update carrying a different one is
 // rejected outright, leaving the object stuck until somebody deletes it by hand.
 func alignLeaderDeploymentFn(
-	kvcb *workercore.KVCacheBackend, eDeploy *apps.Deployment,
+	kvcb *workercore.KVCacheBackend, rendered *apps.Deployment,
 ) func(*apps.Deployment) (*apps.Deployment, bool, error) {
 	return func(aDeploy *apps.Deployment) (*apps.Deployment, bool, error) {
 		skip := true
+
+		// Raising a live Deployment past one replica is two writes, and the first holds the count,
+		// strategy and deadline at one replica while the template already elects -- see
+		// LeaderDeploymentAtOneReplica for why one write would run unelected masters beside the new
+		// one. Decided before anything below changes aDeploy, because the gate reads the live object.
+		eDeploy := rendered
+		if leaderCountRiseMustWait(aDeploy, rendered) {
+			eDeploy = mooncake.LeaderDeploymentAtOneReplica(rendered)
+		}
 
 		if !kubemeta.DeepEqual(aDeploy.Spec.Replicas, eDeploy.Spec.Replicas) {
 			aDeploy.Spec.Replicas = eDeploy.Spec.Replicas
