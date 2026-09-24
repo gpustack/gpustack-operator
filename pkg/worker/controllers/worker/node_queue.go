@@ -50,8 +50,9 @@ import (
 //   - Flavors present: fill the resource groups from the flavors, smallest per-node count
 //     first so Kueue packs small nodes before large ones, reference the node-devices
 //     AdmissionCheck on an accelerated derived queue once it is Active, reactivate a queue
-//     that had been drained to empty (StopPolicy None), and lift the Hold this reconciler placed
-//     on a queue that had no resource groups yet.
+//     that had been drained to empty (StopPolicy None), and drop the marker from the Hold this
+//     reconciler placed on a queue that had no resource groups yet, leaving its release to the
+//     InstanceTypeReconciler.
 //   - No flavors, quota still defined: gated by instance-type-drain-when-no-flavors, drive the
 //     queue to HoldAndDrain and requeue until every reservation clears, then empty the resource
 //     groups — so Kueue's reservation counters never go negative — and keep the emptied queue
@@ -280,14 +281,13 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 		cq.Spec.StopPolicy = ptr.To(kueue.None)
 		changed = true
 	}
-	// Lift the Hold holdEmptyClusterQueue placed in the same update that gives the queue its
-	// resource groups, so Kueue never sees the queue admitting without them. An admin Hold carries
-	// no marker and stays.
+	// Drop the marker from the Hold holdEmptyClusterQueue placed in the same update that gives the
+	// queue its resource groups, and leave the Hold itself for the InstanceTypeReconciler to release:
+	// it reads Inactive, and this reconciler does not, so releasing here would admit for a moment
+	// onto a type an admin marked Inactive before its marker was adopted. Kueue therefore never
+	// sees the queue admitting without its resource groups or its AdmissionCheck references.
 	if cq.Annotations[_TASQueueEmptyPlanHoldAnnotation] != "" && len(eGroups) > 0 {
 		delete(cq.Annotations, _TASQueueEmptyPlanHoldAnnotation)
-		if ptr.Deref(cq.Spec.StopPolicy, kueue.None) == kueue.Hold {
-			cq.Spec.StopPolicy = ptr.To(kueue.None)
-		}
 		changed = true
 	}
 	if planChanged {
@@ -648,7 +648,8 @@ func (r *NodeQueueReconciler) drainOrEmptyClusterQueue(
 }
 
 // holdEmptyClusterQueue puts a queue that has no resource groups and is not stopped on Hold, and
-// marks the Hold so that fillClusterQueue lifts it once the queue has resource groups. Such a queue
+// marks the Hold so that neither reconciler releases it until fillClusterQueue drops the marker
+// with the queue's first resource groups. Such a queue
 // declares no resource, and Kueue ignores undeclared resources (quotaCheckStrategy
 // IgnoreUndeclared), so it would admit every Workload with no flavor and therefore no
 // AdmissionCheck. It is Hold, not HoldAndDrain: the queue reserves no quota to drain, and

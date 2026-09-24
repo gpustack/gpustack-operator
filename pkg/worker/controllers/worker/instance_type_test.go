@@ -1450,7 +1450,7 @@ func TestInstanceTypeReconciler_SyncInactive(t *testing.T) {
 		{"draining backfills inactive (drain wins)", kueue.HoldAndDrain, false, false, false, false, kueue.HoldAndDrain, true, false},
 		{"topology migration does not backfill inactive", kueue.HoldAndDrain, false, true, false, false, kueue.HoldAndDrain, false, false},
 		{"marked hold is neither released nor mirrored", kueue.Hold, false, false, true, true, kueue.Hold, false, true},
-		{"inactive adopts the marked hold", kueue.Hold, true, false, true, true, kueue.Hold, true, false},
+		{"marked hold under inactive is left alone", kueue.Hold, true, false, true, true, kueue.Hold, true, true},
 		{"cleared inactive hands an empty queue's hold over", kueue.Hold, false, false, false, true, kueue.Hold, false, true},
 	}
 

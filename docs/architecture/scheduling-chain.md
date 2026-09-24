@@ -262,7 +262,8 @@ reclaim/borrow preemption).
 It creates the queue on `Hold`, marked `topology.gpustack.ai/empty-plan-hold`, because the queue has
 no resource groups yet and
 [a queue without them admits every Workload](admission.md#known-behavior-the-deployed-kueue-configuration).
-The `NodeQueueReconciler` lifts that Hold in the update that fills the groups.
+The `NodeQueueReconciler` drops the marker in the update that fills the groups, and this reconciler
+then releases the `Hold` unless the type is `Inactive`.
 
 It never fills the resource groups or references the AdmissionCheck (the `NodeQueueReconciler` owns
 those), and prunes a stale feature-key label when the group/acceleratable changes so the re-pointed
@@ -286,10 +287,9 @@ sync writes the `Hold↔None` pair onto the stop policy the migration saved and 
 backfill pauses. An `Inactive` change made while an emptied pool waits for a flavor is therefore what
 the pool comes back with.
 
-A marked empty-plan `Hold` belongs to the `NodeQueueReconciler`: this sync neither releases it nor
-mirrors it into `Inactive`. Marking the type `Inactive` adopts it as the admin's `Hold` by dropping
-the marker, so it is not lifted when the groups fill. Clearing `Inactive` on a queue that has no
-resource groups hands the `Hold` back by marking it rather than releasing it.
+This sync neither releases a marked empty-plan `Hold` nor mirrors it into `Inactive`. Once the
+marker is gone it treats the `Hold` like an admin's, released only while the type is not `Inactive`.
+Clearing `Inactive` on a queue that has no resource groups marks its `Hold` rather than releasing it.
 
 ### `NodeQueueReconciler` (`node_queue.go`)
 
@@ -315,8 +315,9 @@ resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
   clears, then empty the groups so Kueue's counters never go negative. The emptied queue stays
   `HoldAndDrain` until a flavor returns, so it never admits without resource groups.
 - **No resource groups yet** and not stopped — the pool has no flavor, or its flavors fail topology
-  readiness: `Hold`, marked `topology.gpustack.ai/empty-plan-hold` and lifted in the update that fills
-  the groups. It is `Hold`, not `HoldAndDrain`, so the type's Instances are not stopped; an admin
+  readiness: `Hold`, marked `topology.gpustack.ai/empty-plan-hold`. The update that fills the groups
+  drops the marker, and the `InstanceTypeReconciler` releases the `Hold` unless the type is
+  `Inactive`. It is `Hold`, not `HoldAndDrain`, so the type's Instances are not stopped; an admin
   `Hold` carries no marker and is left alone.
 - **Topology readiness** — refuse a partial queue plan when a flavor lacks its profile or Topology,
   selectors overlap, quota changes across the profile split, the same resource would occur in two

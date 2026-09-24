@@ -1375,10 +1375,11 @@ func TestNodeQueueReconciler_HoldsQueueWithoutResourceGroups(t *testing.T) {
 	})
 }
 
-// TestNodeQueueReconciler_LiftsItsHoldWithTheFirstPlan pins that the Hold this reconciler placed on
-// a queue without resource groups is lifted by the update that fills them, which also carries the
-// AdmissionCheck references, so Kueue never sees the queue admitting without quota or checks.
-func TestNodeQueueReconciler_LiftsItsHoldWithTheFirstPlan(t *testing.T) {
+// TestNodeQueueReconciler_UnmarksItsHoldWithTheFirstPlan pins that the update that fills a queue's
+// first resource groups, together with its AdmissionCheck references, drops the empty-plan marker
+// and leaves the Hold for the InstanceTypeReconciler to release. That reconciler reads Inactive, so
+// a type an admin marked Inactive before the plan arrived is never released, even for one update.
+func TestNodeQueueReconciler_UnmarksItsHoldWithTheFirstPlan(t *testing.T) {
 	enableInstanceTypeDerivedFromNode(t)
 	key := "nvidia-a10g"
 	name := nodeQueueName(key)
@@ -1394,7 +1395,8 @@ func TestNodeQueueReconciler_LiftsItsHoldWithTheFirstPlan(t *testing.T) {
 	reconcileNodeQueueN(t, cli, name, 1)
 	got, err := getClusterQueue(t, cli, name)
 	require.NoError(t, err)
-	assert.Equal(t, kueue.None, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+	assert.Equal(t, kueue.Hold, ptr.Deref(got.Spec.StopPolicy, kueue.None),
+		"the InstanceTypeReconciler releases the Hold")
 	assert.NotContains(t, got.Annotations, _TASQueueEmptyPlanHoldAnnotation)
 	require.Len(t, got.Spec.ResourceGroups, 1)
 	require.NotNil(t, got.Spec.AdmissionChecksStrategy)

@@ -148,8 +148,7 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 //	| Hold (admin), no groups  | false         | hand over: mark it NodeQueue's    |
 //	| HoldAndDrain (NodeQueue)  | true         | stable                            |
 //	| HoldAndDrain (NodeQueue)  | false        | mirror: backfill Spec.Inactive    |
-//	| Hold, marked (NodeQueue)  | true         | adopt: drop the marker            |
-//	| Hold, marked (NodeQueue)  | false        | stable                            |
+//	| Hold, marked (NodeQueue)  | either       | stable                            |
 //	| any, migrating (NodeQueue)| either       | forward onto the saved policy     |
 //
 // It evaluates the forward direction (Inactive drives the Hold<->None pair) first; the
@@ -162,12 +161,11 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 // guarded write happens per call; a stable state writes nothing. While NodeQueue carries its
 // topology-migration marker, that controller owns the live StopPolicy, so the forward direction
 // writes the stop policy the migration restores instead and the mirror pauses. A Hold NodeQueue
-// marked as its own, on a queue that has no resource groups yet, is
-// NodeQueue's to lift: it is neither released nor mirrored, and an admin marking the type Inactive
-// adopts it by dropping the marker, so NodeQueue no longer lifts it. The reverse hand-over applies
-// when an admin clears Inactive on a queue without resource groups: the Hold is marked rather than
-// released, because a queue that declares no resource admits every Workload for as long as it is
-// None. It reports whether it wrote.
+// marked as its own, on a queue that has no resource groups yet, is neither released nor
+// mirrored; NodeQueue drops the marker with the queue's first resource groups, and the forward
+// direction then releases the Hold unless the type is Inactive. Clearing Inactive on a queue
+// without resource groups marks its Hold rather than releasing it, because a queue that declares
+// no resource admits every Workload for as long as it is None. It reports whether it wrote.
 func (r *InstanceTypeReconciler) syncInactive(
 	ctx context.Context, it *workercore.InstanceType, cq *kueue.ClusterQueue,
 ) (bool, error) {
@@ -193,11 +191,7 @@ func (r *InstanceTypeReconciler) syncInactive(
 		return true, r.Client.Update(ctx, cq)
 	}
 	if cq.Annotations[_TASQueueEmptyPlanHoldAnnotation] != "" {
-		if !it.Spec.Inactive {
-			return false, nil
-		}
-		delete(cq.Annotations, _TASQueueEmptyPlanHoldAnnotation)
-		return true, r.Client.Update(ctx, cq)
+		return false, nil
 	}
 
 	switch ptr.Deref(cq.Spec.StopPolicy, kueue.None) {
@@ -303,8 +297,8 @@ func (r *InstanceTypeReconciler) ensureClusterQueue(
 // policy written straight into the spec — empty cohort (no cross-queue borrowing to broker), never
 // reclaim or borrow within a nonexistent cohort, only in-queue lower-priority preemption,
 // all-namespace selector. The queue is created held because it has no resource groups yet, and a
-// queue that declares no resource admits every Workload; the NodeQueueReconciler lifts the Hold in
-// the update that fills the resource groups.
+// queue that declares no resource admits every Workload; the NodeQueueReconciler drops the marker in
+// the update that fills the resource groups, and syncInactive then releases the Hold.
 //
 // The NodeQueueReconciler fills the resource groups afterwards, and adds the node-devices
 // AdmissionCheck reference only while the cluster-wide derived-from-node switch is on and that check
