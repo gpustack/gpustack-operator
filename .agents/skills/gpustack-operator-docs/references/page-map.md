@@ -261,8 +261,9 @@ transition, so do not "modernize" its version numbers.
 (`commands.md`), and the KV cache injection contract — opt-in keys, what each engine receives, every
 refusal with its fix (`kv-cache-injection.md`), and the lowest engine release each deployment
 shape has been run with, with its runner image's Mooncake client and store line
-(`engine-versions.md`), which replica each managed router picks and how to switch its policy
-(`model-deployment-routing.md`), and what a `ModelDeployment` replica does between its Pod's delete
+(`engine-versions.md`), what pairs a prefill role with a decode role — the router block, the direct transfer's transport,
+roles on different hardware (`model-deployment-prefill-decode.md`), which replica each managed router
+picks and how to switch its policy (`model-deployment-routing.md`), and what a `ModelDeployment` replica does between its Pod's delete
 and its engine's exit (`model-deployment-shutdown.md`).
 
 **Not** — `model-deployment-shutdown.md` owns the drain window and what it does not cover; what turns

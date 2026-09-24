@@ -160,7 +160,7 @@ renders an RDMA or EFA resource limit on its engine Pod according to the effecti
 The backend's member Pods configure their own host network and device access separately.
 
 The one exception is the Ascend prefill/decode leg, whose engine Pods mount a host driver
-tree read-only — see [Prefill and decode](model-deployment.md#prefill-and-decode).
+tree read-only — see [How a pair is wired](model-deployment-prefill-decode.md#how-a-pair-is-wired).
 
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
 when the container has not spoken about them. A value you set yourself is left alone.

@@ -69,7 +69,7 @@ spec:
       - round_robin
 ```
 
-`--policy` is in neither router's [refused list](model-deployment.md#prefill-and-decode), so admission
+`--policy` is in neither router's [refused list](model-deployment-prefill-decode.md#the-router-block), so admission
 passes it and the operator appends it to the command line it renders. The router then logs
 `Starting router … | policy: RoundRobin`.
 
@@ -121,8 +121,8 @@ the engine Pods' own counts instead, such as each Pod's TTFT histogram `_count`.
 
 ---
 
-**See also** — [Model Deployment Reference](model-deployment.md) for `spec.router` and the flags each
-router refuses · [Model Deployment Metrics Reference](model-deployment-metrics.md) for the router
+**See also** — [Model Deployment Prefill and Decode Reference](model-deployment-prefill-decode.md)
+for `spec.router` and the flags each router refuses · [Model Deployment Metrics Reference](model-deployment-metrics.md) for the router
 counters a deployment's snapshot reads.
 
 **Next** → [Model Deployment Status Reference](model-deployment-status.md)

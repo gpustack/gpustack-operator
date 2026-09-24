@@ -229,6 +229,7 @@ reading on this page most likely to be escalated as an outage.
 [KV Cache Leader](leader.md) (the election, the snapshot and the member addressing choice in full) ·
 [KV Cache Pool](pool.md) (quota, domains and what a full quota does) ·
 [Model Deployment Reference](../reference/model-deployment.md) (roles, prefill/decode, rollout) ·
+[Model Deployment Prefill and Decode Reference](../reference/model-deployment-prefill-decode.md) (router, transfer) ·
 [KV Cache Injection](../reference/kv-cache-injection.md) (what a Pod actually receives)
 
 **Next** → [KV Cache Pool](pool.md) — the quota this walkthrough set once and did not explain.
