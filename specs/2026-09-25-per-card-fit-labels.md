@@ -464,7 +464,7 @@ proves the whole path.
       - The table covers these shapes: a slice, a shared request of 1 and of 3, two shared containers (the larger count wins, not the sum), exclusive, a partition, no accelerator, an init-container-only demand, a limits-only demand, two containers with different units (the larger wins), and units above `MaxInt32` (clamped).
       Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestPodSetFitDemand$' -v`
 
-- [ ] **T4 · The ablation setting**
+- [x] **T4 · The ablation setting**
       Blocked by: None
       Owns: `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `docs/settings.md`
       Acceptance:

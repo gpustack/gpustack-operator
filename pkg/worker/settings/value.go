@@ -305,4 +305,20 @@ var (
 		setting.InitializeFromEnv("false"),
 		setting.AllowBool(),
 	)
+
+	// Workload.
+
+	// WorkloadFitAffinity indicates whether the Workload webhook pins a slice or shared request of
+	// an operator queue to nodes whose fit labels show one card can still host it.
+	// When true (default) the pin is added, so Kueue's topology-aware scheduling skips a fragmented
+	// node; when false Workloads pass unchanged while the fit labels are still published, so the pin
+	// can be switched off on its own. Read on every webhook call.
+	WorkloadFitAffinity = settings.NewEditable(
+		"workload-fit-affinity",
+		"Indicates whether the Workload webhook pins a slice or shared request to nodes whose fit labels "+
+			"show one card can still host it. When true (default), Kueue's topology-aware scheduling skips "+
+			"a fragmented node; when false, Workloads pass unchanged while the fit labels are still published.",
+		setting.InitializeFromEnv("true"),
+		setting.AllowBool(),
+	)
 )
