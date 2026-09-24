@@ -139,7 +139,7 @@ type (
 // Reconcile rebuilds one node's Devices Status from its Spec and the annotations of the Pods
 // scheduled to it, then sweeps the resulting live pod-UID set through the in-process
 // reservation/visibility-grant tables and notifies ListAndWatch subscribers. The Status rebuild
-// is wholesale, not incremental: buildDesiredStatus recomputes every accelerator's Mode,
+// is wholesale, not incremental: BuildDesiredStatus recomputes every accelerator's Mode,
 // Remaining, AllocatedProfiles and RemainingProfiles from Spec + Pod annotations in a single pass,
 // and this method assigns the result once — there is deliberately no second, separately-applied
 // write that a later pass could stomp.
@@ -164,7 +164,7 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: time.Second}, err
 	}
 
-	desiredStatus, livePodUIDs := buildDesiredStatus(logger, devs, podList)
+	desiredStatus, livePodUIDs := BuildDesiredStatus(logger, devs, podList)
 
 	if !kubemeta.DeepEqual(devs.Status, desiredStatus) {
 		devs.Status = desiredStatus
@@ -196,12 +196,17 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
-// buildDesiredStatus rebuilds a node's Devices Status wholesale from Spec + Pod annotations: it
+// BuildDesiredStatus rebuilds a node's Devices Status wholesale from Spec + Pod annotations: it
 // seeds every accelerator from Spec, then merges in what each Pod's annotation says it holds. The
 // two steps run as one pass — mergePodAllocations both folds the physical-slice profile ledger and
 // collects the live pod-UID set in the same walk it merges allocations in — so there is never a
 // second, separately-applied write that a later pass could stomp.
-func buildDesiredStatus(
+//
+// It is exported for the worker's node-devices AdmissionCheck, which rebuilds the ledger from the
+// same Pod list it reads charged Pods from. The published Status is a later copy of this result.
+// Judging against that copy would let a Pod count as charged before the ledger shows its
+// allocation.
+func BuildDesiredStatus(
 	logger logr.Logger, devs *workercore.Devices, podList *core.PodList,
 ) (workercore.DevicesStatus, []string) {
 	return mergePodAllocations(logger, devs, podList, initDesiredStatus(devs))

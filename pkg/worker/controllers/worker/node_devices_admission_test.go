@@ -99,7 +99,7 @@ func oneFlavorPool(devices []workercore.Devices) []scopedDevices {
 // every demand assigned to it. It keeps the pre-P/D cases exercising exactly what they always did
 // while the check itself became per-role.
 func feasibilityOfOnePool(devices []workercore.Devices, demands []familyDemand) (kueue.CheckState, string) {
-	return nodeDevicesFeasibility(oneFlavorPool(devices), demands)
+	return nodeDevicesFeasibility(oneFlavorPool(devices), nil, demands)
 }
 
 func TestNodeDevicesFeasibility(t *testing.T) {
@@ -881,7 +881,7 @@ func TestCandidateDevices(t *testing.T) {
 		Labels: map[string]string{"feature.gpustack.ai/nvidia": "true", "kubernetes.io/os": "windows"},
 	}}
 
-	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(rf, inPool, otherOS).Build()
+	cli := admissionClientBuilder().WithObjects(rf, inPool, otherOS).Build()
 	r := &NodeDevicesAdmissionReconciler{Client: cli, APIReader: cli}
 
 	wl := &kueue.Workload{
@@ -1194,8 +1194,8 @@ func reconcileSlicedGate(t *testing.T, wl *kueue.Workload) (kueue.CheckState, st
 	check := &kueue.AdmissionCheck{ObjectMeta: meta.ObjectMeta{Name: _NodeDevicesAdmissionCheckName}, Spec: kueue.AdmissionCheckSpec{ControllerName: _NodeDevicesControllerName}}
 	devs := devicesWithRemaining(640000)
 	devs.ObjectMeta = meta.ObjectMeta{Name: "node-a", Labels: poolLabels}
-	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
-		WithObjects(rf, check, &devs, wl).
+	cli := admissionClientBuilder().
+		WithObjects(append(chargingPods(&devs), rf, check, &devs, wl)...).
 		WithStatusSubresource(&kueue.Workload{}).
 		Build()
 	r := &NodeDevicesAdmissionReconciler{Client: cli, APIReader: cli}
@@ -1463,7 +1463,7 @@ func TestNodeDevicesFeasibilityScopesEveryDemandToItsOwnFlavor(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, msg := nodeDevicesFeasibility(scopeNodes(c.nodes, scopes...), c.demands)
+			got, msg := nodeDevicesFeasibility(scopeNodes(c.nodes, scopes...), nil, c.demands)
 			assert.Equal(t, c.want, got, "verdict")
 			if c.wantRole != "" {
 				assert.Contains(t, msg, c.wantRole, "the verdict must name the role that fell short")
@@ -1559,9 +1559,9 @@ func TestNodeDevicesAdmission_ReconcilePerRole(t *testing.T) {
 			Spec:       kueue.AdmissionCheckSpec{ControllerName: _NodeDevicesControllerName},
 		}
 		wl := workload()
-		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
-			WithObjects(flavorOf("h20-flavor", "nvidia-h20"), flavorOf("l40s-flavor", "nvidia-l40s"),
-				check, &node, wl).
+		cli := admissionClientBuilder().
+			WithObjects(append(chargingPods(&node), flavorOf("h20-flavor", "nvidia-h20"), flavorOf("l40s-flavor", "nvidia-l40s"),
+				check, &node, wl)...).
 			WithStatusSubresource(&kueue.Workload{}).
 			Build()
 		r := &NodeDevicesAdmissionReconciler{Client: cli, APIReader: cli}
@@ -1706,7 +1706,7 @@ func TestNodeDevicesAdmission_UnassignedFlavorIsHeldExplicitly(t *testing.T) {
 					}},
 				},
 			}
-			cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+			cli := admissionClientBuilder().
 				WithObjects(rf, check, &devs, wl).
 				WithStatusSubresource(&kueue.Workload{}).
 				Build()
@@ -1778,7 +1778,7 @@ func TestNodeDevicesAdmission_RefreshesTheMessageWhenTheCauseChanges(t *testing.
 			}},
 		},
 	}
-	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+	cli := admissionClientBuilder().
 		WithObjects(
 			&kueue.ResourceFlavor{
 				ObjectMeta: meta.ObjectMeta{Name: "gpu-pool"},
@@ -1916,7 +1916,7 @@ func TestNodeDevicesAdmission_UnresolvedFlavorIsHeldExplicitly(t *testing.T) {
 					}},
 				},
 			}
-			cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+			cli := admissionClientBuilder().
 				WithObjects(
 					&kueue.ResourceFlavor{
 						ObjectMeta: meta.ObjectMeta{Name: "gpu-pool"},
@@ -1993,7 +1993,7 @@ func TestNodeDevicesAdmission_RestoresAMissingRetryDelay(t *testing.T) {
 			}},
 		},
 	}
-	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+	cli := admissionClientBuilder().
 		WithObjects(
 			&kueue.ResourceFlavor{
 				ObjectMeta: meta.ObjectMeta{Name: "gpu-pool"},
@@ -2142,17 +2142,17 @@ func TestNodeDevicesFeasibilityScopesEveryDemandToItsNodeBatch(t *testing.T) {
 		return []familyDemand{{family: nodefeature.ResourceFamilyExclusive, cards: 2, flavor: f}}
 	}
 
-	got, _ := nodeDevicesFeasibility(scopeNodes(node, scopes...), demand(fourDevice))
+	got, _ := nodeDevicesFeasibility(scopeNodes(node, scopes...), nil, demand(fourDevice))
 	assert.Equal(t, kueue.CheckStateReady, got,
 		"the flavor whose batch matches this node covers its cards")
 
-	got, _ = nodeDevicesFeasibility(scopeNodes(node, scopes...), demand(eightDevice))
+	got, _ = nodeDevicesFeasibility(scopeNodes(node, scopes...), nil, demand(eightDevice))
 	assert.Equal(t, kueue.CheckStateRetry, got,
 		"a flavor pinning an 8-device batch must not be satisfied by a 4-device node's free cards")
 
 	// A flavor that pins no batch covers any: a missing label must read as "any", not "none".
 	unpinned := []flavorScope{{flavor: eightDevice, acceleratorKey: "nvidia-h20"}}
-	got, _ = nodeDevicesFeasibility(scopeNodes(node, unpinned...), demand(eightDevice))
+	got, _ = nodeDevicesFeasibility(scopeNodes(node, unpinned...), nil, demand(eightDevice))
 	assert.Equal(t, kueue.CheckStateReady, got,
 		"a flavor stating no batch must cover every batch, never none")
 
@@ -2170,7 +2170,7 @@ func TestNodeDevicesFeasibilityScopesEveryDemandToItsNodeBatch(t *testing.T) {
 		acceleratorKey:   "nvidia-h20",
 		acceleratorCount: flavorAcceleratorCount(malformed, "nvidia-h20"),
 	}}
-	got, _ = nodeDevicesFeasibility(scopeNodes(node, unreadable...), demand(eightDevice))
+	got, _ = nodeDevicesFeasibility(scopeNodes(node, unreadable...), nil, demand(eightDevice))
 	assert.Equal(t, kueue.CheckStateRetry, got,
 		"a flavor stating a batch that cannot be read must cover no card, never every card")
 }
@@ -2234,7 +2234,7 @@ func TestVerdictOmitsTheRoleClauseForASingleRole(t *testing.T) {
 				}},
 			},
 		}
-		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+		cli := admissionClientBuilder().
 			WithObjects(
 				&kueue.ResourceFlavor{
 					ObjectMeta: meta.ObjectMeta{Name: "gpu-pool"},
@@ -2324,7 +2324,7 @@ func TestPartitionLedgerNotReadyMessageNamesTheRole(t *testing.T) {
 		},
 	}
 
-	state, msg := nodeDevicesFeasibility(scopeNodes(node, scopes...), demands)
+	state, msg := nodeDevicesFeasibility(scopeNodes(node, scopes...), nil, demands)
 	assert.Equal(t, kueue.CheckStateRetry, state)
 	assert.Contains(t, msg, "device manager rolling out", "the rollout-window branch is the one reached")
 	assert.Contains(t, msg, `for role "decode"`, "the branch must pass its demand's provenance through")
@@ -2373,7 +2373,7 @@ func TestCandidateDevicesOrderIsStable(t *testing.T) {
 		}},
 	}
 
-	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(
+	cli := admissionClientBuilder().WithObjects(
 		flavorOf("flavor-a", "1"), flavorOf("flavor-b", "2"),
 		nodeOf("node-a", "1"), nodeOf("node-c", "1"), nodeOf("node-b", "2"),
 	).Build()
@@ -2595,6 +2595,7 @@ func TestNodeDevicesAdmission_ReadsTheNodeTASAssigned(t *testing.T) {
 				}
 				devs.ObjectMeta = meta.ObjectMeta{Name: name, Labels: poolLabels}
 				objs = append(objs, &devs)
+				objs = append(objs, chargingPods(&devs)...)
 			}
 
 			psa := kueue.PodSetAssignment{
@@ -2630,7 +2631,7 @@ func TestNodeDevicesAdmission_ReadsTheNodeTASAssigned(t *testing.T) {
 			}
 			objs = append(objs, wl)
 
-			cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+			cli := admissionClientBuilder().
 				WithObjects(objs...).
 				WithStatusSubresource(&kueue.Workload{}).
 				Build()
