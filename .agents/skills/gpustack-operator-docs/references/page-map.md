@@ -261,10 +261,13 @@ transition, so do not "modernize" its version numbers.
 (`commands.md`), and the KV cache injection contract — opt-in keys, what each engine receives, every
 refusal with its fix (`kv-cache-injection.md`), and the lowest engine release each deployment
 shape has been run with, with its runner image's Mooncake client and store line
-(`engine-versions.md`), and which replica each managed router picks and how to switch its policy
-(`model-deployment-routing.md`).
+(`engine-versions.md`), which replica each managed router picks and how to switch its policy
+(`model-deployment-routing.md`), and what a `ModelDeployment` replica does between its Pod's delete
+and its engine's exit (`model-deployment-shutdown.md`).
 
-**Not** — `commands.md` states what a flag does, not when to reach for the command. The procedure a
+**Not** — `model-deployment-shutdown.md` owns the drain window and what it does not cover; what turns
+a replica over in the first place stays on `model-deployment.md`, which links to it.
+`commands.md` states what a flag does, not when to reach for the command. The procedure a
 one-shot belongs to lives on its operator page (`docs/operation/preflight.md` for `device-manager
 preflight`), and the reference row links to it rather than restating it.
 

@@ -94,6 +94,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Model Deployment Routing Reference](reference/model-deployment-routing.md) | Which replica each managed router picks by default, why shared-prefix traffic lands on one replica, and switching `vllm-router` or `sglang-gateway` to round robin through `spec.router.extraArgs` | users, operators | ~5 min |
 | [Model Deployment Metrics Reference](reference/model-deployment-metrics.md) | The structured metrics subresource, source scopes, windowed cache hits and Pod scrape annotations | users, operators, console developers | ~5 min |
 | [Model Deployment Status Reference](reference/model-deployment-status.md) | What each `ModelDeployment` status condition and published field means, and how to read them when a deployment misbehaves | users, operators | ~8 min |
+| [Model Deployment Shutdown Reference](reference/model-deployment-shutdown.md) | What a replica does between its Pod's delete and its engine's exit: the drain window, the gauges it waits on, and the requests it does not save | users, operators | ~4 min |
 
 ## Conventions
 
