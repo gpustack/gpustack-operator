@@ -70,6 +70,8 @@ SETTLE="${E2E_MD_SETTLE:-60}"
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 k() { kubectl "$@"; }
 
@@ -77,7 +79,7 @@ k() { kubectl "$@"; }
 # API returns.
 #
 # THE LIST COMES BACK SORTED BY NAME AND CARRIES TYPES ON THEIR WAY OUT. Case 68 creates its own
-# `case68-nowhere` and deletes it without waiting, and that name sorts before an ordinary derived
+# `case68-held` and deletes it without waiting, and that name sorts before an ordinary derived
 # type -- so a case running straight after it picks a type that is already terminating. Naming one
 # is refused at admission, and the run then dies at fixture time for a reason that has nothing to do
 # with what it measures. Inactive is excluded for the mirror reason: a deployment on one is admitted
@@ -322,9 +324,7 @@ YAML
 if ! wait_settled 2; then
   record FAIL "two replicas admit, one Workload each" \
     "reached $(how_many_admitted) replica(s) and $(wl_count) Workload(s); apply said: ${APPLY_OUT:0:200}"
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  for r in "${ROWS[@]}"; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+  print_rows
   echo "[case-78] ${FAILS} check(s) FAILED"
   exit 1
 fi
@@ -456,8 +456,6 @@ record SKIP "the surviving replicas keep serving across both scales" \
   "needs an engine that serves, which needs an accelerator. NOT closed by: the UID rows above, which prove the Pod object survived rather than that its engine never stopped answering; nor by a readiness probe on a pause image, which answers for a container that serves nothing"
 
 # Results.
-echo
-echo "STATUS | CHECK | OBJECT"
-for r in "${ROWS[@]}"; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+print_rows
 [ "$FAILS" -eq 0 ] || { echo "[case-78] ${FAILS} check(s) FAILED"; exit 1; }
 echo "[case-78] all checks passed (the serving half is deferred; see the SKIP row)"

@@ -14,18 +14,19 @@
 #              of it is observable from a unit test: the Workloads are Kueue's, the quota is the
 #              ClusterQueue's, and "no role is admitted" is a statement about two objects at once.
 #
-# Environment: A single-node cluster with NO accelerator and the operator deployed. That is the
-#              intended shape rather than a limitation -- the case needs one group to be
-#              INFEASIBLE, and a cluster with capacity to spare would take that away. The second
-#              InstanceType is CREATED here rather than assumed: "the cluster has two pools" has to
-#              be a fact the case makes, or it is a fact the case is waiting for.
+# Environment: A cluster with NO accelerator and the operator deployed. The case needs one group to
+#              be INFEASIBLE, and it gets that from an Inactive InstanceType rather than from a
+#              shortage, so capacity to spare does not take it away. The second InstanceType is
+#              CREATED here rather than assumed: "the cluster has two pools" has to be a fact the
+#              case makes, or it is a fact the case is waiting for.
 #
-# Inputs:      Real objects only. One CPU-only InstanceType the case creates and then marks
-#              INACTIVE, which makes the reconciler hold its ClusterQueue so that group can never
-#              reserve quota; one ModelDeployment with two roles; and the Binding named by
-#              E2E_MD_BINDING. The runner image is a pause image; nothing here runs an engine.
-#              An ACCELERATABLE type with no node behind it does NOT work as the fixture -- see the
-#              comment where it is created.
+# Inputs:      Real objects only. One CPU-only InstanceType the case creates INACTIVE on the working
+#              type's own CPU pool, so the reconciler holds a ClusterQueue that has capacity behind
+#              it and that group cannot reserve quota until Phase E releases the type; one
+#              ModelDeployment with two roles; and the Binding named by E2E_MD_BINDING. The runner
+#              image is a pause image; nothing here runs an engine. Neither an ACCELERATABLE type
+#              nor a type whose pool no node feeds works as the fixture -- see the comment where it is
+#              created.
 #
 # Expected:    Phase A -- the set assembles (both roles on the working type):
 #              - each replica carries a group name of its own, so two roles of one replica each are
@@ -102,7 +103,7 @@ k() { if [ -n "$KCTX" ]; then kubectl --context "$KCTX" "$@"; else kubectl "$@";
 MD=case68-pair
 MD_CONTROL=case68-control
 MD_OPENS=case68-opens
-IT_UNPLACEABLE=case68-nowhere
+IT_HELD=case68-held
 BINDING="${E2E_MD_BINDING:-case68-no-such-binding}"
 IT="${E2E_MD_INSTANCE_TYPE:-}"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
@@ -137,8 +138,8 @@ record() {
 # API returns.
 #
 # THE LIST COMES BACK SORTED BY NAME AND CARRIES TYPES ON THEIR WAY OUT. This case creates its own
-# `case68-nowhere` and deletes it without waiting, so a second run started straight after the first
-# sees it still terminating -- and `case68-nowhere` sorts before an ordinary derived type. Naming a
+# `case68-held` and deletes it without waiting, so a second run started straight after the first
+# sees it still terminating -- and `case68-held` sorts before an ordinary derived type. Naming a
 # type that is being deleted is refused at admission, and the run then dies at fixture time for a
 # reason that has nothing to do with what it measures. Inactive is excluded for the mirror reason: a
 # deployment on one is admitted and then never scheduled, so the case waits out every timeout it has.
@@ -162,11 +163,18 @@ if [ -z "$IT" ]; then
   echo "[case-68] no usable InstanceType in the cluster; run case-1 first" >&2
   exit 2
 fi
+# The held type is created on the working type's own CPU pool; see Phase B for why.
+read -r HELD_GROUP HELD_OS HELD_ARCH <<<"$(k get instancetypes.worker.gpustack.ai "$IT" \
+  -o jsonpath='{.spec.generalGroup} {.spec.os} {.spec.arch}' 2>/dev/null)"
+if [ -z "$HELD_GROUP" ] || [ -z "$HELD_OS" ] || [ -z "$HELD_ARCH" ]; then
+  echo "[case-68] InstanceType ${IT} names no general group, OS and arch to put the held type on" >&2
+  exit 2
+fi
 
 cleanup() {
   k -n "$NS" delete modeldeployment "$MD" "$MD_CONTROL" "$MD_OPENS" \
     --ignore-not-found --wait=false >/dev/null 2>&1
-  k delete instancetype.worker.gpustack.ai "$IT_UNPLACEABLE" --ignore-not-found --wait=false >/dev/null 2>&1
+  k delete instancetype.worker.gpustack.ai "$IT_HELD" --ignore-not-found --wait=false >/dev/null 2>&1
 }
 trap cleanup EXIT
 
@@ -324,7 +332,7 @@ two_roles_two_types() {
     - name: beta
       kind: server
       replicas: 1
-      instanceType: $IT_UNPLACEABLE
+      instanceType: $IT_HELD
       # NO resources block. The type is not acceleratable, so nothing defaults a card count here --
       # and a card count is what the per-unit ceiling rule reads. Declaring one would put this role
       # back in front of that rule.
@@ -399,8 +407,8 @@ k -n "$NS" delete modeldeployment "$MD" --ignore-not-found --wait=true >/dev/nul
 
 # ------------------------------------------- Phase B: two groups, exactly one of them infeasible.
 #
-# THE SECOND TYPE IS CPU-ONLY AND THEN MARKED INACTIVE, and both halves of that were learned the
-# hard way.
+# THE SECOND TYPE IS CPU-ONLY, INACTIVE, AND ON THE WORKING TYPE'S OWN CPU POOL, and all three were
+# learned the hard way.
 #
 # An ACCELERATABLE type with no node behind it does not work: its status carries an accelerator
 # ceiling of zero, the defaulter fills the role's card count with one, and the admission rule that
@@ -424,29 +432,40 @@ k -n "$NS" delete modeldeployment "$MD" --ignore-not-found --wait=true >/dev/nul
 # A CPU-ONLY type is admitted (no card count is defaulted, so no ceiling applies), and `inactive`
 # is what makes its queue refuse to admit: the InstanceType reconciler holds the backing
 # ClusterQueue, which reports Active=False with a Hold stop policy. That is a supported, documented
-# state rather than a broken fixture -- the group can never reserve quota, and the sibling can.
+# state rather than a broken fixture -- the group cannot reserve quota, and the sibling can.
 #
-# It is created and THEN patched rather than created inactive, because create-then-hold is the
-# sequence this was measured on.
+# THE TYPE COPIES THE WORKING TYPE'S GENERAL GROUP, OS AND ARCH, which are what select a CPU type's
+# pool (the group only while CPU-manufacturer awareness is on), so its queue carries the same flavor
+# and has capacity behind it. A type whose pool no node feeds does NOT work -- pinning an architecture
+# the cluster does not run is the easy way to get one: a queue with no resource groups declares no
+# resource, so it is held whether or not its type is Inactive, and releasing the type in Phase E then
+# changes nothing.
+#
+# It is created Inactive rather than patched afterwards: its queue has capacity, so an active window
+# between a create and a patch is one in which it admits.
 k apply -f - >/dev/null 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: InstanceType
 metadata:
-  name: $IT_UNPLACEABLE
+  name: $IT_HELD
 spec:
   displayName: case-68 held
   acceleratable: false
-  generalGroup: case68-held
-  os: linux
-  arch: amd64
+  generalGroup: $HELD_GROUP
+  os: $HELD_OS
+  arch: $HELD_ARCH
+  inactive: true
   localStorage: 1Gi
   unitResources:
     cpu: "1"
     ram: 1Gi
 YAML
-sleep 10
-k patch instancetype "$IT_UNPLACEABLE" --type=merge -p '{"spec":{"inactive":true}}' >/dev/null 2>&1
-sleep 10
+# Phase E releases this type and expects its group to place, which only a queue with a flavor can do.
+held_queue_has_capacity() {
+  [ -n "$(k get clusterqueue "$IT_HELD" -o jsonpath='{.spec.resourceGroups[*].flavors[*].name}' 2>/dev/null)" ]
+}
+held_capacity=no
+wait_for "$SETTLE" held_queue_has_capacity && held_capacity=yes
 
 apply_deployment "$MD" "$(two_roles_two_types)"
 
@@ -627,10 +646,15 @@ if [ "$opens_held" != yes ]; then
   # Nothing was ever held, so nothing can be observed opening. Recording a FAIL here would report an
   # upstream cause a second time.
   record NO-READ "the barrier opens when the set becomes feasible" "the set was never held"
+elif [ "$held_capacity" != yes ]; then
+  # Releasing a type whose queue carries no flavor cannot make its group placeable, so a group that
+  # stays held says nothing about the barrier.
+  record NO-READ "the barrier opens when the set becomes feasible" \
+    "ClusterQueue ${IT_HELD} never carried a flavor, so releasing its type cannot make that group placeable"
 else
   # RELEASING THE TYPE IS THE ONLY CHANGE. The held group's own workload is untouched; what moves is
   # its SIBLING's ability to reserve, which is exactly the event the held group has to hear about.
-  k patch instancetype "$IT_UNPLACEABLE" --type=merge -p '{"spec":{"inactive":false}}' >/dev/null 2>&1
+  k patch instancetype "$IT_HELD" --type=merge -p '{"spec":{"inactive":false}}' >/dev/null 2>&1
 
   both_admitted() { [ "$(deployment_admitted "$MD_OPENS")" = "2/2" ]; }
   if wait_for "$SETTLE" both_admitted; then

@@ -131,6 +131,8 @@ MAX_REQUESTS=400
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 TMP="$(mktemp -d)"
 
@@ -186,9 +188,7 @@ wait_for() {
 }
 
 fail_out() {
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  for r in "${ROWS[@]}"; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+  print_rows
   [ "$FAILS" -eq 0 ] || { echo "[case-73] ${FAILS} check(s) FAILED"; exit 1; }
   exit 1
 }
@@ -617,8 +617,6 @@ else
 fi
 
 # Results.
-echo
-echo "STATUS | CHECK | OBJECT"
-for r in "${ROWS[@]}"; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+print_rows
 [ "$FAILS" -eq 0 ] || { echo "[case-73] ${FAILS} check(s) FAILED"; exit 1; }
 echo "[case-73] all checks passed"

@@ -63,6 +63,8 @@ SUM_PAST="1280Mi"
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 restore() {
   echo
@@ -118,9 +120,7 @@ YAML
 
 if ! wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Ready 180 >/dev/null; then
   record FAIL "backend ready" "the master did not reach Ready in 180s; nothing below can run"
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  for r in "${ROWS[@]}"; do echo "$r" | tr '|' ' '; done
+  print_rows
   exit 1
 fi
 
@@ -165,9 +165,7 @@ if [ -n "$missing" ]; then
   record FAIL "the pool and its two bindings exist" \
     "absent after the apply:${missing} — so nothing below has a subject. The apply said: \
 $(printf '%s' "${apply_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  for r in "${ROWS[@]}"; do echo "$r" | tr '|' ' '; done
+  print_rows
   exit 1
 fi
 
@@ -204,9 +202,7 @@ else
   record FAIL "the third binding is admitted" \
     "the apply left no binding behind, so the False half below has no subject. The apply said: \
 $(printf '%s' "${third_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  for r in "${ROWS[@]}"; do echo "$r" | tr '|' ' '; done
+  print_rows
   exit 1
 fi
 
@@ -260,9 +256,7 @@ else
 the reading the verdict's spelling exists to avoid"
 fi
 
-echo
-echo "STATUS | CHECK | OBJECT"
-for r in "${ROWS[@]}"; do echo "$r" | tr '|' ' '; done
+print_rows
 
 if [ "$FAILS" -gt 0 ]; then
   echo

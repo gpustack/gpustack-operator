@@ -28,8 +28,8 @@
 #              - the unit-spec edit is REJECTED (immutable) and the stored value is unchanged;
 #              - no unit-spec note lands on the ClusterQueue; the worker NodeFeature labels are unchanged;
 #              - zero Cohort objects exist.
-# Cleanup:     Trap deletes the mocked Devices CR and the injected NodeFeature; removing the accelerator
-#              drains the derived flavor, so the InstanceType + ClusterQueue self-tear-down.
+# Cleanup:     Trap deletes the mocked Devices CR and the injected NodeFeature, and deletes the derived
+#              InstanceType once the mocked flavor is gone.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
@@ -56,13 +56,25 @@ WORKER_NF="${NODE}-gpustack-worker"                 # the worker NodeFeature the
 LABELPFX="acceleratable.feature.gpustack.ai/${AKEY}"
 MOCK_DEV="${NODE}-gpustack-e2e-devices"             # phantom-node Devices CR carrying the mocked ledger
 MANAGED_LABEL="gpustack.ai/managed"
+ITNAME=""
 
 restore() {
   echo
   echo "[case-6] cleanup: deleting mocked Devices, injected NodeFeature"
   kubectl delete devices.worker.gpustack.ai "$MOCK_DEV" --ignore-not-found 2>/dev/null || true
   kubectl -n "$NS" delete nodefeature "$ACCEL_NF" --ignore-not-found 2>/dev/null || true
-  # Removing the accelerator drains the derived flavor → the InstanceType + CQ self-tear-down.
+  # The operator never deletes an InstanceType for lack of flavors, so the derived type outlives the
+  # mock with zero cards, and a later case that takes the first InstanceType it lists can land on it.
+  # Delete it only once the mocked flavor is gone: a derived type deleted while its flavor still
+  # exists is authored again.
+  if [ -n "$ITNAME" ]; then
+    for _ in $(seq 1 30); do
+      [ -z "$(kubectl get resourceflavors.kueue.x-k8s.io -l "${LABELPFX}=true" -o name 2>/dev/null)" ] && break
+      sleep 2
+    done
+    echo "[case-6] cleanup: deleting the derived InstanceType ${ITNAME}"
+    kubectl delete instancetypes.worker.gpustack.ai "$ITNAME" --ignore-not-found --timeout=60s 2>/dev/null || true
+  fi
   sleep 5
 }
 trap restore EXIT
@@ -163,7 +175,6 @@ EOF
 # 2. Wait for the derived accelerated InstanceType (its name is the pool name
 #    gpustack--${AKEY}-<os>-<arch> when CPU-manufacturer awareness is off) and capture it + its
 #    schedule labels.
-ITNAME=""
 for _ in $(seq 1 40); do
   ITNAME=$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys

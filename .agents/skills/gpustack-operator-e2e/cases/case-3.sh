@@ -9,8 +9,10 @@
 #              (drain-when-no-flavors), and restoring the nodes refills the queue and reactivates
 #              the type. Under the queue-ownership split, NodeFlavorReconciler drops the flavor and
 #              NodeQueueReconciler empties the quota — the InstanceType is never deleted for lack of
-#              flavors (an idle pool has no reservations, so quota is emptied directly, StopPolicy
-#              stays None, and identity is kept).
+#              flavors. An idle pool has no reservations to drain, yet its queue is still put on
+#              HoldAndDrain before the quota is emptied and stays held while empty; the returning
+#              flavor is written into the held queue before its StopPolicy is restored, and identity
+#              is kept.
 # Environment: A real cluster with a materialized general pool and a CONTINUOUSLY RUNNING operator
 #              (must NOT be restarted between toggle and assertion). No GPU. Targets the general
 #              (CPU) pool fed by every managed node — same on a 1-node or an N-node cluster.

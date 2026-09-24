@@ -28,8 +28,9 @@
 #              - the derived accelerated InstanceType materializes;
 #              - its backing ClusterQueue references the AdmissionCheck and carries the mocked flavor;
 #              - the Workload's AdmissionCheck state is Retry and it is NOT Admitted (held, not rejected).
-# Cleanup:     Trap deletes the test Pod, the mocked Devices, and the injected NodeFeature, and removes
-#              the nvidia.com/gpu capacity from the Node when this case advertised it.
+# Cleanup:     Trap deletes the test Pod, the mocked Devices, and the injected NodeFeature, removes
+#              the nvidia.com/gpu capacity from the Node when this case advertised it, and deletes the
+#              derived InstanceType once the mocked flavor is gone.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
@@ -58,6 +59,7 @@ POD=gpustack-e2e-overadmit
 # a key that was never added fails harmlessly, while leaving an added one advertises cards that do not
 # exist to every later case.
 ADVERTISED=0
+ITNAME=""
 
 restore() {
   echo
@@ -70,6 +72,18 @@ restore() {
     kubectl patch node "$NODE" --subresource=status --type=json \
       -p '[{"op":"remove","path":"/status/capacity/nvidia.com~1gpu"},{"op":"remove","path":"/status/allocatable/nvidia.com~1gpu"}]' \
       >/dev/null 2>&1 || true
+  fi
+  # The operator never deletes an InstanceType for lack of flavors, so the derived type outlives the
+  # mock with zero cards, and a later case that takes the first InstanceType it lists can land on it.
+  # Delete it only once the mocked flavor is gone: a derived type deleted while its flavor still
+  # exists is authored again.
+  if [ -n "$ITNAME" ]; then
+    for _ in $(seq 1 30); do
+      [ -z "$(kubectl get resourceflavors.kueue.x-k8s.io -l "${LABELPFX}=true" -o name 2>/dev/null)" ] && break
+      sleep 2
+    done
+    echo "[case-4] cleanup: deleting the derived InstanceType ${ITNAME}"
+    kubectl delete instancetypes.worker.gpustack.ai "$ITNAME" --ignore-not-found --timeout=60s 2>/dev/null || true
   fi
   sleep 5
 }
@@ -107,7 +121,6 @@ spec:
 EOF
 
 # 2. Wait for the derived accelerated InstanceType and read its os/arch + entrance LocalQueue.
-ITNAME=""
 for _ in $(seq 1 40); do
   ITNAME=$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys

@@ -81,12 +81,14 @@ DELETE_BOUND="${E2E_MD_DELETE_BOUND:-90}"
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 # The first InstanceType A DEPLOYMENT CAN ACTUALLY NAME, which is not the same as the first one the
 # API returns.
 #
 # THE LIST COMES BACK SORTED BY NAME AND CARRIES TYPES ON THEIR WAY OUT. Case 68 creates its own
-# `case68-nowhere` and deletes it without waiting, and that name sorts before an ordinary derived
+# `case68-held` and deletes it without waiting, and that name sorts before an ordinary derived
 # type -- so a case running straight after it picks a type that is already terminating. Naming one
 # is refused at admission, and the run then dies at fixture time for a reason that has nothing to do
 # with what it measures. Inactive is excluded for the mirror reason: a deployment on one is admitted
@@ -476,8 +478,6 @@ record SKIP "status.endpoint answers an inference request" \
   "same requirement, and the same three things do not close it. status.roles[].assignedFlavors is unreachable here for a third reason: it reports the flavors of a role's ACCELERATOR credits, and a CPU-only pool quotes one for cpu only"
 
 # Results.
-echo
-echo "STATUS | CHECK | OBJECT"
-for r in "${ROWS[@]}"; do echo "$r" | awk -F'|' '{printf "%s | %s | %s\n", $1, $2, $3}'; done
+print_rows
 [ "$FAILS" -eq 0 ] || { echo "[case-49] ${FAILS} check(s) FAILED"; exit 1; }
 echo "[case-49] all checks passed (the serving half is deferred; see the SKIP rows)"

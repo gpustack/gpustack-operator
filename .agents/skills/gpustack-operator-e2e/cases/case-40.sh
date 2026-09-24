@@ -70,11 +70,11 @@ trap restore EXIT
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 results() {
-  echo
-  echo "STATUS | CHECK | OBJECT"
-  for r in "${ROWS[@]}"; do echo "$r" | tr '|' ' ' | awk '{printf "%s | %s | %s\n", $1, $2, substr($0, index($0,$3))}'; done
+  print_rows
   [ "$FAILS" -eq 0 ] || { echo "[case-40] ${FAILS} check(s) FAILED"; exit 1; }
   echo "[case-40] all checks passed"
 }

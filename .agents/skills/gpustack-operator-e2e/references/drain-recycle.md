@@ -37,6 +37,11 @@ derivation and the four-view / AdmissionCheck math are **not** mocked.
    **`.status`** (`status.groups[].accelerators[].{mode,remaining}`), so it must be written to the
    `/status` subresource.
 
+The derived `InstanceType` outlives the mock: removing the NodeFeature deletes the flavor, but the
+operator never deletes a type for lack of flavors. CASE 4 and CASE 6 delete it in their cleanup once
+the mocked flavor is gone — deleting it while the flavor still exists makes the operator author it
+again.
+
    > **Patch the `v1alpha1` CRD, not the unversioned/`v1` resource.** `devices` (no version) resolves
    > to `worker.gpustack.ai/v1` — the aggregated proxy — whose `/status` subresource write currently
    > returns `ServiceUnavailable`. Use `kubectl patch devices.v1alpha1.worker.gpustack.ai <name>
@@ -85,10 +90,15 @@ be observed with the fake client.
 
 Excluding a node (`gpustack.ai/managed=false`, toggled via the NodeFeature — NFD reverts a direct node
 label) must remove its pool contribution. **What changed post-refactor:** there is **no drain
-tombstone** — `NodeFlavorReconciler` *deletes* the flavor when no node contributes (F3a), and the
-derived `InstanceType`'s finalizer then drives the CQ through `HoldAndDrain` and deletes it (F5d). So
-the case asserts the flavor is **deleted** and the derived InstanceType **tears down** (CQ
-`HoldAndDrain` or gone), *not* a `schedule.gpustack.ai/drain=true` annotation.
+tombstone** — `NodeFlavorReconciler` *deletes* the flavor when no node contributes (F3a). The derived
+`InstanceType` is **not** deleted for lack of flavors: its finalizer, which drives the CQ through
+`HoldAndDrain` and deletes it (F5d), runs only when the type itself is deleted. Instead
+`NodeQueueReconciler` puts the CQ on `HoldAndDrain` — also when nothing is reserved — empties its
+resource groups, and keeps the emptied queue held until a flavor returns; the returning flavor is
+written into the held queue before its saved `StopPolicy` is restored. So the case asserts the flavor
+is **deleted**, the InstanceType **survives** with its queue's resource groups emptied, and restoring
+the nodes refills the queue and reactivates the type — *not* a `schedule.gpustack.ai/drain=true`
+annotation.
 
 Non-obvious: a managed toggle changes only `gpustack.ai/managed` — no feature label — so it converges
 **only if** `NodeFlavorReconciler`'s Node-watch predicate includes `systemname.ManagedLabelKey`.
@@ -162,8 +172,8 @@ did not land (wrong API version) or the ledger's reverse-lookup labels do not ma
   `Stopped` when its InstanceType drains. Confirm the InstanceType went `Inactive`/gone (drain
   propagated) and that the operator image includes the drain-stop fix — a stale image predating it
   leaves the evicted Pod recreated and stuck `Pending`. Ground truth:
-  `kubectl -n <ns> logs deploy/gpustack-operator-worker | grep 'stop instance as inactive'`.
-- **CASE 3 nothing tears down** — confirm the operator was not restarted between the toggle and the
+  `kubectl -n <ns> logs deploy/gpustack-operator-worker | grep 'stop instance as its instance type is gone, deleting, or draining'`.
+- **CASE 3 flavor never deleted** — confirm the operator was not restarted between the toggle and the
   assertion (a restart's resync converges regardless of the predicate and masks a bug).
 - **CASE 4 workload never gets a check state** — confirm the AC is `Active` and the accelerated CQ
   references it (`kubectl get cq <name> -o jsonpath='{.spec.admissionChecksStrategy}'`); a Workload
