@@ -22,8 +22,8 @@
 #              them, which is where a router records the endpoints it found.
 # Inputs:      All real. A temporary probe Pod sends sequential chat completions through the
 #              router the whole time, alternating streaming and not, each with a unique tail.
-# Expected:    From one to two, the new Pod becomes Ready and its own counter grows while no
-#              request fails; from two back to one, no request fails and one Pod of the target
+# Expected:    From one to two, the new Pod becomes Ready and its own counter grows after that
+#              while no request fails; from two back to one, no request fails and one Pod of the target
 #              remains Ready; restart counts of the Pods that stay do not move. The request totals
 #              per phase and each failed request's status and body are printed as INFO rows. A new
 #              server behind a router whose cache-aware policy keeps prefix-sharing traffic on one
@@ -161,15 +161,19 @@ fi
 new="$(comm -13 <(printf '%s\n' "$old") <(ready_pods) | head -1)"
 check "$([ -n "$new" ] && echo true || echo false)" "a second $TARGET Pod becomes Ready ($new)"
 phase two
+# The counter is read from the moment the Pod turned Ready, not from zero: SGLang answers a warmup
+# request of its own before it reports Ready, and that request counts as a finished one, so an
+# absolute reading of one says nothing about traffic the router sent.
+ready_count="$(counter_of "$new")"
 sleep "$SETTLE"
-work="$(counter_of "$new")"
+work="$(awk -v a="$(counter_of "$new")" -v b="$ready_count" 'BEGIN { printf "%.10g", a - b }')"
 concentrates=""
 [ "$TARGET" = server ] && concentrates="$(serving_router_concentrates "$ROUTER")"
 if [ -n "$concentrates" ] && awk -v w="$work" 'BEGIN { exit !(w == 0) }'; then
-  printf 'SKIP | the new %s Pod did work (%s=0 on %s): %s | %s\n' "$TARGET" "$COUNTER" "$new" "$concentrates" "$MD"
+  printf 'SKIP | the new %s Pod did work (%s grew by 0 on %s after Ready): %s | %s\n' "$TARGET" "$COUNTER" "$new" "$concentrates" "$MD"
 else
   check "$(awk -v w="$work" 'BEGIN { print (w > 0) ? "true" : "false" }')" \
-    "the new $TARGET Pod did work ($COUNTER=$work on $new)"
+    "the new $TARGET Pod did work ($COUNTER grew by $work on $new after Ready)"
 fi
 if [ -n "${E2E_SCALE_LOG_DIR:-}" ]; then
   mkdir -p "$E2E_SCALE_LOG_DIR"
