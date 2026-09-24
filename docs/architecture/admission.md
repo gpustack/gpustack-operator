@@ -26,7 +26,7 @@ produces or consumes the `.sliced.*` / `.partitioned.*` values at a distinct poi
 |---|---|---|---|
 | 1 | Pod webhook (Worker) | the request's shape; folds memory into credits | cluster-wide capacity |
 | 2 | Kueue `credits` | the pool's aggregate total | per-accelerator fragmentation |
-| 3 | `NodeDevicesAdmission` AdmissionCheck | every accelerator of the assigned flavor, via the ledger | nothing about the node: it judges the flavor's whole node pool and does not read the node Kueue TAS already assigned |
+| 3 | `NodeDevicesAdmission` AdmissionCheck | the accelerators of the node Kueue TAS assigned, via the ledger | how to move a Workload off that node: TAS re-places a `Retry` from the same per-node totals |
 | 4 | Default scheduler / kubelet | per-node remaining capacity keys | which accelerator, for the partitioned family |
 | 5 | Device-plugin allocator | the live accelerator state, under a per-node mutex | anything upstream of its own node |
 
@@ -76,14 +76,27 @@ Once Kueue reserves quota, the check reads the pool's `Devices` ledger (uncached
 per-accelerator `Remaining ≥ demand`: a whole accelerator for exclusive, `.sliced.units` for sliced, an
 owner share for shared, a free placement of the profile for a partition.
 
-**Under TAS the node is already fixed when this check runs, and the check does not read it.** Every
-queue this operator derives is TAS-only and ends at `kubernetes.io/hostname`, so Kueue writes the node
-into the Workload's `podSetAssignments[].topologyAssignment` as it reserves quota, before any
-AdmissionCheck settles.
+**Under TAS the check judges the node already assigned.** Every queue this operator derives is TAS-only
+and ends at `kubernetes.io/hostname`, so Kueue writes the node into the Workload's
+`podSetAssignments[].topologyAssignment` as it reserves quota, before any AdmissionCheck settles. Each
+node named there must host its own share of the PodSet from its own accelerators.
 
-The check still answers for the flavor's whole node pool, so a pool with a fitting accelerator on one
-node passes a Workload TAS placed on another
-([#570](https://github.com/gpustack/gpustack-operator/issues/570)).
+- A PodSet without a hostname-level assignment is judged across the flavor's whole node pool.
+- The shared family stays pool-wide: its key counts ownership shares, which the check reads as
+  distinct accelerators, so judging it per node would hold a multi-share request on a one-accelerator
+  node for good.
+- A node whose `Node` object is gone serves no node-scoped demand, so the Workload is held.
+
+> **Known behavior: a fragmented node livelocks.** TAS sums each node's capacity keys, so it cannot see
+> that a node's free `.sliced.units` are spread over accelerators none of which fits the request.
+>
+> - TAS places the request there, and prefers it: it orders nodes by least free capacity.
+> - The check answers `Retry`, Kueue evicts, and TAS re-places it from the same totals on the same node.
+> - So the Workload retries every 30 s until that node's accelerators free, even while another node has
+>   room, and the verdict message says so.
+>
+> Reading the pool instead let such a request through, and `Allocate`, which does not gate a slice on
+> units, oversubscribed one accelerator's memory.
 
 Each family gets one correlated `(accelerators, per-accelerator demand, profile)` tuple scoped to the
 accelerators that can serve it, so an exclusive or shared request is never judged feasible against a
