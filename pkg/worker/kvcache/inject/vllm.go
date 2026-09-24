@@ -30,7 +30,7 @@ const (
 	VLLMMooncakeBootstrapPort int32 = 8998
 
 	// vllmStoreConnector is the name vLLM PROPER registers for the Mooncake store
-	// (`kv_connector/factory.py:223-226`, read at v0.25.1).
+	// (`kv_connector/factory.py:223-226`, read at v0.29.0).
 	//
 	// `create_connector` looks the name up in a registry and raises `ValueError: Unsupported
 	// connector type` on a miss, so a name that engine does not know stops it at startup. That does

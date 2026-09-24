@@ -302,8 +302,9 @@ between the halves:
   remediation are stated there. The check is one-sided — it fires for a single-manufacturer Ascend
   deployment just the same — and it is the only one of the three that produces a message;
   following its remediation clears only this refusal; the next two apply regardless.
-- **Two upstream walls then apply, measured at vLLM `v0.25.1` and vLLM-Ascend `v0.23.0` — a
-  description of that pair of releases, not a permanent property of either project.** The operator
+- **Two upstream walls then apply, read in the source of vLLM `v0.29.0` and vLLM-Ascend `v0.23.0`,
+  the [minimum each is supported at](engine-versions.md#the-minimum-per-shape) — a description of
+  that pair of releases, not a permanent property of either project.** The operator
   renders no key that lets the Ascend half load from the shared store, and the two engines address
   it with incompatible keys, so every lookup misses and no error is raised.
 

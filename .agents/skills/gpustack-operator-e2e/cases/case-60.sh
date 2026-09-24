@@ -59,7 +59,7 @@
 #              nothing today, only E2E_VLLM_IMAGE can produce a row that runs, and the day admission
 #              stops refusing, that row runs without this file being edited.
 #
-#                E2E_VLLM_IMAGE=gpustack/runner:cuda12.9-vllm0.25.1
+#                E2E_VLLM_IMAGE=gpustack/runner:cuda12.9-vllm0.29.0
 #                E2E_VLLM_ASCEND_IMAGE=quay.io/ascend/vllm-ascend:v0.19.1rc1
 #
 #
@@ -134,7 +134,7 @@
 #              render it, registry membership and "the engine starts" are the same question. On the
 #              day we do render it, this assertion turns into a false negative - reporting missing
 #              what the engine would resolve - and it must move to the version-specific entry point
-#              then (`_get_connector_class_with_compat` at v0.19.1, `get_connector_class` at v0.25.1;
+#              then (`_get_connector_class_with_compat` at v0.19.1, `get_connector_class` at v0.29.0;
 #              the names differ, which is why the registry is read directly while that is equivalent).
 #
 #              SKIPS: each row independently, on its own image variable, plus one MEASURED skip -
@@ -178,6 +178,8 @@
 # through the webhook and kubectl exec.
 #
 # It was written from source read at vllm v0.25.1 (752a3a50) and vllm-ascend v0.19.1rc1 (da421afa).
+# The vllm half was re-read at v0.29.0 (98dff2a8): kv_connector/factory.py is byte-identical to
+# v0.25.1, so the registry, the MooncakeStoreConnector entry and get_connector_class are unchanged.
 #
 # What HAS been executed, 2026-09-04, outside this file - one `docker run --rm` on a host with no
 # accelerator of any kind, against quay.io/ascend/vllm-ascend:v0.19.1rc1 (linux/arm64):

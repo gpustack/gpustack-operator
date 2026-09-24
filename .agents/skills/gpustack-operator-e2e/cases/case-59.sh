@@ -75,8 +75,9 @@
 #              bumped by whoever needs a newer engine, and then only the reason says whether the bump
 #              was safe.
 #
-#                E2E_VLLM_IMAGE=gpustack/runner:cuda12.9-vllm0.25.1
-#                  0.25.1 because that is the version engine.go's facts table was READ at. This case
+#                E2E_VLLM_IMAGE=gpustack/runner:cuda12.9-vllm0.29.0
+#                  0.29.0 because that is the version engine.go's facts table was READ at, and the
+#                  lowest vLLM docs/reference/engine-versions.md supports. This case
 #                  proves an engine accepts what we render, and what we render was decided from that
 #                  version's source; testing a different one silently changes the question. There is
 #                  also a hard FLOOR of 0.21.1: vLLM's Mooncake store connector - the module holding
@@ -161,7 +162,7 @@ kvi_setup || { kvi_results "$CASE_ID"; exit 1; }
 # prefix. Under a prefix match any PARSED output passes - including one where every injected key was
 # ignored and the reader returned its own defaults, which is the outcome this half exists to rule out.
 # ALL THREE differ from this reader's defaults, which is what makes the whole-line match decisive:
-# the reader defaults to mode=embedded and 4 GiB for BOTH sizes (worker.py:74-75 at 752a3a50), while
+# the reader defaults to mode=embedded and 4 GiB for BOTH sizes (worker.py:87-88 at 98dff2a8), while
 # we render standalone-store, segment 0 (an engine container contributes no memory to the pool -
 # client_config.go:25-29) and a 128 MiB buffer (client_config.go:31-40). Read the constants below as
 # the authority: they decide the verdict, and this comment is only what a reader trusts afterwards.
@@ -243,7 +244,7 @@ about the file we render, in either direction; see ${LOG_V}"
   elif grep -qxF "PARSED mode=${VLLM_WANT_MODE} segment=${VLLM_WANT_SEGMENT} buffer=${VLLM_WANT_BUFFER}" "$LOG_V"; then
     record PASS "vLLM's own reader accepts the projected file" \
       "$(grep -m1 '^PARSED ' "$LOG_V") - every value is the one we rendered, and ALL THREE differ from \
-this reader's own defaults (mode=embedded, and 4GiB for both sizes - worker.py:74-75), so the file \
+this reader's own defaults (mode=embedded, and 4GiB for both sizes - worker.py:87-88), so the file \
 was read rather than fallen back from. __post_init__ did not raise, so the mode/segment pair agrees"
   else
     record FAIL "vLLM's own reader accepts the projected file" \
