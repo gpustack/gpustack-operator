@@ -1,6 +1,7 @@
 package helm
 
 import (
+	"context"
 	"io"
 	"testing"
 	"time"
@@ -295,6 +296,16 @@ func newConvergeTestBed(t *testing.T) (*Client, *Chart, *helmaction.Configuratio
 	return cli, chart, config
 }
 
+// convergeContext is the context a convergence test hands to converge: t.Context() without its
+// cancellation. Helm's upgrade returns while a goroutine it started still watches the context, and
+// that goroutine stops only once it sees the upgrade's own done signal. Under load it may not run
+// before the test ends; t.Context() is canceled then, so it finds both signals ready, can take the
+// cancellation, and marks the upgraded release failed and rolls it back, logging through t.Logf
+// after the test has completed, which panics the whole package.
+func convergeContext(t *testing.T) context.Context {
+	return context.WithoutCancel(t.Context())
+}
+
 // Test_Client_converge_discardThenUpgradeOnce runs the convergence loop end to end against an
 // in-memory Helm storage and a printing kube client, pinning the repair this file's decision
 // table only half-covers (gpustack-operator#122): a release with a deployed revision beneath
@@ -307,7 +318,7 @@ func Test_Client_converge_discardThenUpgradeOnce(t *testing.T) {
 
 	last, err := config.Releases.Last("test")
 	assert.NoError(t, err)
-	_, err = cli.converge(t.Context(), config, chart, next, "default", last)
+	_, err = cli.converge(convergeContext(t), config, chart, next, "default", last)
 	assert.NoError(t, err)
 
 	// The pending record is gone and the forced upgrade fired: a new revision 2 stands
@@ -323,7 +334,7 @@ func Test_Client_converge_discardThenUpgradeOnce(t *testing.T) {
 	// Fired once: a second pass reads converged and adds no revision.
 	last, err = config.Releases.Last("test")
 	assert.NoError(t, err)
-	_, err = cli.converge(t.Context(), config, chart, next, "default", last)
+	_, err = cli.converge(convergeContext(t), config, chart, next, "default", last)
 	assert.NoError(t, err)
 	history, err = config.Releases.History("test")
 	assert.NoError(t, err)
@@ -350,7 +361,7 @@ func Test_Client_converge_requeueKeepsForcedUpgrade(t *testing.T) {
 
 	last, err := config.Releases.Last("test")
 	assert.NoError(t, err)
-	_, err = cli.converge(t.Context(), config, chart, next, "default", last)
+	_, err = cli.converge(convergeContext(t), config, chart, next, "default", last)
 	assert.NoError(t, err)
 
 	// The forced upgrade survived the requeue and fired: a new revision 2 stands deployed.
