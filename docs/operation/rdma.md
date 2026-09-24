@@ -1,10 +1,10 @@
 # RDMA Operations
 
 > **Purpose** — how a workload asks for RDMA beside its accelerators: which key, how many endpoints
-> for how many accelerators, what a grant hands the container, and the kubelet policy to set before
-> any of it aligns.
+> for how many accelerators, what a grant hands the container, the kubelet policy to set before
+> any of it aligns, and the engine image an EFA leg needs.
 > **Audience** operators, users writing workloads · **Prerequisites** [Accelerator
-> Requests](../accelerator-requests.md) · **Read time** ~12 min
+> Requests](../accelerator-requests.md) · **Read time** ~16 min
 
 What the keys are and how an endpoint becomes allocatable is
 [Network Topology](../architecture/network-topology.md)'s; what admission enforces is
@@ -20,6 +20,7 @@ put in a manifest, what to configure on the node, and what to check when a Pod d
 - [Enabling NUMA alignment on the kubelet](#enabling-numa-alignment-on-the-kubelet)
 - [Confirming the policy is in force](#confirming-the-policy-is-in-force)
 - [Kueue does not meter the RDMA keys](#kueue-does-not-meter-the-rdma-keys)
+- [What an EFA leg needs from the engine image](#what-an-efa-leg-needs-from-the-engine-image)
 - [When a Pod does not schedule](#when-a-pod-does-not-schedule)
 
 ## Which key a workload asks for
@@ -59,11 +60,9 @@ in a Pod template. [Model Deployment Reference](../reference/model-deployment.md
 count selects, and the mixed-fabric refusal. The field allocates a device to each rendered engine
 Pod and does not assert that the engine has transferred bytes.
 
-**An EFA leg also needs an EFA build of Mooncake in the engine image.** The default build, which
-the runner engine images carry, has no EFA transport: granted the device, the engine fails at
-startup because its transfer engine cannot initialize; without the grant, the transfer falls back
-to TCP. The EFA builds ship as `mooncake-transfer-engine-efa` and
-`mooncake-transfer-engine-efa-cuda13`, and need libfabric installed in the same image.
+**An EFA leg also needs an EFA build of Mooncake in the engine image**, which no runner image
+carries — see [what an EFA leg needs from the engine
+image](#what-an-efa-leg-needs-from-the-engine-image).
 
 ## How many endpoints beside N accelerators
 
@@ -232,6 +231,110 @@ Three things to do instead of a quota:
 - **Remember which key runs out first.** An endpoint carries one exclusive token and many more
   shared ones — [how many of each](../architecture/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)
   — so a fleet exhausts the exclusive key long before the shared one on the same hardware.
+
+## What an EFA leg needs from the engine image
+
+Which engine can use EFA on which leg, beside every other transport, is [the transport
+matrix](../reference/engine-versions.md#which-transport-each-engine-can-use). This section is what
+the cells marked "own image" there ask of you.
+
+REQUIRED: **an EFA build of Mooncake in the engine image, and no runner image carries one.** The
+runner images carry the standard build, which has no EFA transport. Granted an EFA device, an
+engine on that build falls to the verbs path, fails creating its completion queue with `Operation
+not supported`, and never starts: the Pod restarts in a loop. Without the grant it moves KV over TCP
+and says nothing.
+
+**Both legs read the engine's build.** A store group on `EFA` hands the engines it serves the
+protocol `efa`, and `kvTransfer.protocol: efa` renders `efa` into both ends of a direct pair, so
+every engine Pod on either leg needs the EFA build. The store members do not: the
+[default member image](../kv-cache/backend.md#the-image) already carries EFA.
+
+**Nothing more is needed from the operator.** An image differing from the vLLM runner image only by
+the EFA build of the same client, plus libfabric, completed a direct transfer and a store write over
+EFA with only the device grant the operator renders — no host network, no mount and no added
+capability.
+
+**The operator does not pick that image.** Build it, then name it in `roles[].image` on every role
+that moves KV over EFA. A role naming no image gets the runner image, whatever its leg's protocol.
+
+### Building the image
+
+Derive it from the runner image the deployment would otherwise run:
+
+```dockerfile
+# Pin the base by digest.
+FROM gpustack/runner:cuda13.0-vllm0.29.0@sha256:<digest>
+SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
+ARG AWS_EFA_VERSION=1.44.0
+RUN curl --retry 3 --retry-connrefused -fL "https://efa-installer.amazonaws.com/aws-efa-installer-${AWS_EFA_VERSION}.tar.gz" | tar -zx -C /tmp \
+ && cd /tmp/aws-efa-installer && ./efa_installer.sh -y --skip-kmod \
+ && rm -f /opt/amazon/efa/lib/libfabric.a && ldconfig \
+ && rm -rf /tmp/aws-efa-installer /var/cache/apt /var/lib/apt/lists/*
+ENV PATH="${PATH}:/opt/amazon/efa/bin"
+# Same Mooncake version as the base, EFA build. Remove the standard build under either name;
+# on a CUDA 12 base install mooncake-transfer-engine-efa instead of the -cuda13 wheel.
+RUN python3 -m pip uninstall -y mooncake-transfer-engine mooncake-transfer-engine-cuda13 \
+ && python3 -m pip install --no-cache-dir --no-deps mooncake-transfer-engine-efa-cuda13==0.3.13.post1
+```
+
+REQUIRED: **libfabric in the same image.** The EFA wheel links `libfabric.so.1` and does not bundle
+it, so without the installer step Mooncake fails at import. `--skip-kmod` installs the user-space
+half only; the kernel module belongs to the node.
+
+Check the build before deploying it, and the engine once it runs:
+
+```bash
+# inside the image: non-zero means the EFA transport is compiled in
+MC="$(python3 -c 'import importlib.util as u; print(u.find_spec("mooncake").submodule_search_locations[0])')"
+grep -ac EfaTransport "$MC/engine.so"
+# the engine's log once it has started
+kubectl logs <engine-pod> | grep 'The Mooncake Transfer Engine is using efa'
+```
+
+### What you maintain
+
+The image is yours from then on, and nothing in the operator tracks it:
+
+- **The base.** Rebuild whenever the deployment moves to another runner image or engine version; the
+  operator keeps rendering the image you named, not the one it would assemble.
+- **The Mooncake version.** Install the EFA build of the version the base carries — which client
+  each runner image carries is [its table](../reference/engine-versions.md#the-minimum-per-shape) —
+  and keep the store on that client's minor line: [the store version must match the engine's
+  client](../kv-cache/backend.md#the-store-version-must-match-the-engines-client).
+- **libfabric**, from the EFA installer, whose version the recipe pins.
+- **The image on every EFA role.** A new role, or a role you re-create, runs the runner image until
+  you name yours on it.
+
+### What the EFA build does not carry
+
+Measured on the `0.3.13.post1` wheels. These are why the runner images keep the standard build:
+
+- **x86_64 only.** No aarch64 EFA wheel is published.
+- **No intra-node NVLink transport**, which the standard build carries.
+- **No Mooncake EP or PG modules**, which SGLang uses — so this recipe covers vLLM images only.
+- **No silent fallback.** Asked for `efa` on a node without an EFA device it fails, where the
+  standard build falls back to TCP. With libfabric installed, `tcp`, `rdma` and the store still work
+  on such a node.
+- **Not measured:** the RDMA data path on InfiniBand or RoCE hardware with the `rdma-core` the
+  installer brings.
+
+### SGLang cannot use EFA
+
+LIMITED: **no SGLang leg reaches EFA.** On the direct leg the operator grants SGLang no fabric
+device: SGLang does not hand the declared protocol to its transfer engine, so the declaration cannot
+select a grant, and a positive `resources.interface` with no other fabric leg is refused at
+admission.
+
+On the store leg the operator renders the pool's protocol into SGLang's `MOONCAKE_PROTOCOL`, but
+SGLang's runner image carries a Mooncake with no EFA transport, and the EFA build lacks the modules
+SGLang loads. Run SGLang on AWS over `TCP`, which has been run there.
+
+### On AWS, `RDMA` is not an option
+
+**Choose `EFA` or `TCP` on AWS.** The Device Manager discovers no RDMA device on an EFA node, so
+the `device.gpustack.ai/rdma` keys are allocatable at zero there, and a member group or engine that
+asks for them stays `Pending`. Granting the EFA device instead does not help `rdma` either: the
+verbs path fails creating its completion queue, as above.
 
 ## When a Pod does not schedule
 

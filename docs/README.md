@@ -81,7 +81,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [T-Head MIG Operations](operation/thead-mig.md) | Enabling/disabling T-Head's own MIG-named partitioning, the busy-mode-change prerequisite, and reboot recovery | operators | ~10 min |
 | [Hygon MIG Operations](operation/hygon-mig.md) | The same runbook for Hygon, whose mode is node-wide and whose partitioned nodes serve nothing else | operators | ~10 min |
 | [Preflight Operations](operation/preflight.md) | Verifying on a bare host what a node can detect, slice and manage: the command line for both runtimes, every mount and flag, what it starts and removes | operators | ~9 min |
-| [RDMA Operations](operation/rdma.md) | Which RDMA key to ask for and how many endpoints beside N accelerators, what a grant injects, the kubelet policy that aligns the two sides, and why no queue meters these keys | operators, users | ~12 min |
+| [RDMA Operations](operation/rdma.md) | Which RDMA key to ask for and how many endpoints beside N accelerators, what a grant injects, the kubelet policy that aligns the two sides, why no queue meters these keys, and the engine image an EFA leg needs | operators, users | ~16 min |
 | [Migrating to Bundled Subcharts](migration/to-subcharts.md) | The one-time ownership transfer from the runtime-installed releases | operators | ~9 min |
 | [Migrating from v0.5.x](migration/from-v0.5.md) | Upgrading across the scheduling-chain refactor | operators | ~5 min |
 | [Migration Troubleshooting](migration/troubleshooting.md) | Recovering from a wedged upgrade (worker CrashLoopBackOff) or a namespace stuck Terminating | operators | ~8 min |
@@ -90,7 +90,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Command Reference](reference/commands.md) | Every command the binary offers: what each does, who runs it, its flags, and a runnable invocation | operators, developers | ~10 min |
 | [KV Cache Injection Reference](reference/kv-cache-injection.md) | How any Pod joins a KV cache pool with one label: the contract, what is injected per engine, every refusal, and what a cache changes about a workload | users, operators | ~14 min |
 | [Model Deployment Reference](reference/model-deployment.md) | The `ModelDeployment` contract: the inherited reuse domain, the three override tiers and the owned-key table, and the runner-image formula | users, operators, contributors | ~10 min |
-| [Engine Versions Reference](reference/engine-versions.md) | The lowest vLLM, vLLM-Ascend and SGLang release each deployment shape has been run with, the Mooncake client its runner image carries, and the store line it needs | users, operators | reference |
+| [Engine Versions Reference](reference/engine-versions.md) | The lowest vLLM, vLLM-Ascend and SGLang release each deployment shape has been run with, the Mooncake client its runner image carries, the store line it needs, and which transport each engine can use on each leg | users, operators | reference |
 | [Model Deployment Metrics Reference](reference/model-deployment-metrics.md) | The structured metrics subresource, source scopes, windowed cache hits and Pod scrape annotations | users, operators, console developers | ~5 min |
 | [Model Deployment Status Reference](reference/model-deployment-status.md) | What each `ModelDeployment` status condition and published field means, and how to read them when a deployment misbehaves | users, operators | ~8 min |
 

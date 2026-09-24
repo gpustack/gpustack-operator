@@ -138,9 +138,8 @@ The key follows the bound cache backend's effective group protocol and any direc
 transport the engine actually renders. Different backend-group protocols or an RDMA and EFA mix
 are refused for a positive count.
 
-A count with no managed RDMA or EFA transfer leg is also refused. The count is frozen with the
-other role resources. See
-[RDMA Operations](../operation/rdma.md) for the allocation and topology limits.
+A count with no managed RDMA or EFA transfer leg is also refused. The count is frozen with the other
+role resources. See [RDMA Operations](../operation/rdma.md) for the allocation and topology limits.
 
 ## Prefill and decode
 
@@ -404,6 +403,7 @@ It is **declared, not discovered, and not gated**. The set an engine accepts bel
 build inside the engine's own image — a HIP-compiled build makes `hip` a working transport — so vLLM
 gets the value verbatim, and a value the build rejects fails that container at startup. SGLang maps
 it: `tcp` renders `--disaggregation-transfer-backend mooncake_tcp`, anything else `mooncake`.
+Which value works on which engine is [the transport matrix](engine-versions.md#which-transport-each-engine-can-use).
 
 **`tcp` is enforced, not only requested**: the transfer engine picks its transport from the host,
 and with no RDMA device a build with multi-node NVLink installs NVLink between hosts with no NVLink
