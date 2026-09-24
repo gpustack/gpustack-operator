@@ -230,7 +230,7 @@ The sequence that completes cleanly, verified on a cluster:
 kubectl delete apiservice v1beta1.visibility.kueue.x-k8s.io v1beta2.visibility.kueue.x-k8s.io
 
 # 2. --take-ownership lets Helm adopt the Secret cert-manager owns (Helm 3.21+).
-helm upgrade gpustack-operator <chart> --namespace gpustack-system --reuse-values \
+helm upgrade gpustack-operator <chart> --namespace gpustack-system --reset-then-reuse-values \
   --set global.certmanager.enabled=false --take-ownership --wait
 ```
 

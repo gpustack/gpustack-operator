@@ -29,8 +29,12 @@ taints, so three control-plane nodes spread fine.
 
 They tolerate **those taints and no others**, a cordon's included, so a pod evicted by a drain never
 lands back on the node being drained. Where your nodes carry a taint of your own, add it to each
-component's `tolerations`. Earlier releases let the Kueue controller manager, the NFD master and the NFD
-gc tolerate every taint; an install that relied on that must set their three lists before upgrading.
+component's `tolerations`.
+
+Earlier releases let the Kueue controller manager, the NFD master and the NFD gc tolerate every taint;
+an install that relied on that must set their three lists before upgrading. Upgrade with
+`--reset-then-reuse-values`, not `--reuse-values`, or the new lists never reach the release; see
+[Upgrading the Chart](../../deploy/gpustack-operator/chart/README.md#upgrading-the-chart).
 
 ## The knobs, per component
 
@@ -93,7 +97,7 @@ csi-driver-s3:
 
 ```bash
 helm upgrade gpustack-operator gpustack/gpustack-operator \
-  --namespace gpustack-system --values ha.yaml
+  --namespace gpustack-system --reset-then-reuse-values --values ha.yaml
 ```
 
 ### Worker (control plane)

@@ -120,7 +120,7 @@ The lead advances through these in order, writing to `run-log.md` as it goes.
    report's **test-plan** section.
 
 4. **Phase 3 — Build & deploy (lead, confirm).** `TAG=dev-$(git rev-parse --short HEAD)`, then
-   `build-load.sh "$TAG"` and `deploy.sh "$NS" "$TAG"` (or `helm upgrade --reuse-values --set
+   `build-load.sh "$TAG"` and `deploy.sh "$NS" "$TAG"` (or `helm upgrade --reset-then-reuse-values --set
    image.tag="$TAG"` + `rollout restart` to redeploy over an existing release). Capture output to `raw/`.
    Then `assert-core.sh "$NS"` — the **running binary revision must equal HEAD** (stale-image guard).
 
@@ -310,7 +310,7 @@ Mirrors the EKS run (`.claude/reports/2026-07-02-eks-e2e/run-log.md`, phases 6�
 3. Fix loop, each step confirmed: edit code → `make lint` → commit with **`--signoff`** (conventional
    commit; fold fixes into their originating commit rather than a follow-up; add a test only when it guards
    a real regression, per the project's testing conventions) → package (local `build-load.sh`, or remote
-   SSH login shell `bash -lc "… make package PACKAGE_PUSH=true"`) → deploy (`helm upgrade --reuse-values --set image.tag=…` +
+   SSH login shell `bash -lc "… make package PACKAGE_PUSH=true"`) → deploy (`helm upgrade --reset-then-reuse-values --set image.tag=…` +
    `rollout restart`) → retest the affected cases → append results to the report's fix-and-retest section.
 4. SSH / RSYNC / `git commit` / image push are outward-facing; none are on the allow-list, so each prompts.
    Only run teardown (Phase 8) after the loop ends.

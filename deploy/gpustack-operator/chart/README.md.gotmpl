@@ -51,6 +51,31 @@ helm install gpustack-operator gpustack/gpustack-operator \
 > Install with the release name `gpustack-operator` so that the rendered resource names
 > match the conventional `gpustack-operator-worker` / `gpustack-operator-device-manager`.
 
+## Upgrading the Chart
+
+Upgrade with `--reset-then-reuse-values` (Helm 3.14+):
+
+```bash
+helm upgrade gpustack-operator gpustack/gpustack-operator \
+  --namespace gpustack-system \
+  --reset-then-reuse-values
+```
+
+It keeps the values you have set, at install and on every upgrade since, and takes every other value
+from the new chart. `--reuse-values` does not: it carries the release's computed values forward, the
+old chart's defaults included, so a default the new chart changes never reaches the release. A release
+already upgraded that way picks the new defaults up on its next `--reset-then-reuse-values` upgrade.
+A plain `--values`/`--set` upgrade takes the new defaults too, but drops every value it does not repeat.
+
+With a Helm older than 3.14, hand your values back yourself, without any reuse flag:
+
+```bash
+helm get values gpustack-operator --namespace gpustack-system --output yaml > prev.yaml
+helm upgrade gpustack-operator gpustack/gpustack-operator \
+  --namespace gpustack-system \
+  --values prev.yaml
+```
+
 ## Uninstalling the Chart
 
 To uninstall the `gpustack-operator` release:

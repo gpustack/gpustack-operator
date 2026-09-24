@@ -371,7 +371,7 @@ Redeploy over an existing release with a new image (avoids a full reinstall):
 
 ```bash
 helm upgrade gpustack-operator deploy/gpustack-operator/chart -n "$NS" \
-  --reuse-values --set image.tag="$TAG" --set image.pullPolicy=IfNotPresent
+  --reset-then-reuse-values --set image.tag="$TAG" --set image.pullPolicy=IfNotPresent
 kubectl -n "$NS" rollout restart deploy/gpustack-operator-worker
 kubectl -n "$NS" rollout status  deploy/gpustack-operator-worker --timeout=300s
 ```
