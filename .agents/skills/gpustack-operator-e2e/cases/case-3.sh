@@ -21,7 +21,7 @@
 #              directly: NFD reverts a direct node label).
 # Expected:    - A — the pool's general ResourceFlavor is DELETED (no drain tombstone);
 #              - B — the InstanceType SURVIVES and its ClusterQueue's spec.resourceGroups is emptied
-#                (length 0);
+#                (length 0) while the queue stays held (spec.stopPolicy is not None);
 #              - C — restoring the nodes refills resourceGroups and the InstanceType returns to Active.
 # Cleanup:     Trap restores gpustack.ai/managed=true on all nodes and waits for the InstanceType to
 #              return to Active so a following case still finds a healthy chain.
@@ -84,18 +84,23 @@ done
   || record FAIL "flavor deleted on de-manage" "${RF#*/} still present — NodeFlavorReconciler did not drop the unmanaged node"
 
 # --- Assertion B: the InstanceType SURVIVES (not deleted); its backing queue's quota is emptied. ---
+# The emptied queue must still be held: restoring its StopPolicy before a flavor returns reopens a
+# queue with no quota. Both fields come from one read, so they describe the same instant; an absent
+# stopPolicy is Kueue's default, None.
 survived=""
 for _ in $(seq 1 60); do
   exists=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o name 2>/dev/null)
   cqexists=$(kubectl get clusterqueue "$IT" -o name 2>/dev/null)
-  rg=$(kubectl get clusterqueue "$IT" -o json 2>/dev/null | python3 -c "import json,sys
-try: print(len(json.load(sys.stdin).get('spec',{}).get('resourceGroups') or []))
-except Exception: print(-1)" 2>/dev/null)
-  if [ -n "$exists" ] && [ -n "$cqexists" ] && [ "$rg" = "0" ]; then survived=1; break; fi
+  read -r rg stop < <(kubectl get clusterqueue "$IT" -o json 2>/dev/null | python3 -c "import json,sys
+try:
+  spec = json.load(sys.stdin).get('spec', {})
+  print(len(spec.get('resourceGroups') or []), spec.get('stopPolicy') or 'None')
+except Exception: print(-1, '?')" 2>/dev/null)
+  if [ -n "$exists" ] && [ -n "$cqexists" ] && [ "$rg" = "0" ] && [ "$stop" != "None" ]; then survived=1; break; fi
   sleep 3
 done
-[ -n "$survived" ] && record PASS "InstanceType survives flavor loss; queue emptied" "${IT} kept, resourceGroups=0 (drain-when-no-flavors, idle)" \
-  || record FAIL "InstanceType survives flavor loss; queue emptied" "exists='${exists:-gone}' cqexists='${cqexists:-gone}' resourceGroups='${rg}' — the type must survive with its queue emptied, not tear down"
+[ -n "$survived" ] && record PASS "InstanceType survives flavor loss; queue emptied and held" "${IT} kept, resourceGroups=0, stopPolicy=${stop} (drain-when-no-flavors, idle)" \
+  || record FAIL "InstanceType survives flavor loss; queue emptied and held" "exists='${exists:-gone}' cqexists='${cqexists:-gone}' resourceGroups='${rg}' stopPolicy='${stop}' — the type must survive with its queue emptied and held, not tear down or reopen"
 
 # --- Assertion C: restoring the nodes refills the queue and the InstanceType reactivates. ---
 echo "[case-3] restoring gpustack.ai/managed=true; expecting the pool to refill and reactivate"
