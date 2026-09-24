@@ -332,6 +332,75 @@ func validateModelDeploymentRoleListenPorts(old, md *workercore.ModelDeployment)
 	return errs
 }
 
+// validateModelDeploymentRoleReservedListenPorts refuses a role that declares no ports and passes a
+// --port, in any spelling the engine reads as it, naming a port the operator reserves on that role.
+// The render places that port on the container beside the synthesized listeners, and the two
+// claiming one number fail the render on every pass. A role passing none serves on the default
+// port, which no listener reserves. A take-over role is exempt, because the render synthesizes no
+// listener onto it.
+//
+// The refusal names the router when there is one, as validateModelDeploymentRolePorts does, and
+// otherwise lands on the arguments, the field the object carries, rather than on ports it does not.
+//
+// A COLLISION THE OBJECT ALREADY HELD ON THE SAME ROLE IS LEFT ALONE, so that later edits do not
+// strand an object stored before the rule. It is compared as the collision rather than as the role's
+// ports and arguments, because the reserved set also moves with the router: adding one to an object
+// whose role passes the event port brings a listener onto that port without touching the role.
+func validateModelDeploymentRoleReservedListenPorts(old, md *workercore.ModelDeployment) field.ErrorList {
+	held := make(map[string]int32)
+	if old != nil {
+		for i := range old.Spec.Roles {
+			if port, _, ok := modelDeploymentRoleReservedListenPort(old, &old.Spec.Roles[i]); ok {
+				held[old.Spec.Roles[i].Name] = port
+			}
+		}
+	}
+
+	var errs field.ErrorList
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		port, reserved, ok := modelDeploymentRoleReservedListenPort(md, role)
+		if !ok {
+			continue
+		}
+		if prev, stored := held[role.Name]; stored && prev == port {
+			continue
+		}
+
+		argsPath := field.NewPath("spec", "roles").Index(i).Child("extraArgs")
+		if md.Spec.Router != nil {
+			errs = append(errs, field.Invalid(field.NewPath("spec", "router"), md.Spec.Router,
+				fmt.Sprintf("role %q passes --port=%d in %s, which the operator reserves for a listener "+
+					"it synthesizes onto this role under engine %q and router %q; reserved here are %v",
+					role.Name, port, argsPath, md.Spec.Engine.Name, md.Spec.Router.Name, reserved)))
+		} else {
+			errs = append(errs, field.Invalid(argsPath, fmt.Sprintf("--port=%d", port),
+				fmt.Sprintf("role %q passes --port=%d, which the operator reserves for a listener it "+
+					"synthesizes onto this role under engine %q; reserved here are %v",
+					role.Name, port, md.Spec.Engine.Name, reserved)))
+		}
+	}
+
+	return errs
+}
+
+// modelDeploymentRoleReservedListenPort returns the port a role declaring no ports passes as its own
+// --port, with the ports reserved on that role, and true when the one is among the others.
+func modelDeploymentRoleReservedListenPort(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) (int32, []int32, bool) {
+	if len(role.Ports) > 0 {
+		return 0, nil, false
+	}
+	port, ok := workerctrl.ModelDeploymentRoleListenPort(md.Spec.Engine.Name, role)
+	if !ok {
+		return 0, nil, false
+	}
+	reserved := modelDeploymentRouterReservedPorts(md, role)
+
+	return port, reserved, slices.Contains(reserved, port)
+}
+
 // validateModelDeploymentPoolTransport checks a new cache binding against each role's engine.
 // An unchanged binding is held access: an existing deployment remains editable if its backend
 // later changes transport, as with the host access gates above.
@@ -493,6 +562,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
 		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
 	errs = append(errs, validateModelDeploymentRoleListenPorts(nil, md)...)
+	errs = append(errs, validateModelDeploymentRoleReservedListenPorts(nil, md)...)
 
 	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
 
@@ -544,6 +614,7 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
 		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
 	errs = append(errs, validateModelDeploymentRoleListenPorts(old, md)...)
+	errs = append(errs, validateModelDeploymentRoleReservedListenPorts(old, md)...)
 	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
 	errs = append(errs, validateModelDeploymentRouterName(md, old)...)
 	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
@@ -986,9 +1057,12 @@ func validateModelDeploymentRolePorts(
 ) field.ErrorList {
 	var errs field.ErrorList
 
-	// The render places these on the same container the role's declared ports describe. The serving
-	// port is one of the declared ports when the role declares any, and the default when it names
-	// none, so the declared set is the whole collision surface.
+	// The render places these on the same container the role's declared ports describe, and the
+	// declared set is the whole collision surface of a role declaring any: its own --port is held to
+	// the first of them everywhere but on a direct decoder, which reserves nothing. A role declaring
+	// none serves on the port its own --port names, which
+	// validateModelDeploymentRoleReservedListenPorts judges, because telling a stored collision from
+	// a new one takes the old object this rule does not have.
 	//
 	// The refusal names the router when there is one, because a router is what drags the two vLLM
 	// listeners in; without one the listener on this role is the engine's own -- SGLang's registry,
@@ -1114,9 +1188,12 @@ func modelDeploymentRouterReservedPorts(
 	case workercore.ModelDeploymentEngineSGLang:
 		// SGLang's bootstrap registry follows the ROLE and not any router, because naming the split
 		// is what it means to be one half on this engine. It renders on a declared pair, so the
-		// reservation reads the same rule.
+		// reservation reads the same rule. It also renders only where the render can synthesize a
+		// connector at all, read from the predicate that gates the render: a pair with neither a
+		// router nor a cache renders none, and its prefiller keeps the port free.
 		if kind == workercore.ModelDeploymentRoleKindPrefill &&
-			workerctrl.ModelDeploymentDeclaresBothHalves(md) {
+			workerctrl.ModelDeploymentDeclaresBothHalves(md) &&
+			workerctrl.ModelDeploymentMaySynthesizeConnector(md) {
 			reserved = append(reserved, inject.SGLangBootstrapPort)
 		}
 	}

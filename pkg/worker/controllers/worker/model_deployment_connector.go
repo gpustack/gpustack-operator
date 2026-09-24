@@ -184,6 +184,15 @@ func modelDeploymentRoutesManaged(md *workercore.ModelDeployment, manufacturer s
 	return md.Spec.Router != nil && manufacturer != nodefeature.ManufacturerAscend
 }
 
+// ModelDeploymentMaySynthesizeConnector reports whether the render can synthesize a connector onto
+// any role of this deployment. It is decided by the spec alone and gates the render's own per-role
+// test: a connection needs a cache to connect to, and the transfer leg, the event publisher and the
+// routing proxy each need a router, so a deployment naming neither renders no connector and none of
+// the listeners one carries. Admission reads it for the same answer.
+func ModelDeploymentMaySynthesizeConnector(md *workercore.ModelDeployment) bool {
+	return md.Spec.KVCache != nil || md.Spec.Router != nil
+}
+
 // ModelDeploymentDeclaresBothHalves reports whether this deployment's roles contain a prefill role
 // and a decode role.
 //

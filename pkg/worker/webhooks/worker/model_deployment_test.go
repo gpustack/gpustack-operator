@@ -1085,6 +1085,24 @@ func TestValidateModelDeployment(t *testing.T) {
 			wantMessage: `role "server" declares port 8998, which the operator reserves`,
 		},
 		{
+			// And without a cache either, nothing synthesizes a connector onto an unrouted pair, so
+			// the registry is not rendered and the same declaration is an ordinary port.
+			name: "unrouted_cacheless_sglang_prefill_of_a_pair_declares_the_bootstrap_port",
+			md: func() *workercore.ModelDeployment {
+				md := routedModelDeployment(nil)
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Router = nil
+				md.Spec.KVCache = nil
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
+					r.Name = "decode"
+					r.Kind = workercore.ModelDeploymentRoleKindDecode
+				}))
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 8998, Protocol: core.ProtocolTCP}}
+				return md
+			}(),
+		},
+		{
 			// THE PAIR DISCRIMINATOR ON THE SGLANG SIDE: without the decode half the registry does
 			// not render either -- the split follows the pair on this engine -- so an unrouted lone
 			// prefiller feeding a shared pool keeps the port free.
@@ -1946,6 +1964,159 @@ func TestModelDeploymentWebhook_ADeclaredPortAndTheEnginesPortMustAgree(t *testi
 			old:          declared(9100, "--port", "9100"),
 			md:           declared(9000, "--port", "9100"),
 			wantMessages: []string{"--port=9100", "9000"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			if tc.old == nil {
+				_, err = r.ValidateCreate(context.Background(), tc.md)
+			} else {
+				_, err = r.ValidateUpdate(context.Background(), tc.old, tc.md)
+			}
+			if len(tc.wantMessages) == 0 {
+				assert.NoError(t, err)
+
+				return
+			}
+			require.Error(t, err)
+			for _, want := range tc.wantMessages {
+				assert.Contains(t, err.Error(), want)
+			}
+		})
+	}
+}
+
+// TestModelDeploymentWebhook_AnUndeclaredRolesOwnPortMustClearTheReservedPorts covers the reserved
+// ports against a role declaring none, which serves on the port its own --port names: the render
+// places that port on the container beside the synthesized listeners.
+func TestModelDeploymentWebhook_AnUndeclaredRolesOwnPortMustClearTheReservedPorts(t *testing.T) {
+	r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+	// routed is a lone server role under the router that reserves the event publisher's ports.
+	routed := func(args ...string) *workercore.ModelDeployment {
+		md := routedModelDeployment(nil)
+		md.Spec.Roles[0].ExtraArgs = args
+		return md
+	}
+	unrouted := func(args ...string) *workercore.ModelDeployment {
+		md := routed(args...)
+		md.Spec.Router = nil
+		return md
+	}
+	// sglangPrefill is an unrouted SGLang prefiller, alone or with the decode half that makes it
+	// render the bootstrap registry.
+	sglangPrefill := func(paired bool, args ...string) *workercore.ModelDeployment {
+		md := unrouted(args...)
+		md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+		if paired {
+			md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
+				r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
+			}))
+		}
+		return md
+	}
+
+	testCases := []struct {
+		name string
+		// old is nil on create.
+		old, md *workercore.ModelDeployment
+		// wantMessages are substrings the refusal must carry. Empty means the case is accepted.
+		wantMessages []string
+	}{
+		{
+			// THE POSITIVE BASELINE: the default port is not reserved.
+			name: "no_port_at_all_is_accepted",
+			md:   routed(),
+		},
+		{
+			name: "an_unreserved_port_is_accepted",
+			md:   routed("--port", "9000"),
+		},
+		{
+			name: "the_event_port_is_refused",
+			md:   routed("--port=5557"),
+			wantMessages: []string{
+				"spec.router", `role "server" passes --port=5557 in spec.roles[0].extraArgs`,
+				"which the operator reserves", "[5557 5558]",
+			},
+		},
+		{
+			name:         "the_event_port_as_an_abbreviation_is_refused",
+			md:           routed("--por", "5557"),
+			wantMessages: []string{`role "server" passes --port=5557 in spec.roles[0].extraArgs`},
+		},
+		{
+			name:         "the_last_spelling_is_the_one_compared",
+			md:           routed("--port", "9000", "--por=5558"),
+			wantMessages: []string{`role "server" passes --port=5558`},
+		},
+		{
+			// Without a router the refusal lands on the arguments, the field the object carries.
+			name: "an_unrouted_prefiller_of_a_pair_is_refused_on_its_arguments",
+			md:   sglangPrefill(true, "--port", "8998"),
+			wantMessages: []string{
+				"spec.roles[0].extraArgs: Invalid value", `role "server" passes --port=8998`,
+			},
+		},
+		{
+			// Without a router or a cache no connector is synthesized, so the pair's prefiller
+			// binds no registry either.
+			name: "a_prefiller_of_a_pair_with_neither_router_nor_cache_is_accepted",
+			md: func() *workercore.ModelDeployment {
+				md := sglangPrefill(true, "--port", "8998")
+				md.Spec.KVCache = nil
+				return md
+			}(),
+		},
+		{
+			// A lone prefiller binds no registry: the reservation follows the pair, as it does for
+			// a declared port. The pairing cannot move on update, because the role set and each
+			// role's kind are part of the deployment's identity.
+			name: "a_lone_prefiller_is_accepted",
+			md:   sglangPrefill(false, "--port", "8998"),
+		},
+		{
+			name: "a_declared_port_keeps_the_role_off_this_rule",
+			md: func() *workercore.ModelDeployment {
+				md := routed()
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: 9000, Protocol: core.ProtocolTCP}}
+				return md
+			}(),
+		},
+		{
+			// The render synthesizes no listener onto a take-over role, so nothing is there to
+			// collide with, whatever its command line passes.
+			name: "a_take_over_command_is_exempt",
+			md: func() *workercore.ModelDeployment {
+				md := routed()
+				md.Spec.Roles[0].Command = []string{"vllm", "serve", "m", "--port", "5557"}
+				return md
+			}(),
+		},
+		{
+			name: "an_update_keeping_a_held_collision_is_accepted",
+			old:  routed("--port=5557"),
+			md: func() *workercore.ModelDeployment {
+				md := routed("--port=5557", "--served-model-name", "m")
+				md.Spec.Roles[0].Replicas = 2
+				return md
+			}(),
+		},
+		{
+			name:         "an_update_moving_to_another_reserved_port_is_refused",
+			old:          routed("--port=5557"),
+			md:           routed("--port=5558"),
+			wantMessages: []string{`role "server" passes --port=5558`},
+		},
+		{
+			// The reserved set moves with the router, so an edit that leaves the role alone can
+			// still bring a listener onto its port.
+			name:         "an_update_adding_the_router_is_refused",
+			old:          unrouted("--port=5557"),
+			md:           routed("--port=5557"),
+			wantMessages: []string{`role "server" passes --port=5557`},
 		},
 	}
 

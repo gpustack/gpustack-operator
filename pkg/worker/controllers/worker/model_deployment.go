@@ -1117,7 +1117,8 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 		kvTransfer := modelDeploymentUsesKVTransfer(md, role, instType.Status.Detail.Manufacturer)
 		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, instType.Status.Detail.Manufacturer)
 		routingSidecar := modelDeploymentFrontsDecodeWithSidecar(md, role)
-		if connection != nil || kvTransfer || publishKVEvents || routingSidecar {
+		if ModelDeploymentMaySynthesizeConnector(md) &&
+			(connection != nil || kvTransfer || publishKVEvents || routingSidecar) {
 			roleConnection := ModelDeploymentConnectorInput{}
 			if connection != nil {
 				roleConnection = *connection
