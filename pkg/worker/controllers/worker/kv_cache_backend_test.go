@@ -1373,6 +1373,95 @@ func TestKVCacheBackendReconciler_ConvergesAHighAvailabilitySwitch(t *testing.T)
 		"and the member is back on the address it started with, byte for byte")
 }
 
+// backfillDeprecatedServiceAccount does to a written pod template what the API server's PodSpec
+// conversion does: an empty serviceAccountName is filled from the deprecated serviceAccount alias,
+// and the alias is then stored equal to the name. The fake client does neither, so without this a
+// test reads back exactly what the aligner wrote and cannot see an emptied name coming back.
+func backfillDeprecatedServiceAccount(obj ctrlcli.Object) {
+	var pod *core.PodSpec
+	switch o := obj.(type) {
+	case *apps.Deployment:
+		pod = &o.Spec.Template.Spec
+	case *apps.DaemonSet:
+		pod = &o.Spec.Template.Spec
+	default:
+		return
+	}
+	if pod.ServiceAccountName == "" {
+		pod.ServiceAccountName = pod.DeprecatedServiceAccount
+	}
+	pod.DeprecatedServiceAccount = pod.ServiceAccountName
+}
+
+// TestKVCacheBackendReconciler_LeavingHighAvailabilityReleasesTheAccount pins that both workloads
+// stop naming their account once the election is gone, against a client that backfills the
+// deprecated alias the way the API server does. The accounts are deleted on the same pass, so a
+// template still naming one leaves every new Pod refused with "serviceaccount not found" and the
+// backend without a leader or a member. Both ways out of the election are covered, because
+// either one alone empties the name.
+func TestKVCacheBackendReconciler_LeavingHighAvailabilityReleasesTheAccount(t *testing.T) {
+	for name, leave := range map[string]func(*workercore.KVCacheBackendLeader){
+		"ScaledToOneReplica": func(l *workercore.KVCacheBackendLeader) {
+			l.Replicas = ptr.To[int32](1)
+		},
+		"HighAvailabilityRemoved": func(l *workercore.KVCacheBackendLeader) {
+			l.HighAvailability = nil
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			kvcb := newKVCacheBackendObject()
+			ctx := context.Background()
+			cli := ctrlfake.NewClientBuilder().
+				WithScheme(scheme.Scheme).
+				WithStatusSubresource(&workercore.KVCacheBackend{}).
+				WithObjects(kvcb).
+				WithInterceptorFuncs(ctrlinterceptor.Funcs{
+					Create: func(
+						ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object,
+						opts ...ctrlcli.CreateOption,
+					) error {
+						backfillDeprecatedServiceAccount(obj)
+						return c.Create(ctx, obj, opts...)
+					},
+					Update: func(
+						ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object,
+						opts ...ctrlcli.UpdateOption,
+					) error {
+						backfillDeprecatedServiceAccount(obj)
+						return c.Update(ctx, obj, opts...)
+					},
+				}).
+				Build()
+
+			require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+			require.NoError(t, turnOnHighAvailability(t, cli, kvcb.Name))
+
+			leader, member := new(apps.Deployment), new(apps.DaemonSet)
+			require.NoError(t, cli.Get(ctx, leaderObjectKey(kvcb), leader))
+			require.NoError(t, cli.Get(ctx, memberObjectKey(kvcb, 0), member))
+			require.Equal(t, mooncake.LeaderObjectName(kvcb),
+				leader.Spec.Template.Spec.DeprecatedServiceAccount,
+				"the stored leader carries the alias, as it does on a real API server")
+			require.Equal(t, mooncake.MemberRBACObjectName(kvcb),
+				member.Spec.Template.Spec.DeprecatedServiceAccount,
+				"the stored member carries the alias, as it does on a real API server")
+
+			got := new(workercore.KVCacheBackend)
+			require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
+			leave(&got.Spec.Connection.Managed.Leader)
+			require.NoError(t, cli.Update(ctx, got))
+			require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+
+			require.NoError(t, cli.Get(ctx, leaderObjectKey(kvcb), leader))
+			require.NoError(t, cli.Get(ctx, memberObjectKey(kvcb, 0), member))
+			assert.Empty(t, leader.Spec.Template.Spec.ServiceAccountName,
+				"the leader no longer names the account that was just deleted")
+			assert.Empty(t, member.Spec.Template.Spec.ServiceAccountName,
+				"the member no longer names the account that was just deleted")
+		})
+	}
+}
+
 // TestKVCacheBackendReconciler_ConvergesTheRolloutShapeOnALiveDeployment pins the fields an
 // EXISTING Deployment has to acquire when the replica count moves.
 //

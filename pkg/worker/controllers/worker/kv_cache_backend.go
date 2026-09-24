@@ -1895,9 +1895,14 @@ func alignLeaderDeploymentFn(
 		// account's. Neither logs anything; the leader simply retries its election forever. This is
 		// also the field that carries a backend that turned HA ON after its Deployment already
 		// existed, which is the case a renderer alone never reaches.
+		//
+		// The deprecated alias is written with it. The API server stores the alias equal to the
+		// name and fills an empty name back from it, so emptying the name alone restores the old
+		// account -- which HA OFF has just deleted, leaving every new Pod refused.
 		if aDeploy.Spec.Template.Spec.ServiceAccountName !=
 			eDeploy.Spec.Template.Spec.ServiceAccountName {
 			aDeploy.Spec.Template.Spec.ServiceAccountName = eDeploy.Spec.Template.Spec.ServiceAccountName
+			aDeploy.Spec.Template.Spec.DeprecatedServiceAccount = eDeploy.Spec.Template.Spec.ServiceAccountName
 			skip = false
 		}
 
@@ -2265,9 +2270,11 @@ func alignMemberDaemonSetFn(
 		// REQUIRED: converged together with the mount above, for the same reason it is on the
 		// leader's side. They are one setting in two fields and each half alone is silent. This is
 		// also the field that carries a member group whose backend turned HA on after the DaemonSet
-		// already existed, which the renderer alone never reaches.
+		// already existed, which the renderer alone never reaches. The deprecated alias is written
+		// with it, for the same reason it is on the leader's side.
 		if aPod.ServiceAccountName != ePod.ServiceAccountName {
 			aPod.ServiceAccountName = ePod.ServiceAccountName
+			aPod.DeprecatedServiceAccount = ePod.ServiceAccountName
 			skip = false
 		}
 		if !kubemeta.DeepEqual(aPod.Volumes, ePod.Volumes) {
