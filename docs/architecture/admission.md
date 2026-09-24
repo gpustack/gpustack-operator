@@ -26,7 +26,7 @@ produces or consumes the `.sliced.*` / `.partitioned.*` values at a distinct poi
 |---|---|---|---|
 | 1 | Pod webhook (Worker) | the request's shape; folds memory into credits | cluster-wide capacity |
 | 2 | Kueue `credits` | the pool's aggregate total | per-accelerator fragmentation |
-| 3 | `NodeDevicesAdmission` AdmissionCheck | every accelerator of the assigned flavor, via the ledger | which node the scheduler will pick |
+| 3 | `NodeDevicesAdmission` AdmissionCheck | every accelerator of the assigned flavor, via the ledger | nothing about the node: it judges the flavor's whole node pool and does not read the node Kueue TAS already assigned |
 | 4 | Default scheduler / kubelet | per-node remaining capacity keys | which accelerator, for the partitioned family |
 | 5 | Device-plugin allocator | the live accelerator state, under a per-node mutex | anything upstream of its own node |
 
@@ -76,6 +76,15 @@ Once Kueue reserves quota, the check reads the pool's `Devices` ledger (uncached
 per-accelerator `Remaining ≥ demand`: a whole accelerator for exclusive, `.sliced.units` for sliced, an
 owner share for shared, a free placement of the profile for a partition.
 
+**Under TAS the node is already fixed when this check runs, and the check does not read it.** Every
+queue this operator derives is TAS-only and ends at `kubernetes.io/hostname`, so Kueue writes the node
+into the Workload's `podSetAssignments[].topologyAssignment` as it reserves quota, before any
+AdmissionCheck settles.
+
+The check still answers for the flavor's whole node pool, so a pool with a fitting accelerator on one
+node passes a Workload TAS placed on another
+([#570](https://github.com/gpustack/gpustack-operator/issues/570)).
+
 Each family gets one correlated `(accelerators, per-accelerator demand, profile)` tuple scoped to the
 accelerators that can serve it, so an exclusive or shared request is never judged feasible against a
 partitioned accelerator: it stays queued, not admitted into a permanent `Pending`. For partitions
@@ -120,8 +129,11 @@ A **check-only** gate: never preempts, never `Rejected`.
 
 Node-level counting of each family's remaining keys — the bare `.sliced` / `.partitioned` token
 plus its [logical](scheduling-chain.md#logical-slicing-capacities) or
-[partitioned](scheduling-chain.md#hardware-partitioning-capacities) counting keys — picks the
-best-fitting node of that ResourceFlavor.
+[partitioned](scheduling-chain.md#hardware-partitioning-capacities) counting keys — checks the node
+against those keys.
+
+On a TAS queue it does not choose the node: TAS assigned one at quota reservation and the Pod is
+pinned to it, so a node without room leaves the Pod `Pending` rather than moving it elsewhere.
 
 Disjoint accelerator populations advertise the two families' keys, so the resource name alone rules out
 a node that cannot serve the kind at all — the one placement error `Allocate` can never repair.
