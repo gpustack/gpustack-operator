@@ -23,12 +23,27 @@ its Pod: a scale-down, a rollout, a node drain, a preemption or `kubectl delete 
 | 27 s at the latest | the engine receives SIGTERM once the hook returns: the hook starts no read after 25 s, and its last read can take 2 s more |
 | 30 s | the kubelet kills what is left: the Pod's `terminationGracePeriodSeconds` is 30 |
 
-An idle replica therefore leaves about 6 s after its delete. The timings are constants, not fields.
+The hook of an idle replica therefore returns about 6 s after its delete, and vLLM or an SGLang
+server exits a few seconds later. The timings are constants, not fields.
 
 > **Why** — every supported router drops a replica on its deletion timestamp rather than on its
 > readiness, but a router can pick the replica in the instant before it learns of the delete; the
 > first 5 s is where that request lands. The wait happens before SIGTERM because vLLM aborts every
 > running request on the signal by default, and serves nothing new while it drains if told to wait.
+
+**An SGLang prefill or decode role needs up to about 20 s after SIGTERM, even idle.** Measured idle,
+a decoder left 26 s and a prefiller 28 s after its delete, 2 s short of the kill at 30 s. From
+SGLang 0.5.14 on, its split-role scheduler ignores the shutdown request SIGTERM leads to, and the
+engine waits a fixed 15 s for that scheduler before killing it.
+
+> **Why it is left alone** — SGLang checks for SIGTERM every 5 s in `sigterm_watchdog`
+> (`managers/tokenizer_manager.py`), then waits up to 15 s for its schedulers to exit. The loops in
+> `disaggregation/decode.py` and `disaggregation/prefill.py` never read the flag the shutdown request
+> sets, as the plain loop does (paths under `python/sglang/srt/`, v0.5.18). No flag shortens the
+> wait; `SGL_FORCE_SHUTDOWN` skips only the drain.
+>
+> A longer grace would buy only a clean exit code, since the scheduler is killed either way, and it
+> would hold the replica's accelerators longer on every delete.
 
 The hook sums these gauges from the listener the Pod's
 [scrape annotations](model-deployment-metrics.md#scraping-the-pods) name. On a direct decoder that is
@@ -53,6 +68,9 @@ carries them turns each existing replica over once; see
   SGLang keeps draining it on its own until the kill at 30 s. No supported router moves a running
   request to another replica: the SGLang gateway retries only while the response has not started,
   and the other two routers do not retry.
+- **An SGLang prefill or decode replica whose hook returns later than about 10 s after the delete
+  is killed at 30 s**, since its engine then has less than the 20 s it takes to exit. The replica is
+  idle by that point, or its hook gave up on it, so the kill cuts no request the deadline would not.
 - **A take-over role** — one that sets `command` — gets no hook and no rendered grace, because the
   operator cannot claim that container serves the gauges. Its Pod keeps the Kubernetes default.
 - **A role that moves the engine with its own `--port`** gets only the first 5 s: nothing answers the
