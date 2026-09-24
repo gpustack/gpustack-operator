@@ -2050,7 +2050,7 @@ func roleInstanceResources(ress *workercore.ModelDeploymentRoleResources) *worke
 }
 
 // validateRoleResourcesAgainstInstanceType refuses a request the named InstanceType cannot serve:
-// one asking for a mode it does not offer, and one asking for more cards than it hands out at once.
+// one asking for a mode it does not offer, and one asking for more whole cards than its pool has.
 //
 // THE MODE IS DECIDED BY WHAT THE REQUEST NAMES, not by what the type has. A partition profile makes
 // the request a partitioned one, a non-zero percentage makes it a sliced one, and a request naming
@@ -2081,11 +2081,11 @@ func validateRoleResourcesAgainstInstanceType(
 		errs = append(errs, validateRoleSingleCardRequest(ress, "sliced", ressPath)...)
 	default:
 		// THE WHOLE-CARD CEILING BOUNDS A WHOLE-CARD REQUEST AND NOTHING ELSE, which is why it sits
-		// inside this branch. status.accelerator.onceMaxRequest is the whole-card view and counts
-		// FREE UNPARTITIONED cards, so a pool whose cards are all partitioned reports zero there
-		// while its partitioned view serves requests all day. Applied to every mode it refuses a
-		// valid partitioned or sliced role with "hands out at most 0 accelerator(s) at once" -- a
-		// sentence that misdescribes the type rather than the request.
+		// inside this branch. status.accelerator is the whole-card view and counts UNPARTITIONED
+		// cards only, so a pool whose cards are all partitioned reports zero there while its
+		// partitioned view serves requests all day. Applied to every mode it refuses a valid
+		// partitioned or sliced role with a ceiling of 0 -- a sentence that misdescribes the type
+		// rather than the request.
 		//
 		// AND THE REFUSED VALUE IS ONE THIS WEBHOOK WROTE. A role that names no count is defaulted to
 		// one card by the mutating half, so the operator never typed the number the rule rejects and
@@ -2094,14 +2094,25 @@ func validateRoleResourcesAgainstInstanceType(
 		// The Instance webhook already draws the line here: validateExclusiveAcceleratorRequest is
 		// reached on the whole-card path only.
 		//
+		// THE CEILING IS THE VIEW'S CAPACITY, NOT ITS ONCE-MAX-REQUEST. onceMaxRequest is the
+		// largest single node's FREE cards, so it falls to zero whenever the pool is busy, and read
+		// here it refused every deployment submitted while the cards were held. That is the queue's
+		// question, not admission's: a deployment the pool can serve once a card is released is
+		// admitted and waits in its queue. Capacity does not move with occupancy.
+		//
+		// IT IS A LOOSE BOUND, and that is a known limit rather than a guarantee. Capacity sums the
+		// whole pool, while one Pod's cards come from one node, so on a pool of several nodes a
+		// request larger than the largest node but within the pool's total is admitted and then
+		// stays queued. The status carries no per-node capacity to bound it tighter.
+		//
 		// THE CEILING IS CARRIED IN THE MESSAGE rather than left for the reader to look up. "Exceeds
 		// the maximum" states that the request was wrong; the number states what would be right, and
 		// the difference is whether the next attempt is a guess.
 		if ress.Accelerator != nil {
-			if ceiling := instType.Status.Accelerator.OnceMaxRequest; ress.Accelerator.Cmp(ceiling) > 0 {
+			if ceiling := instType.Status.Accelerator.Capacity; ress.Accelerator.Cmp(ceiling) > 0 {
 				errs = append(errs, field.Invalid(
 					ressPath.Child("accelerator"), ress.Accelerator.String(),
-					fmt.Sprintf("instance type %s hands out at most %s accelerator(s) at once",
+					fmt.Sprintf("instance type %s has at most %s whole accelerator(s) in its pool",
 						instType.Name, ceiling.String())))
 			}
 		}
