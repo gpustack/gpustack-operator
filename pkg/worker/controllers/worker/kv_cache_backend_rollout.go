@@ -7,6 +7,7 @@ import (
 
 	apps "k8s.io/api/apps/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	gpustack "gpustack.ai/gpustack/api/v1"
@@ -73,6 +74,17 @@ func (r *KVCacheBackendReconciler) reportRolloutComplete(
 		KVCacheBackendConditionRolloutComplete.Unknown(holder, "UpdateNotObserved", fmt.Sprintf(
 			"the deployment controller has not observed generation %d of %q yet, so its replica "+
 				"counts still describe the update before it", deploy.Generation, deployName))
+
+	case ptr.Deref(deploy.Spec.Replicas, 1) != mooncake.LeaderReplicas(kvcb.Spec.Connection.Managed.Leader):
+		// Raising the count past one is two writes, and between them the Deployment runs one
+		// replica of the elected template while the backend asks for more. Every count below agrees
+		// with the Deployment's own spec then, so without this the pause between the writes would
+		// read as a finished rollout.
+		KVCacheBackendConditionRolloutComplete.False(holder, "ReplicasPending", fmt.Sprintf(
+			"the deployment %q runs %d leader replicas and this backend asks for %d; the count is "+
+				"raised once no replica of the previous template is left",
+			deployName, ptr.Deref(deploy.Spec.Replicas, 1),
+			mooncake.LeaderReplicas(kvcb.Spec.Connection.Managed.Leader)))
 
 	default:
 		desired := int32(1)

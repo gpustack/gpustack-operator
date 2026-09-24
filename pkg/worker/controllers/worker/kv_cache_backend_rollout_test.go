@@ -82,6 +82,15 @@ func TestRolloutCompleteDiscriminates(t *testing.T) {
 			wantReason: "Progressing",
 		},
 		{
+			// Rising past one replica: the elected template has rolled out at one replica and the
+			// standbys are the next write. Every count agrees with the Deployment's own spec, so only
+			// the backend's asked-for count can say this is not finished.
+			name:       "one replica rolled out while the backend asks for three",
+			deploy:     leaderDeployment("store", 4, 4, 1, 1, 1),
+			wantStatus: meta.ConditionFalse,
+			wantReason: "ReplicasPending",
+		},
+		{
 			name:       "nothing rendered yet",
 			deploy:     nil,
 			wantAbsent: true,

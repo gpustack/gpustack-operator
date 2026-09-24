@@ -3,6 +3,7 @@ package mooncake
 import (
 	"fmt"
 	"math"
+	"slices"
 
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
@@ -175,6 +176,42 @@ func LeaderReplicas(leader workercore.KVCacheBackendLeader) int32 {
 	}
 
 	return 1
+}
+
+// leaderElectionFlag is the flag that turns the election on. It is named because the argv is also
+// READ: whether a live template elects is answered from the flag the renderer wrote into it.
+const leaderElectionFlag = "-enable_ha=true"
+
+// LeaderTemplateElects reports whether a leader Pod template runs the election.
+//
+// It reads the argv rather than the account or the token mount, because the flag is what makes the
+// process campaign; the other two only let it. Admission refuses the flag as a passthrough, so the
+// renderer is the only writer of it.
+func LeaderTemplateElects(template core.PodTemplateSpec) bool {
+	for _, c := range template.Spec.Containers {
+		if slices.Contains(c.Args, leaderElectionFlag) {
+			return true
+		}
+	}
+	return false
+}
+
+// LeaderDeploymentAtOneReplica is a rendered leader Deployment with the count, strategy and deadline
+// of one replica, and the template left as rendered.
+//
+// It is the first of the two writes that raise an EXISTING Deployment past one replica, where the
+// election turns on. The Deployment controller handles a replica change as a scaling event before it
+// consults the strategy, and scales the only active ReplicaSet to the new count -- in the update that
+// also changes the template, that is the OLD one. One write carrying both would start more masters
+// that do not elect, next to the one already serving, whatever the strategy says. Written at one
+// replica under Recreate instead, the unelected master stops before the elected one starts, and the
+// standbys are a pure scaling event of the elected ReplicaSet, written once it is the only one.
+func LeaderDeploymentAtOneReplica(deploy *apps.Deployment) *apps.Deployment {
+	held := deploy.DeepCopy()
+	held.Spec.Replicas = ptr.To[int32](1)
+	held.Spec.Strategy = leaderUpdateStrategy(1)
+	held.Spec.ProgressDeadlineSeconds = leaderProgressDeadlineSeconds(1)
+	return held
 }
 
 // leaderUpdateStrategy picks how the leader's Deployment is updated, and the two answers are

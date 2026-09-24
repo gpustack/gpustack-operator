@@ -73,6 +73,14 @@ The gate is re-evaluated on every reconcile, not decided at create: crossing `re
 either direction flips the election on or off, and the flip restarts the leader and rolls every
 member, so the store's cached contents do not survive the crossing.
 
+**Rising past one replica takes two updates.** The first recreates the leader at one replica with the
+election on; the standbys follow once no Pod of the old template is left, and `RolloutComplete` reads
+`False/ReplicasPending` in between. Falling back to one is a single `Recreate`.
+
+> **Why** — the Deployment controller applies a replica change to the only active ReplicaSet before it
+> applies any strategy. In the update that also turns the election on, that is the old one, so a single
+> update would start extra masters that do not elect beside the one still serving.
+
 **The update strategy follows the replica count, and the two cases are opposites.** At one replica
 the Deployment uses `Recreate`: an update stops the old master before starting the new one, so expect
 a gap with no master on every image or flag change. Members keep their segments across it and

@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -1507,13 +1508,192 @@ func TestKVCacheBackendReconciler_ConvergesTheRolloutShapeOnALiveDeployment(t *t
 				"that is working, because every standby is permanently unavailable")
 	}
 
-	// One to three: the strategy TYPE changes here, so even the old comparison caught this step.
-	assertShapeMatchesRender(t, setReplicas(3))
+	// One to three: the strategy TYPE changes here, so even the old comparison caught this step. The
+	// count rises only once the elected template has rolled out -- see the crossing test below.
+	three := setReplicas(3)
+	setLeaderRollout(t, cli, kvcb, true)
+	require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+	assertShapeMatchesRender(t, three)
 	// Three to five: the type does NOT change, which is the step that used to be missed.
 	assertShapeMatchesRender(t, setReplicas(5))
 	// And back to one, where the disabled deadline has to go or the single-replica path loses its
 	// only timeout.
 	assertShapeMatchesRender(t, setReplicas(1))
+}
+
+// setLeaderRollout writes the live leader Deployment's status the way the Deployment controller
+// would, because the fake client runs no controller: finished means the controller observed the
+// current generation and every replica runs its template, unfinished means the old Pods are still
+// going away and the new ReplicaSet does not exist yet.
+func setLeaderRollout(t *testing.T, cli ctrlcli.Client, kvcb *workercore.KVCacheBackend, finished bool) {
+	t.Helper()
+
+	live := new(apps.Deployment)
+	require.NoError(t, cli.Get(context.Background(), leaderObjectKey(kvcb), live))
+	live.Status = apps.DeploymentStatus{ObservedGeneration: live.Generation}
+	if finished {
+		live.Status.UpdatedReplicas = *live.Spec.Replicas
+		live.Status.Replicas = *live.Spec.Replicas
+	}
+	require.NoError(t, cli.Status().Update(context.Background(), live))
+}
+
+// TestKVCacheBackendReconciler_CrossesOneReplicaWithoutMixingMasters pins how an EXISTING leader
+// Deployment crosses one replica, which is where the election turns on or off.
+//
+// The Deployment controller handles a replica change as a scaling event BEFORE it looks at the
+// strategy, and scales the only active ReplicaSet to the new count -- which, in the update that also
+// changes the template, is the OLD one. So one write carrying both the election and three replicas
+// starts two more masters that do not elect, whatever the strategy says. Rising is therefore two
+// writes: the elected template at one replica under Recreate, then the count once the live
+// Deployment reports that template rolled out. Falling needs no such split, because the scaling
+// event only removes elected replicas before Recreate replaces the last one.
+func TestKVCacheBackendReconciler_CrossesOneReplicaWithoutMixingMasters(t *testing.T) {
+	ctx := context.Background()
+
+	elects := func(deploy *apps.Deployment) bool {
+		return slices.Contains(deploy.Spec.Template.Spec.Containers[0].Args, "-enable_ha=true")
+	}
+	live := func(t *testing.T, cli ctrlcli.Client, kvcb *workercore.KVCacheBackend) *apps.Deployment {
+		t.Helper()
+		deploy := new(apps.Deployment)
+		require.NoError(t, cli.Get(ctx, leaderObjectKey(kvcb), deploy))
+		return deploy
+	}
+	edit := func(
+		t *testing.T, cli ctrlcli.Client, kvcb *workercore.KVCacheBackend,
+		change func(*workercore.KVCacheBackend),
+	) *workercore.KVCacheBackend {
+		t.Helper()
+		got := new(workercore.KVCacheBackend)
+		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
+		change(got)
+		require.NoError(t, cli.Update(ctx, got))
+		require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+		return got
+	}
+	scaleTo := func(n int32) func(*workercore.KVCacheBackend) {
+		return func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Replicas = ptr.To(n)
+			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+		}
+	}
+	assertOneUnderRecreate := func(t *testing.T, deploy *apps.Deployment) {
+		t.Helper()
+		assert.Equal(t, ptr.To[int32](1), deploy.Spec.Replicas)
+		assert.Equal(t, apps.DeploymentStrategy{Type: apps.RecreateDeploymentStrategyType},
+			deploy.Spec.Strategy)
+		assert.Nil(t, deploy.Spec.ProgressDeadlineSeconds)
+	}
+	assertRendered := func(t *testing.T, deploy *apps.Deployment, want *workercore.KVCacheBackend) {
+		t.Helper()
+		rendered := mooncake.RenderLeaderDeployment(want, want.Spec.Image)
+		assert.Equal(t, rendered.Spec.Replicas, deploy.Spec.Replicas)
+		assert.Equal(t, rendered.Spec.Strategy, deploy.Spec.Strategy)
+		assert.Equal(t, rendered.Spec.ProgressDeadlineSeconds, deploy.Spec.ProgressDeadlineSeconds)
+		assert.Equal(t, elects(rendered), elects(deploy))
+	}
+	newElecting := func(t *testing.T, n int32) (ctrlcli.Client, *workercore.KVCacheBackend) {
+		t.Helper()
+		kvcb := newKVCacheBackendObject()
+		scaleTo(n)(kvcb)
+		cli := newKVCacheBackendClient(kvcb)
+		require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+		return cli, kvcb
+	}
+
+	t.Run("rising past one recreates the leader elected at one replica before adding standbys",
+		func(t *testing.T) {
+			kvcb := newKVCacheBackendObject()
+			cli := newKVCacheBackendClient(kvcb)
+			require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+			// Finished on the unelected template, so this case also shows that a finished rollout of
+			// the PREVIOUS template does not open the gate.
+			setLeaderRollout(t, cli, kvcb, true)
+
+			want := edit(t, cli, kvcb, scaleTo(3))
+			first := live(t, cli, kvcb)
+			assert.True(t, elects(first), "the template flips in the first write")
+			assertOneUnderRecreate(t, first)
+
+			setLeaderRollout(t, cli, kvcb, false)
+			require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+			assertOneUnderRecreate(t, live(t, cli, kvcb))
+
+			// The counts of the rollout BEFORE the template was written, under a generation the
+			// controller has not observed yet.
+			stale := live(t, cli, kvcb)
+			stale.Status = apps.DeploymentStatus{
+				ObservedGeneration: stale.Generation - 1, UpdatedReplicas: 1, Replicas: 1,
+			}
+			require.NoError(t, cli.Status().Update(ctx, stale))
+			require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+			assertOneUnderRecreate(t, live(t, cli, kvcb))
+
+			setLeaderRollout(t, cli, kvcb, true)
+			require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+			assertRendered(t, live(t, cli, kvcb), want)
+		})
+
+	t.Run("a backend created above one replica starts at its count", func(t *testing.T) {
+		cli, kvcb := newElecting(t, 3)
+		assertRendered(t, live(t, cli, kvcb), kvcb)
+	})
+
+	t.Run("falling to one is one write", func(t *testing.T) {
+		cli, kvcb := newElecting(t, 3)
+		want := edit(t, cli, kvcb, func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
+		})
+		deploy := live(t, cli, kvcb)
+		assert.False(t, elects(deploy))
+		assertOneUnderRecreate(t, deploy)
+		assertRendered(t, deploy, want)
+	})
+
+	t.Run("dropping highAvailability above one replica is one write", func(t *testing.T) {
+		cli, kvcb := newElecting(t, 3)
+		want := edit(t, cli, kvcb, func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
+			k.Spec.Connection.Managed.Leader.HighAvailability = nil
+		})
+		deploy := live(t, cli, kvcb)
+		assert.False(t, elects(deploy))
+		assertOneUnderRecreate(t, deploy)
+		assertRendered(t, deploy, want)
+	})
+
+	for _, tc := range []struct{ from, to int32 }{{3, 5}, {5, 3}} {
+		t.Run(fmt.Sprintf("%d to %d replicas is one write mid-rollout", tc.from, tc.to),
+			func(t *testing.T) {
+				cli, kvcb := newElecting(t, tc.from)
+				setLeaderRollout(t, cli, kvcb, false)
+				want := edit(t, cli, kvcb, scaleTo(tc.to))
+				assertRendered(t, live(t, cli, kvcb), want)
+			})
+	}
+
+	for _, n := range []int32{1, 3} {
+		t.Run(fmt.Sprintf("an image change at %d replicas keeps its strategy", n), func(t *testing.T) {
+			var (
+				cli  ctrlcli.Client
+				kvcb *workercore.KVCacheBackend
+			)
+			if n > 1 {
+				cli, kvcb = newElecting(t, n)
+			} else {
+				kvcb = newKVCacheBackendObject()
+				cli = newKVCacheBackendClient(kvcb)
+				require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+			}
+			want := edit(t, cli, kvcb, func(k *workercore.KVCacheBackend) {
+				k.Spec.Image = "example.com/mooncake:v1"
+			})
+			deploy := live(t, cli, kvcb)
+			assert.Equal(t, "example.com/mooncake:v1", deploy.Spec.Template.Spec.Containers[0].Image)
+			assertRendered(t, deploy, want)
+		})
+	}
 }
 
 // turnOnHighAvailability edits the live object to ask for an election and runs one pass, handing
