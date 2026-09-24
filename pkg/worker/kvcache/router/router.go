@@ -40,6 +40,13 @@ type Metrics struct {
 	QueuedRequests     string
 	RunningRequests    string
 	KVCacheUtilization string
+
+	// CacheInfo names an info-style gauge whose block_size and num_gpu_blocks labels carry the KV
+	// cache's capacity. CacheBlockSize and CacheNumBlocks name gauges carrying the same two values
+	// directly, for an engine that exports them that way. An engine fills one form or neither.
+	CacheInfo      string
+	CacheBlockSize string
+	CacheNumBlocks string
 }
 
 // KVEvents configures discovery of per-Pod event publishers.
@@ -265,14 +272,31 @@ func renderLLMD(input Input) (Output, error) {
 	)
 	metricsExtractor := map[string]any{"type": "core-metrics-extractor"}
 	if input.Metrics.Engine != "" {
-		parameters := map[string]any{
-			"engineConfigs": []any{map[string]any{
-				"name":                input.Metrics.Engine,
-				"queuedRequestsSpec":  input.Metrics.QueuedRequests,
-				"runningRequestsSpec": input.Metrics.RunningRequests,
-				"kvUsageSpec":         input.Metrics.KVCacheUtilization,
-			}},
+		engineConfig := map[string]any{
+			"name":                input.Metrics.Engine,
+			"queuedRequestsSpec":  input.Metrics.QueuedRequests,
+			"runningRequestsSpec": input.Metrics.RunningRequests,
+			"kvUsageSpec":         input.Metrics.KVCacheUtilization,
 		}
+		// Naming an engine here replaces the extractor's built-in entry for it rather than
+		// overlaying it
+		// (`llm-d/llm-d-router@v0.10.0:pkg/epp/framework/plugins/datalayer/extractor/metrics/factories.go:185-194`),
+		// so a field left out is one the extractor never reads. The cache capacity is rendered
+		// beside the approximate producer alone because it is the one plugin that reads it, sizing
+		// each server's prefix index by it; beside the precise producer it would roll the router
+		// for a value nothing reads.
+		if prefixProducer == "approx-prefix-cache-producer" {
+			for key, spec := range map[string]string{
+				"cacheInfoSpec":      input.Metrics.CacheInfo,
+				"cacheBlockSizeSpec": input.Metrics.CacheBlockSize,
+				"cacheNumBlocksSpec": input.Metrics.CacheNumBlocks,
+			} {
+				if spec != "" {
+					engineConfig[key] = spec
+				}
+			}
+		}
+		parameters := map[string]any{"engineConfigs": []any{engineConfig}}
 		// The extractor reads a Pod by the engine its engine-type label names, and a Pod without
 		// that label as the default engine; no model-server Pod carries the label, so every Pod is
 		// read as the default. Left to upstream's default, an SGLang server is read by vLLM's
