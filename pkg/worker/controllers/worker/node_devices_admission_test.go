@@ -208,6 +208,63 @@ func TestNodeDevicesFeasibility(t *testing.T) {
 			want:    kueue.CheckStateRetry,
 		},
 		{
+			// The device plugin refuses a slice on a card another mode holds, however much of that
+			// card is still free.
+			name:    "a slice is not placed on a card held in shared mode",
+			devices: []workercore.Devices{withMode(devicesWithRemaining(whole-slot), workercore.DeviceAllocationModeShared)},
+			demands: []familyDemand{{family: sliced, cards: 1, unitsPerCard: half}},
+			want:    kueue.CheckStateRetry,
+		},
+		{
+			name:    "a slice joins a card already held in sliced mode",
+			devices: []workercore.Devices{withMode(devicesWithRemaining(half), workercore.DeviceAllocationModeSliced)},
+			demands: []familyDemand{{family: sliced, cards: 1, unitsPerCard: half}},
+			want:    kueue.CheckStateReady,
+		},
+		{
+			// A card advertises one token per slice it can host, ten on this fixture, so an
+			// eleventh slice has no token left however small it is.
+			name:    "slices beyond a card's slice count are held",
+			devices: []workercore.Devices{devicesWithRemaining(whole)},
+			demands: []familyDemand{{family: sliced, cards: 11, unitsPerCard: whole / 20}},
+			want:    kueue.CheckStateRetry,
+		},
+		{
+			name:    "slices up to a card's slice count share it",
+			devices: []workercore.Devices{devicesWithRemaining(whole)},
+			demands: []familyDemand{{family: sliced, cards: 10, unitsPerCard: whole / 20}},
+			want:    kueue.CheckStateReady,
+		},
+		{
+			// A slice goes to the fullest card that still fits it, as the device plugin packs, so
+			// the untouched card stays whole for the exclusive role.
+			name:    "a slice fills a used card before breaking into a whole one",
+			devices: []workercore.Devices{devicesWithRemaining(whole, whole*2/5)},
+			demands: []familyDemand{
+				{family: sliced, cards: 1, unitsPerCard: whole * 3 / 10},
+				{family: exclusive, cards: 1},
+			},
+			want: kueue.CheckStateReady,
+		},
+		{
+			name:    "a card one role slices cannot also serve another role exclusively",
+			devices: []workercore.Devices{devicesWithRemaining(whole)},
+			demands: []familyDemand{
+				{family: sliced, cards: 1, unitsPerCard: whole * 3 / 10},
+				{family: exclusive, cards: 1},
+			},
+			want: kueue.CheckStateRetry,
+		},
+		{
+			name:    "a card one role slices cannot also take another role's share",
+			devices: []workercore.Devices{devicesWithRemaining(whole)},
+			demands: []familyDemand{
+				{family: sliced, cards: 1, unitsPerCard: whole * 3 / 10},
+				{family: shared, cards: 1, sharedNeeds: []sharedNeed{{cards: 1, containers: 1}}},
+			},
+			want: kueue.CheckStateRetry,
+		},
+		{
 			name:    "feasibility aggregates whole cards across devices",
 			devices: []workercore.Devices{devicesWithRemaining(whole, half), devicesWithRemaining(whole, whole, half)},
 			// Three clean cards across the two ledgers.
@@ -2350,7 +2407,10 @@ func TestNodeDevicesAdmission_ReadsTheNodeTASAssigned(t *testing.T) {
 	share := whole / nodefeature.SharedResourceMaxSize
 
 	exclusiveCard := core.ResourceList{core.ResourceName(base): resource.MustParse("1")}
-	halfSlice := core.ResourceList{slicedCard: resource.MustParse("1"), slicedUnits: *resource.NewQuantity(int64(half), resource.DecimalSI)}
+	sliceOf := func(units int32) core.ResourceList {
+		return core.ResourceList{slicedCard: resource.MustParse("1"), slicedUnits: *resource.NewQuantity(int64(units), resource.DecimalSI)}
+	}
+	halfSlice := sliceOf(half)
 	oneShare := core.ResourceList{sharedCard: resource.MustParse("1")}
 	twoShares := core.ResourceList{sharedCard: resource.MustParse("2")}
 
@@ -2478,6 +2538,38 @@ func TestNodeDevicesAdmission_ReadsTheNodeTASAssigned(t *testing.T) {
 			name:     "shared on a node whose second card has no free share left is held",
 			free:     map[string][]int32{"node-a": {whole, share - 1}, "node-b": {whole, whole}},
 			requests: twoShares, pods: 1,
+			assigned: map[string]int32{"host-a": 1},
+			want:     kueue.CheckStateRetry,
+			wantIn:   `"host-a"`,
+		},
+		{
+			name:     "two Pods each asking a 30% slice share a one-card node",
+			free:     map[string][]int32{"node-a": {whole}},
+			requests: sliceOf(whole * 3 / 10), pods: 2,
+			assigned: map[string]int32{"host-a": 2},
+			want:     kueue.CheckStateReady,
+			wantIn:   `the node "host-a" Kueue assigned has enough free cards`,
+		},
+		{
+			name:     "two Pods each asking a 60% slice are held on a one-card node",
+			free:     map[string][]int32{"node-a": {whole}, "node-b": {whole}},
+			requests: sliceOf(whole * 3 / 5), pods: 2,
+			assigned: map[string]int32{"host-a": 2},
+			want:     kueue.CheckStateRetry,
+			wantIn:   `"host-a"`,
+		},
+		{
+			name:     "two Pods each asking a 40% slice fill a node whose two cards each keep 40%",
+			free:     map[string][]int32{"node-a": {fragment, fragment}},
+			requests: sliceOf(fragment), pods: 2,
+			assigned: map[string]int32{"host-a": 2},
+			want:     kueue.CheckStateReady,
+			wantIn:   `the node "host-a" Kueue assigned has enough free cards`,
+		},
+		{
+			name:     "exclusive asking two cards on a one-card node is held",
+			free:     map[string][]int32{"node-a": {whole}, "node-b": {whole, whole}},
+			requests: core.ResourceList{core.ResourceName(base): resource.MustParse("2")}, pods: 1,
 			assigned: map[string]int32{"host-a": 1},
 			want:     kueue.CheckStateRetry,
 			wantIn:   `"host-a"`,

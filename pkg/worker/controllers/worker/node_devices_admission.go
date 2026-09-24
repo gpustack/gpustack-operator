@@ -53,9 +53,10 @@ const (
 // familyDemand is one correlated accelerator demand a Workload places on its assigned
 // pool: the family, the cards it needs, the units one card must still have free to host a
 // single one of them, and — for a partition request — the profile it anchors on (empty
-// otherwise). For the three card-bound families each card is a distinct physical card; for
-// the partition family a card is one instance, since a partition request is one card per
-// Pod, and several of them can share a card.
+// otherwise). For the exclusive family each card is a distinct physical card, and a shared
+// demand's distinct cards are counted per holder in sharedNeeds. For the logical-slice and
+// partition families a card is one slice or instance, since such a request is one card per
+// container, and several of them can share a card.
 //
 // The three quantities are read from the SAME podset. Pairing a per-card demand taken as a
 // maximum over every podset with a card count summed over every podset would gate a small
@@ -443,19 +444,6 @@ func clampInt32(v int64) int32 {
 	}
 }
 
-// unitsPerCardFor returns the allocatable units one card must still have free to host a
-// single card of a scalar demand: a whole card for exclusive, and the requested per-card units
-// for a logical slice. A logical slice the Pod webhook did not shape carries no budget, so any
-// card with room fits.
-func unitsPerCardFor(d familyDemand) int32 {
-	switch d.family {
-	case nodefeature.ResourceFamilySliced:
-		return d.unitsPerCard
-	default:
-		return nodefeature.ResourceMaxUnits
-	}
-}
-
 // cardLedger is a per-card view joining the Spec-side capability (which families the card
 // can serve, and the physical partition profiles with their cached placements) with the
 // Status-side allocation (mode, scalar remaining, and the per-profile remaining ledger),
@@ -626,14 +614,17 @@ func (c cardLedger) servesFamily(family nodefeature.ResourceFamily) bool {
 }
 
 // cardBudget records what a Workload's already-checked demands claimed from one card, so a
-// later demand cannot spend the same room twice. An exclusive or logical-slice demand takes the
-// whole card; a shared demand takes one of its ownership shares per holder; a partition demand
-// takes one of the several placements a card may host. Partitions never contend with the rest —
-// the populations are disjoint by capability — so a single budget per card is enough, and a card
-// carrying shares is not whole for any other family, as the device plugin holds it in shared mode.
+// later demand cannot spend the same room twice. An exclusive demand takes the whole card; a
+// shared demand takes one of its ownership shares per holder; a logical-slice demand takes its
+// units and one of the card's slice tokens per slice; a partition demand takes one of the several
+// placements a card may host. Partitions never contend with the rest — the populations are
+// disjoint by capability — so a single budget per card is enough, and a card carrying shares or
+// slices serves no other family, as the device plugin holds it in that mode.
 type cardBudget struct {
 	whole      bool
 	shares     int32
+	units      int32
+	slices     int32
 	placements int32
 }
 
@@ -676,8 +667,10 @@ func nodeDevicesFeasibility(pool []scopedDevices, demands []familyDemand) (kueue
 			state, message = fitPartitionDemand(cards, budgets, d)
 		case nodefeature.ResourceFamilyShared:
 			state, message = fitSharedDemand(cards, budgets, d)
+		case nodefeature.ResourceFamilySliced:
+			state, message = fitSlicedDemand(cards, budgets, d)
 		default:
-			state, message = fitScalarDemand(cards, budgets, d)
+			state, message = fitExclusiveDemand(cards, budgets, d)
 		}
 		if state != kueue.CheckStateReady {
 			return state, message
@@ -697,17 +690,16 @@ func withoutRoles(demands []familyDemand) []familyDemand {
 	return bare
 }
 
-// fitScalarDemand gates an exclusive or logical-slice demand on the scalar per-card
-// remaining ledger, which seeds every card at ResourceMaxUnits and subtracts each pod's
-// allocation, so a card carrying any allocation has Remaining below a whole card and never
-// satisfies an exclusive demand. Its cards count is a card count: each of them needs its
-// own card. Ready once enough cards of the family's population fit, otherwise Retry.
-func fitScalarDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (kueue.CheckState, string) {
-	units := unitsPerCardFor(d)
+// fitExclusiveDemand gates an exclusive demand on the scalar per-card remaining ledger, which
+// seeds every card at ResourceMaxUnits and subtracts each pod's allocation, so a card carrying
+// any allocation has Remaining below a whole card and never satisfies an exclusive demand. Its
+// cards count is a card count: each of them needs its own card. Ready once enough cards of the
+// family's population fit, otherwise Retry.
+func fitExclusiveDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (kueue.CheckState, string) {
 	var fit int32
 	for i := range cards {
-		if budgets[i].whole || budgets[i].shares > 0 || !cards[i].coveredBy(d) ||
-			!cards[i].servesFamily(d.family) || cards[i].remaining < units {
+		if budgets[i].whole || budgets[i].shares > 0 || budgets[i].slices > 0 || !cards[i].coveredBy(d) ||
+			!cards[i].servesFamily(d.family) || cards[i].remaining < nodefeature.ResourceMaxUnits {
 			continue
 		}
 		budgets[i].whole = true
@@ -732,7 +724,7 @@ func fitSharedDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (
 	const share = nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize
 	freeShares := func(i int) int32 {
 		c := &cards[i]
-		if budgets[i].whole || !c.coveredBy(d) || !c.servesFamily(d.family) ||
+		if budgets[i].whole || budgets[i].slices > 0 || !c.coveredBy(d) || !c.servesFamily(d.family) ||
 			(c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeShared) {
 			return 0
 		}
@@ -761,6 +753,45 @@ func fitSharedDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (
 				budgets[i].shares++
 			}
 		}
+	}
+	return kueue.CheckStateReady, demandVerdictMessage(kueue.CheckStateReady, d)
+}
+
+// fitSlicedDemand gates a logical-slice demand slice by slice. Its cards count is a slice count,
+// since the Pod webhook pins each container's slice to one card, and a card hosts as many slices
+// as its free units and its slice tokens allow, because the device plugin grants each container's
+// token on its own and charges that slice's units to the one card it lands on. Only a free card or
+// one already held in sliced mode can take a slice.
+//
+// Each slice goes to the card with the fewest free units that still fit it, the order the device
+// plugin packs in: filling a card that already carries a slice before breaking into an untouched
+// one keeps whole cards for the larger slices and the exclusive demands still to come.
+//
+// The slice tokens counted are this Workload's own. The ledger records how many units a card has
+// left, not how many slices hold them, so the tokens other Workloads already hold are not seen.
+func fitSlicedDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (kueue.CheckState, string) {
+	freeUnits := func(i int) int32 {
+		c := &cards[i]
+		if budgets[i].whole || budgets[i].shares > 0 || !c.coveredBy(d) || !c.servesFamily(d.family) ||
+			(c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeSliced) ||
+			budgets[i].slices >= c.capability.LogicalSliced.Count {
+			return -1
+		}
+		return c.remaining - budgets[i].units
+	}
+
+	for range d.cards {
+		best, bestFree := -1, int32(0)
+		for i := range cards {
+			if free := freeUnits(i); free >= d.unitsPerCard && (best < 0 || free < bestFree) {
+				best, bestFree = i, free
+			}
+		}
+		if best < 0 {
+			return kueue.CheckStateRetry, demandVerdictMessage(kueue.CheckStateRetry, d)
+		}
+		budgets[best].units += d.unitsPerCard
+		budgets[best].slices++
 	}
 	return kueue.CheckStateReady, demandVerdictMessage(kueue.CheckStateReady, d)
 }

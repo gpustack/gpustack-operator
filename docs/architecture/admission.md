@@ -76,6 +76,10 @@ Once Kueue reserves quota, the check reads the pool's `Devices` ledger (uncached
 per-accelerator `Remaining ≥ demand`: a whole accelerator for exclusive, `.sliced.units` for sliced, an
 owner share for shared, a free placement of the profile for a partition.
 
+Slices share an accelerator the way the allocator packs them: each is charged its `.sliced.units` and
+one of the accelerator's slice tokens on the fullest accelerator that still fits it, so two 30 % slices
+fit one free accelerator and two 60 % slices do not. Only a free or already-sliced accelerator takes one.
+
 **Under TAS the check judges the node already assigned.** Every queue this operator derives is TAS-only
 and ends at `kubernetes.io/hostname`, so Kueue writes the node into the Workload's
 `podSetAssignments[].topologyAssignment` as it reserves quota, before any AdmissionCheck settles. Each
