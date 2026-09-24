@@ -274,7 +274,7 @@ func convertSecretFromInstanceImagePullSecret(instImgPullSec *worker.InstanceIma
 					auth["email"] = instImgPullSec.Spec.Email
 				}
 				return auth
-			},
+			}(),
 		},
 	}
 	dcrCfgJson := json.MustMarshal(dcrCfg)
