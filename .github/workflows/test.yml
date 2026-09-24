@@ -28,6 +28,12 @@ on:
     # run it. Added to it are two trees no test reads: testing/, the Terraform and scripts for
     # test clusters, and csrc/, the C sources only the image build compiles.
     #
+    # Skipped as well is .agents/, the agent skills and hooks, listed entry by entry to leave
+    # out skills/gpustack-operator-xbuild-and-verify/: pkg/devicemanager/preflight reads its
+    # verification cases, through the tracked .claude/skills symlink. paths-ignore has no
+    # negation to carve one skill out of ".agents/**", so an entry added under .agents/ or
+    # .agents/skills/ runs this workflow until it is listed here.
+    #
     # It lists what to skip rather than what to run on purpose. The tests read more than Go
     # sources -- the chart, the operator Dockerfile, testdata, embedded files, cgo headers --
     # and a path an allow-list forgets skips the run without a trace on the pull request.
@@ -39,6 +45,18 @@ on:
       - "docs/**"
       - "testing/**"
       - "csrc/**"
+      - ".agents/hooks.json"
+      - ".agents/hooks/**"
+      - ".agents/skills/_e2e-lib/**"
+      - ".agents/skills/gpustack-operator-chart-e2e/**"
+      - ".agents/skills/gpustack-operator-chart-subcharts-manage/**"
+      - ".agents/skills/gpustack-operator-code-review/**"
+      - ".agents/skills/gpustack-operator-docs/**"
+      - ".agents/skills/gpustack-operator-e2e/**"
+      - ".agents/skills/gpustack-operator-generate/**"
+      - ".agents/skills/gpustack-operator-issue-pr/**"
+      - ".agents/skills/gpustack-operator-overview/**"
+      - ".agents/skills/gpustack-operator-release/**"
       - "**.md"
       - "**.mdx"
       - "**.png"
@@ -54,6 +72,18 @@ on:
       - "docs/**"
       - "testing/**"
       - "csrc/**"
+      - ".agents/hooks.json"
+      - ".agents/hooks/**"
+      - ".agents/skills/_e2e-lib/**"
+      - ".agents/skills/gpustack-operator-chart-e2e/**"
+      - ".agents/skills/gpustack-operator-chart-subcharts-manage/**"
+      - ".agents/skills/gpustack-operator-code-review/**"
+      - ".agents/skills/gpustack-operator-docs/**"
+      - ".agents/skills/gpustack-operator-e2e/**"
+      - ".agents/skills/gpustack-operator-generate/**"
+      - ".agents/skills/gpustack-operator-issue-pr/**"
+      - ".agents/skills/gpustack-operator-overview/**"
+      - ".agents/skills/gpustack-operator-release/**"
       - "**.md"
       - "**.mdx"
       - "**.png"
