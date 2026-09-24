@@ -58,23 +58,29 @@ vLLM-Ascend snapshot has been checked.
 | `waiting` | `num_requests_waiting`: requests not yet scheduled, including those deferred while their KV blocks arrive | `num_queue_reqs`: the scheduler's waiting queue alone | every role |
 | `decode-transfer-waiting` | — | `num_decode_transfer_queue_reqs`: requests whose KV blocks are still arriving | decode of a pair |
 | `local-prefix` | `prefix_cache_*`: prompt tokens found in the Pod's own KV cache | — | every role |
-| `external-store` | `external_prefix_cache_*`: of the tokens not found locally, those the KV connector supplies | — | a role with a connector |
+| `external-store` | `external_prefix_cache_*`: of the tokens not found locally, those the KV connector supplies | — | every role but decode of a pair, when the deployment attaches a KV cache pool |
 | `device-prefix`, `host-prefix`, `storage-prefix` | — | `prefill_effective_tokens_total` by mode: prefill tokens found on the device, in host memory, and in the storage backend | every role but decode of a pair |
 | `ttft` | `time_to_first_token_seconds` | `time_to_first_token_seconds` | vLLM every role; SGLang every role but prefill of a pair |
-| `tpot` | `request_time_per_output_token_seconds`: zero for a request with at most one output token | — | every role |
+| `tpot` | `request_time_per_output_token_seconds`: zero for a request with at most one output token | — | every role but prefill of a pair |
 | `itl` | `inter_token_latency_seconds` | `inter_token_latency_seconds`, exported once a request streams | every role but prefill of a pair |
 | `transfer-*` | — | `kv_transfer_latency_ms`, `kv_transfer_speed_gb_s`, `kv_transfer_total_mb`, `num_transfer_failed_reqs_total` | prefill of a pair |
 
-**In a vLLM pair, `external-store` on the decode half does not measure the store.** Decode's
-connector supplies the blocks the prefill half sends, so every token decode lacks counts as a hit
-and the rate stays at one, with or without a store. The prefill half's rate is the store's. Measured
-on a pair with a store and on one without: decode hits equalled queries, prefill hits were zero.
+**vLLM `external-store` is not read where it does not measure the store.** vLLM counts every
+token any KV connector supplies as an external hit, the point-to-point leg of a pair included.
+Decode's leg supplies the blocks the prefill half sends, so every token decode lacks counts as a hit
+and the rate stays at one, with or without a store; it is not read on decode.
+
+The prefill half's leg never supplies a token, so with a pool that half's rate is the store's, and
+without one it is not read. Measured on a pair with a store and on one without: decode hits
+equalled queries, prefill hits were zero.
 
 The prefill half of a vLLM pair answers the router's one-token prefill request, so its `ttft`
-counts each paired request once and its `tpot` mean is zero. A vLLM decode half's `waiting` includes
-requests deferred until the prefill half's blocks arrive. SGLang keeps those in separate queues:
-decode's transfer queue is `decode-transfer-waiting`; its preallocation queue, and prefill's
-bootstrap and in-flight queues, are not read.
+counts each paired request once. Its `tpot` is not read: with no second token its mean is always
+zero. A vLLM decode half's `waiting` includes requests deferred until the prefill half's blocks
+arrive.
+
+SGLang keeps those in separate queues: decode's transfer queue is `decode-transfer-waiting`; its
+preallocation queue, and prefill's bootstrap and in-flight queues, are not read.
 
 SGLang exports all three prefill modes whatever its cache tiers, so `host-prefix` and
 `storage-prefix` appear as measured rates of zero on a server with no host cache or storage backend,
@@ -110,15 +116,19 @@ Where a router sent each request is not in the snapshot; its own per-replica ser
 baseline; a second read within five minutes supplies the window. A counter reset or a window with
 no new queries produces a `missing[]` entry rather than a fabricated zero rate.
 
-vLLM reports `local-prefix` and, on a Pod that renders a KV connector, `external-store` from
-separate prefix-cache hit and query counters. SGLang reports `device-prefix`, `host-prefix` and
-`storage-prefix` from `prefill_effective_tokens_total` modes. Each SGLang tier uses the sum of
-`input` and all three hit modes as its denominator. Ratios with different scopes or sampling
-windows stay per Pod; they are not averaged into one deployment-wide cache-hit claim.
+vLLM reports `local-prefix` and, on a Pod that attaches a KV cache pool and is not the decode half
+of a pair, `external-store` from separate prefix-cache hit and query counters.
+
+SGLang reports `device-prefix`, `host-prefix` and `storage-prefix` from
+`prefill_effective_tokens_total` modes. Each SGLang tier uses the sum of `input` and all three hit
+modes as its denominator. Ratios with different scopes or sampling windows stay per Pod; they are
+not averaged into one deployment-wide cache-hit claim.
 
 vLLM exports its external prefix cache counters without a KV connector too, and they never move. On
 a Pod whose arguments render no connector and whose external query counter has never moved,
 `missing[]` names `external-store` as an unsupported source rather than a window with no queries.
+A Pod with a connector that is not read, as described in
+[What each field counts](#what-each-field-counts), is named the same way with its own reason.
 
 ## Latency, traffic, and transfer
 
@@ -164,7 +174,8 @@ native Pod histograms in Prometheus for percentiles.
 vLLM's request-level TPOT includes zero-valued
 observations for requests with at most one output token, while ITL measures gaps between streamed
 outputs. Compare like sources and roles. The prefill role of a prefill/decode pair answers with its
-first token alone, so ITL is not read from it and its absence is not reported in `missing[]`.
+first token alone, so neither ITL nor TPOT is read from it and neither absence is reported in
+`missing[]`.
 
 In an SGLang pair TTFT is read from the decode half, which records it, and cache hits from the
 prefill half alone: the decode half never prefills, so its token counters hold no ratio.
@@ -184,7 +195,8 @@ retries-exhausted counter beside the router's request counter, and SGLang's tran
 counter beside the transfer size. No fraction is derived from it.
 
 The second is a source the deployment's shape does not provide: the vLLM router's P/D processing
-gauges, and `external-store` on a vLLM Pod without a KV connector, both described above.
+gauges, and `external-store` on a vLLM Pod without a KV connector or without a pool, or on the
+decode half of a vLLM pair, all described above.
 
 The third is a Pod that served no request in the sampling window, which its TTFT histogram shows by
 recording none. Its latency histograms and cache-hit counters then have no new sample and are listed
