@@ -19,7 +19,7 @@ the model name; everything else runs as written on a cluster with this operator 
 - [Step 2: the pool and the grant](#step-2-the-pool-and-the-grant)
 - [Step 3: the workload](#step-3-the-workload)
 - [Step 4: high availability](#step-4-high-availability)
-- [Step 5: what a standby starts from](#step-5-what-a-standby-starts-from)
+- [Step 5: what a failover keeps](#step-5-what-a-failover-keeps)
 - [The three things that go wrong](#the-three-things-that-go-wrong)
 
 ## The four objects, and why the order is fixed
@@ -198,55 +198,17 @@ Two conditions appear at this point that the phase deliberately does not summari
 `RolloutComplete` exists because this workload disables the deployment deadline that would normally
 answer it: that deadline requires every replica to be available, and only one ever is here.
 
-## Step 5: what a standby starts from
+## Step 5: what a failover keeps
 
-A standby holds no data. Without a snapshot it takes over with an empty cache and rebuilds from member
-remounts alone, so a failover costs everything that was cached. A snapshot is what changes that:
+Nothing in memory. A standby holds no data, so the replica that takes over knows none of the objects
+held in member memory and rebuilds from member remounts alone; a single leader that restarts does the
+same. High availability shortens the outage, and every one of those objects misses afterwards. Plan
+for a cold cache after every failover and every leader restart.
 
-```yaml
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: mooncake-snapshots
-  namespace: gpustack-system            # the namespace this operator runs its workloads in
-spec:
-  accessModes: [ReadWriteMany]          # REQUIRED, and nothing refuses a claim that is not
-  resources:
-    requests:
-      storage: 10Gi
-  storageClassName: <a class that provides ReadWriteMany>
----
-# ... on the KVCacheBackend:
-spec:
-  connection:
-    managed:
-      leader:
-        replicas: 3
-        highAvailability:
-          snapshot:
-            persistentVolumeClaimName: mooncake-snapshots
-            intervalSeconds: 600
-            retentionCount: 2
-```
-
-⛔ **`ReadWriteMany` is the whole requirement, and getting it wrong is silent.** The replica that
-serves writes the snapshot and a standby reads it; they are different Pods, so on a claim only one of
-them can mount, the primary writes where the standby cannot read and nothing logs it. The backend
-reaches `Ready` either way.
-
-The reconciler checks the bound volume once it can see the claim:
-
-```console
-$ kubectl get kvcb mooncake-dram -o jsonpath='{.status.conditions[?(@.type=="SnapshotStorageShared")]}'
-```
-
-**A failover still loses `intervalSeconds` worth of writes**, because objects written since the last
-snapshot are not in the baseline. The cache comes back partially cold rather than entirely cold, and
-that difference is the whole of what this feature buys.
-
-⛔ **The claim outlives the backend, and every key in the cache is nameable from it.** A snapshot is
-the master's metadata written as plain bytes with no encryption. Treat the claim as carrying the same
-sensitivity as the cache itself, and delete it deliberately — nothing here does.
+⛔ **`leader.highAvailability.snapshot` is refused at admission, at any replica count**, because
+restoring a snapshot can make the cache serve another key's bytes instead of a miss.
+[High availability](leader.md#high-availability) says why, and what happens to an object admitted
+with it.
 
 ## The three things that go wrong
 
@@ -255,8 +217,8 @@ image carries a leadership backend: the leader answers `UNAVAILABLE_IN_CURRENT_M
 permanent standby, and members answer `Invalid HA backend entry` and CrashLoopBackOff. `spec.image`
 and every `members[].image` need a build that has one — leaving them unset is the simplest way.
 
-**A snapshot claim that is not `ReadWriteMany`.** Admission cannot check it, the backend goes `Ready`,
-and the first failover starts from nothing. `SnapshotStorageShared` is the only thing that says so.
+**Expecting a failover or a restart to keep the cache.** Neither does: the new leader knows none of
+the objects held in member memory, so every lookup for one misses until an engine writes it again.
 
 **Reading `3/1` as a fault.** It is the designed steady state under high availability, and the one
 reading on this page most likely to be escalated as an outage.

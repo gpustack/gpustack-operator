@@ -171,8 +171,8 @@ alternative of leaving members on the leader Service address and letting readine
 
 ⛔ **`enable_oplog` is refused in `leader.extraArgs`**, and not as a policy choice: the store's
 operation log requires the etcd backend, which cannot be compiled together with the Lease backend, so
-the flag produces a leader that refuses to start. Standbys rebuild from the snapshot below and from
-member remounts instead.
+the flag produces a leader that refuses to start. Standbys rebuild from member remounts alone
+instead.
 
 ⛔ **`etcd_endpoints` is refused as well, and it is out of reach twice over.** The store reads it only
 where `ha_backend_connstring` is empty, which the election never leaves empty, and the etcd backend it
@@ -221,49 +221,41 @@ Both first failed at 31.41 seconds and converged around 60.6 seconds, so electio
 result; retest if election timing changes. The Service endpoint transition was inferred from the
 result, not observed directly. Changing the value rolls every member group when HA is active.
 
-**A snapshot is what a standby starts from, and without one it starts from nothing.** Set
-`leader.highAvailability.snapshot` and the serving replica writes the master's metadata to storage on
-an interval; a standby that takes over restores from the last one instead of serving an empty cache:
+**Several leaders shorten the outage; they do not keep the cache.** A standby holds no data. The
+replica that takes over, like a single leader that restarts, learns the members' segments from their
+remounts and none of the keys in them, so every object held in member memory misses until it is
+written again.
 
-```yaml
-spec:
-  connection:
-    managed:
-      leader:
-        replicas: 3
-        highAvailability:
-          snapshot:
-            persistentVolumeClaimName: mooncake-snapshots
-            intervalSeconds: 600
-            retentionCount: 2
-```
+The exception is what a member's [local disk tier](local-disk-tier.md) already holds: when the new
+leader does not know the disk segment, the member registers it again together with the objects on it.
 
-⛔ **The claim must be `ReadWriteMany`, and nothing refuses one that is not.** The replica that serves
-writes the snapshot and a standby reads it, and they are different Pods — so on a claim only one of
-them can mount, the primary writes where the standby cannot read and no log line says so.
+What a second replica buys is time. On a single-node test cluster a failover left the store
+unusable for about 16 seconds and a single-leader restart for about 30; on a real cluster a single
+leader also waits for its replacement to be scheduled and its image pulled.
 
-Admission cannot check it, because the claim often does not exist yet when the backend is created.
-The reconciler checks once it can see the claim and reports `SnapshotStorageShared`. **The backend
-reaches `Ready` either way.**
+**Run one leader by default.** Add replicas when that gap costs more than what an election needs: the
+store image and the two accounts described above.
 
-**What a failover loses is `intervalSeconds` wide.** Objects written since the last snapshot are not
-in the baseline, so the cache comes back partially cold rather than entirely cold. Raising the
-interval trades snapshot cost for a wider loss; `retentionCount` is how many older snapshots a
-restore can fall back to when a payload cannot be read.
+⛔ **`leader.highAvailability.snapshot` is refused at admission, at any replica count.** A snapshot
+records where each key sits in member memory, and restoring one does not check that the memory still
+holds that key. Once the memory has been reused, the restored index hands out another key's bytes
+instead of a miss — to an engine, a wrong KV block rather than a cold one.
 
-⛔ **The claim outlives the backend, and every key in the cache is nameable from it.** A snapshot is
-the master's metadata written as plain bytes with no encryption, so whoever can mount the claim can
-enumerate the keys the cache holds — including their tenant names under multi-tenancy. Nothing here
-deletes the claim when the backend goes away.
+Two ordinary events reuse it. A forced remove, which is how an engine resets its cache, frees it
+before the next snapshot is taken. A standby loads the snapshot once at its own start, so by the time
+it takes over, another leader may have given that memory to other keys.
+
+An object admitted with the field before the refusal keeps running as it was rendered, and an update
+to it is refused only when it moves the field or `replicas`. Removing the field is always accepted.
+
+⛔ **A claim such an object wrote to outlives it, and every key in its cache is nameable from it.** A
+snapshot is the master's metadata written as plain bytes with no encryption, including tenant names
+under multi-tenancy. Nothing here deletes the claim.
 
 ⛔ **`memory_allocator` is refused in `leader.extraArgs` because of this feature**, under a name that
 mentions no part of it: the store builds its snapshot manager only under its default allocator,
 silently and with no log line either way. Any other value would leave the flags rendered, the claim
 mounted and this object stating a snapshot that is never written again.
-
-**The flags arrive as soon as the field is set, unlike the election's.** A single leader restores its
-own last snapshot when it restarts, which is worth having on its own — so a store image too old to
-carry the snapshot subsystem refuses to start here rather than ignoring the field.
 
 **A missing grant fails differently on each side, and one of them is silent.** A leader that cannot
 reach the Lease retries every second forever — liveness is ungated, so nothing restarts and the
