@@ -17,7 +17,10 @@
 #                    the readiness gate does not gate and standbys sit in the Service's endpoints;
 #                    zero ready means nobody won the Lease. Anything but 3/1 is a defect.
 #                (2) THE LEASE NAMES THE SERVING POD. holderIdentity is non-empty and identifies the
-#                    one ready replica, not a standby.
+#                    one ready replica, not a standby -- and the backend's ElectionObserved condition
+#                    reports that election as True/Electing. The condition exists to flag an image
+#                    that cannot elect (it then reads False/NoHolder), so it is only a verdict once
+#                    it has also been seen to read True on an image that can.
 #                (3) THE TWO ACCOUNTS ARE SUFFICIENT AND NO MORE THAN SUFFICIENT, asked of the API
 #                    server's authorizer (kubectl auth can-i), not compared against a rendered Role:
 #                    the leader's account may create/get/update leases and patch its own pods; the
@@ -44,7 +47,8 @@
 # Expected:    - the backend reaches Ready;
 #              - the leader Deployment: spec.replicas=3, three Pods, readyReplicas=1;
 #              - the Lease <backend>-leader exists; holderIdentity non-empty and naming the ready
-#                Pod's address;
+#                Pod's address; the backend's ElectionObserved condition reads True/Electing within
+#                60s;
 #              - leader SA: create/get/update leases=yes, patch pods=yes; watch/list/delete leases
 #                and get/update pods=no;
 #              - member SA: get leases=yes; update/create/delete leases and patch pods=no;
@@ -54,8 +58,9 @@
 #                never reports False at any sample, and the backend's phase returns to Ready.
 #
 # Cleanup:     Trap deletes the KVCacheBackend; owner references cascade to the Deployment, Service,
-#              Lease, both ServiceAccounts, both Roles and both RoleBindings. Nothing else is
-#              touched. Idempotent, runs on pass AND fail, safe to re-run.
+#              both ServiceAccounts, both Roles and both RoleBindings. The Lease is the store's, not
+#              the operator's, carries no owner and is deleted by name once the backend is gone.
+#              Nothing else is touched. Idempotent, runs on pass AND fail, safe to re-run.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
@@ -102,6 +107,9 @@ teardown() {
   echo
   echo "[case-62] cleanup"
   kubectl delete kvcachebackends.worker.gpustack.ai "$BACKEND" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  # After the backend, because a standby still running would campaign the Lease back into existence.
+  kubectl wait --for=delete "kvcachebackends.worker.gpustack.ai/${BACKEND}" --timeout=120s >/dev/null 2>&1 || true
+  kubectl -n "$NS" delete leases.coordination.k8s.io "$LEADER" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 trap teardown EXIT
 
@@ -302,6 +310,23 @@ if [ -n "$READY_IP" ] && echo "$HOLDER" | grep -qF "$READY_IP"; then
 else
   record FAIL "the Lease holder is the ready Pod" \
     "holderIdentity='${HOLDER}' vs ready Pod ${READY_POD:-<none>} at ${READY_IP:-<no ip>}"
+fi
+
+# The operator's own verdict about that Lease, read where it is written rather than inferred from the
+# holder above. Waited for, because it is written by the reconcile the Lease change enqueues, not by
+# the pass that made the backend Ready.
+ELECTION=""
+for ((i = 0; i < 60; i += 3)); do
+  ELECTION="$(kubectl get kvcachebackends.worker.gpustack.ai "$BACKEND" \
+    -o jsonpath='{range .status.conditions[?(@.type=="ElectionObserved")]}{.status}/{.reason}{end}' 2>/dev/null)"
+  [ "$ELECTION" = "True/Electing" ] && break
+  sleep 3
+done
+if [ "$ELECTION" = "True/Electing" ]; then
+  record PASS "the backend reports the election it observes" "ElectionObserved=${ELECTION}"
+else
+  record FAIL "the backend reports the election it observes" \
+    "ElectionObserved='${ELECTION:-<absent>}' after 60s, expected True/Electing while lease/${LEADER} names ${HOLDER}"
 fi
 
 # ------------------------------------------------- (3) sufficient, and no more than sufficient
