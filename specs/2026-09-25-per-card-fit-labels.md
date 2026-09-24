@@ -154,7 +154,9 @@ PodSet, the webhook reads the per-Pod demand the way Gate 3 reads it:
 
 - a logical slice of `U > 0` units per card is pinned with
   `sliced-max-free-units.fit.gpustack.ai/<group> Gt U-1`;
-- a shared request of `N >= 2` cards is pinned with `shared-free-cards.fit.gpustack.ai/<group> Gt N-1`;
+- a shared request of `N >= 2` cards is pinned with `shared-free-cards.fit.gpustack.ai/<group> Gt N-1`.
+  `N` is the largest count any one container of the Pod asks for, not the sum: Gate 3 lets two
+  containers of one Pod hold shares on the same card;
 - anything else is left unchanged.
 
 The expression is ANDed into every required node-selector term of the PodSet template, or added as
@@ -453,13 +455,13 @@ proves the whole path.
       - A table case builds a key from a 63-character `aKey` and checks it with `validation.IsQualifiedName`.
       Verify: `go test ./pkg/nodefeature/ -run 'TestFitLabelKeys$|TestIsFitLabelKey$|TestEqualIgnoringFitLabels$' -v`
 
-- [ ] **T0 · Gate 3's per-Pod demand, exported**
+- [x] **T0 · Gate 3's per-Pod demand, exported**
       Blocked by: None
       Owns: `pkg/worker/controllers/worker/fit_demand.go`, `pkg/worker/controllers/worker/fit_demand_test.go`
       Acceptance:
       - `PodSetFitDemand(ps *kueue.PodSet) (slicedUnits, sharedCards int32)` returns the per-Pod demand read by `podSetFamilyDemands(ps, 1)`, Gate 3's own parser.
       - `node_devices_admission.go` is not edited.
-      - The table covers these shapes: a slice, a shared request of 1 and of 3, exclusive, a partition, no accelerator, an init-container-only demand, a limits-only demand, two containers with different units (the larger wins), and units above `MaxInt32` (clamped).
+      - The table covers these shapes: a slice, a shared request of 1 and of 3, two shared containers (the larger count wins, not the sum), exclusive, a partition, no accelerator, an init-container-only demand, a limits-only demand, two containers with different units (the larger wins), and units above `MaxInt32` (clamped).
       Verify: `go test ./pkg/worker/controllers/worker/ -run 'TestPodSetFitDemand$' -v`
 
 - [ ] **T4 · The ablation setting**
