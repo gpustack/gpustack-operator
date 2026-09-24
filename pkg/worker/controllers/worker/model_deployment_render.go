@@ -388,16 +388,6 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	takeOver := len(role.Command) > 0
 
 	command := role.Command
-	// declaredPorts is the role's declared port list, computed once: the connector's synthesized
-	// ports are deduplicated against it below, and a direct decoder's engine port must clear every
-	// entry in it, not only the one the Service fronts.
-	declaredPorts := modelDeploymentContainerPorts(role)
-	// gradable is false for a take-over role, whose argv the operator did not build.
-	var (
-		scheme     core.URIScheme
-		gradable   bool
-		enginePort = modelDeploymentServicePort(role).ContainerPort
-	)
 	// READ OFF THE PROXY'S OWN FLAG, not off the transfer leg. A transfer leg renders under every
 	// admitted router-and-engine pair but one -- an Ascend pair under "vllm-router" has none --
 	// and only one router fronts its decoder with a proxy; deriving this from the leg would put
@@ -406,6 +396,22 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	// takes is moved.
 	directDecode := !takeOver && in.Connector.RoutingSidecar &&
 		ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindDecode
+	// servingPort is the port the Service targets and the gates grade, read from the same function
+	// the Service is rendered from, so the two cannot name different ports.
+	servingPort := modelDeploymentTargetPort(md.Spec.Engine.Name, role, directDecode)
+	// declaredPorts is the role's port list, computed once: the connector's synthesized ports are
+	// deduplicated against it below, and a direct decoder's engine port must clear every entry in
+	// it, not only the one the Service fronts. A role declaring none gets the serving port alone.
+	declaredPorts := modelDeploymentContainerPorts(role)
+	if len(role.Ports) == 0 {
+		declaredPorts[0] = servingPort
+	}
+	// gradable is false for a take-over role, whose argv the operator did not build.
+	var (
+		scheme     core.URIScheme
+		gradable   bool
+		enginePort = servingPort.ContainerPort
+	)
 	if directDecode {
 		enginePort = modelDeploymentInternalPort
 		for modelDeploymentPortTaken(declaredPorts, enginePort) {
@@ -428,8 +434,15 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		// and invisible to the gate.
 		scheme, gradable = modelDeploymentEngineTransport(md.Spec.Engine.Name, command)
 		command = appendModelDeploymentBindArgs(md.Spec.Engine.Name, command, enginePort)
+		listenPort, listenErr := modelDeploymentCommandPort(md.Spec.Engine.Name, command)
+		if !directDecode && (listenErr != nil || listenPort != servingPort.ContainerPort) {
+			// The engine is not on the port the Service targets, which only a declared port the
+			// role's own --port disagrees with can do; admission refuses that shape, but an object
+			// stored before the rule still renders. A gate on either port grades the other fact.
+			gradable = false
+		}
 		if directDecode {
-			enginePort, err = modelDeploymentCommandPort(md.Spec.Engine.Name, command)
+			enginePort, err = listenPort, listenErr
 			if err != nil {
 				return nil, fmt.Errorf("role %q cannot place its routing proxy: %w", role.Name, err)
 			}
@@ -463,7 +476,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		probeScheme = core.URISchemeHTTP
 		probePath = modelDeploymentDirectDecodeProbePath
 	}
-	startupProbe, readinessProbe, livenessProbe := modelDeploymentProbes(role, probeScheme, probePath, gradable)
+	startupProbe, readinessProbe, livenessProbe := modelDeploymentProbes(servingPort, probeScheme, probePath, gradable)
 	ports, err := appendModelDeploymentConnectorPorts(declaredPorts, in.Connector, takeOver)
 	if err != nil {
 		return nil, err
@@ -1077,9 +1090,11 @@ func modelDeploymentArgsName(engine string, command []string, name string) bool 
 // arguments, extra arguments -- so a check reading a narrower list would honor a connector-supplied
 // port and then grade the operator's own.
 //
-// WHAT WITHDRAWS THE GATE. --host and --port move WHERE the engine listens, and the operator then
-// leaves them alone, so it no longer knows the address and cannot grade it; the scheme such a
-// listener speaks is still observable, and is still reported. --ssl-cert-reqs can demand a CLIENT
+// WHAT WITHDRAWS THE GATE. --host moves WHERE the engine listens, and the operator then leaves it
+// alone, so it no longer knows whether a probe reaches the address and cannot grade it; the scheme
+// such a listener speaks is still observable, and is still reported. --port does NOT withdraw it:
+// the port the role names is read back and the gates follow it there, and the caller withdraws them
+// only where the engine and the Service's target disagree. --ssl-cert-reqs can demand a CLIENT
 // certificate, which a kubelet probe has none to present -- but only where TLS is actually on,
 // because uvicorn builds no TLS context for it to apply to otherwise.
 //
@@ -1091,7 +1106,7 @@ func modelDeploymentEngineTransport(engine string, command []string) (core.URISc
 
 	for i, arg := range command {
 		switch ModelDeploymentListenArg(engine, arg) {
-		case modelDeploymentEngineHostArg, modelDeploymentEnginePortArg:
+		case modelDeploymentEngineHostArg:
 			moved = true
 		case modelDeploymentEngineTLSCertArg, modelDeploymentEngineTLSKeyArg:
 			tls = true
@@ -1197,10 +1212,13 @@ func ModelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
 // write would leave a working replica permanently unready, which is a worse failure than the one
 // probes are being added for.
 //
-// A ROLE THAT MOVES WHERE THE ENGINE LISTENS GETS NEITHER. The operator renders --host and --port
-// only when the role passed neither, so in every other case the address the gate reads is the
-// operator's own and the engine is on it; a role that supplies one moves the engine without moving
-// the Service, and the gate would report a working replica as broken.
+// A ROLE THAT MOVES THE ENGINE'S HOST GETS NEITHER. The operator renders --host only when the role
+// passed none, so otherwise the engine may be on an address a probe cannot reach, and the gate would
+// report a working replica as broken.
+//
+// A ROLE THAT MOVES ONLY THE ENGINE'S PORT STAYS GATED, on that port. Where it declares no ports the
+// serving port follows the engine's --port, so the gate and the Service's target move together;
+// where it declares one that the --port disagrees with, the caller passes gradable false.
 //
 // A ROLE THAT MOVES ONLY HOW IT LISTENS STAYS GATED, over HTTPS. Losing readiness to one ordinary
 // TLS flag would hand back the defect these gates remove, and it is not necessary: the address is
@@ -1218,9 +1236,9 @@ func ModelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
 // Every other case here withholds the gates to avoid calling a working replica broken; this one
 // withholds them to avoid calling a broken one working.
 //
-// Where the port IS the operator's own, it is read from modelDeploymentServicePort rather than
-// picked here, so the address the gate grades and the address the Service sends traffic to cannot
-// become two different ports. That is what makes "ready" and "the endpoint answers" one fact rather
+// The port is the caller's servingPort, read from modelDeploymentTargetPort rather than picked here,
+// so the address the gate grades and the address the Service sends traffic to cannot become two
+// different ports. That is what makes "ready" and "the endpoint answers" one fact rather
 // than two that a test has to compare.
 //
 // THE ROUTE IS THE CALLER'S, because one shape cannot use the shared one: a direct decoder's
@@ -1228,18 +1246,17 @@ func ModelDeploymentRoleArgs(role *workercore.ModelDeploymentRole) []string {
 // the route the sidecar forwards to the engine instead -- a different path on the SAME address,
 // which leaves the one-fact property above intact.
 func modelDeploymentProbes(
-	role *workercore.ModelDeploymentRole, scheme core.URIScheme, path string, gradable bool,
+	servingPort core.ContainerPort, scheme core.URIScheme, path string, gradable bool,
 ) (startup, readiness, liveness *core.Probe) {
 	if !gradable {
 		return nil, nil, nil
 	}
 
-	servicePort := modelDeploymentServicePort(role)
-	if servicePort.Protocol != core.ProtocolTCP {
+	if servingPort.Protocol != core.ProtocolTCP {
 		return nil, nil, nil
 	}
 
-	port := intstr.FromInt32(servicePort.ContainerPort)
+	port := intstr.FromInt32(servingPort.ContainerPort)
 	gate := func(failureThreshold int32) *core.Probe {
 		return &core.Probe{
 			ProbeHandler: core.ProbeHandler{

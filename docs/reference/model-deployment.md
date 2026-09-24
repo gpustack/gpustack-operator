@@ -613,6 +613,7 @@ depends on the `InstanceType` the role names.
 | a `kind` the engine has no term for | the engine and the kind — today, `prefill` or `decode` on SGLang |
 | an owned key in `extraArgs` | the key, the engine, and `roles[].command` as the way to own it |
 | an owned name in `env` | the same three |
+| a `--port` in `extraArgs` or `command` naming another port than the role's first `ports` entry | both values and the field each came from. A managed direct decoder is exempt, since its proxy owns the declared port. A stored role is judged only when an edit changes its `ports` or arguments |
 | a parallel degree the role's books cannot be read for — a known flag's value missing, non-integer, out of range or below its bound, or a malformed `VLLM_DP_SIZE` | the role, the flag, and `roles[].command` as the way to own the whole line |
 | a declared parallel width over the role's card request | the card count, the degrees behind the width, and that the width is per member — `size` does not rescue it |
 | a `template` field on a role | the unknown field itself — the block is gone, so strict decoding refuses it rather than a webhook rule |
@@ -661,6 +662,11 @@ Service and `status.endpoint` keep that external port. On a managed native-vLLM 
 proxy owns it and vLLM listens behind the proxy on an internal port; every other role tells the engine
 itself to open the external port. The startup, readiness and liveness probes follow the external
 listener, so a decoder becomes Ready only when the proxy can reach the engine.
+
+**A role that passes its own `--port` and declares no `ports` moves only the container side.** The
+container port, the Service's `targetPort`, the probes and a router's target port follow the port the
+engine reads, in any spelling it accepts, from `extraArgs` or a replaced `command`. The Service's own
+port and `status.endpoint` stay on 8000, so callers keep their address.
 
 ### Transfer ports are runtime-selected
 

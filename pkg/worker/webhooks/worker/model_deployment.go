@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"slices"
-	"strconv"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -281,6 +280,58 @@ func validateModelDeploymentHostAccess(
 	return errs
 }
 
+// validateModelDeploymentRoleListenPorts refuses a role that declares ports and passes a --port, in
+// any spelling the engine reads as it, naming a different one. The operator renders the first
+// declared port into the engine's --port only where the role passed none, and the Service targets
+// that declared port, so a role's own --port naming another one moves the engine off the port every
+// request is sent to. The two values cannot both be true, and the refusal names both.
+//
+// A DIRECT DECODER IS EXEMPT, because there the two differ by design: its routing proxy owns the
+// declared port and the role's --port places the engine behind it, which
+// validateModelDeploymentRouterPorts already rules on.
+//
+// A ROLE THE OBJECT ALREADY HELD WITH THE SAME PORTS AND ARGUMENTS IS LEFT ALONE. The rule came after
+// objects that break it were stored, and refusing every later edit to them would strand them over a
+// field the edit did not touch; an edit that touches either field is judged by it.
+func validateModelDeploymentRoleListenPorts(old, md *workercore.ModelDeployment) field.ErrorList {
+	held := make(map[string]*workercore.ModelDeploymentRole)
+	if old != nil {
+		for i := range old.Spec.Roles {
+			held[old.Spec.Roles[i].Name] = &old.Spec.Roles[i]
+		}
+	}
+
+	var errs field.ErrorList
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if len(role.Ports) == 0 || workerctrl.ModelDeploymentRoleFrontedByProxy(md, role) {
+			continue
+		}
+		if prev := held[role.Name]; prev != nil && kubemeta.DeepEqual(prev.Ports, role.Ports) &&
+			slices.Equal(workerctrl.ModelDeploymentRoleArgs(prev), workerctrl.ModelDeploymentRoleArgs(role)) {
+			continue
+		}
+		port, ok := workerctrl.ModelDeploymentRoleListenPort(md.Spec.Engine.Name, role)
+		if !ok || port == role.Ports[0].Port {
+			continue
+		}
+
+		rolePath := field.NewPath("spec", "roles").Index(i)
+		argsPath := rolePath.Child("extraArgs")
+		if len(role.Command) > 0 {
+			argsPath = rolePath.Child("command")
+		}
+		errs = append(errs, field.Invalid(argsPath, fmt.Sprintf("--port=%d", port),
+			fmt.Sprintf("role %q passes --port=%d in %s but declares %d in %s; the engine listens on "+
+				"the one and the Service targets the other, so they must name the same port: drop "+
+				"--port, or make the two equal",
+				role.Name, port, argsPath, role.Ports[0].Port,
+				rolePath.Child("ports").Index(0).Child("port"))))
+	}
+
+	return errs
+}
+
 // validateModelDeploymentPoolTransport checks a new cache binding against each role's engine.
 // An unchanged binding is held access: an existing deployment remains editable if its backend
 // later changes transport, as with the host access gates above.
@@ -441,6 +492,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	errs = append(errs, validateModelDeploymentHostAccess(nil, md,
 		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
 		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
+	errs = append(errs, validateModelDeploymentRoleListenPorts(nil, md)...)
 
 	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
 
@@ -491,6 +543,7 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	errs = append(errs, validateModelDeploymentHostAccess(old, md,
 		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
 		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
+	errs = append(errs, validateModelDeploymentRoleListenPorts(old, md)...)
 	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
 	errs = append(errs, validateModelDeploymentRouterName(md, old)...)
 	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
@@ -909,7 +962,7 @@ func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorLi
 				fmt.Sprintf("managed router supports plaintext engine endpoints only; role %q uses HTTPS",
 					role.Name)))
 		}
-		ports = append(ports, workerctrl.ModelDeploymentRoleServingPort(role))
+		ports = append(ports, workerctrl.ModelDeploymentRoleServingPort(md, role))
 		errs = append(errs, validateModelDeploymentRouterPorts(md, role)...)
 	}
 	slices.Sort(ports)
@@ -983,8 +1036,8 @@ func validateModelDeploymentRouterPorts(
 		len(role.Command) > 0 {
 		return errs
 	}
-	if port, ok := modelDeploymentRoleExplicitServingPort(md.Spec.Engine.Name, role); ok &&
-		port == workerctrl.ModelDeploymentRoleServingPort(role) {
+	if port, ok := workerctrl.ModelDeploymentRoleListenPort(md.Spec.Engine.Name, role); ok &&
+		port == workerctrl.ModelDeploymentRoleServingPort(md, role) {
 		errs = append(errs, field.Invalid(field.NewPath("spec", "router"), md.Spec.Router,
 			fmt.Sprintf("role %q passes --port=%d, the port its Service publishes; the routing proxy "+
 				"a direct decode role is fronted by takes that port, so the model server must leave it",
@@ -1069,36 +1122,6 @@ func modelDeploymentRouterReservedPorts(
 	}
 
 	return reserved
-}
-
-// modelDeploymentRoleExplicitServingPort is the value of the last --port a role passes, in any
-// spelling the engine reads as it, matching how the rendered command line is read back. The engine's base argv and the
-// connector's arguments carry no listen flag, so the role's own arguments are the only place one
-// can come from. An unparsable or valueless occurrence reports false: it is the render's problem to
-// name, not this rule's.
-func modelDeploymentRoleExplicitServingPort(
-	engine string, role *workercore.ModelDeploymentRole,
-) (int32, bool) {
-	port, found := int32(0), false
-	for i, arg := range role.ExtraArgs {
-		if workerctrl.ModelDeploymentListenArg(engine, arg) != "--port" {
-			continue
-		}
-		_, value, inline := strings.Cut(arg, "=")
-		if !inline {
-			if i+1 >= len(role.ExtraArgs) {
-				return 0, false
-			}
-			value = role.ExtraArgs[i+1]
-		}
-		parsed, err := strconv.ParseInt(value, 10, 32)
-		if err != nil {
-			return 0, false
-		}
-		port, found = int32(parsed), true
-	}
-
-	return port, found
 }
 
 // validateModelDeploymentEngineVersion refuses an engine without a version when any role would

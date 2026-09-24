@@ -80,7 +80,7 @@ func renderModelDeploymentRouterObjects(
 			Kind:         string(ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i])),
 			RoleLabelKey: modelDeploymentLabelKeyRoleKind,
 		})
-		ports = append(ports, modelDeploymentServicePort(&md.Spec.Roles[i]).ContainerPort)
+		ports = append(ports, ModelDeploymentRoleServingPort(md, &md.Spec.Roles[i]))
 	}
 	slices.Sort(ports)
 	ports = slices.Compact(ports)

@@ -890,6 +890,40 @@ func TestValidateModelDeployment(t *testing.T) {
 			wantMessage: "every routed role must use the same serving port; got [8000 8100]",
 		},
 		{
+			// The router dials a Pod on the port its engine opens, which a role declaring no ports
+			// moves with its own --port.
+			name: "router_role_moves_its_engine_port_alone",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode"
+						r.ExtraArgs = []string{"--por", "8100"}
+					}),
+				)
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			}(),
+			wantMessage: "every routed role must use the same serving port; got [8000 8100]",
+		},
+		{
+			name: "router_roles_move_their_engine_port_together",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill"
+						r.ExtraArgs = []string{"--port=8100"}
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode"
+						r.ExtraArgs = []string{"--por", "8100"}
+					}),
+				)
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			}(),
+		},
+		{
 			name: "router_role_serving_port_is_not_tcp",
 			md: func() *workercore.ModelDeployment {
 				md := routedModelDeployment(nil)
@@ -1811,6 +1845,127 @@ func TestValidateModelDeploymentRoleServiceNames_ExemptsRolesTheObjectAlreadyHad
 			}
 			require.Len(t, errs, 1, tc.why)
 			assert.Contains(t, errs[0].Error(), "not a valid Service name", tc.why)
+		})
+	}
+}
+
+// TestModelDeploymentWebhook_ADeclaredPortAndTheEnginesPortMustAgree covers a role that declares
+// ports and also names its engine's port in its own arguments. The engine listens on one port and
+// the Service targets the first declared one, so two different values cannot both be true: the
+// refusal names both and where each came from. It runs on create and on an update that changes the
+// role's ports or arguments, and leaves an object stored before the rule editable otherwise.
+func TestModelDeploymentWebhook_ADeclaredPortAndTheEnginesPortMustAgree(t *testing.T) {
+	r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
+	declared := func(port int32, args ...string) *workercore.ModelDeployment {
+		return modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Ports = []workercore.ModelDeploymentPort{{Port: port, Protocol: core.ProtocolTCP}}
+				r.ExtraArgs = args
+			}))
+	}
+	directDecode := func(port int32, args ...string) *workercore.ModelDeployment {
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name, r.Kind = "prefill", workercore.ModelDeploymentRoleKindPrefill
+				r.Ports = []workercore.ModelDeploymentPort{{Port: port, Protocol: core.ProtocolTCP}}
+			}),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name, r.Kind = "decode", workercore.ModelDeploymentRoleKindDecode
+				r.Ports = []workercore.ModelDeploymentPort{{Port: port, Protocol: core.ProtocolTCP}}
+				r.ExtraArgs = args
+			}))
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+		return md
+	}
+
+	testCases := []struct {
+		name string
+		// old is nil on create.
+		old, md *workercore.ModelDeployment
+		// wantMessages are substrings the refusal must carry. Empty means the case is accepted.
+		wantMessages []string
+	}{
+		{
+			// THE POSITIVE BASELINE: a declared port the role does not contradict.
+			name: "a_declared_port_alone_is_accepted",
+			md:   declared(9000),
+		},
+		{
+			name: "an_agreeing_port_is_accepted",
+			md:   declared(9100, "--port", "9100"),
+		},
+		{
+			name: "a_disagreeing_port_is_refused",
+			md:   declared(9000, "--port", "9100"),
+			wantMessages: []string{
+				"spec.roles[0].extraArgs", "--port=9100", "spec.roles[0].ports[0].port", "9000",
+			},
+		},
+		{
+			name:         "a_disagreeing_abbreviation_is_refused",
+			md:           declared(9000, "--por=9100"),
+			wantMessages: []string{"spec.roles[0].extraArgs", "--port=9100", "9000"},
+		},
+		{
+			name:         "the_last_spelling_is_the_one_compared",
+			md:           declared(9100, "--port", "9100", "--por", "9200"),
+			wantMessages: []string{"--port=9200", "9100"},
+		},
+		{
+			name: "a_take_over_command_is_read_too",
+			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Ports = []workercore.ModelDeploymentPort{{Port: 9000, Protocol: core.ProtocolTCP}}
+					r.Command = []string{"vllm", "serve", "m", "--port", "9100"}
+				})),
+			wantMessages: []string{"spec.roles[0].command", "--port=9100", "9000"},
+		},
+		{
+			// THE PROXY OWNS THE DECLARED PORT on a direct decoder, and --port names the engine
+			// behind it, so the two differ by design.
+			name: "a_direct_decoder_keeps_its_engine_behind_the_proxy",
+			md:   directDecode(8000, "--port", "8300"),
+		},
+		{
+			name: "an_update_that_leaves_ports_and_arguments_alone_is_accepted",
+			old:  declared(9000, "--port", "9100"),
+			md: func() *workercore.ModelDeployment {
+				md := declared(9000, "--port", "9100")
+				md.Spec.Roles[0].Replicas = 2
+				return md
+			}(),
+		},
+		{
+			name:         "an_update_to_the_arguments_is_refused",
+			old:          declared(9000, "--port", "9100"),
+			md:           declared(9000, "--port", "9100", "--served-model-name", "m"),
+			wantMessages: []string{"--port=9100", "9000"},
+		},
+		{
+			name:         "an_update_to_the_ports_is_refused",
+			old:          declared(9100, "--port", "9100"),
+			md:           declared(9000, "--port", "9100"),
+			wantMessages: []string{"--port=9100", "9000"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			if tc.old == nil {
+				_, err = r.ValidateCreate(context.Background(), tc.md)
+			} else {
+				_, err = r.ValidateUpdate(context.Background(), tc.old, tc.md)
+			}
+			if len(tc.wantMessages) == 0 {
+				assert.NoError(t, err)
+
+				return
+			}
+			require.Error(t, err)
+			for _, want := range tc.wantMessages {
+				assert.Contains(t, err.Error(), want)
+			}
 		})
 	}
 }

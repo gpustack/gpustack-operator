@@ -86,8 +86,10 @@ var modelDeploymentInFlightMetrics = map[string][]string{
 //
 // It reads the port and scheme the scrape annotations name, which is the engine's own listener: on
 // a direct decoder that is the port behind the routing proxy, so the wait counts the engine's work
-// and not the proxy's. A role that moved the engine with its own --port leaves nothing on that
-// port, and the hook then returns after the settle.
+// and not the proxy's. A role declaring no ports moves that port with its own --port, and the hook
+// follows it; a declared port its own --port disagrees with, which only an object stored before
+// admission refused that shape can carry, leaves nothing on the declared port, and the hook then
+// returns after the settle.
 //
 // It is an exec of the image's own python3, as the KV cache member's hook is: both engines are
 // Python programs, so the interpreter is there. An httpGet hook is not an option, because neither

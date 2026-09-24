@@ -165,10 +165,15 @@ func renderModelDeploymentRoleService(
 
 // renderModelDeploymentServiceFor is the shape both Services share: a ClusterIP fronting one role's
 // replicas, on that role's port, owned by the deployment.
+//
+// THE PORT AND THE TARGET PORT ARE TWO FIGURES. The port is what a caller dials, and it stays on the
+// declared or default port; the target is where the replicas actually listen, which a role declaring
+// no ports moves with its own --port.
 func renderModelDeploymentServiceFor(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, name string,
 ) *core.Service {
 	port := modelDeploymentServicePort(role)
+	target := ModelDeploymentRoleServingPort(md, role)
 
 	svc := &core.Service{
 		ObjectMeta: meta.ObjectMeta{
@@ -189,7 +194,7 @@ func renderModelDeploymentServiceFor(
 				Name:       port.Name,
 				Protocol:   port.Protocol,
 				Port:       port.ContainerPort,
-				TargetPort: intstr.FromInt32(port.ContainerPort),
+				TargetPort: intstr.FromInt32(target),
 			}},
 		},
 	}
@@ -207,8 +212,10 @@ func renderModelDeploymentServiceFor(
 	return svc
 }
 
-// modelDeploymentServicePort is the port the deployment is served on: the role's first declared
-// entry, or the default every supported engine's OpenAI-compatible server listens on.
+// modelDeploymentServicePort is the port the deployment is published on: the role's first declared
+// entry, or the default every supported engine's OpenAI-compatible server listens on. It is the
+// Service's own port and the published endpoint's; where the replicas listen is
+// modelDeploymentTargetPort.
 //
 // It reads the same render the replicas get rather than the fields directly, so the Service and
 // the containers behind it cannot name different ports.
@@ -224,9 +231,57 @@ func modelDeploymentServicePort(role *workercore.ModelDeploymentRole) core.Conta
 	return modelDeploymentContainerPorts(role)[0]
 }
 
+// modelDeploymentTargetPort is the container port a role's replicas serve on: the one its Service
+// targets, its gates grade and a router dials.
+//
+// A ROLE DECLARING NO PORTS MOVES IT WITH ITS OWN --port, in any spelling the engine reads as it.
+// The operator fills --port only where the role passed none, so that argument is where the engine
+// listens, and a target left on the default would send every request to a port nothing opens.
+//
+// A DECLARED PORT IS NOT MOVED. The declared port is what the operator renders into the engine's
+// --port, and admission refuses a role whose own --port names another one.
+//
+// A DIRECT DECODER'S IS NOT MOVED EITHER, because fronted reports that its routing proxy owns the
+// serving port: the role's --port there names the engine behind the proxy, not the Pod's front door.
+func modelDeploymentTargetPort(
+	engine string, role *workercore.ModelDeploymentRole, fronted bool,
+) core.ContainerPort {
+	port := modelDeploymentServicePort(role)
+	if len(role.Ports) > 0 || fronted {
+		return port
+	}
+	if listen, ok := ModelDeploymentRoleListenPort(engine, role); ok {
+		port.ContainerPort = listen
+	}
+
+	return port
+}
+
+// ModelDeploymentRoleListenPort returns the value of the last --port a role passes, in any spelling
+// the engine reads as it, and false when it passes none or one it cannot read. The engine's base
+// argv and the connector's arguments carry no listen flag, so the role's own arguments are the only
+// place one can come from.
+func ModelDeploymentRoleListenPort(engine string, role *workercore.ModelDeploymentRole) (int32, bool) {
+	port, err := modelDeploymentCommandPort(engine, ModelDeploymentRoleArgs(role))
+
+	return port, err == nil
+}
+
+// ModelDeploymentRoleFrontedByProxy reports whether a role is a direct decoder whose routing proxy
+// owns its serving port, which is decided by the spec alone: the proxy renders for every decoder
+// under the router that drives it, and never for a role that took over its command line.
+func ModelDeploymentRoleFrontedByProxy(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	return len(role.Command) == 0 && modelDeploymentFrontsDecodeWithSidecar(md, role)
+}
+
 // ModelDeploymentRoleServingPort returns the port a role's Service targets.
-func ModelDeploymentRoleServingPort(role *workercore.ModelDeploymentRole) int32 {
-	return modelDeploymentServicePort(role).ContainerPort
+func ModelDeploymentRoleServingPort(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) int32 {
+	return modelDeploymentTargetPort(
+		md.Spec.Engine.Name, role, ModelDeploymentRoleFrontedByProxy(md, role)).ContainerPort
 }
 
 // ModelDeploymentRoleServingProtocol returns the protocol a role's Service publishes.
@@ -262,9 +317,12 @@ func modelDeploymentEndpoint(md *workercore.ModelDeployment) string {
 
 	// ONLY THE SCHEME IS WANTED HERE, and discarding the other answer is deliberate rather than an
 	// oversight. It reports whether a PROBE may grade the listener, which is a different question
-	// from what a client should dial: a role that moved its listener has a wrong published port
-	// either way, and one demanding a client certificate still serves TLS. Neither is an error, and
-	// turning this into one would refuse to publish an address that is correct.
+	// from what a client should dial: a role that moved its host still serves behind this address,
+	// and one demanding a client certificate still serves TLS. Neither is an error, and turning this
+	// into one would refuse to publish an address that is correct.
+	//
+	// THE PORT IS THE PUBLISHED ONE even where the role moved its engine's port: the Service's
+	// targetPort follows the engine, so the address a caller already dials keeps working.
 	scheme, _ := modelDeploymentEngineTransport(md.Spec.Engine.Name, ModelDeploymentRoleArgs(role))
 
 	return strings.ToLower(string(scheme)) + "://" +
