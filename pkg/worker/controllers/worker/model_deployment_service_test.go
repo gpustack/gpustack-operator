@@ -407,6 +407,12 @@ func TestModelDeploymentEndpoint_Scheme(t *testing.T) {
 			expected:  "https://qwen.team-a.svc:8000",
 		},
 		{
+			// vLLM rewrites the underscores before it matches the flag, so the address has to as well.
+			name:      "a certificate spelled with underscores moves it on vLLM",
+			extraArgs: []string{"--ssl_certfile", "/etc/tls/tls.crt"},
+			expected:  "https://qwen.team-a.svc:8000",
+		},
+		{
 			name:      "a key alone moves it too, spelled with an equals sign",
 			extraArgs: []string{"--ssl-keyfile=/etc/tls/tls.key"},
 			expected:  "https://qwen.team-a.svc:8000",
@@ -445,6 +451,11 @@ func TestModelDeploymentEndpoint_Scheme(t *testing.T) {
 			command:   []string{"python", "-m", "vllm.entrypoints.openai.api_server", "--ssl-certfile", "/x"},
 			extraArgs: []string{"--ssl-certfile", "/ignored"},
 			expected:  "https://qwen.team-a.svc:8000",
+		},
+		{
+			name:     "a take-over role's command line is read by the engine's own spelling rules",
+			command:  []string{"vllm", "serve", "m", "--ssl-certf", "/x"},
+			expected: "https://qwen.team-a.svc:8000",
 		},
 		{
 			// THE EXTRA ARGUMENTS OF A TAKE-OVER ROLE ARE NOT APPENDED to the command it replaced,
@@ -549,13 +560,19 @@ func TestModelDeploymentEndpointReadsEveryFlagTheEngineGets(t *testing.T) {
 			"decode halves as its own disaggregation arguments; update this figure deliberately "+
 			"when that changes")
 
-	scheme, gradable := modelDeploymentEngineTransport(operatorArgs)
-	assert.Equal(t, core.URISchemeHTTP, scheme,
-		"an operator-supplied TLS flag would move the transport where the published address "+
-			"cannot see it")
-	assert.True(t, gradable,
-		"an operator-supplied listen flag would move the engine where the published address "+
-			"cannot see it")
+	// Read under each engine's own spelling rules, which differ in what a prefix reaches.
+	for _, engine := range []string{
+		workercore.ModelDeploymentEngineVLLM,
+		workercore.ModelDeploymentEngineSGLang,
+	} {
+		scheme, gradable := modelDeploymentEngineTransport(engine, operatorArgs)
+		assert.Equal(t, core.URISchemeHTTP, scheme,
+			"%s: an operator-supplied TLS flag would move the transport where the published "+
+				"address cannot see it", engine)
+		assert.True(t, gradable,
+			"%s: an operator-supplied listen flag would move the engine where the published "+
+				"address cannot see it", engine)
+	}
 }
 
 // TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService pins what a scale owes it. The

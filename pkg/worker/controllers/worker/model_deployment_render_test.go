@@ -197,6 +197,159 @@ func TestRenderModelDeploymentPod_DecodeUsesRoutingSidecar(t *testing.T) {
 	}
 }
 
+// TestRenderModelDeploymentPod_DecodeReadsTheEnginesPort follows the direct decoder's model-server
+// port through every spelling the engine reads as --port: the proxy has to forward to the port the
+// engine actually opens, which is the last entry naming it, however it is spelled.
+func TestRenderModelDeploymentPod_DecodeReadsTheEnginesPort(t *testing.T) {
+	testCases := []struct {
+		name      string
+		extraArgs []string
+		wantPort  string
+	}{
+		{name: "the_last_spelling_wins", extraArgs: []string{"--port", "9100", "--por", "9200"}, wantPort: "9200"},
+		{name: "the_last_spelling_wins_reversed", extraArgs: []string{"--por", "9200", "--port", "9100"}, wantPort: "9100"},
+		{name: "a_lone_abbreviation_is_the_roles_own_port", extraArgs: []string{"--por=9200"}, wantPort: "9200"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
+			})
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Connector: ModelDeploymentConnectorRender{
+					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
+				},
+				NativeSidecar: true,
+			})
+			require.NoError(t, err)
+
+			require.Len(t, pod.Spec.InitContainers, 1)
+			assert.Contains(t, pod.Spec.InitContainers[0].Args, "--model-server-port="+tc.wantPort)
+			main := pod.Spec.Containers[0]
+			assert.Equal(t, tc.extraArgs, main.Command[len(main.Command)-len(tc.extraArgs)-2:len(main.Command)-2],
+				"the role's own port is kept and nothing but the host is filled after it")
+			assert.Equal(t, []string{"--host", "0.0.0.0"}, main.Command[len(main.Command)-2:])
+		})
+	}
+}
+
+// TestRenderModelDeploymentPod_ListenFlagSpellings reads the listen and TLS flags back the way the
+// engine's own parser does: vLLM rewrites underscores, both engines resolve a unique prefix, and
+// which prefixes are unique differs between the two. A spelling the operator misreads either sends
+// a plaintext probe at a TLS listener, keeps a gate a client-certificate listener refuses, or fills
+// a --port over the role's own.
+func TestRenderModelDeploymentPod_ListenFlagSpellings(t *testing.T) {
+	const (
+		vllm   = workercore.ModelDeploymentEngineVLLM
+		sglang = workercore.ModelDeploymentEngineSGLang
+	)
+	testCases := []struct {
+		name      string
+		engine    string
+		extraArgs []string
+		// wantFill is what the operator appends after the role's own arguments.
+		wantFill []string
+		// wantScheme is the probes' scheme; empty means the replica is not gated at all.
+		wantScheme core.URIScheme
+	}{
+		{
+			name: "vllm_underscore_certificate_turns_on_tls", engine: vllm,
+			extraArgs: []string{"--ssl_certfile", "/c.pem"},
+			wantFill:  []string{"--host", "0.0.0.0", "--port", "8000"}, wantScheme: core.URISchemeHTTPS,
+		},
+		{
+			name: "vllm_abbreviated_certificate_turns_on_tls", engine: vllm,
+			extraArgs: []string{"--ssl-certf=/c.pem"},
+			wantFill:  []string{"--host", "0.0.0.0", "--port", "8000"}, wantScheme: core.URISchemeHTTPS,
+		},
+		{
+			name: "vllm_underscore_key_turns_on_tls", engine: vllm,
+			extraArgs: []string{"--ssl_keyfile", "/k.pem"},
+			wantFill:  []string{"--host", "0.0.0.0", "--port", "8000"}, wantScheme: core.URISchemeHTTPS,
+		},
+		{
+			// "--ssl-ce" is ambiguous on vLLM, which also registers --ssl-cert-reqs.
+			name: "sglang_abbreviated_certificate_turns_on_tls", engine: sglang,
+			extraArgs: []string{"--ssl-ce", "/c.pem"},
+			wantFill:  []string{"--host", "0.0.0.0", "--port", "8000"}, wantScheme: core.URISchemeHTTPS,
+		},
+		{
+			// SGLang registers no --ssl-cert-reqs, so this prefix has one flag to reach.
+			name: "sglang_reads_ssl_cert_as_the_certificate", engine: sglang,
+			extraArgs: []string{"--ssl-cert", "/c.pem"},
+			wantFill:  []string{"--host", "0.0.0.0", "--port", "8000"}, wantScheme: core.URISchemeHTTPS,
+		},
+		{
+			// The engine refuses this spelling at start; it is not read as TLS here either.
+			name: "sglang_does_not_rewrite_underscores", engine: sglang,
+			extraArgs: []string{"--ssl_certfile", "/c.pem"},
+			wantFill:  []string{"--host", "0.0.0.0", "--port", "8000"}, wantScheme: core.URISchemeHTTP,
+		},
+		{
+			name: "vllm_abbreviated_client_certificate_mode_withdraws_the_gates", engine: vllm,
+			extraArgs: []string{"--ssl-certfile", "/c.pem", "--ssl-cert-r", "2"},
+			wantFill:  []string{"--host", "0.0.0.0", "--port", "8000"},
+		},
+		{
+			name: "vllm_underscore_client_certificate_mode_withdraws_the_gates", engine: vllm,
+			extraArgs: []string{"--ssl-certfile", "/c.pem", "--ssl_cert_reqs=2"},
+			wantFill:  []string{"--host", "0.0.0.0", "--port", "8000"},
+		},
+		{
+			// FILLED, NOT OWNED, in every spelling: the role's own port stands and nothing is
+			// appended after it, exactly as for --port itself.
+			name: "an_abbreviated_port_is_the_roles_own", engine: vllm,
+			extraArgs: []string{"--por", "9100"},
+			wantFill:  []string{"--host", "0.0.0.0"},
+		},
+		{
+			name: "an_abbreviated_host_is_the_roles_own", engine: sglang,
+			extraArgs: []string{"--ho=127.0.0.1"},
+			wantFill:  []string{"--port", "8000"},
+		},
+		{
+			// The baseline: a flag sharing the first letters of --port is not a listen flag.
+			name: "a_flag_sharing_a_stem_moves_nothing", engine: vllm,
+			extraArgs: []string{"--pooler-config", "{}"},
+			wantFill:  []string{"--host", "0.0.0.0", "--port", "8000"}, wantScheme: core.URISchemeHTTP,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = tc.engine
+				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
+			})
+			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+			})
+			require.NoError(t, err)
+
+			c := pod.Spec.Containers[0]
+			require.GreaterOrEqual(t, len(c.Command), len(tc.extraArgs)+len(tc.wantFill))
+			assert.Equal(t, append(slices.Clone(tc.extraArgs), tc.wantFill...),
+				c.Command[len(c.Command)-len(tc.extraArgs)-len(tc.wantFill):])
+			if tc.wantScheme == "" {
+				assert.Nil(t, c.StartupProbe)
+				assert.Nil(t, c.ReadinessProbe)
+				assert.Nil(t, c.LivenessProbe)
+				return
+			}
+			require.NotNil(t, c.StartupProbe)
+			require.NotNil(t, c.ReadinessProbe)
+			require.NotNil(t, c.LivenessProbe)
+			assert.Equal(t, tc.wantScheme, c.StartupProbe.HTTPGet.Scheme)
+			assert.Equal(t, tc.wantScheme, c.ReadinessProbe.HTTPGet.Scheme)
+			assert.Equal(t, tc.wantScheme, c.LivenessProbe.HTTPGet.Scheme)
+		})
+	}
+}
+
 // TestRenderModelDeploymentPod_DecodeUsesClassicSidecarBelowTheFloor asserts the shape a cluster
 // without initContainers[].restartPolicy gets: the SAME proxy, carried as a regular container
 // rather than an init one. What changes is where it lands and that it carries no per-container

@@ -1404,6 +1404,12 @@ func TestModelDeploymentResolveArg(t *testing.T) {
 			keys: []string{"--hicache-storage-backend-extra-config"},
 		},
 		{
+			// The listen flags are registered flags known here as well, so the same rule holds.
+			name:   "an_exact_listen_spelling_is_not_a_prefix_of_another_key",
+			engine: workercore.ModelDeploymentEngineVLLM, arg: "--port",
+			keys: []string{"--port-range"},
+		},
+		{
 			name:   "a_prefix_past_an_exact_owned_spelling_is_the_longer_key",
 			engine: workercore.ModelDeploymentEngineSGLang, arg: "--hicache-storage-backend-ex",
 			keys: []string{"--hicache-storage-backend-extra-config"},

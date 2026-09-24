@@ -904,7 +904,7 @@ func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorLi
 				fmt.Sprintf("every routed role must use TCP serving ports; role %q uses %s",
 					role.Name, port)))
 		}
-		if workerctrl.ModelDeploymentRoleServingScheme(role) == core.URISchemeHTTPS {
+		if workerctrl.ModelDeploymentRoleServingScheme(md.Spec.Engine.Name, role) == core.URISchemeHTTPS {
 			errs = append(errs, field.Invalid(field.NewPath("spec", "router"), md.Spec.Router,
 				fmt.Sprintf("managed router supports plaintext engine endpoints only; role %q uses HTTPS",
 					role.Name)))
@@ -983,7 +983,7 @@ func validateModelDeploymentRouterPorts(
 		len(role.Command) > 0 {
 		return errs
 	}
-	if port, ok := modelDeploymentRoleExplicitServingPort(role); ok &&
+	if port, ok := modelDeploymentRoleExplicitServingPort(md.Spec.Engine.Name, role); ok &&
 		port == workerctrl.ModelDeploymentRoleServingPort(role) {
 		errs = append(errs, field.Invalid(field.NewPath("spec", "router"), md.Spec.Router,
 			fmt.Sprintf("role %q passes --port=%d, the port its Service publishes; the routing proxy "+
@@ -1071,15 +1071,17 @@ func modelDeploymentRouterReservedPorts(
 	return reserved
 }
 
-// modelDeploymentRoleExplicitServingPort is the value of the last --port a role passes, in either
-// spelling, matching how the rendered command line is read back. The engine's base argv and the
+// modelDeploymentRoleExplicitServingPort is the value of the last --port a role passes, in any
+// spelling the engine reads as it, matching how the rendered command line is read back. The engine's base argv and the
 // connector's arguments carry no listen flag, so the role's own arguments are the only place one
 // can come from. An unparsable or valueless occurrence reports false: it is the render's problem to
 // name, not this rule's.
-func modelDeploymentRoleExplicitServingPort(role *workercore.ModelDeploymentRole) (int32, bool) {
+func modelDeploymentRoleExplicitServingPort(
+	engine string, role *workercore.ModelDeploymentRole,
+) (int32, bool) {
 	port, found := int32(0), false
 	for i, arg := range role.ExtraArgs {
-		if workerctrl.ModelDeploymentArgName(arg) != "--port" {
+		if workerctrl.ModelDeploymentListenArg(engine, arg) != "--port" {
 			continue
 		}
 		_, value, inline := strings.Cut(arg, "=")

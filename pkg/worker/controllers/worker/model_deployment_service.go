@@ -235,8 +235,8 @@ func ModelDeploymentRoleServingProtocol(role *workercore.ModelDeploymentRole) co
 }
 
 // ModelDeploymentRoleServingScheme returns the scheme a role's engine endpoint publishes.
-func ModelDeploymentRoleServingScheme(role *workercore.ModelDeploymentRole) core.URIScheme {
-	scheme, _ := modelDeploymentEngineTransport(ModelDeploymentRoleArgs(role))
+func ModelDeploymentRoleServingScheme(engine string, role *workercore.ModelDeploymentRole) core.URIScheme {
+	scheme, _ := modelDeploymentEngineTransport(engine, ModelDeploymentRoleArgs(role))
 
 	return scheme
 }
@@ -265,7 +265,7 @@ func modelDeploymentEndpoint(md *workercore.ModelDeployment) string {
 	// from what a client should dial: a role that moved its listener has a wrong published port
 	// either way, and one demanding a client certificate still serves TLS. Neither is an error, and
 	// turning this into one would refuse to publish an address that is correct.
-	scheme, _ := modelDeploymentEngineTransport(ModelDeploymentRoleArgs(role))
+	scheme, _ := modelDeploymentEngineTransport(md.Spec.Engine.Name, ModelDeploymentRoleArgs(role))
 
 	return strings.ToLower(string(scheme)) + "://" +
 		md.Name + "." + md.Namespace + ".svc:" + strconvx.Itoa(int(port.ContainerPort))
@@ -275,7 +275,7 @@ func modelDeploymentRoleEndpoint(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) string {
 	port := modelDeploymentServicePort(role)
-	scheme, _ := modelDeploymentEngineTransport(ModelDeploymentRoleArgs(role))
+	scheme, _ := modelDeploymentEngineTransport(md.Spec.Engine.Name, ModelDeploymentRoleArgs(role))
 
 	return strings.ToLower(string(scheme)) + "://" + md.Name + "-" + role.Name + "." +
 		md.Namespace + ".svc:" + strconvx.Itoa(int(port.ContainerPort))
