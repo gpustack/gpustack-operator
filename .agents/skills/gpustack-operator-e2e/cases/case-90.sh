@@ -151,5 +151,44 @@ while IFS= read -r pod; do
   fi
 done <<<"$managed_pods"
 
+if [ -n "$router_name" ]; then
+  split="$(jq -r 'any(.spec.roles[]; .kind == "prefill")' <<<"$md_json")"
+  engine="$(jq -r '.spec.engine.name' <<<"$md_json")"
+  # The sources a router does not provide for this shape are a decided contract, so a complete read
+  # lists exactly those as unsupported: the vLLM router's P/D mode exports no processing gauge.
+  want='[]'
+  [ "$router_name/$split" = vllm-router/true ] && want='["vllm_router_active_workers","vllm_router_running_requests"]'
+  got="$(jq -c '[.missing[]? | select(.reason | startswith("unsupported source:")) | .source] | unique' <<<"$second")"
+  if [ "$got" = "$want" ] && jq -e '(.traffic // []) | length > 0' <<<"$second" >/dev/null &&
+     { [ "$engine/$split" != sglang/true ] || jq -e '(.transfer // []) | length > 0' <<<"$second" >/dev/null; }; then
+    record PASS "router contract for this shape" "$router_name, unsupported $got"
+  else
+    record FAIL "router contract for this shape" "$router_name: unsupported $got, want $want; traffic $(jq -c '.traffic // [] | length' <<<"$second"), transfer $(jq -c '.transfer // [] | length' <<<"$second")"
+  fi
+  # Every Ready endpoint the router is meant to reach: the leader member of each role replica.
+  endpoints="$(jq -r --arg label "modeldeployment.gpustack.ai/member-index" 'select(.metadata.labels["app.kubernetes.io/component"] != null and
+    (.metadata.labels[$label] // "0") == "0" and any(.status.conditions[]?; .type == "Ready" and .status == "True")) |
+    .status.podIP' <<<"$managed_pods" | sort -u)"
+  want_n="$(grep -c . <<<"$endpoints")"
+  seen=""
+  if [ "$router_name/$split" = vllm-router/true ]; then
+    # This mode exports no worker gauge; the per-worker request counter names every worker that
+    # served, so this read needs traffic.
+    router_pod="$(jq -r 'select(.metadata.labels["modeldeployment.gpustack.ai/router"] != null) | .metadata.name + " " + .status.podIP' <<<"$managed_pods" | head -1)"
+    seen="$(kubectl -n "$NS" exec "$PROBE" -- curl -fsS --max-time 5 "http://${router_pod#* }:9090/metrics" 2>/dev/null |
+      grep -o '^vllm_router_processed_requests_total{worker="[^"]*"' | sed 's/.*:\/\///; s/:[0-9]*"$//' | sort -u | grep -cxF -f <(printf '%s\n' "$endpoints"))"
+  else
+    seen="$(jq -r '[.processing[]? | select(.name == "router-backends" or .name == "router-reported-workers") | .value] | add // empty' <<<"$second")"
+  fi
+  if [ "${seen:-0}" = "$want_n" ]; then
+    record PASS "router sees every serving endpoint" "$seen of $want_n"
+  else
+    record FAIL "router sees every serving endpoint" "router reports ${seen:-nothing}, $want_n Ready endpoint Pods"
+  fi
+fi
+while IFS= read -r line; do
+  record INFO "image" "$line"
+done < <(jq -r '.metadata.name as $p | .status.containerStatuses[]? | "\($p) \(.name) runs \(.imageID)"' <<<"$managed_pods")
+
 print_rows
 [ "$FAILS" -eq 0 ]
