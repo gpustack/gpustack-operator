@@ -59,7 +59,7 @@ vLLM-Ascend snapshot has been checked.
 | `decode-transfer-waiting` | — | `num_decode_transfer_queue_reqs`: requests whose KV blocks are still arriving | decode of a pair |
 | `local-prefix` | `prefix_cache_*`: prompt tokens found in the Pod's own KV cache | — | every role |
 | `external-store` | `external_prefix_cache_*`: of the tokens not found locally, those the KV connector supplies | — | every role but decode of a pair, when the deployment attaches a KV cache pool |
-| `device-prefix`, `host-prefix`, `storage-prefix` | — | `prefill_effective_tokens_total` by mode: prefill tokens found on the device, in host memory, and in the storage backend | every role but decode of a pair |
+| `device-prefix`, `host-prefix`, `storage-prefix` | — | `prefill_effective_tokens_total` by mode: prefill tokens found on the device, in host memory, and in the storage backend | every role but decode of a pair; `host-prefix` and `storage-prefix` only where the Pod builds that tier |
 | `ttft` | `time_to_first_token_seconds` | `time_to_first_token_seconds` | vLLM every role; SGLang every role but prefill of a pair |
 | `tpot` | `request_time_per_output_token_seconds`: zero for a request with at most one output token | — | every role but prefill of a pair |
 | `itl` | `inter_token_latency_seconds` | `inter_token_latency_seconds`, exported once a request streams | every role but prefill of a pair |
@@ -82,9 +82,14 @@ arrive.
 SGLang keeps those in separate queues: decode's transfer queue is `decode-transfer-waiting`; its
 preallocation queue, and prefill's bootstrap and in-flight queues, are not read.
 
-SGLang exports all three prefill modes whatever its cache tiers, so `host-prefix` and
-`storage-prefix` appear as measured rates of zero on a server with no host cache or storage backend,
-not as unsupported sources.
+**SGLang `host-prefix` and `storage-prefix` are read only where the Pod builds that tier.** SGLang
+exports every hit mode from its start, and a tier the Pod does not build stays at zero, which would
+read as a measured miss. Elsewhere `missing[]` names the scope as an unsupported source.
+
+`host-prefix` is read where the Pod's arguments select a cache with a host tier:
+`--enable-hierarchical-cache`, which the operator renders with a KV cache pool, or a user's own
+`--enable-lmcache`, `--enable-flexkv` or `--radix-cache-backend flexkv`. `storage-prefix` is read
+where the deployment attaches a pool, which renders the storage backend.
 
 | Field | `llm-d-router` | `vllm-router` | `vllm-router`, P/D mode | `sglang-gateway` |
 |---|---|---|---|---|
@@ -119,9 +124,9 @@ no new queries produces a `missing[]` entry rather than a fabricated zero rate.
 vLLM reports `local-prefix` and, on a Pod that attaches a KV cache pool and is not the decode half
 of a pair, `external-store` from separate prefix-cache hit and query counters.
 
-SGLang reports `device-prefix`, `host-prefix` and `storage-prefix` from
-`prefill_effective_tokens_total` modes. Each SGLang tier uses the sum of `input` and all three hit
-modes as its denominator. Ratios with different scopes or sampling windows stay per Pod; they are
+SGLang reports `device-prefix` and, where the Pod builds those tiers, `host-prefix` and
+`storage-prefix` from `prefill_effective_tokens_total` modes. Each SGLang tier uses the sum of
+`input` and all three hit modes as its denominator. Ratios with different scopes or sampling windows stay per Pod; they are
 not averaged into one deployment-wide cache-hit claim.
 
 vLLM exports its external prefix cache counters without a KV connector too, and they never move. On
@@ -195,8 +200,8 @@ retries-exhausted counter beside the router's request counter, and SGLang's tran
 counter beside the transfer size. No fraction is derived from it.
 
 The second is a source the deployment's shape does not provide: the vLLM router's P/D processing
-gauges, and `external-store` on a vLLM Pod without a KV connector or without a pool, or on the
-decode half of a vLLM pair, all described above.
+gauges, `external-store` on a vLLM Pod without a KV connector or without a pool, or on the decode
+half of a vLLM pair, and an SGLang tier the Pod does not build, all described above.
 
 The third is a Pod that served no request in the sampling window, which its TTFT histogram shows by
 recording none. Its latency histograms and cache-hit counters then have no new sample and are listed

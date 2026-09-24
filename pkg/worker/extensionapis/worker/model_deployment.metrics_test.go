@@ -29,6 +29,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
 const metricsVLLMFixture = `# TYPE vllm:num_requests_running gauge
@@ -919,7 +920,7 @@ func TestModelDeploymentMetricsHandler_SGLangPDReadsEachSeriesFromItsHalf(t *tes
 	for _, hit := range result.CacheHits {
 		assert.Equal(t, "prompt-pod", hit.Pod, "only the prefill half prefills")
 	}
-	assert.Len(t, result.CacheHits, 3)
+	assert.Len(t, result.CacheHits, 1, "the prefill half renders neither a host nor a storage tier")
 	latency := map[string]string{}
 	for _, metric := range result.Latency {
 		latency[metric.Pod+"/"+metric.Name] = metric.Source
@@ -928,9 +929,11 @@ func TestModelDeploymentMetricsHandler_SGLangPDReadsEachSeriesFromItsHalf(t *tes
 		"generation-pod/ttft": "sglang:time_to_first_token_seconds",
 		"generation-pod/itl":  "sglang:inter_token_latency_seconds",
 	}, latency)
-	assert.Equal(t, []worker.ModelDeploymentMetricMissing{{
-		Pod: "prompt-pod", Source: "sglang:num_transfer_failed_reqs_total", Reason: modelDeploymentLabeledCounterUnexported,
-	}}, result.Missing)
+	assert.Equal(t, []worker.ModelDeploymentMetricMissing{
+		{Pod: "prompt-pod", Source: "host-prefix", Reason: modelDeploymentSGLangNoHostTier},
+		{Pod: "prompt-pod", Source: "sglang:num_transfer_failed_reqs_total", Reason: modelDeploymentLabeledCounterUnexported},
+		{Pod: "prompt-pod", Source: "storage-prefix", Reason: modelDeploymentSGLangNoStorageTier},
+	}, result.Missing)
 	assert.False(t, result.Partial)
 }
 
@@ -1108,6 +1111,199 @@ func TestModelDeploymentMetricsHandler_VLLMExternalStoreIsReadOnlyFromAStore(t *
 	}
 }
 
+// metricsSGLangRoleWindow merges two busy SGLang reads of a Pod of the given role, "server" in an
+// unpaired deployment or "prompt" in a prefill/decode pair, rendered with the given arguments. Its
+// host and storage hits both move, so whether a tier is read depends on the arguments alone.
+func metricsSGLangRoleWindow(t *testing.T, role string, args ...string) *worker.ModelDeploymentMetrics {
+	t.Helper()
+	md := metricsModelDeployment()
+	md.Spec.Engine.Name = "sglang"
+	if role != "server" {
+		md.Spec.Roles = []workercore.ModelDeploymentRole{
+			{Name: "prompt", Kind: workercore.ModelDeploymentRoleKindPrefill},
+			{Name: "generation", Kind: workercore.ModelDeploymentRoleKindDecode},
+		}
+	}
+	first := metricsFixture(t, "sglang_server_busy_first", "sglang", "")
+	second := metricsFixture(t, "sglang_server_busy_second", "sglang", "")
+	for scope, hits := range map[string]float64{"host-prefix": 30, "storage-prefix": 20} {
+		first.counters[scope] = modelDeploymentCounterPair{hits: 0, queries: first.counters["device-prefix"].queries}
+		second.counters[scope] = modelDeploymentCounterPair{hits: hits, queries: second.counters["device-prefix"].queries}
+	}
+	pod := metricsServerPod("pod", append([]string{"python3", "-m", "sglang.launch_server", "--model-path", "Qwen/Qwen2.5-0.5B-Instruct"}, args...)...)
+	pod.Labels["app.kubernetes.io/component"] = role
+	return mergeMetricsWindow(md, pod, false, first, second)
+}
+
+func TestModelDeploymentMetricsHandler_SGLangTiersAreReadOnlyWhereRendered(t *testing.T) {
+	pool := []string{"--hicache-storage-backend", "mooncake", "--enable-hierarchical-cache"}
+	tests := []struct {
+		name        string
+		role        string
+		args        []string
+		wantHost    bool
+		wantStorage bool
+	}{
+		{"unpaired server without a pool", "server", nil, false, false},
+		{"unpaired server with a pool", "server", pool, true, true},
+		{"prefill of a pair without a pool", "prompt", nil, false, false},
+		{"prefill of a pair with a pool", "prompt", pool, true, true},
+		{"hierarchical cache without a storage backend", "server", []string{"--enable-hierarchical-cache"}, true, false},
+		{"hierarchical cache by its unique prefix", "server", []string{"--enable-hier"}, true, false},
+		{"LMCache", "server", []string{"--enable-lmcache"}, true, false},
+		{"FlexKV", "server", []string{"--enable-flexkv"}, true, false},
+		{"FlexKV radix cache backend as a separate value", "server", []string{"--radix-cache-backend", "flexkv"}, true, false},
+		{"FlexKV radix cache backend inline", "server", []string{"--radix-cache-backend=flexkv"}, true, false},
+		{"radix cache backend with no known host tier", "server", []string{"--radix-cache-backend=custom"}, false, false},
+		{"host pool ratio alone", "server", []string{"--hicache-ratio", "2"}, false, false},
+		{"LMCache config file alone", "server", []string{"--lmcache-config-file", "lmcache.yaml"}, false, false},
+		{"storage backend extra config alone", "server", []string{"--hicache-storage-backend-extra-config", "{}"}, false, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := metricsSGLangRoleWindow(t, tc.role, tc.args...)
+			hits := map[string]float64{}
+			for _, hit := range result.CacheHits {
+				hits[hit.Scope] = hit.Hits
+			}
+			wantHits := map[string]float64{"device-prefix": 35928}
+			var wantMissing []worker.ModelDeploymentMetricMissing
+			if tc.wantHost {
+				wantHits["host-prefix"] = 30
+			} else {
+				wantMissing = append(wantMissing, worker.ModelDeploymentMetricMissing{
+					Pod: "pod", Source: "host-prefix", Reason: modelDeploymentSGLangNoHostTier,
+				})
+			}
+			if tc.wantStorage {
+				wantHits["storage-prefix"] = 20
+			} else {
+				wantMissing = append(wantMissing, worker.ModelDeploymentMetricMissing{
+					Pod: "pod", Source: "storage-prefix", Reason: modelDeploymentSGLangNoStorageTier,
+				})
+			}
+			assert.Equal(t, wantHits, hits)
+			var tiers []worker.ModelDeploymentMetricMissing
+			for _, missing := range result.Missing {
+				if missing.Source == "host-prefix" || missing.Source == "storage-prefix" {
+					tiers = append(tiers, missing)
+				}
+			}
+			assert.ElementsMatch(t, wantMissing, tiers)
+			assert.False(t, modelDeploymentMissingIsPartial(tiers))
+		})
+	}
+}
+
+// metricsSGLangRenderedCommand is the command line the operator renders for an SGLang role, through
+// the connector synthesis the reconciler runs: a role in a pair or with a pool gets a connector, and
+// only a pool renders a storage backend and, on every role but decode of a pair, the hierarchical
+// cache.
+func metricsSGLangRenderedCommand(t *testing.T, kind workercore.ModelDeploymentRoleKind, pool bool) []string {
+	t.Helper()
+	command, err := workerctrl.ModelDeploymentEngineCommand(workercore.ModelDeploymentEngineSGLang, "Qwen/Qwen2.5-0.5B-Instruct")
+	require.NoError(t, err)
+	if !pool && kind == "" {
+		return command
+	}
+	in := workerctrl.ModelDeploymentConnectorInput{
+		Engine: workercore.ModelDeploymentEngineSGLang, Kind: kind, Manufacturer: "nvidia",
+		Disaggregated: kind != "", KVTransfer: kind != "",
+	}
+	if pool {
+		in.MasterServerAddress = "kv-master.team.svc:50051"
+		in.Protocols = []string{"tcp"}
+	}
+	connector, err := workerctrl.SynthesizeModelDeploymentConnector(in)
+	require.NoError(t, err)
+	command = append(command, connector.Args...)
+	for _, group := range connector.DefaultedArgs {
+		command = append(command, group...)
+	}
+	return command
+}
+
+func TestModelDeploymentMetricsHandler_SGLangTiersFollowTheRenderedCommand(t *testing.T) {
+	tests := []struct {
+		name       string
+		kind       workercore.ModelDeploymentRoleKind
+		pool       bool
+		wantScopes []string
+	}{
+		{"unpaired server without a pool", "", false, []string{"device-prefix"}},
+		{"unpaired server with a pool", "", true, []string{"device-prefix", "host-prefix", "storage-prefix"}},
+		{"prefill of a pair without a pool", workercore.ModelDeploymentRoleKindPrefill, false, []string{"device-prefix"}},
+		{"prefill of a pair with a pool", workercore.ModelDeploymentRoleKindPrefill, true, []string{"device-prefix", "host-prefix", "storage-prefix"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var stage atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				name := "sglang_server_busy_first.prom"
+				if stage.Load() == 1 {
+					name = "sglang_server_busy_second.prom"
+				}
+				body, err := os.ReadFile("testdata/model_deployment_metrics/" + name)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				_, _ = w.Write(body)
+			}))
+			defer server.Close()
+			u, err := url.Parse(server.URL)
+			require.NoError(t, err)
+			host, port, err := net.SplitHostPort(u.Host)
+			require.NoError(t, err)
+
+			md := metricsModelDeployment()
+			md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+			if tc.kind != "" {
+				md.Spec.Roles = []workercore.ModelDeploymentRole{
+					{Name: "server", Kind: workercore.ModelDeploymentRoleKindPrefill},
+					{Name: "generation", Kind: workercore.ModelDeploymentRoleKindDecode},
+				}
+			}
+			if tc.pool {
+				md.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "pool"}}
+			}
+			pod := metricsEnginePod(md, "chat-server-1", host, port)
+			pod.Spec.Containers[0].Command = metricsSGLangRenderedCommand(t, tc.kind, tc.pool)
+			cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(md, pod).Build()
+			h := &ModelDeploymentMetricsHandler{APIReader: cli, HTTPClient: server.Client()}
+			key := types.NamespacedName{Namespace: md.Namespace, Name: md.Name}
+
+			_, err = h.OnGet(context.Background(), key, ctrlcli.GetOptions{})
+			require.NoError(t, err)
+			stage.Store(1)
+			obj, err := h.OnGet(context.Background(), key, ctrlcli.GetOptions{})
+			require.NoError(t, err)
+			result := obj.(*worker.ModelDeploymentMetrics)
+
+			var scopes []string
+			for _, hit := range result.CacheHits {
+				scopes = append(scopes, hit.Scope)
+			}
+			assert.ElementsMatch(t, tc.wantScopes, scopes)
+			var tiers []worker.ModelDeploymentMetricMissing
+			for _, missing := range result.Missing {
+				if missing.Source == "host-prefix" || missing.Source == "storage-prefix" {
+					tiers = append(tiers, missing)
+				}
+			}
+			if tc.pool {
+				assert.Empty(t, tiers)
+			} else {
+				assert.ElementsMatch(t, []worker.ModelDeploymentMetricMissing{
+					{Pod: "chat-server-1", Source: "host-prefix", Reason: modelDeploymentSGLangNoHostTier},
+					{Pod: "chat-server-1", Source: "storage-prefix", Reason: modelDeploymentSGLangNoStorageTier},
+				}, tiers)
+			}
+			assert.False(t, modelDeploymentMissingIsPartial(tiers))
+		})
+	}
+}
+
 func TestModelDeploymentMetricsHandler_VLLMPDPrefillDoesNotExpectTPOT(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1192,6 +1388,8 @@ func TestModelDeploymentMetricsHandler_IdleServerHasNoNewSample(t *testing.T) {
 			want: []worker.ModelDeploymentMetricMissing{
 				{Pod: "server", Source: "sglang:time_to_first_token_seconds", Reason: modelDeploymentIdleWindow},
 				{Pod: "server", Source: "sglang:inter_token_latency_seconds", Reason: modelDeploymentLabeledHistogramUnexported},
+				{Pod: "server", Source: "host-prefix", Reason: modelDeploymentSGLangNoHostTier},
+				{Pod: "server", Source: "storage-prefix", Reason: modelDeploymentSGLangNoStorageTier},
 			},
 		},
 		{
@@ -1237,6 +1435,8 @@ func TestModelDeploymentMetricsHandler_IdleServerHasNoNewSample(t *testing.T) {
 			},
 			want: []worker.ModelDeploymentMetricMissing{
 				{Pod: "server", Source: "sglang:inter_token_latency_seconds", Reason: "metric is absent"},
+				{Pod: "server", Source: "host-prefix", Reason: modelDeploymentSGLangNoHostTier},
+				{Pod: "server", Source: "storage-prefix", Reason: modelDeploymentSGLangNoStorageTier},
 			},
 			wantPartial: true,
 		},
