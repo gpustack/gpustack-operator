@@ -895,6 +895,12 @@ in it, so the window is `intervalSeconds` wide and the cache is partially cold a
 rather than entirely cold. That is the difference between this and the oplog, and it is the whole
 of it **for objects**.
 
+**Corrected after shipping.** "Partially cold" does not hold, and the snapshot is refused at admission
+now. A restore does not check that member memory still holds the key it records there: once a forced
+remove, or a leader before the one taking over, has given that memory to other keys, the restored
+index returns another key's bytes instead of a miss — a wrong block, not a cold one. The rule is
+carried by `docs/kv-cache/leader.md`, under High availability.
+
 **REQUIRED: C1 reads what came back, not whether something came back.** What a snapshot carries is
 the master's metadata shards and its segment state; whatever the store holds as pure runtime state
 beside them is a separate question that spec has not settled per property — soft pinning is the one
