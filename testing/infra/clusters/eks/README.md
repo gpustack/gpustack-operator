@@ -126,6 +126,31 @@ Add `-var='switch_kube_context=false'` to keep the context you are already on:
 the cluster is still merged in, and reached with
 `kubectl --context "$(terraform output -raw cluster_name)" get nodes`.
 
+To remove one chosen node from a live group, suspend the group's `AZRebalance` process first.
+Without it, terminating the last node of a zone makes the group launch a replacement in that
+zone and then terminate a different node to get back to its desired count, so the node you
+meant to keep is the one that goes. The suspension is deleted with the group on destroy.
+
+```bash
+asg="$(aws eks describe-nodegroup --cluster-name "$(terraform output -raw cluster_name)" \
+  --nodegroup-name <group> --query 'nodegroup.resources.autoScalingGroups[0].name' --output text)"
+aws autoscaling suspend-processes --auto-scaling-group-name "$asg" --scaling-processes AZRebalance
+kubectl drain <node> --ignore-daemonsets --delete-emptydir-data
+aws autoscaling terminate-instance-in-auto-scaling-group --instance-id <instance-id> \
+  --should-decrement-desired-capacity
+```
+
+To free a node's disk by removing images, remove each image's CRI reference as well as its
+repository reference. The CRI reference is named by the image's config digest (`sha256:...`,
+labelled `io.cri-containerd.image=managed`) and pins the layers on its own, so deleting only the
+`repo@digest` reference frees nothing. It does not carry the repository name, so a listing
+filtered by that name does not show it. Check that no container still uses the image first.
+
+```bash
+ctr -n k8s.io images ls | grep -e '<repo>' -e '<config digest>'
+ctr -n k8s.io images rm '<repo>@sha256:...' 'sha256:<config digest>'
+```
+
 Tear down:
 
 ```bash
