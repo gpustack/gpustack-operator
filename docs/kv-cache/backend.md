@@ -592,7 +592,7 @@ So `kubectl get kvcb -w` moves on its own.
 
 > **15 seconds is an interval, not a maximum age.** The timer starts after a pass finishes, and a
 > pass makes up to three sequential HTTP reads. More importantly, `status.members` is **deliberately
-> retained** when the segment listing cannot be read — a stale list plus `MembersMounted=False` is
+> retained** when a read of the segment listing fails — a stale list plus `MembersMounted=False` is
 > more honest than an empty one — so it has no age bound at all while that read keeps failing. The
 > condition is what says whether the list was refreshed; the list alone never does.
 
@@ -655,6 +655,24 @@ The only exception is a development object whose stored member rows predate the 
 client IDs. Such rows cannot be written under the current list schema, so the operator omits the
 whole legacy listing, explains that migration in `MembersMounted`, and replaces it on the next
 successful leader read. No released version contained the former CRD shape.
+
+**A master before 0.3.12 serves no segment listing, so membership reads `Unknown` on it.** Mooncake
+adds `GET /get_segments_detail` in 0.3.12; the 0.3.10 and 0.3.11 lines answer it with 404 while
+`/health` and `/metrics` serve normally. There `MembersMounted` is `Unknown` with reason
+`SegmentListingNotServed`, `status.members` is empty, and a serving leader reads `Ready`.
+
+`PoolWrites` on such a leader is still `True` once it has seen a put end, since that counter is on
+`/metrics`; before that it is `Unknown` with the same reason, because its other verdicts read the
+members' allocations off the listing.
+
+Two states still read `MembersMounted=False` and `Degraded` there: a member Pod that will not start,
+read from the Pod's own status, and a `status.capacity.total` of zero, reported as `NoSegments` —
+the gauge sums the mounted segments, so zero is every member unmounted.
+
+> **Why a 404 is not a failed scrape** — waiting does not change a version, so `False` would hold
+> such a backend at `Degraded` for as long as it runs. Any other failure — a 5xx, a timeout, nothing
+> answering — is a leader failing a route it serves, and still reads `ListingFailed` with the
+> previous list kept.
 
 ## Growing and shrinking a group
 

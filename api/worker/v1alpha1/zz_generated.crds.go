@@ -3254,7 +3254,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 											XListType: ptr.To[string]("map"),
 										},
 										"members": {
-											Description: "Members is one entry per observed store member.",
+											Description: "Members is one entry per observed store member. It is empty on a leader whose master version\nserves no segment listing, where MembersMounted is Unknown.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{
@@ -3290,7 +3290,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 															Type:        "string",
 														},
 														"state": {
-															Description: "State is the member's state AS THE LEADER REPORTS IT, read from the leader's own segment\nlisting rather than inferred from the member Pod. The states the store defines, in this API's\ncasing: OK, Draining, Drained, GracefullyUnmounting, Unmounting, Undefined.\n- Draining and the two unmounting states are what a shrink passes through, so the field can\ndistinguish a member on its way out from one that is simply gone. That is the whole reason\nit carries the store's vocabulary instead of a summary of it.\n- It carries no \"unreached\" sentinel, because there is no pass that would write one: a\nlisting that cannot be read leaves the PREVIOUS entries in place and says so through\nMembersMounted, rather than rewriting them as blank. Whether what is here was just\nrefreshed is that condition's question, and this field never answers it.\n- It carries no enum marker, deliberately, unlike every enum on the spec side. The value's\ndomain belongs to the store: a store version that adds a state would make the whole status\nwrite fail validation — not this one field, the entire object — leaving every other status\nfield frozen at its last value. Phase, further up, is open for the same reason.",
+															Description: "State is the member's state AS THE LEADER REPORTS IT, read from the leader's own segment\nlisting rather than inferred from the member Pod. The states the store defines, in this API's\ncasing: OK, Draining, Drained, GracefullyUnmounting, Unmounting, Undefined.\n- Draining and the two unmounting states are what a shrink passes through, so the field can\ndistinguish a member on its way out from one that is simply gone. That is the whole reason\nit carries the store's vocabulary instead of a summary of it.\n- It carries no \"unreached\" sentinel, because there is no pass that would write one: a\nlisting read that fails leaves the PREVIOUS entries in place and says so through\nMembersMounted, rather than rewriting them as blank. Whether what is here was just\nrefreshed is that condition's question, and this field never answers it.\n- It carries no enum marker, deliberately, unlike every enum on the spec side. The value's\ndomain belongs to the store: a store version that adds a state would make the whole status\nwrite fail validation — not this one field, the entire object — leaving every other status\nfield frozen at its last value. Phase, further up, is open for the same reason.",
 															Type:        "string",
 														},
 													},
