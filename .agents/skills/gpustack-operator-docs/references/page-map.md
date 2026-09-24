@@ -261,7 +261,8 @@ transition, so do not "modernize" its version numbers.
 (`commands.md`), and the KV cache injection contract — opt-in keys, what each engine receives, every
 refusal with its fix (`kv-cache-injection.md`), and the lowest engine release each deployment
 shape has been run with, with its runner image's Mooncake client and store line
-(`engine-versions.md`).
+(`engine-versions.md`), and which replica each managed router picks and how to switch its policy
+(`model-deployment-routing.md`).
 
 **Not** — `commands.md` states what a flag does, not when to reach for the command. The procedure a
 one-shot belongs to lives on its operator page (`docs/operation/preflight.md` for `device-manager
@@ -270,7 +271,9 @@ preflight`), and the reference row links to it rather than restating it.
 **Pinned** — `kv-cache-injection.md` carries per-engine facts read from engine source at named
 versions. Those rows go stale silently when an engine ships a new build, so a change there is a
 re-read rather than an edit; the same facts are mirrored in `pkg/worker/kvcache/inject/engine.go`,
-which carries the line numbers to re-read from.
+which carries the line numbers to re-read from. `model-deployment-routing.md` is the same kind of
+page for the routers: its defaults and `--policy` values are read from each router's source at the
+version `pack/llm-router/Dockerfile` pins, so bumping one of those `ARG`s is a re-read of that page.
 
 `instance-type-unit-resources.md` is matched row-by-row by `TestUnitResourcesPresetDocs`,
 by path. Do not rename it or reshape its tables. `commands.md` has no test behind it: its flag tables
