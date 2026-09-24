@@ -12,12 +12,14 @@ import (
 	core "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlcontroller "sigs.k8s.io/controller-runtime/pkg/controller"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -652,7 +654,13 @@ type cardBudget struct {
 // reason it is not here is the DIRECTION of the error, which no order changes: a demand only ever
 // takes cards it may itself use, so this reports a shortage that is not there — never room that is
 // not there.
-func nodeDevicesFeasibility(pool []scopedDevices, demands []familyDemand) (kueue.CheckState, string) {
+//
+// The inflight demands are those of Workloads already answered Ready whose Pods the ledger does not
+// hold yet. They are fitted first, on the same budget, so this Workload is judged only against the
+// room they leave. An inflight demand that does not fit keeps the room it did take: whatever it
+// cannot be given here, it can still be given by the device plugin, and leaving it out would report
+// room that is promised.
+func nodeDevicesFeasibility(pool []scopedDevices, inflight, demands []familyDemand) (kueue.CheckState, string) {
 	message := verdictMessage(kueue.CheckStateReady, nil)
 	if len(demands) == 0 {
 		return kueue.CheckStateReady, message
@@ -660,23 +668,39 @@ func nodeDevicesFeasibility(pool []scopedDevices, demands []familyDemand) (kueue
 
 	cards := collectCards(pool)
 	budgets := make([]cardBudget, len(cards))
+	for _, d := range inflight {
+		fitDemand(cards, budgets, d)
+	}
 	for _, d := range demands {
 		var state kueue.CheckState
-		switch d.family {
-		case nodefeature.ResourceFamilyPartitioned:
-			state, message = fitPartitionDemand(cards, budgets, d)
-		case nodefeature.ResourceFamilyShared:
-			state, message = fitSharedDemand(cards, budgets, d)
-		case nodefeature.ResourceFamilySliced:
-			state, message = fitSlicedDemand(cards, budgets, d)
-		default:
-			state, message = fitExclusiveDemand(cards, budgets, d)
-		}
+		state, message = fitDemand(cards, budgets, d)
 		if state != kueue.CheckStateReady {
+			if len(inflight) != 0 {
+				message += _inflightClause
+			}
 			return state, message
 		}
 	}
 	return kueue.CheckStateReady, message
+}
+
+// _inflightClause ends a Retry verdict reached with inflight demands counted, so an operator who
+// reads a free card in the ledger knows it is promised rather than overlooked.
+const _inflightClause = "; cards promised to Workloads admitted before this one, whose Pods have not" +
+	" received them yet, are counted as taken"
+
+// fitDemand fits one demand by its family, charging the room it takes to budgets.
+func fitDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (kueue.CheckState, string) {
+	switch d.family {
+	case nodefeature.ResourceFamilyPartitioned:
+		return fitPartitionDemand(cards, budgets, d)
+	case nodefeature.ResourceFamilyShared:
+		return fitSharedDemand(cards, budgets, d)
+	case nodefeature.ResourceFamilySliced:
+		return fitSlicedDemand(cards, budgets, d)
+	default:
+		return fitExclusiveDemand(cards, budgets, d)
+	}
 }
 
 // withoutRoles strips the provenance from every demand, so every verdict about them reads exactly
@@ -906,6 +930,12 @@ func remainingProfileCount(profiles []workercore.AcceleratorProfileCount, profil
 type NodeDevicesAdmissionReconciler struct {
 	Client    ctrlcli.Client
 	APIReader ctrlcli.Reader
+
+	// readyUnobserved holds, by namespace and name, each Workload this controller answered Ready
+	// whose Ready the cache has not shown yet, as it was written. The next judgment reads other
+	// Workloads from the cache, which may still predate that write, and would otherwise not count
+	// the Workload as inflight. It is read and written only from Reconcile, which runs one at a time.
+	readyUnobserved map[types.NamespacedName]*kueue.Workload
 }
 
 var _ ctrlreconcile.Reconciler = (*NodeDevicesAdmissionReconciler)(nil)
@@ -1013,7 +1043,30 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{}, nil
 	}
 
-	state, message := nodeDevicesFeasibility(devices, demands)
+	// The ledger is rebuilt from the Pods bound to each node, and the Pods already charged are read
+	// from that same list, so an inflight Workload is counted either in the ledger or as inflight,
+	// never in both and never in neither.
+	charged, err := r.chargeLedgers(ctx, devices, demands)
+	if err != nil {
+		logger.Error(err, "rebuild ledgers from bound pods")
+		return ctrl.Result{}, err
+	}
+	inflight, unresolvedNode, err := r.inflightDemands(ctx, wl, devices, charged)
+	if err != nil {
+		logger.Error(err, "collect inflight demands")
+		return ctrl.Result{}, err
+	}
+	if unresolvedNode != "" {
+		logger.Info("holding workload behind an inflight workload whose flavor resolves to no cards",
+			"node", unresolvedNode)
+		if err := r.applyVerdict(ctx, wl, checks, kueue.CheckStateRetry, unresolvedInflightMessage(unresolvedNode)); err != nil {
+			logger.Error(err, "patch admission check state")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	state, message := nodeDevicesFeasibility(devices, inflight, demands)
 
 	if err := r.applyVerdict(ctx, wl, checks, state, message); err != nil {
 		logger.Error(err, "patch admission check state")
@@ -1022,7 +1075,7 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 	// demandsSummary formats eagerly, so gate it: this runs on every Workload reconcile.
 	if logger.V(2).Enabled() {
 		logger.V(2).Info("evaluated node-devices admission",
-			"state", state, "demands", demandsSummary(demands))
+			"state", state, "demands", demandsSummary(demands), "inflight", demandsSummary(inflight))
 	}
 	return ctrl.Result{}, nil
 }
@@ -1279,13 +1332,18 @@ func (r *NodeDevicesAdmissionReconciler) applyVerdict(
 	if !changed {
 		return nil
 	}
-	return kueueworkload.PatchStatus(ctx, r.Client, wl, ctrlcli.FieldOwner(_NodeDevicesFieldOwner),
+	err := kueueworkload.PatchStatus(ctx, r.Client, wl, ctrlcli.FieldOwner(_NodeDevicesFieldOwner),
 		func(w *kueue.Workload) (bool, error) {
 			for i := range desired {
 				kueueworkload.SetAdmissionCheckState(&w.Status.AdmissionChecks, desired[i], clock.RealClock{})
 			}
 			return true, nil
 		})
+	if err != nil {
+		return err
+	}
+	r.recordVerdict(wl, desired, state)
+	return nil
 }
 
 // desiredCheckStates renders the verdict for every check this controller owns, and reports whether
@@ -1433,6 +1491,10 @@ func (r *NodeDevicesAdmissionReconciler) SetupController(_ context.Context, opts
 				return kueueworkload.HasQuotaReservation(wl) && len(wl.Status.AdmissionChecks) > 0
 			})),
 		).
+		// One judgment at a time. Each judgment counts the Workloads answered Ready before it as
+		// inflight; two judgments running together would each miss the other and both answer Ready
+		// for the same card. readyUnobserved relies on it too.
+		WithOptions(ctrlcontroller.Options{MaxConcurrentReconciles: 1}).
 		Complete(r)
 }
 

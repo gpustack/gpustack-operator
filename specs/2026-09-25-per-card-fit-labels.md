@@ -340,6 +340,11 @@ a mocked accelerator NodeFeature and a mocked per-card `Devices` ledger. Node A 
   plugin's `Allocate`, and the label follows within the dedup window. A Workload placed inside that
   window still reaches Gate 3, which answers `Retry`. → The next placement reads the refreshed label
   and moves on, so the Workload converges in one cycle instead of livelocking. Documented.
+  **Corrected after shipping.** Gate 3 answered `Retry` there only once the ledger had moved. Between
+  one Workload's `Ready` and its Pods' `Allocate` the ledger had not moved either. Gate 3 answered
+  `Ready` for a second Workload onto the same card, and a two-Workload run on a four-card node
+  oversubscribed that card twice out of two. Gate 3 now counts such a Workload as taken; the rule is on
+  the Admission page (`docs/architecture/admission.md`), under Gate 3.
 - **Several Pods of one PodSet, several PodSets, or one Pod asking for several sliced cards, on one
   node.** A template-built Workload can carry `<base>.sliced: 2`, which the Pod webhook would refuse
   on a Pod. The label admits a node when one

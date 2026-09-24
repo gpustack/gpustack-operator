@@ -72,9 +72,28 @@ modes](installation-modes.md#the-chart-deploys-workloads-the-worker-applies-the-
 This reconciler keeps it `Active`; the accelerated queue references it in `spec.admissionChecksStrategy`
 only once it is ([`NodeQueueReconciler`](scheduling-chain.md#nodequeuereconciler-node_queuego)).
 
-Once Kueue reserves quota, the check reads the pool's `Devices` ledger (uncached, via `APIReader`) for
-per-accelerator `Remaining ≥ demand`: a whole accelerator for exclusive, `.sliced.units` for sliced, an
-owner share for shared, a free placement of the profile for a partition.
+Once Kueue reserves quota, the check reads each node's `Devices` ledger for per-accelerator
+`Remaining ≥ demand`: a whole accelerator for exclusive, `.sliced.units` for sliced, an owner share for
+shared, a free placement of the profile for a partition. It rebuilds that ledger from the Pods bound to
+the node, one uncached list via `APIReader`, with the device manager's own aggregation.
+
+**A Workload answered `Ready` holds its accelerators before its Pods do.** The ledger moves only when
+`Allocate` records a Pod, after Kueue admits the Workload, the scheduler binds its Pods and the kubelet
+admits them. A second Workload judged in that window would see the first one's accelerators as free.
+
+- So the check first fits every other Workload on the node that is admitted or holds this check's
+  `Ready`: the Pods its topology assignment puts there, minus those the rebuilt ledger already holds.
+- A Pod is held once its allocation record names every container asking for an accelerator. Kueue's
+  `kueue.x-k8s.io/workload` annotation and `kueue.x-k8s.io/podset` label tie it to its Workload.
+- The ledger and the held Pods come from the same list, so no Pod is counted twice or missed. The
+  published `Devices` status is rebuilt later and would lag that list.
+- The check judges one Workload at a time, and remembers each `Ready` it wrote until the cache shows it.
+
+> **Known behavior: the inflight count follows the allocator's hint.** An inflight slice is fitted on
+> the accelerator the allocator's packing order prefers, which the kubelet normally takes. A kubelet
+> that ignores the hint can put it elsewhere, and a slice judged after it can still oversubscribe an
+> accelerator, because `Allocate` does not gate a slice on units. A Workload without a hostname-level
+> assignment is not counted as inflight; every queue this operator derives assigns one.
 
 Slices share an accelerator the way the allocator packs them: each is charged its `.sliced.units` and
 one of the accelerator's slice tokens on the fullest accelerator that still fits it, so two 30 % slices
@@ -127,6 +146,8 @@ What still retries:
 
 - **A label not yet refreshed.** A Workload placed before the label follows an allocation still reaches
   this check and retries once; the next placement reads the new value.
+- **Room promised to a Workload that is still starting.** The label cannot see it, so TAS may place a
+  Workload on those accelerators. The check holds it until the first Workload's Pods are allocated.
 - **Several Pods, or several accelerators, on one node.** The label admits a node when one accelerator
   fits one Pod, so two Pods of one PodSet, two PodSets, or one template-built Pod asking for two
   sliced accelerators can still be placed where only one fits. That does not converge by itself.
