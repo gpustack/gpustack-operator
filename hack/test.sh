@@ -32,7 +32,6 @@ function test() {
   local opts=(
     "-v"
     "-failfast"
-    "-race"
     "-cover"
     # Order-dependent tests hide behind a fixed run order; shuffle so every run probes it.
     # A failure banner prints the seed, and -shuffle=<seed> reproduces that order.
@@ -41,6 +40,10 @@ function test() {
     "-ldflags=${ldflags[*]}${extldflags}"
     "-coverprofile=${TEST_DIR}/coverage.out"
   )
+  # RACE=false drops the race detector and leaves the rest of the run unchanged.
+  if [[ "${RACE:-}" != "false" ]]; then
+    opts+=("-race")
+  fi
   if [[ ${#BUILD_TAGS[@]} -gt 0 ]]; then
     opts+=("-tags=\"${BUILD_TAGS[*]}\"")
   fi

@@ -1,0 +1,83 @@
+# Runs the Go unit tests. Nothing ran them before: ci.yml builds the image, and api.yml and
+# chart.yml verify generated artifacts and the chart install.
+
+name: Test
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+# Pure verification, so a superseded run is cancelled rather than left to finish. The key
+# follows api.yml's: pull request number rather than branch name, and the event name kept in,
+# because push verifies the branch tip and pull_request verifies the merge result.
+concurrency:
+  group: test-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch: { }
+  push:
+    branches:
+      - "main"
+      - "v*-dev"
+    # NB: ci.yml's list without "deploy/**": pkg/worker/kuberess asserts the chart
+    # under deploy/gpustack-operator/chart against the Go code, so a chart-only change has to
+    # run it.
+    #
+    # LIMITED: a markdown-only change still skips this workflow, although two tests read
+    # documentation (pkg/nodefeature and pkg/worker/controllers/worker, each against a page
+    # under docs/reference/). Such a change is caught by the next run that does trigger.
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "**.mdx"
+      - "**.png"
+      - "**.jpg"
+      - "**.jpeg"
+      - "**.gif"
+      - "**.webp"
+  pull_request:
+    branches:
+      - "main"
+      - "v*-dev"
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "**.mdx"
+      - "**.png"
+      - "**.jpg"
+      - "**.jpeg"
+      - "**.gif"
+      - "**.webp"
+
+jobs:
+  unit:
+    # Above "make test"'s own -timeout=30m, so a hung test fails with its goroutine dump
+    # instead of a job cancellation that prints nothing.
+    timeout-minutes: 45
+    # The image ships for both architectures, so the tests run on both. fail-fast is off so a
+    # failure on one does not cancel the other and hide whether it is architecture-specific.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - "ubuntu-24.04"
+          - "ubuntu-24.04-arm"
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        env:
+          # The race detector is not on in CI yet.
+          RACE: "false"
+        run: make test
