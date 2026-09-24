@@ -14,11 +14,13 @@ import (
 
 	conregname "github.com/google/go-containerregistry/pkg/name"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/utils/ptr"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -436,6 +438,28 @@ func validateKVCacheBackendManaged(
 			errs = append(errs, field.Invalid(fldPath.Child("leader", "replicas"), *replicas,
 				"more than one leader requires leader.highAvailability, which elects one of them "+
 					"through a Kubernetes Lease; without it every replica would serve"))
+		}
+	}
+
+	// A snapshot is refused at any replica count, because restoring one can make the cache serve
+	// WRONG DATA rather than miss. The snapshot records where each key sits in member memory, and
+	// nothing checks that memory still holds that key when the index is read back: a forced remove
+	// (the path an engine's cache reset takes) frees it for the next write, and a standby loads the
+	// snapshot once at its own start, so by the time it takes over another leader may have reused it.
+	//
+	// An update is judged only when it moves the snapshot or the replica count. An object admitted
+	// before this rule keeps running as it was rendered, and it still has to take an unrelated edit
+	// and the reconciler's removal of its finalizer -- see unchangedPassthrough for that failure.
+	if snapshot := mooncake.LeaderSnapshot(managed.Leader); snapshot != nil {
+		moved := oldManaged == nil ||
+			!equality.Semantic.DeepEqual(mooncake.LeaderSnapshot(oldManaged.Leader), snapshot) ||
+			!ptr.Equal(oldManaged.Leader.Replicas, managed.Leader.Replicas)
+		if moved {
+			errs = append(errs, field.Forbidden(fldPath.Child("leader", "highAvailability", "snapshot"),
+				"snapshots are not supported: a leader restoring one can serve another key's bytes "+
+					"instead of a miss, because the member memory the snapshot points at may have been "+
+					"reused since it was taken -- after a forced remove such as an engine's cache reset, "+
+					"or before a standby that loaded it at its own start takes over"))
 		}
 	}
 

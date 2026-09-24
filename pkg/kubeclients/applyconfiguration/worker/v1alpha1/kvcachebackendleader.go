@@ -26,7 +26,7 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas
 	// above 1. The election itself needs no settings: the Lease is named after this backend, so
 	// there is no connection target to supply, and the API access it needs is rendered beside the
-	// workload. What the block does carry is what a standby is allowed to start from.
+	// workload. What the block does carry is how members find the leader it elects.
 	//
 	// - Unset, the leader runs as a single process exactly as before — no election flag, no extra
 	// object, the command line it ran before this field existed.

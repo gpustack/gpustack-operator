@@ -108,10 +108,10 @@ func TestRenderLeaderFlags_NoSnapshotRendersNothing(t *testing.T) {
 // TestRenderLeaderFlags_SnapshotIsNotGatedOnTheElection pins the ONE place this group deliberately
 // parts company with the election flags beside it.
 //
-// A single leader restores its own last snapshot when it restarts, so the field earns its flags
-// below two replicas as well. The election flags in the same block do not, because an image without
-// the lease backend refuses to start on them -- and asserting both halves here is what keeps a
-// later edit from collapsing the two gates into one.
+// Admission refuses the field now, and an object admitted with it before that keeps rendering what
+// it rendered, which includes these flags below two replicas. The election flags in the same block
+// do not arrive there, because an image without the lease backend refuses to start on them -- and
+// asserting both halves here is what keeps a later edit from collapsing the two gates into one.
 func TestRenderLeaderFlags_SnapshotIsNotGatedOnTheElection(t *testing.T) {
 	one := testBackend(func(kvcb *workercore.KVCacheBackend) {
 		kvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{
@@ -123,7 +123,7 @@ func TestRenderLeaderFlags_SnapshotIsNotGatedOnTheElection(t *testing.T) {
 
 	flags := RenderLeaderFlags(one)
 	assert.Contains(t, flags, "-enable_snapshot=true",
-		"one leader restoring its own last snapshot is worth having, so this does not wait for a second")
+		"an object admitted with a snapshot under one replica keeps the flags it was rendered with")
 	for _, flag := range flags {
 		assert.NotContains(t, flag, "enable_ha",
 			"the election still has nothing to elect between, and this case is what holds the two gates apart")
