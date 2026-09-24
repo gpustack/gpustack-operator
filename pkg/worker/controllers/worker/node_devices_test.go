@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -153,6 +154,52 @@ func TestNodeDevicesReconciler_MissingDevicesIsNoop(t *testing.T) {
 	_, err := r.Reconcile(context.Background(),
 		ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: "node-a"}})
 	assert.NoError(t, err)
+}
+
+// TestNodeDevicesReconciler_DeletesDevicesOfAbsentNode pins that the worker deletes a Devices whose
+// Node an uncached read confirms is gone, instead of leaving it to the garbage collector, and that a
+// Node missing only from the cache keeps its Devices.
+func TestNodeDevicesReconciler_DeletesDevicesOfAbsentNode(t *testing.T) {
+	const node = "node-a"
+	cases := []struct {
+		name        string
+		cachedNode  bool // the Node is in the cache the reconciler reads first
+		liveNode    bool // the Node is returned by the uncached read
+		wantDevices bool
+	}{
+		{name: "deletes the devices of a node that is gone", wantDevices: false},
+		{name: "keeps the devices of a present node", cachedNode: true, liveNode: true, wantDevices: true},
+		{name: "keeps the devices of a node the cache has not seen yet", liveNode: true, wantDevices: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			nd := &core.Node{ObjectMeta: meta.ObjectMeta{Name: node}}
+			devs := &workercore.Devices{ObjectMeta: meta.ObjectMeta{Name: node, UID: "devices-uid"}}
+
+			cached := []ctrlcli.Object{devs}
+			if c.cachedNode {
+				cached = append(cached, nd.DeepCopy())
+			}
+			var live []ctrlcli.Object
+			if c.liveNode {
+				live = append(live, nd.DeepCopy())
+			}
+			cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(cached...).Build()
+			apiReader := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(live...).Build()
+			r := &NodeDevicesReconciler{Client: cli, APIReader: apiReader}
+
+			_, err := r.Reconcile(context.Background(),
+				ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: node}})
+			require.NoError(t, err)
+
+			err = cli.Get(context.Background(), ctrlcli.ObjectKey{Name: node}, new(workercore.Devices))
+			if c.wantDevices {
+				assert.NoError(t, err)
+			} else {
+				assert.True(t, kerrors.IsNotFound(err), "want the devices deleted, got %v", err)
+			}
+		})
+	}
 }
 
 // TestNodeDevicesControlInSync pins that the sync/predicate comparison looks ONLY at the worker-owned
