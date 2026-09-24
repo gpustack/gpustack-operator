@@ -732,7 +732,9 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 // which of its three programs to run. That last one was found by running it: the image declares no
 // entrypoint, so arguments without a command land in the CMD position and the first flag is read as
 // the program name, which every field-picked case in this file passed over. The metrics listener
-// scheme annotation was then added to each managed router Pod.
+// scheme annotation was then added to each managed router Pod. The SGLang case alone moved again
+// when its picker configuration came to name the engine a Pod without an engine-type label is read
+// as, which the vLLM cases pin as unchanged.
 // To re-baseline after an intended rendering change: empty the table, run this case, and pin the
 // digests the failures print.
 func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
@@ -741,7 +743,7 @@ func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSpli
 		"a sole server role":        "052c5cc61b6c6b2c313c8cc743f070dcc9e5eaa2f8cf197ad52affa3fa8dc0cc",
 		"a router declaring its own image, policy, replicas and extra arguments": "a3eb0fce558ed09aa0f41e6b57cf7e9777bc169ed48709a0f2647064532c43cc",
 		"a role whose command the user took over, so it publishes no events":     "cb3bbff686dad17a56b2f26dc9ef12cf3a8fbefb139b31361b76d0b6a92b72d6",
-		"an sglang engine, whose metrics contract differs":                       "c2034efbe3aba469e9bba1f7a8249f61c94976e89f958dc719a1e29ce7ce42cc",
+		"an sglang engine, whose metrics contract differs":                       "92d63b4fc2bced7e2a011c8097902aeb6c27a8b69fab51c1ac2f33bc2473d2cd",
 	}
 
 	soleServerRole := func() *workercore.ModelDeployment {
