@@ -1139,8 +1139,10 @@ func modelDeploymentWorkloadOwnsAny(wl *kueue.Workload, pods sets.Set[types.UID]
 //
 // THE KIND IS CHECKED BECAUSE A UID ALONE IS NOT A RELATION. A Workload carries whatever owners its
 // composer gave it, and a reference to some other kind that happened to match a Pod's UID would make
-// an unrelated object answer for a replica. Both readers of this relation go through here so that
-// the two cannot come to disagree about what owning a replica means.
+// an unrelated object answer for a replica. Every reader of this relation goes through here -- the
+// status and the rollout guard matching Workloads to replicas, and the Workload watch and the joint
+// admission barrier walking a Workload back to its deployment -- so that none of them can come to
+// disagree about what owning a replica means.
 func modelDeploymentOwnerRefNamesAPod(ref meta.OwnerReference) bool {
 	return ref.Kind == "Pod" && ref.APIVersion == "v1"
 }
