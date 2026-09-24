@@ -50,8 +50,8 @@ image embeds: read it off the image, then pick the store from it.
 suggestion — see [The store version must match the engine's
 client](../kv-cache/backend.md#the-store-version-must-match-the-engines-client).
 
-**vLLM-Ascend's direct transfer has no `tcp` shape**, and one router renders it — see [Prefill and
-decode](model-deployment.md#prefill-and-decode).
+**vLLM-Ascend's direct transfer has no `tcp` shape**, and one router renders it — see [How a pair is
+wired](model-deployment-prefill-decode.md#how-a-pair-is-wired).
 
 **The shapes above move KV over `tcp`, or over `ascend` on vLLM-Ascend.** Which other transport
 each engine can use is [the matrix below](#which-transport-each-engine-can-use).

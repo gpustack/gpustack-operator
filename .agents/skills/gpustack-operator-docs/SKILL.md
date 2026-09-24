@@ -41,6 +41,7 @@ one, not to widen the overview.
 | Standing a cache up end to end, or which object comes first: the pasteable four-object sequence | `docs/kv-cache/walkthrough.md` |
 | How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/reference/kv-cache-injection.md` |
 | A `ModelDeployment` metrics snapshot, which series each field reads per engine, role and router, cache-hit scope or Pod scrape annotation | `docs/reference/model-deployment-metrics.md` |
+| How a prefill role and a decode role are paired: the connector each engine and router renders, `spec.router` and its fields, `spec.kvTransfer`, roles on different hardware, a role's own Service | `docs/reference/model-deployment-prefill-decode.md` |
 | Which replica a managed router picks, its default routing policy, switching it through `spec.router.extraArgs`, the router's own per-replica series | `docs/reference/model-deployment-routing.md` |
 | What a `ModelDeployment` replica does between its Pod's delete and its engine's exit: the drain hook, its timings, what it does not cover | `docs/reference/model-deployment-shutdown.md` |
 | The lowest engine release a deployment shape runs on, the Mooncake client its runner image carries, the store line it needs, which transport each engine can use on each leg | `docs/reference/engine-versions.md` |
