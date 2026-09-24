@@ -3,7 +3,7 @@
 > **Purpose** — the structured `ModelDeployment` metrics snapshot and the managed Pods' raw
 > Prometheus scrape endpoints.
 > **Audience** users, operators, console developers · **Prerequisites** [Model Deployment
-> Reference](model-deployment.md) · **Read time** ~5 min
+> Reference](model-deployment.md) · **Read time** ~7 min
 
 The aggregated API combines selected current gauges from a deployment's engine and router Pods.
 Each managed Pod also exposes its own native `/metrics` output for Prometheus users.
@@ -12,6 +12,7 @@ Each managed Pod also exposes its own native `/metrics` output for Prometheus us
 
 - [The subresource](#the-subresource)
 - [Fields and sources](#fields-and-sources)
+- [What each field counts](#what-each-field-counts)
 - [Windowed cache hits](#windowed-cache-hits)
 - [Latency, traffic, and transfer](#latency-traffic-and-transfer)
 - [Missing and partial samples](#missing-and-partial-samples)
@@ -34,19 +35,72 @@ sample timestamps to the selected Prometheus series.
 
 ## Fields and sources
 
-| Area | Response | Source and scope | Unit |
-|---|---|---|---|
-| processing | `processing[].name: running` | vLLM `num_requests_running` or SGLang `num_running_reqs`, summed by engine role over readable Pods | requests |
-| processing | `router-running` | llm-d `request_running`, vLLM router `running_requests` (not in its P/D mode), or SGLang gateway `worker_requests_active` | requests |
-| processing | `router-backends` | llm-d `ready_endpoints` or SGLang gateway `worker_pool_size` | backends |
-| processing | `router-reported-workers` | vLLM router `active_workers`, not in its P/D mode; this count alone does not prove a worker is reachable or ready | workers |
-| queueing | `queueing[].name: waiting` | vLLM `num_requests_waiting` or SGLang `num_queue_reqs`, summed by engine role over readable Pods | requests |
-| queueing | `decode-transfer-waiting` | SGLang P/D decode transfer queue | requests |
+`processing[]` holds `running`, `router-running`, `router-backends` and `router-reported-workers`;
+`queueing[]` holds `waiting` and `decode-transfer-waiting`. Engine gauges are summed by role over
+readable Pods. The unit is `requests`, except `backends` for `router-backends` and `workers` for
+`router-reported-workers`, a count that alone does not prove a worker reachable or ready. Which
+series each field reads is in [What each field counts](#what-each-field-counts).
 
 Every gauge includes its exact Prometheus `source`, `scope` (`engine` or `router`), `unit`, numeric
 `value`, `podCount` and `observedAt`. Sources are kept separate: a router's view of active requests
 is never added to the engine's view. Prefill and decode roles also stay separate. A measured `0`
 is present as zero.
+
+## What each field counts
+
+Each cell names the series a field reads, without its `vllm:` or `sglang:` prefix, and what it
+counts there. A dash means the field is not read there. vLLM-Ascend Pods are read as vLLM; no
+vLLM-Ascend snapshot has been checked.
+
+| Field | vLLM | SGLang | Read from |
+|---|---|---|---|
+| `running` | `num_requests_running`: requests in the running batch | `num_running_reqs`: requests in the running batch | every role |
+| `waiting` | `num_requests_waiting`: requests not yet scheduled, including those deferred while their KV blocks arrive | `num_queue_reqs`: the scheduler's waiting queue alone | every role |
+| `decode-transfer-waiting` | — | `num_decode_transfer_queue_reqs`: requests whose KV blocks are still arriving | decode of a pair |
+| `local-prefix` | `prefix_cache_*`: prompt tokens found in the Pod's own KV cache | — | every role |
+| `external-store` | `external_prefix_cache_*`: of the tokens not found locally, those the KV connector supplies | — | a role with a connector |
+| `device-prefix`, `host-prefix`, `storage-prefix` | — | `prefill_effective_tokens_total` by mode: prefill tokens found on the device, in host memory, and in the storage backend | every role but decode of a pair |
+| `ttft` | `time_to_first_token_seconds` | `time_to_first_token_seconds` | vLLM every role; SGLang every role but prefill of a pair |
+| `tpot` | `request_time_per_output_token_seconds`: zero for a request with at most one output token | — | every role |
+| `itl` | `inter_token_latency_seconds` | `inter_token_latency_seconds`, exported once a request streams | every role but prefill of a pair |
+| `transfer-*` | — | `kv_transfer_latency_ms`, `kv_transfer_speed_gb_s`, `kv_transfer_total_mb`, `num_transfer_failed_reqs_total` | prefill of a pair |
+
+**In a vLLM pair, `external-store` on the decode half does not measure the store.** Decode's
+connector supplies the blocks the prefill half sends, so every token decode lacks counts as a hit
+and the rate stays at one, with or without a store. The prefill half's rate is the store's. Measured
+on a pair with a store and on one without: decode hits equalled queries, prefill hits were zero.
+
+The prefill half of a vLLM pair answers the router's one-token prefill request, so its `ttft`
+counts each paired request once and its `tpot` mean is zero. A vLLM decode half's `waiting` includes
+requests deferred until the prefill half's blocks arrive. SGLang keeps those in separate queues:
+decode's transfer queue is `decode-transfer-waiting`; its preallocation queue, and prefill's
+bootstrap and in-flight queues, are not read.
+
+SGLang exports all three prefill modes whatever its cache tiers, so `host-prefix` and
+`storage-prefix` appear as measured rates of zero on a server with no host cache or storage backend,
+not as unsupported sources.
+
+| Field | `llm-d-router` | `vllm-router` | `vllm-router`, P/D mode | `sglang-gateway` |
+|---|---|---|---|---|
+| `router-running` | `llm_d_epp_request_running`: requests the router is handling | `vllm_router_running_requests` | not exported | `smg_worker_requests_active`, summed over workers: requests in flight to a worker |
+| `router-backends` | `llm_d_epp_ready_endpoints`: endpoints it holds ready | — | — | `smg_worker_pool_size`: workers in its pool |
+| `router-reported-workers` | — | `vllm_router_active_workers` | not exported | — |
+| `requests` | `llm_d_epp_request_total` | — | — | `smg_router_requests_total` |
+| `successful-requests` | — | `vllm_router_requests_total`: completed successes | — | — |
+| `pd-requests` | — | — | `vllm_router_pd_requests_total` | — |
+| `request-errors`, `errors`, `pd-errors` | `llm_d_epp_request_error_total` | `vllm_router_request_errors_total` | `vllm_router_pd_errors_total` | `smg_router_request_errors_total` |
+| `retries-exhausted` | — | `vllm_router_retries_exhausted_total` | — | — |
+| `error-ratio` | — | — | — | `errors` over `requests` |
+| `http-5xx-responses` | — | — | — | `smg_http_responses_total` with a 5xx `status_code` |
+| `ttft`, `tpot` | `llm_d_epp_request_ttft_seconds`, `llm_d_epp_request_streaming_tpot_seconds` | — | — | — |
+
+Of the error series only `llm_d_epp_request_error_total` has been seen exported. The other four are
+labeled counters that export nothing before their first increment, and none has been seen
+exported, so what each counts has not been checked against a failed request. Why each router has or lacks `error-ratio` is
+in [Latency, traffic, and transfer](#latency-traffic-and-transfer).
+
+Where a router sent each request is not in the snapshot; its own per-replica series say, listed in
+[Seeing where requests went](model-deployment-routing.md#seeing-where-requests-went).
 
 ## Windowed cache hits
 
