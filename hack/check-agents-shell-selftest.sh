@@ -127,7 +127,15 @@ git -c user.email=check@example.invalid -c user.name=check -c commit.gpgsign=fal
 expect red "a committed new finding against an older --base" -- --base HEAD~1 "${MINI}/repo"
 
 echo "== the instrument itself =="
-expect could-not-run "no shellcheck on PATH is reported as not-run, not as a pass" PATH=/usr/bin:/bin -- "${MINI}/repo"
+# A PATH holding only what the checker itself needs, shellcheck deliberately absent. It cannot be
+# a bare /usr/bin:/bin: GitHub runners preinstall shellcheck there, and on such a host the case
+# below would exercise nothing while reading as a pass — the exact vacuous shape it exists to bar.
+nosc="${MINI}/nosc"
+mkdir -p "${nosc}"
+for tool in git bash mktemp sed cut tr cat awk; do
+  ln -s "$(command -v "${tool}")" "${nosc}/${tool}"
+done
+expect could-not-run "no shellcheck on PATH is reported as not-run, not as a pass" PATH="${nosc}" -- "${MINI}/repo"
 
 if [ "${fails}" -gt 0 ]; then
   echo >&2
