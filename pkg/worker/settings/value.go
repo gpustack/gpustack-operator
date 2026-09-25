@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"gpustack.ai/gpustack/pkg/modelartifact"
+	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/setting"
 )
 
@@ -346,6 +347,9 @@ var (
 		setting.InitializeFromEnv("https://huggingface.co"),
 		setting.DisallowBlank(),
 		setting.AllowUrlWithSchema("https", "http"),
+		// A URL without a host passes the schema check and fails every node's; refused here, a
+		// write never freezes the node configuration it feeds.
+		func(_ context.Context, _, newVal string) error { return modelstore.ValidateEndpoint(newVal) },
 	)
 
 	// ModelArtifactHTTPSProxy is the proxy the ModelArtifact controller reaches the Hub through, and

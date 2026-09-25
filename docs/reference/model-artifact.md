@@ -3,7 +3,7 @@
 > **Purpose** — how a `ModelArtifact` names a model's weights, how the operator resolves and
 > revalidates it, and how a `ModelDeployment` or an `Instance` consumes it.
 > **Audience** users, operators · **Prerequisites** [Model Deployment
-> Reference](model-deployment.md) · **Read time** ~14 min
+> Reference](model-deployment.md) · **Read time** ~16 min
 
 A `ModelArtifact` is the one object that says where a model's weights come from and which credential
 reads them. A `ModelDeployment` names it with `spec.model.artifactRef`, an `Instance` with a `model`
@@ -39,6 +39,8 @@ spec:                                    # immutable after creation
     # persistentVolumeClaim:
     #   claimName: models                # this namespace
     #   path: qwen                       # directory inside the volume; empty is the root
+  allowPatterns: ["*.safetensors", "*.json", "tokenizer*"]   # optional; Hugging Face only
+  ignorePatterns: ["original/"]                              # optional; wins over allowPatterns
 status:
   resolved:
     revision: 7ae557604adf67be50417f59c2c2f167def9a775
@@ -57,6 +59,11 @@ status:
 - **A `modelScope` member exists and is refused.** Opening it needs branch resolution checked
   against git, a listing that recovers from the API's silent truncation at 3000 entries, and a vLLM
   runner whose ModelScope SDK accepts a commit (1.39.1 or later).
+- **Patterns select the files.** They follow Python's `fnmatch.fnmatchcase`: case-sensitive, `*`
+  and `?` cross `/`, a trailing `/` means everything under it, an empty allow list keeps every file,
+  and an ignored file is dropped even when allowed. At most 32 per list, 1 to 256 characters each,
+  refused on a claim source. A filter that keeps no file is `Resolved=False`, `EmptyManifest`. A
+  filtered artifact needs [Node delivery](#referencing-it-from-a-modeldeployment).
 - **Deletion waits for the last reference.** The finalizer `worker.gpustack.ai/model-artifact-protection`
   holds a referenced artifact in `Terminating` until no `ModelDeployment` or `Instance` in the
   namespace names it. Running Pods are never affected.
@@ -111,8 +118,10 @@ sha256:8111d5af… 453864 model.safetensors
   in LF. An LFS file uses its `sha256`, any other file its git blob `gitsha1`.
 - A path must be valid UTF-8, relative, with no control character and no empty, `.` or `..`
   segment; the whole resolution fails on one that is not.
-- The source, the repository, the commit and any filter are **not** part of it, so the same files
-  have the same digest wherever they live. The reference implementation is `pkg/modelartifact`.
+- The source, the repository, the commit and the patterns are **not** part of it, so the same files
+  have the same digest wherever they live. A filter changes the digest only through the files it
+  keeps, and an artifact without patterns has the digest it always had. The reference
+  implementation is `pkg/modelartifact`.
 
 Two consequences to keep in mind:
 
@@ -134,15 +143,28 @@ spec:
 reference to an artifact that does not exist or has not resolved is admitted, and the deployment
 creates no Pod until it resolves.
 
-| | Claim source (`Pvc`) | Hugging Face source (`Engine`) |
-| --- | --- | --- |
-| Weights | the claim, read-only, at `/var/lib/gpustack/model`, `subPath` = `path` | downloaded by the engine into `/var/lib/gpustack/model-cache` |
-| vLLM | `vllm serve /var/lib/gpustack/model` | `vllm serve <repository> --revision <commit>` |
-| SGLang | `--model-path /var/lib/gpustack/model` | `--model-path <repository> --revision <commit>` |
-| Both | `--served-model-name <spec.model.name>`, unless the role states it | same |
+A claim source is always mounted directly. A Hugging Face source takes the delivery the
+`model-artifact-delivery-mode` Setting names, `Engine` by default and `Node` where the chart deploys
+the node plugin ([switching it](../operation/model-store.md#switch-delivery) rolls each such
+deployment once):
+
+| | Claim source (`Pvc`) | Hugging Face, `Engine` | Hugging Face, `Node` |
+| --- | --- | --- | --- |
+| Weights | the claim, read-only, at `/var/lib/gpustack/model`, `subPath` = `path` | downloaded by the engine into `/var/lib/gpustack/model-cache` | the node's verified copy, read-only, at `/var/lib/gpustack/model` |
+| vLLM | `vllm serve /var/lib/gpustack/model` | `vllm serve <repository> --revision <commit>` | as a claim |
+| SGLang | `--model-path /var/lib/gpustack/model` | `--model-path <repository> --revision <commit>` | as a claim |
+| Both | `--served-model-name <spec.model.name>`, unless the role states it | same | same |
 
 `--revision` pins the weights and the tokenizer together on both engines. A take-over role (one
-with `command`) gets the claim mount and nothing else, and nothing at all for a Hugging Face source.
+with `command`) gets the claim or node mount and nothing else, and nothing at all under `Engine`.
+
+**Node delivery** mounts an inline CSI volume of the driver `model.csi.gpustack.ai`: the node's
+`model-manager` plugin downloads the digest once per node, verifies every byte against the manifest
+before anything is mounted, and mounts only for a resolved artifact in the Pod's own namespace. The
+plugin and its resource are on the [Node Model Store Reference](node-model-store.md).
+
+No Hub variable and no cache `emptyDir` is rendered under Node delivery, and the ephemeral-storage
+limit is not raised: the volume's bytes are not the Pod's.
 
 While `artifactRef` is set, admission refuses:
 
@@ -158,7 +180,7 @@ prefix-cache scoring falls to zero, with the deployment reporting `Ready`.
 
 ## Engine delivery
 
-The engine downloads the pinned commit itself, with:
+Under `Engine`, the engine downloads the pinned commit itself, with:
 
 | Variable | Value | Owned |
 | --- | --- | --- |
@@ -242,15 +264,19 @@ hexadecimal digits of the manifest digest, or of the SHA-256 of the artifact's U
 
 ## Status
 
-`status.model` echoes the artifact, its `revision` and `manifestDigest`, and the `delivery`, `Pvc`
-or `Engine`. `WeightsReady` says whether every engine role's weights are there:
+`status.model` echoes the artifact, its `revision` and `manifestDigest`, and the `delivery`, `Pvc`,
+`Engine` or `Node`. `WeightsReady` says whether every engine role's weights are there:
 
 | Status | Reason | Meaning |
 | --- | --- | --- |
 | True | `NotApplicable` | the deployment names no artifact |
 | False | `ArtifactNotFound`, `ArtifactNotResolved` | no new Pod is created; the message carries the artifact's reason |
 | False | `ClaimNotBound`, `AccessModeConflict` | no new Pod is created; see the placement table |
-| False | `WeightsNotMounted` | a claim Pod's `PodReadyToStartContainers` is not True yet |
+| False | `NodeDeliveryUnavailable` | `Node` delivery, and the CSIDriver `model.csi.gpustack.ai` does not exist; no new Pod is created |
+| False | `FilterNeedsNodeDelivery` | an artifact with patterns under `Engine` delivery, which cannot honor them; no new Pod is created |
+| False | `Materializing` | a node Pod is not mounted yet and its node lists the digest `Downloading` |
+| False | `MaterializationFailed` | the same, and the node lists it `Failed`; the message carries the node's reason and retry time |
+| False | `WeightsNotMounted` | a claim or node Pod's `PodReadyToStartContainers` is not True yet |
 | False | `Downloading` | an engine Pod is not Ready yet; the engine reports no progress of its own |
 | True | `Mounted`, `Downloaded` | every Pod has its weights |
 
@@ -269,9 +295,10 @@ spec:
       model: {artifactRef: {name: qwen-7b}}
 ```
 
-The volume is always read-only, takes no `subPath` (the artifact's `path` is the sub-path) and
-follows the claim placement rules above. Only a claim artifact is accepted: admission refuses a
-Hugging Face one, and one found later is reported in the Instance's phase message.
+The volume is always read-only and takes no `subPath`. A claim artifact's `path` is the sub-path and
+the claim placement rules above apply. A Hugging Face artifact is mounted through the node plugin
+whatever `model-artifact-delivery-mode` says, since an Instance has no engine to download it; while
+the CSIDriver does not exist the Instance creates no Pod and says so in its phase message.
 
 ## Requirements and limits
 
@@ -282,13 +309,16 @@ Hugging Face one, and one found later is reported in the Instance's phase messag
   local, so it logs one 404 warning and routes by text; with Engine delivery it would fetch `main`
   without a token (not measured).
 - **vLLM 0.29.0 needs `--enforce-eager` for InternLM2** with `trust_remote_code`, an engine defect.
+- **Node delivery downloads from the Hub on every cold node.** It does not prefer nodes that hold
+  the weights, and a cold mount reports its progress only in the Pod's `FailedMount` events.
 - Settings: [Settings & Environment Variables](../settings.md#online-adjustable-settings) carries the
-  endpoint, proxy, no-proxy, CA bundle and revalidation interval.
+  endpoint, proxy, no-proxy, CA bundle, revalidation interval, delivery mode and the node cache's
+  watermarks and download limits.
 
 ---
 
 **See also** — [Model Deployment Reference](model-deployment.md) for the rest of the deployment
-contract · [KV Cache Injection Reference](kv-cache-injection.md) for the store connector this
+contract · [Node Model Store Reference](node-model-store.md) for Node delivery · [KV Cache Injection Reference](kv-cache-injection.md) for the store connector this
 prefixes · [Model Deployment Status Reference](model-deployment-status.md) for the other conditions.
 
 **Next** → [Model Deployment Status Reference](model-deployment-status.md)

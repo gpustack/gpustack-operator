@@ -49,6 +49,10 @@ func (c *FakeWorkerV1alpha1) ModelDeployments(namespace string) v1alpha1.ModelDe
 	return newFakeModelDeployments(c, namespace)
 }
 
+func (c *FakeWorkerV1alpha1) NodeModelStores() v1alpha1.NodeModelStoreInterface {
+	return newFakeNodeModelStores(c)
+}
+
 func (c *FakeWorkerV1alpha1) TopologySources() v1alpha1.TopologySourceInterface {
 	return newFakeTopologySources(c)
 }

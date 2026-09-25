@@ -204,7 +204,13 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 
 	observeModelDeploymentRoleKinds(holder)
 
-	observeModelDeploymentWeights(holder, pods, weights)
+	var nodeModels map[string]*workercore.NodeModelStoreModel
+	if weights != nil && weights.Render != nil && weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryNode {
+		if nodeModels, err = modelArtifactNodeModels(ctx, r.Client, pods, weights.Render.ManifestDigest); err != nil {
+			return nil, err
+		}
+	}
+	observeModelDeploymentWeights(holder, pods, weights, nodeModels)
 
 	// Resolved once for both routed-path observers, and nil for an unrouted deployment, which has
 	// nothing that reads a manufacturer.

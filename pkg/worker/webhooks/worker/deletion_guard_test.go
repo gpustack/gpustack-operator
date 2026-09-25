@@ -83,6 +83,23 @@ func TestDeletionGuardClassification(t *testing.T) {
 				"by TestPodKVCacheValidateUpdate_SurvivesTheDeletionGuard",
 		},
 		{
+			name:    "ModelArtifact keeps its status writer rule while an artifact drains",
+			handler: &ModelArtifactWebhook{},
+			want:    true,
+			reason: "a referenced artifact stays Terminating, and mountable, until its last consumer " +
+				"goes, so the status writer rule must hold then; ValidateUpdate compares the two " +
+				"specs and reads only the admission request, and Default fills the revision from the " +
+				"object alone",
+		},
+		{
+			name:    "NodeModelStore keeps its status writer rule while an object drains",
+			handler: &NodeModelStoreWebhook{},
+			want:    true,
+			reason: "it has no defaulting, a main-resource update is admitted without a read, and the " +
+				"status rule reads the admission request and the writer's own Pod, never the object's " +
+				"owner, so no deletion can make it refuse a finalizer-clearing update",
+		},
+		{
 			name:    "Instance is the one handler the guard is load-bearing for",
 			handler: &InstanceWebhook{},
 			want:    false,

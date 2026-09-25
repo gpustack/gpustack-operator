@@ -1210,6 +1210,133 @@
       "title": "migrate",
       "type": "object"
     },
+    "modelManager": {
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Deploy the model-manager: the CSI node plugin that delivers a Hugging Face ModelArtifact's\nweights from each node's cache, and its CSIDriver `model.csi.gpustack.ai`.\n\nWhen enabled, the worker seeds the `model-artifact-delivery-mode` Setting with `Node`. A seed\nfills only a Setting the cluster does not have yet, so a later upgrade never overrides an\nadministrator's choice. Upgrading from a version without that Setting rolls every\nModelDeployment on a Hugging Face artifact once, to node delivery; set the Setting to `Engine`\nbefore upgrading, or upgrade with this disabled, to avoid it.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "extraArgs": {
+          "description": "Extra command-line arguments appended to the model-manager container args.",
+          "items": {
+            "required": []
+          },
+          "title": "extraArgs",
+          "type": "array"
+        },
+        "image": {
+          "description": "Per-model-manager image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall back\nto the chart-level `image`.",
+          "required": [],
+          "title": "image",
+          "type": "object"
+        },
+        "kubeletDir": {
+          "default": "/var/lib/kubelet",
+          "description": "kubelet's root directory, the convention the bundled CSI drivers follow. It is mounted with\nBidirectional propagation so a bind mount the plugin makes reaches the Pod.",
+          "title": "kubeletDir",
+          "type": "string"
+        },
+        "nodeSelector": {
+          "description": "Node selector for the model-manager DaemonSet, merged over `global.nodeSelector`.",
+          "required": [],
+          "title": "nodeSelector",
+          "type": "object"
+        },
+        "registrar": {
+          "properties": {
+            "image": {
+              "description": "The node-driver-registrar sidecar's image: the mirror the bundled NFS and S3 CSI drivers\npin, rewritten by the `global` image settings like every other image.",
+              "properties": {
+                "repository": {
+                  "default": "docker.io/gpustack/mirrored-csi-node-driver-registrar",
+                  "title": "repository",
+                  "type": "string"
+                },
+                "tag": {
+                  "default": "v2.17.0",
+                  "title": "tag",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "image",
+              "type": "object"
+            }
+          },
+          "required": [],
+          "title": "registrar",
+          "type": "object"
+        },
+        "resources": {
+          "description": "Resource requests and limits for each model-manager container.",
+          "properties": {
+            "limits": {
+              "properties": {
+                "cpu": {
+                  "default": "4",
+                  "title": "cpu",
+                  "type": "string"
+                },
+                "memory": {
+                  "default": "2Gi",
+                  "title": "memory",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "limits",
+              "type": "object"
+            },
+            "requests": {
+              "properties": {
+                "cpu": {
+                  "default": "100m",
+                  "title": "cpu",
+                  "type": "string"
+                },
+                "memory": {
+                  "default": "128Mi",
+                  "title": "memory",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "requests",
+              "type": "object"
+            }
+          },
+          "required": [],
+          "title": "resources",
+          "type": "object"
+        },
+        "rootPath": {
+          "default": "/var/lib/gpustack/models",
+          "description": "The node's model cache directory, a hostPath. Mount a dedicated filesystem here: on one\nshared with kubelet the plugin caps its high watermark below kubelet's eviction and image\ncollection thresholds. Changing it points the plugin at an empty cache; nothing is migrated or\nremoved from the old path.",
+          "title": "rootPath",
+          "type": "string"
+        },
+        "securePort": {
+          "default": 32444,
+          "description": "Secure serving port of the model-manager container: metrics, readiness and liveness.",
+          "title": "securePort",
+          "type": "integer"
+        },
+        "tolerations": {
+          "description": "Tolerations for the model-manager DaemonSet. Defaults tolerate every taint, so every node\na workload may land on can mount its weights.",
+          "items": {
+            "required": [],
+            "type": "object"
+          },
+          "title": "tolerations",
+          "type": "array"
+        }
+      },
+      "required": [],
+      "title": "modelManager",
+      "type": "object"
+    },
     "nameOverride": {
       "default": "",
       "description": "Override the chart name used in resource names.",
@@ -1915,7 +2042,7 @@
           "type": "string"
         },
         "disableApplications": {
-          "description": "Applications the worker must not install at runtime, or `*` for all of them. This chart\ndeploys every one of them itself, so the default takes the worker out of that business\nentirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the\nlist makes the worker install a SECOND release of this same chart, whose render overlaps this\none's. Helm refuses an object another release owns, so that install fails and the worker's\nstartup with it. Handing a component back would mean disabling it here and in this chart's\nown switch for it, in step, through every upgrade — nothing checks that, which is why the\nsupported split is all or nothing. The worker installs applications only where no chart\ndeploys it, see\n[Installation Modes](https://github.com/gpustack/gpustack-operator/blob/main/docs/architecture/installation-modes.md).\nThe value is templated rather than appended through `extraArgs` because the flag accumulates across\noccurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,\n`node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`.",
+          "description": "Applications the worker must not install at runtime, or `*` for all of them. This chart\ndeploys every one of them itself, so the default takes the worker out of that business\nentirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the\nlist makes the worker install a SECOND release of this same chart, whose render overlaps this\none's. Helm refuses an object another release owns, so that install fails and the worker's\nstartup with it. Handing a component back would mean disabling it here and in this chart's\nown switch for it, in step, through every upgrade — nothing checks that, which is why the\nsupported split is all or nothing. The worker installs applications only where no chart\ndeploys it, see\n[Installation Modes](https://github.com/gpustack/gpustack-operator/blob/main/docs/architecture/installation-modes.md).\nThe value is templated rather than appended through `extraArgs` because the flag accumulates across\noccurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,\n`node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`, `model-manager`.",
           "items": {
             "anyOf": [
               {

@@ -98,6 +98,26 @@ func TestModelArtifactWebhookValidateCreate(t *testing.T) {
 		{name: "an empty claim", in: newTestClaimArtifact("", ""), wantField: "spec.source.persistentVolumeClaim.claimName"},
 		{name: "an absolute path", in: newTestClaimArtifact("models", "/qwen"), wantField: "spec.source.persistentVolumeClaim.path"},
 		{name: "a dot-dot element", in: newTestClaimArtifact("models", "qwen/../other"), wantField: "spec.source.persistentVolumeClaim.path"},
+		{name: "patterns on a hub source", in: withPatterns(newTestHubArtifact("owner/repo", "main"),
+			[]string{"*.safetensors", "*.json"}, []string{"original/"})},
+		{
+			name: "allow patterns on a claim", in: withPatterns(newTestClaimArtifact("models", ""), []string{"*.json"}, nil),
+			wantField: "spec.allowPatterns",
+		},
+		{
+			name: "ignore patterns on a claim", in: withPatterns(newTestClaimArtifact("models", ""), nil, []string{"*.bin"}),
+			wantField: "spec.ignorePatterns",
+		},
+		{name: "more than 32 patterns", in: withPatterns(newTestHubArtifact("owner/repo", "main"),
+			make33Patterns(), nil), wantField: "spec.allowPatterns"},
+		{
+			name: "an empty pattern", in: withPatterns(newTestHubArtifact("owner/repo", "main"), []string{"*.json", ""}, nil),
+			wantField: "spec.allowPatterns[1]",
+		},
+		{name: "a pattern longer than 256", in: withPatterns(newTestHubArtifact("owner/repo", "main"), nil,
+			[]string{strings.Repeat("a", 257)}), wantField: "spec.ignorePatterns[0]"},
+		{name: "a control character in a pattern", in: withPatterns(newTestHubArtifact("owner/repo", "main"), nil,
+			[]string{"a b", "a\tb"}), wantField: "spec.ignorePatterns[1]"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -127,6 +147,9 @@ func TestModelArtifactWebhookValidateUpdate(t *testing.T) {
 		}, wantField: "spec"},
 		{name: "a new Secret", edit: func(ma *workercore.ModelArtifact) {
 			ma.Spec.Source.HuggingFace.SecretRef = &core.LocalObjectReference{Name: "hf-token"}
+		}, wantField: "spec"},
+		{name: "a pattern added", edit: func(ma *workercore.ModelArtifact) {
+			ma.Spec.IgnorePatterns = []string{"original/"}
 		}, wantField: "spec"},
 	}
 	for _, c := range cases {
@@ -177,4 +200,17 @@ func TestModelArtifactWebhookUpdateRatchets(t *testing.T) {
 		_, err := new(ModelArtifactWebhook).ValidateUpdate(context.Background(), old, updated)
 		require.NoError(t, err)
 	})
+}
+
+func withPatterns(ma *workercore.ModelArtifact, allow, ignore []string) *workercore.ModelArtifact {
+	ma.Spec.AllowPatterns, ma.Spec.IgnorePatterns = allow, ignore
+	return ma
+}
+
+func make33Patterns() []string {
+	patterns := make([]string, 33)
+	for i := range patterns {
+		patterns[i] = "*.p" + strings.Repeat("x", i)
+	}
+	return patterns
 }

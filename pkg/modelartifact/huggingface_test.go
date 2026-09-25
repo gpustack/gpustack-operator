@@ -153,7 +153,7 @@ func TestHuggingFaceResolve(t *testing.T) {
 			hub := newFakeHub(t, nil)
 			hub.routes = c.routes(hub)
 
-			got, err := hub.client().Resolve(context.Background(), "owner/repo", c.revision, testToken)
+			got, err := hub.client().Resolve(context.Background(), "owner/repo", c.revision, testToken, Filter{})
 			require.NoError(t, err)
 			assert.Equal(t, testCommit, got.Commit)
 			assert.Equal(t, want, got.Manifest)
@@ -170,7 +170,7 @@ func TestHuggingFaceResolveWithoutToken(t *testing.T) {
 		"GET " + treePath:     jsonAnswer([]any{testConfigFile}),
 	})
 
-	_, err := hub.client().Resolve(context.Background(), "owner/repo", "main", "")
+	_, err := hub.client().Resolve(context.Background(), "owner/repo", "main", "", Filter{})
 	require.NoError(t, err)
 	for path, auth := range hub.auth {
 		assert.Empty(t, auth, path)
@@ -250,7 +250,7 @@ func TestHuggingFaceResolveReasons(t *testing.T) {
 			client := hub.client()
 			client.MaxEntries = c.maxEntries
 
-			_, err := client.Resolve(context.Background(), "owner/repo", "main", testToken)
+			_, err := client.Resolve(context.Background(), "owner/repo", "main", testToken, Filter{})
 			require.Error(t, err)
 			assert.Equal(t, c.wantReason, ReasonOf(err))
 			assert.NotContains(t, err.Error(), testToken)
@@ -267,7 +267,7 @@ func TestHuggingFaceResolveRefusesANextPageOnAnotherHost(t *testing.T) {
 		},
 	})
 
-	_, err := hub.client().Resolve(context.Background(), "owner/repo", "main", testToken)
+	_, err := hub.client().Resolve(context.Background(), "owner/repo", "main", testToken, Filter{})
 	require.Error(t, err)
 	assert.Equal(t, ReasonSourceUnavailable, ReasonOf(err))
 	assert.Contains(t, err.Error(), "another host")
@@ -450,4 +450,52 @@ func TestValidateProxy(t *testing.T) {
 			assert.Equal(t, c.wantErr, err != nil, "%v", err)
 		})
 	}
+}
+
+func TestHuggingFaceResolveFiltered(t *testing.T) {
+	cases := []struct {
+		name       string
+		filter     Filter
+		wantPaths  int64
+		wantReason string
+	}{
+		{name: "no pattern keeps every file", wantPaths: 3},
+		{name: "an allow pattern keeps its files", filter: Filter{Allow: []string{"*.json"}}, wantPaths: 2},
+		{name: "a directory ignore pattern drops the directory", filter: Filter{Ignore: []string{"sub/"}}, wantPaths: 2},
+		{
+			name:       "a filter keeping nothing is an empty manifest",
+			filter:     Filter{Allow: []string{"*.gguf"}},
+			wantReason: ReasonEmptyManifest,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			hub := newFakeHub(t, map[string]http.HandlerFunc{
+				revisionRoute("main"): jsonAnswer(map[string]string{"sha": testCommit}),
+				"GET " + treePath:     jsonAnswer([]any{testConfigFile, testWeightFile, testSubDir, testTokenFile}),
+			})
+
+			got, err := hub.client().Resolve(context.Background(), "owner/repo", "main", testToken, c.filter)
+			if c.wantReason != "" {
+				require.Error(t, err)
+				assert.Equal(t, c.wantReason, ReasonOf(err))
+				assert.NotContains(t, err.Error(), testToken)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.wantPaths, got.Manifest.FileCount)
+
+			listed, err := hub.client().ListManifest(context.Background(), "owner/repo", testCommit, testToken, c.filter)
+			require.NoError(t, err)
+			assert.Equal(t, got.Manifest, listed, "a node's recomputation must equal the resolution")
+		})
+	}
+}
+
+func TestHuggingFaceFileURL(t *testing.T) {
+	h := &HuggingFace{Endpoint: "https://hub.example/"}
+	assert.Equal(t, "https://hub.example/owner/repo/resolve/"+testCommit+"/sub/my%20file.json",
+		h.FileURL("owner/repo", testCommit, "sub/my file.json"))
+	assert.Equal(t, "https://hub.example/gpt2/resolve/"+testCommit+"/config.json",
+		h.FileURL("gpt2", testCommit, "config.json"))
 }

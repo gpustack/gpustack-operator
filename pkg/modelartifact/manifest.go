@@ -63,6 +63,8 @@ type Manifest struct {
 	FileCount int64
 	// SizeBytes is the sum of the files' sizes.
 	SizeBytes int64
+	// Entries are the files, in the encoding's order: what a node downloads and verifies.
+	Entries []ManifestEntry
 }
 
 // NewManifest encodes entries into the canonical manifest and computes its digest.
@@ -105,6 +107,7 @@ func NewManifest(entries []ManifestEntry) (Manifest, error) {
 		Digest:    DigestSHA256 + ":" + hex.EncodeToString(sum[:]),
 		FileCount: int64(len(sorted)),
 		SizeBytes: size,
+		Entries:   sorted,
 	}, nil
 }
 

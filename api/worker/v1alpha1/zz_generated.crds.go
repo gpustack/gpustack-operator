@@ -24,6 +24,7 @@ func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 		"KVCachePoolBinding": crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding(),
 		"ModelArtifact":      crd_gpustack_api_worker_v1alpha1_ModelArtifact(),
 		"ModelDeployment":    crd_gpustack_api_worker_v1alpha1_ModelDeployment(),
+		"NodeModelStore":     crd_gpustack_api_worker_v1alpha1_NodeModelStore(),
 		"TopologySource":     crd_gpustack_api_worker_v1alpha1_TopologySource(),
 	}
 }
@@ -4184,6 +4185,29 @@ func crd_gpustack_api_worker_v1alpha1_ModelArtifact() *v1.CustomResourceDefiniti
 										"source",
 									},
 									Properties: map[string]v1.JSONSchemaProps{
+										"allowPatterns": {
+											Description: "AllowPatterns and IgnorePatterns select the files of a hub source that make up the artifact,\nwith the semantics of huggingface_hub's allow_patterns and ignore_patterns: Python's\nfnmatch.fnmatchcase, where \"*\" and \"?\" cross \"/\"; a pattern ending in \"/\" is the directory's\ncontents; no allow pattern keeps every file; an ignore pattern wins over an allow pattern.\nThe selection happens before the manifest is built, so the digest, file count and size\ndescribe the selected files, while the patterns themselves never enter the digest: two\nartifacts selecting the same files share one digest, and an artifact with no pattern has the\ndigest of the whole commit. Only node delivery can honor a selection; an engine that downloads\nthe weights itself chooses its own files. A claim source takes none, webhook-enforced, and\neach pattern is 1 to 256 characters without a control character.",
+											Type:        "array",
+											MaxItems:    ptr.To[int64](32),
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "string",
+												},
+											},
+											Nullable:  true,
+											XListType: ptr.To[string]("atomic"),
+										},
+										"ignorePatterns": {
+											Type:     "array",
+											MaxItems: ptr.To[int64](32),
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "string",
+												},
+											},
+											Nullable:  true,
+											XListType: ptr.To[string]("atomic"),
+										},
 										"source": {
 											Description: "Source is where the weights come from.",
 											Type:        "object",
@@ -5170,7 +5194,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													Type:        "string",
 												},
 												"delivery": {
-													Description: "Delivery is how the weights reach the engine: \"Pvc\", the claim mounted read-only at a fixed\npath, or \"Engine\", the engine downloading the pinned commit itself.",
+													Description: "Delivery is how the weights reach the engine: \"Pvc\", the claim mounted read-only at a fixed\npath; \"Engine\", the engine downloading the pinned commit itself; or \"Node\", the node's\nmodel-manager plugin materializing the verified files and mounting them read-only at the same\nfixed path.",
 													Type:        "string",
 													Enum: []v1.JSON{
 														{
@@ -5178,6 +5202,9 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														},
 														{
 															Raw: []byte(`"Engine"`),
+														},
+														{
+															Raw: []byte(`"Node"`),
 														},
 													},
 												},
@@ -5439,6 +5466,342 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 							Description: "",
 							Priority:    0,
 							JSONPath:    ".status.endpoint",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "nodemodelstores.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "nodemodelstores",
+				Singular: "nodemodelstore",
+				ShortNames: []string{
+					"nms",
+				},
+				Kind:     "NodeModelStore",
+				ListKind: "NodeModelStoreList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Cluster",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "NodeModelStore is the schema for worker.gpustack.ai.\nIt is ONE NODE'S MODEL CACHE, named after the Node and owned by it, and it carries both halves of\nthe node's contract the way a Node does: the worker writes spec, the effective configuration it\ncomputes from the Settings, and the model-manager plugin on that node writes status, what the\nnode holds. status.models reports content the way Node.status.images reports images.\nNOTHING IN IT NAMES A TENANT. It is cluster-scoped, so a namespace, an artifact, a repository or a\nPod written here would leak across tenants; an entry is a digest and its sizes only.\nThe worker creates it once the node's CSINode lists the plugin's driver, which is kubelet's own\nrecord that the plugin registered there, and never deletes it when the driver briefly leaves\nCSINode, as a restart or a rolling upgrade makes it do. Only the plugin Pod running on the named\nnode may write status, webhook-enforced.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"watermarks",
+										"download",
+										"hub",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"download": {
+											Description: "Download limits the node's downloads.",
+											Type:        "object",
+											Required: []string{
+												"concurrency",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"bytesPerSecond": {
+													Description: "BytesPerSecond is the node's download rate limit; 0 is unlimited.",
+													Type:        "integer",
+													Format:      "int64",
+													Minimum:     ptr.To[float64](0),
+												},
+												"concurrency": {
+													Description: "Concurrency is how many HTTP requests the node runs at once. A large file is fetched as byte\nranges that share this budget, because one connection per file was measured to set a whole\ndownload's wall time.",
+													Type:        "integer",
+													Format:      "int32",
+													Maximum:     ptr.To[float64](64),
+													Minimum:     ptr.To[float64](1),
+												},
+											},
+										},
+										"hub": {
+											Description: "Hub is how the node reaches the model hub.",
+											Type:        "object",
+											Required: []string{
+												"huggingFaceEndpoint",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"caBundleConfigMap": {
+													Description: "CABundleConfigMap names a ConfigMap in the operator's namespace whose \"ca.crt\" holds PEM\ncertificates trusted beside the system pool. The name travels rather than the certificates,\nbecause a bundle can be larger than this object may be.",
+													Type:        "string",
+												},
+												"httpsProxy": {
+													Description: "HTTPSProxy is the proxy downloads go through, an http or https URL without credentials.",
+													Type:        "string",
+												},
+												"huggingFaceEndpoint": {
+													Description: "HuggingFaceEndpoint is the Hugging Face Hub's base URL.",
+													Type:        "string",
+													MinLength:   ptr.To[int64](1),
+												},
+												"noProxy": {
+													Description: "NoProxy is the comma-separated host list that bypasses HTTPSProxy.",
+													Type:        "string",
+												},
+											},
+										},
+										"watermarks": {
+											Description: "Watermarks bound the cache filesystem's usage.",
+											Type:        "object",
+											Required: []string{
+												"highPercent",
+												"lowPercent",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"highPercent": {
+													Description: "HighPercent is the usage above which the plugin removes unreferenced content. On a filesystem\nthe cache shares with kubelet, the plugin may apply a lower one so kubelet neither evicts Pods\nnor collects images because of the cache.",
+													Type:        "integer",
+													Format:      "int32",
+													Maximum:     ptr.To[float64](95),
+													Minimum:     ptr.To[float64](2),
+												},
+												"lowPercent": {
+													Description: "LowPercent is the usage a collection removes down to, below HighPercent.",
+													Type:        "integer",
+													Format:      "int32",
+													Maximum:     ptr.To[float64](94),
+													Minimum:     ptr.To[float64](1),
+												},
+											},
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"capacity": {
+											Description: "Capacity is the cache filesystem's size and usage.",
+											Type:        "object",
+											Required: []string{
+												"totalBytes",
+												"storedBytes",
+												"usedPercent",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"storedBytes": {
+													Description: "StoredBytes is what published trees and partial downloads occupy.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+												"totalBytes": {
+													Description: "TotalBytes is the cache filesystem's size.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+												"usedPercent": {
+													Description: "UsedPercent is the filesystem's usage by everything on it, rounded down to a multiple of 5.",
+													Type:        "integer",
+													Format:      "int32",
+												},
+											},
+											Nullable: true,
+										},
+										"conditions": {
+											Description: "Conditions: Ready says the plugin serves and applies spec's generation; CapacityLow says usage\nis above the high watermark with nothing the plugin may remove.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"models": {
+											Description: "Models is the content on the node, keyed by digest. When more is on disk than fits, the\nreferenced entries are kept first and then the most recently used, and the Ready condition's\nmessage counts the omission.",
+											Type:        "array",
+											MaxItems:    ptr.To[int64](256),
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"digest",
+														"state",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"digest": {
+															Description: "Digest is the manifest digest, the content's address.",
+															Type:        "string",
+														},
+														"lastUsedTime": {
+															Description: "LastUsedTime is when the content was last mounted or unmounted, truncated to the hour so that\nuse does not rewrite the object.",
+															Type:        "string",
+															Format:      "date-time",
+															Nullable:    true,
+														},
+														"message": {
+															Description: "Message says why for people, in words that name no tenant: what the reason means and a detail\nsuch as the hub's HTTP status. The full error, with the file and the URL, is in the plugin's\nlog. Nothing parses it, and it never carries a credential.",
+															Type:        "string",
+														},
+														"reason": {
+															Description: "Reason classifies a Failed entry: InvalidRequest, AccessDenied, SourceUnavailable,\nIntegrityMismatch, InsufficientCapacity or Canceled.",
+															Type:        "string",
+														},
+														"referenced": {
+															Description: "Referenced says some Pod mounts the content. Which Pod is never recorded.",
+															Type:        "boolean",
+														},
+														"retryTime": {
+															Description: "RetryTime is the earliest next attempt of a Failed entry. Until then a mount of the digest\nreturns at once without downloading, because kubelet retries every failed mount and each\nretry would otherwise download everything again.",
+															Type:        "string",
+															Format:      "date-time",
+															Nullable:    true,
+														},
+														"sizeBytes": {
+															Description: "SizeBytes is the content's size.",
+															Type:        "integer",
+															Format:      "int64",
+														},
+														"state": {
+															Description: "State is Downloading, Ready or Failed.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"Downloading"`),
+																},
+																{
+																	Raw: []byte(`"Ready"`),
+																},
+																{
+																	Raw: []byte(`"Failed"`),
+																},
+															},
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"digest",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"observedGeneration": {
+											Description: "ObservedGeneration is the spec generation the plugin applies.",
+											Type:        "integer",
+											Format:      "int64",
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Ready",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.conditions[?(@.type=='Ready')].status",
+						},
+						{
+							Name:        "Used",
+							Type:        "integer",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.capacity.usedPercent",
+						},
+						{
+							Name:        "Age",
+							Type:        "date",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".metadata.creationTimestamp",
 						},
 					},
 				},

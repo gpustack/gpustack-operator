@@ -52,6 +52,13 @@ Device-manager resource name: "<fullname>-device-manager".
 {{- end -}}
 
 {{/*
+Model-manager resource name: "<fullname>-model-manager".
+*/}}
+{{- define "gpustack-operator.modelManager.fullname" -}}
+{{- printf "%s-model-manager" (include "gpustack-operator.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
 Resolved operator image reference "{registry/}{namespace/}repository:tag" for a component.
 Overlays the component's `image` overrides on the chart-level `image` defaults.
 When global.imageNamespace is non-empty it replaces the namespace segment of
@@ -153,6 +160,24 @@ Device-manager selector labels. Kept minimal and stable across upgrades.
 app.kubernetes.io/part-of: gpustack-operator
 app.kubernetes.io/component: device-manager
 app.kubernetes.io/name: {{ include "gpustack-operator.deviceManager.fullname" . }}
+{{- end -}}
+
+{{/*
+Model-manager metadata labels.
+*/}}
+{{- define "gpustack-operator.modelManager.labels" -}}
+{{ include "gpustack-operator.commonLabels" . }}
+app.kubernetes.io/component: model-manager
+app.kubernetes.io/name: {{ include "gpustack-operator.modelManager.fullname" . }}
+{{- end -}}
+
+{{/*
+Model-manager selector labels. Kept minimal and stable across upgrades.
+*/}}
+{{- define "gpustack-operator.modelManager.selectorLabels" -}}
+app.kubernetes.io/part-of: gpustack-operator
+app.kubernetes.io/component: model-manager
+app.kubernetes.io/name: {{ include "gpustack-operator.modelManager.fullname" . }}
 {{- end -}}
 
 {{/*

@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apiserver/pkg/admission/plugin/namespace/lifecycle"
 	"k8s.io/apiserver/pkg/admission/plugin/policy/validating"
 	"k8s.io/apiserver/pkg/apis/apiserver"
@@ -32,6 +33,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/version"
 	"gpustack.ai/gpustack/pkg/worker/extensionapis"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 type Options struct {
@@ -63,6 +65,9 @@ type Options struct {
 
 	// Device Manager.
 	Manufacturers []string
+
+	// Model Manager.
+	ModelManagerServiceAccount string
 }
 
 func NewOptions() *Options {
@@ -94,6 +99,9 @@ func NewOptions() *Options {
 
 		// Device Manager.
 		Manufacturers: nodefeature.GetKnownAcceleratableManufacturers(),
+
+		// Model Manager.
+		ModelManagerServiceAccount: system.ModelManagerServiceAccount.Get(),
 	}
 	opts.ManagerOptions.KubeLeaderElectionID = "worker.gpustack.ai"
 
@@ -156,6 +164,11 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	// Device Manager.
 	fs.StringSliceVar(&o.Manufacturers, "manufacturer", o.Manufacturers,
 		"comma separated list of manufacturers to detect.")
+
+	// Model Manager.
+	fs.StringVar(&o.ModelManagerServiceAccount, "model-manager-service-account", o.ModelManagerServiceAccount,
+		"the ServiceAccount, in the system namespace, the model-manager plugin runs as; "+
+			"only it may write a NodeModelStore's status.")
 }
 
 func (o *Options) Validate(ctx context.Context) error {
@@ -216,6 +229,17 @@ func (o *Options) Validate(ctx context.Context) error {
 		return errors.New("--audit-webhook-config-file: no found file")
 	}
 
+	// Settings. A default comes from the environment, which no admission reads.
+	if err := settings.ValidateModelStoreDefaults(); err != nil {
+		return err
+	}
+
+	// Model Manager. The status guard admits only this ServiceAccount, so a name no ServiceAccount
+	// can have would refuse every status the plugin writes.
+	if errs := validation.IsDNS1123Subdomain(o.ModelManagerServiceAccount); len(errs) != 0 {
+		return fmt.Errorf("--model-manager-service-account: %s", strings.Join(errs, "; "))
+	}
+
 	// Device Manager.
 	if len(o.Manufacturers) != 0 {
 		knownManufacturers := nodefeature.GetKnownAcceleratableManufacturers()
@@ -234,6 +258,7 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 		o.DisableAuths,
 		o.DisableApplications,
 	)
+	system.ModelManagerServiceAccount.Configure(o.ModelManagerServiceAccount)
 
 	mgrConfig, err := o.ManagerOptions.Complete(ctx)
 	if err != nil {

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,6 +26,14 @@ func testEngineArtifactRender() *ModelDeploymentArtifactRender {
 		Delivery:   workercore.ModelDeploymentModelDeliveryEngine,
 		Repository: "Qwen/Qwen2.5-72B-Instruct", Revision: testArtifactRevision, SecretName: "hf-token",
 		SizeBytes: 100 << 30, Endpoint: "https://hub.example", HTTPSProxy: "http://proxy:3128", NoProxy: "svc",
+	}
+}
+
+func testNodeArtifactRender() *ModelDeploymentArtifactRender {
+	return &ModelDeploymentArtifactRender{
+		Delivery: workercore.ModelDeploymentModelDeliveryNode, ArtifactName: "qwen", ArtifactUID: "uid-qwen",
+		ManifestDigest: testArtifactDigest, Repository: "Qwen/Qwen2.5-72B-Instruct", Revision: testArtifactRevision,
+		SecretName: "hf-token", SizeBytes: 100 << 30,
 	}
 }
 
@@ -104,6 +113,18 @@ func TestRenderModelDeploymentArtifactCommand(t *testing.T) {
 			name: "SGLang downloading the pinned commit", engine: workercore.ModelDeploymentEngineSGLang, artifact: testEngineArtifactRender(),
 			wantHead: []string{"python3", "-m", "sglang.launch_server", "--model-path", "Qwen/Qwen2.5-72B-Instruct", "--enable-metrics", "--revision", testArtifactRevision},
 			wantArgs: []string{"--served-model-name", served},
+		},
+		{
+			name: "vLLM on the node's published tree", engine: workercore.ModelDeploymentEngineVLLM, artifact: testNodeArtifactRender(),
+			wantHead: []string{"vllm", "serve", ModelDeploymentModelMountPath},
+			wantArgs: []string{"--served-model-name", served},
+			absent:   []string{"--revision"},
+		},
+		{
+			name: "SGLang on the node's published tree", engine: workercore.ModelDeploymentEngineSGLang, artifact: testNodeArtifactRender(),
+			wantHead: []string{"python3", "-m", "sglang.launch_server", "--model-path", ModelDeploymentModelMountPath},
+			wantArgs: []string{"--served-model-name", served},
+			absent:   []string{"--revision"},
 		},
 		{
 			name: "a role stating the served name keeps its own and gets no second one", engine: workercore.ModelDeploymentEngineVLLM,
@@ -232,6 +253,10 @@ func TestRenderModelDeploymentArtifactEnvironment(t *testing.T) {
 		},
 		{name: "a claim adds nothing", artifact: testPvcArtifactRender(), absent: []string{"HF_HOME", "HF_ENDPOINT", "HF_TOKEN"}},
 		{
+			name: "node delivery adds nothing: the token reaches the plugin through kubelet", artifact: testNodeArtifactRender(),
+			absent: []string{"HF_HOME", "HF_ENDPOINT", "HF_TOKEN", "HTTPS_PROXY", "NO_PROXY"},
+		},
+		{
 			name: "a take-over role gets nothing", artifact: testEngineArtifactRender(), takeOver: true,
 			absent: []string{"HF_HOME", "HF_ENDPOINT", "HF_TOKEN", "HTTPS_PROXY"},
 		},
@@ -274,6 +299,7 @@ func TestRenderModelDeploymentArtifactEphemeralStorage(t *testing.T) {
 	}{
 		{name: "an engine download raises the limit by its cache", artifact: testEngineArtifactRender(), wantLimit: "125Gi"},
 		{name: "a claim leaves it alone", artifact: testPvcArtifactRender(), wantLimit: "15Gi"},
+		{name: "node delivery leaves it alone", artifact: testNodeArtifactRender(), wantLimit: "15Gi"},
 		{name: "no artifact leaves it alone", wantLimit: "15Gi"},
 	}
 	for _, c := range cases {
@@ -286,4 +312,41 @@ func TestRenderModelDeploymentArtifactEphemeralStorage(t *testing.T) {
 			assert.Zero(t, request.Cmp(resource.MustParse("15Gi")), "the request is unchanged: %s", request.String())
 		})
 	}
+}
+
+func TestRenderModelDeploymentArtifactNodeVolume(t *testing.T) {
+	for _, takeOver := range []bool{false, true} {
+		t.Run(fmt.Sprintf("take-over %v", takeOver), func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				if takeOver {
+					md.Spec.Roles[0].Command = []string{"sh", "-c", "serve"}
+				}
+			})
+			pod := renderWithArtifact(t, md, testNodeArtifactRender())
+			main := &pod.Spec.Containers[0]
+
+			vol, mount := findVolume(pod, modelDeploymentModelVolumeName), findMount(main, modelDeploymentModelVolumeName)
+			require.NotNil(t, vol, "the take-over tier gets the mount as well")
+			require.NotNil(t, vol.CSI)
+			assert.Equal(t, "model.csi.gpustack.ai", vol.CSI.Driver)
+			assert.True(t, *vol.CSI.ReadOnly)
+			assert.Equal(t, map[string]string{
+				"artifact": "qwen", "artifactUID": "uid-qwen", "manifestDigest": testArtifactDigest,
+			}, vol.CSI.VolumeAttributes)
+			require.NotNil(t, vol.CSI.NodePublishSecretRef)
+			assert.Equal(t, "hf-token", vol.CSI.NodePublishSecretRef.Name)
+			require.NotNil(t, mount)
+			assert.Equal(t, ModelDeploymentModelMountPath, mount.MountPath)
+			assert.True(t, mount.ReadOnly)
+			assert.Empty(t, mount.SubPath)
+			assert.Nil(t, findVolume(pod, modelDeploymentModelCacheVolumeName), "no engine cache")
+		})
+	}
+	t.Run("a public artifact names no Secret", func(t *testing.T) {
+		a := testNodeArtifactRender()
+		a.SecretName = ""
+		vol := findVolume(renderWithArtifact(t, newRenderDeployment(), a), modelDeploymentModelVolumeName)
+		require.NotNil(t, vol)
+		assert.Nil(t, vol.CSI.NodePublishSecretRef)
+	})
 }

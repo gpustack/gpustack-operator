@@ -52,11 +52,19 @@ type Resolution struct {
 	Manifest Manifest
 }
 
-// Resolve resolves revision to a commit and builds the manifest of the files at it.
+// Filter is an artifact's allow and ignore patterns; see FilterEntries. The zero value selects
+// every file.
+type Filter struct {
+	Allow  []string
+	Ignore []string
+}
+
+// Resolve resolves revision to a commit and builds the manifest of the files at it that filter
+// selects.
 //
 // It uses the revision endpoint rather than the refs endpoint because only the former peels an
 // annotated tag to the commit it points at; the latter answers the tag object.
-func (h *HuggingFace) Resolve(ctx context.Context, repository, revision, token string) (Resolution, error) {
+func (h *HuggingFace) Resolve(ctx context.Context, repository, revision, token string, filter Filter) (Resolution, error) {
 	var info struct {
 		SHA string `json:"sha"`
 	}
@@ -70,19 +78,42 @@ func (h *HuggingFace) Resolve(ctx context.Context, repository, revision, token s
 			revision, repository, info.SHA)
 	}
 
-	entries, err := h.listTree(ctx, repository, info.SHA, token)
+	manifest, err := h.ListManifest(ctx, repository, info.SHA, token, filter)
 	if err != nil {
 		return Resolution{}, err
 	}
+
+	return Resolution{Commit: info.SHA, Manifest: manifest}, nil
+}
+
+// ListManifest builds the manifest of the files at commit that filter selects, from every page of
+// the tree listing. A node recomputes an artifact's manifest this way, with the credential of the
+// Pod that mounts it, and compares the digest with the one the controller published.
+func (h *HuggingFace) ListManifest(ctx context.Context, repository, commit, token string, filter Filter) (Manifest, error) {
+	entries, err := h.listTree(ctx, repository, commit, token)
+	if err != nil {
+		return Manifest{}, err
+	}
 	if len(entries) == 0 {
-		return Resolution{}, sourceErrorf(ReasonEmptyManifest, "commit %s of %q holds no file", info.SHA, repository)
+		return Manifest{}, sourceErrorf(ReasonEmptyManifest, "commit %s of %q holds no file", commit, repository)
+	}
+	entries = FilterEntries(entries, filter.Allow, filter.Ignore)
+	if len(entries) == 0 {
+		return Manifest{}, sourceErrorf(ReasonEmptyManifest,
+			"no file of commit %s of %q matches the allow and ignore patterns", commit, repository)
 	}
 	manifest, err := NewManifest(entries)
 	if err != nil {
-		return Resolution{}, sourceErrorf(ReasonInvalidManifest, "commit %s of %q: %v", info.SHA, repository, err)
+		return Manifest{}, sourceErrorf(ReasonInvalidManifest, "commit %s of %q: %v", commit, repository, err)
 	}
 
-	return Resolution{Commit: info.SHA, Manifest: manifest}, nil
+	return manifest, nil
+}
+
+// FileURL is where a file of repository at commit is downloaded from. The Hub answers it with a
+// redirect to a content host, which honors byte ranges.
+func (h *HuggingFace) FileURL(repository, commit, path string) string {
+	return h.resolveURL(repository, commit, path)
 }
 
 // huggingFaceTreeEntry is one entry of a tree listing.

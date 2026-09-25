@@ -107,9 +107,13 @@ func (s Setting) Configure(ctx context.Context, newVal string) error {
 	return nil
 }
 
+// ReadCacheTTL is how long a read setting value is served from the cache: a change reaches a reader
+// at most this long after it was stored.
+const ReadCacheTTL = 30 * time.Second
+
 // _Cache is a cache for the values of settings,
 // which is used to reduce the number of API calls to the Kubernetes API server.
-var _Cache = cache.New(30*time.Second, cache.NoExpiration)
+var _Cache = cache.New(ReadCacheTTL, cache.NoExpiration)
 
 // InvalidateCache drops every cached setting value, so the next read goes back to the delegated
 // secret.

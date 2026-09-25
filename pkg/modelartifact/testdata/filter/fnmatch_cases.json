@@ -1,0 +1,9625 @@
+{
+"python": "3.11.9",
+"cases": [
+{
+"pattern": "*",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "*",
+"name": "model.safetensors",
+"match": true
+},
+{
+"pattern": "*",
+"name": "Model.SAFETENSORS",
+"match": true
+},
+{
+"pattern": "*",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "*",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "*",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "*",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "*",
+"name": "original",
+"match": true
+},
+{
+"pattern": "*",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "*",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "*",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "*",
+"name": "cde",
+"match": true
+},
+{
+"pattern": "*",
+"name": "def",
+"match": true
+},
+{
+"pattern": "*",
+"name": "]x",
+"match": true
+},
+{
+"pattern": "*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "*",
+"name": "!x",
+"match": true
+},
+{
+"pattern": "*",
+"name": "^x",
+"match": true
+},
+{
+"pattern": "*",
+"name": "[x",
+"match": true
+},
+{
+"pattern": "*",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "*",
+"name": "*",
+"match": true
+},
+{
+"pattern": "*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "*",
+"name": "x",
+"match": true
+},
+{
+"pattern": "*",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "*",
+"name": ".gitattributes",
+"match": true
+},
+{
+"pattern": "*",
+"name": "pytorch_model.bin",
+"match": true
+},
+{
+"pattern": "*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "*",
+"name": "b",
+"match": true
+},
+{
+"pattern": "*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "*",
+"name": "z",
+"match": true
+},
+{
+"pattern": "*",
+"name": "zx",
+"match": true
+},
+{
+"pattern": "**",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "**",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "**",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "**",
+"name": "model.safetensors",
+"match": true
+},
+{
+"pattern": "**",
+"name": "Model.SAFETENSORS",
+"match": true
+},
+{
+"pattern": "**",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "**",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "**",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "**",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "**",
+"name": "original",
+"match": true
+},
+{
+"pattern": "**",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "**",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "**",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "**",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "**",
+"name": "cde",
+"match": true
+},
+{
+"pattern": "**",
+"name": "def",
+"match": true
+},
+{
+"pattern": "**",
+"name": "]x",
+"match": true
+},
+{
+"pattern": "**",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "**",
+"name": "!x",
+"match": true
+},
+{
+"pattern": "**",
+"name": "^x",
+"match": true
+},
+{
+"pattern": "**",
+"name": "[x",
+"match": true
+},
+{
+"pattern": "**",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "**",
+"name": "*",
+"match": true
+},
+{
+"pattern": "**",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "**",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "**",
+"name": "a",
+"match": true
+},
+{
+"pattern": "**",
+"name": "x",
+"match": true
+},
+{
+"pattern": "**",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "**",
+"name": ".gitattributes",
+"match": true
+},
+{
+"pattern": "**",
+"name": "pytorch_model.bin",
+"match": true
+},
+{
+"pattern": "**",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "**",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "**",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "**",
+"name": "b",
+"match": true
+},
+{
+"pattern": "**",
+"name": "-",
+"match": true
+},
+{
+"pattern": "**",
+"name": "z",
+"match": true
+},
+{
+"pattern": "**",
+"name": "zx",
+"match": true
+},
+{
+"pattern": "*.json",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "*.json",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "*.json",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "*.json",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "*.json",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "*.json",
+"name": "original",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "*.json",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "*.json",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "def",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "*",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "a",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "x",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "*.json",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "b",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "-",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "z",
+"match": false
+},
+{
+"pattern": "*.json",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "**/*.json",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "**/*.json",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "**/*.json",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "**/*.json",
+"name": "original",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "def",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "*",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "a",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "x",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "b",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "-",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "z",
+"match": false
+},
+{
+"pattern": "**/*.json",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "*/*.json",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "*/*.json",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "*/*.json",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "*/*.json",
+"name": "original",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "def",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "*",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "a",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "x",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "b",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "-",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "z",
+"match": false
+},
+{
+"pattern": "*/*.json",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "original/*",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "original/*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "original/*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "original",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "def",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "*",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "a",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "x",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "original/",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "b",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "-",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "z",
+"match": false
+},
+{
+"pattern": "original/",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "original/**",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "original/**",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "original",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "def",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "*",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "a",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "x",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "b",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "-",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "z",
+"match": false
+},
+{
+"pattern": "original/**",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "Original/*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "Original/*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "Model.SAFETENSORS",
+"match": true
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "original",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "def",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "*",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "a",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "x",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "b",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "-",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "z",
+"match": false
+},
+{
+"pattern": "*.SAFETENSORS",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "model.safetensors",
+"match": true
+},
+{
+"pattern": "*.safetensors",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "*.safetensors",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "original",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "def",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "*",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "a",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "x",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "b",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "-",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "z",
+"match": false
+},
+{
+"pattern": "*.safetensors",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "original",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "def",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "*",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "a",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "x",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "b",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "-",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "z",
+"match": false
+},
+{
+"pattern": "model-?????-of-?????.safetensors",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "tokenizer*",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "tokenizer*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "tokenizer*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "cde",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "b",
+"match": true
+},
+{
+"pattern": "[abc]*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[abc]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "model.safetensors",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "Model.SAFETENSORS",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "original",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "def",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "]x",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "!x",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "^x",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "[x",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "*",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "x",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": ".gitattributes",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "pytorch_model.bin",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[!abc]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "z",
+"match": true
+},
+{
+"pattern": "[!abc]*",
+"name": "zx",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "cde",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "b",
+"match": true
+},
+{
+"pattern": "[a-c]*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[a-c]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "model.safetensors",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "Model.SAFETENSORS",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "original",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "def",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "]x",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "!x",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "^x",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "[x",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "*",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "x",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": ".gitattributes",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "pytorch_model.bin",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[!a-c]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "z",
+"match": true
+},
+{
+"pattern": "[!a-c]*",
+"name": "zx",
+"match": true
+},
+{
+"pattern": "[c-a]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[c-a]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[!c-a]*",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "model.safetensors",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "Model.SAFETENSORS",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "original",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "cde",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "def",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "]x",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "!x",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "^x",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "[x",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "*",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "x",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": ".gitattributes",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "pytorch_model.bin",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "b",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "z",
+"match": true
+},
+{
+"pattern": "[!c-a]*",
+"name": "zx",
+"match": true
+},
+{
+"pattern": "[]]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "]x",
+"match": true
+},
+{
+"pattern": "[]]*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[]]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[!]]*",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "model.safetensors",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "Model.SAFETENSORS",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "original",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "cde",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "def",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[!]]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "!x",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "^x",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "[x",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "*",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "x",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": ".gitattributes",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "pytorch_model.bin",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "b",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "z",
+"match": true
+},
+{
+"pattern": "[!]]*",
+"name": "zx",
+"match": true
+},
+{
+"pattern": "[a-]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "[a-]*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "[a-]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "[a-]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[a-]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "[a-]*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "[a-]*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "[a-]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "[a-]*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "[a-]*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "[a-]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[a-]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[a-]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "[-a]*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "[-a]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "[-a]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[-a]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "[-a]*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "[-a]*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "[-a]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "[-a]*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "[-a]*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "[-a]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[-a]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[-a]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[!-a]*",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[!-a]*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[!-a]*",
+"name": "model.safetensors",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "Model.SAFETENSORS",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "original",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[!-a]*",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "cde",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "def",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "]x",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[!-a]*",
+"name": "!x",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "^x",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "[x",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "*",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[!-a]*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[!-a]*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[!-a]*",
+"name": "x",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": ".gitattributes",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "pytorch_model.bin",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[!-a]*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[!-a]*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[!-a]*",
+"name": "b",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[!-a]*",
+"name": "z",
+"match": true
+},
+{
+"pattern": "[!-a]*",
+"name": "zx",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "cde",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "b",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[a-c-e]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[a-c-e]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "cde",
+"match": true
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "b",
+"match": true
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[z-ab-c]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "model.safetensors",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "Model.SAFETENSORS",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "original",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "def",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "]x",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "!x",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "^x",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "[x",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "*",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "x",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": ".gitattributes",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "pytorch_model.bin",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "z",
+"match": true
+},
+{
+"pattern": "[!z-ab-c]*",
+"name": "zx",
+"match": true
+},
+{
+"pattern": "[abc",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[abc",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "original",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "def",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "*",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "a",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "x",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "a[",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "b",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "-",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "z",
+"match": false
+},
+{
+"pattern": "a[",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "[x",
+"match": true
+},
+{
+"pattern": "[[]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[[]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "[\\]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[\\]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "\\*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "\\*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "original",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "def",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "*",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "a\\b",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "a",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "x",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "b",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "-",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "z",
+"match": false
+},
+{
+"pattern": "a\\b",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "[^a]*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "[^a]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "[^a]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "^x",
+"match": true
+},
+{
+"pattern": "[^a]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "[^a]*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "[^a]*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "[^a]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "[^a]*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "[^a]*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "[^a]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[^a]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "x",
+"match": true
+},
+{
+"pattern": "[x-z]",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[x-z]",
+"name": "z",
+"match": true
+},
+{
+"pattern": "[x-z]",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "?",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "?",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "?",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "?",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "?",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "?",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "?",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "?",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "?",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "?",
+"name": "original",
+"match": false
+},
+{
+"pattern": "?",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "?",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "?",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "?",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "?",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "?",
+"name": "def",
+"match": false
+},
+{
+"pattern": "?",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "?",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "?",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "?",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "?",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "?",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "?",
+"name": "*",
+"match": true
+},
+{
+"pattern": "?",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "?",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "?",
+"name": "a",
+"match": true
+},
+{
+"pattern": "?",
+"name": "x",
+"match": true
+},
+{
+"pattern": "?",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "?",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "?",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "?",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "?",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "?",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "?",
+"name": "b",
+"match": true
+},
+{
+"pattern": "?",
+"name": "-",
+"match": true
+},
+{
+"pattern": "?",
+"name": "z",
+"match": true
+},
+{
+"pattern": "?",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "??",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "??",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "??",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "??",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "??",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "??",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "??",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "??",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "??",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "??",
+"name": "original",
+"match": false
+},
+{
+"pattern": "??",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "??",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "??",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "??",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "??",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "??",
+"name": "def",
+"match": false
+},
+{
+"pattern": "??",
+"name": "]x",
+"match": true
+},
+{
+"pattern": "??",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "??",
+"name": "!x",
+"match": true
+},
+{
+"pattern": "??",
+"name": "^x",
+"match": true
+},
+{
+"pattern": "??",
+"name": "[x",
+"match": true
+},
+{
+"pattern": "??",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "??",
+"name": "*",
+"match": false
+},
+{
+"pattern": "??",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "??",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "??",
+"name": "a",
+"match": false
+},
+{
+"pattern": "??",
+"name": "x",
+"match": false
+},
+{
+"pattern": "??",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "??",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "??",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "??",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "??",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "??",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "??",
+"name": "b",
+"match": false
+},
+{
+"pattern": "??",
+"name": "-",
+"match": false
+},
+{
+"pattern": "??",
+"name": "z",
+"match": false
+},
+{
+"pattern": "??",
+"name": "zx",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "model.safetensors",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "Model.SAFETENSORS",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "original",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "cde",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "def",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "]x",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "!x",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "^x",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "[x",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "*",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "x",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": ".gitattributes",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "pytorch_model.bin",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "b",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "z",
+"match": true
+},
+{
+"pattern": "*?*",
+"name": "zx",
+"match": true
+},
+{
+"pattern": "a*b*c",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "original",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "a*b*c",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "def",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "*",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "a",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "x",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "a*b*c",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "a*b*c",
+"name": "b",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "-",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "z",
+"match": false
+},
+{
+"pattern": "a*b*c",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "é*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "é*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "[é]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[é]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "original",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "def",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "*",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "a",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "x",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "*/",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "b",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "-",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "z",
+"match": false
+},
+{
+"pattern": "*/",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "original",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "def",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "*",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "a",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "x",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "pytorch_model.bin",
+"match": true
+},
+{
+"pattern": "*.bin",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "b",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "-",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "z",
+"match": false
+},
+{
+"pattern": "*.bin",
+"name": "zx",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "original",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "def",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "*",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "a",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "x",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": ".gitattributes",
+"match": true
+},
+{
+"pattern": ".git*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "b",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "-",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "z",
+"match": false
+},
+{
+"pattern": ".git*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "*/config.json",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "*/config.json",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "original",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "def",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "*",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "a",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "x",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "b",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "-",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "z",
+"match": false
+},
+{
+"pattern": "*/config.json",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "config.json",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "original",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "def",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "*",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "a",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "x",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "b",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "-",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "z",
+"match": false
+},
+{
+"pattern": "config.json",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[b-a-c-b]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "[z-a-b]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[z-a-b]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "b",
+"match": true
+},
+{
+"pattern": "[z-a-b]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[z-a-b]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[z-a-b]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[!b-a]*",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "model.safetensors",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "Model.SAFETENSORS",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "Original/params.json",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "original",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "cde",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "def",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "]x",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "!x",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "^x",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "[x",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "\\x",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "*",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "x",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "é.json",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": ".gitattributes",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "pytorch_model.bin",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "b",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "z",
+"match": true
+},
+{
+"pattern": "[!b-a]*",
+"name": "zx",
+"match": true
+},
+{
+"pattern": "[c-b-a]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "[c-b-a]*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "[c-b-a]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "[c-b-a]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[c-b-a]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "[c-b-a]*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "[c-b-a]*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "[c-b-a]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "[c-b-a]*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "[c-b-a]*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "[c-b-a]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[c-b-a]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[c-b-a]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "config.json",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "a/config.json",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "a/b/config.json",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "model.safetensors",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "model-00001-of-00004.safetensors",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "original/consolidated.00.pth",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "original/params.json",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "original",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "tokenizer.json",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "tokenizer_config.json",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "abc",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "bcd",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "cde",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "def",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "-x",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "a\\b",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "ab",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "a",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "x",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "pytorch_model.bin",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "a/b",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "aXbYc",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "a/b/c",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "b",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "-",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "z",
+"match": false
+},
+{
+"pattern": "[b-a]*",
+"name": "zx",
+"match": false
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "config.json",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "a/config.json",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "a/b/config.json",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "model.safetensors",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "Model.SAFETENSORS",
+"match": false
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "model-00001-of-00004.safetensors",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "original/consolidated.00.pth",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "original/params.json",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "Original/params.json",
+"match": false
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "original",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "tokenizer.json",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "tokenizer_config.json",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "abc",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "bcd",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "cde",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "def",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "]x",
+"match": false
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "-x",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "!x",
+"match": false
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "^x",
+"match": false
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "[x",
+"match": false
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "\\x",
+"match": false
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "*",
+"match": false
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "a\\b",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "ab",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "a",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "x",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "é.json",
+"match": false
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": ".gitattributes",
+"match": false
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "pytorch_model.bin",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "a/b",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "aXbYc",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "a/b/c",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "b",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "-",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "z",
+"match": true
+},
+{
+"pattern": "[a-c-b-z]*",
+"name": "zx",
+"match": true
+}
+]
+}

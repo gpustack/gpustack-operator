@@ -15,6 +15,10 @@ var (
 
 	// DisableApplications is a set of applications that are not allowed to be installed.
 	DisableApplications = varx.NewOnce(sets.New[string]())
+
+	// ModelManagerServiceAccount is the ServiceAccount, in the system namespace, the model-manager
+	// plugin runs as: the only identity that may write a NodeModelStore's status.
+	ModelManagerServiceAccount = varx.NewOnce("gpustack-operator-model-manager")
 )
 
 // ConfigureControl configures the function of the system.

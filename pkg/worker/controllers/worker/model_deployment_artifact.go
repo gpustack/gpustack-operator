@@ -3,8 +3,10 @@ package worker
 import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/modelstore"
 )
 
 const (
@@ -39,8 +41,14 @@ const (
 // A nil one is a deployment that names no artifact, which renders exactly what it rendered before
 // the field existed.
 type ModelDeploymentArtifactRender struct {
-	// Delivery is Pvc or Engine.
+	// Delivery is Pvc, Engine or Node.
 	Delivery workercore.ModelDeploymentModelDelivery
+
+	// ArtifactName, ArtifactUID and ManifestDigest are what a node-delivered volume names, as hints
+	// the node's plugin checks against the API before it mounts anything.
+	ArtifactName   string
+	ArtifactUID    string
+	ManifestDigest string
 
 	// ClaimName and Path are a claim artifact's claim and the directory inside it.
 	ClaimName string
@@ -59,14 +67,14 @@ type ModelDeploymentArtifactRender struct {
 	NoProxy    string
 }
 
-// model is what the engine command names as the model: the fixed mount path for a claim, the
-// repository for an engine download.
+// model is what the engine command names as the model: the fixed mount path for a claim or a
+// node-delivered artifact, the repository for an engine download.
 func (a *ModelDeploymentArtifactRender) model() string {
-	if a.Delivery == workercore.ModelDeploymentModelDeliveryPvc {
-		return ModelDeploymentModelMountPath
+	if a.Delivery == workercore.ModelDeploymentModelDeliveryEngine {
+		return a.Repository
 	}
 
-	return a.Repository
+	return ModelDeploymentModelMountPath
 }
 
 // args are the owned arguments that follow the engine's base command.
@@ -83,6 +91,12 @@ func (a *ModelDeploymentArtifactRender) args() []string {
 // downloads the weights.
 func (a *ModelDeploymentArtifactRender) volumes(takeOver bool) ([]core.Volume, []core.VolumeMount) {
 	switch {
+	case a.Delivery == workercore.ModelDeploymentModelDeliveryNode:
+		return []core.Volume{{
+				Name: modelDeploymentModelVolumeName, VolumeSource: a.nodeVolumeSource(),
+			}}, []core.VolumeMount{{
+				Name: modelDeploymentModelVolumeName, MountPath: ModelDeploymentModelMountPath, ReadOnly: true,
+			}}
 	case a.Delivery == workercore.ModelDeploymentModelDeliveryPvc:
 		return []core.Volume{{
 				Name: modelDeploymentModelVolumeName,
@@ -107,6 +121,33 @@ func (a *ModelDeploymentArtifactRender) volumes(takeOver bool) ([]core.Volume, [
 			}}
 	}
 }
+
+// nodeVolumeSource is the node plugin's inline volume. Its attributes are hints the plugin checks
+// against a resolved artifact in the Pod's own namespace; the Secret reference hands the artifact's
+// token to the plugin through kubelet, never through the Pod's environment.
+func (a *ModelDeploymentArtifactRender) nodeVolumeSource() core.VolumeSource {
+	csi := &core.CSIVolumeSource{
+		Driver:   modelstore.DriverName,
+		ReadOnly: ptr.To(true),
+		VolumeAttributes: map[string]string{
+			modelArtifactVolumeAttrArtifact:    a.ArtifactName,
+			modelArtifactVolumeAttrArtifactUID: a.ArtifactUID,
+			modelArtifactVolumeAttrDigest:      a.ManifestDigest,
+		},
+	}
+	if a.SecretName != "" {
+		csi.NodePublishSecretRef = &core.LocalObjectReference{Name: a.SecretName}
+	}
+
+	return core.VolumeSource{CSI: csi}
+}
+
+// The volume attributes a node-delivered volume names, the keys the node plugin reads.
+const (
+	modelArtifactVolumeAttrArtifact    = modelstore.VolumeAttrArtifact
+	modelArtifactVolumeAttrArtifactUID = modelstore.VolumeAttrArtifactUID
+	modelArtifactVolumeAttrDigest      = modelstore.VolumeAttrManifestDigest
+)
 
 // cacheSize is an engine download's cache limit: the manifest's size and a headroom of a tenth,
 // at least modelDeploymentCacheHeadroomMin. The manifest is the whole commit, and an engine

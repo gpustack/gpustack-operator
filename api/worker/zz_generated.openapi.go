@@ -178,6 +178,15 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterStatus(ref),
 		v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref),
 		v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref),
+		v1alpha1.NodeModelStore{}.OpenAPIModelName():                                 schema_gpustack_api_worker_v1alpha1_NodeModelStore(ref),
+		v1alpha1.NodeModelStoreCapacity{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_NodeModelStoreCapacity(ref),
+		v1alpha1.NodeModelStoreDownload{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_NodeModelStoreDownload(ref),
+		v1alpha1.NodeModelStoreHub{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_NodeModelStoreHub(ref),
+		v1alpha1.NodeModelStoreList{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_NodeModelStoreList(ref),
+		v1alpha1.NodeModelStoreModel{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_NodeModelStoreModel(ref),
+		v1alpha1.NodeModelStoreSpec{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_NodeModelStoreSpec(ref),
+		v1alpha1.NodeModelStoreStatus{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_NodeModelStoreStatus(ref),
+		v1alpha1.NodeModelStoreWatermarks{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_NodeModelStoreWatermarks(ref),
 		v1alpha1.TopologySource{}.OpenAPIModelName():                                 schema_gpustack_api_worker_v1alpha1_TopologySource(ref),
 		v1alpha1.TopologySourceConfigMap{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_TopologySourceConfigMap(ref),
 		v1alpha1.TopologySourceList{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_TopologySourceList(ref),
@@ -7914,6 +7923,47 @@ func schema_gpustack_api_worker_v1alpha1_ModelArtifactSpec(ref common.ReferenceC
 							Ref:         ref(v1alpha1.ModelArtifactSource{}.OpenAPIModelName()),
 						},
 					},
+					"allowPatterns": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "AllowPatterns and IgnorePatterns select the files of a hub source that make up the artifact, with the semantics of huggingface_hub's allow_patterns and ignore_patterns: Python's fnmatch.fnmatchcase, where \"*\" and \"?\" cross \"/\"; a pattern ending in \"/\" is the directory's contents; no allow pattern keeps every file; an ignore pattern wins over an allow pattern.\n\nThe selection happens before the manifest is built, so the digest, file count and size describe the selected files, while the patterns themselves never enter the digest: two artifacts selecting the same files share one digest, and an artifact with no pattern has the digest of the whole commit. Only node delivery can honor a selection; an engine that downloads the weights itself chooses its own files. A claim source takes none, webhook-enforced, and each pattern is 1 to 256 characters without a control character.",
+							MaxItems:    ptr.To[int64](32),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"ignorePatterns": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							MaxItems: ptr.To[int64](32),
+							Type:     []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"source"},
 			},
@@ -8384,11 +8434,11 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelStatus(ref common.R
 					},
 					"delivery": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Delivery is how the weights reach the engine: \"Pvc\", the claim mounted read-only at a fixed path, or \"Engine\", the engine downloading the pinned commit itself.\n\n\nPossible enum values:\n - `\"Engine\"` has the engine download a hub artifact's resolved commit into a size-limited cache volume, with the artifact's token from its Secret.\n - `\"Pvc\"` mounts a claim artifact read-only at a fixed path.",
+							Description: "Delivery is how the weights reach the engine: \"Pvc\", the claim mounted read-only at a fixed path; \"Engine\", the engine downloading the pinned commit itself; or \"Node\", the node's model-manager plugin materializing the verified files and mounting them read-only at the same fixed path.\n\n\nPossible enum values:\n - `\"Engine\"` has the engine download a hub artifact's resolved commit into a size-limited cache volume, with the artifact's token from its Secret.\n - `\"Node\"` has the node's model-manager plugin materialize a hub artifact's verified files into the node's cache and mount them read-only.\n - `\"Pvc\"` mounts a claim artifact read-only at a fixed path.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Engine", "Pvc"},
+							Enum:        []interface{}{"Engine", "Node", "Pvc"},
 						},
 					},
 				},
@@ -9316,6 +9366,436 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 		},
 		Dependencies: []string{
 			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentModelStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_NodeModelStore(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStore is the schema for worker.gpustack.ai.\n\nIt is ONE NODE'S MODEL CACHE, named after the Node and owned by it, and it carries both halves of the node's contract the way a Node does: the worker writes spec, the effective configuration it computes from the Settings, and the model-manager plugin on that node writes status, what the node holds. status.models reports content the way Node.status.images reports images.\n\nNOTHING IN IT NAMES A TENANT. It is cluster-scoped, so a namespace, an artifact, a repository or a Pod written here would leak across tenants; an entry is a digest and its sizes only.\n\nThe worker creates it once the node's CSINode lists the plugin's driver, which is kubelet's own record that the plugin registered there, and never deletes it when the driver briefly leaves CSINode, as a restart or a rolling upgrade makes it do. Only the plugin Pod running on the named node may write status, webhook-enforced.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.NodeModelStoreSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.NodeModelStoreStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.NodeModelStoreSpec{}.OpenAPIModelName(), v1alpha1.NodeModelStoreStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_NodeModelStoreCapacity(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStoreCapacity is the cache filesystem's size and usage, coarse enough that it changes only when content does.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"totalBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TotalBytes is the cache filesystem's size.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"storedBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StoredBytes is what published trees and partial downloads occupy.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"usedPercent": {
+						SchemaProps: spec.SchemaProps{
+							Description: "UsedPercent is the filesystem's usage by everything on it, rounded down to a multiple of 5.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"totalBytes", "storedBytes", "usedPercent"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_NodeModelStoreDownload(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStoreDownload limits the node's downloads, across all of them.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"concurrency": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Concurrency is how many HTTP requests the node runs at once. A large file is fetched as byte ranges that share this budget, because one connection per file was measured to set a whole download's wall time.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](64),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"bytesPerSecond": {
+						SchemaProps: spec.SchemaProps{
+							Description: "BytesPerSecond is the node's download rate limit; 0 is unlimited.",
+							Minimum:     ptr.To[float64](0),
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+				Required: []string{"concurrency"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_NodeModelStoreHub(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStoreHub is how the node reaches the model hub, the same way the ModelArtifact controller and an engine download reach it.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"huggingFaceEndpoint": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HuggingFaceEndpoint is the Hugging Face Hub's base URL.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"httpsProxy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HTTPSProxy is the proxy downloads go through, an http or https URL without credentials.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"noProxy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NoProxy is the comma-separated host list that bypasses HTTPSProxy.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"caBundleConfigMap": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CABundleConfigMap names a ConfigMap in the operator's namespace whose \"ca.crt\" holds PEM certificates trusted beside the system pool. The name travels rather than the certificates, because a bundle can be larger than this object may be.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"huggingFaceEndpoint"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_NodeModelStoreList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStoreList holds the list of NodeModelStore.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.NodeModelStore{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.NodeModelStore{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_NodeModelStoreModel(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStoreModel is one digest on the node.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"digest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Digest is the manifest digest, the content's address.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"state": {
+						SchemaProps: spec.SchemaProps{
+							Description: "State is Downloading, Ready or Failed.\n\n\nPossible enum values:\n - `\"Downloading\"` is being materialized.\n - `\"Failed\"` failed its last attempt and waits for RetryTime.\n - `\"Ready\"` is published and mountable.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Downloading", "Failed", "Ready"},
+						},
+					},
+					"sizeBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SizeBytes is the content's size.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"referenced": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Referenced says some Pod mounts the content. Which Pod is never recorded.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"lastUsedTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LastUsedTime is when the content was last mounted or unmounted, truncated to the hour so that use does not rewrite the object.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Reason classifies a Failed entry: InvalidRequest, AccessDenied, SourceUnavailable, IntegrityMismatch, InsufficientCapacity or Canceled.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"message": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Message says why for people, in words that name no tenant: what the reason means and a detail such as the hub's HTTP status. The full error, with the file and the URL, is in the plugin's log. Nothing parses it, and it never carries a credential.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"retryTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RetryTime is the earliest next attempt of a Failed entry. Until then a mount of the digest returns at once without downloading, because kubelet retries every failed mount and each retry would otherwise download everything again.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"digest", "state"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_NodeModelStoreSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStoreSpec is the node's effective configuration, the worker's merge of the Settings.\n\nNo tenant-writable object feeds it: a tenant who could choose where a privileged node process connects could make it request any address. The plugin checks it again before using it, since a hand edit bypasses the worker's checks.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"watermarks": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Watermarks bound the cache filesystem's usage.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.NodeModelStoreWatermarks{}.OpenAPIModelName()),
+						},
+					},
+					"download": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Download limits the node's downloads.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.NodeModelStoreDownload{}.OpenAPIModelName()),
+						},
+					},
+					"hub": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Hub is how the node reaches the model hub.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.NodeModelStoreHub{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"watermarks", "download", "hub"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.NodeModelStoreDownload{}.OpenAPIModelName(), v1alpha1.NodeModelStoreHub{}.OpenAPIModelName(), v1alpha1.NodeModelStoreWatermarks{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_NodeModelStoreStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStoreStatus is what the plugin reports about its node, rebuilt from the node's disk and mounts whenever the plugin starts. It is written only when something in it changes, so a node whose content is not changing writes nothing.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"observedGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ObservedGeneration is the spec generation the plugin applies.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"capacity": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Capacity is the cache filesystem's size and usage.",
+							Ref:         ref(v1alpha1.NodeModelStoreCapacity{}.OpenAPIModelName()),
+						},
+					},
+					"models": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"digest",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Models is the content on the node, keyed by digest. When more is on disk than fits, the referenced entries are kept first and then the most recently used, and the Ready condition's message counts the omission.",
+							MaxItems:    ptr.To[int64](256),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.NodeModelStoreModel{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Conditions: Ready says the plugin serves and applies spec's generation; CapacityLow says usage is above the high watermark with nothing the plugin may remove.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.NodeModelStoreCapacity{}.OpenAPIModelName(), v1alpha1.NodeModelStoreModel{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_NodeModelStoreWatermarks(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStoreWatermarks are percentages of the cache filesystem's usage by everything on it.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"highPercent": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HighPercent is the usage above which the plugin removes unreferenced content. On a filesystem the cache shares with kubelet, the plugin may apply a lower one so kubelet neither evicts Pods nor collects images because of the cache.",
+							Default:     0,
+							Minimum:     ptr.To[float64](2),
+							Maximum:     ptr.To[float64](95),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"lowPercent": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LowPercent is the usage a collection removes down to, below HighPercent.",
+							Default:     0,
+							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](94),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"highPercent", "lowPercent"},
+			},
+		},
 	}
 }
 

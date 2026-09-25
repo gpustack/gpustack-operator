@@ -12,6 +12,7 @@ import (
 	core "k8s.io/api/core/v1"
 	node "k8s.io/api/node/v1"
 	rbac "k8s.io/api/rbac/v1"
+	storage "k8s.io/api/storage/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,7 +38,9 @@ import (
 	kubeapistatus "gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubediscovery"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/setting"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
@@ -934,6 +937,14 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
+	// A deployment held by the delivery is woken by the CSIDriver and Settings watches; it is also
+	// looked at again on its own, so a missed event or a Settings read that was still cached costs a
+	// minute rather than the rest of the deployment's life.
+	if weights != nil && weights.Blocked && (weights.Reason == modelWeightsReasonNodeUnavailable ||
+		weights.Reason == modelWeightsReasonFilterNeedsNode) {
+		return ctrl.Result{RequeueAfter: modelDeploymentDeliveryRecheck}, nil
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -1787,6 +1798,29 @@ func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts cont
 			// may run, and it moves on the claim, not on the artifact.
 			&core.PersistentVolumeClaim{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentClaim),
+		).
+		Watches(
+			// The plugin's CSIDriver decides whether a node-delivered artifact can be delivered.
+			&storage.CSIDriver{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentDelivery),
+			ctrlbuilder.WithPredicates(namePredicate(modelstore.DriverName)),
+		).
+		Watches(
+			// The delivery Setting decides how a hub artifact is delivered; its value is read through
+			// the Settings cache, so the deployments are looked at once that cache has expired.
+			&core.Secret{},
+			enqueueAfterSettingsRead(r.mapModelDeploymentDelivery),
+			ctrlbuilder.WithPredicates(ctrlpredicate.NewPredicateFuncs(func(o ctrlcli.Object) bool {
+				return o.GetNamespace() == setting.DelegatedSecretNamespace && o.GetName() == setting.DelegatedSecretName
+			})),
+		).
+		Watches(
+			// A node-delivered artifact's materialization is reported by the node, and a replica
+			// Pod waiting on it changes nothing while the node downloads or fails, so WeightsReady
+			// follows the node's NodeModelStore.
+			&workercore.NodeModelStore{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentNodeModelStore),
+			ctrlbuilder.WithPredicates(nodeModelStoreModelsChanged()),
 		).
 		Watches(
 			// Kueue's verdict on a replica is written to the replica's Workload and nowhere else: the

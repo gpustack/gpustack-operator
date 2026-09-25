@@ -36,9 +36,11 @@
 #                with `vllm serve <repo> --revision <commit>`, HF_TOKEN from a secretKeyRef, a cache
 #                whose sizeLimit is the manifest size plus its headroom, a raised ephemeral-storage
 #                limit over an unchanged request, and no token value in the Pod spec;
-#              - admission refuses another --served-model-name, --revision, a volume on the weights'
-#                path, and an Instance naming a hub artifact.
-# Cleanup:     Trap deletes every object carrying the case label, then the PV and StorageClasses.
+#              - admission refuses another --served-model-name, --revision and a volume on the
+#                weights' path. An Instance naming a hub artifact is admitted since the node plugin
+#                delivers it; case-103 mounts one.
+# Cleanup:     Trap deletes every object carrying the case label, then the PV and StorageClasses, and
+#              puts back the model-artifact-delivery-mode Setting it pinned to Engine.
 set -uo pipefail
 
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
@@ -52,6 +54,22 @@ IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 P=c98
 LABEL="e2e.gpustack.ai/case=98"
 FAKE_TOKEN="e2e-c98-not-a-real-token"
+SYSTEM_NS="${E2E_SYSTEM_NS:-gpustack-system}"
+
+# This case proves Engine delivery, and the chart seeds Node when it deploys the model-manager plugin,
+# so the case pins Engine for its run and puts back what it found. The wait is the worker's
+# thirty-second Settings read cache.
+ORIG_DELIVERY="$(kubectl -n "$SYSTEM_NS" get secret gpustack-settings -o jsonpath='{.data.model-artifact-delivery-mode}' 2>/dev/null)"
+restore_delivery() {
+  local v=null
+  [ -n "$ORIG_DELIVERY" ] && v="\"${ORIG_DELIVERY}\""
+  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge -p "{\"data\":{\"model-artifact-delivery-mode\":${v}}}" >/dev/null 2>&1
+}
+pin_engine_delivery() {
+  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge \
+    -p "{\"data\":{\"model-artifact-delivery-mode\":\"$(printf Engine | base64)\"}}" >/dev/null
+  sleep 35
+}
 
 FAILS=0
 ROWS=()
@@ -68,6 +86,7 @@ cleanup() {
   kubectl -n "$NS" delete modelartifacts.worker.gpustack.ai,pvc,secret -l "$LABEL" --ignore-not-found --wait=false >/dev/null 2>&1
   kubectl delete pv "${P}-pv" --ignore-not-found --wait=false >/dev/null 2>&1
   kubectl delete storageclass "${P}-static" "${P}-immediate" --ignore-not-found >/dev/null 2>&1
+  restore_delivery
 }
 trap cleanup EXIT
 
@@ -272,6 +291,7 @@ else
 fi
 
 echo "== 5. a missing artifact, then an Engine download =="
+pin_engine_delivery
 md "${P}-engine" "${P}-later" 1
 reading="$(wait_weights "${P}-engine" ArtifactNotFound 60)"
 count="$(pods_of "${P}-engine" '{range .items[*]}x{end}')"
@@ -363,17 +383,6 @@ spec:
       instanceType: "${IT}"
       image: "${IMAGE}"
       additionalVolumes: [{mountPath: /var/lib/gpustack, configMap: {name: x}}]
-YAML
-refused "an Instance naming a hub artifact is refused" <<YAML
-apiVersion: worker.gpustack.ai/v1alpha1
-kind: Instance
-metadata: {name: ${P}-refuse, namespace: ${NS}}
-spec:
-  type: "${IT}"
-  image: "${IMAGE}"
-  resources: {cpu: "1", ram: 2Gi, localStorage: 1Gi}
-  volume: {ephemeral: {capacity: 1Gi}}
-  additionalVolumes: [{mountPath: /models, model: {artifactRef: {name: ${P}-later}}}]
 YAML
 
 print_rows

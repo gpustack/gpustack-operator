@@ -34,6 +34,7 @@ var applicationValuesKeys = map[string]string{
 	"csi-driver-nfs":         "csi-driver-nfs",
 	"csi-driver-s3":          "csi-driver-s3",
 	"device-manager":         "deviceManager",
+	"model-manager":          "modelManager",
 }
 
 // ApplicationNames returns every name --disable-applications accepts, sorted: the

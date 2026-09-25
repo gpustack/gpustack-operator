@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	storage "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,7 +43,22 @@ func TestInstanceModelVolumeResolution(t *testing.T) {
 		wantWait string
 	}{
 		{name: "a missing artifact waits", wantWait: `ModelArtifact "qwen" does not exist`},
-		{name: "a hub artifact is reported", objs: []ctrlcli.Object{artifactFixture("", true, true)}, wantWait: "not on a PersistentVolumeClaim"},
+		{
+			name: "a hub artifact waits for the node plugin", objs: []ctrlcli.Object{artifactFixture("", true, true)},
+			wantWait: "CSIDriver model.csi.gpustack.ai does not exist",
+		},
+		{
+			name: "a hub artifact is delivered by the node, whatever the delivery Setting says",
+			objs: []ctrlcli.Object{artifactFixture("", true, true), &storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: "model.csi.gpustack.ai"}}},
+		},
+		{
+			name: "a filtered hub artifact is delivered by the node too",
+			objs: []ctrlcli.Object{func() *workercore.ModelArtifact {
+				ma := artifactFixture("", true, true)
+				ma.Spec.AllowPatterns = []string{"*.safetensors"}
+				return ma
+			}(), &storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: "model.csi.gpustack.ai"}}},
+		},
 		{
 			name:     "a claim that cannot bind waits",
 			objs:     []ctrlcli.Object{artifactFixture("models", true, true), claimFixture(core.ClaimPending, "", core.ReadWriteOnce)},
@@ -96,6 +112,34 @@ func TestInstanceModelVolumeRender(t *testing.T) {
 	require.NotNil(t, pod.Spec.Affinity)
 	assert.Equal(t, volumeFixture("node-1").Spec.NodeAffinity.Required,
 		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+}
+
+func TestInstanceModelVolumeRenderFromTheNode(t *testing.T) {
+	ma := artifactFixture("", true, true)
+	ma.UID = "uid-qwen"
+	cli := buildInstanceClient(ma, &storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: "model.csi.gpustack.ai"}})
+	r := &InstanceReconciler{Client: cli, APIReader: cli}
+	inst := modelVolumeInstance()
+
+	models, wait, err := r.resolveInstanceModelVolumes(context.Background(), inst)
+	require.NoError(t, err)
+	require.Empty(t, wait)
+	pod := r.convertPodFromInstance(context.Background(), inst,
+		&worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "generic-type"}}, models)
+
+	vol := findVolume(pod, additionalVolumeName(0))
+	require.NotNil(t, vol)
+	require.NotNil(t, vol.CSI)
+	assert.Equal(t, "model.csi.gpustack.ai", vol.CSI.Driver)
+	assert.Equal(t, map[string]string{"artifact": "qwen", "artifactUID": "uid-qwen", "manifestDigest": testArtifactDigest},
+		vol.CSI.VolumeAttributes)
+	require.NotNil(t, vol.CSI.NodePublishSecretRef)
+	assert.Equal(t, "hf-token", vol.CSI.NodePublishSecretRef.Name)
+	mount := findMount(&pod.Spec.Containers[0], additionalVolumeName(0))
+	require.NotNil(t, mount)
+	assert.Equal(t, "/models/qwen", mount.MountPath)
+	assert.True(t, mount.ReadOnly)
+	assert.Empty(t, mount.SubPath)
 }
 
 func TestInstanceModelVolumeReconcileWaits(t *testing.T) {

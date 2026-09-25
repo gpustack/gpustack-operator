@@ -9,7 +9,7 @@
 
 - [Chart mode and image mode](#chart-mode-and-image-mode)
 - [The two modes are exclusive](#the-two-modes-are-exclusive)
-- [Two switches worth calling out](#two-switches-worth-calling-out)
+- [Three switches worth calling out](#three-switches-worth-calling-out)
 - [The chart deploys workloads; the worker applies the custom resources](#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)
 
 ## Chart mode and image mode
@@ -34,7 +34,7 @@ surface is the chart's `values.yaml`, reachable two ways:
 > spares existing clusters a release migration.
 
 `--disable-applications` accepts `*` plus `kueue`, `node-feature-discovery`, `csi-driver-nfs`,
-`csi-driver-s3`, `device-manager`, validated at flag-parse against `pkg/worker/kuberess`'s map, which
+`csi-driver-s3`, `device-manager`, `model-manager`, validated at flag-parse against `pkg/worker/kuberess`'s map, which
 also renders the overlay's switches.
 
 `gpustack-cpu-info` is in neither set: that NodeFeatureRule has **no `enabled` switch**, since the chain
@@ -64,7 +64,7 @@ disabling a component here and in `worker.disableApplications` in step, every up
 checking it. Wherever this chart deploys the worker, `worker.disableApplications` keeps the `*`; image
 mode is for clusters where no chart deploys it.
 
-## Two switches worth calling out
+## Three switches worth calling out
 
 Because they change what a mode installs:
 
@@ -72,6 +72,8 @@ Because they change what a mode installs:
   does **not** hand that install to the worker: with the wildcard the worker installs nothing, so the
   cluster has no device managers (useful for control-plane-only). Before chart mode covered them, this
   switch was how the worker came to install them.
+- **`modelManager.enabled=false`** — no model-manager DaemonSet and no CSIDriver, and the worker
+  then seeds no `Node` delivery; see [Model Store Operations](../operation/model-store.md#enable-it).
 - **`worker.enabled=false`** — the chart deploys only the applications, what image mode's overlay sets.
 
 ## The chart deploys workloads; the worker applies the custom resources

@@ -23,7 +23,7 @@ release. A user who needs those follows a link.
 
 ## `docs/architecture.md` (overview, ≤ ~200 lines)
 
-**Owns** — what the operator builds, the three subcommands, the four stages + the chain diagram, the
+**Owns** — what the operator builds, the four subcommands, the four stages + the chain diagram, the
 *Life of a sliced-GPU request* trace, the vocabulary table, the map of deep pages.
 
 **Never** — a new mechanism, a label table, a webhook rule, a measured failure story. It gains at most
@@ -241,7 +241,10 @@ manage — the NVIDIA MIG runbook, and `thead-mig.md` — MIG is T-Head's own wo
 partitioning, as `hgml.GetMigMode()` and the `alibabacloud.com/ppu.partitioned.mig-<profile>` key both
 show, so the page is named for it too. And `rdma.md`, which is a how-to on both sides of one
 workflow: the request a workload writes, and the kubelet policy an administrator sets so that
-request aligns — split apart, each half reads as a guarantee the other half withholds.
+request aligns — split apart, each half reads as a guarantee the other half withholds. And
+`model-store.md`: enabling the model-manager plugin, its configuration layers, reading a node, the
+watermark cap against kubelet's thresholds, switching delivery, and the upgrade notes of node
+delivery.
 
 **Rule** — a page with a `## Verify` block states the expected output of every command in it. These
 pages are exempt from the line cap: a runbook is as long as the hardware makes it.
@@ -265,8 +268,11 @@ shape has been run with, with its runner image's Mooncake client and store line
 roles on different hardware (`model-deployment-prefill-decode.md`), which replica each managed router
 picks and how to switch its policy (`model-deployment-routing.md`), what a `ModelDeployment` replica does between its Pod's delete
 and its engine's exit (`model-deployment-shutdown.md`), and the `ModelArtifact` contract — sources,
-resolution and revalidation, the manifest digest, how a deployment or an Instance consumes it, claim
-placement and the weight identity in KV keys (`model-artifact.md`).
+resolution and revalidation, the manifest digest and its patterns, how a deployment or an Instance
+consumes it under each delivery, claim placement and the weight identity in KV keys
+(`model-artifact.md`), and the `NodeModelStore` resource with the node plugin behind it — its
+writers and status guard, mount authorization, materialization, failure reasons, collection and
+metrics (`node-model-store.md`).
 
 **Not** — `model-deployment-shutdown.md` owns the drain window and what it does not cover; what turns
 a replica over in the first place stays on `model-deployment.md`, which links to it.
@@ -275,7 +281,9 @@ one-shot belongs to lives on its operator page (`docs/operation/preflight.md` fo
 preflight`), and the reference row links to it rather than restating it.
 
 `model-artifact.md` owns everything about weights delivery; `model-deployment.md` keeps one pointer to
-it from its minimal deployment and states nothing about the artifact itself.
+it from its minimal deployment and states nothing about the artifact itself. `node-model-store.md`
+owns what the node plugin does and reports; the administrator's procedure for it (values, Settings,
+watermarks, switching, upgrading, removing) is on `docs/operation/model-store.md`, which links back.
 
 **Pinned** — `kv-cache-injection.md` carries per-engine facts read from engine source at named
 versions. Those rows go stale silently when an engine ships a new build, so a change there is a

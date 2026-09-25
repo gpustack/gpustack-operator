@@ -20,6 +20,7 @@ var setups = []webhook.Setup{
 	new(worker.KVCachePoolBindingWebhook),
 	new(worker.ModelArtifactWebhook),
 	new(worker.ModelDeploymentWebhook),
+	new(worker.NodeModelStoreWebhook),
 	new(worker.TopologySourceWebhook),
 	new(worker.PodWebhook),
 	new(worker.PodKVCacheWebhook),

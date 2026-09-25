@@ -55,6 +55,10 @@ type ModelDeploymentListerExpansion interface{}
 // ModelDeploymentNamespaceLister.
 type ModelDeploymentNamespaceListerExpansion interface{}
 
+// NodeModelStoreListerExpansion allows custom methods to be added to
+// NodeModelStoreLister.
+type NodeModelStoreListerExpansion interface{}
+
 // TopologySourceListerExpansion allows custom methods to be added to
 // TopologySourceLister.
 type TopologySourceListerExpansion interface{}
