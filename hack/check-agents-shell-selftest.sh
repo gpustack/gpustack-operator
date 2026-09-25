@@ -100,8 +100,8 @@ expect red "the same finding duplicated is one more, not noise the base excuses"
 git checkout -q -- .agents/skills/demo/cases/base-with-findings.sh
 
 echo "== the gate on each shape it must not report =="
-{ head -1 .agents/skills/demo/cases/base-with-findings.sh; printf '# a line inserted above the findings\n'; tail -n +2 .agents/skills/demo/cases/base-with-findings.sh; } >/tmp/c68st-shift
-mv /tmp/c68st-shift .agents/skills/demo/cases/base-with-findings.sh
+{ head -1 .agents/skills/demo/cases/base-with-findings.sh; printf '# a line inserted above the findings\n'; tail -n +2 .agents/skills/demo/cases/base-with-findings.sh; } >"${MINI}/shift.tmp"
+mv "${MINI}/shift.tmp" .agents/skills/demo/cases/base-with-findings.sh
 expect green "a line inserted above a base finding shifts its line, not its key" -- "${MINI}/repo"
 git checkout -q -- .agents/skills/demo/cases/base-with-findings.sh
 
@@ -127,15 +127,12 @@ git -c user.email=check@example.invalid -c user.name=check -c commit.gpgsign=fal
 expect red "a committed new finding against an older --base" -- --base HEAD~1 "${MINI}/repo"
 
 echo "== the instrument itself =="
-# A PATH holding only what the checker itself needs, shellcheck deliberately absent. It cannot be
-# a bare /usr/bin:/bin: GitHub runners preinstall shellcheck there, and on such a host the case
-# below would exercise nothing while reading as a pass — the exact vacuous shape it exists to bar.
-nosc="${MINI}/nosc"
-mkdir -p "${nosc}"
-for tool in git bash mktemp sed cut tr cat awk; do
-  ln -s "$(command -v "${tool}")" "${nosc}/${tool}"
-done
-expect could-not-run "no shellcheck on PATH is reported as not-run, not as a pass" PATH="${nosc}" -- "${MINI}/repo"
+# A forced instrument that does not exist is a loud not-run. The pinned resolution the checker
+# otherwise performs is exercised by every case above (they all resolve it the same way make lint
+# does), so what this case pins is the loudness: exit 2, never a silent pass and never a quiet
+# fall-back to whatever else is installed.
+expect could-not-run "an instrument that cannot be resolved is reported as not-run, not as a pass" \
+  SHELLCHECK_BIN="${MINI}/no-such-shellcheck" -- "${MINI}/repo"
 
 if [ "${fails}" -gt 0 ]; then
   echo >&2

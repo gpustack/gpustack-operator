@@ -22,8 +22,9 @@
 # already carries (run-partition-block.sh among others).
 #
 # Three states, not two: findings (exit 1), nothing to report (exit 0), and could not run
-# (exit 2 — no shellcheck on PATH, or git cannot answer). A gate that silently passes when its
-# instrument is missing reports nothing about the sources.
+# (exit 2 — git cannot answer, or the pinned shellcheck cannot be resolved, installed, or
+# forced through SHELLCHECK_BIN). A gate that silently passes when its instrument is missing
+# reports nothing about the sources.
 #
 # Usage:
 #   bash hack/check-agents-shell.sh [repo-root]               # uncommitted files vs HEAD
@@ -66,10 +67,37 @@ if ! command -v git >/dev/null 2>&1 || ! git rev-parse --is-inside-work-tree >/d
   exit 2
 fi
 
-SHELLCHECK_BIN="$(command -v shellcheck 2>/dev/null || true)"
-if [ -z "${SHELLCHECK_BIN}" ]; then
-  echo "COULD-NOT-RUN: no shellcheck on PATH. CI pins v0.10.0; locally, brew install shellcheck." >&2
-  exit 2
+# The instrument is the pinned shellcheck, resolved like every other pinned tool in hack/lib: the
+# repo's .sbin copy when its version matches the pin, else downloaded from the pinned release into
+# .sbin on first use, so a machine with no shellcheck installed anywhere still runs the gate on
+# the same analyzer version as CI — availability and parity are the same mechanism. An explicit
+# SHELLCHECK_BIN is used verbatim; one that does not exist is a loud not-run, never a pass and
+# never a silent fall-back to some other version.
+if [ -n "${SHELLCHECK_BIN:-}" ]; then
+  if [ ! -x "${SHELLCHECK_BIN}" ]; then
+    echo "COULD-NOT-RUN: SHELLCHECK_BIN points at ${SHELLCHECK_BIN}, which is not an executable." >&2
+    exit 2
+  fi
+else
+  # The pin lives in hack/lib/style.sh with every other tool pin; log and util are what its
+  # resolver calls. init.sh itself is deliberately not sourced: it resolves the Go toolchain
+  # variables on the way in, and a shell-only gate has no business requiring a Go install.
+  # shellcheck source=lib/util.sh
+  # shellcheck source=lib/log.sh
+  # shellcheck source=lib/style.sh
+  LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)"
+  ROOT_DIR="$(cd "${LIB}/../.." && pwd)"
+  # shellcheck disable=SC1091
+  source "${LIB}/util.sh"
+  # shellcheck disable=SC1091
+  source "${LIB}/log.sh"
+  # shellcheck disable=SC1091
+  source "${LIB}/style.sh"
+  if ! gpustack::lint::shellcheck::validate; then
+    echo "COULD-NOT-RUN: the pinned shellcheck cannot be resolved or installed; its diagnostic is above." >&2
+    exit 2
+  fi
+  SHELLCHECK_BIN="$(gpustack::lint::shellcheck::bin)"
 fi
 
 # The changed .sh files under .agents/, added or modified — deleted files have nothing to check.

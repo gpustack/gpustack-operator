@@ -45,17 +45,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Setup shellcheck
-        run: |
-          # Pinned to a release rather than taken from apt, so the findings set is the same one a
-          # contributor reproduces locally; the checker's comparison between base and worktree is
-          # only fair when both sides come from the same analyzer. The release ships tar.xz.
-          ver=v0.10.0
-          curl --retry 3 --retry-all-errors --retry-delay 3 -sSfL \
-            "https://github.com/koalaman/shellcheck/releases/download/${ver}/shellcheck-${ver}.linux.x86_64.tar.xz" \
-            | tar -xJ
-          sudo install -m 0755 "shellcheck-${ver}/shellcheck" /usr/local/bin/shellcheck
-          shellcheck --version | sed -n '2p'
+      # No setup step: the checker resolves the pinned shellcheck the same way it does locally,
+      # through hack/lib's tool pinning — .sbin when it matches, else downloaded from the pinned
+      # release on first use. That is the parity argument made executable: the runner and a
+      # contributor's machine run the same resolution, not two setups that have to be kept alike.
+      # A preinstalled runner shellcheck of some other version is not used.
       - name: Self-test
         run: bash hack/check-agents-shell-selftest.sh
       - name: Check
