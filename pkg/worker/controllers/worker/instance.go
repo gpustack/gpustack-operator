@@ -365,12 +365,21 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 
 		// A model volume's artifact decides whether the Pod can be built at all, and for a claim
-		// where it may run. Waited for like the type's status above: the Pod is rendered once and
-		// never re-diffed, so building it early would fix the wait into it for good.
+		// where it may run; so does every persistent volume's claim. Waited for like the type's
+		// status above: the Pod is rendered once and never re-diffed, so building it early would
+		// fix the wait into it for good.
 		models, wait, err := r.resolveInstanceModelVolumes(ctx, inst)
 		if err != nil {
 			logger.Error(err, "resolve model volumes")
 			return ctrl.Result{}, err
+		}
+		var claimAffinities []*core.NodeSelector
+		if wait == "" {
+			claimAffinities, wait, err = r.resolveInstancePersistentVolumes(ctx, inst)
+			if err != nil {
+				logger.Error(err, "resolve persistent volumes")
+				return ctrl.Result{}, err
+			}
 		}
 		if wait != "" {
 			if inst.Status.Phase != InstancePhaseStarting || inst.Status.PhaseMessage != wait {
@@ -379,11 +388,14 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
 				}
 			}
-			logger.V(2).Info("model volume not available; requeue in 10s", "reason", wait)
+			logger.V(2).Info("volume not available; requeue in 10s", "reason", wait)
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 
 		pod = r.convertPodFromInstance(ctx, inst, instType, models)
+		for _, required := range claimAffinities {
+			injectModelArtifactAffinity(pod, required)
+		}
 		err = r.Client.Create(ctx, pod)
 		if err != nil {
 			logger.Error(err, "create pod")

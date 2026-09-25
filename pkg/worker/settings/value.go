@@ -261,6 +261,19 @@ var (
 		setting.AllowBool(),
 	)
 
+	// InstancePersistentVolumePlacement indicates to place an Instance where its persistent volumes
+	// can attach: a bound claim's PV node affinity is added to the Pod when it is created, and a claim
+	// that nothing binds to the Pod's node holds the Pod back until it is bound. When false the Pod is
+	// built from the claim names alone, as before, and Kueue's topology-aware scheduling may assign a
+	// node the volume cannot reach. Read when a Pod is created, so a change never moves a running one.
+	InstancePersistentVolumePlacement = settings.NewEditable(
+		"instance-persistent-volume-placement",
+		"Indicates to place Instances where their persistent volumes can attach. "+
+			"Read when an Instance's Pod is created, so a change never moves a running Instance.",
+		setting.InitializeFromEnv("true"),
+		setting.AllowBool(),
+	)
+
 	// InstanceType.
 
 	// NodeManagementManual indicates to skip auto-managing nodes.
