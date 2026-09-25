@@ -227,6 +227,56 @@ func TestModelArtifactReconcileResolvesHuggingFace(t *testing.T) {
 	}
 }
 
+func TestModelArtifactReconcileFiltersTheManifest(t *testing.T) {
+	cases := []struct {
+		name         string
+		allow        []string
+		ignore       []string
+		wantResolved string
+		wantReason   string
+		wantFiles    int64
+		wantSize     int64
+	}{
+		{name: "no pattern is the whole commit", wantResolved: "True", wantReason: "Resolved", wantFiles: 2, wantSize: 110},
+		{
+			name: "an allow pattern keeps its files", allow: []string{"*.safetensors"},
+			wantResolved: "True", wantReason: "Resolved", wantFiles: 1, wantSize: 100,
+		},
+		{
+			name: "an ignore pattern drops its files", ignore: []string{"*.safetensors"},
+			wantResolved: "True", wantReason: "Resolved", wantFiles: 1, wantSize: 10,
+		},
+		{
+			name: "a filter keeping nothing is an empty manifest", allow: []string{"*.gguf"},
+			wantResolved: "False", wantReason: modelartifact.ReasonEmptyManifest,
+		},
+	}
+	var wholeDigest string
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ma := testHubArtifact("")
+			ma.Spec.AllowPatterns, ma.Spec.IgnorePatterns = c.allow, c.ignore
+			env := newTestArtifactEnv(t, ma)
+
+			got, _ := env.reconcile(t, "qwen")
+			assert.Equal(t, c.wantResolved, ModelArtifactConditionResolved.GetStatus(got))
+			assert.Equal(t, c.wantReason, ModelArtifactConditionResolved.GetReason(got))
+			if c.wantResolved != "True" {
+				assert.Nil(t, got.Status.Resolved)
+				return
+			}
+			require.NotNil(t, got.Status.Resolved)
+			assert.Equal(t, c.wantFiles, got.Status.Resolved.FileCount)
+			assert.Equal(t, c.wantSize, got.Status.Resolved.SizeBytes)
+			if c.allow == nil && c.ignore == nil {
+				wholeDigest = got.Status.Resolved.ManifestDigest
+				return
+			}
+			assert.NotEqual(t, wholeDigest, got.Status.Resolved.ManifestDigest)
+		})
+	}
+}
+
 func TestModelArtifactReconcileSendsTheNamespaceToken(t *testing.T) {
 	env := newTestArtifactEnv(t, testHubArtifact("hf-token"), testTokenSecret(testArtifactToken))
 

@@ -317,7 +317,9 @@ func (r *ModelArtifactReconciler) resolveHuggingFace(
 	ctx context.Context, ma *workercore.ModelArtifact, hub *modelartifact.HuggingFace, token string,
 ) time.Duration {
 	source := ma.Spec.Source.HuggingFace
-	resolution, err := hub.Resolve(ctx, source.Repository, source.Revision, token)
+	resolution, err := hub.Resolve(ctx, source.Repository, source.Revision, token, modelartifact.Filter{
+		Allow: ma.Spec.AllowPatterns, Ignore: ma.Spec.IgnorePatterns,
+	})
 	if err != nil {
 		reason := modelartifact.ReasonOf(err)
 		ModelArtifactConditionResolved.False(ma, reason, err.Error())

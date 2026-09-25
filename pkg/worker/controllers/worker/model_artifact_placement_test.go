@@ -2,15 +2,20 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
+	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
@@ -182,6 +187,98 @@ func TestModelDeploymentArtifactWait(t *testing.T) {
 	}
 }
 
+func TestModelDeploymentArtifactNodeDelivery(t *testing.T) {
+	filtered := func() *workercore.ModelArtifact {
+		ma := artifactFixture("", true, true)
+		ma.Spec.IgnorePatterns = []string{"original/"}
+		return ma
+	}
+	driver := &storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: "model.csi.gpustack.ai"}}
+	cases := []struct {
+		name         string
+		delivery     string
+		objs         []ctrlcli.Object
+		wantPods     int
+		wantReason   string
+		wantDelivery workercore.ModelDeploymentModelDelivery
+	}{
+		{
+			name: "Node delivery with the plugin creates the replicas", delivery: "Node",
+			objs: []ctrlcli.Object{artifactFixture("", true, true), driver}, wantPods: 1, wantReason: "WeightsNotMounted",
+			wantDelivery: workercore.ModelDeploymentModelDeliveryNode,
+		},
+		{
+			name: "Node delivery without the plugin creates nothing", delivery: "Node",
+			objs: []ctrlcli.Object{artifactFixture("", true, true)}, wantReason: "NodeDeliveryUnavailable",
+			wantDelivery: workercore.ModelDeploymentModelDeliveryNode,
+		},
+		{
+			name: "a filtered artifact under Node delivery creates the replicas", delivery: "Node",
+			objs: []ctrlcli.Object{filtered(), driver}, wantPods: 1, wantReason: "WeightsNotMounted",
+			wantDelivery: workercore.ModelDeploymentModelDeliveryNode,
+		},
+		{
+			name: "a filtered artifact under Engine delivery creates nothing", delivery: "Engine",
+			objs: []ctrlcli.Object{filtered(), driver}, wantReason: "FilterNeedsNodeDelivery",
+			wantDelivery: workercore.ModelDeploymentModelDeliveryEngine,
+		},
+		{
+			name: "Engine delivery ignores the plugin", delivery: "Engine",
+			objs: []ctrlcli.Object{artifactFixture("", true, true), driver}, wantPods: 1, wantReason: "Downloading",
+			wantDelivery: workercore.ModelDeploymentModelDeliveryEngine,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			orig := modelArtifactDeliveryMode
+			t.Cleanup(func() { modelArtifactDeliveryMode = orig })
+			modelArtifactDeliveryMode = func(context.Context) string { return c.delivery }
+			objs := append([]ctrlcli.Object{artifactDeploymentFixture(1), newRenderInstanceType()}, c.objs...)
+			cli := newModelDeploymentClient(objs...)
+
+			_, err := reconcileModelDeployment(t, cli)
+			require.NoError(t, err)
+
+			pods := listReplicas(t, cli)
+			assert.Len(t, pods, c.wantPods)
+			md := getModelDeployment(t, cli)
+			assert.Equal(t, c.wantReason, ModelDeploymentConditionWeightsReady.GetReason(md))
+			require.NotNil(t, md.Status.Model)
+			assert.Equal(t, c.wantDelivery, md.Status.Model.Delivery)
+			for _, pod := range pods {
+				vol := findVolume(&pod, modelDeploymentModelVolumeName)
+				if c.wantDelivery == workercore.ModelDeploymentModelDeliveryNode {
+					require.NotNil(t, vol)
+					require.NotNil(t, vol.CSI, "the node plugin's inline volume")
+				} else {
+					assert.Nil(t, vol)
+				}
+			}
+		})
+	}
+}
+
+// TestModelDeploymentArtifactDeliverySwitchRolls pins that switching the delivery Setting changes the
+// replicas' fingerprint once: the render differs, so each replica is replaced like an image change.
+func TestModelDeploymentArtifactDeliverySwitchRolls(t *testing.T) {
+	fingerprint := func(delivery string) string {
+		orig := modelArtifactDeliveryMode
+		t.Cleanup(func() { modelArtifactDeliveryMode = orig })
+		modelArtifactDeliveryMode = func(context.Context) string { return delivery }
+		cli := newModelDeploymentClient(artifactDeploymentFixture(1), newRenderInstanceType(), artifactFixture("", true, true),
+			&storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: "model.csi.gpustack.ai"}})
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		pods := listReplicas(t, cli)
+		require.Len(t, pods, 1)
+		return pods[0].Annotations[modelDeploymentPodSpecHashAnnotation]
+	}
+	engine, node := fingerprint("Engine"), fingerprint("Node")
+	assert.NotEmpty(t, engine)
+	assert.NotEqual(t, engine, node)
+	assert.Equal(t, node, fingerprint("Node"), "the same delivery renders the same fingerprint")
+}
+
 func TestModelDeploymentArtifactWaitLeavesRunningReplicasAlone(t *testing.T) {
 	cli := newModelDeploymentClient(artifactDeploymentFixture(2), newRenderInstanceType(), artifactFixture("", true, true))
 	_, err := reconcileModelDeployment(t, cli)
@@ -321,10 +418,23 @@ func TestModelDeploymentWeightsReady(t *testing.T) {
 	}
 	claim := &modelArtifactWeights{Render: testPvcArtifactRender(), Status: &workercore.ModelDeploymentModelStatus{Artifact: "qwen"}}
 	engine := &modelArtifactWeights{Render: testEngineArtifactRender(), Status: &workercore.ModelDeploymentModelStatus{Artifact: "qwen"}}
+	node := &modelArtifactWeights{Render: testNodeArtifactRender(), Status: &workercore.ModelDeploymentModelStatus{Artifact: "qwen"}}
+	onNode := func(p core.Pod, name string) core.Pod {
+		p.Spec.NodeName = name
+		return p
+	}
+	stored := func(state workercore.NodeModelStoreModelState) *workercore.NodeModelStoreModel {
+		m := &workercore.NodeModelStoreModel{Digest: testArtifactDigest, State: state}
+		if state == workercore.NodeModelStoreModelStateFailed {
+			m.Reason, m.Message = "IntegrityMismatch", "config.json: the content hashes to another digest"
+		}
+		return m
+	}
 	cases := []struct {
 		name       string
 		weights    *modelArtifactWeights
 		pods       []core.Pod
+		nodeModels map[string]*workercore.NodeModelStoreModel
 		wantStatus string
 		wantReason string
 	}{
@@ -334,11 +444,33 @@ func TestModelDeploymentWeightsReady(t *testing.T) {
 		{name: "a claim mounted everywhere", weights: claim, pods: []core.Pod{pod(false, true), pod(true, true)}, wantStatus: "True", wantReason: "Mounted"},
 		{name: "a download still running", weights: engine, pods: []core.Pod{pod(true, true), pod(false, true)}, wantStatus: "False", wantReason: "Downloading"},
 		{name: "a download done everywhere", weights: engine, pods: []core.Pod{pod(true, true)}, wantStatus: "True", wantReason: "Downloaded"},
+		{
+			name: "a node materializing", weights: node, pods: []core.Pod{onNode(pod(false, false), "n1")},
+			nodeModels: map[string]*workercore.NodeModelStoreModel{"n1": stored(workercore.NodeModelStoreModelStateDownloading)},
+			wantStatus: "False", wantReason: "Materializing",
+		},
+		{
+			name: "a node that failed", weights: node,
+			pods: []core.Pod{onNode(pod(false, false), "n1"), onNode(pod(false, false), "n2")},
+			nodeModels: map[string]*workercore.NodeModelStoreModel{
+				"n1": stored(workercore.NodeModelStoreModelStateDownloading), "n2": stored(workercore.NodeModelStoreModelStateFailed),
+			},
+			wantStatus: "False", wantReason: "MaterializationFailed",
+		},
+		{
+			name: "a node that has not reported", weights: node, pods: []core.Pod{onNode(pod(false, false), "n1")},
+			wantStatus: "False", wantReason: "WeightsNotMounted",
+		},
+		{
+			name: "mounted on every node", weights: node, pods: []core.Pod{onNode(pod(false, true), "n1")},
+			nodeModels: map[string]*workercore.NodeModelStoreModel{"n1": stored(workercore.NodeModelStoreModelStateReady)},
+			wantStatus: "True", wantReason: "Mounted",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			holder := &workercore.ModelDeployment{}
-			observeModelDeploymentWeights(holder, c.pods, c.weights)
+			observeModelDeploymentWeights(holder, c.pods, c.weights, c.nodeModels)
 			assert.Equal(t, c.wantStatus, ModelDeploymentConditionWeightsReady.GetStatus(holder))
 			assert.Equal(t, c.wantReason, ModelDeploymentConditionWeightsReady.GetReason(holder))
 			if c.weights == nil {
@@ -360,4 +492,157 @@ func TestModelDeploymentWeightsReadyPhaseCarriesAnEviction(t *testing.T) {
 	annotateModelDeploymentPhase(holder, pods)
 	assert.Contains(t, holder.Status.PhaseMessage, "qwen-server-abc was evicted")
 	assert.Contains(t, holder.Status.PhaseMessage, "exceeds the limit")
+}
+
+func TestModelArtifactNodeModels(t *testing.T) {
+	nms := func(node string, models ...workercore.NodeModelStoreModel) *workercore.NodeModelStore {
+		return &workercore.NodeModelStore{ObjectMeta: meta.ObjectMeta{Name: node}, Status: workercore.NodeModelStoreStatus{Models: models}}
+	}
+	onNode := func(node string) core.Pod { return core.Pod{Spec: core.PodSpec{NodeName: node}} }
+	cli := newModelDeploymentClient(
+		nms("n1", workercore.NodeModelStoreModel{Digest: testArtifactDigest, State: workercore.NodeModelStoreModelStateDownloading}),
+		nms("n2", workercore.NodeModelStoreModel{Digest: "sha256:" + strings.Repeat("2", 64), State: workercore.NodeModelStoreModelStateReady}),
+	)
+
+	got, err := modelArtifactNodeModels(context.Background(), cli,
+		[]core.Pod{onNode("n1"), onNode("n1"), onNode("n2"), onNode("n3"), onNode("")}, testArtifactDigest)
+	require.NoError(t, err)
+	require.NotNil(t, got["n1"])
+	assert.Equal(t, workercore.NodeModelStoreModelStateDownloading, got["n1"].State)
+	assert.Nil(t, got["n2"], "a node listing other content has no entry for this digest")
+	assert.Nil(t, got["n3"], "a node without a NodeModelStore has none either")
+	assert.NotContains(t, got, "", "an unscheduled Pod asks no node")
+}
+
+func TestMapModelDeploymentNodeModelStore(t *testing.T) {
+	md := func(name string, delivery workercore.ModelDeploymentModelDelivery, digest string) *workercore.ModelDeployment {
+		d := artifactDeploymentFixture(1)
+		d.Name = name
+		d.Status.Model = &workercore.ModelDeploymentModelStatus{Artifact: "qwen", ManifestDigest: digest, Delivery: delivery}
+		return d
+	}
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(
+		md("on-node", workercore.ModelDeploymentModelDeliveryNode, testArtifactDigest),
+		md("engine", workercore.ModelDeploymentModelDeliveryEngine, testArtifactDigest),
+		md("other", workercore.ModelDeploymentModelDeliveryNode, "sha256:"+strings.Repeat("2", 64)),
+	)}
+	store := &workercore.NodeModelStore{Status: workercore.NodeModelStoreStatus{Models: []workercore.NodeModelStoreModel{{Digest: testArtifactDigest}}}}
+
+	reqs := r.mapModelDeploymentNodeModelStore(context.Background(), store)
+	require.Len(t, reqs, 1)
+	assert.Equal(t, "on-node", reqs[0].Name)
+}
+
+func TestNodeModelStoreModelsChanged(t *testing.T) {
+	nms := func(state workercore.NodeModelStoreModelState, stored int64) *workercore.NodeModelStore {
+		return &workercore.NodeModelStore{Status: workercore.NodeModelStoreStatus{
+			Capacity: &workercore.NodeModelStoreCapacity{StoredBytes: stored},
+			Models:   []workercore.NodeModelStoreModel{{Digest: testArtifactDigest, State: state}},
+		}}
+	}
+	cases := []struct {
+		name     string
+		old, new *workercore.NodeModelStore
+		want     bool
+	}{
+		{
+			name: "a model's state changes", old: nms(workercore.NodeModelStoreModelStateDownloading, 1),
+			new: nms(workercore.NodeModelStoreModelStateReady, 1), want: true,
+		},
+		{
+			name: "only the capacity moves", old: nms(workercore.NodeModelStoreModelStateDownloading, 1),
+			new: nms(workercore.NodeModelStoreModelStateDownloading, 2),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := nodeModelStoreModelsChanged().Update(ctrlevent.UpdateEvent{ObjectOld: c.old, ObjectNew: c.new})
+			assert.Equal(t, c.want, got)
+		})
+	}
+}
+
+// delayRecorder is a work queue that records what is added after a delay; nothing else is called.
+type delayRecorder struct {
+	workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]
+	added map[ctrlreconcile.Request]time.Duration
+}
+
+func (q *delayRecorder) AddAfter(req ctrlreconcile.Request, d time.Duration) { q.added[req] = d }
+
+// TestModelDeploymentDeliveryWaitClears pins that a deployment held by the delivery wakes up when
+// what holds it changes, though its own object does not: the plugin's CSIDriver appearing, and the
+// delivery Setting switching to Node.
+func TestModelDeploymentDeliveryWaitClears(t *testing.T) {
+	filtered := func() *workercore.ModelArtifact {
+		ma := artifactFixture("", true, true)
+		ma.Spec.IgnorePatterns = []string{"original/"}
+		return ma
+	}
+	driver := &storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: "model.csi.gpustack.ai"}}
+	settingsSecret := &core.Secret{ObjectMeta: meta.ObjectMeta{Namespace: "gpustack-system", Name: "gpustack-settings"}}
+	cases := []struct {
+		name        string
+		artifact    *workercore.ModelArtifact
+		delivery    string
+		driver      bool
+		heldBy      string
+		fixDelivery string
+		fixDriver   bool
+		// viaSettings is whether the fix reaches the deployment through the Settings Secret's
+		// delayed handler rather than the CSIDriver's mapping.
+		viaSettings bool
+	}{
+		{
+			name: "the plugin's CSIDriver appearing", artifact: artifactFixture("", true, true), delivery: "Node",
+			heldBy: "NodeDeliveryUnavailable", fixDelivery: "Node", fixDriver: true,
+		},
+		{
+			name: "the delivery switching to Node", artifact: filtered(), delivery: "Engine", driver: true,
+			heldBy: "FilterNeedsNodeDelivery", fixDelivery: "Node", viaSettings: true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			orig := modelArtifactDeliveryMode
+			t.Cleanup(func() { modelArtifactDeliveryMode = orig })
+			modelArtifactDeliveryMode = func(context.Context) string { return c.delivery }
+			objs := []ctrlcli.Object{artifactDeploymentFixture(1), newRenderInstanceType(), c.artifact, settingsSecret}
+			if c.driver {
+				objs = append(objs, driver)
+			}
+			other := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Name = "no-artifact"; md.Spec.KVCache = nil })
+			cli := newModelDeploymentClient(append(objs, other)...)
+			r := &ModelDeploymentReconciler{Client: cli}
+
+			res, err := reconcileModelDeployment(t, cli)
+			require.NoError(t, err)
+			require.Equal(t, c.heldBy, ModelDeploymentConditionWeightsReady.GetReason(getModelDeployment(t, cli)))
+			require.Empty(t, listReplicas(t, cli))
+			assert.Equal(t, modelDeploymentDeliveryRecheck, res.RequeueAfter, "a held deployment is looked at again without an event")
+
+			modelArtifactDeliveryMode = func(context.Context) string { return c.fixDelivery }
+			var reqs []ctrlreconcile.Request
+			if c.fixDriver {
+				require.NoError(t, cli.Create(context.Background(), driver.DeepCopy()))
+				reqs = r.mapModelDeploymentDelivery(context.Background(), driver)
+			}
+			if c.viaSettings {
+				q := &delayRecorder{added: map[ctrlreconcile.Request]time.Duration{}}
+				enqueueAfterSettingsRead(r.mapModelDeploymentDelivery).Update(context.Background(),
+					ctrlevent.UpdateEvent{ObjectOld: settingsSecret, ObjectNew: settingsSecret}, q)
+				for req, d := range q.added {
+					assert.Greater(t, d, 30*time.Second, "enqueued after the Settings read cache expires")
+					reqs = append(reqs, req)
+				}
+			}
+			want := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}}
+			require.Equal(t, []ctrlreconcile.Request{want}, reqs, "only the deployment on an artifact is woken")
+
+			_, err = reconcileModelDeployment(t, cli)
+			require.NoError(t, err)
+			assert.Equal(t, "WeightsNotMounted", ModelDeploymentConditionWeightsReady.GetReason(getModelDeployment(t, cli)))
+			assert.Len(t, listReplicas(t, cli), 1)
+		})
+	}
 }

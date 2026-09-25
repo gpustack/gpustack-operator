@@ -732,17 +732,25 @@ func convertAdditionalVolumes(
 		readOnly, subPath := av.ReadOnly, av.SubPath
 		switch {
 		case av.Model != nil:
-			// Always read-only whatever the entry says, with the artifact's own path as the
-			// sub-path. An entry the reconciler resolved no claim for is skipped like one naming
-			// no source: the reconciler waits rather than build a Pod without it.
+			// Always read-only whatever the entry says: a claim with the artifact's own path as
+			// the sub-path, a hub artifact through the node's plugin. An entry the reconciler
+			// resolved nothing for is skipped like one naming no source: the reconciler waits
+			// rather than build a Pod without it.
 			w := models[i]
-			if w == nil || w.Render == nil || w.Render.Delivery != workercore.ModelDeploymentModelDeliveryPvc {
+			switch {
+			case w == nil || w.Render == nil:
+				continue
+			case w.Render.Delivery == workercore.ModelDeploymentModelDeliveryPvc:
+				vs.PersistentVolumeClaim = &core.PersistentVolumeClaimVolumeSource{
+					ClaimName: w.Render.ClaimName, ReadOnly: true,
+				}
+				readOnly, subPath = true, w.Render.Path
+			case w.Render.Delivery == workercore.ModelDeploymentModelDeliveryNode:
+				vs = w.Render.nodeVolumeSource()
+				readOnly, subPath = true, ""
+			default:
 				continue
 			}
-			vs.PersistentVolumeClaim = &core.PersistentVolumeClaimVolumeSource{
-				ClaimName: w.Render.ClaimName, ReadOnly: true,
-			}
-			readOnly, subPath = true, w.Render.Path
 		case av.Persistent != nil:
 			vs.PersistentVolumeClaim = &core.PersistentVolumeClaimVolumeSource{
 				ClaimName: av.Persistent.Name,
@@ -789,16 +797,13 @@ func (r *InstanceReconciler) resolveInstanceModelVolumes(
 			continue
 		}
 		// One Pod mounts it, so a claim that cannot be shared still serves.
-		w, err := resolveModelArtifactWeights(ctx, r.Client, inst.Namespace, av.Model.ArtifactRef.Name, 1)
+		// An Instance has no engine to download a hub artifact, so the node delivers it.
+		w, err := resolveModelArtifactWeights(ctx, r.Client, inst.Namespace, av.Model.ArtifactRef.Name, 1, true)
 		if err != nil {
 			return nil, "", err
 		}
-		switch {
-		case w.Blocked:
+		if w.Blocked {
 			return nil, w.Message, nil
-		case w.Render.Delivery != workercore.ModelDeploymentModelDeliveryPvc:
-			return nil, fmt.Sprintf("ModelArtifact %q is not on a PersistentVolumeClaim: an Instance mounts only a "+
-				"claim artifact in this version", av.Model.ArtifactRef.Name), nil
 		}
 		models[i] = w
 	}

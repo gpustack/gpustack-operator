@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -26,18 +27,35 @@ import (
 // nolint: lll
 // +k8s:webhook-gen:validating:group="worker.gpustack.ai",version="v1alpha1",resource="modelartifacts",scope="Namespaced"
 // +k8s:webhook-gen:validating:operations=["CREATE","UPDATE"],failurePolicy="Fail",sideEffects="None",matchPolicy="Equivalent",timeoutSeconds=10
+// +k8s:webhook-gen:validating:subResources=["status"]
 // +k8s:webhook-gen:mutating:group="worker.gpustack.ai",version="v1alpha1",resource="modelartifacts",scope="Namespaced"
 // +k8s:webhook-gen:mutating:operations=["CREATE","UPDATE"],failurePolicy="Fail",sideEffects="None",matchPolicy="Equivalent",timeoutSeconds=10
-type ModelArtifactWebhook struct{}
+type ModelArtifactWebhook struct {
+	// worker is the username the worker's own requests carry, the only writer of status.
+	worker string
+}
 
-func (*ModelArtifactWebhook) SetupWebhook(_ context.Context, _ webhook.SetupOptions) (runtime.Object, error) {
+func (r *ModelArtifactWebhook) SetupWebhook(ctx context.Context, _ webhook.SetupOptions) (runtime.Object, error) {
+	worker, err := selfUsername(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("learn the worker's identity for the ModelArtifact status rule: %w", err)
+	}
+	r.worker = worker
+
 	return &workercore.ModelArtifact{}, nil
 }
 
 var (
 	_ ctrladmission.Validator[runtime.Object] = (*ModelArtifactWebhook)(nil)
 	_ ctrladmission.Defaulter[runtime.Object] = (*ModelArtifactWebhook)(nil)
+	_ webhook.ReceiveDeletionUpdate           = (*ModelArtifactWebhook)(nil)
 )
+
+// ReceiveDeletionUpdate keeps the rules in force on a Terminating artifact. The status rule must
+// hold there too, since a referenced artifact stays Terminating, and mountable, until its last
+// consumer goes; every other rule an update reaches compares the two objects it is handed, and
+// defaulting reads nothing else.
+func (*ModelArtifactWebhook) ReceiveDeletionUpdate() {}
 
 // ModelArtifactDefaultRevision is the revision a hub source names when it names none, the default
 // branch of a Hugging Face repository.
@@ -64,8 +82,11 @@ func (*ModelArtifactWebhook) ValidateCreate(_ context.Context, obj runtime.Objec
 	return nil, nil
 }
 
-func (*ModelArtifactWebhook) ValidateUpdate(_ context.Context, oldObj, newObj runtime.Object) (ctrladmission.Warnings, error) {
+func (r *ModelArtifactWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (ctrladmission.Warnings, error) {
 	ma, old := newObj.(*workercore.ModelArtifact), oldObj.(*workercore.ModelArtifact)
+	if isStatusRequest(ctx) {
+		return nil, r.validateModelArtifactStatus(ctx, ma)
+	}
 	if errs := validateModelArtifact(ma, old); len(errs) > 0 {
 		return nil, kerrors.NewInvalid(workercore.SchemeGroupVersionKind("ModelArtifact").GroupKind(), ma.Name, errs)
 	}
@@ -119,14 +140,59 @@ func validateModelArtifact(ma, old *workercore.ModelArtifact) field.ErrorList {
 			"exactly one of huggingFace or persistentVolumeClaim is required")}
 	}
 
+	var errs field.ErrorList
 	switch {
 	case source.ModelScope != nil:
 		return field.ErrorList{field.Forbidden(sourcePath.Child("modelScope"), modelArtifactModelScopeMessage)}
 	case source.HuggingFace != nil:
-		return validateModelArtifactHuggingFace(source.HuggingFace, sourcePath.Child("huggingFace"))
+		errs = validateModelArtifactHuggingFace(source.HuggingFace, sourcePath.Child("huggingFace"))
 	default:
-		return validateModelArtifactClaim(source.PersistentVolumeClaim, sourcePath.Child("persistentVolumeClaim"))
+		errs = validateModelArtifactClaim(source.PersistentVolumeClaim, sourcePath.Child("persistentVolumeClaim"))
 	}
+
+	return append(errs, validateModelArtifactPatterns(&ma.Spec, specPath, source.HuggingFace != nil)...)
+}
+
+// modelArtifactMaxPatterns and modelArtifactMaxPatternLength bound a list of patterns and each of
+// its patterns; the schema bounds the count as well, and cannot bound an item.
+const (
+	modelArtifactMaxPatterns      = 32
+	modelArtifactMaxPatternLength = 256
+)
+
+// validateModelArtifactPatterns accepts allow and ignore patterns on a hub source only: a claim's
+// content is the user's and is mounted whole.
+func validateModelArtifactPatterns(spec *workercore.ModelArtifactSpec, specPath *field.Path, hub bool) field.ErrorList {
+	var errs field.ErrorList
+	for _, list := range []struct {
+		name     string
+		patterns []string
+	}{
+		{"allowPatterns", spec.AllowPatterns},
+		{"ignorePatterns", spec.IgnorePatterns},
+	} {
+		path := specPath.Child(list.name)
+		switch {
+		case len(list.patterns) == 0:
+			continue
+		case !hub:
+			errs = append(errs, field.Forbidden(path,
+				"patterns select files of a hub source; a claim's directory is mounted whole"))
+			continue
+		case len(list.patterns) > modelArtifactMaxPatterns:
+			errs = append(errs, field.TooMany(path, len(list.patterns), modelArtifactMaxPatterns))
+			continue
+		}
+		for i, p := range list.patterns {
+			if p == "" || len(p) > modelArtifactMaxPatternLength ||
+				strings.ContainsFunc(p, unicode.IsControl) {
+				errs = append(errs, field.Invalid(path.Index(i), p, fmt.Sprintf(
+					"must be 1 to %d characters without control characters", modelArtifactMaxPatternLength)))
+			}
+		}
+	}
+
+	return errs
 }
 
 func validateModelArtifactHuggingFace(hub *workercore.ModelArtifactHubSource, path *field.Path) field.ErrorList {

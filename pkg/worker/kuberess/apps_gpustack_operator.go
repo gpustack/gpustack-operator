@@ -296,6 +296,9 @@ worker:
 deviceManager:
   enabled: {{ index $.ComponentSwitches "deviceManager" }}
 
+modelManager:
+  enabled: {{ index $.ComponentSwitches "modelManager" }}
+
 kueue:
   enabled: {{ index $.ComponentSwitches "kueue" }}
 

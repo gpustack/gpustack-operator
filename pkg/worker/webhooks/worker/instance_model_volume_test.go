@@ -60,7 +60,10 @@ func TestInstanceModelVolumeShape(t *testing.T) {
 	}
 }
 
-func TestInstanceModelVolumeArtifactSource(t *testing.T) {
+// TestInstanceModelVolumeAdmitsEveryArtifactSource pins that a hub artifact is admitted: the node
+// delivers it, and whether the node can is a runtime fact the Instance waits on in its status. The
+// shape rules still refuse, which is the baseline that shows admission ran.
+func TestInstanceModelVolumeAdmitsEveryArtifactSource(t *testing.T) {
 	artifact := func(claim bool) *workercore.ModelArtifact {
 		ma := &workercore.ModelArtifact{ObjectMeta: meta.ObjectMeta{Name: "qwen"}}
 		if claim {
@@ -73,29 +76,31 @@ func TestInstanceModelVolumeArtifactSource(t *testing.T) {
 	cases := []struct {
 		name    string
 		objs    []ctrlcli.Object
+		subPath string
 		wantErr bool
 	}{
 		{name: "a claim artifact", objs: []ctrlcli.Object{artifact(true)}},
+		{name: "a hub artifact", objs: []ctrlcli.Object{artifact(false)}},
 		{name: "an artifact that does not exist yet"},
-		{name: "a hub artifact", objs: []ctrlcli.Object{artifact(false)}, wantErr: true},
+		{name: "a hub artifact with a sub path", objs: []ctrlcli.Object{artifact(false)}, subPath: "x", wantErr: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			inst := webhookInstance("a", "generic-type")
+			inst := webhookInstance("a", "missing")
+			inst.Spec.Stop = true
 			for _, o := range c.objs {
 				o.SetNamespace(inst.Namespace)
 			}
-			w := newInstanceWebhook(c.objs...)
-			inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{modelVolume("/models", "qwen")}
+			v := modelVolume("/models", "qwen")
+			v.SubPath = c.subPath
+			inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{v}
 
-			errs, err := w.validateInstanceModelVolumes(context.Background(), inst)
-			require.NoError(t, err)
-			if !c.wantErr {
-				assert.Empty(t, errs)
+			_, err := newInstanceWebhook(c.objs...).ValidateCreate(context.Background(), inst)
+			if c.wantErr {
+				require.Error(t, err)
 				return
 			}
-			require.Len(t, errs, 1)
-			assert.Equal(t, "spec.additionalVolumes[0].model.artifactRef", errs[0].Field)
+			require.NoError(t, err)
 		})
 	}
 }

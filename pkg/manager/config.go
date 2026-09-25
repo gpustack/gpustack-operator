@@ -39,6 +39,10 @@ type Config struct {
 	// Internal assigned fields.
 	// Override these fields before call Apply.
 	WebhookServer webserver.Server
+	// CacheByObject narrows what the informer cache watches per object type. A component whose
+	// RBAC covers one namespace or one object must say so here, or its informer's cluster-wide
+	// list is refused and the cache never syncs.
+	CacheByObject map[ctrlcli.Object]ctrlcache.ByObject
 }
 
 func (c *Config) Apply(ctx context.Context) (*Manager, error) {
@@ -79,6 +83,7 @@ func (c *Config) Apply(ctx context.Context) (*Manager, error) {
 			HTTPClient: c.LoopbackKubeHTTPClient,
 			// Set resync period to underlay informer.
 			SyncPeriod: ptr.To(c.InformerCacheResyncPeriod),
+			ByObject:   c.CacheByObject,
 		},
 
 		// Controller.

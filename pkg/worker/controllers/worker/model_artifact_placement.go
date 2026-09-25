@@ -7,16 +7,24 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	core "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/util/workqueue"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
+	ctrlhandler "sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/modelartifact"
+	"gpustack.ai/gpustack/pkg/modelstore"
+	"gpustack.ai/gpustack/pkg/setting"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -32,6 +40,10 @@ const (
 	modelWeightsReasonDownloading      = "Downloading"
 	modelWeightsReasonMounted          = "Mounted"
 	modelWeightsReasonDownloaded       = "Downloaded"
+	modelWeightsReasonNodeUnavailable  = "NodeDeliveryUnavailable"
+	modelWeightsReasonFilterNeedsNode  = "FilterNeedsNodeDelivery"
+	modelWeightsReasonMaterializing    = "Materializing"
+	modelWeightsReasonMaterializeFail  = "MaterializationFailed"
 
 	// modelArtifactNoProvisioner is the provisioner a static local-volume class names.
 	modelArtifactNoProvisioner = "kubernetes.io/no-provisioner"
@@ -59,15 +71,22 @@ func blockedModelArtifactWeights(reason, message string) *modelArtifactWeights {
 	return &modelArtifactWeights{Blocked: true, Reason: reason, Message: message}
 }
 
+// modelArtifactDeliveryMode is the delivery Setting as a ModelDeployment's reconcile reads it. It is
+// a variable so a test can choose a delivery without a Settings store.
+var modelArtifactDeliveryMode = func(ctx context.Context) string {
+	return settings.ModelArtifactDeliveryMode.ShouldValue(ctx)
+}
+
 // resolveModelArtifactWeights reads the artifact a consumer references and, for a claim, where
 // the claim lets its Pods run. pods is how many Pods would mount the weights at once, which is
-// what a claim that is not shared cannot serve beyond one.
+// what a claim that is not shared cannot serve beyond one. nodeOnly says the consumer has no engine
+// to download a hub artifact, so node delivery is its only one whatever the delivery Setting says.
 //
 // NOTHING HERE IS A REFUSAL. Every state that stops new Pods is one that changes by itself or by
 // a user creating something, so the consumer waits and says why, and its Pods are created the pass
 // after the state clears.
 func resolveModelArtifactWeights(
-	ctx context.Context, cli ctrlcli.Reader, namespace, name string, pods int,
+	ctx context.Context, cli ctrlcli.Reader, namespace, name string, pods int, nodeOnly bool,
 ) (*modelArtifactWeights, error) {
 	ma := new(workercore.ModelArtifact)
 	if err := cli.Get(ctx, ctrlcli.ObjectKey{Namespace: namespace, Name: name}, ma); err != nil {
@@ -91,6 +110,19 @@ func resolveModelArtifactWeights(
 			Delivery:  workercore.ModelDeploymentModelDeliveryPvc,
 			ClaimName: source.PersistentVolumeClaim.ClaimName,
 			Path:      source.PersistentVolumeClaim.Path,
+		}
+	case source.HuggingFace != nil && (nodeOnly || modelArtifactDeliveryMode(ctx) == settings.ModelArtifactDeliveryNode):
+		w.Render = &ModelDeploymentArtifactRender{
+			Delivery:       workercore.ModelDeploymentModelDeliveryNode,
+			ArtifactName:   name,
+			ArtifactUID:    string(ma.UID),
+			ManifestDigest: resolved.ManifestDigest,
+			Repository:     source.HuggingFace.Repository,
+			Revision:       resolved.Revision,
+			SizeBytes:      resolved.SizeBytes,
+		}
+		if source.HuggingFace.SecretRef != nil {
+			w.Render.SecretName = source.HuggingFace.SecretRef.Name
 		}
 	case source.HuggingFace != nil:
 		w.Render = &ModelDeploymentArtifactRender{
@@ -124,9 +156,30 @@ func resolveModelArtifactWeights(
 		return w, nil
 	}
 
-	if w.Render.Delivery == workercore.ModelDeploymentModelDeliveryPvc {
+	switch w.Render.Delivery {
+	case workercore.ModelDeploymentModelDeliveryPvc:
 		if err := placeModelArtifactClaim(ctx, cli, namespace, w.Render.ClaimName, pods, w); err != nil {
 			return nil, err
+		}
+	case workercore.ModelDeploymentModelDeliveryNode:
+		// Node delivery needs the plugin. Whether it is installed is a runtime fact admission cannot
+		// see for a value seeded from the environment or a plugin removed later, so the consumer waits.
+		switch err := cli.Get(ctx, ctrlcli.ObjectKey{Name: modelstore.DriverName}, new(storage.CSIDriver)); {
+		case kerrors.IsNotFound(err):
+			w.Blocked, w.Reason = true, modelWeightsReasonNodeUnavailable
+			w.Message = fmt.Sprintf("ModelArtifact %q is delivered by the node, and the CSIDriver %s does not exist: "+
+				"install the model-manager plugin (chart value modelManager.enabled), or set "+
+				"model-artifact-delivery-mode to Engine for a ModelDeployment", name, modelstore.DriverName)
+		case err != nil:
+			return nil, fmt.Errorf("read the CSIDriver %s: %w", modelstore.DriverName, err)
+		}
+	case workercore.ModelDeploymentModelDeliveryEngine:
+		// An engine chooses its own files and its cache is sized to the filtered total, so a filter
+		// could only be honored by the node.
+		if len(ma.Spec.AllowPatterns) > 0 || len(ma.Spec.IgnorePatterns) > 0 {
+			w.Blocked, w.Reason = true, modelWeightsReasonFilterNeedsNode
+			w.Message = fmt.Sprintf("ModelArtifact %q selects files with allow or ignore patterns, which only node "+
+				"delivery honors: set model-artifact-delivery-mode to Node", name)
 		}
 	}
 
@@ -269,16 +322,20 @@ func (r *ModelDeploymentReconciler) resolveModelDeploymentWeights(
 		pods += int(md.Spec.Roles[i].Replicas) * modelDeploymentRoleSize(&md.Spec.Roles[i])
 	}
 
-	return resolveModelArtifactWeights(ctx, r.Client, md.Namespace, name, pods)
+	return resolveModelArtifactWeights(ctx, r.Client, md.Namespace, name, pods, false)
 }
 
-// observeModelDeploymentWeights writes status.model and the WeightsReady condition.
+// observeModelDeploymentWeights writes status.model and the WeightsReady condition. nodeModels is
+// what each replica Pod's node reports about the digest, by node name, for node delivery.
 //
-// THE CONDITION IS DERIVED FROM POD CONDITIONS, NEVER FROM EVENTS. A claim's weights are there once
-// kubelet has mounted the Pod's volumes, which PodReadyToStartContainers reports; an engine download
-// is complete only once the engine serves, because the engine reports no progress of its own.
+// THE CONDITION IS DERIVED FROM POD CONDITIONS AND NODE STATUS, NEVER FROM EVENTS. A claim's or a
+// node-delivered artifact's weights are there once kubelet has mounted the Pod's volumes, which
+// PodReadyToStartContainers reports, and until then the node's NodeModelStore says whether it is
+// materializing them or failed to; an engine download is complete only once the engine serves,
+// because the engine reports no progress of its own.
 func observeModelDeploymentWeights(
 	holder *workercore.ModelDeployment, pods []core.Pod, weights *modelArtifactWeights,
+	nodeModels map[string]*workercore.NodeModelStoreModel,
 ) {
 	if weights == nil {
 		holder.Status.Model = nil
@@ -294,7 +351,10 @@ func observeModelDeploymentWeights(
 	}
 
 	engine := weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryEngine
+	node := weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryNode
 	waiting := 0
+	var materializing int
+	var failed *workercore.NodeModelStoreModel
 	for i := range pods {
 		pod := &pods[i]
 		if pod.DeletionTimestamp != nil || pod.Status.Phase == core.PodSucceeded || pod.Status.Phase == core.PodFailed {
@@ -302,10 +362,29 @@ func observeModelDeploymentWeights(
 		}
 		if engine && !modelDeploymentMainContainerReady(pod) || !engine && !modelDeploymentPodVolumesMounted(pod) {
 			waiting++
+			if m := nodeModels[pod.Spec.NodeName]; node && m != nil {
+				switch m.State {
+				case workercore.NodeModelStoreModelStateDownloading:
+					materializing++
+				case workercore.NodeModelStoreModelStateFailed:
+					failed = m
+				}
+			}
 		}
 	}
 
 	switch {
+	case waiting > 0 && failed != nil:
+		retry := ""
+		if failed.RetryTime != nil {
+			retry = "; the node tries again at " + failed.RetryTime.UTC().Format(time.RFC3339)
+		}
+		ModelDeploymentConditionWeightsReady.False(holder, modelWeightsReasonMaterializeFail, fmt.Sprintf(
+			"a replica Pod's node failed to materialize %s, %s: %s%s", failed.Digest, failed.Reason, failed.Message, retry))
+	case waiting > 0 && materializing > 0:
+		ModelDeploymentConditionWeightsReady.False(holder, modelWeightsReasonMaterializing, fmt.Sprintf(
+			"%d replica Pods wait for their nodes to materialize %s; a Pod starts at kubelet's next mount "+
+				"retry after that, up to about two minutes later", waiting, weights.Render.ManifestDigest))
 	case waiting > 0 && engine:
 		ModelDeploymentConditionWeightsReady.False(holder, modelWeightsReasonDownloading, fmt.Sprintf(
 			"%d replica Pods' engines are not ready yet; each downloads commit %s itself and reports no progress",
@@ -316,10 +395,46 @@ func observeModelDeploymentWeights(
 	case engine:
 		ModelDeploymentConditionWeightsReady.True(holder, modelWeightsReasonDownloaded,
 			fmt.Sprintf("every replica Pod serves commit %s", weights.Render.Revision))
+	case node:
+		ModelDeploymentConditionWeightsReady.True(holder, modelWeightsReasonMounted,
+			fmt.Sprintf("every replica Pod has %s mounted from its node", weights.Render.ManifestDigest))
 	default:
 		ModelDeploymentConditionWeightsReady.True(holder, modelWeightsReasonMounted,
 			fmt.Sprintf("every replica Pod has PersistentVolumeClaim %q mounted", weights.Render.ClaimName))
 	}
+}
+
+// modelArtifactNodeModels reads what each Pod's node reports about digest, by node name. A node
+// without a NodeModelStore, or one not listing the digest, has no entry.
+func modelArtifactNodeModels(
+	ctx context.Context, cli ctrlcli.Reader, pods []core.Pod, digest string,
+) (map[string]*workercore.NodeModelStoreModel, error) {
+	models := map[string]*workercore.NodeModelStoreModel{}
+	for i := range pods {
+		name := pods[i].Spec.NodeName
+		if name == "" {
+			continue
+		}
+		if _, seen := models[name]; seen {
+			continue
+		}
+		nms := new(workercore.NodeModelStore)
+		if err := cli.Get(ctx, ctrlcli.ObjectKey{Name: name}, nms); err != nil {
+			if kerrors.IsNotFound(err) {
+				models[name] = nil
+				continue
+			}
+			return nil, fmt.Errorf("read node model store %q: %w", name, err)
+		}
+		models[name] = nil
+		for j := range nms.Status.Models {
+			if nms.Status.Models[j].Digest == digest {
+				models[name] = &nms.Status.Models[j]
+			}
+		}
+	}
+
+	return models, nil
 }
 
 func modelDeploymentPodVolumesMounted(pod *core.Pod) bool {
@@ -376,6 +491,97 @@ func (r *ModelDeploymentReconciler) mapModelDeploymentClaim(ctx context.Context,
 	}
 
 	return r.modelDeploymentsReferencing(ctx, obj.GetNamespace(), names...)
+}
+
+// mapModelDeploymentNodeModelStore enqueues the node-delivered deployments whose digest the node
+// lists.
+func (r *ModelDeploymentReconciler) mapModelDeploymentNodeModelStore(ctx context.Context, obj ctrlcli.Object) []ctrlreconcile.Request {
+	nms, ok := obj.(*workercore.NodeModelStore)
+	if !ok || len(nms.Status.Models) == 0 {
+		return nil
+	}
+	digests := make(map[string]bool, len(nms.Status.Models))
+	for i := range nms.Status.Models {
+		digests[nms.Status.Models[i].Digest] = true
+	}
+	mds := new(workercore.ModelDeploymentList)
+	if err := r.Client.List(ctx, mds); err != nil {
+		ctrllog.FromContext(ctx).Error(err, "list model deployments for a node model store")
+		return nil
+	}
+	var reqs []ctrlreconcile.Request
+	for i := range mds.Items {
+		m := mds.Items[i].Status.Model
+		if m != nil && m.Delivery == workercore.ModelDeploymentModelDeliveryNode && digests[m.ManifestDigest] {
+			reqs = append(reqs, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(&mds.Items[i])})
+		}
+	}
+
+	return reqs
+}
+
+// nodeModelStoreModelsChanged passes a NodeModelStore update only when its models changed. A
+// deployment reads nothing else from the node, and the capacity and conditions move during every
+// download without changing what any deployment sees.
+func nodeModelStoreModelsChanged() ctrlpredicate.Predicate {
+	return ctrlpredicate.Funcs{
+		UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+			o, okOld := e.ObjectOld.(*workercore.NodeModelStore)
+			n, okNew := e.ObjectNew.(*workercore.NodeModelStore)
+			return !okOld || !okNew || !kubemeta.DeepEqual(o.Status.Models, n.Status.Models)
+		},
+	}
+}
+
+// mapModelDeploymentDelivery enqueues every deployment on an artifact. Which delivery a hub artifact
+// takes, and whether it can be delivered at all, follow the delivery Setting and the plugin's
+// CSIDriver, and neither changes any deployment's own object: without this a deployment waiting on
+// NodeDeliveryUnavailable or FilterNeedsNodeDelivery stays waiting after the fix, and a switch of
+// delivery rolls nothing until something unrelated wakes each deployment.
+func (r *ModelDeploymentReconciler) mapModelDeploymentDelivery(ctx context.Context, _ ctrlcli.Object) []ctrlreconcile.Request {
+	mds := new(workercore.ModelDeploymentList)
+	if err := r.Client.List(ctx, mds); err != nil {
+		ctrllog.FromContext(ctx).Error(err, "list model deployments for a delivery change")
+		return nil
+	}
+	var reqs []ctrlreconcile.Request
+	for i := range mds.Items {
+		if ModelDeploymentArtifactName(&mds.Items[i]) != "" {
+			reqs = append(reqs, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(&mds.Items[i])})
+		}
+	}
+
+	return reqs
+}
+
+// modelDeploymentDeliveryRecheck is how often a deployment held by the delivery is looked at again
+// without an event.
+const modelDeploymentDeliveryRecheck = time.Minute
+
+// settingsReadDelay is how long after a Settings change a deployment is looked at again: past the
+// Settings read cache, so the pass reads the new value rather than the cached one.
+const settingsReadDelay = setting.ReadCacheTTL + 5*time.Second
+
+// enqueueAfterSettingsRead enqueues what mapFn returns for a Settings change once settingsReadDelay
+// has passed.
+func enqueueAfterSettingsRead(mapFn ctrlhandler.MapFunc) ctrlhandler.EventHandler {
+	add := func(ctx context.Context, obj ctrlcli.Object, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
+		for _, req := range mapFn(ctx, obj) {
+			q.AddAfter(req, settingsReadDelay)
+		}
+	}
+
+	return ctrlhandler.Funcs{
+		CreateFunc: func(ctx context.Context, e ctrlevent.CreateEvent, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
+			add(ctx, e.Object, q)
+		},
+		UpdateFunc: func(ctx context.Context, e ctrlevent.UpdateEvent, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
+			add(ctx, e.ObjectNew, q)
+		},
+		DeleteFunc: func(ctx context.Context, e ctrlevent.DeleteEvent, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
+			add(ctx, e.Object, q)
+		},
+	}
 }
 
 func (r *ModelDeploymentReconciler) modelDeploymentsReferencing(

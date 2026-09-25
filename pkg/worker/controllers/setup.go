@@ -25,6 +25,7 @@ var setups = []controller.Setup{
 	new(worker.NodeCapacityReconciler),
 	new(worker.NodeFitLabelReconciler),
 	new(worker.NodeFeatureReconciler),
+	new(worker.NodeModelStoreReconciler),
 	new(worker.NodeFlavorReconciler),
 	new(worker.NodeDevicesReconciler),
 	new(worker.NodeDevicesAdmissionReconciler),

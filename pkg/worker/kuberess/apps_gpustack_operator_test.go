@@ -197,6 +197,7 @@ func Test_componentSwitches(t *testing.T) {
 		"csi-driver-nfs":         true,
 		"csi-driver-s3":          true,
 		"deviceManager":          true,
+		"modelManager":           true,
 	}
 
 	testCases := []struct {
@@ -218,6 +219,7 @@ func Test_componentSwitches(t *testing.T) {
 				"csi-driver-nfs":         false,
 				"csi-driver-s3":          false,
 				"deviceManager":          true,
+				"modelManager":           true,
 			},
 		},
 		{
@@ -243,6 +245,7 @@ func Test_ApplicationNames(t *testing.T) {
 		"csi-driver-s3",
 		"device-manager",
 		"kueue",
+		"model-manager",
 		"node-feature-discovery",
 	}, ApplicationNames())
 }
