@@ -28,8 +28,8 @@
 #              - on the running backend, an update adding the snapshot is refused the same way, and
 #              an update changing only the image is accepted.
 #
-# Cleanup:     Trap deletes the one backend the case created. Idempotent, runs on pass AND fail,
-#              safe to re-run.
+# Cleanup:     Trap deletes the one backend the case created, then its leader Lease by name (the
+#              Lease carries no owner reference). Idempotent, runs on pass AND fail, safe to re-run.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
@@ -46,6 +46,7 @@ IMAGE="${E2E_MOONCAKE_IMAGE:-gpustack/mirrored-mooncake:0.3.13.post1-cpu}"
 SFX="$(set +o pipefail; LC_ALL=C tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | head -c 5)"
 [ -n "$SFX" ] || SFX="$$$(date +%s)"
 BACKEND="kvcb-snap-${SFX}"
+LEADER="${BACKEND}-leader"
 PVC="${BACKEND}-snap"
 
 # The refusal is matched on its field AND its reason. The claim-name rule reports on a path under
@@ -69,6 +70,10 @@ teardown() {
   echo
   echo "[case-74] cleanup"
   kubectl delete kvcachebackends.worker.gpustack.ai "$BACKEND" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  # The leader Lease carries no owner reference, so deleting the backend leaves it behind. Delete it
+  # by name after the backend is gone, because a standby still running would campaign it back.
+  kubectl wait --for=delete "kvcachebackends.worker.gpustack.ai/${BACKEND}" --timeout=120s >/dev/null 2>&1 || true
+  kubectl -n "$NS" delete leases.coordination.k8s.io "$LEADER" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 trap teardown EXIT
 

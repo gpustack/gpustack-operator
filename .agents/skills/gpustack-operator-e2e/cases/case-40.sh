@@ -17,7 +17,7 @@
 #              when it does not — a node with no accelerators runs no device manager, and then this
 #              surface legitimately has nothing to publish. No GPU required; the accelerator
 #              families are asserted only when the scrape carries any.
-# Inputs:      All real, nothing mocked — sets the general InstanceType unit spec; a CPU Instance
+# Inputs:      All real, nothing mocked — reads the general InstanceType unit spec; a CPU Instance
 #              gpustack-e2e-exporter (alpine sleep) on the general pool. Reads /metrics through the
 #              API server's pod proxy, so nothing has to be installed in the device manager image.
 # Expected:    - every pod-level family (cpu/memory/storage, total and used) carries a series for
@@ -31,8 +31,8 @@
 #              - every target reports on itself: collector success/duration for source=kubelet;
 #              - accelerator families, where present, carry id, manufacturer and mode beside the
 #                Instance's labels.
-# Cleanup:     Trap deletes the test Instance and restores the InstanceType unit spec it patched
-#              when there was one to restore; idempotent, runs on pass AND fail.
+# Cleanup:     Trap deletes the test Instance; idempotent, runs on pass AND fail. The InstanceType
+#              is only read.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
@@ -47,23 +47,10 @@ IT=$(kubectl get instancetypes.worker.gpustack.ai \
   -o jsonpath='{.items[?(@.spec.acceleratable==false)].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep -m1 'gpustack-')
 [ -n "$IT" ] || { echo "no general InstanceType found — run case-1 first to materialize the chain"; exit 1; }
 
-# The unit spec is shared baseline: capture it before patching so the trap can put it back.
-UNIT_BEFORE=$(kubectl get instancetypes.worker.gpustack.ai "$IT" \
-  -o jsonpath='{.spec.unitResources}' 2>/dev/null)
-STORAGE_BEFORE=$(kubectl get instancetypes.worker.gpustack.ai "$IT" \
-  -o jsonpath='{.spec.localStorage}' 2>/dev/null)
-
 restore() {
   echo
   echo "[case-40] cleanup: deleting test Instance"
   kubectl -n default delete instance "$INST" --ignore-not-found 2>/dev/null || true
-  if [ -n "$UNIT_BEFORE" ]; then
-    echo "[case-40] cleanup: restoring ${IT} unit spec"
-    kubectl patch instancetypes.worker.gpustack.ai "$IT" --type=merge \
-      -p "{\"spec\":{\"unitResources\":${UNIT_BEFORE},\"localStorage\":\"${STORAGE_BEFORE}\"}}" >/dev/null 2>&1 || true
-  else
-    echo "[case-40] note: ${IT} had no unit spec before this case; the one it set is left in place"
-  fi
 }
 trap restore EXIT
 
@@ -79,17 +66,11 @@ results() {
   echo "[case-40] all checks passed"
 }
 
-# The Instance webhook needs a unit spec to size the Pod; confirm it stuck (the validating webhook
-# may be briefly unready after a deploy).
-unit_ram=""
-for _ in $(seq 1 15); do
-  kubectl patch instancetypes.worker.gpustack.ai "$IT" --type=merge \
-    -p '{"spec":{"unitResources":{"cpu":"1","ram":"2Gi"},"localStorage":"10Gi"}}' >/dev/null 2>&1
-  unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
-  [ -n "$unit_ram" ] && break
-  sleep 3
-done
-[ -n "$unit_ram" ] || { echo "no unit spec on ${IT} (validating webhook not ready?)"; exit 1; }
+# The derived general InstanceType is created with its unit spec, and that spec is immutable
+# afterwards, so there is nothing to set: read it as a precondition. The Instance webhook sizes the
+# Pod from it.
+unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
+[ -n "$unit_ram" ] || { echo "no unit spec on ${IT} — the Instance webhook needs unitRAM to size the Pod"; exit 1; }
 
 # 1. An Instance to be exported.
 echo "[case-40] creating Instance ${INST} of type ${IT}"
@@ -117,8 +98,12 @@ NODE=$(kubectl -n default get pod "$INST" -o jsonpath='{.spec.nodeName}' 2>/dev/
 [ -n "$NODE" ] || { echo "[case-40] the Instance has no backing pod on any node — cannot locate a device manager"; results; }
 
 # 2. The device managers of THAT node, Ready ones only: a pod that is not Ready is not scraped, and
-#    is not in the running to be the node's exporter either.
-mapfile -t DM_PODS < <(kubectl -n "$NS" get pods \
+#    is not in the running to be the node's exporter either. A read loop rather than mapfile, which
+#    bash 3.2 does not have.
+DM_PODS=()
+while IFS= read -r pod; do
+  [ -n "$pod" ] && DM_PODS+=("$pod")
+done < <(kubectl -n "$NS" get pods \
   -l app.kubernetes.io/component=device-manager \
   --field-selector "spec.nodeName=${NODE},status.phase=Running" \
   -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}' 2>/dev/null \

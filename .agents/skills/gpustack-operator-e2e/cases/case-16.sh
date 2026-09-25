@@ -22,7 +22,7 @@
 # Expected:    - A — >=1 InstanceTypeFlavor row, and a generic (acceleratable=false) one;
 #              - B — the ClusterQueue is recreated with a NEW uid while the InstanceType survives;
 #              - C — the throwaway's backing ClusterQueue is created, then both it and the InstanceType
-#                are removed on delete.
+#                are removed on delete, and no sample sees the InstanceType gone while its queue remains.
 # Cleanup:     Trap force-strips the throwaway's finalizer if stuck, deletes the throwaway type + its
 #              ClusterQueue, and waits for the derived general InstanceType to return to Active.
 set -uo pipefail
@@ -128,16 +128,25 @@ done
 
 echo "[case-16] deleting InstanceType ${PROBE}; the finalizer must hold until its queue is gone"
 kubectl delete instancetype "$PROBE" --wait=false >/dev/null 2>&1 || true
+# Every sample also checks the ORDER: an InstanceType that is gone while its queue still exists had
+# its finalizer released before the queue was removed. Sampling can miss a short window, so a PASS
+# means no out-of-order sample was seen, not that the order was proven.
 torn=""
+early=""
 for _ in $(seq 1 50); do
-  it_gone=$(kubectl get instancetype "$PROBE" -o name 2>/dev/null)
-  cq_gone=$(kubectl get clusterqueue "$PROBE" -o name 2>/dev/null)
-  [ -z "$it_gone" ] && [ -z "$cq_gone" ] && { torn=1; break; }
+  it_left=$(kubectl get instancetype "$PROBE" -o name 2>/dev/null)
+  cq_left=$(kubectl get clusterqueue "$PROBE" -o name 2>/dev/null)
+  [ -z "$it_left" ] && [ -n "$cq_left" ] && early=1
+  [ -z "$it_left" ] && [ -z "$cq_left" ] && { torn=1; break; }
   sleep 3
 done
-[ -n "$torn" ] \
-  && record PASS "delete-then-wait teardown" "${PROBE}: InstanceType + backing ClusterQueue both removed" \
-  || record FAIL "delete-then-wait teardown" "it_gone='${it_gone:-present}' cq_gone='${cq_gone:-present}' — teardown must delete the queue then release the finalizer"
+if [ -n "$early" ]; then
+  record FAIL "delete-then-wait teardown" "${PROBE}: the InstanceType was gone while its ClusterQueue still existed — the finalizer was released before the queue was removed"
+elif [ -n "$torn" ]; then
+  record PASS "delete-then-wait teardown" "${PROBE}: InstanceType + backing ClusterQueue both removed, and no sample saw the InstanceType gone before its queue"
+else
+  record FAIL "delete-then-wait teardown" "InstanceType='${it_left:-gone}' ClusterQueue='${cq_left:-gone}' — teardown must delete the queue then release the finalizer"
+fi
 
 echo
 echo "== CASE 16 — InstanceTypeFlavor catalog + declarative queue ownership =="

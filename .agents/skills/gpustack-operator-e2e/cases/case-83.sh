@@ -33,7 +33,7 @@
 #              "somebody set it to none" are indistinguishable from outside, so preflight's
 #              `unknown` is RECORDED rather than judged, and the one direction still decidable is
 #              asserted: preflight must never name a policy the kubelet is not running, and a policy
-#              it does name must come with a depth.
+#              it does name must carry the depth `declared`.
 # Environment: A node running a device manager (the preflight image is taken from that DaemonSet, so
 #              the binary under test is the one this cluster is running). The preflight Pod mounts
 #              the host root read-only and runs as uid 0 to read the kubelet's configuration, which a
@@ -51,7 +51,7 @@
 #                names that same policy;
 #              - where it is running the default, preflight's `unknown` is recorded as an answer
 #                this node cannot discriminate, while a policy preflight DOES name must agree with
-#                the kubelet and must carry a depth;
+#                the kubelet and must carry the depth `declared`;
 #              - a reported policy carries no note, and `unknown` carries one — a note is present
 #                exactly when the policy is unknown, so the pair is asserted rather than the value
 #                alone. Only the note's PRESENCE is asserted, never its wording: which sources it
@@ -182,14 +182,16 @@ elif [ "$PF_POLICY" = "unknown" ]; then
     "NOT DISCRIMINATING ON THIS NODE: the kubelet's endpoint reports none, which is its default, so nobody need have written a policy anywhere — and preflight correctly declines to publish a default nobody wrote. 'unknown' is therefore both the right answer here AND what a reader that can read nothing produces, and this node cannot tell the two apart. Answering it needs a node whose policy is EXPLICITLY set; the requirement 'topology-enforced' in the capability matrix is the proxy for that. Note: ${PF_NOTE:-<none>}"
 elif [ "$PF_POLICY" = "none" ]; then
   # Preflight named `none` rather than declining, which means it found a source declaring it. That
-  # is decidable and agrees with the kubelet, so it is a pass -- and the depth is asserted with it,
-  # because a value reported at no depth would be the default leaking out under another name.
-  if [ -n "$PF_DEPTH" ]; then
+  # is decidable and agrees with the kubelet, so it is a pass, and the depth is asserted with it.
+  # The report's contract is that the depth is always `declared` (the policy is read from the
+  # kubelet's configuration, never measured), so any other value, or none, breaks the report's own
+  # shape. The depth cannot tell a found source from a default: both paths write `declared`.
+  if [ "$PF_DEPTH" = "declared" ]; then
     record PASS "preflight names the policy the kubelet is running" \
-      "both say none, and preflight reports depth ${PF_DEPTH}, so it read the value from a source rather than falling back to the kubelet's default. Image: ${PF_IMAGE}"
+      "both say none, at depth declared. Image: ${PF_IMAGE}"
   else
     record FAIL "preflight names the policy the kubelet is running" \
-      "preflight reports policy none at no depth, which is indistinguishable from publishing the kubelet's default -- the one thing it states it does not do"
+      "preflight reports policy none at depth '${PF_DEPTH:-<none>}', but the report's depth is always declared"
   fi
 else
   record FAIL "preflight names the policy the kubelet is running" \

@@ -12,7 +12,7 @@
 #              out-of-range slice %) be slipped in while stopped and then started.
 # Environment: Any cluster with a materialized general pool; needs a real cluster (the
 #              stop → edit → start sequence across a real API server cannot be faked). No GPU.
-# Inputs:      All real, nothing mocked — sets the general InstanceType unit spec; a control Instance
+# Inputs:      All real, nothing mocked — reads the general InstanceType unit spec; a control Instance
 #              created over-cap at CREATE (expects reject); INST created valid (cpu=1), stopped,
 #              patched over-cap while stopped, then started.
 # Expected:    - create rejects an over-cap CPU request;
@@ -46,17 +46,11 @@ FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
-# The general InstanceType carries no unit spec by default; the Instance webhook needs one to size
-# the Pod. Set it and confirm it stuck (the validating webhook may be briefly unready after deploy).
-unit_ram=""
-for _ in $(seq 1 15); do
-  kubectl patch instancetypes.worker.gpustack.ai "$IT" --type=merge \
-    -p '{"spec":{"unitResources":{"cpu":"1","ram":"2Gi"},"localStorage":"10Gi"}}' >/dev/null 2>&1
-  unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
-  [ -n "$unit_ram" ] && break
-  sleep 3
-done
-[ -n "$unit_ram" ] || { echo "no unit spec on ${IT} (validating webhook not ready?)"; exit 1; }
+# The derived general InstanceType is created with its unit spec, and that spec is immutable
+# afterwards, so there is nothing to set: read it as a precondition. The Instance webhook sizes the
+# Pod from it.
+unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
+[ -n "$unit_ram" ] || { echo "no unit spec on ${IT} — the Instance webhook needs unitRAM to size the Pod"; exit 1; }
 
 # The non-accelerated CPU cap this case exercises, plus a value comfortably above it. The cap is the
 # pool's capacity, not its once-max request: the latter falls with occupancy, and the webhook no

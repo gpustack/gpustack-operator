@@ -15,7 +15,7 @@
 # Environment: Any cluster with a materialized scheduling chain (run case-1 first). No GPU and no
 #              device manager required: this path reads the kubelet, and only the accelerator
 #              entries — which a CPU Instance has none of — come from a device manager.
-# Inputs:      All real, nothing mocked — sets the general InstanceType unit spec; a CPU Instance
+# Inputs:      All real, nothing mocked — reads the general InstanceType unit spec; a CPU Instance
 #              gpustack-e2e-metrics (alpine sleep + ephemeral volume) on the general pool.
 # Expected:    - GET .../instances/<name>/metrics returns one sample carrying timestamp and all
 #              three pairs: cpuTotalMilliCores/cpuUsedMilliCores, memoryTotalMiB/memoryUsedMiB,
@@ -55,17 +55,11 @@ record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
-# The general InstanceType carries no unit spec by default; the Instance webhook needs one to size
-# the Pod. Set it and confirm it stuck (the validating webhook may be briefly unready after deploy).
-unit_ram=""
-for _ in $(seq 1 15); do
-  kubectl patch instancetypes.worker.gpustack.ai "$IT" --type=merge \
-    -p '{"spec":{"unitResources":{"cpu":"1","ram":"2Gi"},"localStorage":"10Gi"}}' >/dev/null 2>&1
-  unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
-  [ -n "$unit_ram" ] && break
-  sleep 3
-done
-[ -n "$unit_ram" ] || { echo "no unit spec on ${IT} (validating webhook not ready?)"; exit 1; }
+# The derived general InstanceType is created with its unit spec, and that spec is immutable
+# afterwards, so there is nothing to set: read it as a precondition. The Instance webhook sizes the
+# Pod from it.
+unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
+[ -n "$unit_ram" ] || { echo "no unit spec on ${IT} — the Instance webhook needs unitRAM to size the Pod"; exit 1; }
 
 # 1. Create the Instance on the general pool.
 echo "[case-37] creating Instance ${INST} of type ${IT}"

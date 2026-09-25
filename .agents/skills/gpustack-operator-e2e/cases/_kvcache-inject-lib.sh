@@ -226,15 +226,16 @@ YAML
   # the tests: it is the configuration the reference documents as a prerequisite, so a fixture without
   # it would be exercising a cluster we tell users not to run.
   #
-  # This is a prerequisite for the engines that forward no tenant - vllm and vllm-ascend - not a
-  # universal one. Their clients fall back to the store's own default name, and a multi-tenant master,
-  # the only kind a pool accepts, refuses a write from a name absent from its ledger. SGLang writes
-  # under its Binding's own reuse domain and needs nothing here; this fixture creates it anyway
-  # because the other cases share the setup.
+  # This is a prerequisite for an engine build that ignores the injected tenant, not a universal one.
+  # Such a client falls back to the store's own default name, and a multi-tenant master, the only kind
+  # a pool accepts, refuses a write from a name absent from its ledger. An engine that consumes the
+  # injected tenant writes under its Binding's own reuse domain and needs nothing here; this fixture
+  # creates it anyway because the other cases share the setup, and case 53 reads it as the Binding
+  # that must stay at zero.
   #
-  # Measured: with only the domain Binding above, an injected vLLM Pod starts, stays Ready, and every
-  # put returns TENANT_NOT_REGISTERED (-1701); adding this one turns the same client's put into rc=0
-  # with the value readable back. Registering the name is all a Binding does for it.
+  # Measured: with only the domain Binding above, a client that passes no tenant starts, stays Ready,
+  # and every put returns TENANT_NOT_REGISTERED (-1701); adding this one turns the same client's put
+  # into rc=0 with the value readable back. Registering the name is all a Binding does for it.
   kubectl apply -f - <<YAML >/dev/null
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCachePoolBinding

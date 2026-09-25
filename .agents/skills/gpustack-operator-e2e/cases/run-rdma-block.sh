@@ -57,8 +57,9 @@ report() {
   local nodes node req
   nodes=$(rdma_nodes | grep -v '^$' || true)
   if [ -z "$nodes" ]; then
-    echo "No node carries a Devices object: no device manager is running, and none of these cases"
-    echo "can answer anything. That is a fact about the cluster, not about the code."
+    echo "No node carries a Devices object: no device manager is running, and none of cases 80-84"
+    echo "can answer anything. That is a fact about the cluster, not about the code. Case 85 reads"
+    echo "only a rendered DaemonSet and needs nothing from this matrix."
     return 0
   fi
 
@@ -84,7 +85,7 @@ report() {
   echo "  case 83  a device manager and a readable kubelet configz"
   echo "  case 84  endpoint-whole, an InfiniBand link layer,"
   echo "           E2E_RDMA_PERFTEST_IMAGE"
-  echo "  case 85  endpoint, endpoint-whole                        (renders a backend; pulls no store"
+  echo "  case 85  nothing from this matrix                        (renders a backend; pulls no store"
   echo "                                                            image and starts no member)"
   echo
   echo "A requirement reported UNMET is a statement about this machine. references/rdma-host-shapes.md"

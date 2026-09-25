@@ -29,8 +29,7 @@
 #              - an `sftp` put/get round-trips and the uploaded file is visible in `main`'s /workspace;
 #              - a loopback TCP port-forward through the Instance round-trips (reaches the in-Pod sshd).
 # Cleanup:     Trap kills the port-forwards, deletes the test Instance and its SSH secret, removes the
-#              temp key dir. The general InstanceType unit spec is left set (idempotent; shared with the
-#              general-pool cases).
+#              temp key dir. The case writes nothing on the InstanceType: its unit spec is read only.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
@@ -89,17 +88,11 @@ print_and_exit() {
   exit 0
 }
 
-# The general InstanceType carries no unit spec by default; the Instance webhook needs one to size the
-# Pod. Set it and confirm it stuck (the validating webhook may be briefly unready after deploy).
-unit_ram=""
-for _ in $(seq 1 15); do
-  kubectl patch instancetypes.worker.gpustack.ai "$IT" --type=merge \
-    -p '{"spec":{"unitResources":{"cpu":"1","ram":"2Gi"},"localStorage":"10Gi"}}' >/dev/null 2>&1
-  unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
-  [ -n "$unit_ram" ] && break
-  sleep 3
-done
-[ -n "$unit_ram" ] || { echo "no unit spec on ${IT} (validating webhook not ready?)"; exit 1; }
+# The derived general InstanceType is created with its unit spec, and that spec is immutable
+# afterwards, so there is nothing to set: read it as a precondition. The Instance webhook sizes the
+# Pod from it.
+unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
+[ -n "$unit_ram" ] || { echo "no unit spec on ${IT} — the Instance webhook needs unitRAM to size the Pod"; exit 1; }
 
 # 1. SSH key + secret, then a CPU-only SSH-enabled Instance on the general pool.
 ssh-keygen -t ed25519 -f "$KEYDIR/id" -N "" -q

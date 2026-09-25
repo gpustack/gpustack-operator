@@ -16,7 +16,7 @@
 #              nodes make the pin meaningful; with one the "pinned rather than merely available" node
 #              sub-check records SKIP instead of a vacuous PASS. The SSH sub-check needs ssh and
 #              ssh-keygen on the runner and SKIPs without them.
-# Inputs:      All real, nothing mocked — sets the general InstanceType unit spec; creates a ConfigMap
+# Inputs:      All real, nothing mocked — reads the general InstanceType unit spec; creates a ConfigMap
 #              with two keys, a Secret, and an InstancePersistentVolume; then one Instance pinned to a
 #              chosen node carrying four additional volumes (persistent, configMap+subPath, secret,
 #              hostPath read-only). Flips instance-privileged-allowed and
@@ -112,17 +112,11 @@ print_and_exit() {
   exit 0
 }
 
-# The general InstanceType carries no unit spec by default; the Instance webhook needs one to size
-# the Pod. Set it and confirm it stuck (the validating webhook may be briefly unready after deploy).
-unit_ram=""
-for _ in $(seq 1 15); do
-  kubectl patch instancetypes.worker.gpustack.ai "$IT" --type=merge \
-    -p '{"spec":{"unitResources":{"cpu":"1","ram":"2Gi"},"localStorage":"10Gi"}}' >/dev/null 2>&1
-  unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
-  [ -n "$unit_ram" ] && break
-  sleep 3
-done
-[ -n "$unit_ram" ] || { echo "no unit spec on ${IT} (validating webhook not ready?)"; exit 1; }
+# The derived general InstanceType is created with its unit spec, and that spec is immutable
+# afterwards, so there is nothing to set: read it as a precondition. The Instance webhook sizes the
+# Pod from it.
+unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
+[ -n "$unit_ram" ] || { echo "no unit spec on ${IT} — the Instance webhook needs unitRAM to size the Pod"; exit 1; }
 
 # --- Pick the node to pin to. Prefer the LAST schedulable managed node so the pin is unlikely to
 #     coincide with the scheduler's own first choice; count them to decide whether the "pinned rather

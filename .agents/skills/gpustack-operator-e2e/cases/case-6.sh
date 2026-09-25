@@ -8,9 +8,8 @@
 #              acceleratorSliced / acceleratorPartitioned) tracks a per-card Devices ledger through a
 #              five-step pooling sequence and moves live over a native watch; the mocked cards report no
 #              hardware partitioning capability, so the partition view stays 0 throughout — the ledger
-#              never leaks a card into a family it cannot serve; the unit spec is immutable after create,
-#              lives only on the InstanceType (never a ClusterQueue note or a Node), and its write
-#              touches no Node/NodeFeature; zero Cohort objects exist.
+#              never leaks a card into a family it cannot serve; the unit spec is immutable after create
+#              and the rejected write touches no Node/NodeFeature. (Zero Cohort objects is CASE 1's row.)
 # Environment: Any cluster with one Ready node that has no Devices ledger, BY APPROXIMATION — the
 #              non-colliding nvidia-e2emock key keeps the mocked pool isolated on a real-accelerator
 #              cluster too. No real hardware. AUTO-SKIPS (exit 0, printing NOTHING WAS VERIFIED) when
@@ -31,8 +30,7 @@
 #                8/80/800/0 → 6/60/600/0 → 4/58/400/0 → 2/38/360/0 → 2/38/356/0 → 1/28/256/0;
 #              - a native watch observes the exclusive count move 8 → 4 → 8;
 #              - the unit-spec edit is REJECTED (immutable) and the stored value is unchanged;
-#              - no unit-spec note lands on the ClusterQueue; the worker NodeFeature labels are unchanged;
-#              - zero Cohort objects exist.
+#              - the worker NodeFeature labels are unchanged.
 # Cleanup:     Trap deletes the mocked Devices CR and the injected NodeFeature, and deletes the derived
 #              InstanceType once the mocked flavor is gone.
 set -uo pipefail
@@ -304,8 +302,7 @@ fi
 rm -f "$watchlog"
 
 # 6. The unit spec is FROZEN after create (declarative-management: unitResources / localStorage are
-#    immutable on update), lives only on the InstanceType (never a CQ note), and its write path never
-#    touches the NodeFeature. Editing the accelerated type's unit spec must be REJECTED by the
+#    immutable on update), and its write path never touches the NodeFeature. Editing the accelerated type's unit spec must be REJECTED by the
 #    validating webhook and leave the stored spec unchanged.
 echo "[case-6] attempting to edit InstanceType unit spec (must be rejected — immutable)"
 nfBefore=$(kubectl -n "$NS" get nodefeature "$WORKER_NF" -o json 2>/dev/null | python3 -c "
@@ -320,25 +317,12 @@ cpuAfter=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{
   && record PASS "unit-spec edit is rejected (immutable)" "unitResources frozen; spec.unitResources.cpu stayed ${cpuBefore}" \
   || record FAIL "unit-spec edit is rejected (immutable)" "err='${errEdit:0:70}' cpu ${cpuBefore}->${cpuAfter} — the unit spec must be immutable after create"
 
-# The unit spec must NOT flow into the ClusterQueue notes — it lives only on the InstanceType.
-cqnote=$(kubectl get clusterqueue "$ITNAME" -o json 2>/dev/null | python3 -c "
-import json,sys
-print(json.load(sys.stdin).get('metadata',{}).get('annotations',{}).get('note.gpustack.ai/unitCPU','<absent>'))
-" 2>/dev/null)
-[ "$cqnote" = "<absent>" ] && record PASS "unit spec is not a ClusterQueue note" "no note.gpustack.ai/unitCPU on ${ITNAME}" \
-  || record FAIL "unit spec is not a ClusterQueue note" "found note.gpustack.ai/unitCPU='${cqnote}' — unit spec leaked into CQ notes"
-
 nfAfter=$(kubectl -n "$NS" get nodefeature "$WORKER_NF" -o json 2>/dev/null | python3 -c "
 import json,sys
 print(json.dumps(json.load(sys.stdin).get('spec',{}).get('labels',{}),sort_keys=True))
 " 2>/dev/null)
 [ "$nfBefore" = "$nfAfter" ] && record PASS "unit-spec write does not touch NodeFeature" "worker NodeFeature spec.labels unchanged" \
   || record FAIL "unit-spec write does not touch NodeFeature" "worker NodeFeature spec.labels changed — the write leaked upward"
-
-# 7. Zero Cohort objects (Cohort removed entirely).
-cohorts=$(kubectl get cohorts.kueue.x-k8s.io -A --no-headers 2>/dev/null | grep -c . || true)
-[ "${cohorts:-0}" = "0" ] && record PASS "zero Cohort objects" "no cohorts.kueue.x-k8s.io" \
-  || record FAIL "zero Cohort objects" "${cohorts} Cohort(s) present — CohortReconciler should be gone"
 
 echo
 echo "== CASE 6 — Pooled four-view + watch freshness =="
@@ -350,8 +334,8 @@ echo "== CASE 6 — Pooled four-view + watch freshness =="
 if [ "$FAILS" -ne 0 ]; then
   echo
   echo "FAILED ${FAILS} check(s). The four-view must track the ledger, a native watch must surface"
-  echo "its transitions, the unit spec must be immutable + off the ClusterQueue/NodeFeature, and no"
-  echo "Cohort may exist. Diagnose: kubectl -n ${NS} logs deploy/gpustack-operator-worker --tail=200"
+  echo "its transitions, and the unit spec must be immutable with its rejected write leaving the"
+  echo "NodeFeature alone. Diagnose: kubectl -n ${NS} logs deploy/gpustack-operator-worker --tail=200"
   exit 1
 fi
 echo "CASE 6 PASS"

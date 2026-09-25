@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # CASE 85 — A host-fabric member is granted its device by protocol, and mounts no device tree
-#   (MUTATING, self-recovering; AUTO-SKIPS without a node carrying a whole-function RDMA endpoint)
+#   (MUTATING, self-recovering)
 #
 #   case-85.sh <NS>
 #
@@ -22,11 +22,17 @@
 #              they cover the chain; neither covers it alone, and a reader taking this one for an
 #              end-to-end reading has over-read it.
 #
-# Environment: A node running a device manager with at least one WHOLE-FUNCTION RDMA endpoint, since
-#              the shared key is served from those. AUTO-SKIPS (exit 0, printing NOTHING WAS
-#              VERIFIED) otherwise. No store image is pulled and no member Pod has to reach Running:
-#              every assertion is read from the rendered DaemonSet's pod template.
-#
+# Environment: Any cluster with the operator installed; no RDMA hardware. Every assertion is read from
+#              the rendered DaemonSet's pod template, and the operator renders it without looking at
+#              any node, so the member group selects a label no node carries: no member Pod is ever
+#              created and no store image is pulled. Never auto-skips.
+# Inputs:      All real, nothing mocked. One KVCacheBackend whose transport protocol is RDMA, with a
+#              leader and one DRAM member group; the image is named because the schema requires one.
+# Expected:    - the backend is accepted and its member DaemonSet is rendered;
+#              - the member container limits device.gpustack.ai/rdma.shared=1;
+#              - no volume and no volumeMount on /dev/infiniband;
+#              - hostNetwork=true with dnsPolicy=ClusterFirstWithHostNet;
+#              - capabilities add exactly IPC_LOCK and SYS_RESOURCE, and privileged is unset.
 # Cleanup:     Deletes the KVCacheBackend it created, on every exit path.
 
 set -uo pipefail
@@ -37,7 +43,9 @@ CASE_ID=85
 # shellcheck source=/dev/null
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rdma-lib.sh"
 
-rdma_select endpoint endpoint-whole
+# The member group selects this label, which no node carries, so the rendering is read without a
+# member Pod ever being scheduled.
+RENDER_ONLY_LABEL="gpustack.ai/e2e-case-85-render-only"
 
 BACKEND="gpustack-e2e-fabric-grant-$$"
 RDMA_KEY="device.gpustack.ai/rdma.shared"
@@ -67,7 +75,7 @@ spec:
     managed:
       leader: {}
       members:
-        - nodeSelector: {kubernetes.io/hostname: ${RDMA_NODE}}
+        - nodeSelector: {${RENDER_ONLY_LABEL}: "true"}
           medium: DRAM
           capacityPerMember: 1Gi
 YAML
@@ -77,7 +85,7 @@ YAML
   exit 1
 fi
 record PASS "the operator accepts a backend whose transport is RDMA" \
-  "${BACKEND} applied, member group selecting ${RDMA_NODE}"
+  "${BACKEND} applied, member group selecting ${RENDER_ONLY_LABEL}=true (no node)"
 
 DS="${BACKEND}-member-0"
 TEMPLATE=""
