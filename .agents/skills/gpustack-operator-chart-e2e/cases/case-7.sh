@@ -393,16 +393,23 @@ fi
 # worker whose Prepare fails restarts, and restarting is how the applications end up never
 # installed at all.
 #
-# Only Running pods are judged. The old replica's container exits 0 when the rollout terminates
-# it, and its Pod lingers Completed for a few seconds afterwards — that is the rollout working,
-# not an old worker still up.
+# Only live pods are judged: Running and not being deleted. When the new replica turns Ready the
+# rollout deletes the old one, and that Pod stays in phase Running through its graceful shutdown —
+# the worker drains its API server for about 15s — while carrying a deletionTimestamp. The check
+# runs within a second or two of the rollout returning, so counting phase alone reported that Pod
+# as an old worker still up. A deleting Pod is the rollout working, and it is named in
+# the verdict so a slow shutdown stays visible; an old Pod with no deletionTimestamp is still a FAIL.
+#
+# The deletionTimestamp rides as "del=<value>" so an empty one still occupies its field.
 pods=$(kubectl -n "$NS" get pods -l "app=${WORKER}" \
-         -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{" "}{.spec.containers[0].image}{" "}{.status.containerStatuses[*].restartCount}{"\n"}{end}' 2>/dev/null)
-live=$(printf '%s\n' "$pods" | grep -cF " Running ${IMAGE} " || true)
-stale=$(printf '%s\n' "$pods" | awk -v old="$OLD_IMAGE" '$2 == "Running" && $3 == old {printf "%s ", $1}')
-restarted=$(printf '%s\n' "$pods" | awk '$2 == "Running" && $4 > 0 {printf "%s(%s restarts) ", $1, $4}')
+         -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{" del="}{.metadata.deletionTimestamp}{" "}{.spec.containers[0].image}{" "}{.status.containerStatuses[*].restartCount}{"\n"}{end}' 2>/dev/null)
+live=$(printf '%s\n' "$pods" | awk -v img="$IMAGE" '$2 == "Running" && $3 == "del=" && $4 == img' | grep -c . || true)
+stale=$(printf '%s\n' "$pods" | awk -v old="$OLD_IMAGE" '$2 == "Running" && $3 == "del=" && $4 == old {printf "%s ", $1}')
+restarted=$(printf '%s\n' "$pods" | awk '$2 == "Running" && $3 == "del=" && $5 > 0 {printf "%s(%s restarts) ", $1, $5}')
+deleting=$(printf '%s\n' "$pods" | awk '$3 != "del=" && $1 != "" {printf "%s ", $1}')
 if [ "$live" -eq 1 ] && [ -z "$stale" ] && [ -z "$restarted" ]; then
-  record PASS "the new replica is the only one" "1 Running on ${IMAGE}, no restarts"
+  record PASS "the new replica is the only one" \
+    "1 Running on ${IMAGE}, no restarts${deleting:+; still shutting down: ${deleting% }}"
 else
   record FAIL "the new replica is the only one" \
     "${live} Running on the new image; ${stale:+old still up: ${stale}}${restarted:-no restarts}"
