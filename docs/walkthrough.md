@@ -669,6 +669,11 @@ spec:
   and `subPath` behave as on any Pod volume mount.
 - **They mount into the workload container only.** The SSH sidecar needs no change: it enters that
   container's mount namespace per session, so every mount is visible over SSH too.
+- **A persistent claim places the Instance where it can attach.** The workspace claim and every
+  `persistent` entry follow the [claim placement rules](./reference/model-artifact.md#claim-delivery-and-placement):
+  a node-local volume pins the Instance to its node and that node's capacity; network or `ReadWriteMany`
+  storage avoids the pin. A claim nothing binds creates no Pod and says why in `status.phaseMessage`;
+  [`instance-persistent-volume-placement`](./settings.md#online-adjustable-settings) turns this off.
 - **Both new fields are immutable while the Instance runs**, editable while stopped — the rule the rest
   of `spec` follows.
 

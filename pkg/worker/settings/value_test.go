@@ -112,3 +112,14 @@ func TestWorkloadFitAffinitySetting(t *testing.T) {
 	assert.Equal(t, "true", WorkloadFitAffinity.DefaultValue(), "boot default value")
 	assert.True(t, WorkloadFitAffinity.Editable(), "must stay editable for runtime adjustment")
 }
+
+// TestInstancePersistentVolumePlacementSetting pins the escape switch for placing an Instance where
+// its persistent volumes can attach: its stable name (which drives the GPUSTACK_ env mapping), its
+// default-on boot value, and that it stays an editable boolean, so an administrator can return to
+// the render that knew only the claim names without a redeploy.
+func TestInstancePersistentVolumePlacementSetting(t *testing.T) {
+	s := InstancePersistentVolumePlacement
+	assert.Equal(t, "instance-persistent-volume-placement", s.Name(), "name drives the GPUSTACK_ env mapping")
+	assert.Equal(t, "true", s.DefaultValue(), "boot default value")
+	assert.True(t, s.Editable(), "must stay editable for runtime adjustment")
+}
