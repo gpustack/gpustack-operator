@@ -35,7 +35,8 @@
 #              - deletion: the referenced artifact stays Terminating, and goes once its deployment does;
 #              - the token appears in no artifact status, no event and no worker log line, measured
 #                by a scan shown to find a planted copy first.
-# Cleanup:     Trap deletes the deployment, the artifacts and the Secrets it created.
+# Cleanup:     Trap deletes the deployment, the artifacts and the Secrets it created, and puts back
+#              the model-artifact-delivery-mode Setting it pinned to Engine.
 set -uo pipefail
 
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
@@ -63,6 +64,21 @@ record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0
 
 SCRATCH="$(mktemp -d)"
 
+# This case proves Engine delivery, and the chart seeds Node when it deploys the model-manager plugin,
+# so the case pins Engine for its run and puts back what it found. The wait is the worker's
+# thirty-second Settings read cache.
+ORIG_DELIVERY="$(kubectl -n "$SYSTEM_NS" get secret gpustack-settings -o jsonpath='{.data.model-artifact-delivery-mode}' 2>/dev/null)"
+restore_delivery() {
+  local v=null
+  [ -n "$ORIG_DELIVERY" ] && v="\"${ORIG_DELIVERY}\""
+  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge -p "{\"data\":{\"model-artifact-delivery-mode\":${v}}}" >/dev/null 2>&1
+}
+pin_engine_delivery() {
+  kubectl -n "$SYSTEM_NS" patch secret gpustack-settings --type=merge \
+    -p "{\"data\":{\"model-artifact-delivery-mode\":\"$(printf Engine | base64)\"}}" >/dev/null
+  sleep 35
+}
+
 cleanup() {
   echo
   echo "[case-97] cleanup"
@@ -73,6 +89,7 @@ cleanup() {
   done
   kubectl -n "$NS" delete modelartifacts.worker.gpustack.ai -l "e2e.gpustack.ai/case=97" --ignore-not-found --wait=false >/dev/null 2>&1
   kubectl -n "$NS" delete secret -l "e2e.gpustack.ai/case=97" --ignore-not-found >/dev/null 2>&1
+  restore_delivery
   rm -rf "$SCRATCH"
 }
 trap cleanup EXIT
@@ -266,6 +283,7 @@ else
 fi
 
 echo "== 6. revocation stops new Pods and leaves the running one =="
+pin_engine_delivery
 if [ -z "$IT" ]; then
   IT="$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
 fi

@@ -25,11 +25,11 @@
 #              - exactly one such release, at revision 1, with no replica having restarted:
 #                three concurrent installers converge on one instead of racing;
 #              - its chart version equals the running binary's version (the tgz resolved);
-#              - Kueue, NFD, the CSI drivers and the device-manager DaemonSet all belong to THAT
-#                release (Helm's ownership annotation), not to a chart release and not to four
-#                releases of their own;
-#              - the device-manager runs the same image as the worker, which is how a device-manager
-#                can never drift from the operator that manages it;
+#              - Kueue, NFD, the CSI drivers and the device-manager and model-manager DaemonSets all
+#                belong to THAT release (Helm's ownership annotation), not to a chart release and
+#                not to releases of their own;
+#              - the device-manager and the model-manager run the same image as the worker, which is
+#                how a node component can never drift from the operator that manages it;
 #              - the worker's own Deployment is absent from the release (it is already running).
 # Cleanup:     A trap deletes the hand-rolled worker and its cluster-admin binding, then runs the
 #              shared teardown (which uninstalls that release, its CRDs, finalizers, APIServices and
@@ -266,7 +266,8 @@ for entry in \
   "daemonset/node-feature-discovery-worker|required" \
   "deploy/csi-nfs-controller|required" \
   "deploy/csi-s3-controller|required" \
-  "daemonset/gpustack-operator-device-manager-${MANUFACTURER}|required"; do
+  "daemonset/gpustack-operator-device-manager-${MANUFACTURER}|required" \
+  "daemonset/gpustack-operator-model-manager|required"; do
   obj="${entry%|*}"
   if ! kubectl -n "$NS" get "$obj" >/dev/null 2>&1; then
     record FAIL "in the worker's own release" "$obj missing"
@@ -296,6 +297,13 @@ if [ "$dm_img" = "$IMAGE" ]; then
   record PASS "device-manager image == worker image" "$dm_img"
 else
   record FAIL "device-manager image == worker image" "device-manager [${dm_img:-none}] != worker [${IMAGE}]"
+fi
+mm_img=$(kubectl -n "$NS" get daemonset/gpustack-operator-model-manager \
+           -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)
+if [ "$mm_img" = "$IMAGE" ]; then
+  record PASS "model-manager image == worker image" "$mm_img"
+else
+  record FAIL "model-manager image == worker image" "model-manager [${mm_img:-none}] != worker [${IMAGE}]"
 fi
 
 # And it stayed one release: no per-application releases came back alongside it.

@@ -61,7 +61,9 @@ esac
 # And what that appVersion renders to, asked of the PACKAGED chart rather than of the tree: the
 # image can carry an older copy of the helper that composes the tag. Every e2e install passes an
 # explicit image, so this default is rendered nowhere else. Only the parent's own workloads are
-# rendered — the subcharts bring their own images, which this tag never governs.
+# rendered — the subcharts bring their own images, which this tag never governs — and of those only
+# the operator image is judged: the model-manager's node-driver-registrar sidecar is a pinned mirror
+# with its own version, like the subcharts' images.
 kubever=$(kubectl version -o json 2>/dev/null \
   | python3 -c 'import json,sys; v=json.load(sys.stdin)["serverVersion"]; print(v["major"]+"."+v["minor"].rstrip("+"))' 2>/dev/null)
 tags=$(kubectl -n "$NS" exec "$WORKER" -- sh -c "helm template t '${tgz_path}' -n '${NS}' \
@@ -69,10 +71,10 @@ tags=$(kubectl -n "$NS" exec "$WORKER" -- sh -c "helm template t '${tgz_path}' -
          --set worker.enabled=false --set kueue.enabled=false \
          --set node-feature-discovery.enabled=false \
          --set csi-driver-nfs.enabled=false --set csi-driver-s3.enabled=false" 2>/dev/null \
-         | awk '/^[[:space:]]*image:/ {gsub(/"/,"",$2); print $2}' | sort -u)
+         | awk '/^[[:space:]]*image:/ {gsub(/"/,"",$2); print $2}' | sort -u | grep '/gpustack-operator:')
 want="v${appver#v}"
 if [ -z "$tags" ]; then
-  record FAIL "default image tag" "the packaged chart rendered no image (kube-version v${kubever:-1.33}.0)"
+  record FAIL "default image tag" "the packaged chart rendered no operator image (kube-version v${kubever:-1.33}.0)"
 else
   bad=$(printf '%s\n' "$tags" | grep -v ":${want}\$" | tr '\n' ' ')
   [ -z "$bad" ] && record PASS "default image tag" "$(printf '%s' "$tags" | tr '\n' ' ')" \
