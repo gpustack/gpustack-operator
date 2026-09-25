@@ -32,20 +32,52 @@ function docs_lint() {
   # (check-crossrefs). Every one is bash and awk over the corpus — no cluster, no golangci-lint
   # pass — so running all five costs a few seconds.
   #
+  # The five run concurrently: each is self-contained (its own throwaway tree, its own reads of
+  # the corpus, nothing written in common), and together they are the whole wall of this target —
+  # measured 14 s serial, 7 s concurrent, the longest single check being check-docs at 6 s.
+  # Output is buffered per check and replayed in list order, so a failed run prints the same
+  # blocks in the same order the serial form printed them.
+  #
   # Stopping at the first failure would cost one CI round per finding, which is the same reason
   # docs.yml reports every broken external URL rather than the first.
+  local docs_tmp
+  docs_tmp="$(mktemp -d)"
+  local check
+  local pids=() names=()
   for check in check-specs-selftest check-crossrefs-selftest check-docs check-specs check-crossrefs; do
-    if ! bash "${scripts}/${check}.sh" "${ROOT_DIR}"; then
-      failed+=("${check}")
+    bash "${scripts}/${check}.sh" "${ROOT_DIR}" >"${docs_tmp}/${check}.out" 2>&1 &
+    pids+=("$!")
+    names+=("${check}")
+  done
+  # The skills self-test joins them; check-skills itself runs after, because it is conditional on
+  # the self-test's verdict.
+  bash "${ROOT_DIR}/hack/check-skills-selftest.sh" "${ROOT_DIR}" >"${docs_tmp}/check-skills-selftest.out" 2>&1 &
+  pids+=("$!")
+  names+=("check-skills-selftest")
+
+  local rcs=() i rc skills_selftest_rc=""
+  for i in "${!names[@]}"; do
+    rc=0
+    wait "${pids[$i]}" || rc=$?
+    rcs+=("${rc}")
+  done
+  for i in "${!names[@]}"; do
+    if [[ -s "${docs_tmp}/${names[$i]}.out" ]]; then
+      cat "${docs_tmp}/${names[$i]}.out"
+    fi
+    if [[ "${rcs[$i]}" -ne 0 ]]; then
+      failed+=("${names[$i]}")
+      if [[ "${names[$i]}" == "check-skills-selftest" ]]; then
+        skills_selftest_rc="${rcs[$i]}"
+      fi
     fi
   done
+  rm -rf "${docs_tmp}"
 
   # The skill contract rides here rather than with the Go lint because a SKILL.md is markdown: the
   # Stop hook and docs.yml both already fire on any .md, so this gate reaches every turn that edits
   # a skill without a second trigger to keep in sync. Same self-test-first rule as above.
-  if ! bash "${ROOT_DIR}/hack/check-skills-selftest.sh" "${ROOT_DIR}"; then
-    failed+=("check-skills-selftest")
-  else
+  if [[ -z "${skills_selftest_rc}" ]]; then
     # Two failures, two messages: a finding about the skills, or a check that could not run at all.
     local skills_rc=0
     bash "${ROOT_DIR}/hack/check-skills.sh" "${ROOT_DIR}" || skills_rc=$?

@@ -106,6 +106,14 @@ fi
 # installer stubbed out. What is measured is the decision, not the network: a validator that
 # reaches its installer has rejected what it was handed.
 #
+# The plant lands in the tree named by $W, a throwaway copy of $MINI carrying its own hack/lib:
+# verdict() empties and replants its tree's .sbin, so two verdicts cannot share one tree — not
+# serially through carelessness and not concurrently through scheduling. Each verdict also
+# re-sources its tree's hack/lib/init.sh, which is where the git and go lookups that made the
+# serial form cost 13 seconds went, one subshell per row; the rows are independent, so they run
+# concurrently now and their outputs are judged in row order after the wait. The assertions, the
+# printed order and the counts are the serial form's exactly.
+#
 # Two shapes, and the second is the one with teeth. A SILENT plant answers every version flag with
 # nothing, which a validator comparing against its pin rejects - and so does a validator that has
 # regressed to accepting any non-empty output, because nothing is not non-empty. A SPEAKING plant
@@ -122,7 +130,7 @@ fi
 #                 deleted or died, or a speaking fixture/parser precondition failed, must not read
 #                 as one that approved something
 function prepare_speaking_fixture() {
-  if [ -x "$MINI/speaking-bin" ]; then
+  if [ -x "$W/speaking-bin" ]; then
     return 0
   fi
   if ! command -v go > /dev/null; then
@@ -130,8 +138,8 @@ function prepare_speaking_fixture() {
     return 1
   fi
 
-  mkdir -p "$MINI/cmd/speaking"
-  printf 'module example.com/speaking\n' > "$MINI/go.mod"
+  mkdir -p "$W/cmd/speaking"
+  printf 'module example.com/speaking\n' > "$W/go.mod"
   printf '%s\n' \
     'package main' \
     '' \
@@ -148,8 +156,8 @@ function prepare_speaking_fixture() {
     '    }' \
     '  }' \
     '  fmt.Println("stale 0.0.0-not-any-pin built from 0000000 on 1970-01-01T00:00:00Z")' \
-    '}' > "$MINI/cmd/speaking/main.go"
-  if ! (cd "$MINI" && go build -o "$MINI/speaking-bin" ./cmd/speaking); then
+    '}' > "$W/cmd/speaking/main.go"
+  if ! (cd "$W" && go build -o "$W/speaking-bin" ./cmd/speaking); then
     echo "SPEAKING-FIXTURE-FAILED:go build" >&2
     return 1
   fi
@@ -160,26 +168,26 @@ function verdict() {
   local base="${validate_fn%::validate}"
   local out
 
-  rm -rf "${MINI:?}/.sbin"
-  mkdir -p "$(dirname "$MINI/.sbin/$rel")"
+  rm -rf "${W:?}/.sbin"
+  mkdir -p "$(dirname "$W/.sbin/$rel")"
   if [ "$shape" = speaking ]; then
     if ! prepare_speaking_fixture; then
       echo "broken"
       return 0
     fi
-    if ! cp "$MINI/speaking-bin" "$MINI/.sbin/$rel"; then
+    if ! cp "$W/speaking-bin" "$W/.sbin/$rel"; then
       echo "SPEAKING-FIXTURE-FAILED:copy" >&2
       echo "broken"
       return 0
     fi
   else
-    printf '#!/bin/sh\nexit 0\n' > "$MINI/.sbin/$rel"
-    chmod +x "$MINI/.sbin/$rel"
+    printf '#!/bin/sh\nexit 0\n' > "$W/.sbin/$rel"
+    chmod +x "$W/.sbin/$rel"
   fi
 
   out="$(
     # shellcheck disable=SC1090,SC1091
-    source "$MINI/hack/lib/init.sh"
+    source "$W/hack/lib/init.sh"
 
     # Stubbing an installer that is not the one this validator calls would let the real one run, so
     # the convention this derivation relies on is asserted rather than assumed.
@@ -187,7 +195,7 @@ function verdict() {
     declare -F "${base}::bin" > /dev/null || { echo "NO-BIN-FN"; exit 0; }
 
     resolved="$(command -v "$("${base}"::bin)" || true)"
-    if [ "$resolved" != "$MINI/.sbin/$rel" ]; then
+    if [ "$resolved" != "$W/.sbin/$rel" ]; then
       echo "UNATTRIBUTED:${resolved:-<nothing>}"
       exit 0
     fi
@@ -224,10 +232,46 @@ echo
 echo "== a binary that is not the pin =="
 rejects=0
 accepts=0
+# The speaking fixture is built once here rather than once per worker: concurrent `go build`s of
+# the same ten-line program are most of what the concurrent form otherwise costs. Each worker
+# tree gets a copy; prepare_speaking_fixture finds it present and skips its build. When the
+# build cannot run (no go), the copies are absent and each worker's prepare reports that, which
+# is the serial form's behaviour for the same environment.
+mkdir -p "$MINI/fixture"
+if W="$MINI/fixture" prepare_speaking_fixture 2>/dev/null; then
+  fixture="$MINI/fixture/speaking-bin"
+else
+  fixture=""
+fi
+
+# One throwaway tree per verdict, prepared up front so the concurrent jobs only read their own.
+ri=0
+for shape in silent speaking; do
+  for row in "${CASES[@]}"; do
+    W="${MINI}/tree.${ri}"
+    mkdir -p "${W}"
+    cp -R "$MINI/hack" "${W}/hack"
+    if [ -n "${fixture}" ]; then
+      cp "${fixture}" "${W}/speaking-bin"
+    fi
+    (
+      W="${MINI}/tree.${ri}"
+      IFS='|' read -r validate_fn rel want why <<<"$row"
+      verdict "$validate_fn" "$rel" "$shape" "$why" >"${MINI}/verdict.${ri}"
+    ) &
+    ri=$((ri + 1))
+  done
+done
+wait
+
+# Judge in the same row order the serial form printed, so the output reads identically and the
+# counts count the same rows. An empty file — a job that died before writing one — reads as the
+# empty string, which no want column holds, so it fails rather than passing silently.
+ri=0
 for shape in silent speaking; do
   for row in "${CASES[@]}"; do
     IFS='|' read -r validate_fn rel want why <<<"$row"
-    got="$(verdict "$validate_fn" "$rel" "$shape" "$why")"
+    got="$(cat "${MINI}/verdict.${ri}" 2>/dev/null || true)"
     if [ "$got" = "$want" ]; then
       pass "$rel [$shape]: $got ($why)"
     else
@@ -241,6 +285,7 @@ for shape in silent speaking; do
         accept) accepts=$((accepts + 1)) ;;
       esac
     fi
+    ri=$((ri + 1))
   done
 done
 
