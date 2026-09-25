@@ -273,7 +273,7 @@ Without one, users patch the rendered Pod and the reconcile loop silently overwr
 | Tier | Field | Semantics |
 |---|---|---|
 | append | `roles[].extraArgs`, `roles[].env` | appended **after** the operator-synthesized arguments; a key the operator owns is refused, never merged |
-| overlay | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes` | the operator renders first, then merges this overlay on top |
+| overlay | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes`, `terminationGracePeriodSeconds` | the operator renders first, then merges this overlay on top |
 | take over | `roles[].command` | the user owns the whole argv; the operator synthesizes **no** engine argument and **no** client environment |
 
 Unlike the `Instance` that keeps its pod shape inside an `InstanceTemplate`, a role's Pod fields sit
@@ -448,8 +448,8 @@ appearing as an unattributable `ImagePullBackOff`.
 Changing `replicas` adds or removes instances and nothing more: the survivors are not restarted, do
 not reload their weights and keep their cached blocks. What still replaces **every** instance of the
 role is an edit that changes what a replica's Pod renders — `image`, `extraArgs`, `env`, `ports`,
-`additionalVolumes`. A change to `size` is not on that list because it cannot be made: see
-`roles[].size` above.
+`additionalVolumes`, `terminationGracePeriodSeconds`. A change to `size` is not on that list because
+it cannot be made: see `roles[].size` above.
 
 Such an edit **deletes and recreates** the role's replicas — one replica per role per pass, waited
 out. The role set itself cannot be edited at all; admission refuses it, so there is no role rename or
@@ -542,7 +542,7 @@ this deployment being run right now*.**
 | the set of roles, and each role's `name` and `kind` | `roles[].replicas` |
 | `roles[].size` | |
 | `roles[].instanceType` | `roles[].extraArgs`, `roles[].env` |
-| `roles[].resources` | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes` |
+| `roles[].resources` | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes`, `terminationGracePeriodSeconds` |
 | `roles[].command` | labels and annotations |
 
 `roles[].resources` is frozen against the criterion rather than by it, and that is marked here so it

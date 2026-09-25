@@ -493,6 +493,34 @@ type ModelDeploymentRole struct {
 	//
 	// +optional
 	Topology *ModelDeploymentRoleTopology `json:"topology,omitempty" protobuf:"bytes,16,name=topology"`
+
+	// TerminationGracePeriodSeconds is the whole time a departing replica of this role gets, from
+	// its Pod's delete to the kill, and it is written to each Pod's field of the same name. Unset
+	// renders 30, the Kubernetes default.
+	//
+	//   - The drain hook is budgeted against it: the hook waits for the engine to go idle until
+	//     5 s before this, and those 5 s are left for the engine to exit on SIGTERM. So raising it
+	//     lengthens the wait for running requests and the time the engine has to exit, together.
+	//   - A LONGER GRACE COSTS ACCELERATORS AND QUOTA. A departing replica holds both until it
+	//     exits, on every delete, and a rollout waits each departing replica out one at a time per
+	//     role, so the grace multiplies into every rollout. An idle replica still exits as soon as
+	//     its engine does; the grace is a ceiling, not a wait.
+	//   - An SGLang prefill or decode role needs about 45: measured idle, such an engine takes
+	//     26-28 s after its delete to exit, which leaves 2 s before a kill at 30.
+	//   - Changing it replaces every replica of the role, as any edit to a rendered Pod field does,
+	//     and the replicas that leave in that rollout leave with the grace they were created with.
+	//   - A take-over role, one that sets Command, gets it written to its Pods as given, and gets
+	//     no drain hook either way; unset, its Pods keep the Kubernetes default.
+	//   - The lower bound keeps a wait between the two fixed ends: the engine serves the first 5 s
+	//     untouched and the last 5 s are the exit's, and at 15 the 5 s left between them hold the two
+	//     idle reads the hook returns on. The upper bound is an hour, far past any request a replica
+	//     serves; a request that needs longer needs a router that can move it, which no supported
+	//     one does.
+	//
+	// +optional
+	// +k8s:validation:minimum=15
+	// +k8s:validation:maximum=3600
+	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty" protobuf:"varint,17,opt,name=terminationGracePeriodSeconds"` // nolint: lll
 }
 
 // ModelDeploymentRoleTopology is the topology request for one independent replica group.

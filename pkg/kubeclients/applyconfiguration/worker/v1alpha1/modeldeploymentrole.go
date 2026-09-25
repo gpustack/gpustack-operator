@@ -161,6 +161,29 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// It applies to this role's independent replica group; it does not require other roles or replicas
 	// to share that domain.
 	Topology *ModelDeploymentRoleTopologyApplyConfiguration `json:"topology,omitempty"`
+	// TerminationGracePeriodSeconds is the whole time a departing replica of this role gets, from
+	// its Pod's delete to the kill, and it is written to each Pod's field of the same name. Unset
+	// renders 30, the Kubernetes default.
+	//
+	// - The drain hook is budgeted against it: the hook waits for the engine to go idle until
+	// 5 s before this, and those 5 s are left for the engine to exit on SIGTERM. So raising it
+	// lengthens the wait for running requests and the time the engine has to exit, together.
+	// - A LONGER GRACE COSTS ACCELERATORS AND QUOTA. A departing replica holds both until it
+	// exits, on every delete, and a rollout waits each departing replica out one at a time per
+	// role, so the grace multiplies into every rollout. An idle replica still exits as soon as
+	// its engine does; the grace is a ceiling, not a wait.
+	// - An SGLang prefill or decode role needs about 45: measured idle, such an engine takes
+	// 26-28 s after its delete to exit, which leaves 2 s before a kill at 30.
+	// - Changing it replaces every replica of the role, as any edit to a rendered Pod field does,
+	// and the replicas that leave in that rollout leave with the grace they were created with.
+	// - A take-over role, one that sets Command, gets it written to its Pods as given, and gets
+	// no drain hook either way; unset, its Pods keep the Kubernetes default.
+	// - The lower bound keeps a wait between the two fixed ends: the engine serves the first 5 s
+	// untouched and the last 5 s are the exit's, and at 15 the 5 s left between them hold the two
+	// idle reads the hook returns on. The upper bound is an hour, far past any request a replica
+	// serves; a request that needs longer needs a router that can move it, which no supported
+	// one does.
+	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
 }
 
 // ModelDeploymentRoleApplyConfiguration constructs a declarative configuration of the ModelDeploymentRole type for use with
@@ -318,5 +341,13 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithEnv(values ...*ModelDeployme
 // If called multiple times, the Topology field is set to the value of the last call.
 func (b *ModelDeploymentRoleApplyConfiguration) WithTopology(value *ModelDeploymentRoleTopologyApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
 	b.Topology = value
+	return b
+}
+
+// WithTerminationGracePeriodSeconds sets the TerminationGracePeriodSeconds field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the TerminationGracePeriodSeconds field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithTerminationGracePeriodSeconds(value int64) *ModelDeploymentRoleApplyConfiguration {
+	b.TerminationGracePeriodSeconds = &value
 	return b
 }

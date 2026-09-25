@@ -513,7 +513,8 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	// that command line, so it cannot claim the container serves the metrics the hook reads.
 	if !takeOver {
 		mainC.Lifecycle = &core.Lifecycle{
-			PreStop: modelDeploymentDrainHook(md.Spec.Engine.Name, enginePort, scheme),
+			PreStop: modelDeploymentDrainHook(md.Spec.Engine.Name, enginePort, scheme,
+				modelDeploymentTerminationGracePeriodSeconds(role)),
 		}
 	}
 
@@ -541,10 +542,13 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			Containers:       []core.Container{mainC},
 		},
 	}
-	// The grace the drain hook is budgeted against goes with the hook, so a take-over replica keeps
-	// the Pod it rendered before either existed.
+	// The grace the drain hook is budgeted against goes with the hook. A take-over replica gets only
+	// the grace its role writes, so one that writes none keeps the Pod it rendered before either
+	// existed.
 	if !takeOver {
-		pod.Spec.TerminationGracePeriodSeconds = ptr.To(modelDeploymentTerminationGracePeriodSeconds)
+		pod.Spec.TerminationGracePeriodSeconds = ptr.To(modelDeploymentTerminationGracePeriodSeconds(role))
+	} else if role.TerminationGracePeriodSeconds != nil {
+		pod.Spec.TerminationGracePeriodSeconds = ptr.To(*role.TerminationGracePeriodSeconds)
 	}
 	if directDecode {
 		sidecar := renderModelDeploymentRoutingSidecar(

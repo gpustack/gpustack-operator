@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
@@ -160,38 +161,125 @@ func TestRenderModelDeploymentPod_DrainsBeforeTheEngineStops(t *testing.T) {
 				}
 			}
 			assert.Contains(t, script, fmt.Sprintf("time.sleep(%d)", modelDeploymentDrainSettleSeconds))
-			assert.Contains(t, script, fmt.Sprintf("start < %d:", modelDeploymentDrainDeadlineSeconds))
+			assert.Contains(t, script, "start < 25:", "the default grace of 30 less the exit reserve")
 		})
 	}
 }
 
-// TestRenderModelDeploymentPod_TakeOverRoleGetsNoDrain asserts that a role which replaced the
-// command line keeps the Pod it rendered before the drain existed: no hook, since the operator
-// cannot claim the container serves the metrics the hook reads, and no grace, since the grace
-// exists for the hook.
-func TestRenderModelDeploymentPod_TakeOverRoleGetsNoDrain(t *testing.T) {
-	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[0].Command = []string{"/bin/my-server", "--flag"}
-	})
-	pod := renderOne(t, md, newRenderInstanceType())
+// TestRenderModelDeploymentPod_GraceIsTheRoles asserts what a role's terminationGracePeriodSeconds
+// renders: the Pod's grace, and on a role whose command line the operator builds, the hook's
+// deadline derived from it. A take-over role gets the value as given and no hook, and one that sets
+// none keeps the Pod it rendered before the drain existed.
+//
+// The expectations are literals, never the constants: comparing a constant to what it rendered
+// agrees with itself whatever the constant becomes.
+func TestRenderModelDeploymentPod_GraceIsTheRoles(t *testing.T) {
+	testCases := []struct {
+		name         string
+		command      []string
+		grace        *int64
+		wantGrace    *int64
+		wantDeadline int64
+	}{
+		{
+			name:         "unset renders the Kubernetes default",
+			wantGrace:    ptr.To[int64](30),
+			wantDeadline: 25,
+		},
+		{
+			name:         "a role's grace moves the hook's deadline with it",
+			grace:        ptr.To[int64](45),
+			wantGrace:    ptr.To[int64](45),
+			wantDeadline: 40,
+		},
+		{
+			name:    "a take-over role that sets none keeps the Kubernetes default",
+			command: []string{"/bin/my-server", "--flag"},
+		},
+		{
+			name:      "a take-over role gets its grace as given and still no hook",
+			command:   []string{"/bin/my-server", "--flag"},
+			grace:     ptr.To[int64](60),
+			wantGrace: ptr.To[int64](60),
+		},
+	}
 
-	assert.Nil(t, pod.Spec.TerminationGracePeriodSeconds)
-	require.Len(t, pod.Spec.Containers, 1)
-	assert.Nil(t, pod.Spec.Containers[0].Lifecycle)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Command = tc.command
+				md.Spec.Roles[0].TerminationGracePeriodSeconds = tc.grace
+			})
+			pod := renderOne(t, md, newRenderInstanceType())
+
+			assert.Equal(t, tc.wantGrace, pod.Spec.TerminationGracePeriodSeconds)
+			require.Len(t, pod.Spec.Containers, 1)
+			if tc.wantDeadline == 0 {
+				assert.Nil(t, pod.Spec.Containers[0].Lifecycle,
+					"the operator cannot claim a take-over container serves the gauges the hook reads")
+				return
+			}
+			require.NotNil(t, pod.Spec.Containers[0].Lifecycle)
+			require.NotNil(t, pod.Spec.Containers[0].Lifecycle.PreStop)
+			require.NotNil(t, pod.Spec.Containers[0].Lifecycle.PreStop.Exec)
+			script := pod.Spec.Containers[0].Lifecycle.PreStop.Exec.Command[2]
+			assert.Contains(t, script, fmt.Sprintf("start < %d:", tc.wantDeadline))
+		})
+	}
 }
 
-// TestModelDeploymentDrain_BudgetFitsTheGrace asserts the relationship between the timings rather
-// than either number: the settle ends before the deadline, and the deadline plus the most the last
-// read can overrun it -- one read timeout and one poll interval -- still leaves time for the engine
-// to exit before the kubelet kills it.
-func TestModelDeploymentDrain_BudgetFitsTheGrace(t *testing.T) {
+// TestRenderModelDeploymentPod_TheDefaultWrittenOutRendersTheSamePod asserts that writing the
+// default grace onto a role that had none changes nothing it renders, so the edit replaces no
+// replica.
+func TestRenderModelDeploymentPod_TheDefaultWrittenOutRendersTheSamePod(t *testing.T) {
+	unset := renderOne(t, newRenderDeployment(), newRenderInstanceType())
+	written := renderOne(t, newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].TerminationGracePeriodSeconds = ptr.To[int64](30)
+	}), newRenderInstanceType())
+
+	assert.Equal(t, unset.Annotations[modelDeploymentPodSpecHashAnnotation],
+		written.Annotations[modelDeploymentPodSpecHashAnnotation])
+}
+
+// TestModelDeploymentDrain_BudgetFitsEveryAdmittedGrace asserts the relationship between the
+// timings rather than any one number, at every grace admission lets through: the settle ends before
+// the deadline with room for the two idle reads the hook returns on, and the deadline plus the most
+// the last read can overrun it -- one read timeout and one poll interval -- still leaves time for
+// the engine to exit before the kubelet kills it.
+//
+// The bounds are read out of the GENERATED CRD, because that is what admission applies: a test
+// holding its own copy of them would keep passing after the schema moved.
+func TestModelDeploymentDrain_BudgetFitsEveryAdmittedGrace(t *testing.T) {
 	const lastReadOverrun = 2
 
-	assert.Less(t, modelDeploymentDrainSettleSeconds, modelDeploymentDrainDeadlineSeconds)
-	assert.Less(t, modelDeploymentDrainDeadlineSeconds+lastReadOverrun,
-		modelDeploymentTerminationGracePeriodSeconds)
-	assert.Equal(t, modelDeploymentTerminationGracePeriodSeconds,
-		modelDeploymentDrainDeadlineSeconds+modelDeploymentDrainExitSeconds)
+	crd, ok := workercore.GetCustomResourceDefinitions()["ModelDeployment"]
+	require.True(t, ok, "the ModelDeployment CRD is generated under this key")
+	require.Len(t, crd.Spec.Versions, 1)
+
+	node := *crd.Spec.Versions[0].Schema.OpenAPIV3Schema
+	for _, step := range []string{"spec", "roles"} {
+		next, found := node.Properties[step]
+		require.True(t, found, "the schema still has a %q under the path to a role", step)
+		node = next
+	}
+	require.NotNil(t, node.Items)
+	require.NotNil(t, node.Items.Schema)
+	field, found := node.Items.Schema.Properties["terminationGracePeriodSeconds"]
+	require.True(t, found, "a role carries terminationGracePeriodSeconds")
+	require.NotNil(t, field.Minimum,
+		"without a floor, a grace shorter than the settle and the exit reserve is admitted")
+	require.NotNil(t, field.Maximum,
+		"without a ceiling, one accepted value holds a departing replica's accelerators indefinitely")
+
+	for _, grace := range []int64{
+		int64(*field.Minimum), modelDeploymentDefaultTerminationGracePeriodSeconds, int64(*field.Maximum),
+	} {
+		deadline := modelDeploymentDrainDeadlineSeconds(grace)
+		assert.LessOrEqual(t, modelDeploymentDrainSettleSeconds+lastReadOverrun, deadline,
+			"a grace of %d leaves no room after the settle for two idle reads", grace)
+		assert.Less(t, deadline+lastReadOverrun, grace,
+			"a grace of %d kills the engine inside the hook's last read", grace)
+	}
 }
 
 // TestModelDeploymentDrainScript_WaitsForTheEngine runs the hook's program against a stand-in
