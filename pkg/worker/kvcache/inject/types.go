@@ -217,6 +217,20 @@ type Input struct {
 	// Connection is what the pool and its backend published.
 	Connection Connection
 
+	// CachePrefix is the weight identity the store's keys are prefixed with, or empty for none.
+	//
+	// NEITHER ENGINE'S STORE KEY NAMES THE WEIGHTS. vLLM's Mooncake store keys carry the last path
+	// segment of --model, SGLang's the served model name, and neither carries a revision or a
+	// digest, so two deployments serving different weights under one tenant read each other's
+	// blocks -- measured on vLLM between two commits of one repository. The prefix is the key
+	// namespace each engine lets the server side set: vLLM's kv_connector_extra_config.cache_prefix
+	// and SGLang's extra_backend_tag. It renders only with a store: a point-to-point leg keys
+	// nothing.
+	//
+	// It must not contain "@", "_" or ":", the separators the two engines join their keys with;
+	// Render refuses one that does.
+	CachePrefix string
+
 	// KVTransfer enables the point-to-point connector used by a managed prefill/decode router.
 	// With a complete Connection it is composed with the shared store; without one it is rendered on
 	// its own. The two are orthogonal inputs, not alternatives: both may be on at once.
@@ -334,6 +348,11 @@ const (
 	// separate from ReasonConnectionIncomplete because the Connection is complete: every value is
 	// present and legal, and it is the PAIR that no container can run.
 	ReasonTransportUnsupported Reason = "TransportUnsupported"
+
+	// ReasonCachePrefixInvalid is a cache prefix holding a separator the engines join their store
+	// keys with. Such a prefix would be joined into keys another prefix can also produce, so two
+	// weight identities could read each other's blocks while both look configured.
+	ReasonCachePrefixInvalid Reason = "CachePrefixInvalid"
 )
 
 // RefusalError is a rendering that was declined, carrying the reason a caller branches on and a

@@ -365,7 +365,26 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			logger.Info("instance starting")
 		}
 
-		pod = r.convertPodFromInstance(ctx, inst, instType)
+		// A model volume's artifact decides whether the Pod can be built at all, and for a claim
+		// where it may run. Waited for like the type's status above: the Pod is rendered once and
+		// never re-diffed, so building it early would fix the wait into it for good.
+		models, wait, err := r.resolveInstanceModelVolumes(ctx, inst)
+		if err != nil {
+			logger.Error(err, "resolve model volumes")
+			return ctrl.Result{}, err
+		}
+		if wait != "" {
+			if inst.Status.Phase != InstancePhaseStarting || inst.Status.PhaseMessage != wait {
+				inst.Status = workercore.InstanceStatus{Phase: InstancePhaseStarting, PhaseMessage: wait}
+				if err = r.Client.Status().Update(ctx, inst); err != nil {
+					return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+				}
+			}
+			logger.V(2).Info("model volume not available; requeue in 10s", "reason", wait)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+
+		pod = r.convertPodFromInstance(ctx, inst, instType, models)
 		err = r.Client.Create(ctx, pod)
 		if err != nil {
 			logger.Error(err, "create pod")
@@ -506,12 +525,13 @@ func (r *InstanceReconciler) convertPodFromInstance(
 	ctx context.Context,
 	inst *workercore.Instance,
 	instType *worker.InstanceType,
+	models map[int]*modelArtifactWeights,
 ) *core.Pod {
 	needSSHD := inst.Spec.SSHPublicKey != nil && inst.Spec.SSHPublicKey.Name != ""
 
 	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
 
-	additionalVols, additionalMounts := convertAdditionalVolumes(inst.Spec.AdditionalVolumes)
+	additionalVols, additionalMounts := convertAdditionalVolumes(inst.Spec.AdditionalVolumes, models)
 
 	// Construct containers.
 	// Main container.
@@ -679,6 +699,12 @@ func (r *InstanceReconciler) convertPodFromInstance(
 		}
 	}
 
+	// A claim bound to a PV with node affinity is placed where that PV is; Kueue's topology-aware
+	// scheduling reads the Pod's affinity and not its volumes.
+	for _, w := range models {
+		injectModelArtifactAffinity(pod, w.Affinity)
+	}
+
 	systemmeta.NoteResource(pod, "instances", nil)
 	kubemeta.ControlOnWithoutBlock(pod, inst, workercore.SchemeGroupVersionKind("Instance"))
 
@@ -692,7 +718,9 @@ func (r *InstanceReconciler) convertPodFromInstance(
 //
 // An entry with no source is skipped rather than rendered: admission rejects one, and a volume with
 // an empty source would make the API server refuse the whole Pod on every reconcile.
-func convertAdditionalVolumes(avs []workercore.InstanceAdditionalVolume) (vols []core.Volume, mounts []core.VolumeMount) {
+func convertAdditionalVolumes(
+	avs []workercore.InstanceAdditionalVolume, models map[int]*modelArtifactWeights,
+) (vols []core.Volume, mounts []core.VolumeMount) {
 	if len(avs) == 0 {
 		return nil, nil
 	}
@@ -703,7 +731,20 @@ func convertAdditionalVolumes(avs []workercore.InstanceAdditionalVolume) (vols [
 		av := &avs[i]
 
 		var vs core.VolumeSource
+		readOnly, subPath := av.ReadOnly, av.SubPath
 		switch {
+		case av.Model != nil:
+			// Always read-only whatever the entry says, with the artifact's own path as the
+			// sub-path. An entry the reconciler resolved no claim for is skipped like one naming
+			// no source: the reconciler waits rather than build a Pod without it.
+			w := models[i]
+			if w == nil || w.Render == nil || w.Render.Delivery != workercore.ModelDeploymentModelDeliveryPvc {
+				continue
+			}
+			vs.PersistentVolumeClaim = &core.PersistentVolumeClaimVolumeSource{
+				ClaimName: w.Render.ClaimName, ReadOnly: true,
+			}
+			readOnly, subPath = true, w.Render.Path
 		case av.Persistent != nil:
 			vs.PersistentVolumeClaim = &core.PersistentVolumeClaimVolumeSource{
 				ClaimName: av.Persistent.Name,
@@ -730,12 +771,41 @@ func convertAdditionalVolumes(avs []workercore.InstanceAdditionalVolume) (vols [
 		mounts = append(mounts, core.VolumeMount{
 			Name:      name,
 			MountPath: av.MountPath,
-			ReadOnly:  av.ReadOnly,
-			SubPath:   av.SubPath,
+			ReadOnly:  readOnly,
+			SubPath:   subPath,
 		})
 	}
 
 	return vols, mounts
+}
+
+// resolveInstanceModelVolumes resolves every model volume's artifact, keyed by the entry's index,
+// and returns why the Pod cannot be built yet, or "" once it can.
+func (r *InstanceReconciler) resolveInstanceModelVolumes(
+	ctx context.Context, inst *workercore.Instance,
+) (map[int]*modelArtifactWeights, string, error) {
+	models := map[int]*modelArtifactWeights{}
+	for i := range inst.Spec.AdditionalVolumes {
+		av := &inst.Spec.AdditionalVolumes[i]
+		if av.Model == nil {
+			continue
+		}
+		// One Pod mounts it, so a claim that cannot be shared still serves.
+		w, err := resolveModelArtifactWeights(ctx, r.Client, inst.Namespace, av.Model.ArtifactRef.Name, 1)
+		if err != nil {
+			return nil, "", err
+		}
+		switch {
+		case w.Blocked:
+			return nil, w.Message, nil
+		case w.Render.Delivery != workercore.ModelDeploymentModelDeliveryPvc:
+			return nil, fmt.Sprintf("ModelArtifact %q is not on a PersistentVolumeClaim: an Instance mounts only a "+
+				"claim artifact in this version", av.Model.ArtifactRef.Name), nil
+		}
+		models[i] = w
+	}
+
+	return models, "", nil
 }
 
 // additionalVolumeName is the Pod volume name of the additional volume at the given index.

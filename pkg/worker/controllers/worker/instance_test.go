@@ -618,7 +618,7 @@ func TestConvertPodFromInstance_NodePin(t *testing.T) {
 			}
 			instType := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "generic-type"}}
 
-			pod := r.convertPodFromInstance(context.Background(), inst, instType)
+			pod := r.convertPodFromInstance(context.Background(), inst, instType, nil)
 
 			assert.Equal(t, c.wantSelector, pod.Spec.NodeSelector, "pod node selector")
 			assert.Empty(t, pod.Spec.NodeName, "pod.spec.nodeName must never be written")
@@ -660,7 +660,7 @@ func TestConvertPodFromInstance_AdditionalVolumes(t *testing.T) {
 	instType := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "generic-type"}}
 
 	t.Run("empty list leaves the pod unchanged", func(t *testing.T) {
-		pod := r.convertPodFromInstance(context.Background(), newInstance(), instType)
+		pod := r.convertPodFromInstance(context.Background(), newInstance(), instType, nil)
 
 		require.Len(t, pod.Spec.Volumes, 2, "only the sshd key and the workspace")
 		assert.Equal(t, []core.VolumeMount{{Name: "workspace", MountPath: "/workspace"}},
@@ -693,7 +693,7 @@ func TestConvertPodFromInstance_AdditionalVolumes(t *testing.T) {
 			},
 		)
 
-		pod := r.convertPodFromInstance(context.Background(), inst, instType)
+		pod := r.convertPodFromInstance(context.Background(), inst, instType, nil)
 
 		require.Len(t, pod.Spec.Volumes, 6, "the sshd key, the workspace and the four additions")
 		added := pod.Spec.Volumes[2:]
@@ -722,13 +722,13 @@ func TestConvertPodFromInstance_AdditionalVolumes(t *testing.T) {
 			ReadOnly:  true,
 		}}, sshd.VolumeMounts, "the sidecar gains no additional mount")
 
-		again := r.convertPodFromInstance(context.Background(), inst, instType)
+		again := r.convertPodFromInstance(context.Background(), inst, instType, nil)
 		assert.Equal(t, pod.Spec, again.Spec, "re-rendering an unchanged instance is identical")
 	})
 
 	t.Run("an entry with no source is skipped", func(t *testing.T) {
 		pod := r.convertPodFromInstance(context.Background(),
-			newInstance(workercore.InstanceAdditionalVolume{MountPath: "/data"}), instType)
+			newInstance(workercore.InstanceAdditionalVolume{MountPath: "/data"}), instType, nil)
 
 		assert.Len(t, pod.Spec.Volumes, 2, "a sourceless entry renders no volume")
 		assert.Len(t, pod.Spec.Containers[0].VolumeMounts, 1, "and no mount")
@@ -745,7 +745,7 @@ func TestConvertPodFromInstance_AdditionalVolumes(t *testing.T) {
 			Persistent: &core.LocalObjectReference{Name: "inst-disk"},
 		}
 
-		pod := r.convertPodFromInstance(context.Background(), inst, instType)
+		pod := r.convertPodFromInstance(context.Background(), inst, instType, nil)
 
 		require.Len(t, pod.Spec.Volumes, 3, "the sshd key, the claimed workspace and the addition")
 		assert.Equal(t, "inst-disk", pod.Spec.Volumes[1].PersistentVolumeClaim.ClaimName,
@@ -805,7 +805,7 @@ func TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain(t *testing.T
 		},
 	}
 
-	pod := r.convertPodFromInstance(context.Background(), inst, instType)
+	pod := r.convertPodFromInstance(context.Background(), inst, instType, nil)
 
 	require.Len(t, pod.Spec.Containers, 2, "SSH-enabled Instance renders main + sshd")
 	main, sshd := &pod.Spec.Containers[0], &pod.Spec.Containers[1]
@@ -883,7 +883,7 @@ func TestConvertPodFromInstance_SSHDImageRedirectionKeepsARegistryHost(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			settingtest.MergeDelegatedSettings(t, map[string]string{"instance-ssh-server-image": tc.image})
 
-			pod := r.convertPodFromInstance(context.Background(), inst, instType)
+			pod := r.convertPodFromInstance(context.Background(), inst, instType, nil)
 			require.Len(t, pod.Spec.Containers, 2, "SSH-enabled Instance renders main + sshd")
 			assert.Equal(t, tc.want, pod.Spec.Containers[1].Image, "sshd image")
 		})
@@ -935,7 +935,7 @@ func TestConvertPodFromInstance_ContainerLimitsCarryTheDeclaredResources(t *test
 			}
 			instType := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "generic-type"}}
 
-			pod := r.convertPodFromInstance(context.Background(), inst, instType)
+			pod := r.convertPodFromInstance(context.Background(), inst, instType, nil)
 			require.Len(t, pod.Spec.Containers, c.wantContainers)
 
 			sample := kubemetrics.NewSample(pod)
@@ -1121,7 +1121,7 @@ func TestConvertPodFromInstance_QueueLabelIsThePublishedEntrance(t *testing.T) {
 
 	cli := buildInstanceClient(inst, it)
 	r := &InstanceReconciler{Client: cli, APIReader: cli}
-	pod := r.convertPodFromInstance(context.Background(), inst, it)
+	pod := r.convertPodFromInstance(context.Background(), inst, it, nil)
 
 	require.NotNil(t, pod)
 	assert.Equal(t, "queue-for-h20-8x", pod.Labels[kueuectrlconst.QueueLabel],

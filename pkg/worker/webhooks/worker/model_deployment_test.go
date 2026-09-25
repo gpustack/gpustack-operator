@@ -1956,7 +1956,7 @@ func TestModelDeploymentWebhook_ADeclaredPortAndTheEnginesPortMustAgree(t *testi
 		{
 			name:         "an_update_to_the_arguments_is_refused",
 			old:          declared(9000, "--port", "9100"),
-			md:           declared(9000, "--port", "9100", "--served-model-name", "m"),
+			md:           declared(9000, "--port", "9100", "--max-model-len", "4096"),
 			wantMessages: []string{"--port=9100", "9000"},
 		},
 		{
@@ -2099,7 +2099,7 @@ func TestModelDeploymentWebhook_AnUndeclaredRolesOwnPortMustClearTheReservedPort
 			name: "an_update_keeping_a_held_collision_is_accepted",
 			old:  routed("--port=5557"),
 			md: func() *workercore.ModelDeployment {
-				md := routed("--port=5557", "--served-model-name", "m")
+				md := routed("--port=5557", "--max-model-len", "4096")
 				md.Spec.Roles[0].Replicas = 2
 				return md
 			}(),

@@ -130,7 +130,7 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 			// Deleting rather than the last Ready it happened to reach. The Binding is deliberately
 			// not re-read: a teardown pass has no question to ask it, and the domain a replica is
 			// still writing into is the one that was last observed.
-			if err = r.syncModelDeploymentStatus(ctx, md, pods, nil, nil); err != nil {
+			if err = r.syncModelDeploymentStatus(ctx, md, pods, nil, nil, nil); err != nil {
 				logger.Error(err, "update model deployment status to deleting")
 				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
 			}
@@ -234,7 +234,25 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		}
 	}
 
-	desired, err := r.renderModelDeploymentPods(ctx, md, connection, interfaceProtocols)
+	// The weights are resolved before anything is rendered, because an artifact that has never
+	// resolved leaves nothing to render: no commit to pin, no claim to mount. That pass touches no
+	// replica at all -- a deployment waiting for its first resolution has none, and one whose
+	// artifact went away is protected by the artifact's finalizer -- and only says why it waits.
+	weights, err := r.resolveModelDeploymentWeights(ctx, md)
+	if err != nil {
+		logger.Error(err, "resolve model artifact")
+		return ctrl.Result{}, err
+	}
+	if weights != nil && weights.Render == nil {
+		pods, listErr := r.listModelDeploymentPods(ctx, md)
+		if listErr != nil {
+			return ctrl.Result{}, listErr
+		}
+
+		return ctrl.Result{}, r.syncModelDeploymentStatus(ctx, md, pods, domain, nil, weights)
+	}
+
+	desired, err := r.renderModelDeploymentPods(ctx, md, connection, interfaceProtocols, weights)
 	if err != nil {
 		// A render failure is the InstanceType not being ready, or a role the renderer cannot build
 		// a container from. The pass aborts before any status is written, so an Event is the only
@@ -618,6 +636,16 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			outdated = nil
 		}
 
+		if weights != nil && weights.Blocked && len(outdated) > 0 {
+			// A REPLICA IS NOT TURNED OVER WHILE ITS REPLACEMENT COULD NOT BE CREATED. The weights
+			// are what the replacement needs, and while they are blocked -- access revoked, a claim
+			// that cannot be placed -- the create below is withheld, so a recreate here would only
+			// delete a serving replica. The edit waits for the weights, as it waits for a lost
+			// connector above.
+			rollout.held += len(outdatedByOrdinal) + len(orphaned)
+			outdated = nil
+		}
+
 		// The rollout is recreate rather than surge: a replica built before a spec change is deleted
 		// here and replaced by a later pass. The cost is this replica's cached blocks, which its
 		// siblings lose when it goes.
@@ -794,6 +822,13 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		}
 	}
 
+	// NO REPLICA IS CREATED WHILE THE WEIGHTS ARE BLOCKED, and none that runs is touched: a revoked
+	// credential stops new consumption, never running consumption, and a claim that cannot be placed
+	// would only produce a Pod that sits Pending while its Workload holds quota.
+	if weights != nil && weights.Blocked {
+		clear(createOrdinals)
+	}
+
 	// A FAILED CREATE DOES NOT END THE PASS EITHER, and that is what makes the incomplete group a
 	// REPORTED state rather than a silent one. Returning here would skip the status write below, so
 	// the one pass that knows the group is short of its total would be the one pass that says
@@ -817,6 +852,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				// One fresh object per member: the template is every Pod of the role's, stamped for
 				// its own ordinal and member index.
 				pod := want.DeepCopy()
+				// Added at creation rather than rendered, so a replica created before its claim
+				// bound -- which then carries no affinity -- is not rolled once the claim has one.
+				if weights != nil {
+					injectModelArtifactAffinity(pod, weights.Affinity)
+				}
 				if err = r.Client.Create(ctx, pod); err != nil {
 					logger.Error(err, "create replica member",
 						"role", role.Name, "ordinal", ordinal,
@@ -863,7 +903,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 
 	r.recordModelDeploymentDepartures(md, actual)
 
-	if err = r.syncModelDeploymentStatus(ctx, md, actual, domain, &rollout); err != nil {
+	if err = r.syncModelDeploymentStatus(ctx, md, actual, domain, &rollout, weights); err != nil {
 		logger.Error(err, "sync status")
 		return ctrl.Result{}, err
 	}
@@ -1055,7 +1095,7 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentOwnedChildren(
 // two members is what the stamp writes: a name, a hostname and an index label.
 func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	ctx context.Context, md *workercore.ModelDeployment,
-	connection *ModelDeploymentConnectorInput, interfaceProtocols []string,
+	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
 ) (map[string]map[int][]*core.Pod, error) {
 	// The overcommit setting is the Instance path's, deliberately: it decides how a declared
 	// resource becomes a request, and this renderer derives the same values the Instance webhook
@@ -1109,6 +1149,9 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			TCPTWReuse:                 tcpTWReuse,
 			NativeSidecar:              nativeSidecar,
 		}
+		if weights != nil {
+			in.Artifact = weights.Render
+		}
 
 		// The connector is synthesized PER ROLE even though its connection is per deployment,
 		// because the accelerator is the role's: it selects the store connector the engine
@@ -1141,6 +1184,9 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 			roleConnection.RoutingSidecar = routingSidecar
 			if md.Spec.KVTransfer != nil {
 				roleConnection.KVTransferProtocol = md.Spec.KVTransfer.Protocol
+			}
+			if weights != nil && connection != nil {
+				roleConnection.CachePrefix = weights.KVIdentity
 			}
 			roleConnection.PublishKVEvents = publishKVEvents
 			if roleConnection.PublishKVEvents {
@@ -1717,6 +1763,18 @@ func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts cont
 			// can edit it on a running pool. Same staleness, same silence.
 			&workercore.KVCacheBackend{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentBackend),
+		).
+		Watches(
+			// The artifact's resolution and access decide whether replicas may be created and what
+			// they are rendered from, and they move on the artifact's status alone.
+			&workercore.ModelArtifact{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentArtifact),
+		).
+		Watches(
+			// A claim artifact's binding decides whether replicas may be created and where they
+			// may run, and it moves on the claim, not on the artifact.
+			&core.PersistentVolumeClaim{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentClaim),
 		).
 		Watches(
 			// Kueue's verdict on a replica is written to the replica's Workload and nowhere else: the

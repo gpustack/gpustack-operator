@@ -121,6 +121,11 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 		errs = append(errs, nodeErr)
 	}
 	errs = append(errs, validateAdditionalVolumes(inst)...)
+	modelErrs, err := r.validateInstanceModelVolumes(ctx, inst)
+	if err != nil {
+		return nil, err
+	}
+	errs = append(errs, modelErrs...)
 	// Nothing is held yet on create, so every escape the Instance asks for is one it is taking. Both
 	// settings default to off, so a failed settings read denies rather than allows.
 	errs = append(errs, validateHostAccess(nil, inst,
@@ -278,6 +283,11 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 		// editable while it is stopped, and a malformed entry yields a Pod the API server refuses on
 		// every reconcile rather than one that merely stays Pending.
 		errs = append(errs, validateAdditionalVolumes(inst)...)
+		modelErrs, err := r.validateInstanceModelVolumes(ctx, inst)
+		if err != nil {
+			return nil, err
+		}
+		errs = append(errs, modelErrs...)
 		// Re-validate the resources that will take effect on start with the SAME checks
 		// ValidateCreate applies (sign, accelerator/CPU caps, slice-percentage ranges, and
 		// per-unit RAM / local storage), not just the upper caps — a stopped Instance may have
@@ -354,6 +364,40 @@ func validateAdditionalVolumes(inst *workercore.Instance) field.ErrorList {
 	return errs
 }
 
+// validateInstanceModelVolumes refuses a model volume naming a ModelArtifact on a model hub.
+//
+// A hub artifact reaches an Instance only through node delivery, which does not exist yet, so an
+// Instance naming one could never start. The artifact is read, unlike the other references this
+// webhook checks, because this refusal depends on what it is rather than on whether it exists: an
+// artifact that does not exist yet is admitted, and the Instance waits in its status, reporting a
+// hub artifact it discovers later the same way.
+func (r *InstanceWebhook) validateInstanceModelVolumes(ctx context.Context, inst *workercore.Instance) (field.ErrorList, error) {
+	var errs field.ErrorList
+	for i := range inst.Spec.AdditionalVolumes {
+		av := &inst.Spec.AdditionalVolumes[i]
+		if av.Model == nil || av.Model.ArtifactRef.Name == "" {
+			continue
+		}
+		ma := new(workercore.ModelArtifact)
+		key := ctrlcli.ObjectKey{Namespace: inst.Namespace, Name: av.Model.ArtifactRef.Name}
+		if err := r.APIReader.Get(ctx, key, ma); err != nil {
+			if kerrors.IsNotFound(err) {
+				continue
+			}
+			return nil, kerrors.NewInternalError(fmt.Errorf("read model artifact %q: %w", key.Name, err))
+		}
+		if ma.Spec.Source.PersistentVolumeClaim == nil {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.additionalVolumes").Index(i).Child("model", "artifactRef"),
+				fmt.Sprintf("ModelArtifact %q is not on a PersistentVolumeClaim: an Instance mounts only a claim "+
+					"artifact in this version, because a hub artifact reaches an Instance through node delivery, "+
+					"which does not exist yet", key.Name)))
+		}
+	}
+
+	return errs, nil
+}
+
 // validateAdditionalVolumeSource checks that exactly one source of an additional volume is set and
 // that it actually names something.
 func validateAdditionalVolumeSource(av *workercore.InstanceAdditionalVolume, fldPath *field.Path) field.ErrorList {
@@ -370,11 +414,23 @@ func validateAdditionalVolumeSource(av *workercore.InstanceAdditionalVolume, fld
 		{"configMap", av.ConfigMap},
 		{"secret", av.Secret},
 	}
+	if av.Model != nil {
+		refs = append(refs, struct {
+			name string
+			ref  *core.LocalObjectReference
+		}{"model.artifactRef", &av.Model.ArtifactRef})
+		// The artifact's own path is the sub-path, so a second one would be a path inside a path
+		// the author of this entry cannot see.
+		if av.SubPath != "" {
+			errs = append(errs, field.Forbidden(fldPath.Child("subPath"),
+				"a model volume takes no subPath: the ModelArtifact's own path is the directory mounted"))
+		}
+	}
 	for _, r := range refs {
 		if r.ref == nil {
 			continue
 		}
-		set = append(set, r.name)
+		set = append(set, strings.Split(r.name, ".")[0])
 		namePath := fldPath.Child(r.name, "name")
 		if r.ref.Name == "" {
 			errs = append(errs, field.Required(namePath,
@@ -399,7 +455,7 @@ func validateAdditionalVolumeSource(av *workercore.InstanceAdditionalVolume, fld
 	case 1:
 	case 0:
 		errs = append(errs, field.Required(fldPath,
-			"exactly one of persistent, configMap, secret or hostPath must be specified"))
+			"exactly one of persistent, configMap, secret, hostPath or model must be specified"))
 	default:
 		errs = append(errs, field.Forbidden(fldPath,
 			fmt.Sprintf("cannot specify more than one source: %s", strings.Join(set, ", "))))

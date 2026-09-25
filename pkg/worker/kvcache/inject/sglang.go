@@ -25,6 +25,7 @@
 package inject
 
 import (
+	"encoding/json"
 	"strconv"
 
 	core "k8s.io/api/core/v1"
@@ -52,6 +53,14 @@ const (
 	// equivalent, so this engine also cannot be configured without appending an argument.
 	sglangBackendArg   = "--hicache-storage-backend"
 	sglangBackendValue = "mooncake"
+
+	// sglangBackendExtraConfigArg carries the store's extra configuration as JSON. It renders
+	// holding extra_backend_tag alone, which SGLang v0.5.18 puts first in every store key
+	// (`mem_cache/storage/mooncake_store/mooncake_store.py:419-430`). An extra configuration naming
+	// neither master_server_address nor client_server_address does not select the loader that
+	// reads the store's settings from it (`:294-314`), so the settings still come from the
+	// environment rendered here.
+	sglangBackendExtraConfigArg = "--hicache-storage-backend-extra-config"
 
 	// The disaggregation arguments, which name the prefill/decode split itself. All three are
 	// ServerArgs fields: disaggregation_mode (v0.5.18 `server_args.py:3101-3105`, Literal
@@ -197,6 +206,13 @@ func renderSGLang(in Input) (*Result, error) {
 		// workload declaration of this environment variable with the Binding's resolved tenant.
 		result.TenantEnvName = tenantEnvName
 		result.Args = []string{sglangBackendArg, sglangBackendValue}
+		if in.CachePrefix != "" {
+			extra, err := json.Marshal(map[string]string{"extra_backend_tag": in.CachePrefix})
+			if err != nil {
+				return nil, err
+			}
+			result.Args = append(result.Args, sglangBackendExtraConfigArg, string(extra))
+		}
 		// A decode half never gets the hierarchical cache: SGLang forces the radix cache off on a
 		// decode half (v0.5.18 `arg_groups/pd_disaggregation_hook.py`), and refuses the two flags
 		// together. Every other shape serves prefills and reads the tree the backend feeds.
