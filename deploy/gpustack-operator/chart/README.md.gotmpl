@@ -91,6 +91,10 @@ stay behind. Run the chart's `files/cleanup.sh` afterwards to clear them, or ins
 exclusively owns those CRDs. Before anything is deleted, those Jobs drain the operator's custom
 resources and, where this release owns Kueue, stop the worker and delete the Kueue objects it created
 while Kueue can still finalize them; the post-delete Job then clears what is left.
+On the Nodes, the cleanup deletes the NodeFeatures the operator reported and removes the
+`topology.gpustack.ai/profile`, `sliced-max-free-units.fit.gpustack.ai/*` and
+`shared-free-cards.fit.gpustack.ai/*` labels the worker wrote; it leaves
+`gpustack.ai/managed` and the other `topology.gpustack.ai/*` labels, which an administrator may set.
 
 The dependencies listed below are **vendored subcharts**: their sources are committed into this
 chart's `charts/` directory, so the `Repository` column is intentionally empty — `helm install`

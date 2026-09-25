@@ -14,7 +14,10 @@
 #              does not own; CRDs, finalizers, APIServices/webhooks, migration-hook leftovers).
 # Expected:    After teardown, zero leftover: helm releases (gpustack/kueue/nfd/csi), every
 #              gpustack.ai CRD, every CRD this release owned, gpustack apiservices, gpustack
-#              clusterrolebindings, and the gpustack-cpu-info NodeFeatureRule the worker applied.
+#              clusterrolebindings, the gpustack-cpu-info NodeFeatureRule the worker applied, the
+#              NodeFeatures this operator reported, and every Node label or annotation key in a
+#              gpustack.ai domain but the two an administrator may set; a user's own NodeFeature and
+#              label in those domains survive.
 # NOT every kueue/nfd CRD by name. The teardown delegates to the chart's own
 #              cleanup.sh, which leaves NFD's CRDs in place entirely (its subchart ships them
 #              unannotated, so there is nothing to read ownership from) and removes Kueue's only when
@@ -37,6 +40,46 @@ RELEASE=gpustack-operator
 # Ask with the same pinned client that teardown uses, so a client incompatibility cannot appear as
 # a leftover release.
 HELM="$(bash "${LIB}/helm.sh")" || exit 1
+
+# Two things a user owns, planted before the teardown so it can be seen to leave them alone: a
+# NodeFeature in this namespace under another owner's part-of, and a label in the gpustack.ai
+# domains of the kind an administrator sets for a nodeLabels TopologySource. cleanup.sh selects the
+# NodeFeatures it deletes by this operator's markers and the Node labels it removes by exact key, so
+# both must survive it. Either failing to plant is a FAIL further down, never a skip. The label key
+# is one no real topology uses, and it is planted without --overwrite: a Node that already carries
+# it is a FAIL, never an administrator's value this case clobbers and then removes.
+USER_NF=case2-user-owned
+USER_LABEL_KEY=topology.gpustack.ai/e2e-case2-user
+USER_LABEL_VALUE=case2-user
+USER_NODE="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+USER_PLANTED=""
+USER_LABEL_PLANTED=""
+if [ -n "$USER_NODE" ] \
+  && kubectl label node "$USER_NODE" "${USER_LABEL_KEY}=${USER_LABEL_VALUE}" >/dev/null 2>&1 \
+  && USER_LABEL_PLANTED=yes \
+  && kubectl apply -f - >/dev/null 2>&1 <<EOF
+apiVersion: nfd.k8s-sigs.io/v1alpha1
+kind: NodeFeature
+metadata:
+  name: ${USER_NF}
+  namespace: ${NS}
+  labels:
+    nfd.node.kubernetes.io/node-name: ${USER_NODE}
+    app.kubernetes.io/part-of: case2-user
+spec: {}
+EOF
+then
+  USER_PLANTED=yes
+fi
+
+# Which Node keys NFD had written, read before the teardown removes NFD and the record with it. A
+# key in the kept list below is excused only when NFD did NOT write it: that is the copy an
+# administrator set. NFD writes the same keys itself in the default modes, and its copy has to be
+# gone, so excusing the key by name alone would hide exactly the leftover this case looks for.
+# One "<node><TAB><keys NFD lists as its own>" line per Node.
+if ! NODES_BEFORE="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.nfd\.node\.kubernetes\.io/feature-labels}{"\n"}{end}' 2>&1)"; then
+  NODES_BEFORE="CHECK-BROKEN: kubectl get nodes failed: $(printf '%s' "$NODES_BEFORE" | head -1)"
+fi
 
 # Tear everything down (delegates the cleanup to the chart's own files/cleanup.sh).
 bash "$LIB/teardown.sh" "$NS"
@@ -149,6 +192,86 @@ assert_empty "no leftover cpu-info NodeFeatureRule" "$(
       kubectl get nodefeaturerules.nfd.k8s-sigs.io -l app.kubernetes.io/part-of=gpustack-operator -o name
   fi
 )"
+# The NodeFeatures the worker, the device-managers and the TopologySources report, by the same
+# markers cleanup.sh selects them by. Left behind, an NFD that is still installed keeps applying
+# them, and the next install replays them. A missing NodeFeature CRD is answered as for the rule.
+for sel in app.kubernetes.io/part-of=gpustack-operator-worker \
+  app.kubernetes.io/part-of=gpustack-operator-device-manager topology.gpustack.ai/source-uid; do
+  assert_empty "no leftover NodeFeature ${sel}" "$(
+    if ! nf_crd="$(kubectl get crd nodefeatures.nfd.k8s-sigs.io -o name 2>&1)"; then
+      case "$nf_crd" in
+        *NotFound*) ;;
+        *) echo "CHECK-BROKEN: kubectl get crd failed: $(printf '%s' "$nf_crd" | head -1)" ;;
+      esac
+    else
+      probe 'kubectl get nodefeature' '^nodefeature' \
+        kubectl -n "$NS" get nodefeatures.nfd.k8s-sigs.io -l "$sel" -o name
+    fi
+  )"
+done
+# Every label and annotation key in a gpustack.ai domain (gpustack.ai/ or <anything>.gpustack.ai/)
+# on every Node, not a list of the keys known today: the next key the worker writes is covered the
+# day it is added. The only keys excused are the two an administrator may set, and only where NFD
+# had not written them (see NODES_BEFORE):
+#   - gpustack.ai/managed: onboards a Node under manual node management
+#     (GPUSTACK_NODE_MANAGEMENT_MANUAL=true); in the default mode it is NFD's, and NFD removes it;
+#   - topology.gpustack.ai/<level>, any level except profile: what a TopologySource in nodeLabels
+#     mode reads; a snapshot-mode source writes it through NFD instead, and NFD removes it.
+# topology.gpustack.ai/profile is never excused: the worker writes it on every Node itself.
+assert_empty "no gpustack.ai-domain key left on any Node" "$(
+  if ! nodes_after="$(kubectl get nodes -o json 2>&1)"; then
+    echo "CHECK-BROKEN: kubectl get nodes failed: $(printf '%s' "$nodes_after" | head -1)"
+  else
+    printf '%s' "$nodes_after" | NODES_BEFORE="$NODES_BEFORE" python3 -c '
+import json, os, sys
+before = os.environ["NODES_BEFORE"]
+if before.startswith("CHECK-BROKEN"):
+    print(before)
+    sys.exit(0)
+try:
+    after = json.load(sys.stdin)
+except Exception as e:
+    print("CHECK-BROKEN: node list is not valid json: %s" % e)
+    sys.exit(0)
+def ours(key):
+    domain = key.split("/", 1)[0] if "/" in key else ""
+    return domain == "gpustack.ai" or domain.endswith(".gpustack.ai")
+def kept(key):
+    return key == "gpustack.ai/managed" or (
+        key.startswith("topology.gpustack.ai/") and key != "topology.gpustack.ai/profile")
+written = {}
+for line in before.splitlines():
+    node, _, keys = line.partition("\t")
+    written[node] = set(k for k in keys.split(",") if k)
+for o in after.get("items", []):
+    meta = o.get("metadata", {})
+    node = meta.get("name", "")
+    for k in sorted(meta.get("labels") or {}):
+        if ours(k) and not (kept(k) and k not in written.get(node, set())):
+            print("%s:%s" % (node, k))
+    for k in sorted(meta.get("annotations") or {}):
+        if ours(k):
+            print("%s:annotation %s" % (node, k))
+'
+  fi
+)"
+# The two things planted before the teardown, read back and then removed, so this case leaves them
+# no more than the teardown should have left anything of its own.
+if [ -z "$USER_PLANTED" ]; then
+  record FAIL "a user's NodeFeature and label survive" "CHECK-BROKEN: could not plant them before the teardown"
+else
+  user_nf="$(kubectl -n "$NS" get nodefeatures.nfd.k8s-sigs.io "$USER_NF" -o name 2>&1)"
+  user_label="$(kubectl get node "$USER_NODE" \
+    -o jsonpath="{.metadata.labels.${USER_LABEL_KEY//./\\.}}" 2>&1)"
+  if [ "$user_nf" = "nodefeature.nfd.k8s-sigs.io/${USER_NF}" ] && [ "$user_label" = "$USER_LABEL_VALUE" ]; then
+    record PASS "a user's NodeFeature and label survive" "${USER_NF}, ${USER_NODE}:${USER_LABEL_KEY}"
+  else
+    record FAIL "a user's NodeFeature and label survive" \
+      "$(printf 'nodefeature=%s label=%s' "$user_nf" "$user_label" | tr '\n' ' ' | cut -c1-60)"
+  fi
+fi
+kubectl -n "$NS" delete nodefeatures.nfd.k8s-sigs.io "$USER_NF" --ignore-not-found >/dev/null 2>&1 || true
+[ -z "$USER_LABEL_PLANTED" ] || kubectl label node "$USER_NODE" "${USER_LABEL_KEY}-" >/dev/null 2>&1 || true
 
 echo
 echo "== CASE 2 — Uninstall leaves zero leftovers =="
