@@ -72,6 +72,7 @@ CASES=(
   "gpustack::protoc::protoc_gen_grpc_gateway::validate|protoc/bin/protoc-gen-grpc-gateway|reject|--version"
   "gpustack::lint::golangci_lint::validate|golangci-lint|reject|--version"
   "gpustack::lint::goimports_reviser::validate|goimports-reviser|reject|-version"
+  "gpustack::lint::shellcheck::validate|shellcheck|reject|--version; it writes the comparison baseline of the .agents shell gate"
   "gpustack::commit::commitsar::validate|commitsar|reject|version"
   "gpustack::lint::goimports::validate|goimports|reject|go version -m"
 )

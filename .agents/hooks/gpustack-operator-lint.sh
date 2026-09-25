@@ -87,7 +87,8 @@ paths_match() { grep -qE "$1" <<<"${dirty_paths}"; }
 # the set" are different facts, and the dirty list is rarely one entry.
 paths_beyond() { grep -qvE "$1" <<<"${dirty_paths}"; }
 
-# Lint code when any dirty path is not markdown. Asked this way round on purpose: the boundary is
+# Lint code when any dirty path is not markdown, asked as "beyond markdown AND beyond the
+# .agents/skills shell carved out below". Asked this way round on purpose: the boundary is
 # not a list of file types maintained here, it is read out of the gate being run. check-symbols.sh,
 # which `make lint` invokes and which is the only thing in this repository that reads shell at all,
 # selects `git ls-files` minus a named exclusion list whose last entry is `:(exclude)*.md`, under a
@@ -98,8 +99,21 @@ paths_beyond() { grep -qvE "$1" <<<"${dirty_paths}"; }
 # input nobody named means that target does not ALSO run for it -- never that nothing runs, because
 # a path that is not markdown has already asked for this one. An enumeration here meant the
 # opposite, and it showed: a turn that touched only shell used to fire none of the branches.
-if paths_beyond '\.md$'; then
+if paths_beyond '\.md$|^\.agents/skills/.*\.sh$'; then
   run_lint "make lint" make lint
+fi
+
+# The .agents/skills shell carve-out, and it is a partition rather than a skip: a turn whose dirty
+# paths are all markdown or .agents/skills shell routes to `make lint agents-shell`, which runs the
+# .agents shell gate plus check-symbols.sh — of everything the full code gate runs, those are the
+# pieces that read such files, and .agents/hooks shell is deliberately NOT carved out because
+# check-hook-dispatch.sh reads the hook itself. hack/check-hook-dispatch.sh holds the step-to-inputs
+# table behind that sentence, asserts both directions of this routing, and fails when a step joins
+# the code gate without a classification or when the covering set drifts from the table. This
+# branch fires only when the branch above did not, which is exactly "every non-markdown dirty path
+# is .agents/skills shell" -- and at least one such path exists, or the match would fail too.
+if ! paths_beyond '\.md$|^\.agents/skills/.*\.sh$' && paths_match '^\.agents/skills/.*\.sh$'; then
+  run_lint "make lint agents-shell" make lint agents-shell
 fi
 
 # Check the documentation contract when any markdown, or one of the docs gate's own non-markdown
