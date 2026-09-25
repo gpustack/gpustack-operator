@@ -2021,3 +2021,87 @@ func TestInstanceTypeReconciler_ExpectedWriteFailuresAreQuiet(t *testing.T) {
 		})
 	}
 }
+
+// TestInstanceTypeReconciler_ExpectedStopPolicySyncFailuresAreQuiet pins the same rule for the write
+// that converges the Inactive flag onto the backing ClusterQueue's StopPolicy. The write may be to
+// the queue or to the InstanceType's spec, and the change behind a conflict on the InstanceType may
+// be one the predicate drops, so a conflict requeues. The fixture is an Inactive type over an active
+// queue, and the next reconcile holds the queue in every case.
+func TestInstanceTypeReconciler_ExpectedStopPolicySyncFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: kueue.GroupVersion.Group, Resource: "clusterqueues"}
+	key := "nvidia-a10g"
+	name := nodeQueueName(key)
+	testCases := []struct {
+		name       string
+		err        error
+		want       ctrlreconcile.Result
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name: "a conflicting queue update requeues quietly",
+			err:  kerrors.NewConflict(gr, name, fmt.Errorf("the object has been modified")),
+			want: _requeueAfterConflict,
+		},
+		{
+			name: "an update on a deleted queue ends quietly",
+			err:  kerrors.NewNotFound(gr, name),
+		},
+		{
+			name:       "any other queue update failure is returned and logged",
+			err:        kerrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			it := &workercore.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: name, Finalizers: []string{systemmeta.LockedResourceFinalizer}},
+				Spec: workercore.InstanceTypeSpec{
+					AcceleratorGroup: key,
+					Acceleratable:    true,
+					OS:               "linux",
+					Arch:             "amd64",
+					Inactive:         true,
+					UnitResources:    workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+					LocalStorage:     "100Gi",
+				},
+			}
+			cq := newInstanceTypeQueue(key, true, cpuResourceGroup("gpustack-nvidia-a10g-linux-amd64-1d", 4))
+			cq.Spec.StopPolicy = ptr.To(kueue.None)
+
+			var injected bool
+			fail := failOnce(tc.err)
+			cli := ctrlinterceptor.NewClient(buildInstanceTypeClient(it, cq).(ctrlcli.WithWatch), ctrlinterceptor.Funcs{
+				Update: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.UpdateOption) error {
+					if q, ok := obj.(*kueue.ClusterQueue); ok && ptr.Deref(q.Spec.StopPolicy, kueue.None) == kueue.Hold {
+						if err := fail(); err != nil {
+							injected = true
+							return err
+						}
+					}
+					return c.Update(ctx, obj, opts...)
+				},
+			})
+			r := &InstanceTypeReconciler{Client: cli, APIReader: cli}
+			req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: name}}
+
+			out := reconcileUntilInjected(t, r, req, &injected)
+			if tc.wantErr {
+				assert.Error(t, out.err)
+			} else {
+				assert.NoError(t, out.err)
+			}
+			assert.Equal(t, tc.want, out.res)
+			assert.Equal(t, tc.wantLogged, out.logged, "error log lines")
+
+			// The next reconcile, which the requeue or the returned error triggers, writes it.
+			_, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+			gotCQ, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, kueue.Hold, ptr.Deref(gotCQ.Spec.StopPolicy, kueue.None))
+		})
+	}
+}

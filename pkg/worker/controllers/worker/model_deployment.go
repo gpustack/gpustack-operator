@@ -131,8 +131,10 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 			// not re-read: a teardown pass has no question to ask it, and the domain a replica is
 			// still writing into is the one that was last observed.
 			if err = r.syncModelDeploymentStatus(ctx, md, pods, nil, nil, nil); err != nil {
-				logger.Error(err, "update model deployment status to deleting")
-				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+				// The predicate drops status-only and metadata-only updates, so the change behind a
+				// conflict may deliver no event: requeue rather than wait for one.
+				return objectWriteResult(logger, err, "update model deployment status to deleting",
+					_requeueAfterConflict)
 			}
 
 			for i := range pods {
@@ -168,8 +170,9 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 		// The last replica has left, so the claim on the Binding can go. Released any earlier, the
 		// authorization could be deleted from under a process that is still writing through it.
 		if err := r.releaseModelDeploymentBinding(ctx, md); err != nil {
-			logger.Error(err, "release kv cache pool binding")
-			return ctrl.Result{}, err
+			// The Binding watch passes every change to it, so the one behind a conflict wakes this
+			// deployment again.
+			return objectWriteResult(logger, err, "release kv cache pool binding", ctrl.Result{})
 		}
 	}
 
@@ -212,8 +215,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// what holds an admin's delete off a deployment that is still writing, and a claim that came and
 	// went with readiness would open exactly that window.
 	if err = r.claimModelDeploymentBinding(ctx, md); err != nil {
-		logger.Error(err, "claim kv cache pool binding")
-		return ctrl.Result{}, err
+		// The Binding watch passes every change to it, so the one behind a conflict wakes this
+		// deployment again.
+		return objectWriteResult(logger, err, "claim kv cache pool binding", ctrl.Result{})
 	}
 
 	// Resolved once per pass, not per role: the endpoint and the transport belong to the pool and its
@@ -249,7 +253,13 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			return ctrl.Result{}, listErr
 		}
 
-		return ctrl.Result{}, r.syncModelDeploymentStatus(ctx, md, pods, domain, nil, weights)
+		if err = r.syncModelDeploymentStatus(ctx, md, pods, domain, nil, weights); err != nil {
+			// The predicate drops status-only updates, so the change behind a conflict may deliver
+			// no event: requeue rather than wait for one.
+			return objectWriteResult(logger, err, "sync status while the weights resolve", _requeueAfterConflict)
+		}
+
+		return ctrl.Result{}, nil
 	}
 
 	desired, err := r.renderModelDeploymentPods(ctx, md, connection, interfaceProtocols, weights)
@@ -904,8 +914,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	r.recordModelDeploymentDepartures(md, actual)
 
 	if err = r.syncModelDeploymentStatus(ctx, md, actual, domain, &rollout, weights); err != nil {
-		logger.Error(err, "sync status")
-		return ctrl.Result{}, err
+		// The predicate drops status-only updates, so the change behind a conflict may deliver no
+		// event: requeue rather than wait for one. The requeued pass also retries a failed create
+		// or router sync, whose errors would otherwise be returned below.
+		return objectWriteResult(logger, err, "sync status", _requeueAfterConflict)
 	}
 
 	// Returned only now, so the pass is not treated as successful and the missing replicas are

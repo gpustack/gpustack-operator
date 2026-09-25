@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strconv"
@@ -12,7 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -1610,5 +1613,138 @@ func TestModelDeployment_DegreeEditRollsThePair(t *testing.T) {
 			assert.NotEqual(t, hash, edited,
 				"and lands on the role whose argv changed: %s", slot)
 		}
+	}
+}
+
+// TestModelDeploymentReconciler_ExpectedBindingClaimFailuresAreQuiet pins how a pass ends when the
+// Binding it claims changed or was deleted after it was read. Neither is logged as an error or
+// returned, and neither requeues: the Binding watch passes every change to it, so the change behind
+// the conflict wakes the deployment again. Any other failure is still returned and logged, and the
+// next pass writes the claim in every case.
+func TestModelDeploymentReconciler_ExpectedBindingClaimFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: workercore.GroupVersion.Group, Resource: "kvcachepoolbindings"}
+	testCases := []struct {
+		name       string
+		err        error
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name: "a conflicting claim ends quietly, for the binding watch to retry",
+			err:  kerrors.NewConflict(gr, "shared-kv", fmt.Errorf("the object has been modified")),
+		},
+		{
+			name: "a claim on a deleted binding ends quietly",
+			err:  kerrors.NewNotFound(gr, "shared-kv"),
+		},
+		{
+			name:       "any other claim failure is returned and logged",
+			err:        kerrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var injected bool
+			fail := failOnce(tc.err)
+			cli := ctrlinterceptor.NewClient(
+				newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(), newRenderBinding()).(ctrlcli.WithWatch),
+				ctrlinterceptor.Funcs{
+					SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
+						if _, ok := obj.(*workercore.KVCachePoolBinding); ok {
+							if err := fail(); err != nil {
+								injected = true
+								return err
+							}
+						}
+						return c.SubResource(sub).Update(ctx, obj, opts...)
+					},
+				})
+			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64)}
+			req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}}
+
+			out := reconcileUntilInjected(t, r, req, &injected)
+			if tc.wantErr {
+				assert.Error(t, out.err)
+			} else {
+				assert.NoError(t, out.err)
+			}
+			assert.Equal(t, ctrlreconcile.Result{}, out.res)
+			assert.Equal(t, tc.wantLogged, out.logged, "error log lines")
+
+			// The next pass, which the Binding event or the returned error triggers, writes it.
+			_, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+			assert.Equal(t, []workercore.KVCacheObjectReference{modelDeploymentClaim()},
+				getModelDeploymentBinding(t, cli).Status.UsedBy)
+		})
+	}
+}
+
+// TestModelDeploymentReconciler_ExpectedStatusWriteFailuresAreQuiet pins how a pass ends when the
+// deployment changed or was deleted after its status was read. Neither is logged as an error or
+// returned. A conflict requeues: the predicate passes only generation changes, so the change behind
+// it may deliver no event. Any other failure is still returned and logged, and the next pass writes
+// the status in every case.
+func TestModelDeploymentReconciler_ExpectedStatusWriteFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: workercore.GroupVersion.Group, Resource: "modeldeployments"}
+	testCases := []struct {
+		name       string
+		err        error
+		want       ctrlreconcile.Result
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name: "a conflicting status update requeues quietly",
+			err:  kerrors.NewConflict(gr, "qwen", fmt.Errorf("the object has been modified")),
+			want: _requeueAfterConflict,
+		},
+		{
+			name: "a status update on a deleted deployment ends quietly",
+			err:  kerrors.NewNotFound(gr, "qwen"),
+		},
+		{
+			name:       "any other status update failure is returned and logged",
+			err:        kerrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var injected bool
+			fail := failOnce(tc.err)
+			cli := ctrlinterceptor.NewClient(
+				newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(), newRenderBinding()).(ctrlcli.WithWatch),
+				ctrlinterceptor.Funcs{
+					SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
+						if _, ok := obj.(*workercore.ModelDeployment); ok {
+							if err := fail(); err != nil {
+								injected = true
+								return err
+							}
+						}
+						return c.SubResource(sub).Update(ctx, obj, opts...)
+					},
+				})
+			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64)}
+			req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}}
+
+			out := reconcileUntilInjected(t, r, req, &injected)
+			if tc.wantErr {
+				assert.Error(t, out.err)
+			} else {
+				assert.NoError(t, out.err)
+			}
+			assert.Equal(t, tc.want, out.res)
+			assert.Equal(t, tc.wantLogged, out.logged, "error log lines")
+
+			// The next pass, which the requeue or the returned error triggers, writes it.
+			_, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+			assert.NotEmpty(t, getModelDeployment(t, cli).Status.Conditions)
+		})
 	}
 }

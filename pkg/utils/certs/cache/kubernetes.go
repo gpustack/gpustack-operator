@@ -87,7 +87,7 @@ func NewK8sCache(ctx context.Context, group string, cli certs.SecretInterface) (
 
 				if sumName(annos[k8sManagedNameAnno]) != annos[k8sManagedNameSumAnno] ||
 					sumValue(data[k8sManagedValueKey]) != annos[k8sManagedValueSumAnno] {
-					lg.Error(nil, "invalid key %q", annos[k8sManagedNameAnno])
+					lg.Error(nil, "invalid key", "key", annos[k8sManagedNameAnno])
 					return nil, nil
 				}
 

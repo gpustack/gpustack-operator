@@ -117,8 +117,11 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// stable; skip the status refresh this cycle so status reflects the settled queue.
 	changed, err := r.syncInactive(ctx, it, cq)
 	if err != nil {
-		logger.Error(err, "sync instance type inactive with cluster queue stop policy")
-		return ctrl.Result{}, err
+		// The write is to the queue or to this InstanceType's spec. A queue change is watched, but
+		// the change behind a conflict on the InstanceType may be status-only, which the predicate
+		// drops: requeue rather than wait for an event.
+		return objectWriteResult(logger, err, "sync instance type inactive with cluster queue stop policy",
+			_requeueAfterConflict)
 	}
 	if changed {
 		return ctrl.Result{}, nil

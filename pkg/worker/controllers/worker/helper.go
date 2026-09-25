@@ -45,13 +45,15 @@ var _requeueAfterConflict = ctrl.Result{RequeueAfter: time.Second}
 
 // objectWriteResult turns a failed write of the reconciled object into the reconcile result, whether
 // the write is to its status or to its spec and metadata, as long as it carries the resource version
-// the object was read at. Two failures are expected and heal on their own, so they are logged at V(1) and not returned: not
-// found means the object is gone and nothing is left to write; a conflict means the object changed
-// after it was read, and it is reconciled again from its newer version as onConflict says. A
-// reconciler whose predicate passes every newer version that still needs the write passes an empty
-// result, because the change that caused the conflict is itself an event; one whose predicate may
-// filter that change passes _requeueAfterConflict. Returning either error would only add an error
-// log and a backoff retry of a write that is already moot.
+// the object was read at. It serves a write to another object only when the reconciler also watches
+// that object, deletions included: without that watch, nothing would reconcile again after a not
+// found. Two failures are expected and heal on their own, so they are logged at V(1) and not
+// returned: not found means the object is gone and nothing is left to write; a conflict means the
+// object changed after it was read, and it is reconciled again from its newer version as onConflict
+// says. A reconciler whose predicate passes every newer version that still needs the write passes
+// an empty result, because the change that caused the conflict is itself an event; one whose
+// predicate may filter that change passes _requeueAfterConflict. Returning either error would only
+// add an error log and a backoff retry of a write that is already moot.
 //
 // The conflict is kept rather than avoided. A write judged from the object as read must not land on
 // a newer one, and the resource version it carries is what stops it: Kueue resets the checks of an
