@@ -13,8 +13,8 @@
 # Inputs:      All real, nothing mocked — runs teardown.sh (helm uninstall; the releases the chart
 #              does not own; CRDs, finalizers, APIServices/webhooks, migration-hook leftovers).
 # Expected:    After teardown, zero leftover: helm releases (gpustack/kueue/nfd/csi), every
-#              gpustack.ai CRD, every CRD this release owned, gpustack apiservices, and gpustack
-#              clusterrolebindings.
+#              gpustack.ai CRD, every CRD this release owned, gpustack apiservices, gpustack
+#              clusterrolebindings, and the gpustack-cpu-info NodeFeatureRule the worker applied.
 # NOT every kueue/nfd CRD by name. The teardown delegates to the chart's own
 #              cleanup.sh, which leaves NFD's CRDs in place entirely (its subchart ships them
 #              unannotated, so there is nothing to read ownership from) and removes Kueue's only when
@@ -131,6 +131,24 @@ assert_empty "no leftover apiservices" \
   "$(probe 'kubectl get apiservice' 'gpustack' kubectl get apiservice)"
 assert_empty "no leftover rolebindings" \
   "$(probe 'kubectl get clusterrolebinding' 'gpustack' kubectl get clusterrolebinding)"
+# The gpustack-cpu-info NodeFeatureRule belongs to no release: the worker applies it at boot, so
+# helm uninstall never takes it, and the NFD CRD it lives under is kept on purpose. cleanup.sh deletes
+# it by the operator's part-of label, and this reads it back by the same label. Missed, it keeps an
+# external NFD labelling nodes, and it fails the install of any earlier version whose NFD release
+# rendered the same rule.
+# No NodeFeatureRule CRD means no rule can be left, which is not a failure; any OTHER failure to ask
+# is, through the same sentinel every query here uses.
+assert_empty "no leftover cpu-info NodeFeatureRule" "$(
+  if ! nfr_crd="$(kubectl get crd nodefeaturerules.nfd.k8s-sigs.io -o name 2>&1)"; then
+    case "$nfr_crd" in
+      *NotFound*) ;;
+      *) echo "CHECK-BROKEN: kubectl get crd failed: $(printf '%s' "$nfr_crd" | head -1)" ;;
+    esac
+  else
+    probe 'kubectl get nodefeaturerule' 'gpustack-cpu-info' \
+      kubectl get nodefeaturerules.nfd.k8s-sigs.io -l app.kubernetes.io/part-of=gpustack-operator -o name
+  fi
+)"
 
 echo
 echo "== CASE 2 — Uninstall leaves zero leftovers =="

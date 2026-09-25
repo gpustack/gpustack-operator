@@ -236,20 +236,31 @@ done
 #    left to remove, and it waits forever. Passing over it leaves a WEDGED cluster that every signal
 #    calls clean, and the next install walks into Terminating CRDs with no idea why.
 #
-# ONLY the gpustack groups are judged. The Kueue CRDs are deleted by cleanup.sh only when this
-#    release owns them and NFD's are never deleted at all, so their presence here is not a failure —
-#    and asserting on them is what the old copy of this logic did wrong in the first place.
+# The gpustack groups are judged by PRESENCE. The Kueue CRDs are deleted by cleanup.sh only when
+#    one of this operator's releases owns them and NFD's are never deleted at all, so their presence
+#    here is not a failure — and asserting on them is what the old copy of this logic did wrong in the
+#    first place.
+# A Kueue CRD is judged by TERMINATING, whoever owns it. A Kueue the cluster brought itself is never
+#    deleted by this teardown, so it is never Terminating here; one that is is the wedge above, left by
+#    a Kueue controller uninstalled while its objects still carried kueue.x-k8s.io/resource-in-use.
+#    Judging gpustack alone passed exactly that state on every image-mode teardown, and the next
+#    chart-mode install then failed on the CRD's ownership.
 # The LISTING is checked before its result is. `kubectl get crd 2>/dev/null | grep || true`
 #    reports an empty set for a transport error, an RBAC denial and a genuinely clean cluster alike —
 #    and empty is what this verdict reads as success, so a failed query would print "done" over a
 #    wedged cluster. That is the same shape this file's own guards exist to prevent.
-if ! crd_list="$(kubectl get crd -o name 2>&1)"; then
+crd_query=(kubectl get crd -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.metadata.deletionTimestamp}{"\n"}{end}')
+judged() { # "name [deletionTimestamp]" lines -> the CRDs the verdict fails on
+  awk '$1 ~ /\.(worker\.)?gpustack\.ai$/ { print $1; next }
+       $1 ~ /\.kueue\.x-k8s\.io$/ && $2 != "" { print $1 " (Terminating)" }'
+}
+if ! crd_list="$("${crd_query[@]}" 2>&1)"; then
   echo "[teardown] FATAL: could not list CRDs, so the drain cannot be judged:" >&2
   echo "$crd_list" | head -3 >&2
   echo "[teardown] (namespace ${NS} kept on purpose)" >&2
   exit 1
 fi
-remaining="$(printf '%s\n' "$crd_list" | grep -E '\.(worker\.)?gpustack\.ai$' || true)"
+remaining="$(printf '%s\n' "$crd_list" | judged)"
 
 # A CRD still here after cleanup.sh's own ~60s drain loop is given one more window before it is
 #    called wedged: under load a large CR set can genuinely still be finalizing, and failing on that
@@ -273,13 +284,13 @@ if [ -n "$remaining" ]; then
   for _ in $(seq 1 10); do
     sleep 3
     previous="$remaining"
-    if ! crd_list="$(kubectl get crd -o name 2>&1)"; then
+    if ! crd_list="$("${crd_query[@]}" 2>&1)"; then
       echo "[teardown] FATAL: could not re-list CRDs while waiting for the drain:" >&2
       echo "$crd_list" | head -3 >&2
       echo "[teardown] (namespace ${NS} kept on purpose)" >&2
       exit 1
     fi
-    remaining="$(printf '%s\n' "$crd_list" | grep -E '\.(worker\.)?gpustack\.ai$' || true)"
+    remaining="$(printf '%s\n' "$crd_list" | judged)"
     [ "$remaining" = "$previous" ] || moved=yes
     [ -z "$remaining" ] && break
   done
@@ -287,12 +298,15 @@ fi
 
 if [ -n "$remaining" ]; then
   if [ -n "$moved" ]; then
-    echo "[teardown] INCOMPLETE: gpustack CRDs were still draining when the 30s window closed:" >&2
+    echo "[teardown] INCOMPLETE: CRDs were still draining when the 30s window closed:" >&2
   else
-    echo "[teardown] INCOMPLETE: gpustack CRDs did not change over the whole 30s window:" >&2
+    echo "[teardown] INCOMPLETE: CRDs did not change over the whole 30s window:" >&2
   fi
   echo "$remaining" >&2
   echo "[teardown] an install against them fails in ways that do not name this as the cause." >&2
+  case "$remaining" in
+    *kueue.x-k8s.io*) echo "[teardown] for the Kueue ones see docs/migration/troubleshooting.md" >&2 ;;
+  esac
   echo "[teardown] (namespace ${NS} kept on purpose)" >&2
   exit 1
 fi
