@@ -73,9 +73,11 @@ echo "[teardown] namespace=${NS}"
 #
 #    The test Instance is no longer deleted by name here - drain.sh deletes every Instance in the
 #    cluster, and it does so before the InstanceType the Instance consumes, which by name it did
-#    not. The NodeFeatures stay here: they belong to NFD rather than to this operator, so drain.sh
-#    does not touch them, and deleting the Worker-authored <node>-gpustack-worker one also discards
-#    any injected label edit.
+#    not. Only the NodeFeatures the cases create are deleted here, by the part-of label every case
+#    puts on them. The ones the worker and the device-managers report are left to cleanup.sh, which
+#    is what removes them for a user, and deleting them here first would leave that step with
+#    nothing to do on every run this suite makes. A case's label edit to the worker's NodeFeature
+#    goes with it there. The ones NFD's own worker reports stay, as NFD's CRDs do.
 if [ ! -r "$DRAIN" ]; then
   echo "[teardown] FATAL: cannot read ${DRAIN}" >&2
   echo "[teardown] the drain is delegated to the chart's own script; there is no local copy" >&2
@@ -83,7 +85,7 @@ if [ ! -r "$DRAIN" ]; then
 fi
 echo "[teardown] delegating to chart drain: ${DRAIN}"
 bash "$DRAIN" "$NS"
-kubectl -n "$NS" delete nodefeature --all 2>/dev/null || true
+kubectl -n "$NS" delete nodefeature -l app.kubernetes.io/part-of=gpustack-operator-e2e 2>/dev/null || true
 
 # 1. The operator's own release (worker, device-managers, RBAC, webhooks). cleanup.sh does not do
 #    this and must not: it runs as the chart's post-delete hook, at which point the release is

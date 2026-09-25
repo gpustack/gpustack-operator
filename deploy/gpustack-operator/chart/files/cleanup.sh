@@ -10,6 +10,8 @@
 #   - the CRDs this release installed (gpustack, and Kueue when one of this operator's releases
 #     in this namespace installed it);
 #   - the gpustack-cpu-info NodeFeatureRule the worker applies at boot, which no release owns;
+#   - the NodeFeatures the worker and the device-managers report, and the labels the worker
+#     writes on Nodes directly (the topology profile and the fit labels);
 #   - the finalizers that pin objects once their controllers are gone
 #     (Kueue's `kueue.x-k8s.io/resource-in-use`, the operator's
 #     `gpustack.ai/controlled` on Instances AND InstanceTypes);
@@ -362,5 +364,41 @@ if [ "$(kubectl get nodefeaturerules.nfd.k8s-sigs.io gpustack-cpu-info \
       -o jsonpath='{.metadata.labels.app\.kubernetes\.io/part-of}' 2>/dev/null)" = "gpustack-operator" ]; then
   kubectl delete nodefeaturerules.nfd.k8s-sigs.io gpustack-cpu-info --ignore-not-found 2>/dev/null || true
 fi
+
+# 10. Take this operator's labels off the Nodes. They come two ways, and each needs its own step.
+#
+#    Through NFD: the worker and every device-manager report a NodeFeature per Node, and each
+#    TopologySource one per Node it covers. NFD turns those into the feature.gpustack.ai,
+#    general./acceleratable.feature.gpustack.ai, gpustack.ai/managed and topology.gpustack.ai labels.
+#    Their owner is the Node, so nothing garbage-collects them, and the namespace outlives the
+#    release. An NFD that stays installed keeps applying them for an operator that is gone. The
+#    bundled NFD's own post-delete prune takes the labels off, but the NodeFeatures survive it and
+#    are applied again, stale, by the next install. Deleting them lets a running NFD withdraw what
+#    it wrote. Selected ONLY by the markers this operator puts on them, never by name, so a
+#    NodeFeature a user or another operator keeps in this namespace is left alone.
+for sel in app.kubernetes.io/part-of=gpustack-operator-worker \
+  app.kubernetes.io/part-of=gpustack-operator-device-manager topology.gpustack.ai/source-uid; do
+  kubectl -n "${NS}" delete nodefeatures.nfd.k8s-sigs.io -l "${sel}" --ignore-not-found 2>/dev/null || true
+done
+#    Directly: the worker writes topology.gpustack.ai/profile on every Node and the two fit labels
+#    on every managed one, sliced-max-free-units.fit.gpustack.ai/<accelerator> and
+#    shared-free-cards.fit.gpustack.ai/<accelerator>, and only the worker ever removes them. NFD has
+#    no record of either, so neither its prune nor the step above reaches them. The fit labels are
+#    matched by those two prefixes, as the worker's own IsFitLabelKey matches them, and not by the
+#    whole fit.gpustack.ai domain, so a label some other tool put there is not taken for ours.
+#    Removed by key, and only these keys: the rest of the gpustack.ai domains may carry labels an
+#    administrator set, gpustack.ai/managed under manual node management and the
+#    topology.gpustack.ai levels a TopologySource reads in nodeLabels mode, and those stay.
+#    One kubectl call per Node, however many of its keys match.
+kubectl get nodes \
+  -o go-template='{{range .items}}{{$n := .metadata.name}}{{range $k, $v := .metadata.labels}}{{$n}} {{$k}}{{"\n"}}{{end}}{{end}}' \
+  2>/dev/null \
+  | awk '$2 == "topology.gpustack.ai/profile" || $2 ~ /^(sliced-max-free-units|shared-free-cards)\.fit\.gpustack\.ai\// { keys[$1] = keys[$1] " " $2 "-" }
+         END { for (n in keys) print n keys[n] }' \
+  | while read -r node keys; do
+      echo "[cleanup] node ${node}: kubectl label ${keys}"
+      # shellcheck disable=SC2086 # keys is a space-separated list of "<key>-" removal arguments
+      kubectl label node "${node}" ${keys} >/dev/null 2>&1 || true
+    done
 
 echo "[cleanup] done"
