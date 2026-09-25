@@ -10,12 +10,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
@@ -1562,4 +1565,91 @@ func TestNodeQueueReconciler_WaitsForCurrentQueueStatusBeforeDroppingFlavor(t *t
 	require.Len(t, got.Spec.ResourceGroups[0].Flavors, 1)
 	assert.Equal(t, live, string(got.Spec.ResourceGroups[0].Flavors[0].Name))
 	assert.Equal(t, "Ready", nodeQueueConditionTopologyReady.GetReason(got))
+}
+
+// TestNodeQueueReconciler_ExpectedWriteFailuresAreQuiet pins how a reconcile ends when the
+// ClusterQueue changed or was deleted after it was read. Neither is logged as an error or returned.
+// A conflict requeues: the usual cause is Kueue's status churn, which the predicate drops, so no
+// event may follow it. Any other failure is still returned and logged, and the next reconcile
+// completes the write in every case.
+func TestNodeQueueReconciler_ExpectedWriteFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: kueue.GroupVersion.Group, Resource: "clusterqueues"}
+	key := "generic"
+	name := nodeQueueName(key)
+	testCases := []struct {
+		name       string
+		deleting   bool
+		err        error
+		want       ctrlreconcile.Result
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name: "a conflicting resource group fill requeues quietly",
+			err:  kerrors.NewConflict(gr, name, fmt.Errorf("the object has been modified")),
+			want: _requeueAfterConflict,
+		},
+		{
+			name: "a resource group fill on a deleted queue ends quietly",
+			err:  kerrors.NewNotFound(gr, name),
+		},
+		{
+			name:     "a conflicting hold and drain of a deleting queue requeues quietly",
+			deleting: true,
+			err:      kerrors.NewConflict(gr, name, fmt.Errorf("the object has been modified")),
+			want:     _requeueAfterConflict,
+		},
+		{
+			name:       "any other update failure is returned and logged",
+			err:        kerrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cq := newInstanceTypeQueue(key, false)
+			if tc.deleting {
+				cq.DeletionTimestamp = ptr.To(meta.Now())
+				cq.Finalizers = []string{"kueue.x-k8s.io/resource-in-use"}
+			}
+			var injected bool
+			fail := failOnce(tc.err)
+			cli := ctrlinterceptor.NewClient(buildNodeQueueClient(cq,
+				newNodesFlavor("gpustack-generic-linux-amd64-4c", key, 4, 4),
+			).(ctrlcli.WithWatch), ctrlinterceptor.Funcs{
+				Update: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.UpdateOption) error {
+					if _, ok := obj.(*kueue.ClusterQueue); ok {
+						if err := fail(); err != nil {
+							injected = true
+							return err
+						}
+					}
+					return c.Update(ctx, obj, opts...)
+				},
+			})
+			r := &NodeQueueReconciler{Client: cli}
+			req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: name}}
+
+			out := reconcileUntilInjected(t, r, req, &injected)
+			if tc.wantErr {
+				assert.Error(t, out.err)
+			} else {
+				assert.NoError(t, out.err)
+			}
+			assert.Equal(t, tc.want, out.res)
+			assert.Equal(t, tc.wantLogged, out.logged, "error log lines")
+
+			// The next reconcile, which the requeue or the returned error triggers, writes it.
+			_, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+			got, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			if tc.deleting {
+				assert.Equal(t, kueue.HoldAndDrain, ptr.Deref(got.Spec.StopPolicy, kueue.None))
+			} else {
+				assert.Len(t, got.Spec.ResourceGroups, 1)
+			}
+		})
+	}
 }

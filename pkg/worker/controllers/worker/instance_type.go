@@ -129,8 +129,9 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if !kubemeta.DeepEqual(desiredStatus, it.Status) {
 		it.Status = desiredStatus
 		if err = r.Client.Status().Update(ctx, it); err != nil {
-			logger.Error(err, "update instance type status")
-			return ctrl.Result{}, err
+			// The predicate drops status-only and metadata-only updates, so the change behind a
+			// conflict may deliver no event: requeue rather than wait for one.
+			return objectWriteResult(logger, err, "update instance type status", _requeueAfterConflict)
 		}
 		logger.V(2).Info("refreshed instance type status")
 	}
@@ -366,8 +367,7 @@ func (r *InstanceTypeReconciler) teardownInstanceType(
 				Entrance:     nodefeature.FormatLocalQueueName(cq.Name),
 			}
 			if err = r.Client.Status().Update(ctx, it); err != nil {
-				logger.Error(err, "mark instance type inactive while terminating")
-				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+				return objectWriteResult(logger, err, "mark instance type inactive while terminating", _requeueAfterConflict)
 			}
 		}
 		// Request the queue's deletion once; the NodeQueueReconciler drains it (HoldAndDrain) so
