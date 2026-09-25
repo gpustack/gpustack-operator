@@ -87,6 +87,9 @@ admits them. A second Workload judged in that window would see the first one's a
   `kueue.x-k8s.io/workload` annotation and `kueue.x-k8s.io/podset` label tie it to its Workload.
 - The ledger and the held Pods come from the same list, so no Pod is counted twice or missed. The
   published `Devices` status is rebuilt later and would lag that list.
+- A finished Pod, in phase `Succeeded` or `Failed`, still counts as held, while the ledger stops
+  charging the cards the kubelet took back from it ([device discovery](device-discovery.md#container-identification-and-cross-mode-exclusion)).
+  A replacement Pod its Workload creates is then counted by neither until `Allocate` records it.
 - The check judges one Workload at a time, and remembers each `Ready` it wrote until the cache shows it.
 
 > **Known behavior: the inflight count follows the allocator's hint.** An inflight slice is fitted on

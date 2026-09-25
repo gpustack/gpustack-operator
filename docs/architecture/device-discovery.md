@@ -873,6 +873,12 @@ containers of one group each holding a live claim are both recorded and both cha
 charges its accelerator until its **Pod** is gone — the reclaimer and the kubelet also scope a device
 to the Pod's life, not the container's.
 
+A Pod that has **finished**, in phase `Succeeded` or `Failed`, is the exception: the kubelet has taken
+back its exclusive and shared cards and its logical slices, so the ledger stops charging those. A
+hardware partition and a MetaX or Cambricon slice stay charged until the Pod is gone, because the
+reclaimer destroys them only then. `GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS=false` turns the exception
+off ([settings](../settings.md#configuration-knobs)).
+
 One thing takes an entry back earlier, and it is the only one: an allocation the manufacturer
 responder refuses **after** the record is written is given back on the spot — the entry and the
 reservation both — because the kubelet does not start that container. A claim the container already

@@ -33,11 +33,10 @@ type _SlicedOccupancy map[Resource]map[_ReservationKey]int32
 // the annotation outlives a restart, so either alone misses allocations; a container found in both is
 // read the way priorClaimOf reads it — reservation, then a give-back still pending, then annotation.
 //
-// A Pod in a terminal phase is skipped. kubelet has stopped its containers and returned their tokens,
-// and the per-process memory limit went with them, so what it records no longer occupies the card.
-// The Devices ledger keeps charging such a Pod until it is deleted; that is the ledger's rule and is
-// left alone here. A reservation whose Pod is no longer listed is skipped as well: the Pod is gone,
-// and the next reconcile prunes the reservation.
+// A Pod in a terminal phase counts only for what heldAllocation says it still holds, the rule the
+// Devices ledger is rebuilt by, so this gate and the ledger agree on a finished Pod's card. A
+// reservation whose Pod is no longer listed is skipped: the Pod is gone, and the next reconcile
+// prunes the reservation.
 //
 // Every read is served from the informer cache and from memory, which is what makes it legal under
 // the allocate mutex.
@@ -53,9 +52,6 @@ func (s *ResourceServer) slicedOccupancy(ctx context.Context) (_SlicedOccupancy,
 	occupied := make(_SlicedOccupancy)
 	for i := range podList.Items {
 		pod := &podList.Items[i]
-		if p := pod.Status.Phase; p == core.PodSucceeded || p == core.PodFailed {
-			continue
-		}
 		// An unreadable annotation contributes no names, and priorClaimOf reads it as holding
 		// nothing: the ledger drops such a Pod too, and says so loudly when it does.
 		allocations, _ := AllocatedAcceleratorsOf(pod)
@@ -68,7 +64,7 @@ func (s *ResourceServer) slicedOccupancy(ctx context.Context) (_SlicedOccupancy,
 		}
 		for _, name := range sets.List(holders) {
 			if held := s.priorClaimOf(pod, name); held != nil {
-				occupied.add(_ReservationKey{PodUID: pod.UID, Container: name}, held.Devices)
+				occupied.add(_ReservationKey{PodUID: pod.UID, Container: name}, heldAllocation(pod, held.Devices))
 			}
 		}
 	}

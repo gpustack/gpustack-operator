@@ -149,6 +149,8 @@ spec:
                   fieldPath: spec.nodeName
             - name: KUBERNETES_SERVICE_NAME
               value: {{ $name | quote }}
+            - name: GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS
+              value: {{ $root.Values.ledgerReleaseTerminatedPods | quote }}
             {{- with $root.Values.deviceManager.containerdConfigDir }}
             - name: GPUSTACK_CONTAINERD_CONFIG_DIR
               value: {{ . | quote }}

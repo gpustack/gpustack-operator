@@ -33,6 +33,14 @@ cleanupOnUninstall: false
 # the silent skip this whole phase exists to prevent.
 cleanupDrainBudgetSeconds: 210
 
+# -- Whether the accelerator ledger stops charging a Pod that has finished (phase Succeeded or
+# Failed) for the exclusive cards, shared cards and logical slices kubelet has taken back from it.
+# A hardware partition, and a MetaX or Cambricon slice, stay charged until the Pod object is gone,
+# because they are destroyed only then. Set it to false to charge every finished Pod until its
+# object is gone, as before. Rendered as GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS on the worker,
+# whose node-devices check rebuilds the ledger, and on every device-manager, which publishes it.
+ledgerReleaseTerminatedPods: true
+
 # -- Global values shared across the chart and its subcharts.
 global:
   # -- Image registry override applied to every image this chart renders, the subcharts'
