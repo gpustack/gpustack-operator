@@ -37,7 +37,8 @@ cleanupDrainBudgetSeconds: 210
 # Failed) for the exclusive cards, shared cards and logical slices kubelet has taken back from it.
 # A hardware partition, and a MetaX or Cambricon slice, stay charged until the Pod object is gone,
 # because they are destroyed only then. Set it to false to charge every finished Pod until its
-# object is gone, as before. Rendered as GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS on the worker,
+# object is gone, as before; the sliced Allocate gate then charges it too, which it did not do
+# before. Rendered as GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS on the worker,
 # whose node-devices check rebuilds the ledger, and on every device-manager, which publishes it.
 ledgerReleaseTerminatedPods: true
 
