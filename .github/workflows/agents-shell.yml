@@ -49,11 +49,11 @@ jobs:
         run: |
           # Pinned to a release rather than taken from apt, so the findings set is the same one a
           # contributor reproduces locally; the checker's comparison between base and worktree is
-          # only fair when both sides come from the same analyzer.
+          # only fair when both sides come from the same analyzer. The release ships tar.xz.
           ver=v0.10.0
           curl --retry 3 --retry-all-errors --retry-delay 3 -sSfL \
-            "https://github.com/koalaman/shellcheck/releases/download/${ver}/shellcheck-${ver}.linux.x86_64.tar.gz" \
-            | tar -xz
+            "https://github.com/koalaman/shellcheck/releases/download/${ver}/shellcheck-${ver}.linux.x86_64.tar.xz" \
+            | tar -xJ
           sudo install -m 0755 "shellcheck-${ver}/shellcheck" /usr/local/bin/shellcheck
           shellcheck --version | sed -n '2p'
       - name: Self-test
