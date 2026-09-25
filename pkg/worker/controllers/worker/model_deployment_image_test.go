@@ -168,6 +168,38 @@ func TestModelDeploymentBackendsCoverEveryKnownManufacturer(t *testing.T) {
 	}
 }
 
+// TestModelDeploymentImageBackendTokens pins the token each manufacturer maps onto.
+//
+// The coverage test above checks only which manufacturers have an entry, so a wrong value passes it.
+// The expected tokens are literals rather than read from the table, and they are the pairs
+// gpustack_runtime's manufacturer-to-backend mapping gives. Two do not follow from the vendor name:
+// hygon is dtk although its accelerators are ROCm-derived, and t-head is hggc. A token that is
+// plausible but wrong synthesizes a tag the matrix never published, which fails as an
+// ImagePullBackOff far from its cause.
+func TestModelDeploymentImageBackendTokens(t *testing.T) {
+	testCases := []struct {
+		manufacturer string
+		want         string
+	}{
+		{manufacturer: nodefeature.ManufacturerNVIDIA, want: "cuda"},
+		{manufacturer: nodefeature.ManufacturerAscend, want: "cann"},
+		{manufacturer: nodefeature.ManufacturerAMD, want: "rocm"},
+		{manufacturer: nodefeature.ManufacturerMetaX, want: "maca"},
+		{manufacturer: nodefeature.ManufacturerMThreads, want: "musa"},
+		{manufacturer: nodefeature.ManufacturerIluvatar, want: "corex"},
+		{manufacturer: nodefeature.ManufacturerHygon, want: "dtk"},
+		{manufacturer: nodefeature.ManufacturerTHead, want: "hggc"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.manufacturer, func(t *testing.T) {
+			got, ok := ModelDeploymentImageBackend(tc.manufacturer)
+			require.True(t, ok, "%q has a runner backend", tc.manufacturer)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // TestModelDeploymentAscendVariantKeysSurviveLabelSanitizing pins the one link in the family's path
 // that this package cannot see.
 //
