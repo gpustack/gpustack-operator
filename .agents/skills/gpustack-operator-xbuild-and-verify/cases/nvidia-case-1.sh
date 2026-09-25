@@ -57,4 +57,4 @@ INNER
 PAYLOAD
 )"
 echo "${out}"
-xb_verdict "NVIDIA-CASE 1" "$(xb_fails "${out}")"
+xb_verdict "NVIDIA-CASE 1" "$(xb_fails "${out}")" "${out}"

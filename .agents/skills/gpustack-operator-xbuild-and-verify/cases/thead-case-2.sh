@@ -451,4 +451,4 @@ echo "FAILS=${fails}"
 PAYLOAD
 )"
 echo "${out}"
-xb_verdict "THEAD-CASE 2" "$(xb_fails "${out}")"
+xb_verdict "THEAD-CASE 2" "$(xb_fails "${out}")" "${out}"

@@ -376,4 +376,4 @@ echo "FAILS=${fails}"
 PAYLOAD
 )"
 echo "${out}"
-xb_verdict "HYGON-CASE 2" "$(xb_fails "${out}")"
+xb_verdict "HYGON-CASE 2" "$(xb_fails "${out}")" "${out}"

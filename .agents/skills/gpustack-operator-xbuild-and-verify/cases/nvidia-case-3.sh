@@ -9,7 +9,9 @@
 # (MEM*(j+1) MiB) via CUDA_DEVICE_MEMORY_LIMIT_<j>, then asserts the container's
 # nvidia-smi reports each card's memory.total at exactly its own limit. This is the
 # multi-card analogue the allocator emits (one CUDA_DEVICE_MEMORY_LIMIT_<i> per
-# allocated card — pkg/devicemanager/allocator/nvidia/deviceplugin.go).
+# allocated card — pkg/devicemanager/allocator/nvidia/deviceplugin.go), injected with
+# CUDA_DEVICE_ORDER=PCI_BUS_ID as the allocator does. The reading is nvidia-smi, which
+# numbers cards in NVML order, so a CUDA-ordinal mismatch is not visible to this case.
 #
 # Env: XB_WORKLOAD_IMAGE (default XB_IMAGE), XB_STAGE (/opt/vgpu),
 #      XB_GPUS (0,1), XB_MEM (4096 MiB base; slot j gets MEM*(j+1)), XB_SM (30 %).
@@ -35,7 +37,8 @@ T="${STAGE}/test"; rm -rf "${T}"; mkdir -p "${T}/vgpulock" "${T}/vgpu"
 printf '/usr/local/vgpu/libvgpu.so\n' > "${T}/ld.so.preload"; chmod 0644 "${T}/ld.so.preload"
 
 # physical card count gate
-phys="$(nvidia-smi -L 2>/dev/null | grep -c '^GPU ' || echo 0)"
+# grep -c prints 0 AND exits 1 on no match, so `|| echo 0` would append a second 0.
+phys="$(nvidia-smi -L 2>/dev/null | grep -c '^GPU ')"; phys="${phys:-0}"
 IFS=',' read -ra G <<< "${GPUS}"
 n="${#G[@]}"
 if [ "${phys}" -lt "${n}" ]; then
@@ -50,7 +53,7 @@ for j in "${!G[@]}"; do
   envlim+=" -e CUDA_DEVICE_MEMORY_LIMIT_${j}=${lim}m"
 done
 
-INJ="-e NVIDIA_VISIBLE_DEVICES=${GPUS} -e CUDA_DEVICE_SM_LIMIT=${SM} \
+INJ="-e NVIDIA_VISIBLE_DEVICES=${GPUS} -e CUDA_DEVICE_SM_LIMIT=${SM} -e CUDA_DEVICE_ORDER=PCI_BUS_ID \
  -e CUDA_DEVICE_MEMORY_SHARED_CACHE=/tmp/vgpu/cudevshr.cache ${envlim} \
  -v ${STAGE}/libvgpu.so:/usr/local/vgpu/libvgpu.so:ro \
  -v ${T}/ld.so.preload:/etc/ld.so.preload:ro \
@@ -71,4 +74,4 @@ PAYLOAD
 )"
 echo "${out}"
 echo "${out}" | grep -q 'SKIP_FEWER_GPUS' && { echo "NVIDIA-CASE 3: SKIP (insufficient GPUs)"; exit 0; }
-xb_verdict "NVIDIA-CASE 3" "$(xb_fails "${out}")"
+xb_verdict "NVIDIA-CASE 3" "$(xb_fails "${out}")" "${out}"

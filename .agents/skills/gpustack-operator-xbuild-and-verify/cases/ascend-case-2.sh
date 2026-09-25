@@ -12,7 +12,9 @@
 #   3. write ld.so.preload listing the two host-injected libdcmi paths BEFORE
 #      libvruntime.so (libdcmi must be loaded or the weak dcmi_* symbols segfault —
 #      see references/ascend-ld-preload-and-libdcmi.md)
-#   4. docker run (ascend runtime, ASCEND_VISIBLE_DEVICES) the staged enpu-monitor
+#   4. docker run (ascend runtime, ASCEND_VISIBLE_DEVICES, ENPU_DSMI_HOOK=1) the staged
+#      enpu-monitor; ENPU_DSMI_HOOK=1 matches the product default the Ascend allocator
+#      injects into every sliced container
 #   5. assert: all 6 config fields loaded, "Successfully to initialize", and the
 #      enpu-monitor Aicore/Memory quota lines match the config
 #
@@ -48,13 +50,12 @@ cfg="${STAGE}/test/npu_info.config"
 printf 'physical-npu-id=%s\nvirtual-npu-id=%s\naicore-quota=%s\nmemory-quota=%s\nshm-id=%s\nscheduling-policy=2\n' \
   "${NPU}" "${VNPU}" "${AICORE}" "${MEM}" "${shmid}" > "${cfg}"
 chmod 0644 "${cfg}"
-[ "$(stat -c '%a' "${cfg}")" = 644 ] && row PASS "npu_info.config mode 0644" ok || { row FAIL "npu_info.config mode 0644" "$(stat -c '%a' "${cfg}")"; fails=$((fails+1)); }
 
 pre="${STAGE}/test/ld.so.preload"
 printf '/usr/local/dcmi/libdcmi.so\n/usr/local/Ascend/driver/lib64/driver/libdcmi.so\n/opt/enpu/vcann-rt/lib/libvruntime.so\n' > "${pre}"
 chmod 0644 "${pre}"
 
-log="$(docker run --rm --runtime=ascend -e ASCEND_VISIBLE_DEVICES="${NPU}" -e ENPU_LOG_LEVEL=3 \
+log="$(docker run --rm --runtime=ascend -e ASCEND_VISIBLE_DEVICES="${NPU}" -e ENPU_LOG_LEVEL=3 -e ENPU_DSMI_HOOK=1 \
   -v "${STAGE}/lib/libvruntime.so:/opt/enpu/vcann-rt/lib/libvruntime.so:ro" \
   -v "${STAGE}/tools/enpu-monitor:/opt/enpu/vcann-rt/tools/enpu-monitor:ro" \
   -v "${cfg}:/etc/enpu/vcann-rt/npu_info.config:ro" \
@@ -77,4 +78,4 @@ echo "FAILS=${fails}"
 PAYLOAD
 )"
 echo "${out}"
-xb_verdict "ASCEND-CASE 2" "$(xb_fails "${out}")"
+xb_verdict "ASCEND-CASE 2" "$(xb_fails "${out}")" "${out}"

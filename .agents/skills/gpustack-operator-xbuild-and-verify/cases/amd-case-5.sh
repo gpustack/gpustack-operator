@@ -284,4 +284,4 @@ echo "FAILS=${fails}"
 PAYLOAD
 )"
 echo "${out}"
-xb_verdict "AMD-CASE 5" "$(xb_fails "${out}")"
+xb_verdict "AMD-CASE 5" "$(xb_fails "${out}")" "${out}"
