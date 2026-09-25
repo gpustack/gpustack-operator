@@ -193,10 +193,12 @@ for md in case47-a case47-b case47-c; do
   kubectl -n "$TEST_NS" get modeldeployments.worker.gpustack.ai "$md" -o name >/dev/null 2>&1 \
     || deploy_missing="${deploy_missing} ${TEST_NS}/modeldeployment/${md}"
 done
+# A refusal here comes from this operator's own admission (a stale fixture or a regression), not from
+# the environment, so it is a FAIL and the case stops: every row below would read an absence.
 if [ -n "$deploy_missing" ]; then
-  record SKIP "the three deployments are admitted" \
-    "absent after the apply:${deploy_missing} — so every row below would report an absence produced \
-by the manifest rather than by the operator. The apply said: \
+  record FAIL "the three deployments are admitted" \
+    "absent after the apply:${deploy_missing} — the rows below are not run, since each would report \
+an absence produced by the refusal. The apply said: \
 $(printf '%s' "${deploy_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
   kvi_results "$CASE_ID"
   exit $?

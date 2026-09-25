@@ -214,9 +214,11 @@ kubectl get kvcachepools.worker.gpustack.ai "$DEAD_POOL" -o name >/dev/null 2>&1
   || dead_missing="${dead_missing} kvcachepool/${DEAD_POOL}"
 kubectl -n "$TEST_NS" get kvcachepoolbindings.worker.gpustack.ai "$DEAD_BINDING" -o name >/dev/null 2>&1 \
   || dead_missing="${dead_missing} ${TEST_NS}/kvcachepoolbinding/${DEAD_BINDING}"
+# A refusal here comes from this operator's own admission (a stale fixture or a regression), not from
+# the environment, so it is a FAIL and the case stops: nothing below would have a subject.
 if [ -n "$dead_missing" ]; then
-  record SKIP "the unreachable pool is admitted" \
-    "absent after the apply:${dead_missing} — so nothing below has a broken subject to observe. \
+  record FAIL "the unreachable pool is admitted" \
+    "absent after the apply:${dead_missing} — the rows below are not run, since nothing would have a broken subject to observe. \
 The apply said: $(printf '%s' "${dead_out:-<no output at all>}" | tr '\n' ' ' | cut -c1-220)"
   kvi_results "$CASE_ID"
   exit $?
@@ -294,10 +296,11 @@ for md in case48-unreachable case48-registered; do
   kubectl -n "$TEST_NS" get modeldeployments.worker.gpustack.ai "$md" -o name >/dev/null 2>&1 \
     || md_missing="${md_missing} ${TEST_NS}/modeldeployment/${md}"
 done
+# Same reasoning as the gate above: an absent deployment was refused by this operator.
 if [ -n "$md_missing" ]; then
-  record SKIP "both deployments are admitted" \
-    "absent after the apply:${md_missing} — so every row below would report an absence produced by \
-the manifest rather than by the operator. case48-unreachable said: ${u_out:-<no output>} / \
+  record FAIL "both deployments are admitted" \
+    "absent after the apply:${md_missing} — the rows below are not run, since each would report an \
+absence produced by the refusal. case48-unreachable said: ${u_out:-<no output>} / \
 case48-registered said: ${r_out:-<no output>}"
   kvi_results "$CASE_ID"
   exit $?

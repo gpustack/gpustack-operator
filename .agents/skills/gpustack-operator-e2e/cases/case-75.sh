@@ -43,9 +43,9 @@
 #                health condition True -- PoolWrites, which reports write activity rather than
 #                health, reads Unknown/NoWritesObserved on this idle backend and is accepted so.
 #
-# Cleanup:     Trap deletes the KVCacheBackend; owner references cascade to the Deployment,
-#              Service, Lease, and accounts. Nothing else is touched. Idempotent, runs on pass AND
-#              fail, safe to re-run.
+# Cleanup:     Trap deletes the KVCacheBackend, whose owner references cascade to the Deployment,
+#              Service and accounts, then deletes the leader Lease by name: the Lease carries no owner
+#              reference. Nothing else is touched. Idempotent, runs on pass AND fail, safe to re-run.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
@@ -89,6 +89,10 @@ teardown() {
   echo
   echo "[case-75] cleanup"
   kubectl delete kvcachebackends.worker.gpustack.ai "$BACKEND" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  # The leader Lease carries no owner reference, so deleting the backend leaves it behind. Delete it
+  # by name after the backend is gone, because a standby still running would campaign it back.
+  kubectl wait --for=delete "kvcachebackends.worker.gpustack.ai/${BACKEND}" --timeout=120s >/dev/null 2>&1 || true
+  kubectl -n "$NS" delete leases.coordination.k8s.io "$LEADER" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 trap teardown EXIT
 

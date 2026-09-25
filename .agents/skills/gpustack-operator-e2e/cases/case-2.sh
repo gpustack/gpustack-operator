@@ -11,16 +11,17 @@
 #              Kueue admission + eviction). No GPU. Targets the general (CPU) pool fed by every
 #              managed node, so it behaves the same on a 1-node or an N-node cluster.
 # Inputs:      All real, nothing mocked —
-#              - sets the general InstanceType unit spec (cpu=1, ram=2Gi, localStorage=10Gi);
+#              - reads the derived general InstanceType's unit spec, which the Instance webhook needs;
 #              - a running Instance gpustack-e2e-instance (alpine sleep + ephemeral volume) in ns default;
 #              - drains the pool by toggling gpustack.ai/managed=false on every <node>-gpustack-worker
 #                NodeFeature (a general pool's capacity is Node CPU count, not a bumpable label).
-# Expected:    - the Workload reaches Admitted=True on the cpu-only queue (quotaCheckStrategy checks
-#                only the covered cpu dimension and ignores the uncovered memory/ephemeral-storage);
+# Expected:    - the Instance Pod's own Workload reaches Admitted=True on the cpu-only queue
+#                (quotaCheckStrategy checks only the covered cpu dimension and ignores the uncovered
+#                memory/ephemeral-storage);
 #              - the Instance is running (phase Ready, spec.stop unset) before the drain;
 #              - the drain deletes the pool's general ResourceFlavor;
-#              - the Instance flips to spec.stop=true (STOPPED, not recreated);
-#              - the worker log shows the stop-on-inactive/gone-type branch ran.
+#              - the Instance flips to spec.stop=true (STOPPED, not recreated).
+#              The worker log line naming the stop branch is printed for diagnosis, not asserted.
 # Cleanup:     Trap restores gpustack.ai/managed=true on all nodes, deletes the test Instance, and
 #              waits for the InstanceType to return to Active WITH a non-zero CPU capacity so a
 #              following case finds a healthy chain rather than a pool whose flavor is still being
@@ -45,21 +46,11 @@ WORKER_NFS=$(kubectl -n "$NS" get nodefeatures -o name 2>/dev/null | grep -E -- 
 [ -n "$WORKER_NFS" ] || { echo "no <node>-gpustack-worker NodeFeatures found"; exit 1; }
 echo "general InstanceType: ${IT}; draining $(echo "$WORKER_NFS" | grep -c .) node(s)"
 
-# The derived general InstanceType carries no unit spec by default; the InstanceWebhook needs one
-# to size the Instance's Pod, so set it via the InstanceType API (this itself exercises the
-# admin-writable spec→CQ path). Confirm it stuck before creating the Instance: right after a fresh
-# deploy the InstanceType validating webhook may briefly be unready and reject the patch, and an
-# empty unitRAM then fails the Instance webhook's quantity parse ("invalid RAM unit"). Once set the
-# reconciler preserves it (admin values are authoritative), so retry until it is observed.
-unit_ram=""
-for _ in $(seq 1 15); do
-  kubectl patch instancetypes.worker.gpustack.ai "$IT" --type=merge \
-    -p '{"spec":{"unitResources":{"cpu":"1","ram":"2Gi"},"localStorage":"10Gi"}}' >/dev/null 2>&1
-  unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
-  [ -n "$unit_ram" ] && break
-  sleep 3
-done
-[ -n "$unit_ram" ] || { echo "no unit spec on ${IT} — the Instance webhook needs unitRAM to size the Pod (validating webhook not ready?)"; exit 1; }
+# The derived general InstanceType is created with its unit spec, and that spec is immutable
+# afterwards, so there is nothing to set: read it as a precondition. The Instance webhook sizes the
+# Pod from it.
+unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
+[ -n "$unit_ram" ] || { echo "no unit spec on ${IT} — the Instance webhook needs unitRAM to size the Pod"; exit 1; }
 
 restore() {
   echo
@@ -104,16 +95,19 @@ spec:
   volume: { ephemeral: { capacity: 1Gi } }
 EOF
 
-# 2. The Pod must be admitted by Kueue (holding quota is what lets the drain evict it).
+# 2. The Pod must be admitted by Kueue (holding quota is what lets the drain evict it). The Pod is
+#    named after the Instance and owns its Workload, so the Workload is found by that owner: any
+#    other admitted Workload in the namespace says nothing about this Instance.
 admitted=""
 for _ in $(seq 1 20); do
   a=$(kubectl -n default get workloads.kueue.x-k8s.io \
-        -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Admitted")].status}{"\n"}{end}' 2>/dev/null | grep -m1 True)
+        -o jsonpath='{range .items[*]}{.metadata.ownerReferences[0].name}{"|"}{.status.conditions[?(@.type=="Admitted")].status}{"\n"}{end}' 2>/dev/null \
+        | grep -m1 -x 'gpustack-e2e-instance|True')
   [ -n "$a" ] && { admitted=1; break; }
   sleep 3
 done
-[ -n "$admitted" ] && record PASS "workload admitted" "Kueue Admitted=True (holds quota)" \
-  || record FAIL "workload admitted" "no Admitted workload — the cpu-only CQ must admit despite the Pod's memory/ephemeral-storage (quotaCheckStrategy: IgnoreUndeclared)"
+[ -n "$admitted" ] && record PASS "workload admitted" "the Workload owned by Pod gpustack-e2e-instance is Admitted=True (holds quota)" \
+  || record FAIL "workload admitted" "the Workload owned by Pod gpustack-e2e-instance never reached Admitted=True — the cpu-only CQ must admit despite the Pod's memory/ephemeral-storage (quotaCheckStrategy: IgnoreUndeclared)"
 
 # The drain has to meet a RUNNING Instance, which is what this case claims to stop, and spec.stop
 # unset is not that: an Instance whose Pod is still pulling its image or failing readiness is
@@ -173,16 +167,11 @@ done
 [ -n "$stopped" ] && record PASS "instance STOPPED (not recreated)" "spec.stop=true" \
   || record FAIL "instance STOPPED (not recreated)" "spec.stop still ${s:-<unset>} — a running Instance must stop when its type drains"
 
-# Ground truth in the logs — proves the stop-on-drain/gone branch ran (grep -c, not -q: under
-# pipefail, -q closes the pipe early and kubectl logs gets SIGPIPE → non-zero pipeline).
-logged=""
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  cnt=$(kubectl -n "$NS" logs deploy/gpustack-operator-worker --since=10m 2>/dev/null | grep -c "stop instance as its instance type is gone, deleting, or draining")
-  [ "${cnt:-0}" -gt 0 ] && { logged=1; break; }
-  sleep 3
-done
-[ -n "$logged" ] && record PASS "stop-on-drain/gone branch ran" "log: stop instance as its instance type is gone, deleting, or draining" \
-  || record FAIL "stop-on-drain/gone branch ran" "log line absent — the stop branch may not have run"
+# Which branch set spec.stop is printed for diagnosis only. The stop itself is the behavior and is
+# asserted above; a log sentence is wording the controller is free to change, so it is not a verdict
+# (grep -c, not -q: under pipefail, -q closes the pipe early and kubectl logs gets SIGPIPE).
+cnt=$(kubectl -n "$NS" logs deploy/gpustack-operator-worker --since=10m 2>/dev/null | grep -c "stop instance as its instance type is gone, deleting, or draining")
+echo "[case-2] worker log lines naming the stop-on-drain branch: ${cnt:-0}"
 
 echo
 echo "== CASE 2 — Running Instance admits, then drain stops it (not recreate) =="

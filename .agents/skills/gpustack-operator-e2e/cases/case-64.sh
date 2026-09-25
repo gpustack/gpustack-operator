@@ -31,12 +31,13 @@
 #              - after the hard kill: the Lease's holder changes WITHIN THE FAILOVER BOUND
 #                (120s; a hard kill skips the 30s grace, so this path is expected FASTER than
 #                the graceful one), a DIFFERENT replica becomes ready, every member Pod keeps
-#                its UID and restartCount, MembersMounted never reports False at any sample,
-#                and the backend's phase returns to Ready.
+#                its UID and restartCount, MembersMounted reads True/Mounted before the kill and
+#                no sample reports a member fault (the leader-gap and re-registration reasons are
+#                data), and the backend's phase returns to Ready.
 #
-# Cleanup:     Trap deletes the KVCacheBackend; owner references cascade to the Deployment,
-#              Service, Lease, and accounts. Nothing else is touched. Idempotent, runs on pass
-#              AND fail, safe to re-run.
+# Cleanup:     Trap deletes the KVCacheBackend, whose owner references cascade to the Deployment,
+#              Service and accounts, then deletes the leader Lease by name: the Lease carries no owner
+#              reference. Nothing else is touched. Idempotent, runs on pass AND fail, safe to re-run.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on
@@ -81,6 +82,10 @@ teardown() {
   echo
   echo "[case-64] cleanup"
   kubectl delete kvcachebackends.worker.gpustack.ai "$BACKEND" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  # The leader Lease carries no owner reference, so deleting the backend leaves it behind. Delete it
+  # by name after the backend is gone, because a standby still running would campaign it back.
+  kubectl wait --for=delete "kvcachebackends.worker.gpustack.ai/${BACKEND}" --timeout=120s >/dev/null 2>&1 || true
+  kubectl -n "$NS" delete leases.coordination.k8s.io "$LEADER" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 trap teardown EXIT
 
@@ -272,7 +277,17 @@ fi
 # so the Lease is left held by a dead process -- exactly what a power loss or a partition looks
 # like from the standby's side. The graceful path is covered elsewhere; this case exists because
 # the two paths fail differently.
+# One reading of the backend's own report, as phase|MembersMounted status/reason. The condition lives
+# under .status; reading it from the object root returns nothing, and an empty reading can never
+# contain False, which is how this row once passed on every run whatever the backend said.
+members_mounted_sample() {
+  kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" \
+    -o jsonpath='{.status.phase}{"|"}{.status.conditions[?(@.type=="MembersMounted")].status}{"/"}{.status.conditions[?(@.type=="MembersMounted")].reason}{"\n"}' \
+    2>/dev/null
+}
 TRAJ_FILE="$(mktemp)"
+PRE_DELETE_SAMPLE="$(members_mounted_sample)"
+echo "$PRE_DELETE_SAMPLE" >>"$TRAJ_FILE"
 DELETE_EPOCH="$(date +%s)"
 if DELETE_OUT="$(kubectl -n "$NS" delete pod "$OLD_READY" --force --grace-period=0 --wait=false 2>&1)"; then
   record PASS "the serving Pod deletion is accepted" "${OLD_READY} (${OLD_READY_UID}), forced with no grace period"
@@ -298,9 +313,7 @@ HANDOFF_DEADLINE=$((DELETE_EPOCH + 240))
 # A changed identity or renewTime timestamps the move directly. A Ready holder is an upper bound:
 # the Lease must have moved no later than the serving replacement became observable.
 while [ "$(date +%s)" -lt "$HANDOFF_DEADLINE" ]; do
-  kubectl -n "$NS" get kvcachebackends.worker.gpustack.ai "$BACKEND" \
-    -o jsonpath='{.status.phase}{"|"}{.conditions[?(@.type=="MembersMounted")].status}{"\n"}' \
-    2>/dev/null >>"$TRAJ_FILE"
+  members_mounted_sample >>"$TRAJ_FILE"
   NEW_HOLDER="$(lease_holder)"
   NEW_HOLDER_POD_UID="$(holder_pod_uid "$NEW_HOLDER")"
   NEW_RENEW_TIME=""
@@ -366,13 +379,23 @@ fi
 # appearance. A member fault firing on a healthy failover is the failure this case exists to
 # catch; a transient leader-unavailable reading during the gap is a true statement about the gap
 # and is reported as data, not passed or failed.
+#
+# The reasons below are that gap and the members re-registering with the new leader
+# (setMembersObservationFailed and observeMembers in the KVCacheBackend controller); any other False
+# reason names a member fault. The pre-delete sample must read True/Mounted, which is the positive
+# baseline that proves the reader returns the condition at all.
+GAP_REASONS='NoAdminEndpoint|LeaderStarting|LeaderUnreachable|LeaderUnschedulable|ServicePlaneNotActive|ListingFailed|NoSegments|SegmentsShort'
 TRAJECTORY="$(awk '!seen[$0]++ {printf "%s%s", (NR>1 ? " -> " : ""), $0}' "$TRAJ_FILE")"
-if ! grep -q '|False' "$TRAJ_FILE"; then
-  record PASS "no member fault is reported throughout the transition" \
-    "MembersMounted never sampled False; phase trajectory: ${TRAJECTORY}"
-else
+MEMBER_FAULTS="$(grep -E '[|]False/' "$TRAJ_FILE" | grep -vE "[|]False/(${GAP_REASONS})\$" | sort -u | tr '\n' ' ')"
+if [ "${PRE_DELETE_SAMPLE#*|}" != "True/Mounted" ]; then
   record FAIL "no member fault is reported throughout the transition" \
-    "MembersMounted sampled False during the failover; trajectory: ${TRAJECTORY}"
+    "the pre-delete reading was '${PRE_DELETE_SAMPLE:-<empty>}', not True/Mounted, so the samples below prove nothing; trajectory: ${TRAJECTORY}"
+elif [ -n "$MEMBER_FAULTS" ]; then
+  record FAIL "no member fault is reported throughout the transition" \
+    "MembersMounted sampled a member fault (${MEMBER_FAULTS% }); trajectory: ${TRAJECTORY}"
+else
+  record PASS "no member fault is reported throughout the transition" \
+    "True/Mounted before the delete, and no False reading outside the leader gap; trajectory: ${TRAJECTORY}"
 fi
 rm -f "$TRAJ_FILE"
 

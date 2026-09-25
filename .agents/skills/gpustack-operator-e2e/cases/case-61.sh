@@ -16,11 +16,12 @@
 #              delete had silently failed, so the recreated Service must carry a DIFFERENT uid. And a
 #              row that stopped there would pass with the watch removed on any cluster where some
 #              other watched object happened to be written in the same window: the controller also
-#              owns the replicas and watches the InstanceType, the KVCachePoolBinding, the
-#              KVCachePool and the KVCacheBackend -- the last four with no generation predicate, so a
-#              status write on any of them wakes it and the Service comes back for a reason this case
-#              is not about. So all of them are sampled either side of the window, and the row says
-#              only what that sample supports: nothing else the controller watches moved.
+#              owns the replicas and the router objects, and watches the InstanceType, the
+#              KVCachePoolBinding, the KVCachePool, the KVCacheBackend and the replicas' Kueue
+#              Workloads -- most with no generation predicate, so a status write on any of them wakes
+#              it and the Service comes back for a reason this case is not about. So all of them are
+#              sampled either side of the window, and the row says only what that sample supports:
+#              nothing else the controller watches moved.
 #
 #              EVERY COMPARISON HERE IS ALSO ASKED WHAT IT RECORDS WHEN BOTH SIDES ARE EMPTY, because
 #              an absence and a quiet object read alike. With no replica Pod at all the quiescence
@@ -168,14 +169,24 @@ sample() {
 }
 
 # Everything this controller is woken by EXCEPT the Service under test, as
-# kind/name=resourceVersion. The controller Owns the replica Pods and the Service, and Watches the
-# InstanceType, the KVCachePoolBinding, the KVCachePool and the KVCacheBackend; its own spec is
-# filtered by a GenerationChangedPredicate and nothing here edits it, but it is sampled anyway so
-# the list needs no argument about that.
+# kind/name=resourceVersion. This list must match the Owns/Watches clauses of the ModelDeployment
+# controller's SetupWithManager one for one: a kind missing here is a wake-up the attribution cannot
+# see. The controller Owns the replica Pods, the Service and the router's Deployment, ConfigMap,
+# ServiceAccount, Role and RoleBinding, and Watches the KVCachePoolBinding, the InstanceType, the
+# KVCachePool, the KVCacheBackend and the replicas' Kueue Workloads; its own spec is filtered by a
+# GenerationChangedPredicate and nothing here edits it, but it is sampled anyway so the list needs no
+# argument about that. This deployment has no router, so the router kinds are expected to be empty on
+# both sides; they are sampled so that a router object appearing in the window is seen. Workloads are
+# sampled for the whole namespace, which can only disqualify the row more often, never pass it wrongly.
 watched_versions() {
   {
     sample pods -n "$NS" get pods -l "app.kubernetes.io/instance=${MD}" \
       -o jsonpath="{range .items[*]}pod/{.metadata.name}={.metadata.resourceVersion}{\"\\n\"}{end}"
+    sample routerobjects -n "$NS" get deployments,configmaps,serviceaccounts,roles,rolebindings \
+      -l "app.kubernetes.io/instance=${MD}" \
+      -o jsonpath="{range .items[*]}{.kind}/{.metadata.name}={.metadata.resourceVersion}{\"\\n\"}{end}"
+    sample workloads -n "$NS" get workloads.kueue.x-k8s.io \
+      -o jsonpath="{range .items[*]}workload/{.metadata.name}={.metadata.resourceVersion}{\"\\n\"}{end}"
     sample instancetype get instancetypes.worker.gpustack.ai "$IT" \
       -o jsonpath="instancetype/{.metadata.name}={.metadata.resourceVersion}{\"\\n\"}"
     sample modeldeployment -n "$NS" get modeldeployments.worker.gpustack.ai "$MD" \
@@ -405,7 +416,7 @@ elif [ "$attributable" != true ]; then
     "the precondition failed, so the row above passes unattributed: ${attribution_note}"
 elif [ "$before" = "$after" ]; then
   record PASS "no other object this controller watches changed in the window" \
-    "identical either side of the delete, so no Pod, InstanceType, Binding, pool or backend event could have driven the reconcile: ${after}"
+    "identical either side of the delete, so no Pod, router object, Workload, InstanceType, Binding, pool or backend event could have driven the reconcile: ${after}"
 else
   record SKIP "no other object this controller watches changed in the window" \
     "something moved, so the row above passes unattributed: before=[${before}] after=[${after}]"

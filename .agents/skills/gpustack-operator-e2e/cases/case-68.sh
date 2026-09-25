@@ -191,6 +191,11 @@ group_names() {
 # like a wait and behaves like a single sample.
 group_count_is() { [ "$(group_names "$1" | wc -l | tr -d ' ')" = "$2" ]; }
 admitted_count_is_not() { [ "$(admitted_count)" != "$1" ]; }
+role_count_is() { # role_count_is <md> <role> <n>
+  [ "$(k -n "$NS" get pods -l "app.kubernetes.io/instance=$1,app.kubernetes.io/component=$2" \
+    -o name 2>/dev/null | grep -c .)" = "$3" ]
+}
+md_admitted_is() { [ "$(deployment_admitted "$1")" = "$2" ]; }
 md_quota_reason_is() {
   [ "$(k -n "$NS" get modeldeployment "$1" \
     -o jsonpath='{.status.conditions[?(@.type=="QuotaReserved")].reason}' 2>/dev/null)" = "$2" ]
@@ -364,6 +369,7 @@ fi
 # ------------------------------------------------- Phase D (on the Phase A shape): blast radius.
 before_beta="$(role_uids "$MD" beta)"
 before_alpha="$(role_uids "$MD" alpha)"
+scaled=""
 if [ -z "$before_beta" ] || [ -z "$before_alpha" ]; then
   record SKIP "a scale leaves every living replica alone" "no replicas to compare; earlier phase failed"
 else
@@ -372,11 +378,22 @@ else
   # is a FROZEN field, so the identity rule refuses the edit. Measured before the field moved
   # onto the role: the refusal named the command path, and the scale below silently never
   # happened, which turned this row into a PASS that compared two unchanged samples.
+  #
+  # THE COMPARISON WAITS FOR THE SCALE TO HAPPEN. Comparing after a fixed sleep passes when the added
+  # replica never renders, since nothing then changed; so the row first requires alpha to have one
+  # replica more, and a refused edit or a scale that never renders is a FAIL with no comparison.
+  want_alpha="$(printf '%s\n' $before_alpha | grep -c . || true)"
   if ! k -n "$NS" patch modeldeployment "$MD" --type=json \
     -p '[{"op":"replace","path":"/spec/roles/0/replicas","value":2}]' >/dev/null 2>&1; then
     record FAIL "scale one role" "the replicas edit was refused; nothing below measured a scale"
+  elif ! wait_for "$SETTLE" role_count_is "$MD" alpha "$((want_alpha + 1))"; then
+    record FAIL "scale one role" \
+      "the edit was accepted, but alpha never reached $((want_alpha + 1)) replica(s) within ${SETTLE}s"
+  else
+    scaled=yes
   fi
-  sleep 20
+fi
+if [ -n "$before_beta" ] && [ -n "$before_alpha" ] && [ -n "$scaled" ]; then
   after_beta="$(role_uids "$MD" beta)"
   after_alpha="$(role_uids "$MD" alpha)"
 
@@ -393,7 +410,6 @@ else
   for e in $before_alpha; do
     case " $after_alpha " in *" $e "*) kept_alpha=$((kept_alpha + 1)) ;; esac
   done
-  want_alpha="$(printf '%s\n' $before_alpha | grep -c . || true)"
   if [ "$before_beta" = "$after_beta" ] && [ "$kept_alpha" = "$want_alpha" ]; then
     record PASS "a scale leaves every living replica alone" \
       "beta untouched, and all ${want_alpha} of alpha's own replicas kept their UIDs: only the added one is new"
@@ -520,12 +536,14 @@ fi
 
 # THE CONTROL. Without it the row above is true whether or not the joint check exists: both groups
 # being unplaceable would satisfy it, and so would an operator that admits nothing at all.
+# Counted over the control deployment's own Workloads: a namespace-wide count would also be satisfied
+# by the pair above admitting late, which is the exact thing this control has to tell apart.
 apply_deployment "$MD_CONTROL" "$(one_role)"
-if wait_for "$SETTLE" admitted_count_is_not 0; then
+if wait_for "$SETTLE" md_admitted_is "$MD_CONTROL" 1/1; then
   record PASS "control: the feasible role alone IS admitted" "the refusal above is the barrier's"
 else
   record FAIL "control: the feasible role alone IS admitted" \
-    "nothing is admitted even alone, so the row above says nothing about the barrier"
+    "${MD_CONTROL} is $(deployment_admitted "$MD_CONTROL") admitted even alone, so the row above says nothing about the barrier"
 fi
 k -n "$NS" delete modeldeployment "$MD_CONTROL" --ignore-not-found --wait=true >/dev/null 2>&1
 
