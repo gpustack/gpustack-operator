@@ -591,6 +591,51 @@ func (in ModelDeploymentStatus) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NodeModelStore) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.NodeModelStore"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NodeModelStoreCapacity) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.NodeModelStoreCapacity"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NodeModelStoreDownload) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.NodeModelStoreDownload"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NodeModelStoreHub) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.NodeModelStoreHub"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NodeModelStoreList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.NodeModelStoreList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NodeModelStoreModel) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.NodeModelStoreModel"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NodeModelStoreSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.NodeModelStoreSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NodeModelStoreStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.NodeModelStoreStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NodeModelStoreWatermarks) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.NodeModelStoreWatermarks"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in TopologySource) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.TopologySource"
 }

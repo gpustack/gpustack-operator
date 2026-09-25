@@ -1502,6 +1502,22 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStore"):
+		return &applyconfigurationworkerv1alpha1.NodeModelStoreApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreCapacity"):
+		return &applyconfigurationworkerv1alpha1.NodeModelStoreCapacityApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreDownload"):
+		return &applyconfigurationworkerv1alpha1.NodeModelStoreDownloadApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreHub"):
+		return &applyconfigurationworkerv1alpha1.NodeModelStoreHubApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreModel"):
+		return &applyconfigurationworkerv1alpha1.NodeModelStoreModelApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreSpec"):
+		return &applyconfigurationworkerv1alpha1.NodeModelStoreSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreStatus"):
+		return &applyconfigurationworkerv1alpha1.NodeModelStoreStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreWatermarks"):
+		return &applyconfigurationworkerv1alpha1.NodeModelStoreWatermarksApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("TopologySource"):
 		return &applyconfigurationworkerv1alpha1.TopologySourceApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("TopologySourceConfigMap"):

@@ -244,6 +244,24 @@ func (*ModelDeploymentSpec) ProtoMessage() {}
 
 func (*ModelDeploymentStatus) ProtoMessage() {}
 
+func (*NodeModelStore) ProtoMessage() {}
+
+func (*NodeModelStoreCapacity) ProtoMessage() {}
+
+func (*NodeModelStoreDownload) ProtoMessage() {}
+
+func (*NodeModelStoreHub) ProtoMessage() {}
+
+func (*NodeModelStoreList) ProtoMessage() {}
+
+func (*NodeModelStoreModel) ProtoMessage() {}
+
+func (*NodeModelStoreSpec) ProtoMessage() {}
+
+func (*NodeModelStoreStatus) ProtoMessage() {}
+
+func (*NodeModelStoreWatermarks) ProtoMessage() {}
+
 func (*TopologySource) ProtoMessage() {}
 
 func (*TopologySourceConfigMap) ProtoMessage() {}

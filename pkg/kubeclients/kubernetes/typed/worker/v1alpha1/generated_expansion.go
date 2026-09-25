@@ -23,4 +23,6 @@ type ModelArtifactExpansion interface{}
 
 type ModelDeploymentExpansion interface{}
 
+type NodeModelStoreExpansion interface{}
+
 type TopologySourceExpansion interface{}

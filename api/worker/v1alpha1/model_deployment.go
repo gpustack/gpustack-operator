@@ -939,10 +939,12 @@ type ModelDeploymentModelStatus struct {
 	ManifestDigest string `json:"manifestDigest,omitempty" protobuf:"bytes,3,opt,name=manifestDigest"`
 
 	// Delivery is how the weights reach the engine: "Pvc", the claim mounted read-only at a fixed
-	// path, or "Engine", the engine downloading the pinned commit itself.
+	// path; "Engine", the engine downloading the pinned commit itself; or "Node", the node's
+	// model-manager plugin materializing the verified files and mounting them read-only at the same
+	// fixed path.
 	//
 	// +required
-	// +k8s:validation:enum=["Pvc","Engine"]
+	// +k8s:validation:enum=["Pvc","Engine","Node"]
 	Delivery ModelDeploymentModelDelivery `json:"delivery" protobuf:"bytes,4,name=delivery,casttype=ModelDeploymentModelDelivery"`
 }
 
@@ -956,6 +958,9 @@ const (
 	// ModelDeploymentModelDeliveryEngine has the engine download a hub artifact's resolved commit
 	// into a size-limited cache volume, with the artifact's token from its Secret.
 	ModelDeploymentModelDeliveryEngine ModelDeploymentModelDelivery = "Engine"
+	// ModelDeploymentModelDeliveryNode has the node's model-manager plugin materialize a hub
+	// artifact's verified files into the node's cache and mount them read-only.
+	ModelDeploymentModelDeliveryNode ModelDeploymentModelDelivery = "Node"
 )
 
 // ModelDeploymentRoleStatus is one role's observed readiness.

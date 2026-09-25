@@ -25,6 +25,7 @@ type WorkerV1alpha1Interface interface {
 	KVCachePoolBindingsGetter
 	ModelArtifactsGetter
 	ModelDeploymentsGetter
+	NodeModelStoresGetter
 	TopologySourcesGetter
 }
 
@@ -63,6 +64,10 @@ func (c *WorkerV1alpha1Client) ModelArtifacts(namespace string) ModelArtifactInt
 
 func (c *WorkerV1alpha1Client) ModelDeployments(namespace string) ModelDeploymentInterface {
 	return newModelDeployments(c, namespace)
+}
+
+func (c *WorkerV1alpha1Client) NodeModelStores() NodeModelStoreInterface {
+	return newNodeModelStores(c)
 }
 
 func (c *WorkerV1alpha1Client) TopologySources() TopologySourceInterface {

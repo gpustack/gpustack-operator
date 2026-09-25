@@ -9,6 +9,19 @@ package v1alpha1
 type ModelArtifactSpecApplyConfiguration struct {
 	// Source is where the weights come from.
 	Source *ModelArtifactSourceApplyConfiguration `json:"source,omitempty"`
+	// AllowPatterns and IgnorePatterns select the files of a hub source that make up the artifact,
+	// with the semantics of huggingface_hub's allow_patterns and ignore_patterns: Python's
+	// fnmatch.fnmatchcase, where "*" and "?" cross "/"; a pattern ending in "/" is the directory's
+	// contents; no allow pattern keeps every file; an ignore pattern wins over an allow pattern.
+	//
+	// The selection happens before the manifest is built, so the digest, file count and size
+	// describe the selected files, while the patterns themselves never enter the digest: two
+	// artifacts selecting the same files share one digest, and an artifact with no pattern has the
+	// digest of the whole commit. Only node delivery can honor a selection; an engine that downloads
+	// the weights itself chooses its own files. A claim source takes none, webhook-enforced, and
+	// each pattern is 1 to 256 characters without a control character.
+	AllowPatterns  []string `json:"allowPatterns,omitempty"`
+	IgnorePatterns []string `json:"ignorePatterns,omitempty"`
 }
 
 // ModelArtifactSpecApplyConfiguration constructs a declarative configuration of the ModelArtifactSpec type for use with
@@ -22,5 +35,25 @@ func ModelArtifactSpec() *ModelArtifactSpecApplyConfiguration {
 // If called multiple times, the Source field is set to the value of the last call.
 func (b *ModelArtifactSpecApplyConfiguration) WithSource(value *ModelArtifactSourceApplyConfiguration) *ModelArtifactSpecApplyConfiguration {
 	b.Source = value
+	return b
+}
+
+// WithAllowPatterns adds the given value to the AllowPatterns field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the AllowPatterns field.
+func (b *ModelArtifactSpecApplyConfiguration) WithAllowPatterns(values ...string) *ModelArtifactSpecApplyConfiguration {
+	for i := range values {
+		b.AllowPatterns = append(b.AllowPatterns, values[i])
+	}
+	return b
+}
+
+// WithIgnorePatterns adds the given value to the IgnorePatterns field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the IgnorePatterns field.
+func (b *ModelArtifactSpecApplyConfiguration) WithIgnorePatterns(values ...string) *ModelArtifactSpecApplyConfiguration {
+	for i := range values {
+		b.IgnorePatterns = append(b.IgnorePatterns, values[i])
+	}
 	return b
 }

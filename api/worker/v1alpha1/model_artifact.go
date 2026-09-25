@@ -47,6 +47,28 @@ type ModelArtifactSpec struct {
 	//
 	// +required
 	Source ModelArtifactSource `json:"source" protobuf:"bytes,1,name=source"`
+
+	// AllowPatterns and IgnorePatterns select the files of a hub source that make up the artifact,
+	// with the semantics of huggingface_hub's allow_patterns and ignore_patterns: Python's
+	// fnmatch.fnmatchcase, where "*" and "?" cross "/"; a pattern ending in "/" is the directory's
+	// contents; no allow pattern keeps every file; an ignore pattern wins over an allow pattern.
+	//
+	// The selection happens before the manifest is built, so the digest, file count and size
+	// describe the selected files, while the patterns themselves never enter the digest: two
+	// artifacts selecting the same files share one digest, and an artifact with no pattern has the
+	// digest of the whole commit. Only node delivery can honor a selection; an engine that downloads
+	// the weights itself chooses its own files. A claim source takes none, webhook-enforced, and
+	// each pattern is 1 to 256 characters without a control character.
+	//
+	// +optional
+	// +listType=atomic
+	// +k8s:validation:maxItems=32
+	AllowPatterns []string `json:"allowPatterns,omitempty" protobuf:"bytes,2,rep,name=allowPatterns"`
+
+	// +optional
+	// +listType=atomic
+	// +k8s:validation:maxItems=32
+	IgnorePatterns []string `json:"ignorePatterns,omitempty" protobuf:"bytes,3,rep,name=ignorePatterns"`
 }
 
 // ModelArtifactSource is a tagged union: exactly one member is set, webhook-enforced.

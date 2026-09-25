@@ -29,6 +29,8 @@ type Interface interface {
 	ModelArtifacts() ModelArtifactInformer
 	// ModelDeployments returns a ModelDeploymentInformer.
 	ModelDeployments() ModelDeploymentInformer
+	// NodeModelStores returns a NodeModelStoreInformer.
+	NodeModelStores() NodeModelStoreInformer
 	// TopologySources returns a TopologySourceInformer.
 	TopologySources() TopologySourceInformer
 }
@@ -82,6 +84,11 @@ func (v *version) ModelArtifacts() ModelArtifactInformer {
 // ModelDeployments returns a ModelDeploymentInformer.
 func (v *version) ModelDeployments() ModelDeploymentInformer {
 	return &modelDeploymentInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// NodeModelStores returns a NodeModelStoreInformer.
+func (v *version) NodeModelStores() NodeModelStoreInformer {
+	return &nodeModelStoreInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
 // TopologySources returns a TopologySourceInformer.
