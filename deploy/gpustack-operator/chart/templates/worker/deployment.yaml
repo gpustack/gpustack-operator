@@ -82,6 +82,8 @@ spec:
             {{- if .Values.global.manufacturers }}
             - --manufacturer={{ keys .Values.global.manufacturers | sortAlpha | join "," }}
             {{- end }}
+            # The only identity whose NodeModelStore status writes the worker's webhook admits.
+            - --model-manager-service-account={{ include "gpustack-operator.modelManager.fullname" . }}
             {{- with .Values.worker.disableApplications }}
             # One flag carrying the whole list: the flag accumulates across occurrences, so a
             # second one could only ever disable more.
@@ -132,6 +134,11 @@ spec:
             # the two must agree on what a finished Pod still holds.
             - name: GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS
               value: {{ .Values.ledgerReleaseTerminatedPods | quote }}
+            {{- if .Values.modelManager.enabled }}
+            # Seeds the delivery Setting where the cluster has none yet; a stored value always wins.
+            - name: GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE
+              value: Node
+            {{- end }}
             # Propagate each manufacturer's identity, so the worker reads the same facts the
             # chart states: its NodeFeatureRule, its resource accounting and the RuntimeClass
             # it attaches to a workload all come from these.

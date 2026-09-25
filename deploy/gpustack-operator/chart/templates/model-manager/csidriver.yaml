@@ -1,0 +1,24 @@
+{{- if .Values.modelManager.enabled }}
+{{- /*
+  A node-only driver serving inline ephemeral volumes. podInfoOnMount hands the plugin the Pod's
+  namespace, written by kubelet over whatever the Pod's own volume attributes say, which is what
+  mount authorization is judged in. fsGroupPolicy None, because the content is read-only and must
+  not be chowned per Pod.
+*/}}
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: model.csi.gpustack.ai
+  labels:
+    {{- include "gpustack-operator.modelManager.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  attachRequired: false
+  podInfoOnMount: true
+  volumeLifecycleModes:
+    - Ephemeral
+  fsGroupPolicy: None
+{{- end }}

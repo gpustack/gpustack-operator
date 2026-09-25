@@ -278,7 +278,7 @@ worker:
   # [Installation Modes](https://github.com/gpustack/gpustack-operator/blob/main/docs/architecture/installation-modes.md).
   # The value is templated rather than appended through `extraArgs` because the flag accumulates across
   # occurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,
-  # `node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`.
+  # `node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`, `model-manager`.
   disableApplications:
     - "*"
   podDisruptionBudget:
@@ -428,6 +428,57 @@ deviceManager:
   extraArgs: []
   # -- Extra environment variables for the device-manager, as a name/value map.
   env: {}
+
+modelManager:
+  # -- Deploy the model-manager: the CSI node plugin that delivers a Hugging Face ModelArtifact's
+  # weights from each node's cache, and its CSIDriver `model.csi.gpustack.ai`.
+  #
+  # When enabled, the worker seeds the `model-artifact-delivery-mode` Setting with `Node`. A seed
+  # fills only a Setting the cluster does not have yet, so a later upgrade never overrides an
+  # administrator's choice. Upgrading from a version without that Setting rolls every
+  # ModelDeployment on a Hugging Face artifact once, to node delivery; set the Setting to `Engine`
+  # before upgrading, or upgrade with this disabled, to avoid it.
+  enabled: true
+  # -- The node's model cache directory, a hostPath. Mount a dedicated filesystem here: on one
+  # shared with kubelet the plugin caps its high watermark below kubelet's eviction and image
+  # collection thresholds. Changing it points the plugin at an empty cache; nothing is migrated or
+  # removed from the old path.
+  rootPath: /var/lib/gpustack/models
+  # -- kubelet's root directory, the convention the bundled CSI drivers follow. It is mounted with
+  # Bidirectional propagation so a bind mount the plugin makes reaches the Pod.
+  kubeletDir: /var/lib/kubelet
+  # -- Secure serving port of the model-manager container: metrics, readiness and liveness.
+  securePort: 32444
+  # -- Per-model-manager image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall back
+  # to the chart-level `image`.
+  image: {}
+  registrar:
+    # -- The node-driver-registrar sidecar's image: the mirror the bundled NFS and S3 CSI drivers
+    # pin, rewritten by the `global` image settings like every other image.
+    image:
+      repository: docker.io/gpustack/mirrored-csi-node-driver-registrar
+      tag: v2.17.0
+  # -- Resource requests and limits for each model-manager container.
+  resources:
+    limits:
+      cpu: "4"
+      memory: 2Gi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  # -- Node selector for the model-manager DaemonSet, merged over `global.nodeSelector`.
+  nodeSelector: {}
+  # @schema
+  # type: array
+  # items:
+  #   type: object
+  # @schema
+  # -- Tolerations for the model-manager DaemonSet. Defaults tolerate every taint, so every node
+  # a workload may land on can mount its weights.
+  tolerations:
+    - operator: "Exists"
+  # -- Extra command-line arguments appended to the model-manager container args.
+  extraArgs: []
 
 # -- Migration hook Jobs. A pre-install/pre-upgrade Job reaps a Kueue left stranded by an
 # interrupted teardown, and on an upgrade applies the vendored subcharts' CRDs, which Helm
