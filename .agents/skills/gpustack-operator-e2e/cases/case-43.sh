@@ -56,6 +56,8 @@
 #
 # Expected:    - the master reaches Ready with no pool bound, and its init container completed;
 #              - both Bindings Ready, the pool's usedBy naming both, sorted;
+#              - the pool, whose two ceilings add up to more than its total, reports QuotaWithinTotal
+#                False with reason Oversubscribed while its phase stays Ready;
 #              - each Binding's effectiveQuota is its share of the master's allocatable capacity;
 #              - the backend's own usedBy carries the pool's claim with an EMPTY namespace, exactly
 #                once after a second converging pass;
@@ -423,6 +425,35 @@ if [ "$used_by" = "${NS_A}/bind-a ${NS_B}/bind-b " ]; then
   record PASS "the pool lists both bindings" "sorted: ${used_by% }"
 else
   record FAIL "the pool lists both bindings" "usedBy is '${used_by:-<empty>}'"
+fi
+
+# THE TWO CEILINGS ADD UP TO 8/6 OF THE TOTAL, so the pool is oversubscribed by construction, and that
+# is a report rather than a refusal: both bindings were admitted and are Ready above, and the pool
+# says so on its own condition while its phase stays Ready. Only the reason is compared, not the
+# figures in the message: the message renders quantities in their canonical form, so a literal
+# total would not survive the round trip.
+if wait_for kvcachepools.worker.gpustack.ai "$POOL" \
+  '{.status.conditions[?(@.type=="QuotaWithinTotal")].status}' False 120 >/dev/null; then
+  qwt_reason="$(kubectl get kvcachepools.worker.gpustack.ai "$POOL" \
+    -o jsonpath='{.status.conditions[?(@.type=="QuotaWithinTotal")].reason}' 2>/dev/null)"
+  if [ "$qwt_reason" = "Oversubscribed" ]; then
+    record PASS "the oversubscribed pool reports QuotaWithinTotal False" \
+      "reason=Oversubscribed with ceilings ${CEIL_A_MI}Mi + ${CEIL_B_MI}Mi over a ${ALLOC_MI}Mi total"
+  else
+    record FAIL "the oversubscribed pool reports QuotaWithinTotal False" \
+      "status is False but reason is '${qwt_reason:-<absent>}'; wanted Oversubscribed"
+  fi
+else
+  record FAIL "the oversubscribed pool reports QuotaWithinTotal False" \
+    "QuotaWithinTotal did not reach False in 120s with ceilings ${CEIL_A_MI}Mi + ${CEIL_B_MI}Mi over a ${ALLOC_MI}Mi total"
+fi
+pool_phase="$(kubectl get kvcachepools.worker.gpustack.ai "$POOL" -o jsonpath='{.status.phase}' 2>/dev/null)"
+if [ "$pool_phase" = "Ready" ]; then
+  record PASS "the oversubscribed pool still reads Ready" \
+    "phase is Ready: oversubscription is served in proportion, and is not a fault"
+else
+  record FAIL "the oversubscribed pool still reads Ready" \
+    "phase is '${pool_phase:-<absent>}' while the pool is oversubscribed; that is a report, not a fault"
 fi
 
 echo "== 3. the ceiling is a request; the grant falls in proportion =="

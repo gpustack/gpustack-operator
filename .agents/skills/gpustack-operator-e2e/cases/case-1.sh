@@ -14,8 +14,9 @@
 #              ("connect: connection refused"), and the reconciler then retries on its own
 #              backoff — measured at ~40s. A single-shot read right after a deploy reports that
 #              as a chain that never materialized.
-# Inputs:      None injected — reads live cluster state only (operator-core health delegated
-#              to assert-core.sh). Nothing mocked.
+# Inputs:      None injected — reads live cluster state (operator-core health delegated to
+#              assert-core.sh), plus one server-side dry-run CREATE of an InstanceType, which
+#              persists nothing. Nothing mocked.
 # Expected:    - assert-core.sh passes (rollout / running revision == HEAD / apiservices /
 #                CRDs / the four bundled applications in the operator's own release);
 #              - NFD stamps feature.gpustack.ai/cpu-* + acceleratable labels;
@@ -25,6 +26,10 @@
 #                under the "gpustack-" prefix;
 #              - the general InstanceType's spec.os/spec.arch equal its ClusterQueue's
 #                kubernetes.io/os|arch schedule labels (read from labels, never blanked);
+#              - the general InstanceType carries feature.gpustack.ai/acceleratable=false and a
+#                schedule.gpustack.ai/queue-entrance label equal to its status.entrance, both of
+#                which only the InstanceType Default webhook writes;
+#              - a CREATE of an InstanceType with no unit spec is refused by the validating webhook;
 #              - zero Cohort objects exist.
 # Cleanup:     None — read-only, no trap.
 set -uo pipefail
@@ -107,6 +112,47 @@ if [ "${osarch%%|*}" = "PASS" ]; then
 else
   record FAIL "InstanceType materializes spec.os/arch" "${osarch#*|} — spec.os/arch must equal the CQ kubernetes.io/os|arch labels, not be blanked"
 fi
+
+# The InstanceType Default webhook stamps, on CREATE, the acceleratable boolean and the queue-entrance
+# label naming the type's LocalQueue. The entrance label has no other writer
+# (webhooks/worker/instance_type.go), so finding it on the derived general type proves that webhook is
+# installed and ran; its value must equal the type's own status.entrance.
+stampedIT=$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
+import json,sys
+for it in json.load(sys.stdin).get('items',[]):
+    s=it.get('spec',{}); st=it.get('status',{}) or {}; l=it.get('metadata',{}).get('labels',{}) or {}; n=it['metadata']['name']
+    if not n.startswith('gpustack-') or s.get('acceleratable'): continue
+    acc=l.get('feature.gpustack.ai/acceleratable',''); ent=l.get('schedule.gpustack.ai/queue-entrance','')
+    ok=acc=='false' and ent!='' and ent==st.get('entrance','')
+    print(('PASS' if ok else 'FAIL')+'|'+'%s acceleratable=%s queue-entrance=%s status.entrance=%s'%(n,acc or '<none>',ent or '<none>',st.get('entrance') or '<none>'))
+    break
+else:
+    print('FAIL|no general InstanceType found')
+" 2>/dev/null)
+if [ "${stampedIT%%|*}" = "PASS" ]; then
+  record PASS "InstanceType Default webhook stamped its labels" "${stampedIT#*|}"
+else
+  record FAIL "InstanceType Default webhook stamped its labels" "${stampedIT#*|} — the Default webhook must stamp acceleratable=false and a queue-entrance label equal to status.entrance"
+fi
+
+# The validating webhook refuses an InstanceType with no unit spec on CREATE. A server-side dry run
+# against the v1alpha1 CRD persists nothing; the unversioned name would resolve to the aggregated v1
+# API, which answers a dry run without running the CRD's admission.
+errUnit=$(kubectl apply --dry-run=server -f - 2>&1 <<'EOF'
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: InstanceType
+metadata:
+  name: e2e-case1-nounit
+spec:
+  generalGroup: e2e1probe
+  acceleratable: false
+  os: linux
+  arch: amd64
+EOF
+)
+echo "$errUnit" | grep -qiE 'unitResources|localStorage' \
+  && record PASS "CREATE rejects an InstanceType with no unit spec" "validating webhook: $(echo "$errUnit" | tr '\n' ' ' | cut -c1-90)" \
+  || record FAIL "CREATE rejects an InstanceType with no unit spec" "not refused on the unit spec: $(echo "$errUnit" | tr '\n' ' ' | cut -c1-90)"
 
 # Zero Cohort objects — Cohort was removed entirely; one isolated CQ per pool.
 cohorts=$(kubectl get cohorts.kueue.x-k8s.io -A --no-headers 2>/dev/null | grep -c . || true)

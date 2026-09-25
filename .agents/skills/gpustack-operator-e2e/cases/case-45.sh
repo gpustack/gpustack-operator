@@ -61,6 +61,11 @@
 # Inputs:      All real, nothing mocked. Server-side dry-run (`--dry-run=server`) runs the schema
 #              and the webhook and persists nothing; the one row that needs a controller verdict
 #              creates a ModelDeployment naming a Binding that does not exist and deletes it again.
+#              Before it is deleted that stored object is edited three times, because a frozen field
+#              is a rule about an UPDATE and no dry-run create reaches it: `size` and `model` must be
+#              refused (the model refusal must name spec.model, state that the value describes a
+#              different deployment, and say nothing of conflict, concurrency, locks or races), and
+#              `replicas` must be accepted and read back from storage.
 #
 # Deferred:    The serving half of this case — `replicas: 2` reaching `status.roles[0].ready == 2`
 #              and `status.endpoint` answering an inference request — is NOT here. It needs the
@@ -478,6 +483,40 @@ if [ "$nobind_ready" = yes ]; then
       "wanted a refusal naming roles[0].size, got: $(echo "$size_out" | cut -c1-160)"
   fi
 
+  # THE MODEL SAYS WHICH DEPLOYMENT THIS IS, so it is frozen too, and its refusal is read for its
+  # wording. An earlier framing of this freeze was "shrink the surface two writers can disagree on";
+  # a message carrying it sends an operator looking for a locking problem that does not exist.
+  model_out="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai case45-nobind --type=merge \
+    -p '{"spec":{"model":{"name":"case45/another-model"}}}' 2>&1)"
+  model_rc=$?
+  model_out="$(echo "$model_out" | tr '\n' ' ')"
+  if [ "$model_rc" -ne 0 ] && [ -z "${model_out##*spec.model*}" ]; then
+    record PASS "an edit to the model is refused on a live object, naming the field" "refused at spec.model"
+  else
+    record FAIL "an edit to the model is refused on a live object, naming the field" \
+      "rc=${model_rc}, wanted a refusal naming spec.model, got: $(echo "$model_out" | cut -c1-160)"
+  fi
+  if [ "$model_rc" -eq 0 ]; then
+    # No refusal to read: these two rows are about its wording, so they are unmeasured, not failed.
+    record SKIP "the model refusal states the rule" "the edit was accepted; there is no refusal to read"
+    record SKIP "the model refusal states no mechanism" "the edit was accepted; there is no refusal to read"
+  else
+    if [ -z "${model_out##*describes a different deployment*}" ]; then
+      record PASS "the model refusal states the rule" "a different value describes a different deployment"
+    else
+      record FAIL "the model refusal states the rule" "$(echo "$model_out" | cut -c1-160)"
+    fi
+    wrong=""
+    for word in conflict concurrent lock race; do
+      case "$model_out" in *"$word"*) wrong="$wrong $word" ;; esac
+    done
+    if [ -z "$wrong" ]; then
+      record PASS "the model refusal states no mechanism" "none of conflict/concurrent/lock/race"
+    else
+      record FAIL "the model refusal states no mechanism" "carries:${wrong}"
+    fi
+  fi
+
   replicas_out="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai case45-nobind --type=json \
     -p '[{"op":"replace","path":"/spec/roles/0/replicas","value":2}]' 2>&1 | tr '\n' ' ')"
   if [ -n "$replicas_out" ] && [ -z "${replicas_out##*patched*}" ]; then
@@ -487,8 +526,17 @@ if [ "$nobind_ready" = yes ]; then
     record FAIL "the control: an edit to a role's replicas is accepted" \
       "wanted the patch to be accepted, got: $(echo "$replicas_out" | cut -c1-160)"
   fi
+  stored_replicas="$(kubectl -n "$NS" get modeldeployments.worker.gpustack.ai case45-nobind \
+    -o jsonpath='{.spec.roles[0].replicas}' 2>/dev/null)"
+  if [ "$stored_replicas" = 2 ]; then
+    record PASS "the accepted replicas edit reached storage" "replicas=${stored_replicas}"
+  else
+    record FAIL "the accepted replicas edit reached storage" "replicas=[${stored_replicas:-none}]"
+  fi
 else
   record SKIP "an edit to a role's size is refused, naming the field" \
+    "the subject deployment was never created, so there is no stored object to edit"
+  record SKIP "an edit to the model is refused on a live object, naming the field" \
     "the subject deployment was never created, so there is no stored object to edit"
 fi
 
