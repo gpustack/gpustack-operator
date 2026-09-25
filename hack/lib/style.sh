@@ -8,6 +8,7 @@
 #    GOLANGCI_LINT_VERSION  -  The Golangci-lint version, default is v2.11.4.
 #        COMMITSAR_VERSION  -  The Commitsar version, default is v1.0.2.
 #         GOIMPORT_VERSION  -  The Goimports version, default is master.
+#       SHELLCHECK_VERSION  -  The Shellcheck version, default is v0.10.0.
 
 goimports_reviser_version=${GOIMPORT_REVISER_VERSION:-"v3.12.6"}
 golangci_lint_version=${GOLANGCI_LINT_VERSION:-"v2.11.4"}
@@ -16,6 +17,12 @@ commitsar_version=${COMMITSAR_VERSION:-"v1.0.3"}
 # generators run, so its output is inside the baseline the API drift gate compares
 # against and a floating specifier would move that baseline. Bump deliberately.
 goimports_version=${GOIMPORT_VERSION:-"v0.49.0"}
+# LIMITED: pinned for the same class of reason. The .agents shell gate compares a change's
+# findings against the base version of the same file, so the analyzer version is part of the
+# comparison's fairness: a floating one re-derives the two sides differently on every machine.
+# hack/check-agents-shell.sh resolves this pin through these functions, and
+# hack/check-agents-shell-selftest.sh asserts the two literals agree. Bump both together.
+shellcheck_version=${SHELLCHECK_VERSION:-"v0.10.0"}
 
 function gpustack::lint::golangci_lint::install() {
   curl --retry 3 --retry-all-errors --retry-delay 3 \
@@ -133,6 +140,68 @@ function gpustack::lint::run() {
   )
   gpustack::log::debug "golangci-lint run ${golangci_lint_opts[*]} $*"
   $(gpustack::lint::golangci_lint::bin) run "${golangci_lint_opts[@]}" "$@"
+}
+
+function gpustack::lint::shellcheck::install() {
+  local os arch
+  os="$(gpustack::util::get_raw_os)"
+  arch="$(gpustack::util::get_raw_arch)"
+  # Shellcheck's release assets name the architectures the way uname does, not the way Helm's
+  # helpers do, so the two spellings are mapped here rather than upstream of them.
+  case "${arch}" in
+  arm64) arch="aarch64" ;;
+  amd64) arch="x86_64" ;;
+  esac
+  curl --retry 3 --retry-all-errors --retry-delay 3 \
+    -o /tmp/shellcheck.tar.xz \
+    -sSfL "https://github.com/koalaman/shellcheck/releases/download/${shellcheck_version}/shellcheck-${shellcheck_version}.${os}.${arch}.tar.xz"
+  mkdir -p "${ROOT_DIR}/.sbin"
+  # The archive names its members "shellcheck-<version>/..." only; the os and arch of the build
+  # live in the FILE name, not in any directory inside.
+  tar -xf /tmp/shellcheck.tar.xz \
+    --directory "${ROOT_DIR}/.sbin" \
+    --strip-components 1 \
+    --no-same-owner \
+    "shellcheck-${shellcheck_version}/shellcheck"
+  chmod a+x "${ROOT_DIR}/.sbin/shellcheck"
+}
+
+function gpustack::lint::shellcheck::validate() {
+  # shellcheck disable=SC2046
+  if [[ -n "$(command -v $(gpustack::lint::shellcheck::bin))" ]]; then
+    if [[ $($(gpustack::lint::shellcheck::bin) --version 2>&1 | sed -n 's/^version: //p' | head -n 1) == "${shellcheck_version#v}" ]]; then
+      return 0
+    fi
+  fi
+
+  gpustack::log::info "installing shellcheck ${shellcheck_version}"
+  if gpustack::lint::shellcheck::install; then
+    gpustack::log::info "shellcheck $($(gpustack::lint::shellcheck::bin) --version 2>&1 | sed -n 's/^version: //p' | head -n 1)"
+    return 0
+  fi
+  gpustack::log::error "no shellcheck available"
+  return 1
+}
+
+function gpustack::lint::shellcheck::bin() {
+  # Unlike the helm and commitsar bin() helpers, this one answers an absolute path or a bare
+  # name that is KNOWN to resolve, never a bare name on faith: the .agents shell gate and its
+  # self-test put this value into SHELLCHECK_BIN, and the consumer's "[ -x ${SHELLCHECK_BIN} ]"
+  # is answered relative to the working directory, where a bare "shellcheck" names nothing — so
+  # a machine with the pinned version on PATH but an empty .sbin would have every fixture
+  # reported as could-not-run. When nothing resolves at all, the bare name stands: validate()
+  # then installs into .sbin and bin() answers absolutely on the next call.
+  if [[ -f "${ROOT_DIR}/.sbin/shellcheck" ]]; then
+    echo -n "${ROOT_DIR}/.sbin/shellcheck"
+    return 0
+  fi
+  local resolved
+  resolved="$(command -v shellcheck 2>/dev/null || true)"
+  if [[ -n "${resolved}" ]]; then
+    echo -n "${resolved}"
+    return 0
+  fi
+  echo -n "shellcheck"
 }
 
 function gpustack::commit::commitsar::install() {
