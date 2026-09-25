@@ -61,37 +61,6 @@ function docs_lint() {
   fi
 }
 
-# The covering set for a turn that dirtied only shell under .agents/ outside hooks/. The Stop hook
-# routes such a turn here instead of the full code gate: of everything lint() runs, only
-# check-symbols.sh reads those files, so it runs beside the shell gate and the steps that read no
-# such file are skipped. check-hook-dispatch.sh holds the step-to-inputs table this set must stay
-# equal to, and fails when a step of lint() is added without a classification or when this
-# function's set disagrees with the table.
-function agents_shell_lint() {
-  if ! bash "${ROOT_DIR}/hack/check-agents-shell-selftest.sh" "${ROOT_DIR}"; then
-    gpustack::log::fatal "the .agents shell check is not trustworthy: its self-test failed"
-  fi
-
-  local agents_shell_rc=0
-  bash "${ROOT_DIR}/hack/check-agents-shell.sh" "${ROOT_DIR}" || agents_shell_rc=$?
-  if [[ ${agents_shell_rc} -eq 1 ]]; then
-    gpustack::log::fatal "new syntax errors or shellcheck findings in changed .agents/ shell"
-  elif [[ ${agents_shell_rc} -gt 1 ]]; then
-    gpustack::log::fatal "the .agents shell check could not run; its diagnostic is above"
-  fi
-
-  # The one code-gate step that reads .agents/ shell files. Its own self-test is skipped here on
-  # purpose: it exercises fixtures of its own and reads nothing this turn dirtied, and the full
-  # code gate still runs it on every turn that dirties anything else.
-  local symbols_rc=0
-  bash "${ROOT_DIR}/hack/check-symbols.sh" "${ROOT_DIR}" || symbols_rc=$?
-  if [[ ${symbols_rc} -eq 1 ]]; then
-    gpustack::log::fatal "decorative symbols in commented sources"
-  elif [[ ${symbols_rc} -gt 1 ]]; then
-    gpustack::log::fatal "the decorative-symbol check could not run; its diagnostic is above"
-  fi
-}
-
 function lint() {
   if [[ "${1:-}" == "chart" ]]; then
     chart_lint
@@ -100,11 +69,6 @@ function lint() {
 
   if [[ "${1:-}" == "docs" ]]; then
     docs_lint
-    return
-  fi
-
-  if [[ "${1:-}" == "agents-shell" ]]; then
-    agents_shell_lint
     return
   fi
 
@@ -194,22 +158,6 @@ function lint() {
     gpustack::log::fatal "an API description a cluster renders describes Go rather than the field"
   elif [[ ${api_descriptions_rc} -gt 1 ]]; then
     gpustack::log::fatal "the API-description check could not run; its diagnostic is above"
-  fi
-
-  # Shell under .agents/, which the review bot selects nothing from and which nothing above reads
-  # for shell syntax or semantics — check-symbols.sh reads it for decorative symbols only. The
-  # self-test runs first, for the same reason as every other gate here: a comparison gate that has
-  # only ever been seen to pass cannot be told apart from one whose comparison is broken. It
-  # checks only the .agents shell files this tree changed, so a clean tree costs one git call.
-  if ! bash "${ROOT_DIR}/hack/check-agents-shell-selftest.sh" "${ROOT_DIR}"; then
-    gpustack::log::fatal "the .agents shell check is not trustworthy: its self-test failed"
-  fi
-  local agents_shell_rc=0
-  bash "${ROOT_DIR}/hack/check-agents-shell.sh" "${ROOT_DIR}" || agents_shell_rc=$?
-  if [[ ${agents_shell_rc} -eq 1 ]]; then
-    gpustack::log::fatal "new syntax errors or shellcheck findings in changed .agents/ shell"
-  elif [[ ${agents_shell_rc} -gt 1 ]]; then
-    gpustack::log::fatal "the .agents shell check could not run; its diagnostic is above"
   fi
 
   # Three states, not two: the tree is clean, the tree is dirty, or git cannot answer

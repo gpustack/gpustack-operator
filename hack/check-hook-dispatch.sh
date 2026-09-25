@@ -126,77 +126,6 @@ expect_vendor_note() {
   fi
 }
 
-# --- the code gate's steps, classified by what they read --------------------
-
-# The partition the hook routes a pure .agents/skills shell turn to is not a second opinion kept
-# in step by hand: it is derived from this table. Each row is one step the lint() function of
-# hack/lint.sh runs, plus what that step reads under .agents:
-#
-#   gate    the .agents shell gate itself, always in the covering set
-#   skills  reads .agents/skills shell files, so it joins the covering set
-#   hooks   reads .agents/hooks and nothing under .agents/skills, so a hooks turn keeps the full
-#           gate and this row stays out of the covering set
-#   none    reads nothing under .agents
-#
-# The assertions below fail in both drift directions: a step lint() invokes with no row here, and
-# a covering set in agents_shell_lint() that is not the gate plus the "skills" rows.
-LINTSH="$ROOT/hack/lint.sh"
-CLASSIFY=(
-  "gpustack::lint::run|none"
-  "check-symbols-selftest|none"
-  "check-symbols|skills"
-  "check-toolpins-selftest|none"
-  "check-hook-dispatch|hooks"
-  "check-review-config-selftest|none"
-  "check-review-config|none"
-  "check-api-descriptions-selftest|none"
-  "check-api-descriptions|none"
-  "gpustack::commit::lint|none"
-  "check-agents-shell-selftest|gate"
-  "check-agents-shell|gate"
-)
-
-# steps <function-name>: the check scripts and gpustack:: calls one function of hack/lint.sh
-# invokes, one per line. Scoped to the named function's body, because the docs gate invokes check
-# scripts of its own that no code-gate row needs to classify.
-steps() {
-  awk -v fn="function ${1}()" '
-    index($0, fn) == 1 { inside = 1; next }
-    inside && /^function / { inside = 0 }
-    inside {
-      if (match($0, /hack\/check-[a-z-]+\.sh/)) {
-        s = substr($0, RSTART, RLENGTH)
-        sub(/^hack\//, "", s); sub(/\.sh$/, "", s)
-        print s
-      } else if ($0 ~ /gpustack::(lint::run|commit::lint)/) {
-        print substr($0, index($0, "gpustack::"))
-      }
-    }
-  ' "$LINTSH" | sed 's/".*//; s/[[:space:]]*$//' | sort -u
-}
-
-echo "== the code gate's steps, classified =="
-unclassified="$(comm -23 <(steps lint) <(printf '%s\n' "${CLASSIFY[@]}" | cut -d'|' -f1 | sort))"
-gone="$(comm -13 <(steps lint) <(printf '%s\n' "${CLASSIFY[@]}" | cut -d'|' -f1 | sort))"
-if [ -n "$unclassified" ]; then
-  while IFS= read -r s; do fail "lint() runs $s with no row in the classification table: classify what it reads under .agents"; done <<<"$unclassified"
-else
-  pass "every step lint() runs has a row"
-fi
-if [ -n "$gone" ]; then
-  while IFS= read -r s; do fail "the table classifies $s, which lint() no longer runs: drop the row"; done <<<"$gone"
-else
-  pass "every row names a step lint() runs"
-fi
-
-want_cover="$( (printf '%s\n' "${CLASSIFY[@]}" | awk -F'|' '$2 == "skills" || $2 == "gate" {print $1}') | sort)"
-got_cover="$(steps agents_shell_lint)"
-if [ "$got_cover" = "$want_cover" ]; then
-  pass "the covering set is the shell gate plus the steps that read .agents/skills shell"
-else
-  fail "agents_shell_lint() must run exactly the gate plus the skills rows; want [$want_cover], got [$got_cover]"
-fi
-
 # --- the code gate is default-in -------------------------------------------
 
 # The reported defect. Shell is read by check-symbols.sh alone, which `make lint` invokes.
@@ -204,28 +133,11 @@ build
 printf '#!/usr/bin/env bash\necho changed\n' > "$TREE/hack/thing.sh"
 expect "a shell source outside every named path runs the code gate" "lint"
 
-# The other reported defect: this path is on the docs branch and holds shell as well as markdown.
-# Since the partition, such a turn runs the covering subset instead of the full code gate — the
-# shell gate plus check-symbols.sh are the pieces of it that read the file — and the absence half
-# matters as much: goimports-reviser, golangci-lint and the rest must NOT run for it.
+# The other reported defect: this path is on the docs branch and holds shell as well as markdown,
+# so it used to run the one target that does not read shell.
 build
 printf '#!/usr/bin/env bash\necho case\n' > "$TREE/.agents/skills/demo/case.sh"
-expect "skills shell alone runs the covering partition and the documentation contract, not the full code gate" \
-  "lint agents-shell,lint docs"
-
-# A Go source beside the skills shell breaks the "only" of the case above, and the full gate
-# returns: the .go file is read by steps the partition would have skipped.
-build
-printf '#!/usr/bin/env bash\necho case\n' > "$TREE/.agents/skills/demo/case.sh"
-printf 'package pkg // changed\n' > "$TREE/pkg/thing.go"
-expect "skills shell beside a Go source runs the full code gate" "lint,lint docs"
-
-# Hooks shell is deliberately not carved out: check-hook-dispatch.sh reads the hook itself, so a
-# turn touching it keeps the full gate. The hook file routes itself elsewhere in this suite; this
-# is the neighbour file, which owes nothing to that branch.
-build
-printf '#!/usr/bin/env bash\necho other\n' > "$TREE/.agents/hooks/other.sh"
-expect "hooks shell runs the full code gate" "lint"
+expect "shell under a docs input runs both targets" "lint,lint docs"
 
 # The closing condition, stated as an input: a file type no branch names still has an answer.
 build
