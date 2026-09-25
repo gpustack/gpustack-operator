@@ -67,6 +67,11 @@ const (
 	// and failing the whole status pass over it would freeze every other axis while naming none.
 	// The convergence path still returns the same error, so the pass is still retried.
 	ModelDeploymentConditionRouterReady kubeapistatus.ConditionType = "RouterReady"
+
+	// ModelDeploymentConditionWeightsReady reports whether every engine role's weights are available:
+	// a claim mounted, or an engine's own download finished. It is True with NotApplicable for a
+	// deployment naming no artifact.
+	ModelDeploymentConditionWeightsReady kubeapistatus.ConditionType = "WeightsReady"
 )
 
 // The reasons RoleKindsReady carries. Three rather than two, because "no kind is missing" and "no
@@ -140,9 +145,9 @@ const (
 // survives the very pass that deletes every replica.
 func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod, domain *modelDeploymentDomain,
-	rollout *modelDeploymentRollout,
+	rollout *modelDeploymentRollout, weights *modelArtifactWeights,
 ) error {
-	desired, err := r.computeModelDeploymentStatus(ctx, md, pods, domain, rollout)
+	desired, err := r.computeModelDeploymentStatus(ctx, md, pods, domain, rollout, weights)
 	if err != nil {
 		return err
 	}
@@ -162,7 +167,7 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 // computeModelDeploymentStatus derives the whole status from the spec and the observed Pods.
 func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod, domain *modelDeploymentDomain,
-	rollout *modelDeploymentRollout,
+	rollout *modelDeploymentRollout, weights *modelArtifactWeights,
 ) (*workercore.ModelDeploymentStatus, error) {
 	// The condition accessors mutate the object they are given, so they work on a copy of the
 	// observed status: conditions carry a LastTransitionTime that must not be reset on every pass,
@@ -199,6 +204,8 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 
 	observeModelDeploymentRoleKinds(holder)
 
+	observeModelDeploymentWeights(holder, pods, weights)
+
 	// Resolved once for both routed-path observers, and nil for an unrouted deployment, which has
 	// nothing that reads a manufacturer.
 	manufacturers := r.modelDeploymentRoleManufacturers(ctx, md)
@@ -212,6 +219,7 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	holder.Status.RoleSummary = modelDeploymentRoleSummary(md.Spec.Router, routerReady, holder.Status.Roles)
 
 	deriveModelDeploymentPhase(md, holder, routerReady > 0)
+	annotateModelDeploymentPhase(holder, pods)
 
 	return &holder.Status, nil
 }
@@ -1257,6 +1265,26 @@ func deriveModelDeploymentPhase(md, holder *workercore.ModelDeployment, routerRe
 	default:
 		holder.Status.Phase = ModelDeploymentPhaseStarting
 		holder.Status.PhaseMessage = ModelDeploymentConditionQuotaReserved.GetMessage(holder)
+	}
+}
+
+// annotateModelDeploymentPhase says in the phase message what the phase alone cannot: why a
+// deployment waiting on its weights has no replica, and which replica was evicted. The weights'
+// wait is checked first because while it holds nothing is created, so it is the whole answer.
+func annotateModelDeploymentPhase(holder *workercore.ModelDeployment, pods []core.Pod) {
+	if holder.Status.Phase == ModelDeploymentPhaseReady || holder.Status.Phase == ModelDeploymentPhaseDeleting {
+		return
+	}
+	if ModelDeploymentConditionWeightsReady.IsFalse(holder) && len(pods) == 0 {
+		holder.Status.PhaseMessage = ModelDeploymentConditionWeightsReady.GetMessage(holder)
+		return
+	}
+	if note := modelDeploymentEvictionNote(pods); note != "" {
+		if holder.Status.PhaseMessage == "" {
+			holder.Status.PhaseMessage = note
+			return
+		}
+		holder.Status.PhaseMessage += "; " + note
 	}
 }
 

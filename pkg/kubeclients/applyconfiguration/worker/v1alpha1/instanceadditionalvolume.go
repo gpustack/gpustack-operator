@@ -31,6 +31,11 @@ type InstanceAdditionalVolumeApplyConfiguration struct {
 	// later change that adds or widens such a mount. One the Instance already holds is never
 	// re-judged, so the Setting going off does not strand it.
 	HostPath *v1.HostPathVolumeSourceApplyConfiguration `json:"hostPath,omitempty"`
+	// Model mounts the weights of a ModelArtifact in the same namespace. It is always mounted
+	// read-only, whatever ReadOnly says, and takes no SubPath: the artifact's own path is the
+	// sub-path. Only an artifact on a PersistentVolumeClaim is accepted in this version; one on a
+	// model hub needs node delivery, which does not exist yet.
+	Model *InstanceModelVolumeSourceApplyConfiguration `json:"model,omitempty"`
 }
 
 // InstanceAdditionalVolumeApplyConfiguration constructs a declarative configuration of the InstanceAdditionalVolume type for use with
@@ -92,5 +97,13 @@ func (b *InstanceAdditionalVolumeApplyConfiguration) WithSecret(value *v1.LocalO
 // If called multiple times, the HostPath field is set to the value of the last call.
 func (b *InstanceAdditionalVolumeApplyConfiguration) WithHostPath(value *v1.HostPathVolumeSourceApplyConfiguration) *InstanceAdditionalVolumeApplyConfiguration {
 	b.HostPath = value
+	return b
+}
+
+// WithModel sets the Model field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Model field is set to the value of the last call.
+func (b *InstanceAdditionalVolumeApplyConfiguration) WithModel(value *InstanceModelVolumeSourceApplyConfiguration) *InstanceAdditionalVolumeApplyConfiguration {
+	b.Model = value
 	return b
 }

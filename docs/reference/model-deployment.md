@@ -51,6 +51,10 @@ spec:
         accelerator: 2                   # cards per Pod
 ```
 
+`model.name` is what the engine serves. The weights come from the engine's own hub client, a role's
+volumes, or a `ModelArtifact` named by `model.artifactRef` — see the
+[Model Artifact Reference](model-artifact.md).
+
 `poolRef` is a `LocalObjectReference` on purpose: naming another namespace, the cluster-scoped
 `KVCachePool`, or a bare endpoint URL is unrepresentable rather than merely rejected. The Binding is
 the authorization point — an admin creating one in a namespace is what grants that namespace access.

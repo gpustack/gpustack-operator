@@ -1338,6 +1338,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.InstanceEnvVarApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceEphemeralVolume"):
 		return &applyconfigurationworkerv1alpha1.InstanceEphemeralVolumeApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceModelVolumeSource"):
+		return &applyconfigurationworkerv1alpha1.InstanceModelVolumeSourceApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstancePort"):
 		return &applyconfigurationworkerv1alpha1.InstancePortApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceResources"):
@@ -1442,6 +1444,20 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.KVCachePoolStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCachePoolUsage"):
 		return &applyconfigurationworkerv1alpha1.KVCachePoolUsageApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifact"):
+		return &applyconfigurationworkerv1alpha1.ModelArtifactApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactHubSource"):
+		return &applyconfigurationworkerv1alpha1.ModelArtifactHubSourceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactPersistentVolumeClaimSource"):
+		return &applyconfigurationworkerv1alpha1.ModelArtifactPersistentVolumeClaimSourceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactResolved"):
+		return &applyconfigurationworkerv1alpha1.ModelArtifactResolvedApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactSource"):
+		return &applyconfigurationworkerv1alpha1.ModelArtifactSourceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelArtifactSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelArtifactStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeployment"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentAdditionalVolume"):
@@ -1460,6 +1476,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVTransferApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentModel"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentModelApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentModelStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentModelStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentPort"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentPortApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRole"):

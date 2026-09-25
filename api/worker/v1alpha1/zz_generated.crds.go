@@ -22,6 +22,7 @@ func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 		"KVCacheBackend":     crd_gpustack_api_worker_v1alpha1_KVCacheBackend(),
 		"KVCachePool":        crd_gpustack_api_worker_v1alpha1_KVCachePool(),
 		"KVCachePoolBinding": crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding(),
+		"ModelArtifact":      crd_gpustack_api_worker_v1alpha1_ModelArtifact(),
 		"ModelDeployment":    crd_gpustack_api_worker_v1alpha1_ModelDeployment(),
 		"TopologySource":     crd_gpustack_api_worker_v1alpha1_TopologySource(),
 	}
@@ -958,6 +959,29 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																	Description: "type for HostPath Volume\nDefaults to \"\"\nMore info: https://kubernetes.io/docs/concepts/storage/volumes#hostpath",
 																	Type:        "string",
 																	Nullable:    true,
+																},
+															},
+															Nullable: true,
+														},
+														"model": {
+															Description: "Model mounts the weights of a ModelArtifact in the same namespace. It is always mounted\nread-only, whatever ReadOnly says, and takes no SubPath: the artifact's own path is the\nsub-path. Only an artifact on a PersistentVolumeClaim is accepted in this version; one on a\nmodel hub needs node delivery, which does not exist yet.",
+															Type:        "object",
+															Required: []string{
+																"artifactRef",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"artifactRef": {
+																	Description: "ArtifactRef names a ModelArtifact in the Instance's namespace.",
+																	Type:        "object",
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"name": {
+																			Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																			Type:        "string",
+																			Default: &v1.JSON{
+																				Raw: []byte(`""`),
+																			},
+																		},
+																	},
 																},
 															},
 															Nullable: true,
@@ -4108,6 +4132,316 @@ func crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding() *v1.CustomResourceDef
 	}
 }
 
+func crd_gpustack_api_worker_v1alpha1_ModelArtifact() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "modelartifacts.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "modelartifacts",
+				Singular: "modelartifact",
+				ShortNames: []string{
+					"mart",
+				},
+				Kind:     "ModelArtifact",
+				ListKind: "ModelArtifactList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Namespaced",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "ModelArtifact is the schema for worker.gpustack.ai.\nIt is WHERE A MODEL'S WEIGHTS COME FROM AND WHICH CREDENTIAL READS THEM, and it is the only\nobject that says so: a ModelDeployment or an Instance references it by name and carries no URI,\nrevision or token of its own. Every consumer in the namespace shares one declaration.\nIT IS AN IDENTITY, SO ITS WHOLE SPEC IS IMMUTABLE AFTER CREATION, webhook-enforced. A different\nsource or revision is a different artifact, created rather than edited. That is also what makes a\nfrozen reference to it pin anything: a reference that cannot change to an object that can would\npin nothing.\nA Hugging Face source is resolved ONCE: the branch or tag becomes a 40-character commit, the files\nat that commit become the canonical manifest, and the manifest's digest becomes the content\naddress. Nothing follows the branch afterwards. Access is revalidated periodically; losing it stops\nnew consumption and never touches running Pods.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"source",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"source": {
+											Description: "Source is where the weights come from.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"huggingFace": {
+													Description: "HuggingFace is a Hugging Face model repository at one revision.",
+													Type:        "object",
+													Required: []string{
+														"repository",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"repository": {
+															Description: "Repository is the repository id, \"owner/name\", or a bare canonical name.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](256),
+															MinLength:   ptr.To[int64](1),
+														},
+														"revision": {
+															Description: "Revision is a branch, a tag or a commit. Admission defaults it to \"main\". It is resolved to a\nfull commit once, at creation, into status.resolved.revision.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](255),
+														},
+														"secretRef": {
+															Description: "SecretRef names a Secret in this namespace whose \"token\" key is the hub token. It is read by\nthe controller for resolution and revalidation, and handed to an engine that downloads the\nweights itself through an environment variable referencing the Secret, so the value never\nenters a Pod spec, a status or an event.\nThe Secret need not exist at admission; a missing one is reported in status.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"name": {
+																	Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`""`),
+																	},
+																},
+															},
+															Nullable: true,
+														},
+													},
+													Nullable: true,
+												},
+												"modelScope": {
+													Description: "ModelScope is RESERVED AND REFUSED by admission in this version. Its shape is fixed so that\nopening it is a webhook change rather than a schema change, and the refusal names what opening\nit needs: branch resolution cross-checked against git, a listing that re-lists per directory at\nthe API's silent truncation point, errors classified by the envelope code, and an engine runner\nwhose ModelScope SDK accepts a commit as the revision.",
+													Type:        "object",
+													Required: []string{
+														"repository",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"repository": {
+															Description: "Repository is the repository id, \"owner/name\", or a bare canonical name.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](256),
+															MinLength:   ptr.To[int64](1),
+														},
+														"revision": {
+															Description: "Revision is a branch, a tag or a commit. Admission defaults it to \"main\". It is resolved to a\nfull commit once, at creation, into status.resolved.revision.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](255),
+														},
+														"secretRef": {
+															Description: "SecretRef names a Secret in this namespace whose \"token\" key is the hub token. It is read by\nthe controller for resolution and revalidation, and handed to an engine that downloads the\nweights itself through an environment variable referencing the Secret, so the value never\nenters a Pod spec, a status or an event.\nThe Secret need not exist at admission; a missing one is reported in status.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"name": {
+																	Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`""`),
+																	},
+																},
+															},
+															Nullable: true,
+														},
+													},
+													Nullable: true,
+												},
+												"persistentVolumeClaim": {
+													Description: "PersistentVolumeClaim is a directory inside a claim in this namespace. The operator never\nreads the claim's content, so the artifact has no revision and no digest, and what the\ndirectory holds, and any change to it, is the user's.",
+													Type:        "object",
+													Required: []string{
+														"claimName",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"claimName": {
+															Description: "ClaimName names a PersistentVolumeClaim in this namespace. It need not exist at admission; a\nmissing one is reported in status.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+															MinLength:   ptr.To[int64](1),
+														},
+														"path": {
+															Description: "Path is the directory inside the volume, relative to its root. Empty is the root. It must not\nbe absolute and must not contain a \"..\" element; the second half is admission's, because this\nschema's patterns cannot express it.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^[^/].*$`,
+														},
+													},
+													Nullable: true,
+												},
+											},
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"conditions": {
+											Description: "Conditions: Resolved says whether the source is bound to its immutable identity and the most\nrecent access check passed; Degraded says a resolution or revalidation is failing, including\none that has not yet revoked access.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"observedGeneration": {
+											Description: "ObservedGeneration is the generation the status was written for.",
+											Type:        "integer",
+											Format:      "int64",
+										},
+										"resolved": {
+											Description: "Resolved is what the source was resolved to. It is written once and never changes afterwards:\na later revalidation moves only LastValidatedTime and the conditions. It is absent until the\nfirst resolution succeeds.",
+											Type:        "object",
+											Required: []string{
+												"resolvedTime",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"fileCount": {
+													Description: "FileCount and SizeBytes are the manifest's file count and total size. Absent for a claim.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+												"lastValidatedTime": {
+													Description: "LastValidatedTime is when access was last confirmed. Absent for a claim, which has no access\ncheck of its own.",
+													Type:        "string",
+													Format:      "date-time",
+													Nullable:    true,
+												},
+												"manifestDigest": {
+													Description: "ManifestDigest is the content address of a hub source: \"sha256:\" and the SHA-256 of the\ncanonical manifest of every file at Revision, in the format pkg/modelartifact defines.\nIT IS NEVER EVIDENCE OF AUTHORIZATION. It is a pure content address: a public and a private\nrepository holding the same files have the same digest, so knowing it proves nothing about\naccess. Absent for a claim.",
+													Type:        "string",
+												},
+												"resolvedTime": {
+													Description: "ResolvedTime is when the resolution succeeded.",
+													Type:        "string",
+													Format:      "date-time",
+												},
+												"revision": {
+													Description: "Revision is the full 40-character commit a hub source resolved to. Absent for a claim.",
+													Type:        "string",
+												},
+												"sizeBytes": {
+													Type:   "integer",
+													Format: "int64",
+												},
+											},
+											Nullable: true,
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Revision",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.resolved.revision",
+						},
+						{
+							Name:        "Size",
+							Type:        "integer",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.resolved.sizeBytes",
+						},
+						{
+							Name:        "Resolved",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.conditions[?(@.type=='Resolved')].status",
+						},
+						{
+							Name:        "Age",
+							Type:        "date",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".metadata.creationTimestamp",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefinition {
 	return &v1.CustomResourceDefinition{
 		TypeMeta: metav1.TypeMeta{
@@ -4243,8 +4577,22 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 												"name",
 											},
 											Properties: map[string]v1.JSONSchemaProps{
+												"artifactRef": {
+													Description: "ArtifactRef names a ModelArtifact IN THIS NAMESPACE holding the weights. The type is a\nLocalObjectReference so that reaching another namespace is unrepresentable rather than\nrefused.\n- It is FROZEN with the rest of this object: the weights a deployment serves are part of\nwhich deployment it is. Serving other weights means creating another deployment, which\nalso keeps a prefill/decode pair from handing KV between two different weights.\n- An artifact that does not exist yet, or is not resolved, is ADMITTED: the deployment waits\nin status, creating no Pod, so a GitOps tool need not order the two objects.\n- With it, every managed role's engine gets the weights at a fixed local path (a claim) or\nthe repository pinned to the resolved commit (a hub), and, with spec.kvCache, a weight\nidentity in its store key prefix, so different weights never share KV blocks.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"name": {
+															Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+															Type:        "string",
+															Default: &v1.JSON{
+																Raw: []byte(`""`),
+															},
+														},
+													},
+													Nullable: true,
+												},
 												"name": {
-													Description: "Name is the identifier the engine serves, e.g. \"Qwen/Qwen2.5-72B-Instruct\".",
+													Description: "Name is the identifier the engine serves, e.g. \"Qwen/Qwen2.5-72B-Instruct\".\nIt stays the SERVED NAME whether or not ArtifactRef is set: routers, the router's tokenizer\ncalls and the metrics' model label all match on it, so a managed role's own\n--served-model-name must equal it, admission-enforced.",
 													Type:        "string",
 													MaxLength:   ptr.To[int64](253),
 													MinLength:   ptr.To[int64](1),
@@ -4697,7 +5045,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 									Type: "object",
 									Properties: map[string]v1.JSONSchemaProps{
 										"conditions": {
-											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady. They are\nindependent —\n\"quota reserved but cache not attached\" is a real and actionable state — which is what a single\nphase string cannot carry.\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher\nthat was configured and then crashed therefore remains True until a live consumer observes it.",
+											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady,\nWeightsReady. They are independent —\n\"quota reserved but cache not attached\" is a real and actionable state — which is what a single\nphase string cannot carry.\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher\nthat was configured and then crashed therefore remains True until a live consumer observes it.\nWeightsReady reports whether every engine role's weights are available: a claim artifact\nmounted, or an engine's own download of a hub artifact finished. While it is False for a\nreason other than a Pod still starting, no replica is created and none that runs is touched.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{
@@ -4804,6 +5152,41 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 												},
 												"pool": {
 													Description: "Pool is the KVCachePool that Binding points at.",
+													Type:        "string",
+												},
+											},
+											Nullable: true,
+										},
+										"model": {
+											Description: "Model echoes the weights spec.model.artifactRef resolved to, and how they reach the engine.\nIt is ABSENT without spec.model.artifactRef, and while the artifact has not resolved, for the\nreason KVCache is: an empty object here cannot be told apart from an identity whose every\nfield happens to be empty.",
+											Type:        "object",
+											Required: []string{
+												"artifact",
+												"delivery",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"artifact": {
+													Description: "Artifact is the ModelArtifact this deployment references, in this namespace.",
+													Type:        "string",
+												},
+												"delivery": {
+													Description: "Delivery is how the weights reach the engine: \"Pvc\", the claim mounted read-only at a fixed\npath, or \"Engine\", the engine downloading the pinned commit itself.",
+													Type:        "string",
+													Enum: []v1.JSON{
+														{
+															Raw: []byte(`"Pvc"`),
+														},
+														{
+															Raw: []byte(`"Engine"`),
+														},
+													},
+												},
+												"manifestDigest": {
+													Description: "ManifestDigest is a hub artifact's content address. Absent for a claim.",
+													Type:        "string",
+												},
+												"revision": {
+													Description: "Revision is the commit a hub artifact resolved to. Absent for a claim.",
 													Type:        "string",
 												},
 											},

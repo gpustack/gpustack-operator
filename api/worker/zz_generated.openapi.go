@@ -90,6 +90,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.InstanceEnvVar{}.OpenAPIModelName():                                 schema_gpustack_api_worker_v1alpha1_InstanceEnvVar(ref),
 		v1alpha1.InstanceEphemeralVolume{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_InstanceEphemeralVolume(ref),
 		v1alpha1.InstanceList{}.OpenAPIModelName():                                   schema_gpustack_api_worker_v1alpha1_InstanceList(ref),
+		v1alpha1.InstanceModelVolumeSource{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_InstanceModelVolumeSource(ref),
 		v1alpha1.InstancePort{}.OpenAPIModelName():                                   schema_gpustack_api_worker_v1alpha1_InstancePort(ref),
 		v1alpha1.InstanceResources{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_InstanceResources(ref),
 		v1alpha1.InstanceServicePort{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_InstanceServicePort(ref),
@@ -146,6 +147,14 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCachePoolSpec{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1alpha1_KVCachePoolSpec(ref),
 		v1alpha1.KVCachePoolStatus{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_KVCachePoolStatus(ref),
 		v1alpha1.KVCachePoolUsage{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1alpha1_KVCachePoolUsage(ref),
+		v1alpha1.ModelArtifact{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1alpha1_ModelArtifact(ref),
+		v1alpha1.ModelArtifactHubSource{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_ModelArtifactHubSource(ref),
+		v1alpha1.ModelArtifactList{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelArtifactList(ref),
+		v1alpha1.ModelArtifactPersistentVolumeClaimSource{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_ModelArtifactPersistentVolumeClaimSource(ref),
+		v1alpha1.ModelArtifactResolved{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelArtifactResolved(ref),
+		v1alpha1.ModelArtifactSource{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelArtifactSource(ref),
+		v1alpha1.ModelArtifactSpec{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelArtifactSpec(ref),
+		v1alpha1.ModelArtifactStatus{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelArtifactStatus(ref),
 		v1alpha1.ModelDeployment{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1alpha1_ModelDeployment(ref),
 		v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentAdditionalVolume(ref),
 		v1alpha1.ModelDeploymentEngine{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentEngine(ref),
@@ -156,6 +165,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentKVTransfer{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVTransfer(ref),
 		v1alpha1.ModelDeploymentList{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentList(ref),
 		v1alpha1.ModelDeploymentModel{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref),
+		v1alpha1.ModelDeploymentModelStatus{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelStatus(ref),
 		v1alpha1.ModelDeploymentPort{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentPort(ref),
 		v1alpha1.ModelDeploymentRole{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref),
 		v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref),
@@ -4178,12 +4188,18 @@ func schema_gpustack_api_worker_v1alpha1_InstanceAdditionalVolume(ref common.Ref
 							Ref:         ref(corev1.HostPathVolumeSource{}.OpenAPIModelName()),
 						},
 					},
+					"model": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Model mounts the weights of a ModelArtifact in the same namespace. It is always mounted read-only, whatever ReadOnly says, and takes no SubPath: the artifact's own path is the sub-path. Only an artifact on a PersistentVolumeClaim is accepted in this version; one on a model hub needs node delivery, which does not exist yet.",
+							Ref:         ref(v1alpha1.InstanceModelVolumeSource{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"mountPath"},
 			},
 		},
 		Dependencies: []string{
-			corev1.HostPathVolumeSource{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+			v1alpha1.InstanceModelVolumeSource{}.OpenAPIModelName(), corev1.HostPathVolumeSource{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -4285,6 +4301,29 @@ func schema_gpustack_api_worker_v1alpha1_InstanceList(ref common.ReferenceCallba
 		},
 		Dependencies: []string{
 			v1alpha1.Instance{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceModelVolumeSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceModelVolumeSource references the ModelArtifact an Instance volume mounts.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"artifactRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ArtifactRef names a ModelArtifact in the Instance's namespace.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"artifactRef"},
+			},
+		},
+		Dependencies: []string{
+			corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -7603,6 +7642,339 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolUsage(ref common.ReferenceCa
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelArtifact(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifact is the schema for worker.gpustack.ai.\n\nIt is WHERE A MODEL'S WEIGHTS COME FROM AND WHICH CREDENTIAL READS THEM, and it is the only object that says so: a ModelDeployment or an Instance references it by name and carries no URI, revision or token of its own. Every consumer in the namespace shares one declaration.\n\nIT IS AN IDENTITY, SO ITS WHOLE SPEC IS IMMUTABLE AFTER CREATION, webhook-enforced. A different source or revision is a different artifact, created rather than edited. That is also what makes a frozen reference to it pin anything: a reference that cannot change to an object that can would pin nothing.\n\nA Hugging Face source is resolved ONCE: the branch or tag becomes a 40-character commit, the files at that commit become the canonical manifest, and the manifest's digest becomes the content address. Nothing follows the branch afterwards. Access is revalidated periodically; losing it stops new consumption and never touches running Pods.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelArtifactSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelArtifactStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelArtifactSpec{}.OpenAPIModelName(), v1alpha1.ModelArtifactStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelArtifactHubSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifactHubSource is one repository on a model hub at one revision.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"repository": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Repository is the repository id, \"owner/name\", or a bare canonical name.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](256),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"revision": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Revision is a branch, a tag or a commit. Admission defaults it to \"main\". It is resolved to a full commit once, at creation, into status.resolved.revision.",
+							MaxLength:   ptr.To[int64](255),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"secretRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SecretRef names a Secret in this namespace whose \"token\" key is the hub token. It is read by the controller for resolution and revalidation, and handed to an engine that downloads the weights itself through an environment variable referencing the Secret, so the value never enters a Pod spec, a status or an event.\n\nThe Secret need not exist at admission; a missing one is reported in status.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"repository"},
+			},
+		},
+		Dependencies: []string{
+			corev1.LocalObjectReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelArtifactList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifactList holds the list of ModelArtifact.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelArtifact{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelArtifact{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelArtifactPersistentVolumeClaimSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifactPersistentVolumeClaimSource is a directory inside a claim.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"claimName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ClaimName names a PersistentVolumeClaim in this namespace. It need not exist at admission; a missing one is reported in status.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"path": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Path is the directory inside the volume, relative to its root. Empty is the root. It must not be absolute and must not contain a \"..\" element; the second half is admission's, because this schema's patterns cannot express it.",
+							MaxLength:   ptr.To[int64](1024),
+							Pattern:     "^[^/].*$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"claimName"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelArtifactResolved(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifactResolved is the identity a source resolved to.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"revision": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Revision is the full 40-character commit a hub source resolved to. Absent for a claim.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"manifestDigest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ManifestDigest is the content address of a hub source: \"sha256:\" and the SHA-256 of the canonical manifest of every file at Revision, in the format pkg/modelartifact defines.\n\nIT IS NEVER EVIDENCE OF AUTHORIZATION. It is a pure content address: a public and a private repository holding the same files have the same digest, so knowing it proves nothing about access. Absent for a claim.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"fileCount": {
+						SchemaProps: spec.SchemaProps{
+							Description: "FileCount and SizeBytes are the manifest's file count and total size. Absent for a claim.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"sizeBytes": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int64",
+						},
+					},
+					"resolvedTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ResolvedTime is when the resolution succeeded.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"lastValidatedTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LastValidatedTime is when access was last confirmed. Absent for a claim, which has no access check of its own.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"resolvedTime"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelArtifactSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifactSource is a tagged union: exactly one member is set, webhook-enforced.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"huggingFace": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HuggingFace is a Hugging Face model repository at one revision.",
+							Ref:         ref(v1alpha1.ModelArtifactHubSource{}.OpenAPIModelName()),
+						},
+					},
+					"modelScope": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ModelScope is RESERVED AND REFUSED by admission in this version. Its shape is fixed so that opening it is a webhook change rather than a schema change, and the refusal names what opening it needs: branch resolution cross-checked against git, a listing that re-lists per directory at the API's silent truncation point, errors classified by the envelope code, and an engine runner whose ModelScope SDK accepts a commit as the revision.",
+							Ref:         ref(v1alpha1.ModelArtifactHubSource{}.OpenAPIModelName()),
+						},
+					},
+					"persistentVolumeClaim": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PersistentVolumeClaim is a directory inside a claim in this namespace. The operator never reads the claim's content, so the artifact has no revision and no digest, and what the directory holds, and any change to it, is the user's.",
+							Ref:         ref(v1alpha1.ModelArtifactPersistentVolumeClaimSource{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelArtifactHubSource{}.OpenAPIModelName(), v1alpha1.ModelArtifactPersistentVolumeClaimSource{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelArtifactSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifactSpec defines the desired state of ModelArtifact.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"source": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Source is where the weights come from.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelArtifactSource{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"source"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelArtifactSource{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelArtifactStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifactStatus defines the observed state of ModelArtifact.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"observedGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ObservedGeneration is the generation the status was written for.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"resolved": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Resolved is what the source was resolved to. It is written once and never changes afterwards: a later revalidation moves only LastValidatedTime and the conditions. It is absent until the first resolution succeeds.",
+							Ref:         ref(v1alpha1.ModelArtifactResolved{}.OpenAPIModelName()),
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Conditions: Resolved says whether the source is bound to its immutable identity and the most recent access check passed; Degraded says a resolution or revalidation is failing, including one that has not yet revoked access.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelArtifactResolved{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeployment(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -7953,12 +8325,12 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref common.Referen
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentModel names the model the engine serves.\n\nIt provisions nothing. Weights arrive through the role's additional volumes or through the engine's own hub client; a weight-provisioning block here would be the first step towards the general-purpose serving CR this deliberately is not.",
+				Description: "ModelDeploymentModel names the model the engine serves and, optionally, the weights it serves.\n\nIt provisions nothing, and that has not changed: ArtifactRef REFERENCES weights that a ModelArtifact provisions, the way spec.kvCache.poolRef references a pool a Binding grants. The prohibition this type always carried stands: a source, a URI, a credential or a download policy never enters this object, because a weight-provisioning block here would be the first step towards the general-purpose serving CR this deliberately is not, and would make every deployment a credential holder. Without ArtifactRef, weights arrive through the role's additional volumes or through the engine's own hub client, as before.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"name": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Name is the identifier the engine serves, e.g. \"Qwen/Qwen2.5-72B-Instruct\".",
+							Description: "Name is the identifier the engine serves, e.g. \"Qwen/Qwen2.5-72B-Instruct\".\n\nIt stays the SERVED NAME whether or not ArtifactRef is set: routers, the router's tokenizer calls and the metrics' model label all match on it, so a managed role's own --served-model-name must equal it, admission-enforced.",
 							Default:     "",
 							MinLength:   ptr.To[int64](1),
 							MaxLength:   ptr.To[int64](253),
@@ -7966,8 +8338,61 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref common.Referen
 							Format:      "",
 						},
 					},
+					"artifactRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ArtifactRef names a ModelArtifact IN THIS NAMESPACE holding the weights. The type is a LocalObjectReference so that reaching another namespace is unrepresentable rather than refused.\n\n  - It is FROZEN with the rest of this object: the weights a deployment serves are part of\n    which deployment it is. Serving other weights means creating another deployment, which\n    also keeps a prefill/decode pair from handing KV between two different weights.\n  - An artifact that does not exist yet, or is not resolved, is ADMITTED: the deployment waits\n    in status, creating no Pod, so a GitOps tool need not order the two objects.\n  - With it, every managed role's engine gets the weights at a fixed local path (a claim) or\n    the repository pinned to the resolved commit (a hub), and, with spec.kvCache, a weight\n    identity in its store key prefix, so different weights never share KV blocks.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"name"},
+			},
+		},
+		Dependencies: []string{
+			corev1.LocalObjectReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentModelStatus is the resolved weight identity a deployment serves.\n\nEvery field is READ FROM THE MODELARTIFACT, never declared here, so reading which commit and which content a deployment serves takes one object rather than two.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"artifact": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Artifact is the ModelArtifact this deployment references, in this namespace.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"revision": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Revision is the commit a hub artifact resolved to. Absent for a claim.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"manifestDigest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ManifestDigest is a hub artifact's content address. Absent for a claim.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"delivery": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Delivery is how the weights reach the engine: \"Pvc\", the claim mounted read-only at a fixed path, or \"Engine\", the engine downloading the pinned commit itself.\n\n\nPossible enum values:\n - `\"Engine\"` has the engine download a hub artifact's resolved commit into a size-limited cache volume, with the artifact's token from its Secret.\n - `\"Pvc\"` mounts a claim artifact read-only at a fixed path.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Engine", "Pvc"},
+						},
+					},
+				},
+				Required: []string{"artifact", "delivery"},
 			},
 		},
 	}
@@ -8819,7 +9244,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady. They are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.\n\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher that was configured and then crashed therefore remains True until a live consumer observes it.",
+							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady, WeightsReady. They are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.\n\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher that was configured and then crashed therefore remains True until a live consumer observes it.\n\nWeightsReady reports whether every engine role's weights are available: a claim artifact mounted, or an engine's own download of a hub artifact finished. While it is False for a reason other than a Pod still starting, no replica is created and none that runs is touched.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -8880,11 +9305,17 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 							Format:      "",
 						},
 					},
+					"model": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Model echoes the weights spec.model.artifactRef resolved to, and how they reach the engine.\n\nIt is ABSENT without spec.model.artifactRef, and while the artifact has not resolved, for the reason KVCache is: an empty object here cannot be told apart from an identity whose every field happens to be empty.",
+							Ref:         ref(v1alpha1.ModelDeploymentModelStatus{}.OpenAPIModelName()),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName()},
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentModelStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName()},
 	}
 }
 

@@ -44,6 +44,7 @@ pkg/
     exporter/                     this node's Instances as Prometheus gauges on /metrics
   kubemetrics/                    Instance utilization from the kubelet, behind both surfaces
                                   (the metrics subresource and the exporter above)
+  modelartifact/                  resolves a Hub repository to a commit and its canonical manifest (ModelArtifact)
   nodefeature/                    label algebra (node keys, flavors, queues, credits)
   extensionapi/                   generic aggregated-apiserver storage plumbing
 api/

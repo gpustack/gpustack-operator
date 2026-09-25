@@ -35,6 +35,7 @@ func GetValidatingWebhookConfiguration(n string, c v1.WebhookClientConfig) *v1.V
 			vwh_pkg_worker_webhooks_worker_KVCacheBackendWebhook(c),
 			vwh_pkg_worker_webhooks_worker_KVCachePoolBindingWebhook(c),
 			vwh_pkg_worker_webhooks_worker_KVCachePoolWebhook(c),
+			vwh_pkg_worker_webhooks_worker_ModelArtifactWebhook(c),
 			vwh_pkg_worker_webhooks_worker_ModelDeploymentWebhook(c),
 			vwh_pkg_worker_webhooks_worker_PodKVCacheWebhook(c),
 			vwh_pkg_worker_webhooks_worker_PodWebhook(c),
@@ -55,6 +56,7 @@ func GetMutatingWebhookConfiguration(n string, c v1.WebhookClientConfig) *v1.Mut
 		Webhooks: []v1.MutatingWebhook{
 			mwh_pkg_worker_webhooks_worker_InstanceTypeWebhook(c),
 			mwh_pkg_worker_webhooks_worker_InstanceWebhook(c),
+			mwh_pkg_worker_webhooks_worker_ModelArtifactWebhook(c),
 			mwh_pkg_worker_webhooks_worker_ModelDeploymentWebhook(c),
 			mwh_pkg_worker_webhooks_worker_PodKVCacheWebhook(c),
 			mwh_pkg_worker_webhooks_worker_PodWebhook(c),
@@ -375,6 +377,100 @@ func vwh_pkg_worker_webhooks_worker_KVCachePoolWebhook(c v1.WebhookClientConfig)
 						"kvcachepools",
 					},
 					Scope: ptr.To[v1.ScopeType]("Cluster"),
+				},
+				Operations: []v1.OperationType{
+					"CREATE",
+					"UPDATE",
+				},
+			},
+		},
+		FailurePolicy:  ptr.To[v1.FailurePolicyType]("Fail"),
+		MatchPolicy:    ptr.To[v1.MatchPolicyType]("Equivalent"),
+		SideEffects:    ptr.To[v1.SideEffectClass]("None"),
+		TimeoutSeconds: ptr.To[int32](10),
+		AdmissionReviewVersions: []string{
+			"v1",
+		},
+	}
+}
+
+func (*ModelArtifactWebhook) ValidatePath() string {
+	return "/validate-worker-gpustack-ai-v1alpha1-modelartifact"
+}
+
+func vwh_pkg_worker_webhooks_worker_ModelArtifactWebhook(c v1.WebhookClientConfig) v1.ValidatingWebhook {
+	path := "/validate-worker-gpustack-ai-v1alpha1-modelartifact"
+
+	cc := c.DeepCopy()
+	if cc.Service != nil {
+		cc.Service.Path = &path
+	} else if c.URL != nil {
+		cc.URL = ptr.To(*c.URL + path)
+	}
+
+	return v1.ValidatingWebhook{
+		Name:         "validate.worker.gpustack.ai.v1alpha1.modelartifact",
+		ClientConfig: *cc,
+		Rules: []v1.RuleWithOperations{
+			{
+				Rule: v1.Rule{
+					APIGroups: []string{
+						"worker.gpustack.ai",
+					},
+					APIVersions: []string{
+						"v1alpha1",
+					},
+					Resources: []string{
+						"modelartifacts",
+					},
+					Scope: ptr.To[v1.ScopeType]("Namespaced"),
+				},
+				Operations: []v1.OperationType{
+					"CREATE",
+					"UPDATE",
+				},
+			},
+		},
+		FailurePolicy:  ptr.To[v1.FailurePolicyType]("Fail"),
+		MatchPolicy:    ptr.To[v1.MatchPolicyType]("Equivalent"),
+		SideEffects:    ptr.To[v1.SideEffectClass]("None"),
+		TimeoutSeconds: ptr.To[int32](10),
+		AdmissionReviewVersions: []string{
+			"v1",
+		},
+	}
+}
+
+func (*ModelArtifactWebhook) DefaultPath() string {
+	return "/mutate-worker-gpustack-ai-v1alpha1-modelartifact"
+}
+
+func mwh_pkg_worker_webhooks_worker_ModelArtifactWebhook(c v1.WebhookClientConfig) v1.MutatingWebhook {
+	path := "/mutate-worker-gpustack-ai-v1alpha1-modelartifact"
+
+	cc := c.DeepCopy()
+	if cc.Service != nil {
+		cc.Service.Path = &path
+	} else if c.URL != nil {
+		cc.URL = ptr.To(*c.URL + path)
+	}
+
+	return v1.MutatingWebhook{
+		Name:         "mutate.worker.gpustack.ai.v1alpha1.modelartifact",
+		ClientConfig: *cc,
+		Rules: []v1.RuleWithOperations{
+			{
+				Rule: v1.Rule{
+					APIGroups: []string{
+						"worker.gpustack.ai",
+					},
+					APIVersions: []string{
+						"v1alpha1",
+					},
+					Resources: []string{
+						"modelartifacts",
+					},
+					Scope: ptr.To[v1.ScopeType]("Namespaced"),
 				},
 				Operations: []v1.OperationType{
 					"CREATE",

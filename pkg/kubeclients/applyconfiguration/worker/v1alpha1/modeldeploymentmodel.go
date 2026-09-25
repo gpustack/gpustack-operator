@@ -2,17 +2,42 @@
 
 package v1alpha1
 
+import (
+	v1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/core/v1"
+)
+
 // ModelDeploymentModelApplyConfiguration represents a declarative configuration of the ModelDeploymentModel type for use
 // with apply.
 //
-// ModelDeploymentModel names the model the engine serves.
+// ModelDeploymentModel names the model the engine serves and, optionally, the weights it serves.
 //
-// It provisions nothing. Weights arrive through the role's additional volumes or through the engine's
-// own hub client; a weight-provisioning block here would be the first step towards the
-// general-purpose serving CR this deliberately is not.
+// It provisions nothing, and that has not changed: ArtifactRef REFERENCES weights that a
+// ModelArtifact provisions, the way spec.kvCache.poolRef references a pool a Binding grants. The
+// prohibition this type always carried stands: a source, a URI, a credential or a download policy
+// never enters this object, because a weight-provisioning block here would be the first step
+// towards the general-purpose serving CR this deliberately is not, and would make every deployment
+// a credential holder. Without ArtifactRef, weights arrive through the role's additional volumes or
+// through the engine's own hub client, as before.
 type ModelDeploymentModelApplyConfiguration struct {
 	// Name is the identifier the engine serves, e.g. "Qwen/Qwen2.5-72B-Instruct".
+	//
+	// It stays the SERVED NAME whether or not ArtifactRef is set: routers, the router's tokenizer
+	// calls and the metrics' model label all match on it, so a managed role's own
+	// --served-model-name must equal it, admission-enforced.
 	Name *string `json:"name,omitempty"`
+	// ArtifactRef names a ModelArtifact IN THIS NAMESPACE holding the weights. The type is a
+	// LocalObjectReference so that reaching another namespace is unrepresentable rather than
+	// refused.
+	//
+	// - It is FROZEN with the rest of this object: the weights a deployment serves are part of
+	// which deployment it is. Serving other weights means creating another deployment, which
+	// also keeps a prefill/decode pair from handing KV between two different weights.
+	// - An artifact that does not exist yet, or is not resolved, is ADMITTED: the deployment waits
+	// in status, creating no Pod, so a GitOps tool need not order the two objects.
+	// - With it, every managed role's engine gets the weights at a fixed local path (a claim) or
+	// the repository pinned to the resolved commit (a hub), and, with spec.kvCache, a weight
+	// identity in its store key prefix, so different weights never share KV blocks.
+	ArtifactRef *v1.LocalObjectReferenceApplyConfiguration `json:"artifactRef,omitempty"`
 }
 
 // ModelDeploymentModelApplyConfiguration constructs a declarative configuration of the ModelDeploymentModel type for use with
@@ -26,5 +51,13 @@ func ModelDeploymentModel() *ModelDeploymentModelApplyConfiguration {
 // If called multiple times, the Name field is set to the value of the last call.
 func (b *ModelDeploymentModelApplyConfiguration) WithName(value string) *ModelDeploymentModelApplyConfiguration {
 	b.Name = &value
+	return b
+}
+
+// WithArtifactRef sets the ArtifactRef field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ArtifactRef field is set to the value of the last call.
+func (b *ModelDeploymentModelApplyConfiguration) WithArtifactRef(value *v1.LocalObjectReferenceApplyConfiguration) *ModelDeploymentModelApplyConfiguration {
+	b.ArtifactRef = value
 	return b
 }

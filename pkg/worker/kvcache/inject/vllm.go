@@ -126,6 +126,9 @@ type vllmTransferConfig struct {
 }
 
 type vllmConnectorExtraConfig struct {
+	// CachePrefix is the store connector's key namespace: vLLM v0.29.0 builds every Mooncake
+	// store key as "[cache_prefix@]<model name>@tp_rank:N@...@<chunk hash>".
+	CachePrefix      string               `json:"cache_prefix,omitempty"`
 	Connectors       []vllmTransferConfig `json:"connectors,omitempty"`
 	MooncakeProtocol string               `json:"mooncake_protocol,omitempty"`
 	Prefill          *vllmRoleParallelism `json:"prefill,omitempty"`
@@ -193,6 +196,12 @@ func renderVLLM(in Input) (*Result, error) {
 			return nil, err
 		}
 		transferConfigValue = &vllmTransferConfig{KVConnector: connector, KVRole: kvRole}
+		// Rendered on the native store connector alone: it is the one whose key layout was read.
+		// The vLLM-Ascend store connector keys by its own rules, and a prefix it may ignore would
+		// look like isolation without being it.
+		if in.CachePrefix != "" && in.Engine == EngineVLLM {
+			transferConfigValue.KVConnectorExtraConfig = &vllmConnectorExtraConfig{CachePrefix: in.CachePrefix}
+		}
 	}
 	if in.KVTransfer {
 		native := in.Engine == EngineVLLM

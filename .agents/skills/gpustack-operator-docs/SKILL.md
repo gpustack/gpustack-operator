@@ -40,6 +40,7 @@ one, not to widen the overview.
 | A `KVCachePool` or `KVCachePoolBinding`: the grant, the reuse domain, a quota ceiling or grant, what a full quota does | `docs/kv-cache/pool.md` |
 | Standing a cache up end to end, or which object comes first: the pasteable four-object sequence | `docs/kv-cache/walkthrough.md` |
 | How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/reference/kv-cache-injection.md` |
+| A `ModelArtifact`: its sources, resolution and revalidation, the manifest digest, how a `ModelDeployment` or an `Instance` mounts or downloads it, claim placement, the weight identity in KV keys | `docs/reference/model-artifact.md` |
 | A `ModelDeployment` metrics snapshot, which series each field reads per engine, role and router, cache-hit scope or Pod scrape annotation | `docs/reference/model-deployment-metrics.md` |
 | How a prefill role and a decode role are paired: the connector each engine and router renders, `spec.router` and its fields, `spec.kvTransfer`, roles on different hardware, a role's own Service | `docs/reference/model-deployment-prefill-decode.md` |
 | Which replica a managed router picks, its default routing policy, switching it through `spec.router.extraArgs`, the router's own per-replica series | `docs/reference/model-deployment-routing.md` |

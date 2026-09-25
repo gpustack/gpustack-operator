@@ -286,6 +286,11 @@ type ModelDeploymentRenderInput struct {
 	// which is what a caller with no particular replica in mind gets.
 	Ordinal int
 
+	// Artifact is how the weights spec.model.artifactRef names reach the engine, resolved by the
+	// reconciler. Nil renders a deployment naming no artifact exactly as before the field existed;
+	// a deployment that names one is not rendered at all until it resolves.
+	Artifact *ModelDeploymentArtifactRender
+
 	// Member is which Pod of that replica this render is for, counting from zero. It is stamped,
 	// never templated, for the same reason Ordinal is: the template is what every Pod of the role
 	// shares, and a value naming one Pod inside it would make two members of one replica hash
@@ -419,12 +424,23 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		}
 	}
 	if !takeOver {
-		command, err = ModelDeploymentEngineCommand(md.Spec.Engine.Name, md.Spec.Model.Name)
+		// With an artifact the engine loads the weights from where they are delivered and serves
+		// them under spec.model.name, which the defaulted served-name group keeps true when the
+		// model argument is a path or a repository rather than that name.
+		model, defaulted := md.Spec.Model.Name, in.Connector.DefaultedArgs
+		if in.Artifact != nil {
+			model = in.Artifact.model()
+			defaulted = append(slices.Clone(defaulted), []string{ModelDeploymentServedModelNameArg, md.Spec.Model.Name})
+		}
+		command, err = ModelDeploymentEngineCommand(md.Spec.Engine.Name, model)
 		if err != nil {
 			return nil, err
 		}
+		if in.Artifact != nil {
+			command = append(command, in.Artifact.args()...)
+		}
 		command = append(command, in.Connector.Args...)
-		command = append(command, modelDeploymentDefaultedArgs(in.Connector.DefaultedArgs, role.ExtraArgs)...)
+		command = append(command, modelDeploymentDefaultedArgs(defaulted, role.ExtraArgs)...)
 		command = append(command, role.ExtraArgs...)
 
 		// READ BEFORE FILLING, and read the SAME list the filling reads. What decides whether the
@@ -465,6 +481,11 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	// A take-over role gets NEITHER, along with no synthesized argument and no client environment.
 	// The operator did not build that command line and cannot claim the container uses the cache.
 	vols, mounts := convertModelDeploymentAdditionalVolumes(role.AdditionalVolumes)
+	if in.Artifact != nil {
+		artifactVols, artifactMounts := in.Artifact.volumes(takeOver)
+		vols = append(vols, artifactVols...)
+		mounts = append(mounts, artifactMounts...)
+	}
 	if !takeOver {
 		vols = append(vols, in.Connector.Volumes...)
 		mounts = append(mounts, in.Connector.VolumeMounts...)
@@ -494,11 +515,14 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		Resources: getResourceRequirements(
 			ress, in.InstanceType, true, in.GeneralResourcesOvercommit, true, false),
 		Ports:          ports,
-		Env:            mergeModelDeploymentEnv(md.Spec.Engine.Name, role, in.Connector, takeOver),
+		Env:            mergeModelDeploymentEnv(md.Spec.Engine.Name, role, in.Connector, in.Artifact, takeOver),
 		VolumeMounts:   mounts,
 		StartupProbe:   startupProbe,
 		ReadinessProbe: readinessProbe,
 		LivenessProbe:  livenessProbe,
+	}
+	if in.Artifact != nil {
+		in.Artifact.raiseEphemeralStorageLimit(&mainC, takeOver)
 	}
 	if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
 		if in.InterfaceResource == "" {
@@ -1293,31 +1317,41 @@ func modelDeploymentProbes(
 // the file they point at, so setting them would describe a configuration nothing reads.
 func mergeModelDeploymentEnv(
 	engine string, role *workercore.ModelDeploymentRole,
-	connector ModelDeploymentConnectorRender, takeOver bool,
+	connector ModelDeploymentConnectorRender, artifact *ModelDeploymentArtifactRender, takeOver bool,
 ) []core.EnvVar {
 	if takeOver {
-		return mergeModelDeploymentUserEnv(nil, engine, role.Env)
+		return mergeModelDeploymentUserEnv(nil, engine, role.Env, false)
 	}
 
-	env := make([]core.EnvVar, 0, len(connector.Env)+len(connector.DefaultedEnv)+len(role.Env))
+	var artifactEnv, artifactDefaulted []core.EnvVar
+	if artifact != nil {
+		artifactEnv, artifactDefaulted = artifact.env(takeOver)
+	}
+
+	env := make([]core.EnvVar, 0,
+		len(connector.Env)+len(artifactEnv)+len(connector.DefaultedEnv)+len(artifactDefaulted)+len(role.Env))
 	env = append(env, connector.Env...)
-	for _, e := range connector.DefaultedEnv {
+	env = append(env, artifactEnv...)
+	for _, e := range slices.Concat(connector.DefaultedEnv, artifactDefaulted) {
 		if modelDeploymentUserSetsEnv(role.Env, e.Name) {
 			continue
 		}
 		env = append(env, e)
 	}
 
-	return mergeModelDeploymentUserEnv(env, engine, role.Env)
+	return mergeModelDeploymentUserEnv(env, engine, role.Env, artifact != nil)
 }
 
 // mergeModelDeploymentUserEnv appends the user's entries to what the operator already rendered,
 // letting a later tier replace an earlier one by name and never replacing what the operator owns.
+// With an artifact the artifact-owned names are the operator's too; admission refuses them, and
+// dropping them here keeps an object stored before that rule from overriding the artifact's.
 func mergeModelDeploymentUserEnv(
-	env []core.EnvVar, engine string, userEnv []workercore.ModelDeploymentEnvVar,
+	env []core.EnvVar, engine string, userEnv []workercore.ModelDeploymentEnvVar, artifact bool,
 ) []core.EnvVar {
 	for i := range userEnv {
-		if ModelDeploymentOwnsEnv(engine, userEnv[i].Name) {
+		if ModelDeploymentOwnsEnv(engine, userEnv[i].Name) ||
+			(artifact && ModelDeploymentArtifactOwnsEnv(engine, userEnv[i].Name)) {
 			continue
 		}
 		replaced := false

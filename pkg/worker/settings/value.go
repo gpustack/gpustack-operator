@@ -1,6 +1,10 @@
 package settings
 
 import (
+	"context"
+	"time"
+
+	"gpustack.ai/gpustack/pkg/modelartifact"
 	"gpustack.ai/gpustack/pkg/setting"
 )
 
@@ -304,6 +308,68 @@ var (
 			"the CPU manufacturer.",
 		setting.InitializeFromEnv("false"),
 		setting.AllowBool(),
+	)
+
+	// ModelArtifact.
+
+	// ModelArtifactHuggingFaceEndpoint is the Hugging Face Hub the ModelArtifact controller
+	// resolves and revalidates against, and the HF_ENDPOINT an engine downloading the weights
+	// itself is given. It is administrator configuration: no tenant object can change where the
+	// controller connects. Changing it does not re-resolve an artifact that already resolved.
+	ModelArtifactHuggingFaceEndpoint = settings.NewEditable(
+		"model-artifact-huggingface-endpoint",
+		"Indicates the Hugging Face Hub endpoint ModelArtifacts resolve against and engines download from. "+
+			"Changing it does not re-resolve an artifact that already resolved.",
+		setting.InitializeFromEnv("https://huggingface.co"),
+		setting.DisallowBlank(),
+		setting.AllowUrlWithSchema("https", "http"),
+	)
+
+	// ModelArtifactHTTPSProxy is the proxy the ModelArtifact controller reaches the Hub through, and
+	// the HTTPS_PROXY an engine downloading the weights itself is given, where a role's own value
+	// wins. Blank leaves the worker's own environment in effect and renders nothing. It carries no
+	// credentials: the value is rendered into tenant Pods, where anyone who can read a Pod reads it.
+	ModelArtifactHTTPSProxy = settings.NewEditable(
+		"model-artifact-https-proxy",
+		"Indicates the HTTPS proxy ModelArtifacts resolve through, also given to engines that download "+
+			"the weights themselves. Blank keeps the worker's own environment and renders nothing.",
+		setting.InitializeFromEnv(),
+		setting.AllowBlank(),
+		func(_ context.Context, _, newVal string) error { return modelartifact.ValidateProxy(newVal) },
+	)
+
+	// ModelArtifactNoProxy is the comma-separated host list that bypasses ModelArtifactHTTPSProxy,
+	// given to engines as NO_PROXY on the same terms.
+	ModelArtifactNoProxy = settings.NewEditable(
+		"model-artifact-no-proxy",
+		"Indicates the comma-separated hosts that bypass model-artifact-https-proxy, also given to engines as NO_PROXY.",
+		setting.InitializeFromEnv(),
+		setting.AllowBlank(),
+		setting.Allow(),
+	)
+
+	// ModelArtifactCABundle names a ConfigMap in the worker's namespace whose "ca.crt" holds PEM
+	// certificates the ModelArtifact controller trusts beside the system pool. It is not given to
+	// engine Pods: they run in tenant namespaces, which cannot mount a ConfigMap from this one, and
+	// copying it into every tenant namespace would put an administrator object where tenants own
+	// everything.
+	ModelArtifactCABundle = settings.NewEditable(
+		"model-artifact-ca-bundle",
+		"Indicates the ConfigMap, in the worker's namespace, whose ca.crt the ModelArtifact controller trusts "+
+			"beside the system pool. It is not given to engine Pods.",
+		setting.InitializeFromEnv(),
+		setting.AllowBlank(),
+		setting.Allow(),
+	)
+
+	// ModelArtifactRevalidateInterval is how often a resolved Hugging Face ModelArtifact's access is
+	// checked again. A check also runs whenever the artifact's Secret changes.
+	ModelArtifactRevalidateInterval = settings.NewEditable(
+		"model-artifact-revalidate-interval",
+		"Indicates how often a resolved Hugging Face ModelArtifact's access is checked again, at least 1m. "+
+			"A check also runs whenever the artifact's Secret changes.",
+		setting.InitializeFromEnv("24h"),
+		setting.AllowDurationInRange(time.Minute, 365*24*time.Hour),
 	)
 
 	// Workload.

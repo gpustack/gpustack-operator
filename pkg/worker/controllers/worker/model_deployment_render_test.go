@@ -2920,7 +2920,7 @@ func TestRenderModelDeploymentPods_TCPTWReuseFollowsTheSetting(t *testing.T) {
 
 		md := newTCPTWReusePair()
 		r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
-		desired, err := r.renderModelDeploymentPods(context.Background(), md, nil, nil)
+		desired, err := r.renderModelDeploymentPods(context.Background(), md, nil, nil, nil)
 		require.NoError(t, err)
 
 		got := map[string][]core.Sysctl{}

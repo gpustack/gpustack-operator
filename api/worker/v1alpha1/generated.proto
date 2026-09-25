@@ -791,6 +791,12 @@ message InstanceAdditionalVolume {
   // later change that adds or widens such a mount. One the Instance already holds is never
   // re-judged, so the Setting going off does not strand it.
   optional .k8s.io.api.core.v1.HostPathVolumeSource hostPath = 7;
+
+  // Model mounts the weights of a ModelArtifact in the same namespace. It is always mounted
+  // read-only, whatever ReadOnly says, and takes no SubPath: the artifact's own path is the
+  // sub-path. Only an artifact on a PersistentVolumeClaim is accepted in this version; one on a
+  // model hub needs node delivery, which does not exist yet.
+  optional InstanceModelVolumeSource model = 8;
 }
 
 // InstanceEnvVar defines the environment variable to set in the Instance.
@@ -818,6 +824,14 @@ message InstanceList {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
 
   repeated Instance items = 2;
+}
+
+// InstanceModelVolumeSource references the ModelArtifact an Instance volume mounts.
+message InstanceModelVolumeSource {
+  // ArtifactRef names a ModelArtifact in the Instance's namespace.
+  //
+  // +required
+  optional .k8s.io.api.core.v1.LocalObjectReference artifactRef = 1;
 }
 
 // InstancePort defines the port to expose from the Instance.
@@ -2890,6 +2904,183 @@ message KVCachePoolUsage {
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity total = 1;
 }
 
+// ModelArtifact is the schema for worker.gpustack.ai.
+//
+// It is WHERE A MODEL'S WEIGHTS COME FROM AND WHICH CREDENTIAL READS THEM, and it is the only
+// object that says so: a ModelDeployment or an Instance references it by name and carries no URI,
+// revision or token of its own. Every consumer in the namespace shares one declaration.
+//
+// IT IS AN IDENTITY, SO ITS WHOLE SPEC IS IMMUTABLE AFTER CREATION, webhook-enforced. A different
+// source or revision is a different artifact, created rather than edited. That is also what makes a
+// frozen reference to it pin anything: a reference that cannot change to an object that can would
+// pin nothing.
+//
+// A Hugging Face source is resolved ONCE: the branch or tag becomes a 40-character commit, the files
+// at that commit become the canonical manifest, and the manifest's digest becomes the content
+// address. Nothing follows the branch afterwards. Access is revalidated periodically; losing it stops
+// new consumption and never touches running Pods.
+//
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["mart"],subResources=["status"]
+// +k8s:crd-gen:printcolumn:name="Revision",type="string",jsonPath=".status.resolved.revision"
+// +k8s:crd-gen:printcolumn:name="Size",type="integer",jsonPath=".status.resolved.sizeBytes"
+// +k8s:crd-gen:printcolumn:name="Resolved",type="string",jsonPath=".status.conditions[?(@.type=='Resolved')].status"
+// +k8s:crd-gen:printcolumn:name="Age",type="date",jsonPath=".metadata.creationTimestamp"
+message ModelArtifact {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional ModelArtifactSpec spec = 2;
+
+  optional ModelArtifactStatus status = 3;
+}
+
+// ModelArtifactHubSource is one repository on a model hub at one revision.
+message ModelArtifactHubSource {
+  // Repository is the repository id, "owner/name", or a bare canonical name.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=256
+  optional string repository = 1;
+
+  // Revision is a branch, a tag or a commit. Admission defaults it to "main". It is resolved to a
+  // full commit once, at creation, into status.resolved.revision.
+  //
+  // +optional
+  // +k8s:validation:maxLength=255
+  optional string revision = 2;
+
+  // SecretRef names a Secret in this namespace whose "token" key is the hub token. It is read by
+  // the controller for resolution and revalidation, and handed to an engine that downloads the
+  // weights itself through an environment variable referencing the Secret, so the value never
+  // enters a Pod spec, a status or an event.
+  //
+  // The Secret need not exist at admission; a missing one is reported in status.
+  //
+  // +optional
+  optional .k8s.io.api.core.v1.LocalObjectReference secretRef = 3;
+}
+
+// ModelArtifactList holds the list of ModelArtifact.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelArtifactList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelArtifact items = 2;
+}
+
+// ModelArtifactPersistentVolumeClaimSource is a directory inside a claim.
+message ModelArtifactPersistentVolumeClaimSource {
+  // ClaimName names a PersistentVolumeClaim in this namespace. It need not exist at admission; a
+  // missing one is reported in status.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=253
+  optional string claimName = 1;
+
+  // Path is the directory inside the volume, relative to its root. Empty is the root. It must not
+  // be absolute and must not contain a ".." element; the second half is admission's, because this
+  // schema's patterns cannot express it.
+  //
+  // +optional
+  // +k8s:validation:pattern="^[^/].*$"
+  // +k8s:validation:maxLength=1024
+  optional string path = 2;
+}
+
+// ModelArtifactResolved is the identity a source resolved to.
+message ModelArtifactResolved {
+  // Revision is the full 40-character commit a hub source resolved to. Absent for a claim.
+  //
+  // +optional
+  optional string revision = 1;
+
+  // ManifestDigest is the content address of a hub source: "sha256:" and the SHA-256 of the
+  // canonical manifest of every file at Revision, in the format pkg/modelartifact defines.
+  //
+  // IT IS NEVER EVIDENCE OF AUTHORIZATION. It is a pure content address: a public and a private
+  // repository holding the same files have the same digest, so knowing it proves nothing about
+  // access. Absent for a claim.
+  //
+  // +optional
+  optional string manifestDigest = 2;
+
+  // FileCount and SizeBytes are the manifest's file count and total size. Absent for a claim.
+  //
+  // +optional
+  optional int64 fileCount = 3;
+
+  // +optional
+  optional int64 sizeBytes = 4;
+
+  // ResolvedTime is when the resolution succeeded.
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time resolvedTime = 5;
+
+  // LastValidatedTime is when access was last confirmed. Absent for a claim, which has no access
+  // check of its own.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time lastValidatedTime = 6;
+}
+
+// ModelArtifactSource is a tagged union: exactly one member is set, webhook-enforced.
+message ModelArtifactSource {
+  // HuggingFace is a Hugging Face model repository at one revision.
+  //
+  // +optional
+  optional ModelArtifactHubSource huggingFace = 1;
+
+  // ModelScope is RESERVED AND REFUSED by admission in this version. Its shape is fixed so that
+  // opening it is a webhook change rather than a schema change, and the refusal names what opening
+  // it needs: branch resolution cross-checked against git, a listing that re-lists per directory at
+  // the API's silent truncation point, errors classified by the envelope code, and an engine runner
+  // whose ModelScope SDK accepts a commit as the revision.
+  //
+  // +optional
+  optional ModelArtifactHubSource modelScope = 2;
+
+  // PersistentVolumeClaim is a directory inside a claim in this namespace. The operator never
+  // reads the claim's content, so the artifact has no revision and no digest, and what the
+  // directory holds, and any change to it, is the user's.
+  //
+  // +optional
+  optional ModelArtifactPersistentVolumeClaimSource persistentVolumeClaim = 3;
+}
+
+// ModelArtifactSpec defines the desired state of ModelArtifact.
+message ModelArtifactSpec {
+  // Source is where the weights come from.
+  //
+  // +required
+  optional ModelArtifactSource source = 1;
+}
+
+// ModelArtifactStatus defines the observed state of ModelArtifact.
+message ModelArtifactStatus {
+  // ObservedGeneration is the generation the status was written for.
+  optional int64 observedGeneration = 1;
+
+  // Resolved is what the source was resolved to. It is written once and never changes afterwards:
+  // a later revalidation moves only LastValidatedTime and the conditions. It is absent until the
+  // first resolution succeeds.
+  //
+  // +optional
+  optional ModelArtifactResolved resolved = 2;
+
+  // Conditions: Resolved says whether the source is bound to its immutable identity and the most
+  // recent access check passed; Degraded says a resolution or revalidation is failing, including
+  // one that has not yet revoked access.
+  //
+  // +patchMergeKey=type
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=type
+  repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 3;
+}
+
 // ModelDeployment is the schema for worker.gpustack.ai.
 //
 // It is N replicas of one inference-engine role attached to a KV cache pool, so that the replicas
@@ -3146,18 +3337,70 @@ message ModelDeploymentList {
   repeated ModelDeployment items = 2;
 }
 
-// ModelDeploymentModel names the model the engine serves.
+// ModelDeploymentModel names the model the engine serves and, optionally, the weights it serves.
 //
-// It provisions nothing. Weights arrive through the role's additional volumes or through the engine's
-// own hub client; a weight-provisioning block here would be the first step towards the
-// general-purpose serving CR this deliberately is not.
+// It provisions nothing, and that has not changed: ArtifactRef REFERENCES weights that a
+// ModelArtifact provisions, the way spec.kvCache.poolRef references a pool a Binding grants. The
+// prohibition this type always carried stands: a source, a URI, a credential or a download policy
+// never enters this object, because a weight-provisioning block here would be the first step
+// towards the general-purpose serving CR this deliberately is not, and would make every deployment
+// a credential holder. Without ArtifactRef, weights arrive through the role's additional volumes or
+// through the engine's own hub client, as before.
 message ModelDeploymentModel {
   // Name is the identifier the engine serves, e.g. "Qwen/Qwen2.5-72B-Instruct".
+  //
+  // It stays the SERVED NAME whether or not ArtifactRef is set: routers, the router's tokenizer
+  // calls and the metrics' model label all match on it, so a managed role's own
+  // --served-model-name must equal it, admission-enforced.
   //
   // +required
   // +k8s:validation:minLength=1
   // +k8s:validation:maxLength=253
   optional string name = 1;
+
+  // ArtifactRef names a ModelArtifact IN THIS NAMESPACE holding the weights. The type is a
+  // LocalObjectReference so that reaching another namespace is unrepresentable rather than
+  // refused.
+  //
+  //   - It is FROZEN with the rest of this object: the weights a deployment serves are part of
+  //     which deployment it is. Serving other weights means creating another deployment, which
+  //     also keeps a prefill/decode pair from handing KV between two different weights.
+  //   - An artifact that does not exist yet, or is not resolved, is ADMITTED: the deployment waits
+  //     in status, creating no Pod, so a GitOps tool need not order the two objects.
+  //   - With it, every managed role's engine gets the weights at a fixed local path (a claim) or
+  //     the repository pinned to the resolved commit (a hub), and, with spec.kvCache, a weight
+  //     identity in its store key prefix, so different weights never share KV blocks.
+  //
+  // +optional
+  optional .k8s.io.api.core.v1.LocalObjectReference artifactRef = 2;
+}
+
+// ModelDeploymentModelStatus is the resolved weight identity a deployment serves.
+//
+// Every field is READ FROM THE MODELARTIFACT, never declared here, so reading which commit and which
+// content a deployment serves takes one object rather than two.
+message ModelDeploymentModelStatus {
+  // Artifact is the ModelArtifact this deployment references, in this namespace.
+  //
+  // +required
+  optional string artifact = 1;
+
+  // Revision is the commit a hub artifact resolved to. Absent for a claim.
+  //
+  // +optional
+  optional string revision = 2;
+
+  // ManifestDigest is a hub artifact's content address. Absent for a claim.
+  //
+  // +optional
+  optional string manifestDigest = 3;
+
+  // Delivery is how the weights reach the engine: "Pvc", the claim mounted read-only at a fixed
+  // path, or "Engine", the engine downloading the pinned commit itself.
+  //
+  // +required
+  // +k8s:validation:enum=["Pvc","Engine"]
+  optional string delivery = 4;
 }
 
 // ModelDeploymentPort defines one port a role's replica exposes beside the engine's own.
@@ -3909,13 +4152,17 @@ message ModelDeploymentStatus {
   optional string phaseMessage = 2;
 
   // Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,
-  // CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady. They are
-  // independent —
+  // CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady,
+  // WeightsReady. They are independent —
   // "quota reserved but cache not attached" is a real and actionable state — which is what a single
   // phase string cannot carry.
   //
   // KVEventsPublishing reports rendered configuration rather than observing the stream. A publisher
   // that was configured and then crashed therefore remains True until a live consumer observes it.
+  //
+  // WeightsReady reports whether every engine role's weights are available: a claim artifact
+  // mounted, or an engine's own download of a hub artifact finished. While it is False for a
+  // reason other than a Pod still starting, no replica is created and none that runs is touched.
   //
   // +patchMergeKey=type
   // +patchStrategy=merge
@@ -3959,6 +4206,13 @@ message ModelDeploymentStatus {
   // managed router Pods; S, P, and D count server, prefill, and decode instances. A serving
   // instance may contain several Pods, so the engine figures are not Pod counts.
   optional string roleSummary = 8;
+
+  // Model echoes the weights spec.model.artifactRef resolved to, and how they reach the engine.
+  //
+  // It is ABSENT without spec.model.artifactRef, and while the artifact has not resolved, for the
+  // reason KVCache is: an empty object here cannot be told apart from an identity whose every
+  // field happens to be empty.
+  optional ModelDeploymentModelStatus model = 9;
 }
 
 // TopologySource is the cluster-scoped topology inventory used to form Kueue hierarchies.

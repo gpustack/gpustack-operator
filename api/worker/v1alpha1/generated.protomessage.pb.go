@@ -68,6 +68,8 @@ func (*InstanceEphemeralVolume) ProtoMessage() {}
 
 func (*InstanceList) ProtoMessage() {}
 
+func (*InstanceModelVolumeSource) ProtoMessage() {}
+
 func (*InstancePort) ProtoMessage() {}
 
 func (*InstanceResources) ProtoMessage() {}
@@ -180,6 +182,22 @@ func (*KVCachePoolStatus) ProtoMessage() {}
 
 func (*KVCachePoolUsage) ProtoMessage() {}
 
+func (*ModelArtifact) ProtoMessage() {}
+
+func (*ModelArtifactHubSource) ProtoMessage() {}
+
+func (*ModelArtifactList) ProtoMessage() {}
+
+func (*ModelArtifactPersistentVolumeClaimSource) ProtoMessage() {}
+
+func (*ModelArtifactResolved) ProtoMessage() {}
+
+func (*ModelArtifactSource) ProtoMessage() {}
+
+func (*ModelArtifactSpec) ProtoMessage() {}
+
+func (*ModelArtifactStatus) ProtoMessage() {}
+
 func (*ModelDeployment) ProtoMessage() {}
 
 func (*ModelDeploymentAdditionalVolume) ProtoMessage() {}
@@ -199,6 +217,8 @@ func (*ModelDeploymentKVTransfer) ProtoMessage() {}
 func (*ModelDeploymentList) ProtoMessage() {}
 
 func (*ModelDeploymentModel) ProtoMessage() {}
+
+func (*ModelDeploymentModelStatus) ProtoMessage() {}
 
 func (*ModelDeploymentPort) ProtoMessage() {}
 

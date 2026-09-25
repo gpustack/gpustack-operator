@@ -262,6 +262,11 @@ func ValidateBindingTransport(engine Engine, offers []string) error {
 // package emits, while the Pod carries a full set of them and the injection record says it
 // succeeded. That is the failure this list exists to refuse rather than document.
 //
+// The elided condition is an extra configuration naming master_server_address or
+// client_server_address. The renderer writes an extra configuration of its own for a deployment
+// that names its weights -- extra_backend_tag and nothing else -- which takes the else branch, so
+// the flag is refused on a user's container and rendered by this package on its own.
+//
 // REQUIRED: keyed per engine, because a key is only a branch selector for the engine that reads it.
 // SGLang's variable means nothing to vLLM, and refusing a vLLM container over it would be a refusal
 // with nothing behind it -- the same reason the owned-key scan filters by what the render writes.

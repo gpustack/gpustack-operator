@@ -57,6 +57,10 @@ type ModelDeploymentConnectorInput struct {
 	// image owner's compatibility responsibility.
 	Domain string
 
+	// CachePrefix is the weight identity the store's keys are prefixed with, derived from the
+	// deployment's ModelArtifact, or empty for a deployment naming none.
+	CachePrefix string
+
 	// MasterServerAddress is the address of the store master, observed from the pool.
 	MasterServerAddress string
 
@@ -348,6 +352,92 @@ var modelDeploymentOwnedKeys = map[string]struct {
 	},
 }
 
+// ModelDeploymentModelMountPath is where a claim artifact's directory is mounted, read-only, and
+// the path the engine is told to load. ModelDeploymentModelCachePath is where an engine that
+// downloads a hub artifact itself keeps the download. Both are reserved while spec.model.artifactRef
+// is set: a role's own volume at, inside or around either would shadow the weights or be shadowed.
+const (
+	ModelDeploymentModelMountPath = "/var/lib/gpustack/model"
+	ModelDeploymentModelCachePath = "/var/lib/gpustack/model-cache"
+)
+
+// ModelDeploymentServedModelNameArg is the flag naming what the engine serves. It is DEFAULTED,
+// not owned, and its value is pinned: a managed role may state it, but only as spec.model.name,
+// because a router, the router's tokenizer calls and the metrics' model label all match on that
+// name, and a mismatch was measured to fail silently behind a deployment reporting Ready.
+const ModelDeploymentServedModelNameArg = "--served-model-name"
+
+// modelDeploymentArtifactOwnedKeys is what the operator owns on top of modelDeploymentOwnedKeys
+// WHILE spec.model.artifactRef IS SET, and on a role it renders the command line of.
+//
+// The arguments are the model the engine loads and the pin on it: the operator renders the model
+// as a positional path or the repository, then --revision, and a later flag of the same name would
+// silently replace either. --download-dir would move the download off the size-limited cache
+// volume. The environment is how an engine that downloads the weights reaches the Hub: the token
+// read from the artifact's Secret, the administrator's endpoint, and the cache location.
+//
+// IT IS A SEPARATE TABLE, NOT ENTRIES IN THE OTHER ONE, because the other one is unconditional: a
+// deployment naming no artifact still passes --revision to pin a hub download itself, and must
+// keep being able to.
+var modelDeploymentArtifactOwnedKeys = map[string]struct {
+	Args []string
+	Env  []string
+}{
+	workercore.ModelDeploymentEngineVLLM: {
+		Args: []string{"--model", "--revision", "--tokenizer-revision", "--download-dir"},
+		Env:  []string{"HF_TOKEN", "HF_ENDPOINT", "HF_HOME"},
+	},
+	workercore.ModelDeploymentEngineSGLang: {
+		Args: []string{"--model-path", "--revision", "--download-dir"},
+		Env:  []string{"HF_TOKEN", "HF_ENDPOINT", "HF_HOME"},
+	},
+}
+
+// ModelDeploymentArtifactOwnedArg reports which artifact-owned argument the engine's parser reads
+// a command-line entry as. It applies only while spec.model.artifactRef is set.
+func ModelDeploymentArtifactOwnedArg(engine, arg string) (string, bool) {
+	return ModelDeploymentResolveArg(engine, arg, modelDeploymentArtifactOwnedKeys[engine].Args)
+}
+
+// ModelDeploymentArtifactOwnsEnv reports whether the environment name is artifact-owned. It applies
+// only while spec.model.artifactRef is set.
+func ModelDeploymentArtifactOwnsEnv(engine, name string) bool {
+	return slices.Contains(modelDeploymentArtifactOwnedKeys[engine].Env, name)
+}
+
+// ModelDeploymentServedModelNames returns every value a command line gives the served-name flag,
+// in the engine's own reading, and whether the flag appears at all.
+//
+// vLLM takes one or more names after the flag, up to the next entry starting with "-", and accepts
+// the "=" form for one; SGLang takes exactly one. Every value is returned, so a caller can refuse a
+// second name as well as a wrong first one.
+func ModelDeploymentServedModelNames(engine string, args []string) ([]string, bool) {
+	keys := []string{ModelDeploymentServedModelNameArg}
+	var (
+		names []string
+		found bool
+	)
+	for i := 0; i < len(args); i++ {
+		if _, ok := ModelDeploymentResolveArg(engine, args[i], keys); !ok {
+			continue
+		}
+		found = true
+		if _, value, inline := strings.Cut(args[i], "="); inline {
+			names = append(names, value)
+			continue
+		}
+		for i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			i++
+			names = append(names, args[i])
+			if engine != workercore.ModelDeploymentEngineVLLM {
+				break
+			}
+		}
+	}
+
+	return names, found
+}
+
 // modelDeploymentDefaultedEnvNames are the environment names the operator supplies but does not own.
 //
 // MC_TE_METRIC turns on the transfer engine's own metrics, without which the hit rate this whole
@@ -516,6 +606,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		// know whether its other half is declared.
 		Disaggregated: in.Disaggregated,
 		Domain:        in.Domain,
+		CachePrefix:   in.CachePrefix,
 		Connection: inject.Connection{
 			MasterAddress: in.MasterServerAddress,
 			Protocol:      protocol,

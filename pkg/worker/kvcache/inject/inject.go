@@ -4,6 +4,7 @@ package inject
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	core "k8s.io/api/core/v1"
 )
@@ -104,6 +105,9 @@ func KVEventsPorts() []core.ContainerPort {
 	}
 }
 
+// cachePrefixSeparators are the characters vLLM and SGLang join a store key's parts with.
+const cachePrefixSeparators = "@_:"
+
 // Render turns a resolved input into the artifacts one container needs to use a KV cache pool.
 //
 // It is a pure function over values: no Kubernetes client, no context, no cluster reads. Deciding WHAT
@@ -174,6 +178,12 @@ func Render(in Input) (*Result, error) {
 		return nil, newRefusal(ReasonRoleUnsupported,
 			"engine %q renders no KV event publishing; asking for it would leave a container that "+
 				"starts and moves nothing", in.Engine)
+	}
+
+	if strings.ContainsAny(in.CachePrefix, cachePrefixSeparators) {
+		return nil, newRefusal(ReasonCachePrefixInvalid,
+			"cache prefix %q holds one of %q, the separators the engines join store keys with",
+			in.CachePrefix, cachePrefixSeparators)
 	}
 
 	switch in.Engine {

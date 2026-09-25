@@ -563,6 +563,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
 	errs = append(errs, validateModelDeploymentRoleListenPorts(nil, md)...)
 	errs = append(errs, validateModelDeploymentRoleReservedListenPorts(nil, md)...)
+	errs = append(errs, validateModelDeploymentServedModelNames(nil, md)...)
 
 	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
 
@@ -615,6 +616,7 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
 	errs = append(errs, validateModelDeploymentRoleListenPorts(old, md)...)
 	errs = append(errs, validateModelDeploymentRoleReservedListenPorts(old, md)...)
+	errs = append(errs, validateModelDeploymentServedModelNames(old, md)...)
 	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
 	errs = append(errs, validateModelDeploymentRouterName(md, old)...)
 	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
@@ -1634,6 +1636,8 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 		errs = append(errs, validateModelDeploymentRoleEnv(md.Spec.Engine.Name, role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleResources(role, rolePath)...)
 		errs = append(errs, validateModelDeploymentRoleAdditionalVolumes(role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleArtifactKeys(md, role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleReservedMountPaths(md, role, rolePath)...)
 		// Unconditional rather than inside the router's own rules, because the listeners this
 		// refuses against are not all the router's: SGLang's bootstrap registry follows the role
 		// and renders on an unrouted prefiller, and the router-gated walk never runs for one.
@@ -1702,6 +1706,135 @@ func validateModelDeploymentRoleAdditionalVolumes(
 				"must not contain a \"..\" element: the path is resolved inside the volume, and an "+
 					"element that climbs out of it reaches the host filesystem of whatever backs the "+
 					"volume"))
+		}
+	}
+
+	return errs
+}
+
+// validateModelDeploymentServedModelNames applies validateModelDeploymentRoleServedModelName to every
+// role, except a role an update leaves with the served names it already had: the rule arrived after
+// objects were stored, and one it would refuse must still take an edit elsewhere -- a scale, a label
+// -- rather than be stranded until its arguments are fixed in the same request.
+func validateModelDeploymentServedModelNames(old, md *workercore.ModelDeployment) field.ErrorList {
+	var errs field.ErrorList
+	rolesPath := field.NewPath("spec", "roles")
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if old != nil {
+			if j := slices.IndexFunc(old.Spec.Roles, func(r workercore.ModelDeploymentRole) bool {
+				return r.Name == role.Name
+			}); j >= 0 {
+				was, _ := workerctrl.ModelDeploymentServedModelNames(old.Spec.Engine.Name, old.Spec.Roles[j].ExtraArgs)
+				now, _ := workerctrl.ModelDeploymentServedModelNames(md.Spec.Engine.Name, role.ExtraArgs)
+				if slices.Equal(was, now) && old.Spec.Model.Name == md.Spec.Model.Name &&
+					len(old.Spec.Roles[j].Command) == len(role.Command) {
+					continue
+				}
+			}
+		}
+		errs = append(errs, validateModelDeploymentRoleServedModelName(md, role, rolesPath.Index(i))...)
+	}
+
+	return errs
+}
+
+// validateModelDeploymentRoleServedModelName refuses a managed role whose own --served-model-name
+// is anything but spec.model.name.
+//
+// THE RULE CANNOT BE LOOSENED, and it holds with or without an artifact. A router, the router's
+// tokenizer calls and the metrics' model label all match on spec.model.name. A role serving under
+// another name was measured to fail twice and silently: requests by spec.model.name answer 404
+// through the router, and requests by the role's name succeed while the router's token producer
+// fails on every one and its prefix-cache scoring falls to zero -- with the deployment reporting
+// Ready. Nothing but this refusal stops it.
+//
+// A second name is refused too: vLLM takes several, and its metrics carry only the first.
+//
+// A role that replaced its command line is not judged: its author owns every argument, which is
+// what that tier is for.
+func validateModelDeploymentRoleServedModelName(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, rolePath *field.Path,
+) field.ErrorList {
+	if len(role.Command) > 0 {
+		return nil
+	}
+	names, found := workerctrl.ModelDeploymentServedModelNames(md.Spec.Engine.Name, role.ExtraArgs)
+	if !found || (len(names) == 1 && names[0] == md.Spec.Model.Name) {
+		return nil
+	}
+
+	return field.ErrorList{field.Invalid(rolePath.Child("extraArgs"), names, fmt.Sprintf(
+		"%s must be exactly %q, the name spec.model.name serves under: a router, its tokenizer "+
+			"calls and the metrics' model label all match on that name, so any other value, or a "+
+			"second one, makes them miss while the deployment reports Ready; leave the flag out "+
+			"to have the operator render it",
+		workerctrl.ModelDeploymentServedModelNameArg, md.Spec.Model.Name,
+	))}
+}
+
+// validateModelDeploymentRoleArtifactKeys refuses, while spec.model.artifactRef is set, an argument
+// or environment entry naming what the operator renders to deliver the weights: the model the
+// engine loads, the pin on it, where a download lands, and how the engine reaches the Hub.
+//
+// A later flag of the same name would silently replace the operator's, and the deployment would
+// serve weights other than the artifact's while status echoes the artifact. A role that replaced
+// its command line gets none of those renders, so it is not judged.
+func validateModelDeploymentRoleArtifactKeys(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, rolePath *field.Path,
+) field.ErrorList {
+	if md.Spec.Model.ArtifactRef == nil || len(role.Command) > 0 {
+		return nil
+	}
+
+	engine := md.Spec.Engine.Name
+	var errs field.ErrorList
+	for i, arg := range role.ExtraArgs {
+		owned, ok := workerctrl.ModelDeploymentArtifactOwnedArg(engine, arg)
+		if !ok {
+			continue
+		}
+		errs = append(errs, field.Invalid(rolePath.Child("extraArgs").Index(i), arg, fmt.Sprintf(
+			"%q is set by the operator while spec.model.artifactRef names the weights, and a second "+
+				"value would silently replace the artifact's; replace the whole command line through "+
+				"%s to own it instead", owned, rolePath.Child("command"),
+		)))
+	}
+	for i := range role.Env {
+		name := role.Env[i].Name
+		if !workerctrl.ModelDeploymentArtifactOwnsEnv(engine, name) {
+			continue
+		}
+		errs = append(errs, field.Invalid(rolePath.Child("env").Index(i), name, fmt.Sprintf(
+			"%q is set by the operator while spec.model.artifactRef names the weights: it is how an "+
+				"engine downloading them reaches the Hub with the artifact's credential; replace the "+
+				"whole command line through %s to own it instead", name, rolePath.Child("command"),
+		)))
+	}
+
+	return errs
+}
+
+// validateModelDeploymentRoleReservedMountPaths refuses, while spec.model.artifactRef is set, a
+// role volume at, inside or around the paths the weights are mounted at: one inside would shadow
+// part of the weights, one around them would shadow all of them.
+func validateModelDeploymentRoleReservedMountPaths(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, rolePath *field.Path,
+) field.ErrorList {
+	if md.Spec.Model.ArtifactRef == nil {
+		return nil
+	}
+
+	var errs field.ErrorList
+	for i, av := range role.AdditionalVolumes {
+		for _, reserved := range []string{workerctrl.ModelDeploymentModelMountPath, workerctrl.ModelDeploymentModelCachePath} {
+			if !pathsOverlap(av.MountPath, reserved) {
+				continue
+			}
+			errs = append(errs, field.Invalid(rolePath.Child("additionalVolumes").Index(i).Child("mountPath"),
+				av.MountPath, fmt.Sprintf(
+					"overlaps %q, where the operator mounts the weights spec.model.artifactRef names", reserved)))
+			break
 		}
 	}
 
