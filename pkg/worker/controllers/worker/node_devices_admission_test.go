@@ -8,15 +8,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueueadmissioncheck "sigs.k8s.io/kueue/pkg/util/admissioncheck"
@@ -1174,13 +1179,10 @@ func slicedGateWorkload(check kueue.CheckState, extraConds ...meta.Condition) *k
 	}
 }
 
-// reconcileSlicedGate seeds the one-node pool the Workload is assigned to, reconciles it once, and
-// reports the state this controller's check holds afterwards. The pool's single card has only 640k
-// units free: the 960k slicedGateWorkload asks for no longer fits, so the gate answers Retry for
-// every Workload it is allowed to evaluate.
-func reconcileSlicedGate(t *testing.T, wl *kueue.Workload) (kueue.CheckState, string) {
-	t.Helper()
-
+// slicedGateClientBuilder seeds the one-node pool the Workload is assigned to. The pool's single
+// card has only 640k units free: the 960k slicedGateWorkload asks for no longer fits, so the gate
+// answers Retry for every Workload it is allowed to evaluate.
+func slicedGateClientBuilder(wl *kueue.Workload) *ctrlfake.ClientBuilder {
 	// The bare accelerator feature key is what an accelerated flavor pins and what decides which
 	// of a node's cards it covers, so a fixture without it would make this gate answer Retry for
 	// an empty card population rather than for the shortage these cases are about — a test that
@@ -1194,10 +1196,17 @@ func reconcileSlicedGate(t *testing.T, wl *kueue.Workload) (kueue.CheckState, st
 	check := &kueue.AdmissionCheck{ObjectMeta: meta.ObjectMeta{Name: _NodeDevicesAdmissionCheckName}, Spec: kueue.AdmissionCheckSpec{ControllerName: _NodeDevicesControllerName}}
 	devs := devicesWithRemaining(640000)
 	devs.ObjectMeta = meta.ObjectMeta{Name: "node-a", Labels: poolLabels}
-	cli := admissionClientBuilder().
+	return admissionClientBuilder().
 		WithObjects(append(chargingPods(&devs), rf, check, &devs, wl)...).
-		WithStatusSubresource(&kueue.Workload{}).
-		Build()
+		WithStatusSubresource(&kueue.Workload{})
+}
+
+// reconcileSlicedGate seeds the pool of slicedGateClientBuilder, reconciles the Workload once, and
+// reports the state this controller's check holds afterwards.
+func reconcileSlicedGate(t *testing.T, wl *kueue.Workload) (kueue.CheckState, string) {
+	t.Helper()
+
+	cli := slicedGateClientBuilder(wl).Build()
 	r := &NodeDevicesAdmissionReconciler{Client: cli, APIReader: cli}
 
 	_, err := r.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "default", Name: "w"}})
@@ -1300,6 +1309,185 @@ func TestNodeDevicesAdmission_EvictedWorkloadKeepsKueuesResetCheck(t *testing.T)
 				assert.Contains(t, msg, "enough free cards",
 					"the hold must be the units shortage this fixture builds, not a missing assignment")
 			}
+		})
+	}
+}
+
+// errorCountingSink is a logr sink that counts the Error calls it receives and discards the rest.
+type errorCountingSink struct{ errors *int }
+
+func (errorCountingSink) Init(logr.RuntimeInfo)            {}
+func (errorCountingSink) Enabled(int) bool                 { return true }
+func (errorCountingSink) Info(int, string, ...any)         {}
+func (s errorCountingSink) Error(error, string, ...any)    { *s.errors++ }
+func (s errorCountingSink) WithValues(...any) logr.LogSink { return s }
+func (s errorCountingSink) WithName(string) logr.LogSink   { return s }
+
+// failOnce returns an error the first time a call matches, and nil after, so the next reconcile
+// finds the client healthy again.
+func failOnce(err error) func() error {
+	failed := false
+	return func() error {
+		if failed {
+			return nil
+		}
+		failed = true
+		return err
+	}
+}
+
+// TestNodeDevicesAdmission_ExpectedWriteFailuresAreQuiet pins how a reconcile ends when the Workload
+// changed or was deleted after it was read. Both heal on their own, the conflict through the change
+// event that reconciles the Workload again, so they end the reconcile without an error and without
+// an error log. Any other failure is still returned and logged, and the next reconcile writes the
+// verdict in every case.
+func TestNodeDevicesAdmission_ExpectedWriteFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: kueue.GroupVersion.Group, Resource: "workloads"}
+	testCases := []struct {
+		name       string
+		getErr     error
+		patchErr   error
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name:     "a conflicting verdict write ends quietly",
+			patchErr: apierrors.NewConflict(gr, "w", fmt.Errorf("the object has been modified")),
+		},
+		{
+			name:     "a verdict write on a deleted workload ends quietly",
+			patchErr: apierrors.NewNotFound(gr, "w"),
+		},
+		{
+			name:   "fetching a deleted workload ends quietly",
+			getErr: apierrors.NewNotFound(gr, "w"),
+		},
+		{
+			name:       "any other write failure is returned and logged",
+			patchErr:   apierrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			getErr, patchErr := failOnce(tc.getErr), failOnce(tc.patchErr)
+			cli := slicedGateClientBuilder(slicedGateWorkload(kueue.CheckStatePending)).
+				WithInterceptorFuncs(ctrlinterceptor.Funcs{
+					Get: func(ctx context.Context, c ctrlcli.WithWatch, key ctrlcli.ObjectKey, obj ctrlcli.Object, opts ...ctrlcli.GetOption) error {
+						if _, ok := obj.(*kueue.Workload); ok {
+							if err := getErr(); err != nil {
+								return err
+							}
+						}
+						return c.Get(ctx, key, obj, opts...)
+					},
+					SubResourcePatch: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, patch ctrlcli.Patch, opts ...ctrlcli.SubResourcePatchOption) error {
+						if err := patchErr(); err != nil {
+							return err
+						}
+						return c.SubResource(sub).Patch(ctx, obj, patch, opts...)
+					},
+				}).
+				Build()
+			r := &NodeDevicesAdmissionReconciler{Client: cli, APIReader: cli}
+			req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "default", Name: "w"}}
+
+			var logged int
+			ctx := ctrllog.IntoContext(context.Background(), logr.New(errorCountingSink{errors: &logged}))
+			res, err := r.Reconcile(ctx, req)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, ctrlreconcile.Result{}, res)
+			assert.Equal(t, tc.wantLogged, logged, "error log lines")
+
+			// The next reconcile, which the change event or the returned error triggers, writes it.
+			_, err = r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+			got := new(kueue.Workload)
+			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, got))
+			cs := kueueadmissioncheck.FindAdmissionCheck(got.Status.AdmissionChecks, _NodeDevicesAdmissionCheckName)
+			require.NotNil(t, cs)
+			assert.Equal(t, kueue.CheckStateRetry, cs.State)
+		})
+	}
+}
+
+// TestNodeDevicesAdmissionCheckReconciler_ExpectedWriteFailuresAreQuiet pins the same rule for the
+// AdmissionCheck this operator marks Active: a conflict or a deleted object ends the reconcile
+// without an error and without an error log, any other failure is returned and logged, and the next
+// reconcile marks the check Active in every case.
+func TestNodeDevicesAdmissionCheckReconciler_ExpectedWriteFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: kueue.GroupVersion.Group, Resource: "admissionchecks"}
+	testCases := []struct {
+		name       string
+		getErr     error
+		updateErr  error
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name:      "a conflicting status update ends quietly",
+			updateErr: apierrors.NewConflict(gr, _NodeDevicesAdmissionCheckName, fmt.Errorf("the object has been modified")),
+		},
+		{
+			name:   "fetching a deleted admission check ends quietly",
+			getErr: apierrors.NewNotFound(gr, _NodeDevicesAdmissionCheckName),
+		},
+		{
+			name:       "any other update failure is returned and logged",
+			updateErr:  apierrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			getErr, updateErr := failOnce(tc.getErr), failOnce(tc.updateErr)
+			cli := ctrlfake.NewClientBuilder().
+				WithScheme(scheme.Scheme).
+				WithObjects(&kueue.AdmissionCheck{
+					ObjectMeta: meta.ObjectMeta{Name: _NodeDevicesAdmissionCheckName},
+					Spec:       kueue.AdmissionCheckSpec{ControllerName: _NodeDevicesControllerName},
+				}).
+				WithStatusSubresource(&kueue.AdmissionCheck{}).
+				WithInterceptorFuncs(ctrlinterceptor.Funcs{
+					Get: func(ctx context.Context, c ctrlcli.WithWatch, key ctrlcli.ObjectKey, obj ctrlcli.Object, opts ...ctrlcli.GetOption) error {
+						if err := getErr(); err != nil {
+							return err
+						}
+						return c.Get(ctx, key, obj, opts...)
+					},
+					SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
+						if err := updateErr(); err != nil {
+							return err
+						}
+						return c.SubResource(sub).Update(ctx, obj, opts...)
+					},
+				}).
+				Build()
+			r := &NodeDevicesAdmissionCheckReconciler{Client: cli}
+			req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: _NodeDevicesAdmissionCheckName}}
+
+			var logged int
+			ctx := ctrllog.IntoContext(context.Background(), logr.New(errorCountingSink{errors: &logged}))
+			res, err := r.Reconcile(ctx, req)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, ctrlreconcile.Result{}, res)
+			assert.Equal(t, tc.wantLogged, logged, "error log lines")
+
+			_, err = r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+			got := new(kueue.AdmissionCheck)
+			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, got))
+			assert.True(t, kubemeta.IsConditionTrue(got.Status.Conditions, kueue.AdmissionCheckActive))
 		})
 	}
 }

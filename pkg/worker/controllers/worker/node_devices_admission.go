@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/go-logr/logr"
 	core "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -945,8 +946,12 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 
 	wl := new(kueue.Workload)
 	if err := r.Client.Get(ctx, req.NamespacedName, wl); err != nil {
+		// A deleted Workload is reconciled once more on its delete event; there is nothing to judge.
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
 		logger.Error(err, "fetch workload")
-		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+		return ctrl.Result{}, err
 	}
 
 	// Evaluate only a live, unfinished Workload that already holds a quota
@@ -1014,8 +1019,7 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 		logger.Info("holding workload whose podset carries no assigned flavor",
 			"roles", roles)
 		if err := r.applyVerdict(ctx, wl, checks, kueue.CheckStateRetry, unassignedFlavorMessage(roles)); err != nil {
-			logger.Error(err, "patch admission check state")
-			return ctrl.Result{}, err
+			return statusWriteResult(logger, err, "patch admission check state")
 		}
 		return ctrl.Result{}, nil
 	}
@@ -1037,8 +1041,7 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 		logger.Info("holding workload whose assigned flavor resolves to no card population",
 			"roles", roles)
 		if err := r.applyVerdict(ctx, wl, checks, kueue.CheckStateRetry, unresolvedFlavorMessage(roles)); err != nil {
-			logger.Error(err, "patch admission check state")
-			return ctrl.Result{}, err
+			return statusWriteResult(logger, err, "patch admission check state")
 		}
 		return ctrl.Result{}, nil
 	}
@@ -1060,8 +1063,7 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 		logger.Info("holding workload behind an inflight workload whose flavor resolves to no cards",
 			"node", unresolvedNode)
 		if err := r.applyVerdict(ctx, wl, checks, kueue.CheckStateRetry, unresolvedInflightMessage(unresolvedNode)); err != nil {
-			logger.Error(err, "patch admission check state")
-			return ctrl.Result{}, err
+			return statusWriteResult(logger, err, "patch admission check state")
 		}
 		return ctrl.Result{}, nil
 	}
@@ -1069,8 +1071,7 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 	state, message := nodeDevicesFeasibility(devices, inflight, demands)
 
 	if err := r.applyVerdict(ctx, wl, checks, state, message); err != nil {
-		logger.Error(err, "patch admission check state")
-		return ctrl.Result{}, err
+		return statusWriteResult(logger, err, "patch admission check state")
 	}
 	// demandsSummary formats eagerly, so gate it: this runs on every Workload reconcile.
 	if logger.V(2).Enabled() {
@@ -1346,6 +1347,24 @@ func (r *NodeDevicesAdmissionReconciler) applyVerdict(
 	return nil
 }
 
+// statusWriteResult turns a failed status write into the reconcile result. Two failures are
+// expected and heal on their own, so they are logged at V(1) and not returned: a conflict means the
+// object changed after it was read, and that change is itself an event that reconciles the object
+// again from its newer version; not found means the object is gone and nothing is left to write.
+// Returning either would only add an error log and a backoff retry of a write that is already moot.
+//
+// The conflict is kept rather than avoided. The verdict is judged from the object as read, and the
+// resource version the write carries is what stops it from landing on a newer one: Kueue resets the
+// checks of an evicted Workload to Pending, and a verdict judged before that reset must not overwrite it.
+func statusWriteResult(logger logr.Logger, err error, msg string) (ctrl.Result, error) {
+	if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
+		logger.V(1).Info(msg+" skipped, the object changed or was deleted since it was read", "reason", err.Error())
+		return ctrl.Result{}, nil
+	}
+	logger.Error(err, msg)
+	return ctrl.Result{}, err
+}
+
 // desiredCheckStates renders the verdict for every check this controller owns, and reports whether
 // any of them differs from what the Workload already carries.
 //
@@ -1513,8 +1532,11 @@ func (r *NodeDevicesAdmissionCheckReconciler) Reconcile(ctx context.Context, req
 
 	ac := new(kueue.AdmissionCheck)
 	if err := r.Client.Get(ctx, req.NamespacedName, ac); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
 		logger.Error(err, "fetch admission check")
-		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+		return ctrl.Result{}, err
 	}
 
 	if ac.Spec.ControllerName != _NodeDevicesControllerName {
@@ -1533,8 +1555,7 @@ func (r *NodeDevicesAdmissionCheckReconciler) Reconcile(ctx context.Context, req
 		Message: "the node-devices admission check controller is running",
 	})
 	if err := r.Client.Status().Update(ctx, ac); err != nil {
-		logger.Error(err, "mark admission check active")
-		return ctrl.Result{}, err
+		return statusWriteResult(logger, err, "mark admission check active")
 	}
 
 	logger.V(2).Info("activated node-devices admission check", "name", ac.Name)
