@@ -289,4 +289,4 @@ echo "${bc}" | grep -v '^FAILS='
 
 total=$(( $(xb_fails "${partA}") + $(xb_fails "${bc}") ))
 echo "FAILS=${total}"
-xb_verdict "AMD-CASE 6" "${total}"
+xb_verdict "AMD-CASE 6" "${total}" "${partA}"$'\n'"${bc}"

@@ -82,4 +82,4 @@ echo "FAILS=${fails}"
 PAYLOAD
 )"
 echo "${out}"
-xb_verdict "NVIDIA-CASE 2" "$(xb_fails "${out}")"
+xb_verdict "NVIDIA-CASE 2" "$(xb_fails "${out}")" "${out}"

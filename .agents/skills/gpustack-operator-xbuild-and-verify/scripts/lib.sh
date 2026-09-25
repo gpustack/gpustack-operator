@@ -330,9 +330,18 @@ xb_fails() {
   printf '%s' "${n:-1}"
 }
 
-# xb_verdict <label> <count> — print the case's verdict and exit with it. Does not return.
+# xb_verdict <label> <count> [<output>] — print the case's verdict and exit with it. Does not return.
+#
+# Given the case's output, a zero count with no PASS row and no FAIL row is SKIP, exit 3: every row
+# skipped, so nothing was measured, and a PASS there would read as coverage. 3 because 1 is FAIL and
+# 2 is a case's "input required". Rows are matched at the start of a line only, for the same reason
+# the count is.
 xb_verdict() {
   if [ "${2:-1}" -eq 0 ]; then
+    if [ "$#" -ge 3 ] && ! printf '%s\n' "$3" | grep -qE '^(PASS|FAIL) \| '; then
+      echo "$1: SKIP (no row passed or failed; nothing was measured)"
+      exit 3
+    fi
     echo "$1: PASS"
     exit 0
   fi

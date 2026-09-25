@@ -8,9 +8,11 @@
 # a loop is capped at the configured memory-quota when libvruntime.so is preloaded,
 # but not when it is absent.
 #   - baseline (no injection): allocates well past the quota (until physical free)
-#   - injected (memory-quota=MEM MB): libvruntime's aclrtMalloc hook denies the
-#     allocation that would cross the quota, logging
+#   - injected (memory-quota=MEM MB, ENPU_DSMI_HOOK=1): libvruntime's aclrtMalloc hook
+#     denies the allocation that would cross the quota, logging
 #       Out of memory! Request:<r> B, used:<u> B, quota:<MEM*1048576> B.
+#     ENPU_DSMI_HOOK=1 matches the product default the Ascend allocator injects into every
+#     sliced container, so the combination measured is the one that ships.
 #
 # Asserts: injected run blocked at <= MEM; the "Out of memory" log carries the
 # correct quota bytes; baseline run reached > MEM. Embeds the validated memquota.py.
@@ -76,7 +78,7 @@ base="$(docker run --rm --runtime=ascend -e ASCEND_VISIBLE_DEVICES="${NPU}" \
 nbase="$(echo "${base}" | awk -F= '/STOP total=/{gsub(/MB/,"",$2);print $2}')"
 
 # B) injected — memory-quota=MEM
-inj="$(docker run --rm --runtime=ascend -e ASCEND_VISIBLE_DEVICES="${NPU}" -e ENPU_LOG_LEVEL=3 \
+inj="$(docker run --rm --runtime=ascend -e ASCEND_VISIBLE_DEVICES="${NPU}" -e ENPU_LOG_LEVEL=3 -e ENPU_DSMI_HOOK=1 \
   ${base_dir} -v "${T}/memquota.py:/memquota.py:ro" "${IMG}" python3 /memquota.py 2>&1)"
 ninj="$(echo "${inj}" | awk -F= '/STOP total=/{gsub(/MB/,"",$2);print $2}')"
 
@@ -97,4 +99,4 @@ echo "FAILS=${fails}"
 PAYLOAD
 )"
 echo "${out}"
-xb_verdict "ASCEND-CASE 3" "$(xb_fails "${out}")"
+xb_verdict "ASCEND-CASE 3" "$(xb_fails "${out}")" "${out}"

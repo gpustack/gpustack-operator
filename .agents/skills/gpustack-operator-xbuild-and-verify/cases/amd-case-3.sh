@@ -325,4 +325,4 @@ fi
 PAYLOAD
 )"
 echo "${out}"
-xb_verdict "AMD-CASE 3" "$(xb_fails "${out}")"
+xb_verdict "AMD-CASE 3" "$(xb_fails "${out}")" "${out}"

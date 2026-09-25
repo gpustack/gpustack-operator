@@ -403,4 +403,4 @@ INNER
 PAYLOAD
 )"
 echo "${out}"
-xb_verdict "THEAD-CASE 1" "$(xb_fails "${out}")"
+xb_verdict "THEAD-CASE 1" "$(xb_fails "${out}")" "${out}"
