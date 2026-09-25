@@ -1,8 +1,9 @@
 # Migration Troubleshooting
 
-> **Purpose** — recovering from the three failures an in-place operator upgrade or a cluster reset can
+> **Purpose** — recovering from the four failures an in-place operator upgrade or a cluster reset can
 > leave behind: a worker stuck in CrashLoopBackOff while the old replica keeps serving, a namespace
-> that never finishes deleting, and Kueue CRDs left Terminating by a teardown.
+> that never finishes deleting, Kueue CRDs left Terminating by a teardown, and an NFD prune Job that
+> never finishes.
 > **Audience** operators · **Prerequisites** [Migrating to Bundled Subcharts](to-subcharts.md) ·
 > **Read time** ~8 min
 
@@ -17,6 +18,7 @@ live guidance, for older releases and for the reset any release can meet too.
 - [Worker CrashLoopBackOff after an upgrade](#worker-crashloopbackoff-after-an-upgrade)
 - [Namespace stuck Terminating](#namespace-stuck-terminating)
 - [Kueue CRDs stuck Terminating after a teardown](#kueue-crds-stuck-terminating-after-a-teardown)
+- [NFD prune Job that never finishes](#nfd-prune-job-that-never-finishes)
 - [The safe full-reset order](#the-safe-full-reset-order)
 
 ## Worker CrashLoopBackOff after an upgrade
@@ -160,6 +162,40 @@ bash cleanup.sh "$NS" gpustack-operator-worker-cert gpustack-operator-device-man
 
 # 3. Verify (expect no row).
 kubectl get crd -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletionTimestamp | grep kueue
+```
+
+## NFD prune Job that never finishes
+
+The symptom: removing a v0.5.x install whose own Node Feature Discovery install had failed, the
+teardown spends minutes on `helm uninstall gpustack-node-feature-discovery`, never reports that
+release as uninstalled, and leaves a Job `node-feature-discovery-prune` in the namespace that never
+completes.
+
+What happened: the NFD chart runs that Job as its post-delete hook, to strip NFD's labels from the
+nodes, and Helm waits for it. Here it cannot finish, for example because its ServiceAccount is
+already gone. A healthy v0.5.x install, a fresh install and a current chart's uninstall do not meet
+this.
+
+It blocks nothing. No component reads the Job, the namespace still deletes, and a later install
+still succeeds: the bundled NFD takes the node labels over, and its own hook replaces a Job of that
+name. Deleting it is safe.
+
+Recover:
+
+```bash
+NS=gpustack-system
+
+# 1. Confirm: the Job exists and has not completed.
+kubectl -n "$NS" get job node-feature-discovery-prune
+
+# 2. Delete it. Nothing waits on it, and nothing else goes with it.
+kubectl -n "$NS" delete job node-feature-discovery-prune --ignore-not-found
+
+# 3. During a teardown only: if the legacy release is still listed, finish its removal without
+#    running the hook again. After an upgrade, leave it to the chart's migrate-post hook, which
+#    retires legacy release records; uninstalling one then deletes objects the chart adopted.
+helm -n "$NS" list -a | grep gpustack-node-feature-discovery \
+  && helm -n "$NS" uninstall gpustack-node-feature-discovery --no-hooks
 ```
 
 ## The safe full-reset order
