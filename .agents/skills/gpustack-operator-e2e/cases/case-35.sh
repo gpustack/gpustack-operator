@@ -54,7 +54,9 @@
 #                          touch it.
 # Expected:    - every sliced claim lands on an in-use card whenever one has room (the defect guard);
 #              - every sliced claim lands on the fullest card that fits (the policy);
-#              - the runtime's visible-devices agrees with the card the plugin recorded, every time;
+#              - the runtime's visible-devices agrees with the card the plugin recorded, every time:
+#                it equals that card's physicalIndexes[1] in a 950-family group, else physicalIndexes[0]
+#                (the number the vendor runtime resolves a card by, not the ledger index);
 #              - the exclusive claim lands outside the sliced population, is recorded exclusive, and
 #                lowers the pool's Accelerator remaining;
 #              - the sliced claim placed alongside it does not land on the exclusively held card;
@@ -315,8 +317,9 @@ EOF
   return 1
 }
 
-# placement_of <index> -> "<cardIndex> <tokenIndex> <allocatedUnits> <mode>", from the allocation the
-# plugin recorded on the Pod. This is the operator's own view of where the claim went.
+# placement_of <index> -> "<cardIndex> <tokenIndex> <allocatedUnits> <mode> <acceleratorId>", from the
+# allocation the plugin recorded on the Pod. This is the operator's own view of where the claim went.
+# The id comes last so a reader's final variable keeps it whole.
 placement_of() {
   kubectl -n default get pod "${PFX}-$1" -o json 2>/dev/null | python3 -c "
 import json,sys
@@ -328,7 +331,7 @@ tok=ids[0].rsplit(':',1)[-1] if ids else '-'
 modes={0:'free',1:'exclusive',2:'shared',3:'sliced',4:'partitioned'}
 for g in a.get('devices',{}).get('groups',[]):
     for c in g.get('accelerators',[]):
-        print(c.get('index'), tok, c.get('allocated'), modes.get(c.get('mode'),'?')); sys.exit(0)
+        print(c.get('index'), tok, c.get('allocated'), modes.get(c.get('mode'),'?'), c.get('id','')); sys.exit(0)
 sys.exit(1)
 "
 }
@@ -348,6 +351,24 @@ visible_of() {
   return 1
 }
 
+# visible_want_of <acceleratorId> -> the number ASCEND_VISIBLE_DEVICES must carry for that card: the
+# card's physicalIndexes[1] (the dcmi card number) when its group's family is "950", else
+# physicalIndexes[0] (the physical id). The ledger index is a detection counter and a different
+# number on real hosts. Empty when the card or the slot is missing.
+visible_want_of() {
+  kubectl get devices "$SLICE_NODE" -o json 2>/dev/null | AID="$1" python3 -c "
+import json,os,sys
+aid=os.environ['AID']
+for g in json.load(sys.stdin).get('spec',{}).get('groups',[]):
+    for a in g.get('accelerators',[]):
+        if a.get('id')==aid:
+            p=a.get('physicalIndexes') or []
+            slot=1 if g.get('family')=='950' else 0
+            if len(p)>slot: print(p[slot])
+            sys.exit(0)
+" 2>/dev/null
+}
+
 # step_sliced <index> <pct> <label> — submit a sliced claim and assert both placement properties.
 step_sliced() {
   local idx="$1" pct="$2" label="$3"
@@ -360,8 +381,8 @@ step_sliced() {
     record FAIL "${label}: takes the fullest card that fits" "not evaluated — the claim did not run"
     return 1
   fi
-  local card token alloc mode
-  read -r card token alloc mode <<<"$(placement_of "$idx")"
+  local card token alloc mode aid
+  read -r card token alloc mode aid <<<"$(placement_of "$idx")"
   if [ -z "${card:-}" ]; then
     record FAIL "${label}: joins an in-use card when one has room" "no allocation recorded on the Pod"
     record FAIL "${label}: takes the fullest card that fits" "not evaluated — no allocation recorded"
@@ -389,11 +410,11 @@ step_sliced() {
     "card ${card}, but card ${want_best} was the fullest that fits ${pct}%"
 
   # The runtime must agree with what the operator recorded, or the ledger is bookkeeping fiction.
-  local vis; vis=$(visible_of "$idx")
-  [ -n "$vis" ] && [ "$vis" = "$card" ]
+  local vis want_vis; vis=$(visible_of "$idx"); want_vis=$(visible_want_of "${aid:-}")
+  [ -n "$vis" ] && [ -n "$want_vis" ] && [ "$vis" = "$want_vis" ]
   verdict $? "${label}: runtime confinement agrees with the ledger" \
-    "ASCEND_VISIBLE_DEVICES=${vis} matches card ${card}" \
-    "ASCEND_VISIBLE_DEVICES='${vis:-<unreadable>}' vs recorded card ${card}"
+    "ASCEND_VISIBLE_DEVICES=${vis} matches card ${card}'s runtime number" \
+    "ASCEND_VISIBLE_DEVICES='${vis:-<unreadable>}' vs recorded card ${card} (id '${aid:-?}'), whose runtime number is '${want_vis:-<unresolved>}'"
   LAST_CARD="$card"
   # Let the per-card ledger reflect this placement before the next claim is planned against it.
   sleep 6
@@ -429,7 +450,7 @@ if [ "${free_now:-0}" -le 0 ]; then
     record SKIP "$chk" "no free card left on ${SLICE_NODE} — the sliced steps consumed them, so a whole-card claim has nowhere to land through no fault of the implementation"
   done
 elif submit 5 ""; then
-  read -r ecard etoken ealloc emode <<<"$(placement_of 5)"
+  read -r ecard etoken ealloc emode eaid <<<"$(placement_of 5)"
   EXCL_CARD="${ecard:-}"
   echo "[case-35] e1 → card ${ecard:-?} (${ealloc:-?} units, ${emode:-?}); sliced cards were {${sliced_cards}}"
   case ",${sliced_cards}," in *",${ecard},"*) rc=1 ;; *) rc=0 ;; esac
@@ -441,11 +462,11 @@ elif submit 5 ""; then
   verdict $? "exclusive claim is recorded exclusive" \
     "mode=${emode} allocated=${ealloc}" \
     "mode='${emode:-?}', expected exclusive"
-  evis=$(visible_of 5)
-  [ -n "$evis" ] && [ "$evis" = "$ecard" ]
+  evis=$(visible_of 5); ewant=$(visible_want_of "${eaid:-}")
+  [ -n "$evis" ] && [ -n "$ewant" ] && [ "$evis" = "$ewant" ]
   verdict $? "exclusive claim: runtime confinement agrees with the ledger" \
-    "ASCEND_VISIBLE_DEVICES=${evis} matches card ${ecard}" \
-    "ASCEND_VISIBLE_DEVICES='${evis:-<unreadable>}' vs recorded card ${ecard}"
+    "ASCEND_VISIBLE_DEVICES=${evis} matches card ${ecard}'s runtime number" \
+    "ASCEND_VISIBLE_DEVICES='${evis:-<unreadable>}' vs recorded card ${ecard} (id '${eaid:-?}'), whose runtime number is '${ewant:-<unresolved>}'"
   # The pool's EX view must lose a whole card. Reconciled after the Pod is already Running, so poll.
   #
   # NOT the node's <base> allocatable: in the device-plugin model that counts ADVERTISED devices and

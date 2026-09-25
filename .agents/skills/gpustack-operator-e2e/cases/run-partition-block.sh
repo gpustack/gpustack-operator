@@ -41,6 +41,45 @@ CASES="${*:-27 24 25 26 28 29 30 31 32 34}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$RAW"
 
+# block_ssh <cmd...> — the same ssh options the cases use, including MIG_NODE_SSH_OPTS (identity file,
+# port, jump host). Unquoted on purpose so the options split into words, as in the lib.
+block_ssh() {
+  # shellcheck disable=SC2086
+  ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 ${MIG_NODE_SSH_OPTS:-} "$MIG_NODE_SSH" "$@"
+}
+
+# mig_modes — "<index>, <mode>" per card, as nvidia-smi reports it.
+mig_modes() { block_ssh sudo nvidia-smi --query-gpu=index,mig.mode.current --format=csv,noheader 2>/dev/null; }
+
+# cards_to_disable <start-modes> <end-modes> — the indexes that were Disabled when the block started
+# and are Enabled now. Only those were switched by the block; a card already Enabled at the start is
+# the lead's and is left as found.
+cards_to_disable() {
+  local start="$1" end="$2" line idx mode was=" "
+  while IFS= read -r line; do
+    idx="$(printf '%s' "${line%%,*}" | tr -d '[:space:]')"
+    mode="$(printf '%s' "${line#*,}" | tr -d '[:space:]')"
+    [ -n "$idx" ] && [ "$mode" = Disabled ] && was="${was}${idx} "
+  done <<<"$start"
+  while IFS= read -r line; do
+    idx="$(printf '%s' "${line%%,*}" | tr -d '[:space:]')"
+    mode="$(printf '%s' "${line#*,}" | tr -d '[:space:]')"
+    case "$was" in *" ${idx} "*) [ "$mode" = Enabled ] && echo "$idx" ;; esac
+  done <<<"$end"
+  return 0
+}
+
+# Record every card's mode before any case runs. Without it the final restore cannot tell a card the
+# block switched from one the lead enabled on purpose, so the block refuses to start.
+START_MODES="$(mig_modes)"
+if [ -z "$START_MODES" ]; then
+  echo "!! could not read the cards' MIG modes over SSH before the block; refusing to run, because the"
+  echo "   final restore could not tell which cards the block switched. Check MIG_NODE_SSH / MIG_NODE_SSH_OPTS."
+  exit 1
+fi
+echo "   MIG modes at block start:"
+printf '%s\n' "$START_MODES" | sed 's/^/     /'
+
 echo "== partition block: cases ${CASES} =="
 echo "   namespace ${NS}, raw output under ${RAW}"
 FAILED=""
@@ -61,14 +100,15 @@ for n in $CASES; do
 done
 
 echo "---------- restoring the partitioning mode the block held ----------"
-for c in $(seq 0 7); do
-  ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 "$MIG_NODE_SSH" \
-    sudo nvidia-smi -i "$c" -mig 0 >/dev/null 2>&1 || true
+END_MODES="$(mig_modes)"
+[ -n "$END_MODES" ] || echo "!! could not read the cards' MIG modes over SSH; no card restored — check them by hand"
+for c in $(cards_to_disable "$START_MODES" "$END_MODES"); do
+  echo "   card ${c}: Disabled at block start, Enabled now — disabling"
+  block_ssh sudo nvidia-smi -i "$c" -mig 0 >/dev/null 2>&1 || true
 done
 kubectl -n "$NS" rollout restart ds/gpustack-operator-device-manager-nvidia >/dev/null 2>&1
 kubectl -n "$NS" rollout status ds/gpustack-operator-device-manager-nvidia --timeout=300s >/dev/null 2>&1
-ssh -o StrictHostKeyChecking=no -o BatchMode=yes "$MIG_NODE_SSH" \
-  sudo nvidia-smi --query-gpu=index,mig.mode.current --format=csv,noheader 2>&1 | sed 's/^/  /'
+block_ssh sudo nvidia-smi --query-gpu=index,mig.mode.current --format=csv,noheader 2>&1 | sed 's/^/  /'
 
 echo
 if [ -n "$FAILED" ]; then

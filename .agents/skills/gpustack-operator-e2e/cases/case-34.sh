@@ -14,8 +14,10 @@
 #              contributes no constraint, so under single-numa-node the CPU and memory providers can
 #              settle on one socket while the only card with room sits on the other. Nothing in the
 #              design claims otherwise; this case exists so the limitation is a measured statement
-#              rather than an inference. It asserts NOTHING about alignment — it reports the policy,
-#              the card's socket, the socket the container's CPUs landed on, and whether the Pod ran.
+#              rather than an inference. It asserts ONE thing: because the partition resource reports
+#              no topology, the kubelet's hint merge always has a solution, so the partition Pod is
+#              never refused with TopologyAffinityError and reaches Running. Where its CPUs land
+#              relative to the card is reported, not asserted.
 # Environment: A reachable cluster whose active context is the GPU cluster, a DUAL-SOCKET nvidia node
 #              whose kubelet runs topologyManagerPolicy: single-numa-node, at least one card that can
 #              be put into a hardware partitioning mode, AND SSH to that node supplied via
@@ -23,15 +25,19 @@
 #              AUTO-SKIPS (exit 0) — the expected outcome on a default cluster — when the node reports
 #              fewer than two NUMA nodes, when the TopologyManager policy is anything other than
 #              single-numa-node (the default none cannot exhibit this at all), when the policy cannot
-#              be read, or when the card reports no partitioning mode.
+#              be read, or when the card reports no partitioning mode. It also AUTO-SKIPS when the
+#              precondition is not established: the cpuManagerPolicy is not static, the filler Pod does
+#              not run with every CPU on the card's NUMA node, or the partition Pod is allocated a card
+#              other than MIG_GPU_INDEX's.
 # Inputs:      All real, nothing mocked. The case reads the kubelet's own configuration, maps each card
-#              to its NUMA node through the PCI device tree, pins a guaranteed-QoS filler Pod onto the
-#              CPUs of the socket the partitioned card sits on, and then submits a guaranteed-QoS
-#              partition Pod that can only be given CPUs from the far socket. Profiles are DISCOVERED
-#              from the card's own capability.
-# Expected:    - the observation is captured and printed: policy, CPU-manager policy, the card's NUMA
-#                node, the NUMA node the partition Pod's CPUs came from, and the Pod's outcome
-#                (Running, TopologyAffinityError, or held);
+#              to its NUMA node through the PCI device tree, submits a guaranteed-QoS filler Pod sized to
+#              the card's socket and confirms from its Cpus_allowed_list that it landed there, and then
+#              submits a guaranteed-QoS partition Pod that can only be given CPUs from the far socket.
+#              Profiles are DISCOVERED from the card's own capability.
+# Expected:    - under single-numa-node the partition Pod is NOT refused with TopologyAffinityError
+#                and reaches Running (the one hard assertion);
+#              - the observation is captured and printed: policy, CPU-manager policy, the card's NUMA
+#                node, the NUMA node the partition Pod's CPUs came from, and the Pod's outcome;
 #              - no alignment assertion is made either way.
 # Cleanup:     Trap deletes every test Pod, waits for the instances to reclaim, and restores the
 #              partitioning mode of the card this case toggled (a card found already partitioned is
@@ -121,6 +127,61 @@ fi
 NEAR_CPUS="$(node_ssh "cat /sys/devices/system/node/node${CARD_NUMA}/cpulist 2>/dev/null" | tr -d '[:space:]')"
 NEAR_COUNT="$(node_ssh "cat /sys/devices/system/node/node${CARD_NUMA}/cpulist 2>/dev/null | tr ',' '\n' | awk -F- '{if (NF==2) s+=\$2-\$1+1; else s+=1} END {print s}'" 2>/dev/null | tr -d '[:space:]')"
 echo "[case-34] card ${GPU_INDEX} sits on NUMA node ${CARD_NUMA} (cpus ${NEAR_CPUS}, ${NEAR_COUNT} of them)"
+# Every NUMA node's cpulist, one "<node> <cpulist>" line each, for numa_of_cpus below.
+NODE_CPULISTS="$(node_ssh 'for n in /sys/devices/system/node/node[0-9]*; do echo "${n##*node} $(cat "$n/cpulist")"; done' 2>/dev/null)"
+
+# numa_of_cpus <cpulist> — the NUMA node that holds EVERY CPU in the list, or empty when the list is
+# empty, unreadable, or spans nodes.
+numa_of_cpus() {
+  CPUS="$1" NODES="$NODE_CPULISTS" python3 -c "
+import os
+def expand(s):
+    out=set()
+    for part in s.split(','):
+        part=part.strip()
+        if not part: continue
+        if '-' in part:
+            a,b=part.split('-',1); out.update(range(int(a),int(b)+1))
+        else:
+            out.add(int(part))
+    return out
+try:
+    cpus=expand(os.environ['CPUS'])
+    if cpus:
+        for line in os.environ['NODES'].splitlines():
+            f=line.split()
+            if len(f)==2 and cpus <= expand(f[1]):
+                print(f[0]); break
+except Exception:
+    pass
+" 2>/dev/null
+}
+
+# pod_cpus <pod> — the container's Cpus_allowed_list, retried: a Pod reports Running slightly before
+# its container is attachable.
+pod_cpus() {
+  local out
+  for _ in $(seq 1 8); do
+    out="$(kubectl -n default exec "$1" -- sh -c "grep Cpus_allowed_list /proc/self/status | awk '{print \$2}'" 2>/dev/null | tr -d '[:space:]')"
+    [ -n "$out" ] && { echo "$out"; return 0; }
+    sleep 3
+  done
+  return 1
+}
+
+# card_of_index <index> — the "<group>:<accelerator-id>" of the nvidia card with that index, in the
+# same folded form pod_cards prints.
+card_of_index() {
+  kubectl get devices "$GPU_NODE" -o json 2>/dev/null | WANT="$1" python3 -c "
+import json,os,sys
+want=int(os.environ['WANT'])
+for g in json.load(sys.stdin).get('spec',{}).get('groups',[]):
+    if g.get('manufacturer')!='nvidia': continue
+    for a in g.get('accelerators',[]):
+        if int(a.get('index',-1))==want:
+            print(('%s:%s' % (g.get('id',''), a.get('id',''))).replace(' ','~')); sys.exit(0)
+" 2>/dev/null
+}
 
 # ---------------------------------------------------------------------------------------------------
 # Occupy the near socket's CPUs, then ask for a partition that can only be given far-socket CPUs.
@@ -149,7 +210,23 @@ spec:
 EOF
 fillran=0
 wait_running "$F" && fillran=1
-record PASS "OBSERVED: near-socket CPUs occupied" "filler Pod requesting ${FILL_CPU} guaranteed CPU(s) on the card's socket is $([ "$fillran" = 1 ] && echo Running || echo "not Running ($(held_reason "$F"))")"
+# The precondition is that the card's socket is really full. Nothing in the filler's spec pins it to a
+# socket, so read where its CPUs landed, and require the static CPU manager: under 'none' every
+# container's Cpus_allowed_list is every CPU and no socket is ever occupied.
+if [ "$fillran" != 1 ]; then
+  part_skip "precondition not established: the filler Pod did not run ($(held_reason "$F"))."
+fi
+if [ "${CM_POLICY:-}" != "static" ]; then
+  part_skip "precondition not established: cpuManagerPolicy is '${CM_POLICY:-<unread>}', not 'static', so the" \
+    "filler cannot hold the card's socket exclusively."
+fi
+FILL_CPUS="$(pod_cpus "$F")"
+FILL_NUMA="$(numa_of_cpus "$FILL_CPUS")"
+if [ -z "$FILL_NUMA" ] || [ "$FILL_NUMA" != "$CARD_NUMA" ]; then
+  part_skip "precondition not established: the filler's CPUs '${FILL_CPUS:-<unread>}' are on NUMA node" \
+    "'${FILL_NUMA:-<none or several>}', not the card's node ${CARD_NUMA}."
+fi
+record PASS "OBSERVED: near-socket CPUs occupied" "filler Pod requesting ${FILL_CPU} guaranteed CPU(s) is Running on cpus ${FILL_CPUS}, all on the card's NUMA node ${FILL_NUMA}"
 
 P="${PODPFX}-part"
 mkpod "$P" "$(partition_reslines "$MIDKEY")
@@ -176,6 +253,29 @@ else
   TAE="unreadable"
 fi
 
+# The near/far comparison only holds for the card whose socket was filled. A Pod allocated another
+# partitioned card says nothing about it. An empty answer means no allocation was recorded, which the
+# hard row below reports.
+WANT_CARD="$(card_of_index "$GPU_INDEX")"
+GOT_CARDS="$(pod_cards "$P")"
+if [ -z "$WANT_CARD" ]; then
+  part_skip "precondition not established: card ${GPU_INDEX} is not in the Devices ledger of ${GPU_NODE}."
+fi
+if [ -n "$GOT_CARDS" ] && [ "$GOT_CARDS" != "$WANT_CARD" ]; then
+  part_skip "precondition not established: the partition Pod was allocated '${GOT_CARDS}', not card" \
+    "${GPU_INDEX} (${WANT_CARD}) whose socket the filler occupies."
+fi
+
+# The one hard assertion. The partition resource reports no topology hint, so single-numa-node merges
+# only the CPU side and always finds a solution. A TopologyAffinityError here means the partition
+# resource started to contribute a NUMA constraint. A kubelet admission refusal leaves the Pod Failed,
+# so Running is itself proof it was admitted; a counted refusal event fails it as well.
+if [ "$outcome" = "Running" ] && { [ "$TAE" = 0 ] || [ "$TAE" = unreadable ]; }; then
+  record PASS "partition Pod is not refused with TopologyAffinityError under ${TM_POLICY}" "${P} Running on ${GOT_CARDS:-?}, TopologyAffinityError events=${TAE}"
+else
+  record FAIL "partition Pod is not refused with TopologyAffinityError under ${TM_POLICY}" "outcome=${outcome}, TopologyAffinityError events=${TAE}, cards='${GOT_CARDS:-<none recorded>}', held reason='$(held_reason "$P")' — a partition resource with no topology must not make the hint merge fail"
+fi
+
 record PASS "OBSERVED: the partition Pod's outcome under ${TM_POLICY}" "outcome=${outcome}$([ "$outcome" = Running ] && echo ", container cpus=${POD_CPUS:-?} on NUMA node ${POD_NUMA:-?} vs card on node ${CARD_NUMA}"), TopologyAffinityError events=${TAE}, held reason='$(held_reason "$P")'"
 if [ "$outcome" = "Running" ] && [ -n "$POD_NUMA" ] && [ "$POD_NUMA" != "$CARD_NUMA" ]; then
   record PASS "OBSERVED: cross-socket placement occurred" "the container's CPUs came from NUMA node ${POD_NUMA} while its partition lives on a card on node ${CARD_NUMA} — the limitation reproduced, recorded not asserted"
@@ -198,7 +298,8 @@ echo "---------------------------------------------------------------"
 
 if [ "$FAILS" -ne 0 ]; then
   echo
-  echo "FAILED ${FAILS} check(s) — unexpected for an observation-only case. Diagnose:"
+  echo "FAILED ${FAILS} check(s). Under single-numa-node a partition Pod must not be refused with"
+  echo "TopologyAffinityError. Diagnose:"
   echo "  kubectl -n default describe pod ${P}"
   echo "  ${MIG_NODE_SSH} numactl --hardware"
   exit 1

@@ -70,7 +70,8 @@
 #                count and the domain's charged bytes are both above their pre-load baselines;
 #              - KNOWN-FAILURE DETECTOR: after replaying every written prefix at the other replica,
 #                that replica's vllm:external_prefix_cache_hits_total has not moved, and the
-#                master's mem_cache_hit_nums_ has not moved. PASS while the defect persists.
+#                master's mem_cache_hit_nums_ has not moved. PASS while the defect persists; an
+#                empty baseline or final reading FAILS the row, since nothing was measured.
 #
 # Cleanup:     Trap removes the ModelDeployment, the probe Pods and ConfigMap, then the namespace,
 #              pool and backend. A binding whose domain still holds objects is held by its
@@ -600,20 +601,36 @@ HITS1="$(mval "$ADMIN" '^mem_cache_hit_nums_ ')"
 # inverted into positive guards in the same commit. Measured defect: every replayed token computes
 # locally (prompt_tokens_by_source local_compute rises by the full replay volume) while the store
 # demonstrably holds keys, and the same zero holds for the writer's own replica replaying itself.
-DELTA_EXT="$(awk -v a="${EXT_B0:-0}" -v b="${EXT_B1:-0}" 'BEGIN{print b-a}')"
-if [ "$DELTA_EXT" = "0" ]; then
-  record PASS "the other replica's store-path hits stay at zero (KNOWN-FAILURE DETECTOR)" \
-    "external_prefix_cache_hits_total ${EXT_B0:-?} -> ${EXT_B1:-?} across a ${REPLAY_OK}-prompt, ${FILL_TOKENS}-token replay of prefixes that replica never served: content the store holds is not visible to the lookup path. When this row FAILS with a nonzero delta the fix has landed — invert it"
-else
+#
+# Both readings of each row must be present. An empty one (a renamed metric, a filter that no longer
+# matches, a probe that errored) would otherwise read as a zero delta and PASS a row whose PASS means
+# "the defect persists" without anything having been measured.
+if [ -z "$EXT_B0" ] || [ -z "$EXT_B1" ]; then
   record FAIL "the other replica's store-path hits stay at zero (KNOWN-FAILURE DETECTOR)" \
-    "external_prefix_cache_hits_total moved by ${DELTA_EXT} tokens: cross-replica reuse WORKS now — invert this row and the master-side one into positive guards"
-fi
-if [ "${HITS1:-0}" = "0" ]; then
-  record PASS "the master counts no served hits (KNOWN-FAILURE DETECTOR)" \
-    "mem_cache_hit_nums_ ${HITS0:-?} -> ${HITS1:-?}: the master's own read counters agree with the engine-side zero. When this row FAILS the fix has landed — invert it"
+    "external_prefix_cache_hits_total read empty (baseline '${EXT_B0:-<empty>}', final '${EXT_B1:-<empty>}') — nothing was measured"
 else
+  DELTA_EXT="$(awk -v a="$EXT_B0" -v b="$EXT_B1" 'BEGIN{print b-a}')"
+  if [ "$DELTA_EXT" = "0" ]; then
+    record PASS "the other replica's store-path hits stay at zero (KNOWN-FAILURE DETECTOR)" \
+      "external_prefix_cache_hits_total ${EXT_B0} -> ${EXT_B1} across a ${REPLAY_OK}-prompt, ${FILL_TOKENS}-token replay of prefixes that replica never served: content the store holds is not visible to the lookup path. When this row FAILS with a nonzero delta the fix has landed — invert it"
+  else
+    record FAIL "the other replica's store-path hits stay at zero (KNOWN-FAILURE DETECTOR)" \
+      "external_prefix_cache_hits_total moved by ${DELTA_EXT} tokens: cross-replica reuse WORKS now — invert this row and the master-side one into positive guards"
+  fi
+fi
+# The delta, not the absolute value: a reused master may already carry hits from before this run.
+if [ -z "$HITS0" ] || [ -z "$HITS1" ]; then
   record FAIL "the master counts no served hits (KNOWN-FAILURE DETECTOR)" \
-    "mem_cache_hit_nums_ moved ${HITS0:-?} -> ${HITS1:-?}: the master is serving reads — invert this row and the engine-side one into positive guards"
+    "mem_cache_hit_nums_ read empty (baseline '${HITS0:-<empty>}', final '${HITS1:-<empty>}') — nothing was measured"
+else
+  DELTA_HITS="$(awk -v a="$HITS0" -v b="$HITS1" 'BEGIN{print b-a}')"
+  if [ "$DELTA_HITS" = "0" ]; then
+    record PASS "the master counts no served hits (KNOWN-FAILURE DETECTOR)" \
+      "mem_cache_hit_nums_ ${HITS0} -> ${HITS1}: the master's own read counters agree with the engine-side zero. When this row FAILS the fix has landed — invert it"
+  else
+    record FAIL "the master counts no served hits (KNOWN-FAILURE DETECTOR)" \
+      "mem_cache_hit_nums_ moved by ${DELTA_HITS} (${HITS0} -> ${HITS1}): the master is serving reads — invert this row and the engine-side one into positive guards"
+  fi
 fi
 
 # Results.

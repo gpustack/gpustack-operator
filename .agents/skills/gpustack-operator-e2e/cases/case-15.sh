@@ -54,9 +54,9 @@ echo "[case-15] real accelerator found on ${gpu_node}"
 read -r IT CARDMEM <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys
 for it in json.load(sys.stdin).get('items',[]):
-    s=it.get('spec',{})
+    s=it.get('spec',{}); d=it.get('status',{}).get('detail',{}) or {}
     if s.get('acceleratable'):
-        print(it['metadata']['name'], s.get('memory','')); break
+        print(it['metadata']['name'], d.get('memory','')); break
 ")"
 [ -n "$IT" ] || { echo "no acceleratable InstanceType found"; exit 1; }
 PHYS_MIB=$(python3 -c "
@@ -64,6 +64,16 @@ import re
 m = re.match(r'\s*(\d+)\s*([GM])i?', '${CARDMEM}')
 print(int(m.group(1)) * (1024 if m.group(2) == 'G' else 1) if m else 0)
 " 2>/dev/null)
+# The whole-card assertion below compares against PHYS_MIB. A zero (an empty status.detail.memory, the
+# not-yet-ready state, or a form the regex above does not read) would fail it for a reason unrelated to
+# SSH, so refuse to run and name the field instead.
+if [ "${PHYS_MIB:-0}" -le 0 ]; then
+  echo "== CASE 15 — FAILED (setup) =="
+  echo "Pool ${IT} reports status.detail.memory '${CARDMEM:-<empty>}', which reads as ${PHYS_MIB:-0}MiB. The"
+  echo "whole-card assertion needs the physical card memory, so this case will not run. An empty value is the"
+  echo "InstanceType's not-yet-ready state — let the pool settle and re-run."
+  exit 1
+fi
 # A whole card reports close to physical (the driver reserves a little, e.g. T4 15360 of 16384).
 WHOLE_MIN=$(python3 -c "print(int(${PHYS_MIB:-0} * 0.9))" 2>/dev/null)
 echo "[case-15] acceleratable InstanceType ${IT} (card memory ${CARDMEM} = ${PHYS_MIB}MiB; whole-card >= ${WHOLE_MIN}MiB)"

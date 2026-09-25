@@ -8,8 +8,10 @@
 #              its AWS API is ready with the dedicated Pod Identity ServiceAccount and its brokers
 #              complete node-local IMDS discovery.
 # Environment: An EKS cluster installed with topograph.enabled=true, provider.name=aws, and the
-#              infrastructure module's optional Pod Identity association enabled. AUTO-SKIPS when
-#              Topograph is disabled; FAILS when it is enabled but incomplete.
+#              infrastructure module's optional Pod Identity association enabled. AUTO-SKIPS only
+#              when the release's values were read and show Topograph disabled; FAILS when it is
+#              enabled but incomplete. A missing jq or an unreadable release FAILS setup, because
+#              either would otherwise read as "disabled".
 # Inputs:      The live Helm release and Pods only; nothing mocked and no cluster mutation.
 # Expected:    Helm records the AWS provider, the Topograph API is
 #              ready and receives the EKS Pod Identity credential endpoint, one broker is ready on
@@ -38,11 +40,21 @@ report() {
   } | column -t -s '|'
 }
 
-if ! values="$($HELM get values "$RELEASE" -n "$NS" -o json 2>/dev/null)"; then
-  echo "CASE 8 SKIP — release ${RELEASE} is not readable in ${NS}"
-  exit 0
+# Only a read that succeeded may skip. A missing jq, a failed helm query (no release, no access, no
+# network) or unparseable values say nothing about whether Topograph is enabled.
+if ! command -v jq >/dev/null 2>&1; then
+  echo "CASE 8 FAIL (setup) — jq is not on PATH, so the release values cannot be read"
+  exit 1
 fi
-enabled="$(printf '%s' "$values" | jq -r '.topograph.enabled // false')"
+if ! values="$($HELM get values "$RELEASE" -n "$NS" -o json 2>&1)"; then
+  echo "CASE 8 FAIL (setup) — helm get values for release ${RELEASE} in ${NS} failed:"
+  printf '%s\n' "$values" | head -5
+  exit 1
+fi
+if ! enabled="$(printf '%s' "$values" | jq -r '.topograph.enabled // false')"; then
+  echo "CASE 8 FAIL (setup) — the values of release ${RELEASE} could not be parsed"
+  exit 1
+fi
 if [ "$enabled" != true ]; then
   echo "CASE 8 SKIP — topograph.enabled is not true on release ${RELEASE}"
   exit 0

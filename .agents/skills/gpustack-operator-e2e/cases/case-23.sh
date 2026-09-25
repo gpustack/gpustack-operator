@@ -9,7 +9,8 @@
 #              allocates the hardware GPU/compute instances that back scheduled workloads. This case
 #              proves, end to end on real hardware, that:
 #                - a card whose MIG mode is OFF serves logical slices — two Pods at 20% and 40%
-#                  coexist and are runtime-capped (the vendor libvgpu path);
+#                  coexist and are runtime-capped: each Pod's CUDA_DEVICE_SM_LIMIT equals its
+#                  cores-percentage (the vendor libvgpu path);
 #                - after the ADMIN enables MIG (nvidia-smi, over SSH) and the Device Manager re-detects,
 #                  the card carves into its canonical profile set (names/counts match the ledger) and
 #                  MOVES FAMILY: the node advertises one nvidia.com/gpu.partitioned.<kind>-<profile> key
@@ -29,10 +30,11 @@
 #                  every .partitioned key disappears in the same move.
 # Environment: A reachable cluster whose active context is the GPU cluster, a node with a real NVIDIA
 #              card, AND SSH to that node (sudo nvidia-smi) supplied via MIG_NODE_SSH=<user@host>.
-#              This case is the ONE case that toggles node hardware state, so it needs the node address;
-#              it does NOT guess it. It EXITS 2 (input required) when MIG_NODE_SSH is unset — provide the
-#              address and re-run. It AUTO-SKIPS (exit 0) when the node's card is not MIG-capable, or the
-#              cluster advertises no nvidia accelerator.
+#              This case toggles node hardware state, so it needs the node address; it does NOT guess
+#              it. It EXITS 2 (input required) when MIG_NODE_SSH is unset — provide the address and
+#              re-run. It AUTO-SKIPS (exit 0) when the node's card is not MIG-capable, or the cluster
+#              advertises no nvidia accelerator. A Devices ledger that cannot be read is a setup FAIL
+#              (exit 1), never a skip.
 #              Prerequisites the ADMIN owns (the case attempts the mode switch but cannot force them):
 #              the card must be idle, driver-handle daemons (DCGM/nvsm/exporters) stopped, nvidia_drm
 #              unloaded, CAP_SYS_ADMIN available. Targets Hopper+ (no GPU reset needed); on Ampere a
@@ -129,13 +131,29 @@ echo "[case-23] node ${MIG_NODE_SSH} card ${GPU_INDEX}: MIG mode currently ${INI
 GPU_NODE="${MIG_NODE_NAME:-}"
 if [ -z "$GPU_NODE" ]; then
   _nv=()
-  while IFS= read -r _n; do [ -n "$_n" ] && _nv+=("$_n"); done < <(kubectl get devices -o json 2>/dev/null | python3 -c "
+  # Read the ledger and its exit status separately, and parse in a command substitution: a failed
+  # query or an unparseable answer would otherwise read as an empty list, which this gate turns into
+  # a SKIP. Only a query that answered with no nvidia group may skip.
+  if ! _devs="$(kubectl get devices.worker.gpustack.ai -o json 2>&1)"; then
+    echo "== CASE 23 — FAILED (setup) =="
+    echo "Reading the Devices ledger failed, so this case cannot tell 'no nvidia hardware' from 'the"
+    echo "query did not answer'. It refuses to report a skip on either:"
+    printf '%s\n' "$_devs" | head -5
+    exit 1
+  fi
+  if ! _parsed="$(printf '%s' "$_devs" | python3 -c "
 import json,sys
 for d in json.load(sys.stdin).get('items',[]):
     for g in d.get('spec',{}).get('groups',[]):
         if g.get('manufacturer')=='nvidia' and g.get('accelerators'):
             print(d['metadata']['name']); break
-" 2>/dev/null)
+")"; then
+    echo "== CASE 23 — FAILED (setup) =="
+    echo "The Devices ledger was read but could not be parsed, so this case cannot tell 'no nvidia"
+    echo "hardware' from 'the answer was unreadable'. It refuses to report a skip on either."
+    exit 1
+  fi
+  while IFS= read -r _n; do [ -n "$_n" ] && _nv+=("$_n"); done <<<"$_parsed"
   if [ "${#_nv[@]}" -eq 0 ]; then
     echo "== CASE 23 — SKIPPED =="
     echo "No Devices object reports an nvidia accelerator group — the operator chain is not observing a GPU node."
@@ -174,11 +192,11 @@ items=json.load(sys.stdin).get('items',[])
 for it in items:
     s=it.get('spec',{}); st=it.get('status',{})
     if s.get('acceleratable') and in_group(s) and backs(it) and st.get('entrance'):
-        print(it['metadata']['name'], st['entrance'], s.get('manufacturer','nvidia')); sys.exit(0)
+        print(it['metadata']['name'], st['entrance'], (st.get('detail') or {}).get('manufacturer','nvidia')); sys.exit(0)
 for it in items:
     s=it.get('spec',{}); st=it.get('status',{})
     if s.get('acceleratable') and st.get('entrance'):
-        print(it['metadata']['name'], st['entrance'], s.get('manufacturer','nvidia')); sys.exit(0)
+        print(it['metadata']['name'], st['entrance'], (st.get('detail') or {}).get('manufacturer','nvidia')); sys.exit(0)
 ")"
 [ -n "${IT:-}" ] && [ -n "${LQ:-}" ] || { echo "[case-23] no accelerated InstanceType with an entrance LocalQueue — chain not materialized"; exit 1; }
 MANUF="${MANUF:-nvidia}"
@@ -228,6 +246,19 @@ for wl in json.load(sys.stdin).get('items',[]):
 " 2>/dev/null
 }
 
+# pod_events <pod> — the reasons of the events recorded against THIS Pod, one per line. Scoped to the
+# Pod's UID as well as its name: events outlive their Pod by about an hour while this case reuses the
+# same Pod names every round, so a name-only selector reports a previous round's events as this Pod's.
+# Returns non-zero when the identity or the event query cannot be answered.
+pod_events() {
+  local uid
+  uid="$(kubectl -n default get pod "$1" -o jsonpath='{.metadata.uid}' 2>/dev/null)" || return 1
+  [ -n "$uid" ] || return 1
+  kubectl -n default get events \
+    --field-selector "involvedObject.name=$1,involvedObject.uid=${uid}" \
+    -o jsonpath='{range .items[*]}{.reason}{"\n"}{end}' 2>/dev/null || return 1
+}
+
 # held_reason <pod> — a DECISIVE signal that the Pod was refused: a terminal failure, an Unschedulable
 # verdict, a device-plugin admission refusal, or an AdmissionCheck that declined it. Empty when none is
 # present. The bare Kueue scheduling gate is deliberately NOT among these — see assert_held.
@@ -237,7 +268,8 @@ held_reason() {
   [ "$phase" = Failed ] && { echo "Failed"; return; }
   cond="$(kubectl -n default get pod "$p" -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].reason}' 2>/dev/null)"
   [ "$cond" = Unschedulable ] && { echo "Unschedulable"; return; }
-  ev="$(kubectl -n default get events --field-selector involvedObject.name="$p" -o jsonpath='{range .items[*]}{.reason} {end}' 2>/dev/null | tr ' ' '\n' | grep -iE 'UnexpectedAdmissionError|FailedScheduling' | head -1)"
+  # A failed event query reads as "no event", which can only withhold a PASS, never grant one.
+  ev="$(pod_events "$p" | grep -iE 'UnexpectedAdmissionError|FailedScheduling' | head -1)"
   [ -n "$ev" ] && { echo "$ev"; return; }
   wl="$(workload_refusal "$p")"
   [ -n "$wl" ] && { echo "$wl"; return; }
@@ -274,20 +306,29 @@ assert_held() {
 }
 
 # node_gi_count — the number of live GPU instances the card actually holds (node ground truth).
-# grep -c prints "0" AND exits non-zero on no match, so capture it (a bare `|| echo 0` would append a
-# SECOND "0" under pipefail, yielding a two-line "0\n0" that never compares equal to "0").
+# It prints the count and returns 0 only when the node answered. Two exit statuses are real answers of
+# "none": 0 with "No MIG-enabled devices found." and 6 with "No GPU instances found: Not Found".
+# Anything else (unreachable node, timeout, sudo refused) prints nothing and returns non-zero, because
+# a probe that never answered must never be read as an idle card.
 node_gi_count() {
-  local out
-  out="$(node_ssh sudo nvidia-smi mig -lgi 2>/dev/null | grep -cE '^\|[[:space:]]+[0-9]+')"
-  echo "${out:-0}"
+  local out rc
+  out="$(node_ssh sudo nvidia-smi mig -lgi 2>&1)"; rc=$?
+  case "$rc" in
+    0 | 6) ;;
+    *) return 1 ;;
+  esac
+  # grep -c prints "0" AND exits non-zero on no match, so keep the count and discard the status.
+  printf '%s\n' "$out" | grep -cE '^\|[[:space:]]+[0-9]+' || true
 }
 
 # wait_card_idle — poll until the card holds no live GPU instances, bounded ~120s. A MIG mode switch
 # needs an idle card (the disable prerequisite), so callers wait for the last workload's instance to
-# reclaim before toggling the mode. Returns 0 when idle, 1 on timeout.
+# reclaim before toggling the mode. An unanswered probe keeps it waiting: unknown is not idle.
+# Returns 0 when idle, 1 on timeout.
 wait_card_idle() {
+  local n
   for _ in $(seq 1 40); do
-    [ "$(node_gi_count)" = 0 ] && return 0
+    n="$(node_gi_count)" && [ "$n" = 0 ] && return 0
     sleep 3
   done
   return 1
@@ -468,7 +509,12 @@ if [ "$INITIAL_MODE" = Disabled ]; then
   if [ "$l20" = 1 ] && [ "$l40" = 1 ]; then
     sm20="$(exec_out "$P20" printenv CUDA_DEVICE_SM_LIMIT)"
     sm40="$(exec_out "$P40" printenv CUDA_DEVICE_SM_LIMIT)"
-    record PASS "logical 20% + 40% coexist and are capped" "${P20}(SM=${sm20:-?}) + ${P40}(SM=${sm40:-?}) both Running on the logical-sliced card"
+    # The product sets CUDA_DEVICE_SM_LIMIT to the container's cores-percentage.
+    if [ "$sm20" = 20 ] && [ "$sm40" = 40 ]; then
+      record PASS "logical 20% + 40% coexist and are capped" "${P20}(SM=${sm20}) + ${P40}(SM=${sm40}) both Running on the logical-sliced card"
+    else
+      record FAIL "logical 20% + 40% coexist and are capped" "${P20} SM limit='${sm20:-?}' (want 20), ${P40} SM limit='${sm40:-?}' (want 40) — the cores-percentage did not reach the runtime cap"
+    fi
   else
     record FAIL "logical 20% + 40% coexist and are capped" "20% running=${l20} 40% running=${l40} — logical slicing broken on the MIG-off card"
   fi
@@ -673,16 +719,19 @@ if [ -n "$MIGKEY_MID" ]; then
   mkpod "$G1" "          ${PARTITIONED}: \"1\"
           ${MIGKEY_MID}: \"1\""
   if wait_running "$G1"; then
-    before="$(node_gi_count)"
+    before="$(node_gi_count)" || before="unknown"
     delpod "$G1"
-    reclaimed=0; waited=0
+    reclaimed=0; waited=0; gic=""
     for _ in $(seq 1 40); do   # up to ~120s for the reclaim debounce
-      gic="$(node_gi_count)"
-      if [ "${gic:-1}" = 0 ]; then reclaimed=1; break; fi
+      if gic="$(node_gi_count)"; then
+        [ "$gic" = 0 ] && { reclaimed=1; break; }
+      else
+        gic="unknown (node probe did not answer)"
+      fi
       sleep 3; waited=$((waited + 3))
     done
     [ "$reclaimed" = 1 ] && record PASS "idle instance reclaimed after debounce" "node GI count ${before}→0 within ~${waited}s of the Pod exiting (no re-request)" \
-      || record FAIL "idle instance reclaimed after debounce" "node GI count still $(node_gi_count) ~${waited}s after the Pod exited — the instance was not reclaimed"
+      || record FAIL "idle instance reclaimed after debounce" "node GI count still ${gic} ~${waited}s after the Pod exited — the instance was not reclaimed or could not be read"
   else
     record FAIL "idle instance reclaimed after debounce" "${G1} not Running — could not set up the reclaim precondition"
     delpod "$G1"

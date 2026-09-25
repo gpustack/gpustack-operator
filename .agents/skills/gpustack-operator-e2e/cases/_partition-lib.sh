@@ -278,11 +278,11 @@ items=json.load(sys.stdin).get('items',[])
 for it in items:
     s=it.get('spec',{}); st=it.get('status',{})
     if s.get('acceleratable') and in_group(s) and backs(it) and st.get('entrance'):
-        print(it['metadata']['name'], st['entrance'], s.get('manufacturer','nvidia')); sys.exit(0)
+        print(it['metadata']['name'], st['entrance'], (st.get('detail') or {}).get('manufacturer','nvidia')); sys.exit(0)
 for it in items:
     s=it.get('spec',{}); st=it.get('status',{})
     if s.get('acceleratable') and st.get('entrance'):
-        print(it['metadata']['name'], st['entrance'], s.get('manufacturer','nvidia')); sys.exit(0)
+        print(it['metadata']['name'], st['entrance'], (st.get('detail') or {}).get('manufacturer','nvidia')); sys.exit(0)
 ")"
   if [ -z "${IT:-}" ] || [ -z "${LQ:-}" ]; then
     echo "[case-${CASE_ID}] no accelerated InstanceType with an entrance LocalQueue — chain not materialized"

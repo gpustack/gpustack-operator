@@ -33,9 +33,11 @@
 #
 #              AUTO-SKIPS (exit 0) when no Devices object reports a Hygon accelerator group, when the
 #              node's cards report no partition profile (the mode is off, or the driver was installed
-#              without virtualization support), or when the node advertises no partition capacity. A
-#              Devices read that ERRORS fails setup rather than skipping: "no Hygon hardware" must
-#              not be indistinguishable from "the query did not answer".
+#              without virtualization support), when the node advertises no partition capacity, or
+#              when no InstanceType backs the node's accelerator group. A Devices read that ERRORS
+#              fails setup rather than skipping: "no Hygon hardware" must not be indistinguishable
+#              from "the query did not answer". So does a backing InstanceType whose entrance
+#              LocalQueue cannot be found.
 #
 #              The mode itself is NEVER changed here. It is node-wide on this vendor, it is refused
 #              while the device manager holds the driver, and turning it on with nothing carved makes
@@ -142,8 +144,8 @@ for d in json.load(sys.stdin).get('items', []):
         profiles = sorted({p['name']
                            for a in accs
                            for p in (a.get('status', {}).get('physicalSliced', {}).get('profiles') or [])})
-        print('%s\t%s\t%d\t%d\t%s' % (d['metadata']['name'], g['name'], len(accs), partitioned,
-                                      ','.join(profiles)))
+        print('%s\t%s\t%d\t%d\t%s\t%s' % (d['metadata']['name'], g['name'], len(accs), partitioned,
+                                          ','.join(profiles), g.get('id', '')))
         break
 ")"; then
   fail_setup "The Devices ledger was read but could not be parsed, so this case cannot tell 'no hygon" \
@@ -158,6 +160,8 @@ GROUP=$(cut -f2 <<<"$DISCOVERED" | head -1)
 CARDS=$(cut -f3 <<<"$DISCOVERED" | head -1)
 PARTITIONED_CARDS=$(cut -f4 <<<"$DISCOVERED" | head -1)
 PROFILES=$(cut -f5 <<<"$DISCOVERED" | head -1)
+# The group's id, not its display name: pool and queue names are built from the normalized id.
+GROUP_ID=$(cut -f6 <<<"$DISCOVERED" | head -1)
 
 [ "$PARTITIONED_CARDS" -gt 0 ] || skip \
   "Node ${NODE} reports ${CARDS} ${MANU} card(s) and none offering a partition profile." \
@@ -203,15 +207,52 @@ CLAIMS=$(( PER_CARD < 3 ? PER_CARD : 3 ))
   "Profile ${PROFILE} fits only ${PER_CARD} instance(s) per card, so nothing can be shown about two" \
   "partitions of one card sharing it."
 
-LQ=$(kubectl get localqueues.kueue.x-k8s.io -A -o json 2>/dev/null | python3 -c "
-import json,sys
-want = 'gpustack--${MANU}-${GROUP}-linux-amd64'
+# The InstanceType whose POOL this node belongs to, matched on the pool's identity (accelerator group
+# plus the discriminator labels), the same lookup the other vendor cases use. Its status.entrance
+# names the LocalQueue; the ClusterQueue behind it carries the InstanceType's name.
+# A failed read must not turn into the "no pool backs this node" skip, so each read and the parse are
+# checked on their own.
+if ! ITS_JSON="$(kubectl get instancetypes.worker.gpustack.ai -o json 2>&1)" \
+   || ! NODE_JSON="$(kubectl get node "$NODE" -o json 2>&1)"; then
+  fail_setup "Reading the InstanceTypes or node ${NODE} failed, so this case cannot tell 'no pool backs" \
+    "this node' from 'the query did not answer'."
+fi
+if ! POOL="$(printf '%s' "$ITS_JSON" | NODE_GID="$GROUP_ID" NODE_JSON="$NODE_JSON" python3 -c "
+import json,sys,os
+gid=os.environ.get('NODE_GID','')
+nl=(json.loads(os.environ.get('NODE_JSON') or '{}').get('metadata',{}) or {}).get('labels',{}) or {}
+# A pool BACKS this node when every discriminator it carries is a label the node carries too. Those are
+# the schedule labels the webhook stamps from PoolScheduleLabels, so this is the pool's whole identity —
+# os/arch, the acceleratable boolean, the accelerator group and, under CPU-aware grouping, the general
+# group. schedule.gpustack.ai/* is the pool's own bookkeeping and never a node label.
+def backs(it):
+    d={k:v for k,v in (it['metadata'].get('labels') or {}).items() if not k.startswith('schedule.gpustack.ai/')}
+    return bool(d) and all(nl.get(k)==v for k,v in d.items())
+def in_group(s):
+    return bool(gid) and (s.get('acceleratorGroup') or '').endswith('-'+gid)
+for it in json.load(sys.stdin).get('items',[]):
+    s=it.get('spec',{}); st=it.get('status',{})
+    if s.get('acceleratable') and in_group(s) and backs(it):
+        print(it['metadata']['name'], st.get('entrance','')); break
+")"; then
+  fail_setup "The InstanceTypes were read but could not be parsed, so this case cannot tell 'no pool" \
+    "backs this node' from 'the answer was unreadable'."
+fi
+read -r IT ENTRANCE <<<"$POOL"
+[ -n "${IT:-}" ] || skip \
+  "No InstanceType backs node ${NODE}'s ${MANU} accelerator group '${GROUP_ID}', so there is no pool to" \
+  "claim through."
+[ -n "${ENTRANCE:-}" ] || fail_setup \
+  "InstanceType ${IT} backs node ${NODE} but reports no status.entrance, so no LocalQueue can be named."
+LQ=$(kubectl get localqueues.kueue.x-k8s.io -A -o json 2>/dev/null | ENTRANCE="$ENTRANCE" CQ="$IT" python3 -c "
+import json,os,sys
 for it in json.load(sys.stdin).get('items', []):
-    if it.get('spec', {}).get('clusterQueue') == want:
+    if it['metadata']['name'] == os.environ['ENTRANCE'] and it.get('spec', {}).get('clusterQueue') == os.environ['CQ']:
         print('%s\t%s' % (it['metadata']['namespace'], it['metadata']['name'])); break
 ")
-[ -n "$LQ" ] || skip \
-  "No LocalQueue fronts the ${MANU} pool's ClusterQueue yet; the scheduling chain has not materialized."
+[ -n "$LQ" ] || fail_setup \
+  "InstanceType ${IT} names entrance LocalQueue ${ENTRANCE}, but no LocalQueue of that name fronts" \
+  "ClusterQueue ${IT}."
 LQ_NS=$(cut -f1 <<<"$LQ")
 LQ_NAME=$(cut -f2 <<<"$LQ")
 
