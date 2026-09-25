@@ -15,8 +15,9 @@ through the InstanceType **finalizer** (`HoldAndDrain` the backing CQ, then dele
 
 ## Shared accelerated mock recipe (CASE 4 and CASE 6)
 
-A GPU-less node produces no accelerator labels and no `Devices` ledger, so two inputs are mocked; the
-derivation and the four-view / AdmissionCheck math are **not** mocked.
+A GPU-less node produces no accelerator labels and no `Devices` ledger, so two inputs are mocked, and
+a third for the cases that reach the node-devices AdmissionCheck; the derivation and the four-view /
+AdmissionCheck math are **not** mocked.
 
 1. **A fake accelerator NodeFeature** — NFD merges its labels onto `Node.Labels`, and the Worker
    derives the accelerated `ResourceFlavor` → `InstanceType` → `ClusterQueue`. Minimal set (validated
@@ -30,12 +31,24 @@ derivation and the four-view / AdmissionCheck math are **not** mocked.
    `.product`/`.memory`/`.cores` add realism but are not the gate. The NodeFeature must carry
    `metadata.labels."nfd.node.kubernetes.io/node-name": <node>` so NFD merges it onto that node.
 
-2. **A phantom-node `Devices` CR** carrying the per-card ledger the `InstanceTypeReconciler` reads.
-   It is named for a node the DeviceManager DaemonSet never runs on (so `NodeDevicesReconciler` leaves
-   it untouched) and carries the pool's reverse-lookup labels — the feature key +
-   `kubernetes.io/os|arch` + `gpustack.ai/managed=true`. The per-card occupancy lives in its
-   **`.status`** (`status.groups[].accelerators[].{mode,remaining}`), so it must be written to the
-   `/status` subresource.
+2. **A `Devices` CR named after a real node** carrying the per-card ledger. `NodeDevicesReconciler`
+   deletes a `Devices` whose Node is gone, so a ledger named after no node does not outlive its first
+   reconcile. A case picks a Ready node that has no ledger of its own, which is also a node no
+   DeviceManager runs on, so nothing rewrites the mocked Status, and it never overwrites a real
+   ledger. The ledger carries the pool's reverse-lookup labels — the feature key +
+   `kubernetes.io/os|arch` + `gpustack.ai/managed=true` — or, for a gate-3 case, the flavor's own
+   `nodeLabels` (see CASE 4). The per-card occupancy lives in its **`.status`**
+   (`status.groups[].accelerators[].{mode,remaining}`), so it must be written to the `/status`
+   subresource. The readers of that published Status, the four-view CASE 6 asserts and the fit labels
+   CASE 96 asserts, need nothing more.
+
+3. **A charging Pod per occupied node, for a gate-3 case** (CASE 4, CASE 96). The node-devices
+   AdmissionCheck does not read the published Status: it scopes a card to the node its ledger is
+   named after, and rebuilds the ledger from the Pods bound to that node. So the occupancy is stated
+   a second time, as a Pod bound to the node by `spec.nodeName` whose
+   `device.gpustack.ai/accelerator.allocated` annotation charges the same units in the device
+   plugin's own format. A Status written without its Pod reads as free to the check, so a hold would
+   pass whatever the cards say.
 
 The derived `InstanceType` outlives the mock: removing the NodeFeature deletes the flavor, but the
 operator never deletes a type for lack of flavors. CASE 4 and CASE 6 delete it in their cleanup once
@@ -116,10 +129,16 @@ Wiring that must hold: `installKueue` applies the `gpustack-node-devices` Admiss
 after the Kueue install; `NodeDevicesAdmissionCheckReconciler` sets its `Active=True`; and
 `NodeQueueReconciler.fillClusterQueue` references it in `spec.admissionChecksStrategy` **only when
 `acceleratable && derived && the AC is Active`**. The raw Pod → Kueue `Workload` gets a quota
-reservation, then the AC reads the phantom ledger (uncached, via `APIReader`) and writes
-`admissionChecks[gpustack-node-devices].state = Retry`; the Workload never reaches `Admitted`.
+reservation, then the AC reads the node-named ledger and rebuilds it from the node's Pods (both
+uncached, via `APIReader`) and writes `admissionChecks[gpustack-node-devices].state = Retry`; the
+Workload never reaches `Admitted`. Then the case deletes the charging Pod and frees the Status, and
+the same Workload must be answered `Ready` and admitted: without that row a check that holds every
+request would pass too.
 
-Two inputs differ from the shared recipe, and both are about reaching gate 3 at all:
+Three inputs differ from the shared recipe, and all are about reaching gate 3 at all:
+
+- **The ledger is named after a real node and charged by a Pod bound to it**, as the shared recipe's
+  third input explains; CASE 4 picks a Ready, untainted node with no ledger and no `nvidia.com/gpu`.
 
 - **The AC finds a ledger by the assigned flavor's `nodeLabels`, minus the `.count` pin** — not by the
   pool's reverse-lookup labels. The flavor also pins the CPU group key and, under topology-aware
@@ -127,7 +146,7 @@ Two inputs differ from the shared recipe, and both are about reaching gate 3 at 
   ledger the AC cannot find holds every Workload in `Retry` whatever its cards say.
 - **Topology-aware scheduling fits the Pod against the Node's own allocatable** before quota is
   reserved, so a node reporting no `nvidia.com/gpu` excludes it and the AC is never consulted. CASE 4
-  advertises the mocked count on the Node's status when the Node reports none, and removes it again.
+  advertises the mocked count on the chosen Node's status, and removes it again.
 
 ## CASE 5 — Pod webhook folds slice-by-memory-% into units (Story 3)
 
@@ -179,11 +198,15 @@ did not land (wrong API version) or the ledger's reverse-lookup labels do not ma
   references it (`kubectl get cq <name> -o jsonpath='{.spec.admissionChecksStrategy}'`); a Workload
   whose `QuotaReserved` message names a topology that "doesn't allow to fit" was excluded by
   topology-aware scheduling before gate 3, which means the Node reports no `nvidia.com/gpu`.
-- **CASE 4 check is `Retry` whatever the ledger says** — the phantom Devices must carry every label of
-  the accelerated flavor's `nodeLabels` except the `.count` pin; compare
+- **CASE 4 check is `Retry` whatever the ledger says** — the Devices must be named after the node the
+  Workload's topology assignment names, and carry every label of the accelerated flavor's
+  `nodeLabels` except the `.count` pin; compare
   `kubectl get resourceflavor <name> -o jsonpath='{.spec.nodeLabels}'` with the ledger's labels.
+- **CASE 4 or CASE 96 check is `Ready` on a full ledger** — the check rebuilt the ledger from the
+  node's Pods and found no charge: confirm the charging Pod exists, is bound to that node, and its
+  allocation annotation names the ledger's card ids.
 - **CASE 6 four-view stuck at 0/0/0/0** — the ledger status patch did not land: target
   `devices.v1alpha1.worker.gpustack.ai --subresource=status` (the `v1` proxy returns
-  `ServiceUnavailable`), and verify the phantom Devices' reverse-lookup labels match the InstanceType's.
+  `ServiceUnavailable`), and verify the ledger's reverse-lookup labels match the InstanceType's.
 - **Accelerated InstanceType never materializes** — `instance-type-derived-from-node` must be on
   (default true); confirm the fake accelerator NodeFeature merged onto `Node.Labels`.

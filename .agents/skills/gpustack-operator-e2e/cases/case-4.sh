@@ -7,19 +7,29 @@
 # Goal:        When every card is already sliced, a request for whole exclusive cards passes the
 #              coarse Kueue credits gate but is HELD by the node-devices AdmissionCheck reading the
 #              per-card Devices ledger — so it never becomes an admitted-then-unschedulable Workload.
-#              The check returns Retry (transient, re-checked as capacity frees), not Rejected.
-# Environment: Any cluster BY APPROXIMATION — the fake product key nvidia-e2emock never collides with
-#              a real GPU's derived pool/Devices, so it is safe on a real-accelerator cluster too.
-#              No real hardware needed.
+#              The check returns Retry (transient, re-checked as capacity frees), not Rejected, and
+#              the same request is admitted once the cards are freed.
+# Environment: Any cluster with one Ready, untainted, schedulable node that has no Devices ledger
+#              and reports no nvidia.com/gpu, BY APPROXIMATION — no accelerator is needed, and the
+#              fake product key nvidia-e2emock never collides with a real GPU's derived pool.
+#              AUTO-SKIPS (exit 0, printing NOTHING WAS VERIFIED) when no such node exists.
 # Inputs:      - MOCKED: a fake accelerator NodeFeature (nvidia-e2emock, count=8, 24Gi/card) that
 #                drives real derivation of the accelerated ResourceFlavor → ClusterQueue → InstanceType;
-#                a phantom-node Devices ledger where all 8 cards are 50%-sliced (no clean whole card);
+#                a Devices ledger named after the node where all 8 cards are 50%-sliced (no clean
+#                whole card). The check scopes a card to the node its ledger is named after, and a
+#                topology assignment names that node, so a ledger named after no node serves no
+#                demand and holds every request whatever its cards say;
+#              - MOCKED: the same occupancy as a Pod bound to the node whose allocation annotation, in
+#                the device plugin's own format, charges each card 50% in sliced mode. The check
+#                rebuilds the ledger from the Pods bound to the node rather than reading its
+#                published Status, so a Status written without its Pods reads as free to the check.
+#                No device manager runs on the node, so nothing rewrites the published Status;
 #              - MOCKED: the Devices ledger is labelled with the accelerated flavor's own node
 #                selector (minus its node-batch pin), which is how the AdmissionCheck finds it;
 #              - MOCKED: the Node's nvidia.com/gpu capacity (8), advertised through the status
-#                subresource only when the Node reports none. Kueue's topology-aware scheduling fits a
-#                Pod against the Node's own allocatable, so on a node with no such resource the Workload
-#                never reserves quota and the AdmissionCheck is never consulted;
+#                subresource. Kueue's topology-aware scheduling fits a Pod against the Node's own
+#                allocatable, so on a node with no such resource the Workload never reserves quota
+#                and the AdmissionCheck is never consulted;
 #              - real: a raw Pod requesting 5 exclusive nvidia.com/gpu cards on the pool's entrance
 #                LocalQueue (a raw Pod, not an Instance, keeps this independent of the Instance webhook);
 #              - NOT mocked (the verification): the CQ→AdmissionCheck wiring, the Workload quota
@@ -27,10 +37,12 @@
 # Expected:    - the gpustack-node-devices AdmissionCheck is Active;
 #              - the derived accelerated InstanceType materializes;
 #              - its backing ClusterQueue references the AdmissionCheck and carries the mocked flavor;
-#              - the Workload's AdmissionCheck state is Retry and it is NOT Admitted (held, not rejected).
-# Cleanup:     Trap deletes the test Pod, the mocked Devices, and the injected NodeFeature, removes
-#              the nvidia.com/gpu capacity from the Node when this case advertised it, and deletes the
-#              derived InstanceType once the mocked flavor is gone.
+#              - the Workload's AdmissionCheck state is Retry and it is NOT Admitted (held, not rejected);
+#              - positive, with the charging Pod deleted and the ledger freed: the same Workload's
+#                check turns Ready and it is Admitted.
+# Cleanup:     Trap deletes the test Pod, the charging Pod, the mocked Devices, and the injected
+#              NodeFeature, removes the nvidia.com/gpu capacity from the Node when this case
+#              advertised it, and deletes the derived InstanceType once the mocked flavor is gone.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail
@@ -40,7 +52,28 @@ E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/
 [ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 
 NS="${1:?usage: case-4.sh <NS>}"
-NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+# A Ready, untainted, schedulable node without a Devices ledger of its own and without an
+# nvidia.com/gpu resource. The case writes a node-named ledger and deletes it afterwards, so a node
+# that already has one is never chosen, and a node whose nvidia.com/gpu a device plugin reports is
+# real hardware whose value is not overwritten.
+LEDGERS=$(kubectl get devices.worker.gpustack.ai -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+NODE=$(kubectl get nodes -o json | LEDGERS="$LEDGERS" python3 -c '
+import json, os, sys
+taken = set(os.environ["LEDGERS"].split())
+ok = []
+for n in json.load(sys.stdin)["items"]:
+    ready = any(c["type"] == "Ready" and c["status"] == "True" for c in n["status"].get("conditions", []))
+    tainted = any(t.get("effect") in ("NoSchedule", "NoExecute") for t in n["spec"].get("taints", []) or [])
+    if (ready and not tainted and not n["spec"].get("unschedulable") and n["metadata"]["name"] not in taken
+            and "nvidia.com/gpu" not in n["status"].get("capacity", {})):
+        ok.append(n["metadata"]["name"])
+print(sorted(ok)[0] if ok else "")')
+if [ -z "$NODE" ]; then
+  echo
+  echo "== CASE 4 — SKIPPED: NOTHING WAS VERIFIED =="
+  echo "No Ready, untainted, schedulable node without a Devices ledger and without nvidia.com/gpu."
+  exit 0
+fi
 AKEY=nvidia-e2emock   # 'nvidia' is a known manufacturer (gates derivation); 'e2emock' never collides with a real product
 # The mocked Devices group id, derived from AKEY so the two can never drift apart. A pool reads only
 # the Devices groups whose "<manufacturer>-<id>" equals its own spec.acceleratorGroup (== AKEY), so a
@@ -51,7 +84,8 @@ MEM_MIB=24576
 D=1600000
 AC=gpustack-node-devices
 ACCEL_NF="${NODE}-gpustack-e2e-accel"
-MOCK_DEV="${NODE}-gpustack-e2e-devices"
+MOCK_DEV="${NODE}"
+HOLDER=gpustack-e2e-overadmit-holds
 LABELPFX="acceleratable.feature.gpustack.ai/${AKEY}"
 EXCL_RES="nvidia.com/gpu"                 # exclusive whole-card resource for nvidia
 POD=gpustack-e2e-overadmit
@@ -64,7 +98,7 @@ ITNAME=""
 restore() {
   echo
   echo "[case-4] cleanup: deleting Pod, mocked Devices, injected NodeFeature"
-  kubectl -n default delete pod "$POD" --ignore-not-found --force --grace-period=0 2>/dev/null || true
+  kubectl -n default delete pod "$POD" "$HOLDER" --ignore-not-found --force --grace-period=0 2>/dev/null || true
   kubectl delete devices.worker.gpustack.ai "$MOCK_DEV" --ignore-not-found 2>/dev/null || true
   kubectl -n "$NS" delete nodefeature "$ACCEL_NF" --ignore-not-found 2>/dev/null || true
   if [ "$ADVERTISED" -eq 1 ]; then
@@ -166,34 +200,25 @@ case "$cqStop" in "" | None) ;; *) cqFlavors="" ;; esac
 
 # Kueue's topology-aware scheduling fits the Pod against the Node's own allocatable of every resource
 # it requests, so on a node reporting no nvidia.com/gpu the Workload is excluded before quota is
-# reserved and the AdmissionCheck is never consulted. Advertise the mocked count only when the Node
-# reports none: a node that already reports the resource is one a real device plugin owns, and
-# overwriting its value would misstate real hardware.
-gpuAlloc=$(kubectl get node "$NODE" -o jsonpath='{.status.allocatable.nvidia\.com/gpu}' 2>/dev/null)
-if [ -z "$gpuAlloc" ]; then
-  echo "[case-4] advertising ${EXCL_RES}=${COUNT} on node ${NODE} (it reports none)"
-  ADVERTISED=1
-  kubectl patch node "$NODE" --subresource=status --type=json \
-    -p "[{\"op\":\"add\",\"path\":\"/status/capacity/nvidia.com~1gpu\",\"value\":\"${COUNT}\"},{\"op\":\"add\",\"path\":\"/status/allocatable/nvidia.com~1gpu\",\"value\":\"${COUNT}\"}]" \
-    >/dev/null || { echo "[case-4] could not advertise ${EXCL_RES} on node ${NODE}"; exit 1; }
-elif [ "$gpuAlloc" -lt 5 ] 2>/dev/null; then
-  echo
-  echo "== CASE 4 — SKIPPED: NOTHING WAS VERIFIED =="
-  echo "Node ${NODE} reports ${EXCL_RES}=${gpuAlloc} from a real device plugin, fewer than the 5 this case"
-  echo "requests, so topology-aware scheduling excludes the Pod before gate 3 is reached. Its value is"
-  echo "not overwritten."
-  exit 0
-fi
+# reserved and the AdmissionCheck is never consulted. The node was chosen for reporting none.
+echo "[case-4] advertising ${EXCL_RES}=${COUNT} on node ${NODE} (it reports none)"
+ADVERTISED=1
+kubectl patch node "$NODE" --subresource=status --type=json \
+  -p "[{\"op\":\"add\",\"path\":\"/status/capacity/nvidia.com~1gpu\",\"value\":\"${COUNT}\"},{\"op\":\"add\",\"path\":\"/status/allocatable/nvidia.com~1gpu\",\"value\":\"${COUNT}\"}]" \
+  >/dev/null || { echo "[case-4] could not advertise ${EXCL_RES} on node ${NODE}"; exit 1; }
 
 # 4. Mock the per-card ledger: 8 cards, each 50%-sliced → no clean whole card for exclusive.
 echo "[case-4] creating mocked Devices ${MOCK_DEV}: 8× card sliced 50% (no clean card)"
-accs=$(D="$D" COUNT="$COUNT" python3 - <<'PY'
+HALF=$((50 * (D / 100)))                     # 50% VRAM free, mode=Sliced(3)
+# physicalIndexes/topology/status are required by the CRD, and the check seeds its rebuilt ledger
+# from the Spec's cards, so a Spec without them leaves the check no card at all.
+spec=$(COUNT="$COUNT" python3 -c '
 import json, os
-D = int(os.environ["D"]); n = int(os.environ["COUNT"])
-half = 50 * (D // 100)                       # 50% VRAM free, mode=Sliced(3)
-print(json.dumps([{"id": "c%d" % i, "index": i, "mode": 3, "remaining": half} for i in range(n)]))
-PY
-)
+print(json.dumps([{
+    "id": "c%d" % i, "index": i, "physicalIndexes": [i],
+    "topology": {"pciBusId": "0000:%02x:00.0" % (i + 1), "pciRootId": "", "pciClass": "0302", "numaAffinity": "0", "cpuAffinity": ""},
+    "status": {"unhealthy": False, "logicalSliced": {"count": 10}},
+} for i in range(int(os.environ["COUNT"]))]))')
 # The ledger is labelled with the accelerated flavor's own node selector, minus its ".count"
 # node-batch pin, because that selector is how the AdmissionCheck finds a node's Devices. A
 # hand-written label set drifts from it — the flavor also pins the CPU group and, under topology-aware
@@ -226,11 +251,49 @@ spec:
       manufacturer: nvidia
       name: E2E-Mock
       memory: ${MEM_MIB}
+      accelerators: ${spec}
+      acceleratorSlicedDetail:
+        logical:
+          count: 10
 EOF
+
+# set_status <mode> <remaining> writes every card of the ledger's published Status at that state.
 # Target the v1alpha1 CRD explicitly: the aggregated v1 proxy's /status subresource write
 # returns ServiceUnavailable — only the real v1alpha1 CRD serves the status subresource.
-kubectl patch devices.v1alpha1.worker.gpustack.ai "$MOCK_DEV" --subresource=status --type=merge \
-  -p "{\"status\":{\"groups\":[{\"id\":\"${AGID}\",\"manufacturer\":\"nvidia\",\"accelerators\":${accs}}]}}" >/dev/null
+set_status() {
+  local accs
+  accs=$(M="$1" R="$2" COUNT="$COUNT" python3 -c '
+import json, os
+print(json.dumps([{"id": "c%d" % i, "index": i, "mode": int(os.environ["M"]), "remaining": int(os.environ["R"])} for i in range(int(os.environ["COUNT"]))]))')
+  kubectl patch devices.v1alpha1.worker.gpustack.ai "$MOCK_DEV" --subresource=status --type=merge \
+    -p "{\"status\":{\"groups\":[{\"id\":\"${AGID}\",\"manufacturer\":\"nvidia\",\"accelerators\":${accs}}]}}" >/dev/null \
+    || { echo "[case-4] could not write the ledger Status of ${MOCK_DEV}"; exit 1; }
+}
+set_status 3 "$HALF"
+
+# The check rebuilds the ledger from the Pods bound to the node, so the same occupancy is stated as
+# the Pod the device plugin would have recorded: one Pod bound to the node charging each card the
+# half it has taken, in sliced mode.
+alloc=$(COUNT="$COUNT" G="$AGID" U="$((D - HALF))" python3 -c '
+import json, os
+print(json.dumps({"main": {"devices": {"groups": [{"id": os.environ["G"], "manufacturer": "nvidia", "accelerators": [
+    {"id": "c%d" % i, "index": i, "mode": 3, "allocated": int(os.environ["U"])} for i in range(int(os.environ["COUNT"]))]}]}}}))')
+cat <<EOF | kubectl apply -f - >/dev/null || { echo "[case-4] could not bind the charging Pod to ${NODE}"; exit 1; }
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${HOLDER}
+  namespace: default
+  labels:
+    app.kubernetes.io/part-of: gpustack-operator-e2e
+  annotations:
+    device.gpustack.ai/accelerator.allocated: '${alloc}'
+spec:
+  nodeName: ${NODE}
+  containers:
+    - name: main
+      image: registry.k8s.io/pause:3.10
+EOF
 
 # 5. Submit a raw Pod requesting 5 EXCLUSIVE cards, routed to the accelerated pool's entrance
 #    LocalQueue. Credits (5×M ≤ 8×M) reserve quota at gate 1; gate 3 must hold it because no
@@ -261,9 +324,9 @@ EOF
 #    The Workload is the one owned by this case's Pod, found whether or not it carries the check: a
 #    Workload admitted through a queue with no check is the failure that must be reported as such,
 #    and skipping it would report "no Workload" instead.
-verdict=""
-for _ in $(seq 1 40); do
-  read -r state admitted reserved reservedMsg <<<"$(kubectl -n default get workloads.kueue.x-k8s.io -o json 2>/dev/null | python3 -c "
+# wl_state prints the check state, Admitted, QuotaReserved and its message of the Pod's Workload.
+wl_state() {
+  kubectl -n default get workloads.kueue.x-k8s.io -o json 2>/dev/null | python3 -c "
 import json,sys
 for wl in json.load(sys.stdin).get('items',[]):
     if not any(o.get('kind')=='Pod' and o.get('name')=='${POD}' for o in wl['metadata'].get('ownerReferences',[])): continue
@@ -273,7 +336,12 @@ for wl in json.load(sys.stdin).get('items',[]):
     qr=conds.get('QuotaReserved',{})
     print(check, conds.get('Admitted',{}).get('status','False'), qr.get('status','False'),
           ' '.join((qr.get('message') or '-').split())[:200]); break
-" 2>/dev/null)"
+" 2>/dev/null
+}
+
+verdict=""
+for _ in $(seq 1 40); do
+  read -r state admitted reserved reservedMsg <<<"$(wl_state)"
   [ "$state" = "Retry" ] && [ "$admitted" != "True" ] && { verdict=1; break; }
   [ "$state" = "Rejected" ] && { verdict=rejected; break; }
   # Admission ends the question, and the state is read at that moment: afterwards the admitted Pod
@@ -296,6 +364,25 @@ elif [ "$reserved" != "True" ]; then
   record FAIL "exclusive over-admit held by gate-3" "the Workload never reserved quota, so gate-3 was never consulted (check state=${state}): QuotaReserved=${reserved} ${reservedMsg}"
 else
   record FAIL "exclusive over-admit held by gate-3" "quota reserved but the check never reported a verdict (state=${state}, admitted=${admitted})"
+fi
+
+# 7. Positive: the same request once the cards are freed. Deleting the charging Pod frees them for
+#    the check, and the Status is written back to free so the published ledger says the same. After
+#    its Retry the Workload is reserved again, and this time the check must answer Ready. Without
+#    this row the hold above cannot be told apart from a check that holds every request.
+if [ "$verdict" = 1 ]; then
+  kubectl -n default delete pod "$HOLDER" --force --grace-period=0 >/dev/null 2>&1
+  set_status 0 "$D"
+  for _ in $(seq 1 60); do
+    read -r state admitted reserved reservedMsg <<<"$(wl_state)"
+    [ "$admitted" = "True" ] && break
+    sleep 3
+  done
+  [ "$admitted" = "True" ] && [ "$state" = "Ready" ] \
+    && record PASS "with the cards freed the same request is admitted" "AdmissionCheck state=Ready, workload Admitted" \
+    || record FAIL "with the cards freed the same request is admitted" "state=${state:-<none>} admitted=${admitted:-<none>} QuotaReserved=${reserved:-<none>} ${reservedMsg:-}"
+else
+  record SKIP "with the cards freed the same request is admitted" "not attempted: the request was never held"
 fi
 
 echo
