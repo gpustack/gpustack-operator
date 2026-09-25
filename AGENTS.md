@@ -56,6 +56,8 @@ default, not a list, so a file type nobody named still has an answer:
 
 - Markdown → `make lint docs`
 - the chart → `make lint chart`
+- shell under `.agents/skills/` and nothing else non-markdown → `make lint agents-shell`, the
+  `.agents` shell gate plus the symbol check, the two steps that read such files
 - every other source, Go and shell included → `make lint`
 
 REQUIRED: a change touching more than one subject runs more than one target — `make lint docs`
