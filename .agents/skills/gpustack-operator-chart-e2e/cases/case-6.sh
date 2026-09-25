@@ -33,7 +33,8 @@
 #              - the worker's own Deployment is absent from the release (it is already running).
 # Cleanup:     A trap deletes the hand-rolled worker and its cluster-admin binding, then runs the
 #              shared teardown (which uninstalls that release, its CRDs, finalizers, APIServices and
-#              webhooks). Idempotent and safe to re-run.
+#              webhooks). A teardown that ends INCOMPLETE fails the case. Idempotent and safe to
+#              re-run.
 set -uo pipefail
 
 NS="${1:?usage: case-6.sh <NS> <TAG>}"
@@ -66,11 +67,20 @@ if "$HELM" status "$CHART_RELEASE" -n "$NS" >/dev/null 2>&1; then
   exit 0
 fi
 
+# The teardown's verdict is part of this case's. A teardown that ends INCOMPLETE leaves the cluster
+# in the state that fails the next install without naming its cause — Kueue CRDs Terminating under
+# finalizers nobody clears — so the case exits non-zero and says so last. The case's own verdict is
+# kept: an exit status that is already non-zero stays as it was.
 cleanup() {
+  local rc=$?
   echo "[case-6] removing the hand-rolled worker"
   kubectl -n "$NS" delete deploy,svc,sa "$WORKER" --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete clusterrolebinding "$WORKER" --ignore-not-found >/dev/null 2>&1 || true
-  bash "$LIB/teardown.sh" "$NS" "${WORKER}-cert"
+  if ! bash "$LIB/teardown.sh" "$NS" "${WORKER}-cert"; then
+    echo "CASE 6 FAIL — the teardown did not leave the cluster clean; see [teardown] above"
+    [ "$rc" -ne 0 ] || rc=1
+  fi
+  exit "$rc"
 }
 trap cleanup EXIT
 
