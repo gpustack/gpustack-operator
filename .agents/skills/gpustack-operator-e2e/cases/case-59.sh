@@ -13,7 +13,11 @@
 #                         __post_init__ does not raise. The mode/global_segment_size pair is what is
 #                         being proven: getting it wrong aborts the engine at startup, and it is a
 #                         pairing no unit test of ours can check, because the rule lives in the
-#                         engine.
+#                         engine. Then the tenant, as its own row and by the same two steps as
+#                         SGLang below: the reader holds the Binding's reuse domain, and it differs
+#                         from the reader's default, the only kind the store setup forwards. The
+#                         file is also read raw, so the key's JSON type - a string - is asserted,
+#                         not inferred.
 #                SGLang - call the engine's own _load_config and assert on the config it returns,
 #                         never on os.environ. Reading the environment directly would prove only that
 #                         we set the variables we meant to set; what has to be proven is WHICH BRANCH
@@ -100,9 +104,10 @@
 # Inputs:      a real Pod per engine, running that engine's OWN configuration reader against the
 #              artifact this webhook injected. Nothing is mocked, and that is the point: everything
 #              upstream of this case proves we render what we believe is right.
-# Expected:    with E2E_VLLM_IMAGE, the file parses and does not raise; with E2E_SGLANG_IMAGE,
-#              _load_config takes the env branch and reports the Pod's IP; without an image, that half
-#              SKIPs and says what is unverified.
+# Expected:    with E2E_VLLM_IMAGE, the file parses and does not raise, and the reader holds the
+#              reuse domain as its tenant; with E2E_SGLANG_IMAGE, _load_config takes the env branch
+#              and reports the Pod's IP; without an image, that half SKIPs and says what is
+#              unverified.
 #
 #              SKIPS: each half independently, when its own engine image is unset. One image present
 #              must not let the other half report green by omission, and a SKIP says which schema is
@@ -129,7 +134,8 @@
 #   vLLM    IMPORT_OK, then PARSED mode=standalone-store segment=0 buffer=134217728, in a container
 #           with no GPU and no CUDA runtime. Still valid - though the verdict now matches that line
 #           whole rather than by its PARSED prefix, because a prefix match passes a reader that
-#           ignored every injected key and returned its own defaults.
+#           ignored every injected key and returned its own defaults. Says nothing about the tenant,
+#           which that revision did not assert.
 #   SGLang  Reported the env branch and the Pod's IP. Says nothing about the tenant, which this
 #           revision injects and asserts, because that behaviour did not exist yet.
 #
@@ -209,7 +215,7 @@ else
   # No `if !` around the call: the negation would be what $? then reports, collapsing run_in's three
   # outcomes into two and losing exactly the one that had to be told apart.
   if run_in vllm-probe "$E2E_VLLM_IMAGE" vllm '
-import os, sys
+import json, os, sys
 # The import is a step this case OBSERVES, not a precondition it assumes. The dataclass shares a
 # worker-side module with transfer-thread and lookup-server scaffolding, so importing it can pull up
 # heavy vLLM initialisation. An import failure and a schema rejection call for opposite actions - one
@@ -224,6 +230,20 @@ try:
 except Exception as e:
     print("RAISED %s: %s" % (type(e).__name__, e)); sys.exit(0)
 print("PARSED mode=%s segment=%s buffer=%s" % (cfg.mode, cfg.global_segment_size, cfg.local_buffer_size))
+# The tenant, three ways. TENANT_RAW is the key as we wrote it, with its JSON type: the reader
+# normalizes (strips, maps null and blank to "default"), so its value alone cannot show what the
+# file holds. TENANT and TENANT_FORWARDED are the same two steps the SGLang half prints - the store
+# setup only forwards a tenant that differs from "default" (worker.py:1482-1483 at 98dff2a8). A
+# reader older than v0.28.0 has no tenant_id field at all, and says so rather than raising.
+with open(os.environ["MOONCAKE_CONFIG_PATH"]) as f:
+    raw = json.load(f)
+if "tenant_id" in raw:
+    print("TENANT_RAW=%s:%s" % (type(raw["tenant_id"]).__name__, raw["tenant_id"]))
+else:
+    print("TENANT_RAW=absent")
+tenant = getattr(cfg, "tenant_id", "<reader has no tenant_id field>")
+print("TENANT=%s" % tenant)
+print("TENANT_FORWARDED=%s" % (tenant not in ("default", "<reader has no tenant_id field>")))
 ' "$LOG_V"; rc_v=$?; [ "$rc_v" -ne 0 ]; then
     if [ "$rc_v" -eq 2 ]; then
       record FAIL "vLLM's own reader accepts the projected file" \
@@ -253,6 +273,27 @@ echo 'the probe printed neither PARSED nor RAISED'); expected exactly \
 'PARSED mode=${VLLM_WANT_MODE} segment=${VLLM_WANT_SEGMENT} buffer=${VLLM_WANT_BUFFER}'. A PARSED line \
 with other values means the reader fell back to its own defaults rather than reading what we \
 projected, which is a pass under a prefix match and a failure under this one; see ${LOG_V}"
+  fi
+  # The tenant is its own row, asserted as the SGLang half asserts it: the Binding's reuse domain,
+  # held by the reader and different from its default. TENANT_RAW adds the file's own view, a JSON
+  # string - the reader raises TypeError on any other type, which the row above reports as RAISED.
+  # This fixture always resolves a domain, so an absent key is a FAILURE here; that an unset domain
+  # writes no key is pinned by inject_test.go instead. Gated on PARSED: without it the row above
+  # already failed, and this one would only repeat that the reader never returned.
+  if [ "$rc_v" -eq 0 ] && grep -q '^PARSED ' "$LOG_V"; then
+    missing_v=""
+    for expect in "TENANT_RAW=str:${DOMAIN}" "TENANT=${DOMAIN}" "TENANT_FORWARDED=True"; do
+      grep -qxF "$expect" "$LOG_V" || missing_v="${missing_v} ${expect}"
+    done
+    if [ -z "$missing_v" ]; then
+      record PASS "vLLM's own reader holds the injected tenant" \
+        "TENANT=${DOMAIN}, written as a JSON string and different from the reader's default, so \
+the store setup will forward it"
+    else
+      record FAIL "vLLM's own reader holds the injected tenant" \
+        "these expected values were absent from the probe output:${missing_v}. Observed: $(grep -E \
+'^TENANT' "$LOG_V" | tr '\n' ' ' | cut -c1-200); see ${LOG_V}"
+    fi
   fi
 fi
 
