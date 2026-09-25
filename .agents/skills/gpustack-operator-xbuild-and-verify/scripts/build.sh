@@ -13,13 +13,14 @@
 #   XB_MODE=pty XB_HOST=user@proxy        bash .../build.sh xbuild-amd-rocm
 #
 # TWO BACKENDS ARE BUILT DIFFERENTLY, and in both cases the difference is that their SOURCE IS IN
-# THIS REPO: there is no upstream commit to pin and nothing to fetch, so there is no builder stage
-# in the Dockerfile and the arm stages the tree onto the target and compiles it there with `run`.
+# THIS REPO: there is no upstream commit to pin and nothing to fetch, so the arm stages the tree
+# onto the target and compiles it there with `run`.
 # The recipes themselves are not here: each shim tree owns them in its own `build.sh`, which the
 # arm stages and calls. THead compiles inside the published SDK image because that image is where
 # hggc.h lives; AMD compiles inside a ROCm devel image, or in place when the target has no
-# container runtime and already carries ROCm. Once a builder stage exists for either, that arm can
-# switch to buildx under the same target name.
+# container runtime and already carries ROCm. The Dockerfile now has a stage of the same name for
+# each, which builds what the image ships; this arm does not use it, because the PPU host has no
+# docker and an AMD target may have no container runtime at all.
 #
 # Env:
 #   XB_PLATFORM   linux/arm64 | linux/amd64   (default: detect from the target arch)

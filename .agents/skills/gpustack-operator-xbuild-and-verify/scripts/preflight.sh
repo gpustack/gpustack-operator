@@ -263,7 +263,7 @@ fi
 
 # And the function they all call is itself worth two inputs, because the row above only asserts
 # that everybody asks the same code -- code which, written the wrong way, would answer "no
-# failures" for all 21 cases at once.
+# failures" for every case at once.
 #
 # The poisoned line comes AFTER the count on purpose. That is the ordering that separates reading
 # whole lines from taking the last line that merely contains the token: with the token quoted in a

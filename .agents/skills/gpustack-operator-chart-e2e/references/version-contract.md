@@ -30,8 +30,9 @@ gates its startup on installing its applications, it never starts.
 
 CASE 6 stands that topology up and asserts the release's own chart version equals the running
 binary's — the direct form of view 2. It needs a cluster with **no** chart release: both renders carry
-the cluster-scoped `gpustack-cpu-info` NodeFeatureRule, so a worker installing its own release while
-a chart release owns that rule is refused by Helm on ownership metadata and never starts. The two
+cluster-scoped objects, the Kueue CRDs and ClusterRoles among them, so a worker installing its own
+release while a chart release owns those objects is refused by Helm on ownership metadata and never
+starts. The two
 install modes are exclusive by construction, which is also why
 `--set deviceManager.enabled=false` no longer exercises this path — it now only means "render no
 device-manager DaemonSets".

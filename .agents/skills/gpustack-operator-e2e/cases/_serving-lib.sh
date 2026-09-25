@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # _serving-lib.sh — where a serving ModelDeployment's evidence lives, per vendor and engine, for the
-# serving cases (90, 91, 94).
+# serving cases that source it (91, 94).
 #
 # NOT A CASE. It carries no case header, no trap and no results table; each stays with the case that
 # sources it. What it holds is the ONE place a vendor or engine difference is written: a case reads

@@ -27,8 +27,8 @@
 # THE GAP THIS LEAVES, STATED RATHER THAN IMPLIED. A real replica runs an engine, not this probe, so
 # "the engine reads MOONCAKE_TENANT_ID and forwards the value to the store" is a DIFFERENT claim from
 # anything below. It is measured in case-59, against a real SGLang image, and that measurement
-# applies to the path this case exercises because T14 made both the injection webhook and this
-# controller render through the same `pkg/worker/kvcache/inject`. A case that drove the probe and
+# applies to the path this case exercises because the injection webhook and this controller both
+# render through the same `pkg/worker/kvcache/inject`. A case that drove the probe and
 # then claimed the engine's behaviour would be asserting something it never looked at.
 #
 # AND THE STORE ROW MEASURES DATA ISOLATION, NOT A QUOTA LEDGER. Those are different claims and the

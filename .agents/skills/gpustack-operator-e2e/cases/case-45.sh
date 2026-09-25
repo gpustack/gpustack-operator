@@ -443,23 +443,15 @@ if [ "$nobind_ready" = yes ]; then
   fi
 fi
 
-# The other half of that rule — the unregistered domain costs the replicas their connector and
-# NOTHING else — still cannot be asserted here, but THE REASON CHANGED and the old one is no longer
-# true. It used to be that no replica got a connector at all, so a Ready Binding rendered a
-# byte-identical Pod and "carries no connector" discriminated nothing; that was measured side by
-# side on a live cluster and it is why this row was deferred to T14.
-#
-# T14 has landed. A deployment whose Binding is Ready now renders a client-config annotation, a
+# The other half of that rule, that the unregistered domain costs the replicas their connector and
+# NOTHING else, is not asserted here. A Ready Binding now renders a client-config annotation, a
 # downwardAPI projection of it, a mount and the engine's config-path variable, so "carries no
-# connector" HAS become a discriminating claim. What is missing is the other side of the comparison:
-# this case deliberately names a Binding that does not exist, so every deployment in it is
-# unregistered and the assertion would still pass without ever seeing a registered one. A Ready
-# Binding needs a live Mooncake backend, which is case-46's environment and not this one's.
-#
-# The distinction is worth keeping: this row was blocked by a MECHANISM that did not exist, and is
-# now blocked by a CONTROL that this case cannot host. Only the second kind moves to another case.
+# connector" is a discriminating claim, but only beside a registered deployment to compare with. This
+# case deliberately names a Binding that does not exist, so every deployment in it is unregistered and
+# the assertion would pass without ever seeing a registered one. CASE 48 asserts it with that control:
+# a Ready Binding over a live Mooncake backend beside an unreachable one.
 record SKIP "the unregistered domain costs the replicas their connector and nothing else" \
-  "deferred: needs a READY Binding as the control, which needs a live Mooncake backend. T14 has landed, so the claim now discriminates — but not inside a case whose every deployment is unregistered"
+  "asserted by CASE 48, which hosts the Ready-Binding control this case cannot: every deployment here is unregistered"
 
 # --- the two rows that need a STORED object, because they are about an edit ---
 #
@@ -555,11 +547,10 @@ fi
 
 # --- deferred: the serving half ---
 
-# BOTH REASONS WERE STALE AND SAID "needs the connector wired into the replicas". T14 wired it, and
-# neither row became runnable, because neither was actually waiting on that: a replica reaching Ready
-# needs a container that serves, and this case runs on a CPU-only cluster against busybox. Naming the
-# real blocker matters more than the deferral itself — a stale reason sends the next reader to look
-# for work that is already done.
+# Neither row waits on the connector being wired into the replicas, which it now is: a replica
+# reaching Ready needs a container that serves, and this case runs on a CPU-only cluster against
+# busybox. Naming the real blocker matters more than the deferral itself, since a stale reason sends
+# the next reader to look for work that is already done.
 record SKIP "replicas: 2 reaches status.roles[0].ready == 2" \
   "deferred: needs an engine image that actually serves, which needs an accelerator; this case is CPU-only by design"
 record SKIP "status.endpoint serves inference" \
