@@ -14,7 +14,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -510,6 +512,85 @@ func TestModelArtifactReconcileAsksAgainWhenTheStatusWriteFails(t *testing.T) {
 	ma := new(workercore.ModelArtifact)
 	require.NoError(t, base.Get(context.Background(), key.NamespacedName, ma))
 	assert.True(t, ModelArtifactConditionResolved.IsTrue(ma))
+}
+
+// TestModelArtifactReconcileExpectedStatusWriteFailuresAreQuiet pins how a reconcile ends when the
+// artifact changed or was deleted after it was read, at either status write. Both heal on their own,
+// the conflict through the change event that reconciles the artifact again, so they end the reconcile
+// without an error and without an error log. Any other failure is still returned and logged, and the
+// next reconcile resolves the artifact in every case.
+func TestModelArtifactReconcileExpectedStatusWriteFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: workercore.GroupVersion.Group, Resource: "modelartifacts"}
+	testCases := []struct {
+		name       string
+		failWrite  int // which status write fails: 1 writes Resolving, 2 writes the answer
+		err        error
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name:      "a conflicting Resolving write ends quietly",
+			failWrite: 1,
+			err:       kerrors.NewConflict(gr, "qwen", errors.New("the object has been modified")),
+		},
+		{
+			name:      "a Resolving write on a deleted artifact ends quietly",
+			failWrite: 1,
+			err:       kerrors.NewNotFound(gr, "qwen"),
+		},
+		{
+			name:      "a conflicting answer write ends quietly",
+			failWrite: 2,
+			err:       kerrors.NewConflict(gr, "qwen", errors.New("the object has been modified")),
+		},
+		{
+			name:      "an answer write on a deleted artifact ends quietly",
+			failWrite: 2,
+			err:       kerrors.NewNotFound(gr, "qwen"),
+		},
+		{
+			name:       "any other answer write failure is returned and logged",
+			failWrite:  2,
+			err:        kerrors.NewInternalError(errors.New("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newTestArtifactEnv(t, testHubArtifact(""))
+			var (
+				writes   int
+				injected bool
+			)
+			env.r.Client = interceptor.NewClient(env.cli.(ctrlcli.WithWatch), interceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
+					if _, ok := obj.(*workercore.ModelArtifact); ok {
+						writes++
+						if writes == tc.failWrite {
+							injected = true
+							return tc.err
+						}
+					}
+					return c.SubResource(sub).Update(ctx, obj, opts...)
+				},
+			})
+			req := ctrl.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}}
+
+			out := reconcileUntilInjected(t, env.r, req, &injected)
+			if tc.wantErr {
+				assert.Error(t, out.err)
+			} else {
+				assert.NoError(t, out.err)
+			}
+			assert.Equal(t, ctrl.Result{}, out.res)
+			assert.Equal(t, tc.wantLogged, out.logged, "error log lines")
+
+			// The next passes, which the change event or the returned error triggers, resolve it.
+			ma, _ := env.reconcile(t, "qwen")
+			assert.True(t, ModelArtifactConditionResolved.IsTrue(ma))
+		})
+	}
 }
 
 func TestModelArtifactReconcileASecretReadFailureNeverRevokes(t *testing.T) {

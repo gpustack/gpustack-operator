@@ -86,6 +86,8 @@ type ModelArtifactReconciler struct {
 var _ ctrlreconcile.Reconciler = (*ModelArtifactReconciler)(nil)
 
 func (r *ModelArtifactReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := ctrllog.FromContext(ctx)
+
 	ma := new(workercore.ModelArtifact)
 	if err := r.Client.Get(ctx, req.NamespacedName, ma); err != nil {
 		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
@@ -106,8 +108,10 @@ func (r *ModelArtifactReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if !ModelArtifactConditionResolved.Exists(ma) {
 		ma.Status.ObservedGeneration = ma.Generation
 		ModelArtifactConditionResolved.Unknown(ma, modelArtifactReasonResolving, "the source has not answered yet")
+		// This write and the answer's below end a conflict with an empty result: the watch has no
+		// predicate, so the change that caused the conflict is itself an event.
 		if err := r.Client.Status().Update(ctx, ma); err != nil {
-			return ctrl.Result{}, err
+			return objectWriteResult(logger, err, "update model artifact status to resolving", ctrl.Result{})
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
@@ -136,7 +140,7 @@ func (r *ModelArtifactReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			// than when the pacing entry says: a resolution whose status never landed would
 			// otherwise wait out a whole revalidation interval.
 			r.checks.Delete(ma.UID)
-			return ctrl.Result{}, err
+			return objectWriteResult(logger, err, "update model artifact status", ctrl.Result{})
 		}
 	}
 	// Recorded only once the answer is stored, for the same reason.
