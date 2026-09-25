@@ -3017,7 +3017,8 @@ func (r *KVCacheBackendReconciler) syncStatus(
 
 	kvcb.Status = desired
 	if err := r.Client.Status().Update(ctx, kvcb); err != nil {
-		logger.Error(err, "update kv cache backend status")
+		// The backend is watched with no predicate, so the change behind a conflict wakes it again.
+		_, err = objectWriteResult(logger, err, "update kv cache backend status", ctrl.Result{})
 		return err
 	}
 	logger.V(2).Info("refreshed kv cache backend status", "phase", desired.Phase)

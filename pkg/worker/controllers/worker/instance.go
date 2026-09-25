@@ -140,8 +140,10 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			inst.Status.Phase = InstancePhaseDeleting
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
-				logger.Error(err, "update instance status to deleting")
-				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+				// The predicate drops status-only and metadata-only updates, so the change behind a
+				// conflict may deliver no event: requeue rather than wait for one. The same holds for
+				// every write to the Instance below.
+				return objectWriteResult(logger, err, "update instance status to deleting", _requeueAfterConflict)
 			}
 		}
 
@@ -196,8 +198,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
-				logger.Error(err, "update instance status to stopped")
-				return ctrl.Result{}, err
+				return objectWriteResult(logger, err, "update instance status to stopped", _requeueAfterConflict)
 			}
 			logger.Info("instance stopped")
 			return ctrl.Result{}, nil
@@ -209,8 +210,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			inst.Status.Phase = InstancePhaseStopping
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
-				logger.Error(err, "update instance status to stopping")
-				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+				return objectWriteResult(logger, err, "update instance status to stopping", _requeueAfterConflict)
 			}
 		}
 
@@ -282,8 +282,8 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		inst.Spec.Stop = true
 		err = r.Client.Update(ctx, inst)
 		if err != nil {
-			logger.Error(err, "stop instance with unschedulable instance type")
-			return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+			return objectWriteResult(logger, err, "stop instance with unschedulable instance type",
+				_requeueAfterConflict)
 		}
 
 		logger.Info("stop instance as its instance type is gone, deleting, or draining", "type", inst.Spec.Type)
@@ -358,8 +358,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
-				logger.Error(err, "update instance status to starting")
-				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+				return objectWriteResult(logger, err, "update instance status to starting", _requeueAfterConflict)
 			}
 
 			logger.Info("instance starting")
@@ -509,8 +508,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	inst.Status = *instStatus
 	err = r.Client.Status().Update(ctx, inst)
 	if err != nil {
-		logger.Error(err, "update instance status to ready")
-		return ctrl.Result{}, err
+		return objectWriteResult(logger, err, "update instance status to ready", _requeueAfterConflict)
 	}
 
 	if currentPhase != lastPhase && lastPhase == InstancePhaseReady {

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
@@ -17,6 +18,7 @@ import (
 	clientfeatures "k8s.io/client-go/features"
 	clientfeaturestesting "k8s.io/client-go/features/testing"
 	k8stesting "k8s.io/client-go/testing"
+	klog "k8s.io/klog/v2"
 
 	kubefake "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/fake"
 	"gpustack.ai/gpustack/pkg/utils/certs"
@@ -319,4 +321,37 @@ func Test_k8sCache_Delete(t *testing.T) {
 		_, err := c.Get(t.Context(), testKey)
 		return errors.Is(err, certs.ErrCacheMiss)
 	}, 3*time.Second, 20*time.Millisecond, "deleted key never became a cache miss")
+}
+
+// Test_k8sCache_TamperedSecretIsLoggedAsKeyValuePairs asserts a secret whose sums do not match
+// its content is reported with the key as a key-value pair, which is the only form a structured
+// logger renders.
+func Test_k8sCache_TamperedSecretIsLoggedAsKeyValuePairs(t *testing.T) {
+	var (
+		mu    sync.Mutex
+		lines []string
+	)
+	klog.SetLogger(funcr.New(func(prefix, args string) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, args)
+	}, funcr.Options{}))
+	t.Cleanup(klog.ClearLogger)
+
+	tampered := newLegacySecret(testKey, []byte("value"))
+	tampered.Name = secretName(testGroup, testKey)
+	tampered.Annotations[k8sManagedValueSumAnno] = sumValue([]byte("other"))
+	newTestCache(t, kubefake.NewSimpleClientset(tampered))
+
+	wantMsg, wantKey := `"msg"="invalid key" `, `"key"="`+testKey+`"`
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, line := range lines {
+			if strings.Contains(line, wantMsg) && strings.Contains(line, wantKey) {
+				return true
+			}
+		}
+		return false
+	}, 3*time.Second, 20*time.Millisecond, "no log line with %s and %s", wantMsg, wantKey)
 }

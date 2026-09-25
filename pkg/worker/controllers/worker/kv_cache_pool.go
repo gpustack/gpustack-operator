@@ -271,8 +271,8 @@ func (r *KVCachePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		// Requeued rather than left waiting for an event: a backend coming up publishes its
 		// addresses through its OWN status, and this reconciler does not watch that object.
-		return ctrl.Result{RequeueAfter: kvCachePoolObserveInterval},
-			r.syncKVCachePoolStatus(ctx, kvcp, r.summarizeKVCachePool(holder))
+		return r.syncKVCachePoolStatus(ctx, kvcp, r.summarizeKVCachePool(holder),
+			ctrl.Result{RequeueAfter: kvCachePoolObserveInterval})
 	}
 
 	// Claimed as soon as the backend RESOLVES, before anything is asked of it. The claim is what holds
@@ -290,8 +290,8 @@ func (r *KVCachePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				"reached; no address is derived from the backend's name, because one that happened "+
 				"to resolve would drive the wrong master",
 				kvcb.Name, workercore.KVCacheBackendEndpointNameAdmin))
-		return ctrl.Result{RequeueAfter: kvCachePoolObserveInterval},
-			r.syncKVCachePoolStatus(ctx, kvcp, r.summarizeKVCachePool(holder))
+		return r.syncKVCachePoolStatus(ctx, kvcp, r.summarizeKVCachePool(holder),
+			ctrl.Result{RequeueAfter: kvCachePoolObserveInterval})
 	}
 	KVCachePoolConditionBackendResolved.True(holder, "Resolved",
 		fmt.Sprintf("backend %q is reachable", kvcb.Name))
@@ -350,11 +350,13 @@ func (r *KVCachePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// figures the pool's phase is derived from, and writing the summary first would publish a Ready
 	// pool whose Bindings still carried the previous pass's numbers.
 	if err = r.syncKVCachePoolBindings(ctx, kvcp, master, ledger); err != nil {
-		return ctrl.Result{}, err
+		// A conflict or a not found here is on a Binding, and the Binding watch passes every change
+		// to one, so the change behind it starts the next pass.
+		return objectWriteResult(logger, err, "sync kv cache pool bindings", ctrl.Result{})
 	}
 
-	return ctrl.Result{RequeueAfter: kvCachePoolObserveInterval},
-		r.syncKVCachePoolStatus(ctx, kvcp, r.summarizeKVCachePool(holder))
+	return r.syncKVCachePoolStatus(ctx, kvcp, r.summarizeKVCachePool(holder),
+		ctrl.Result{RequeueAfter: kvCachePoolObserveInterval})
 }
 
 // kvCachePoolResolveError is a backend this pass could not use, split by whose problem it is.
@@ -1459,12 +1461,11 @@ func (r *KVCachePoolReconciler) syncKVCachePoolBindings(
 			// The whole pass gives up, rather than carrying on to the siblings. A failure here is
 			// almost always a conflict, which says this Binding was changed underneath the snapshot
 			// every OTHER Binding in this loop is also being written from — so continuing would be
-			// writing the rest from a listing already known to be stale. The requeue re-lists and
-			// re-scrapes, and the siblings get their figures a resync later from data that is
-			// current. Delayed, not lost.
-			logger.Error(err, "update kv cache pool binding status",
-				"kv cache pool binding", ctrlcli.ObjectKeyFromObject(kvcpb))
-			return err
+			// writing the rest from a listing already known to be stale. The change behind the
+			// conflict is itself a Binding event, which re-lists and re-scrapes, and the siblings
+			// get their figures on that pass from data that is current. Delayed, not lost.
+			return fmt.Errorf("update kv cache pool binding %s status: %w",
+				ctrlcli.ObjectKeyFromObject(kvcpb), err)
 		}
 		logger.V(2).Info("refreshed kv cache pool binding status",
 			"kv cache pool binding", ctrlcli.ObjectKeyFromObject(kvcpb), "phase", desired.Phase)
@@ -1734,26 +1735,28 @@ func (r *KVCachePoolReconciler) summarizeKVCachePool(
 	return status
 }
 
-// syncKVCachePoolStatus writes the status wholesale, and only on a difference.
+// syncKVCachePoolStatus writes the status wholesale, and only on a difference, and then ends the
+// pass with result.
 //
 // The guard is what keeps the loop from feeding itself: this reconciler's predicate ignores its own
-// status writes, and a settled pool writes nothing at all on top of that.
+// status writes, and a settled pool writes nothing at all on top of that. The same predicate drops a
+// status-only change by anyone else, so the change behind a conflict may deliver no event, and the
+// pass is requeued rather than left to wait for one.
 func (r *KVCachePoolReconciler) syncKVCachePoolStatus(
-	ctx context.Context, kvcp *workercore.KVCachePool, desired workercore.KVCachePoolStatus,
-) error {
+	ctx context.Context, kvcp *workercore.KVCachePool, desired workercore.KVCachePoolStatus, result ctrl.Result,
+) (ctrl.Result, error) {
 	if kubemeta.DeepEqual(desired, kvcp.Status) {
-		return nil
+		return result, nil
 	}
 
 	logger := ctrllog.FromContext(ctx)
 
 	kvcp.Status = desired
 	if err := r.Client.Status().Update(ctx, kvcp); err != nil {
-		logger.Error(err, "update kv cache pool status")
-		return err
+		return objectWriteResult(logger, err, "update kv cache pool status", _requeueAfterConflict)
 	}
 	logger.V(2).Info("refreshed kv cache pool status", "phase", desired.Phase)
-	return nil
+	return result, nil
 }
 
 // teardownKVCachePool releases the pool once nothing holds it, and refuses while something does.
@@ -1789,7 +1792,7 @@ func (r *KVCachePoolReconciler) teardownKVCachePool(
 		Status:     *kvcp.Status.DeepCopy(),
 	}
 	deleting := func(result ctrl.Result) (ctrl.Result, error) {
-		return result, r.syncKVCachePoolStatus(ctx, kvcp, deletingKVCachePoolStatus(holder))
+		return r.syncKVCachePoolStatus(ctx, kvcp, deletingKVCachePoolStatus(holder), result)
 	}
 
 	bindings := new(workercore.KVCachePoolBindingList)

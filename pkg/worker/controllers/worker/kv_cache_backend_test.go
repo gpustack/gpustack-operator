@@ -20,6 +20,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -5527,4 +5528,81 @@ func TestKVCacheBackendConverge_MovingToLatestMovesThePullPolicy(t *testing.T) {
 	require.NoError(t, cli.Get(ctx, deployKey, deploy))
 	assert.Equal(t, core.PullAlways, deploy.Spec.Template.Spec.Containers[0].ImagePullPolicy,
 		"the tag moved, so the default derived from it moves with it")
+}
+
+// TestKVCacheBackendReconciler_ExpectedStatusWriteFailuresAreQuiet pins how a pass ends when the
+// backend changed or was deleted after it was read. Neither is logged as an error or returned, and
+// the pass still ends with its observation timer: the backend is watched with no predicate, so the
+// change behind a conflict wakes it again. Any other failure is still returned and logged, and the
+// next pass writes the status in every case.
+func TestKVCacheBackendReconciler_ExpectedStatusWriteFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: workercore.GroupVersion.Group, Resource: "kvcachebackends"}
+	observe := ctrlreconcile.Result{RequeueAfter: kvCacheBackendObserveInterval}
+	testCases := []struct {
+		name       string
+		err        error
+		want       ctrlreconcile.Result
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name: "a conflicting status update ends quietly",
+			err:  kerrors.NewConflict(gr, "kvcb", fmt.Errorf("the object has been modified")),
+			want: observe,
+		},
+		{
+			name: "a status update on a deleted backend ends quietly",
+			err:  kerrors.NewNotFound(gr, "kvcb"),
+			want: observe,
+		},
+		{
+			name:       "any other status update failure is returned and logged",
+			err:        kerrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			want:       observe,
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			kvcb := newKVCacheBackendObject()
+
+			var injected bool
+			fail := failOnce(tc.err)
+			cli := ctrlinterceptor.NewClient(newKVCacheBackendClient(kvcb).(ctrlcli.WithWatch), ctrlinterceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
+					if _, ok := obj.(*workercore.KVCacheBackend); ok {
+						if err := fail(); err != nil {
+							injected = true
+							return err
+						}
+					}
+					return c.SubResource(sub).Update(ctx, obj, opts...)
+				},
+			})
+			r := &KVCacheBackendReconciler{
+				Client: cli,
+				AdminHTTP: &http.Client{Transport: &adminRoundTripper{byPath: map[string]adminResponse{
+					"/health": {err: errors.New("connect: connection refused")},
+				}}},
+			}
+			req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: kvcb.Name}}
+
+			out := reconcileUntilInjected(t, r, req, &injected)
+			if tc.wantErr {
+				assert.Error(t, out.err)
+			} else {
+				assert.NoError(t, out.err)
+			}
+			assert.Equal(t, tc.want, out.res)
+			assert.Equal(t, tc.wantLogged, out.logged, "error log lines")
+
+			// The next pass, which the change event or the returned error triggers, writes it.
+			_, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+			got := new(workercore.KVCacheBackend)
+			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, got))
+			assert.Equal(t, KVCacheBackendPhaseProvisioning, got.Status.Phase)
+		})
+	}
 }

@@ -13,11 +13,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
@@ -1019,4 +1022,103 @@ func TestKVCachePoolReconcile_ADeclaredSingleTenantBackendIsNeverAskedForItsLedg
 	assert.Equal(t, "NoTenantLedger",
 		conditionReason(t, kvcpb, KVCachePoolBindingConditionQuotaObserved))
 	assert.Nil(t, kvcpb.Status.Usage, "usage is not accounted per domain on such a master")
+}
+
+// TestKVCachePoolReconcile_ExpectedStatusWriteFailuresAreQuiet pins how a pass ends when the pool or
+// one of its Bindings changed or was deleted after it was read. Neither is logged as an error or
+// returned. A conflict on the pool's status requeues: the predicate passes only generation and
+// deletion changes, so the change behind it may deliver no event. A conflict on a Binding's status
+// does not, because the Binding watch passes every change to one; the pass still stops there rather
+// than write the pool's summary over Bindings that carry the previous figures. Any other failure is
+// still returned and logged, and the next pass writes both in every case.
+func TestKVCachePoolReconcile_ExpectedStatusWriteFailuresAreQuiet(t *testing.T) {
+	poolGR := schema.GroupResource{Group: workercore.GroupVersion.Group, Resource: "kvcachepools"}
+	bindingGR := schema.GroupResource{Group: workercore.GroupVersion.Group, Resource: "kvcachepoolbindings"}
+	testCases := []struct {
+		name       string
+		binding    bool
+		err        error
+		want       ctrl.Result
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name: "a conflicting pool status update requeues quietly",
+			err:  kerrors.NewConflict(poolGR, "shared", fmt.Errorf("the object has been modified")),
+			want: _requeueAfterConflict,
+		},
+		{
+			name: "a status update on a deleted pool ends quietly",
+			err:  kerrors.NewNotFound(poolGR, "shared"),
+		},
+		{
+			name:       "any other pool status update failure is returned and logged",
+			err:        kerrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+		{
+			name:    "a conflicting binding status update ends quietly, for the binding watch to retry",
+			binding: true,
+			err:     kerrors.NewConflict(bindingGR, "chat", fmt.Errorf("the object has been modified")),
+		},
+		{
+			name:    "a status update on a deleted binding ends quietly",
+			binding: true,
+			err:     kerrors.NewNotFound(bindingGR, "chat"),
+		},
+		{
+			name:       "any other binding status update failure is returned and logged",
+			binding:    true,
+			err:        kerrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			master := newFakeMaster()
+			address := master.start(t)
+			_, base := newReconciler(
+				newReconcileBackend("mooncake-dram", address),
+				newTestKVCachePool("shared", "mooncake-dram"),
+				newBoundBinding("team-a", "chat", "shared", "team-a-chat", resource.MustParse("20Ti")),
+			)
+
+			var injected bool
+			fail := failOnce(tc.err)
+			cli := ctrlinterceptor.NewClient(base.(ctrlcli.WithWatch), ctrlinterceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
+					_, isBinding := obj.(*workercore.KVCachePoolBinding)
+					_, isPool := obj.(*workercore.KVCachePool)
+					if (tc.binding && isBinding) || (!tc.binding && isPool) {
+						if err := fail(); err != nil {
+							injected = true
+							return err
+						}
+					}
+					return c.SubResource(sub).Update(ctx, obj, opts...)
+				},
+			})
+			r := &KVCachePoolReconciler{Client: cli, AdminHTTP: newAdminHTTPClient()}
+			req := ctrl.Request{NamespacedName: ctrlcli.ObjectKey{Name: "shared"}}
+
+			out := reconcileUntilInjected(t, r, req, &injected)
+			if tc.wantErr {
+				assert.Error(t, out.err)
+			} else {
+				assert.NoError(t, out.err)
+			}
+			assert.Equal(t, tc.want, out.res)
+			assert.Equal(t, tc.wantLogged, out.logged, "error log lines")
+			assert.Empty(t, readPool(t, cli, "shared").Status.Phase,
+				"the pass that failed a write publishes no pool summary")
+
+			// The next pass, which the requeue, the Binding event or the returned error triggers,
+			// writes both.
+			reconcilePool(t, r, "shared")
+			assert.Equal(t, KVCachePoolPhaseReady, readPool(t, cli, "shared").Status.Phase)
+			assert.Equal(t, KVCachePoolPhaseReady, readBinding(t, cli, "team-a", "chat").Status.Phase)
+		})
+	}
 }

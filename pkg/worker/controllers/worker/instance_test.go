@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -11,9 +12,11 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
@@ -1300,6 +1303,78 @@ func TestPartitionProfileMemoryPercent(t *testing.T) {
 			pct, sizeable := PartitionProfileMemoryPercent(it, tc.profile)
 			assert.Equal(t, tc.wantSizeable, sizeable, tc.why)
 			assert.Equal(t, tc.wantPct, pct, tc.why)
+		})
+	}
+}
+
+// TestInstanceReconciler_ExpectedWriteFailuresAreQuiet pins how a reconcile ends when the Instance
+// changed or was deleted after it was read. Neither is logged as an error or returned. A conflict
+// requeues: the predicate passes only generation changes, so the change behind the conflict may
+// deliver no event. Any other failure is still returned and logged, and the next reconcile writes
+// the status in every case.
+func TestInstanceReconciler_ExpectedWriteFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: workercore.GroupVersion.Group, Resource: "instances"}
+	testCases := []struct {
+		name       string
+		err        error
+		want       ctrlreconcile.Result
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name: "a conflicting status update requeues quietly",
+			err:  kerrors.NewConflict(gr, "inst", fmt.Errorf("the object has been modified")),
+			want: _requeueAfterConflict,
+		},
+		{
+			name: "a status update on a deleted instance ends quietly",
+			err:  kerrors.NewNotFound(gr, "inst"),
+		},
+		{
+			name:       "any other status update failure is returned and logged",
+			err:        kerrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// A stopped Instance whose Pod is already gone is one status write away from Stopped.
+			inst := newReadyInstance("default", "inst", "generic")
+			inst.Spec.Stop = true
+			systemmeta.Lock(inst)
+
+			var injected bool
+			fail := failOnce(tc.err)
+			cli := ctrlinterceptor.NewClient(buildInstanceClient(inst).(ctrlcli.WithWatch), ctrlinterceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
+					if _, ok := obj.(*workercore.Instance); ok {
+						if err := fail(); err != nil {
+							injected = true
+							return err
+						}
+					}
+					return c.SubResource(sub).Update(ctx, obj, opts...)
+				},
+			})
+			r := &InstanceReconciler{Client: cli, APIReader: cli}
+			req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}}
+
+			out := reconcileUntilInjected(t, r, req, &injected)
+			if tc.wantErr {
+				assert.Error(t, out.err)
+			} else {
+				assert.NoError(t, out.err)
+			}
+			assert.Equal(t, tc.want, out.res)
+			assert.Equal(t, tc.wantLogged, out.logged, "error log lines")
+
+			// The next reconcile, which the requeue or the returned error triggers, writes it.
+			_, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+			got := new(workercore.Instance)
+			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, got))
+			assert.Equal(t, InstancePhaseStopped, got.Status.Phase)
 		})
 	}
 }
