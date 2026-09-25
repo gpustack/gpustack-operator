@@ -31,9 +31,7 @@ import (
 )
 
 // enableInstanceTypeDrainWhenNoFlavors seeds the delegated settings Secret so
-// InstanceTypeDrainWhenNoFlavors resolves to true. ShouldValueBool returns false for any
-// setting whose key is absent from the Secret (the read errors and the bool default is not
-// applied), so the drain=true branch is only reachable once the key is present. The value
+// InstanceTypeDrainWhenNoFlavors resolves to true whatever an earlier case seeded. The value
 // caches for ~30s once read, so this is a one-way setup step — never flipped mid-test.
 func enableInstanceTypeDrainWhenNoFlavors(t *testing.T) {
 	t.Helper()
@@ -231,6 +229,8 @@ func cpuResourceGroup(flavorName string, cpu int64) kueue.ResourceGroup {
 }
 
 func TestValidateTASFlavors_CPUOnlyNodeMatchesFlavor(t *testing.T) {
+	// The CPU-only selector this case removes from the Node is rendered only while mixing is off.
+	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-mixed-on-node": "false"})
 	node := newManagedCPUNode("node-a", 4, 16, 32)
 	name := cpuFlavorName(node)
 	flavorClient := buildNodeFlavorClient(node)
@@ -559,6 +559,8 @@ func TestNodeQueueReconciler_GenericCollapsedFillsFromAllCPUFlavors(t *testing.T
 // excludes it. Without that boolean guard the general.<gKey> key alone would wrongly match the
 // accelerated flavor and pollute the queue's quota.
 func TestNodeQueueReconciler_AwareGenericExcludesAcceleratedFlavor(t *testing.T) {
+	// This case is written for mixing off, and the setting defaults to on.
+	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-mixed-on-node": "false"})
 	const gKey = "amd-epyc-7763"
 	name := "gpustack--" + gKey + "-linux-amd64"
 	cq := collapsedGenericQueue(name, gKey) // aware generic: carries general.<gKey>
@@ -659,9 +661,8 @@ func TestNodeQueueReconciler_KeepsAdminHoldStickyOnFlavorReturn(t *testing.T) {
 // TestNodeQueueReconciler_DrainThenEmptyRespectsReservations pins the no-flavors path: while
 // the queue still holds a reservation the quota is kept and the queue is driven to
 // HoldAndDrain (requeued), and only once nothing is reserved are the resource groups emptied.
-// instance-type-drain-when-no-flavors is seeded true once at setup (its key is otherwise
-// absent, which ShouldValueBool reads as false); the value then caches, so only the drain=true
-// path is exercised — it is never flipped mid-run.
+// instance-type-drain-when-no-flavors is seeded true once at setup; the value then caches, so
+// only the drain=true path is exercised — it is never flipped mid-run.
 func TestNodeQueueReconciler_DrainThenEmptyRespectsReservations(t *testing.T) {
 	enableInstanceTypeDrainWhenNoFlavors(t)
 
@@ -1237,8 +1238,8 @@ func TestNodeQueueReconciler_PoolConservationCountsOnlyContributingNodes(t *test
 // reference holds the queue first even with automatic drain off and nothing reserved, so no
 // reservation can land between the zero check and the switch.
 func TestNodeQueueReconciler_HoldsBeforeEmptyingUnreservedQueue(t *testing.T) {
-	require.False(t, settings.InstanceTypeDrainWhenNoFlavors.ShouldValueBool(context.Background()),
-		"this case covers the automatic-drain-off path")
+	// This case covers the automatic-drain-off path, and the setting defaults to on.
+	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-drain-when-no-flavors": "false"})
 	key := "generic"
 	name := nodeQueueName(key)
 	flavor := "gpustack-generic-linux-amd64-4c"

@@ -14,10 +14,9 @@ import (
 // settings via ShouldValueBool, which reaches the loopback client, so without this a setting read
 // would nil-panic.
 //
-// The fake holds no delegated Secret, so every read fails and ShouldValueBool yields false — not the
-// setting's declared default, which ValueBool drops along with the error. That happens to coincide
-// with the default for the two host-access gates, which is why they read correctly here. A test
-// covering a setting whose default is true cannot rely on this client and must seed the Secret.
+// The fake holds no delegated Secret, so every read fails: ShouldValueBool yields the setting's
+// default, and the two host-access gates, which deny on a failed read, yield false. A test covering
+// the other side of a setting must seed the Secret.
 func TestMain(m *testing.M) {
 	system.LoopbackCtrlClient.Configure(
 		ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build())
