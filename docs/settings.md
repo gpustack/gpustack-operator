@@ -101,13 +101,12 @@ admitted Workload stay `Pending`, compare the request against the per-accelerato
 
 **The joint-admission check is attached in both modes.** Every queue backing an InstanceType
 references `gpustack-model-deployment-joint` once it reports `Active`, whoever authored the type and
-whatever this setting says. It holds every replica of a multi-role ModelDeployment until the whole set
-has reserved quota — see [Prefill and decode](reference/model-deployment.md#prefill-and-decode).
+whatever this setting says.
 
-It answers `Ready` at once for every other Workload, so the only thing it changes is that a
-multi-role deployment no longer starts one role while another waits for quota. A set that stays short
-of quota is parked after half an hour; the deployment's `QuotaReserved` condition reads `Parked` and
-its message says how to clear it.
+It answers `Ready` at once for every Workload that is not a replica of a multi-role ModelDeployment,
+so the only thing it changes in this mode is that such a deployment is admitted as a set — see
+[Prefill and decode](reference/model-deployment.md#prefill-and-decode), and
+[Status](reference/model-deployment-status.md#status) for a set that stays short of quota.
 
 **Write the InstanceType against the `InstanceTypeFlavor` catalog.** It is the read-only,
 os/arch-agnostic view of the pools that actually exist — one entry per grouping the settings above
