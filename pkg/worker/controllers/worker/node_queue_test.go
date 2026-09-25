@@ -1141,10 +1141,11 @@ func TestNodeQueueReconciler_TheJointCheckWaitsForActive(t *testing.T) {
 //
 // A QUEUE ONLY RE-READS THE CHECK WHEN IT IS ENQUEUED. Activation that no watch delivers leaves a
 // queue that was filled a moment earlier without the barrier until a flavor or spec change happens
-// along; a deletion that no watch delivers leaves the queue referencing a check that is gone, and
-// Kueue turns that queue inactive so it admits nothing. The other check's events used to mask the
-// first gap, because both checks turn Active at start-up, but in the administrator-authored mode
-// the joint check is the only reference a queue can carry.
+// along. A deletion is held open by Kueue's finalizer until no queue references the check, so a
+// queue that neither hears of it nor treats a check being deleted as absent keeps the delete open
+// for good. The other check's events used to mask the first gap, because both checks turn Active
+// at start-up, but in the administrator-authored mode the joint check is the only reference a queue
+// can carry.
 func TestNodeQueueReconciler_FollowsTheJointCheckItself(t *testing.T) {
 	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-derived-from-node": "false"})
 
@@ -1152,6 +1153,9 @@ func TestNodeQueueReconciler_FollowsTheJointCheckItself(t *testing.T) {
 	name := nodeQueueName(key)
 	rf := newNodesFlavor("gpustack-generic-linux-amd64-1d", key, 1, 4)
 	ac := jointCheck(false)
+	// Kueue holds this finalizer while any ClusterQueue references the check, so a delete leaves the
+	// check in place, still Active, until the queues drop the reference.
+	ac.Finalizers = []string{"kueue.x-k8s.io/resource-in-use"}
 	cli := buildNodeQueueClient(newInstanceTypeQueue(key, false), rf, ac)
 	r := &NodeQueueReconciler{Client: cli}
 	ctx := context.Background()
@@ -1172,12 +1176,14 @@ func TestNodeQueueReconciler_FollowsTheJointCheckItself(t *testing.T) {
 	require.NotNil(t, got.Spec.AdmissionChecksStrategy, "the enqueued queue gains the reference")
 
 	require.NoError(t, cli.Delete(ctx, ac))
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(ac), ac), "the finalizer keeps the check")
 	assert.Equal(t, []ctrlreconcile.Request{{NamespacedName: ctrlcli.ObjectKey{Name: name}}},
 		r.enqueueNodeQueuesWhenAdmissionCheckChanged(ctx, ac), "deletion enqueues the queue")
 	reconcileNodeQueueN(t, cli, name, 1)
 	got, err = getClusterQueue(t, cli, name)
 	require.NoError(t, err)
-	assert.Nil(t, got.Spec.AdmissionChecksStrategy, "the enqueued queue drops the reference")
+	assert.Nil(t, got.Spec.AdmissionChecksStrategy,
+		"the enqueued queue drops the reference to a check being deleted, which is what lets the delete finish")
 }
 
 // TestNodeQueueReconciler_EnqueuesOnlyForItsOwnChecks pins which AdmissionChecks re-enqueue the

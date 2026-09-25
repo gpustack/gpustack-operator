@@ -814,13 +814,17 @@ func nodeQueueAdmissionCheck(ac *kueue.AdmissionCheck) bool {
 		ac.Spec.ControllerName == _JointAdmissionControllerName
 }
 
-// admissionCheckActive reports whether the named AdmissionCheck exists and is Active. The queue
-// references one only when true, since listing an inactive check would turn the ClusterQueue
-// inactive and stop it admitting.
+// admissionCheckActive reports whether the named AdmissionCheck exists, is not being deleted, and
+// is Active. The queue references one only when true, since listing an inactive check would turn
+// the ClusterQueue inactive and stop it admitting.
+//
+// A check being deleted counts as absent even while it still reads Active. Kueue holds its
+// resource-in-use finalizer until no ClusterQueue references the check, so a queue that kept the
+// reference would hold the delete open for good.
 func (r *NodeQueueReconciler) admissionCheckActive(ctx context.Context, name string) bool {
 	ac := new(kueue.AdmissionCheck)
 	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: name}, ac, ctrlclix.WithoutQuorum)
-	if err != nil {
+	if err != nil || ac.DeletionTimestamp != nil {
 		return false
 	}
 
