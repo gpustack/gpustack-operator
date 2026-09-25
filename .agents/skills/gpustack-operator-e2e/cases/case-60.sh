@@ -128,14 +128,20 @@
 #                   would look most like it was working exactly when it was not.
 #
 #              PRECONDITION, AND THE FAILURE CONDITION OF THIS CASE: we do not render
-#              `kv_connector_module_path` (vllm.go renders `kv_connector` alone). The engine's real
-#              `create_connector` path falls back to that module path when the registry misses, and
-#              raises `Unsupported connector type` only when the key is unset - so while we never
-#              render it, registry membership and "the engine starts" are the same question. On the
-#              day we do render it, this assertion turns into a false negative - reporting missing
-#              what the engine would resolve - and it must move to the version-specific entry point
-#              then (`_get_connector_class_with_compat` at v0.19.1, `get_connector_class` at v0.29.0;
-#              the names differ, which is why the registry is read directly while that is equivalent).
+#              `kv_connector_module_path` (vllm.go renders `kv_connector` alone). The two releases
+#              this case reads order the two lookups OPPOSITELY. At v0.25.1 and v0.29.0 the module
+#              path comes first, and while it is set the registry is never consulted
+#              (factory.py:105-127 at v0.29.0, 98dff2a8). At v0.19.1, the vLLM that vllm-ascend
+#              pins, the registry comes first and the module path is only the fallback for a miss
+#              (factory.py:110-115 at v0.19.1, b1388b1f). Both raise `Unsupported connector type` on
+#              a registry miss with the key unset - so while we never render it, registry membership
+#              and "the engine starts" are the same question on both. On the day we do render it,
+#              this assertion stops measuring the engine: at v0.19.1 it turns into a false negative,
+#              reporting missing what the fallback would resolve, and at v0.29.0 it can be wrong in
+#              either direction, because the registry is not asked at all. It must move to the
+#              version-specific entry point then (`_get_connector_class_with_compat` at v0.19.1,
+#              `get_connector_class` at v0.29.0; the names differ, which is why the registry is read
+#              directly while that is equivalent).
 #
 #              SKIPS: each row independently, on its own image variable, plus one MEASURED skip -
 #              vLLM-Ascend, taken on admission's own refusal rather than on a name written here, and
@@ -296,11 +302,13 @@ except BaseException as e:
 print("PLUGINS_OK")
 
 # 3. THE VERDICT: is the rendered name in this engine's registry. That membership is the exact
-# property deciding whether a workload starts - the factory consults kv_connector_module_path only
-# when the name is ABSENT, and raises `ValueError: Unsupported connector type` when that key is
-# unset, which is every Pod we render. The whole registry is printed, not just the answer: a failure
-# that also lists the names the engine DOES know says what to render instead, and listing the full
-# set does not depend on having guessed which other name to probe.
+# property deciding whether a workload starts while kv_connector_module_path is unset, which is
+# every Pod we render: with that key unset both releases this case reads resolve the name from the
+# registry alone and raise `ValueError: Unsupported connector type` on a miss. The order of the two
+# lookups differs by release when the key IS set - see Expected in the header. The whole registry is
+# printed, not just the answer: a failure that also lists the names the engine DOES know says what
+# to render instead, and listing the full set does not depend on having guessed which other name to
+# probe.
 names = sorted(KVConnectorFactory._registry)
 print("REGISTRY %s" % ",".join(names))
 if NAME not in KVConnectorFactory._registry:
