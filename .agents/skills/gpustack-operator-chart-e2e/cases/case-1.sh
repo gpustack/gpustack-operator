@@ -7,7 +7,7 @@
 # Goal:        The chart installs and runs (operator core healthy) and the three version views
 #              agree — the running binary is built from HEAD, the chart tgz bundled in the image
 #              matches the binary version, and the deployed image tag is the one built. A tgz
-#              mismatch is a release/cache bug (the version deviceManagerChartVersion() computes),
+#              mismatch is a release/cache bug (the version gpustackOperatorChartVersion() computes),
 #              not cosmetic. See references/version-contract.md.
 # Environment: Any reachable cluster with the chart already installed (operator core up). No GPU.
 #              Read-only, level-based, safe to re-run.

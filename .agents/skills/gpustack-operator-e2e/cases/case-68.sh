@@ -72,10 +72,10 @@
 # attributable to hearing about its sibling.
 #
 # Not covered: that a prefill and a decode replica land on different physical cards. That needs
-#              hardware, it is T12 of the stabilization spec, and no cluster case substitutes for
-#              it. Also not covered: that Kueue STAMPS LastTransitionTime correctly -- Phase C
-#              back-dates that stamp, so what it exercises is the operator's comparison against it,
-#              which is the half this repository owns.
+#              real accelerators, and no cluster case without them substitutes for it. Also not
+#              covered: that Kueue STAMPS LastTransitionTime correctly -- Phase C back-dates that
+#              stamp, so what it exercises is the operator's comparison against it, which is the
+#              half this repository owns.
 #
 # Why the phases are separate states rather than one: "no role is admitted" and "the other group's
 # Pods are unchanged by a scale" cannot both hold at once. The second needs admitted Pods to

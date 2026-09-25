@@ -15,10 +15,11 @@
 #              cannot be placed. The case also MEASURES what this costs: the ledger-derived key
 #              re-patches node capacity on every partition allocate and release, so the Node-object
 #              write volume is counted over an idle window and over a carve/free window and PRINTED for
-#              the record. Finally it records — as an observation, not an assertion — the residual the
-#              key shape does not close: the per-profile keys are independently subtracted scalars, so
-#              two Pods naming mutually exclusive profiles can both be admitted to a node that can host
-#              only one of them, and the loser is failed closed at Allocate and retried.
+#              the record. Finally it exercises the residual the key shape does not close: the
+#              per-profile keys are independently subtracted scalars, so two Pods naming mutually
+#              exclusive profiles can both be admitted to a node that can host only one of them. The
+#              case FAILS if both reach Running on the one card, since that is a double-booked
+#              placement; how the loser is held is recorded, not asserted.
 # Environment: A reachable cluster whose active context is the GPU cluster, an nvidia node with at
 #              least one card that can be put into a hardware partitioning mode, AND SSH to that node
 #              (sudo nvidia-smi) supplied via MIG_NODE_SSH=<user@host>. It EXITS 2 (input required)
@@ -40,7 +41,8 @@
 #              - with a single partitioned card so occupied, a whole-card-profile Pod is HELD rather
 #                than admitted onto a node that cannot place it;
 #              - the Node-object write counts over both windows are recorded and printed;
-#              - the mutually-exclusive-profile residual is recorded with its measured outcome.
+#              - of two Pods naming mutually exclusive profiles on one card, at most one runs; how the
+#                other is held is recorded.
 # Cleanup:     Trap deletes every test Pod, waits for the live instances to reclaim, stops the write
 #              probe, and restores the partitioning mode of the card this case toggled (a card it found
 #              already partitioned is left as found). Idempotent; runs on pass AND fail.

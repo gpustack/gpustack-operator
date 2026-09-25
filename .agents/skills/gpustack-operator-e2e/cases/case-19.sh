@@ -5,9 +5,9 @@
 #   case-19.sh <NS>
 #
 # Goal:        With instance-type-aware-cpu-manufacturer ON, the derived accelerated pool splits by CPU
-#              (gpustack--${gKey}--${aKey}-${os}-${arch}) and its InstanceType spec carries BOTH the
-#              correct GPU descriptors (product/memory/cores, from the real card) AND the folded CPU
-#              detail (spec.cpu). Then a real GPU Instance deploys onto that aware type and its Pod runs
+#              (gpustack--${gKey}--${aKey}-${os}-${arch}) and its InstanceType status.detail carries BOTH
+#              the correct GPU descriptors (product/memory/cores, from the real card) AND the folded CPU
+#              detail (status.detail.cpu). Then a real GPU Instance deploys onto that aware type and its Pod runs
 #              with the card visible — the full aware→derive→enrich→admit→schedule chain.
 # Environment: Needs REAL accelerator hardware (a real card the Instance actually schedules onto).
 #              AUTO-SKIPS (exit 0, prints why) on a GPU-less cluster. Flips a cluster-wide editable
@@ -18,7 +18,7 @@
 #              - an Instance gpustack-e2e-case19 (accelerator=1, ubuntu sleep) on the aware accelerated type.
 # Expected:    - the aware type gpustack--${gKey}--${aKey}-${os}-${arch} materializes Active with
 #                acceleratorGroup=${aKey}, generalGroup=${gKey}, GPU product/memory/cores == the flavor's,
-#                and a non-empty spec.cpu (the awareness-gated CPU fold ran);
+#                and a non-empty status.detail.cpu (the awareness-gated CPU fold ran);
 #              - the Instance reaches Ready and its Pod runs with nvidia-smi seeing the card.
 # Cleanup:     Trap deletes the Instance, restores the setting to its original value, restarts the worker,
 #              and removes any derived type the aware window created (snapshot diff).
@@ -112,10 +112,10 @@ sHasCPU="$(printf '%s' "$it_json" | jq -r 'if ((.status.detail.cpu // {}) | leng
   || record FAIL "aware type splits by CPU" "acceleratorGroup='${sAG}' generalGroup='${sGG}', want ${AKEY}/${GKEY}"
 { [ "$sProd" = "$PRODUCT" ] && [ "$sMem" = "$MEMORY" ] && [ "$sCores" = "$CORES" ]; } \
   && record PASS "GPU descriptors correct" "product=${sProd} memory=${sMem} cores=${sCores}" \
-  || record FAIL "GPU descriptors correct" "spec=${sProd}/${sMem}/${sCores} != flavor ${PRODUCT}/${MEMORY}/${CORES}"
+  || record FAIL "GPU descriptors correct" "status.detail=${sProd}/${sMem}/${sCores} != flavor ${PRODUCT}/${MEMORY}/${CORES}"
 [ "$sHasCPU" = "yes" ] \
-  && record PASS "CPU detail folded when aware" "spec.cpu present" \
-  || record FAIL "CPU detail folded when aware" "spec.cpu empty — the awareness-gated cpuDetail fold did not run"
+  && record PASS "CPU detail folded when aware" "status.detail.cpu present" \
+  || record FAIL "CPU detail folded when aware" "status.detail.cpu empty — the awareness-gated cpuDetail fold did not run"
 
 # 3. Deploy a real GPU Instance on the aware type: set a unit spec, then run one whole card.
 for _ in $(seq 1 15); do

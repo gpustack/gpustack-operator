@@ -43,8 +43,8 @@ Run as a **test-orchestration lead** (main agent) coordinating read-only **domai
 | 8 | Topograph AWS API uses EKS Pod Identity and brokers complete IMDS discovery | `deploy/gpustack-operator/chart/charts/topograph/**`, `deploy/gpustack-operator/chart/values.yaml`, `testing/infra/clusters/eks/**` | `cases/case-8.sh` | no |
 
 **CASES 6 and 7 need a cluster with no chart release** — the two install modes are exclusive, because
-both renders carry the cluster-scoped `gpustack-cpu-info` NodeFeatureRule and Helm refuses the second
-render on ownership metadata. Run them in Phase 4 **before** the Phase 3 install, or after CASE 2's
+both renders carry cluster-scoped objects, the Kueue CRDs and ClusterRoles among them, and Helm refuses
+the second render on ownership metadata. Run them in Phase 4 **before** the Phase 3 install, or after CASE 2's
 teardown in Phase 8. They are also exclusive with **each other**: both drive the same image-mode
 release, so each needs the other torn down first (each one's trap does that). CASE 4 and CASE 5 both
 upgrade the release and restore the captured values on exit, so they run against the Phase 3 install,

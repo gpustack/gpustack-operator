@@ -49,10 +49,10 @@
 # Inputs:      All real, nothing mocked. A KVCacheBackend with multi-tenancy on and three small DRAM
 #              members; a KVCachePool over it; two Bindings in two created namespaces. The one
 # MOCKED value is criterion 5's usedBy entry, which the case patches onto a Binding's
-#              status itself: the kind that will write it in production is the model-deployment
-#              spec's, which this repository has not built, so nothing on this cluster fills that
-#              list. Waiting for a writer would wait forever; skipping the write would assert a
-#              release nothing was holding.
+#              status itself. In production the ModelDeployment controller writes it, but this case
+#              runs no ModelDeployment, so nothing on this cluster fills that list. Waiting for a
+#              writer would wait forever; skipping the write would assert a release nothing was
+#              holding.
 #
 # Expected:    - the master reaches Ready with no pool bound, and its init container completed;
 #              - both Bindings Ready, the pool's usedBy naming both, sorted;
@@ -625,9 +625,9 @@ kubectl delete kvcachebackends.worker.gpustack.ai "kvcb-other-${SFX}" \
 
 echo "== 6. a binding a workload holds cannot be deleted =="
 
-# WRITTEN BY THIS CASE. No controller in this repository fills a Binding's usedBy: the kind that
-# will is the model-deployment spec's, which has not been built. A case that waited for a writer
-# would wait forever, and one that skipped the write would assert a release nothing was holding.
+# WRITTEN BY THIS CASE. The ModelDeployment controller fills a Binding's usedBy in production, and
+# this case runs no ModelDeployment. A case that waited for a writer would wait forever, and one
+# that skipped the write would assert a release nothing was holding.
 kubectl -n "$NS_A" patch kvcachepoolbindings.worker.gpustack.ai bind-a --subresource=status --type=merge \
   -p '{"status":{"usedBy":[{"kind":"ModelDeployment","namespace":"","name":"qwen-e2e"}]}}' >/dev/null 2>&1
 

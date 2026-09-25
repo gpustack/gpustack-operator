@@ -46,7 +46,7 @@ The remote host is **never hardcoded** — always ask the user for it.
 - **Run the AMD cases against both an RDNA and a CDNA host when one is available** — a green suite on one architecture says nothing about the other. AMD-CASE 4/5 read `NUM_XCC` and assert a *different* conformance table and a *different* fail-open set on each; the two derivations share no arithmetic. `preflight.sh` reports `NUM_XCC` before anything is built precisely so the choice is visible up front. A single-architecture run is a partial result and must be reported as one. Note what a runtime-less target can and cannot do, because multi-XCC hardware is rentable only as an instance that **is itself a container**: **AMD-CASE 4/5 need only a card**, since they drive staged binaries under `HSA_CU_MASK`. **AMD-CASE 2/3 reach such a target in place** — with no runtime they write `/etc/ld.so.preload` on the instance's own root filesystem, which is the same mechanism by another owner, and they refuse to start if the target already carries one of its own. **AMD-CASE 6/7 split**: the arms that link no ROCm — case 6's unit suite, case 7's lifecycle — run anywhere, and the arms that need something the instance cannot provide skip and say which thing. Case 7's cross-version arm needs two ROCm majors and therefore two images; case 6's cross-process arms need a container, and its per-card keying arm a second card.
 - **Never start buildkitd on a user-owned host, and never install docker there** — a PPU/NPU host is usually someone else's production node. `preflight.sh` reports a missing `docker buildx` as a build-capable **WARN**: build the image on a docker host and load it. Only a missing *run* capability is a FAIL.
 - **Never pick a THead card by index** — the PPU test host runs production inference and a card can already hold ~91 GB. `lib.sh: thead_idle_cards` reads idle cards out of `ppu-smi`'s own table; `XB_PPU_CARD`/`XB_PPU_CARDS` override it only when the user names one.
-- **A case never decides its own verdict** — it ends with `xb_verdict "<LABEL>" "$(xb_fails "${out}")" "${out}"`, and its payload prints `FAILS=<n>` as a whole line of its own. Given the output, a zero count with no `PASS | ` or `FAIL | ` row prints `SKIP` and exits 3: every row skipped, so nothing was measured, and reporting PASS there would read as coverage. What that helper replaced grepped the output for the token `FAILS=0` anywhere, which any row could satisfy by printing it in a detail column — AMD-CASE 4 did, so the case that exists to catch a silently discarded CU mask could not itself fail: measured, one deliberately broken assertion printed a red row, printed `FAILS=1`, and still exited 0 saying PASS. `preflight.sh` FAILs if any case under `cases/` decides for itself, and checks the helper's own arithmetic on two inputs, because 21 cases calling one wrong function go green together.
+- **A case never decides its own verdict** — it ends with `xb_verdict "<LABEL>" "$(xb_fails "${out}")" "${out}"`, and its payload prints `FAILS=<n>` as a whole line of its own. Given the output, a zero count with no `PASS | ` or `FAIL | ` row prints `SKIP` and exits 3: every row skipped, so nothing was measured, and reporting PASS there would read as coverage. What that helper replaced grepped the output for the token `FAILS=0` anywhere, which any row could satisfy by printing it in a detail column — AMD-CASE 4 did, so the case that exists to catch a silently discarded CU mask could not itself fail: measured, one deliberately broken assertion printed a red row, printed `FAILS=1`, and still exited 0 saying PASS. `preflight.sh` FAILs if any case under `cases/` decides for itself, and checks the helper's own arithmetic on two inputs, because every case calling one wrong function goes green with it.
 - **Never write the *host's* `/etc/ld.so.preload`** — every preload the cases install is scoped to a container (ASCEND-CASE 4 builds and preloads a throwaway dsmi interposer as a mechanism control; that shim is a probe, never product code — the shipped dsmi hook is the vendored patch in `pack/gpustack-operator/external/ascend/vcann-rt/`).
 
 ## Flow
@@ -55,7 +55,7 @@ The remote host is **never hardcoded** — always ask the user for it.
    ```bash
    grep -nE 'AS xbuild-(ascend-cann|nvidia-cuda)-' pack/gpustack-operator/Dockerfile
    ```
-   Ascend: `xbuild-ascend-cann-8-910b`, `-8-910c`, `-9-910b`, `-9-910c`, `-9-950`. NVIDIA: `xbuild-nvidia-cuda-12`, `-13`. The two in-repo-source backends have **no** Dockerfile stage and so do not appear in that grep — `xbuild-thead-ppu` and `xbuild-amd-rocm` are targets of `build.sh` alone.
+   Ascend: `xbuild-ascend-cann-8-910b`, `-8-910c`, `-9-910b`, `-9-910c`, `-9-950`. NVIDIA: `xbuild-nvidia-cuda-12`, `-13`. The two in-repo-source backends do not appear in that grep: their Dockerfile stages, `xbuild-thead-ppu` and `xbuild-amd-rocm`, build what the image ships, while `build.sh` still builds these two targets on the target host with `run`, not with buildx.
 
 2. **Pick connection (AskUserQuestion).** Local, or ssh — and if ssh, the host. Set `XB_MODE`/`XB_HOST`.
 
@@ -86,7 +86,7 @@ The remote host is **never hardcoded** — always ask the user for it.
    XB_MODE=… XB_HOST=… XB_GPU=0                      bash .../cases/nvidia-case-4.sh xbuild-nvidia-cuda-13
    ```
 
-   **THead has a target like the others, built differently** — `xbuild-thead-ppu` compiles the shim tree inside the published SDK image with `run` rather than building a Dockerfile stage with buildx, because no such stage exists yet and the PPU host has no docker. Run it first: every case consumes what it staged, so **a source edit needs it re-run**.
+   **THead has a target like the others, built differently** — `xbuild-thead-ppu` compiles the shim tree inside the published SDK image with `run` rather than building the Dockerfile stage of the same name with buildx, because the PPU host has no docker. Run it first: every case consumes what it staged, so **a source edit needs it re-run**.
    ```bash
    XB_MODE=ssh XB_HOST=… XB_CTR=nerdctl XB_CTR_ARGS='--namespace k8s.io' \
      bash .../scripts/build.sh xbuild-thead-ppu                     # no PPU; stages + compiles
@@ -291,6 +291,6 @@ while the other keeps its own `_1`, so the fallback arm of the precedence is mea
   map onto each other.
 - `references/thead-hggc-symbol-manifest.md` — THead: the measured exported symbol surface of `libhggc.so`,
   `libhgml.so` and `libhggcrt`, the image digest it came from, and the command that regenerates it.
-- `references/troubleshooting.md` — all three backends: scp banner, buildx-missing, Ascend
+- `references/troubleshooting.md` — the backends it has entries for: scp banner, buildx-missing, Ascend
   link/segfault/hgemm, NVIDIA runtime/preload/stale-cache/cuCtxCreate-v4/stub-lib/SM-visibility, THead
   `ppu-smi` exit-0 / `nm -D` false pass / plain-vs-`_v2` ABI / `nerdctl` namespace and mirrors.
