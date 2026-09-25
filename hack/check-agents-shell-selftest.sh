@@ -42,6 +42,10 @@ fi
 SHELLCHECK_BIN="$(gpustack::lint::shellcheck::bin)"
 export SHELLCHECK_BIN
 
+# The image build exports the declaration for the whole of make ci, this self-test included, and a
+# case that expects it absent would then read the caller's value. Each case sets it explicitly.
+unset GPUSTACK_IMAGE_BUILD
+
 MINI="$(mktemp -d)"
 trap 'rm -rf "${MINI}"' EXIT
 
@@ -50,7 +54,7 @@ cases=0
 pass() { printf 'PASS  %s\n' "$1"; }
 fail() { printf 'FAIL  %s\n' "$1"; fails=$((fails + 1)); }
 
-# expect <want: red|green|could-not-run> <label> [KEY=VAL...] -- <checker args...>
+# expect <want: red|green|could-not-run|skipped> <label> [KEY=VAL...] -- <checker args...>
 expect() {
   local want="$1" label="$2"
   shift 2
@@ -71,9 +75,18 @@ expect() {
     red:1) pass "${label}" ;;
     green:0) pass "${label}" ;;
     could-not-run:2) pass "${label}" ;;
+    # A skip has to say so: an exit code alone reads like any other not-green.
+    skipped:3)
+      if grep -q '^SKIPPED: ' "${MINI}/out"; then
+        pass "${label}"
+      else
+        fail "${label}: exit 3 without a SKIPPED line; output: $(cat "${MINI}/out")"
+      fi
+      ;;
     red:*) fail "${label}: want exit 1, got ${rc}; output: $(cat "${MINI}/out")" ;;
     green:*) fail "${label}: want exit 0, got ${rc}; output: $(cat "${MINI}/out")" ;;
     could-not-run:*) fail "${label}: want exit 2, got ${rc}; output: $(cat "${MINI}/out")" ;;
+    skipped:*) fail "${label}: want exit 3, got ${rc}; output: $(cat "${MINI}/out")" ;;
   esac
 }
 
@@ -183,6 +196,44 @@ pinbin="$(cd "${pinrepo}" && env PATH="${pinpath}:/usr/bin:/bin" bash -c '
 ')"
 expect green "a pinned shellcheck on PATH with an empty .sbin resolves absolutely and passes" \
   SHELLCHECK_BIN="${pinbin}" PATH="${pinpath}:/usr/bin:/bin" -- "${pinrepo}"
+
+echo "== the image build: skipped only for a worktree pointer the context does not carry =="
+# The build context of an image built from a git worktree: the tree's files plus the .git pointer
+# file, without the gitdir it names. The ceiling stops git from walking up into whatever
+# repository the scratch directory happens to sit inside, which would make it readable.
+wt="${MINI}/wt"
+mkdir -p "${wt}/.agents/skills/demo/cases"
+printf '#!/usr/bin/env bash\necho $WT_UNQUOTED\n' >"${wt}/.agents/skills/demo/cases/case.sh"
+printf 'gitdir: %s\n' "${MINI}/no-such-main/.git/worktrees/wt" >"${wt}/.git"
+expect could-not-run "the worktree pointer shape without the declaration is not run, not skipped" \
+  GIT_CEILING_DIRECTORIES="${MINI}" -- "${wt}"
+expect skipped "the worktree pointer shape with the declaration is skipped, with its reason" \
+  GIT_CEILING_DIRECTORIES="${MINI}" GPUSTACK_IMAGE_BUILD=true -- "${wt}"
+expect could-not-run "the declaration in --base mode is not a skip" \
+  GIT_CEILING_DIRECTORIES="${MINI}" GPUSTACK_IMAGE_BUILD=true -- --base HEAD~1 "${wt}"
+mkdir -p "${MINI}/not-a-gitdir"
+printf 'gitdir: %s\n' "${MINI}/not-a-gitdir" >"${wt}/.git"
+expect could-not-run "a pointer whose gitdir exists is a broken repository, not a missing one" \
+  GIT_CEILING_DIRECTORIES="${MINI}" GPUSTACK_IMAGE_BUILD=true -- "${wt}"
+printf 'gitdir: \n' >"${wt}/.git"
+expect could-not-run "a pointer that names no gitdir is not skipped" \
+  GIT_CEILING_DIRECTORIES="${MINI}" GPUSTACK_IMAGE_BUILD=true -- "${wt}"
+printf 'gitdir: %s\n' "${MINI}/no-such-main/.git/worktrees/wt" >"${wt}/.git"
+# Only what the gate needs before its git check, so git itself is absent from PATH.
+nogit="${MINI}/nogit"
+mkdir -p "${nogit}"
+for tool in bash dirname sed head; do
+  ln -s "$(command -v "${tool}")" "${nogit}/${tool}"
+done
+expect could-not-run "the pointer shape with no git installed is not skipped" \
+  PATH="${nogit}" GIT_CEILING_DIRECTORIES="${MINI}" GPUSTACK_IMAGE_BUILD=true -- "${wt}"
+rm "${wt}/.git"
+expect could-not-run "a .git missing outright is not run, even with the declaration" \
+  GIT_CEILING_DIRECTORIES="${MINI}" GPUSTACK_IMAGE_BUILD=true -- "${wt}"
+printf 'echo $DECLARED_NEW_UNQUOTED\n' >>.agents/skills/demo/cases/clean.sh
+expect red "a tree git can read is checked in full whatever the declaration says" \
+  GPUSTACK_IMAGE_BUILD=true -- "${MINI}/repo"
+git checkout -q -- .agents/skills/demo/cases/clean.sh
 
 echo "== the instrument itself =="
 # A forced instrument that does not exist is a loud not-run. The pinned resolution the checker

@@ -29,6 +29,11 @@
 CI (`hack/ci.sh`) runs `make generate && make deps && make lint && make build` inside the image build. The unit tests run
 separately, in `test.yml`, as `RACE=false make test` on linux/amd64 and linux/arm64.
 
+An image built from a git worktree carries the worktree's `.git` pointer file but not the gitdir it names, so git cannot read
+the tree inside the build. There the `.agents` shell gate, `hack/check-agents-shell.sh`, reports itself skipped with its reason
+instead of failing the build: in local mode it checks only uncommitted changes, so inside an image its set is empty even from a
+clone. The verdict on committed `.agents` shell comes from `agents-shell.yml` and from `make lint` on the host.
+
 > **`make lint` writes.** It runs `goimports-reviser -output=file` and `golangci-lint --fix`, so it
 > edits the source rather than only reading it. Anything generated *before* it — `make generate`,
 > `make generate chart` — was produced from a version of the source that no longer exists, and

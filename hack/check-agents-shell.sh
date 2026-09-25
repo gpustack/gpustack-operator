@@ -21,10 +21,20 @@
 # finding's line or the line above, with the reason stated beside it — the form the corpus
 # already carries (run-partition-block.sh among others).
 #
-# Three states, not two: findings (exit 1), nothing to report (exit 0), and could not run
-# (exit 2 — git cannot answer, or the pinned shellcheck cannot be resolved, installed, or
-# forced through SHELLCHECK_BIN). A gate that silently passes when its instrument is missing
-# reports nothing about the sources.
+# Four states, not two: findings (exit 1), nothing to report (exit 0), could not run (exit 2 —
+# git cannot answer, or the pinned shellcheck cannot be resolved, installed, or forced through
+# SHELLCHECK_BIN), and skipped (exit 3). A gate that silently passes when its instrument is
+# missing reports nothing about the sources.
+#
+# Skipped is the image build from a git worktree, and nothing else: the Dockerfile declares
+# GPUSTACK_IMAGE_BUILD=true, the mode is local, and .git is a worktree pointer file whose gitdir
+# the build context does not carry. Stepping aside there loses no verdict: local mode checks only
+# uncommitted changes, and an image builds a committed tree, so even a build from a clean clone
+# checks an empty set. The verdict on committed .agents shell belongs to agents-shell.yml, which
+# runs --base, and to make lint on the host. A .git that is missing outright, a git that is not
+# installed, or the declaration in --base mode is still could not run, and a tree git can read is
+# checked in full whatever the declaration says. Exit 3 is its own code, printed with its reason,
+# so no caller can take it for a pass.
 #
 # Usage:
 #   bash hack/check-agents-shell.sh [repo-root]               # uncommitted files vs HEAD
@@ -63,6 +73,16 @@ done
 cd "$ROOT"
 
 if ! command -v git >/dev/null 2>&1 || ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  # The one shape that is skipped rather than not run; the header states why and what it excludes.
+  # A relative gitdir resolves against the tree root, which is the working directory here.
+  if [ -z "${BASE}" ] && [ "${GPUSTACK_IMAGE_BUILD:-}" = "true" ] && command -v git >/dev/null 2>&1 && [ -f .git ]; then
+    # An unreadable .git leaves gitdir empty, which is could not run, rather than tripping errexit.
+    gitdir="$(sed -n 's/^gitdir: //p' .git 2>/dev/null | head -n 1 || true)"
+    if [ -n "${gitdir}" ] && [ ! -e "${gitdir}" ]; then
+      echo "SKIPPED: an image build from a git worktree: .git points at ${gitdir}, which the build context does not carry, so there is no base to diff against. agents-shell.yml and make lint on the host check this tree's .agents shell."
+      exit 3
+    fi
+  fi
   echo "COULD-NOT-RUN: git cannot read this tree, so the changed files cannot be listed." >&2
   exit 2
 fi

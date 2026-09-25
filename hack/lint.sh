@@ -236,10 +236,16 @@ function lint() {
   if ! bash "${ROOT_DIR}/hack/check-agents-shell-selftest.sh" "${ROOT_DIR}"; then
     gpustack::log::fatal "the .agents shell check is not trustworthy: its self-test failed"
   fi
+  # Exit 3 is the gate stepping aside in an image build from a git worktree, the one shape where
+  # it has no base to diff against; its header states why no verdict is lost. It is accepted here
+  # only: agents_shell_lint(), the hook route, never runs inside an image, so there it stays a
+  # failure.
   local agents_shell_rc=0
   bash "${ROOT_DIR}/hack/check-agents-shell.sh" "${ROOT_DIR}" || agents_shell_rc=$?
   if [[ ${agents_shell_rc} -eq 1 ]]; then
     gpustack::log::fatal "new syntax errors or shellcheck findings in changed .agents/ shell"
+  elif [[ ${agents_shell_rc} -eq 3 ]]; then
+    gpustack::log::info "the .agents shell check skipped itself; its reason is above"
   elif [[ ${agents_shell_rc} -gt 1 ]]; then
     gpustack::log::fatal "the .agents shell check could not run; its diagnostic is above"
   fi
