@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
 
@@ -11,9 +12,12 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
@@ -150,6 +154,112 @@ func TestKVCachePoolClaim_OmitsLegacyBackendMembers(t *testing.T) {
 	assert.Equal(t, []workercore.KVCacheObjectReference{{
 		Kind: KVCachePoolKind, Namespace: "", Name: kvcp.Name,
 	}}, got.Status.UsedBy, "the claim and the compatibility cleanup land in one status write")
+}
+
+// TestKVCachePoolClaim_ExpectedBackendWriteFailuresAreQuiet pins how a pass ends when the backend
+// changed or was deleted between the read and the write of this pool's claim on it, on both the
+// claiming and the releasing side. Neither failure is logged as an error or returned, and the pass
+// asks for its own retry, because this reconciler does not watch backends and no event would follow.
+// Any other failure is still returned, and the next pass writes the claim in every case.
+func TestKVCachePoolClaim_ExpectedBackendWriteFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: workercore.GroupVersion.Group, Resource: "kvcachebackends"}
+	testCases := []struct {
+		name       string
+		release    bool
+		err        error
+		want       ctrlreconcile.Result
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name: "a conflicting claim ends quietly and asks for a retry",
+			err:  kerrors.NewConflict(gr, "mooncake-dram", fmt.Errorf("the object has been modified")),
+			want: _requeueAfterConflict,
+		},
+		{
+			name: "a claim on a deleted backend ends quietly and asks for a retry",
+			err:  kerrors.NewNotFound(gr, "mooncake-dram"),
+			want: _requeueAfterConflict,
+		},
+		{
+			name:       "any other claim failure is returned and logged",
+			err:        kerrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+		{
+			name:    "a conflicting release ends quietly and asks for a retry",
+			release: true,
+			err:     kerrors.NewConflict(gr, "mooncake-dram", fmt.Errorf("the object has been modified")),
+			want:    _requeueAfterConflict,
+		},
+		{
+			name:    "a release on a deleted backend ends quietly and asks for a retry",
+			release: true,
+			err:     kerrors.NewNotFound(gr, "mooncake-dram"),
+			want:    _requeueAfterConflict,
+		},
+		{
+			name:    "any other release failure is returned",
+			release: true,
+			err:     kerrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr: true,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			master := newFakeMaster()
+			address := master.start(t)
+			r, cli := newReconciler(
+				newReconcileBackend("mooncake-dram", address),
+				newTestKVCachePool("shared", "mooncake-dram"),
+			)
+
+			// Armed only once the pool is where the write under test happens: the claiming pass for
+			// a claim, and a pool marked for deletion for a release.
+			armed := !tc.release
+			var injected bool
+			fail := failOnce(tc.err)
+			r.Client = ctrlinterceptor.NewClient(cli.(ctrlcli.WithWatch), ctrlinterceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
+					if _, ok := obj.(*workercore.KVCacheBackend); ok && armed {
+						if err := fail(); err != nil {
+							injected = true
+							return err
+						}
+					}
+					return c.SubResource(sub).Update(ctx, obj, opts...)
+				},
+			})
+			if tc.release {
+				reconcilePool(t, r, "shared")
+				require.NotEmpty(t, readBackend(t, cli, "mooncake-dram").Status.UsedBy,
+					"the claim has to be on the backend before its release means anything")
+				deleteObject(t, cli, readPool(t, cli, "shared"))
+				armed = true
+			}
+			req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: "shared"}}
+
+			out := reconcileUntilInjected(t, r, req, &injected)
+			if tc.wantErr {
+				assert.Error(t, out.err)
+			} else {
+				assert.NoError(t, out.err)
+			}
+			assert.Equal(t, tc.want, out.res)
+			assert.Equal(t, tc.wantLogged, out.logged, "error log lines")
+
+			// The next pass, which the requeue or the returned error triggers, writes it.
+			reconcilePool(t, r, "shared")
+			if tc.release {
+				assert.Empty(t, readBackend(t, cli, "mooncake-dram").Status.UsedBy)
+				return
+			}
+			assert.Equal(t, []workercore.KVCacheObjectReference{
+				{Kind: KVCachePoolKind, Namespace: "", Name: "shared"},
+			}, readBackend(t, cli, "mooncake-dram").Status.UsedBy)
+		})
+	}
 }
 
 // TestKVCachePoolTeardown_ABindingHeldByAWorkloadIsNotReleased is criterion 5's unit half.

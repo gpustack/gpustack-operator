@@ -279,6 +279,11 @@ func (r *KVCachePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// the backend's own teardown, and a backend that has published no address yet is exactly the one
 	// somebody might delete while a pool is waiting for it to come up.
 	if err = r.claimKVCacheBackend(ctx, kvcb, kvcp); err != nil {
+		if isStaleKVCacheBackendWrite(err) {
+			logger.V(1).Info("claim kv cache backend deferred, the backend changed or was deleted since it was read",
+				"backend", kvcb.Name, "reason", err.Error())
+			return _requeueAfterConflict, nil
+		}
 		logger.Error(err, "claim kv cache backend", "backend", kvcb.Name)
 		return ctrl.Result{}, err
 	}
@@ -1942,6 +1947,11 @@ func (r *KVCachePoolReconciler) teardownKVCachePool(
 	// it. Before, because a pool that dropped its own lock first would leave the claim behind with
 	// nothing in the cluster left to remove it, and the backend held forever by a pool that is gone.
 	if err = r.releaseKVCachePoolBackendClaim(ctx, kvcp); err != nil {
+		if isStaleKVCacheBackendWrite(err) {
+			logger.V(1).Info("release kv cache backend deferred, the backend changed or was deleted since it was read",
+				"reason", err.Error())
+			return _requeueAfterConflict, nil
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -2464,6 +2474,17 @@ func (r *KVCachePoolReconciler) syncKVCacheBackendClaim(
 	// the list would write a claim derived from an object that has since moved.
 	omitLegacyMemberListing(&kvcb.Status)
 	return r.Client.Status().Update(ctx, kvcb)
+}
+
+// isStaleKVCacheBackendWrite reports whether a failed write of this pool's claim on its backend only
+// means the backend changed or was deleted after this pass read it. Both are expected: the backend's
+// own reconciler writes the same status, and a stack can be torn down backend-first. Neither is worth
+// an error log, but neither heals through an event either, because this reconciler does not watch
+// backends. So a caller ends the pass with a short requeue rather than with the error, which is why
+// objectWriteResult does not fit here: it ends a not found with no retry at all. The next pass reads
+// the backend again, claims a moved one from its newer version, and reports a deleted one as missing.
+func isStaleKVCacheBackendWrite(err error) bool {
+	return kerrors.IsConflict(err) || kerrors.IsNotFound(err)
 }
 
 // formatKVCacheConsumers names the holders in a refusal message, because an operator whose delete is
