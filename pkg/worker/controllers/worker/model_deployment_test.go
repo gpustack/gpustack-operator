@@ -32,6 +32,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 func newModelDeploymentClient(objs ...ctrlcli.Object) ctrlcli.Client {
@@ -667,9 +668,11 @@ func surplusReplicaAt(
 ) *core.Pod {
 	t.Helper()
 
+	// The reconciler renders with the overcommit setting it reads, so the fixture reads it too.
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment: md, Role: &md.Spec.Roles[0],
 		InstanceType: newRenderInstanceType(), Ordinal: ordinal,
+		GeneralResourcesOvercommit: settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(context.Background()),
 	})
 	require.NoError(t, err)
 	pod.Name = name

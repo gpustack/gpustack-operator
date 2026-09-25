@@ -3,6 +3,9 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"os/exec"
 	"slices"
 	"testing"
 
@@ -23,9 +26,12 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/setting"
+	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemname"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 func newInstanceWebhook(objs ...ctrlcli.Object) *InstanceWebhook {
@@ -1050,6 +1056,140 @@ func TestInstanceWebhook_HostAccessGates(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
+}
+
+// TestHostAccessAllowed pins how a host-access gate is read: a stored value is honored, and a
+// setting that cannot be read denies even when its default is true, where a plain bool read
+// returns that default.
+func TestHostAccessAllowed(t *testing.T) {
+	cases := []struct {
+		name   string
+		defVal string
+		stored string // empty stores no value, so the read fails
+		want   bool
+	}{
+		{name: "default true, unreadable", defVal: "true", want: false},
+		{name: "default false, unreadable", defVal: "false", want: false},
+		{name: "stored true", defVal: "false", stored: "true", want: true},
+		{name: "stored false under default true", defVal: "true", stored: "false", want: false},
+	}
+	for i, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			name := fmt.Sprintf("test-host-access-gate-%d", i)
+			s := setting.Settings{}.New(name, "", setting.PropPrivate, setting.InitializeFrom(c.defVal), setting.AllowBool())
+			if c.stored != "" {
+				settingtest.MergeDelegatedSettings(t, map[string]string{name: c.stored})
+			} else {
+				_, err := s.ValueBool(context.Background())
+				require.Error(t, err, "this case needs a read that fails")
+			}
+
+			assert.Equal(t, c.want, hostAccessAllowed(context.Background(), s))
+		})
+	}
+}
+
+// TestHostAccessGates_DenyOnFailedRead pins that every Instance and ModelDeployment host-access gate
+// denies on a failed settings read, with both settings seeded to default true. A setting's default
+// is fixed when the package initializes, so the case re-runs itself in a child process that seeds
+// both through the environment; its reads fail because the loopback client holds no Secret.
+func TestHostAccessGates_DenyOnFailedRead(t *testing.T) {
+	const childEnv = "GPUSTACK_TEST_HOST_ACCESS_DEFAULTS_ON"
+	if os.Getenv(childEnv) == "" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestHostAccessGates_DenyOnFailedRead$", "-test.count=1", "-test.v")
+		cmd.Env = append(os.Environ(), childEnv+"=1",
+			"GPUSTACK_INSTANCE_PRIVILEGED_ALLOWED=true",
+			"GPUSTACK_INSTANCE_HOST_PATH_VOLUME_ALLOWED=true")
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "child run failed:\n%s", out)
+		// A child that matched no test also exits zero.
+		require.Contains(t, string(out), "--- PASS: TestHostAccessGates_DenyOnFailedRead", "child run:\n%s", out)
+		return
+	}
+
+	// Baseline: both defaults are on here, and a plain bool read of either returns that default, so a
+	// gate read that way would allow.
+	for _, s := range []setting.Setting{settings.InstancePrivilegedAllowed, settings.InstanceHostPathVolumeAllowed} {
+		require.Equal(t, "true", s.DefaultValue(), s.Name())
+		_, err := s.ValueBool(context.Background())
+		require.Error(t, err, "%s must be unreadable", s.Name())
+		require.True(t, s.ShouldValueBool(context.Background()), s.Name())
+	}
+
+	cases := []struct {
+		name       string
+		deployment bool
+		update     bool
+		privileged bool
+		want       string
+	}{
+		{name: "instance create privileged", privileged: true, want: "privileged mode is not allowed"},
+		{name: "instance create host path", want: "mounting a host path is not allowed"},
+		{name: "instance update privileged", update: true, privileged: true, want: "privileged mode is not allowed"},
+		{name: "instance update host path", update: true, want: "mounting a host path is not allowed"},
+		{name: "deployment create privileged", deployment: true, privileged: true, want: "privileged mode is not allowed"},
+		{name: "deployment create host path", deployment: true, want: "mounting a host path is not allowed"},
+		{name: "deployment update privileged", deployment: true, update: true, privileged: true, want: "privileged mode is not allowed"},
+		{name: "deployment update host path", deployment: true, update: true, want: "mounting a host path is not allowed"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var err error
+			if c.deployment {
+				err = validateDeploymentTakingHostAccess(c.update, c.privileged)
+			} else {
+				err = validateInstanceTakingHostAccess(c.update, c.privileged)
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.want)
+		})
+	}
+}
+
+// validateInstanceTakingHostAccess validates an Instance that takes privileged mode or a host path
+// mount, on create or on an update of a stopped Instance that held neither.
+func validateInstanceTakingHostAccess(update, privileged bool) error {
+	const typeName = "generic-type"
+	w := newInstanceWebhook(pinnedType(typeName))
+	old := webhookInstance("a", typeName)
+	old.Spec.VolumeMount = "/workspace"
+	old.Spec.Stop = true
+	old.Status.Phase = workerctrl.InstancePhaseStopped
+	inst := old.DeepCopy()
+	if privileged {
+		inst.Spec.Privileged = true
+	} else {
+		inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{{
+			MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"},
+		}}
+	}
+	if update {
+		_, err := w.ValidateUpdate(context.Background(), old, inst)
+		return err
+	}
+	_, err := w.ValidateCreate(context.Background(), inst)
+	return err
+}
+
+// validateDeploymentTakingHostAccess validates a ModelDeployment whose role takes privileged mode or
+// a host path mount, on create or on an update of a deployment that held neither.
+func validateDeploymentTakingHostAccess(update, privileged bool) error {
+	w := newModelDeploymentWebhookWith(nil)
+	old := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+	md := old.DeepCopy()
+	if privileged {
+		md.Spec.Roles[0].Privileged = true
+	} else {
+		md.Spec.Roles[0].AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{{
+			MountPath: "/driver", HostPath: &core.HostPathVolumeSource{Path: "/usr/local/driver"},
+		}}
+	}
+	if update {
+		_, err := w.ValidateUpdate(context.Background(), old, md)
+		return err
+	}
+	_, err := w.ValidateCreate(context.Background(), md)
+	return err
 }
 
 // TestInstanceWebhook_ValidateCreate_SlicedPercentages pins the sliced request

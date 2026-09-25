@@ -21,6 +21,7 @@ import (
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 )
@@ -469,14 +470,12 @@ func TestNodeFlavorReconcilerDoesNotRewriteImmutableFlavor(t *testing.T) {
 	assert.Equal(t, drifted, *got.Spec.TopologyName)
 }
 
-// TestNodeFlavorReconciler_MixingDisabledExcludesAccelNode pins the
-// instance-type-mixed-on-node switch. The unit-test binary resolves the setting to
-// false (the empty loopback client makes it fall back to its on-error default), and
-// flipping a cached setting back to true is not deterministic in a shared binary
-// (the value caches for 30s), so only the false branch is asserted here: an
-// accelerated node does NOT contribute to a CPU flavor, so reconciling that node's
-// CPU flavor name creates nothing.
+// TestNodeFlavorReconciler_MixingDisabledExcludesAccelNode pins the false branch of the
+// instance-type-mixed-on-node switch, seeded here because the setting defaults to true: an
+// accelerated node does NOT contribute to a CPU flavor, so reconciling that node's CPU flavor
+// name creates nothing.
 func TestNodeFlavorReconciler_MixingDisabledExcludesAccelNode(t *testing.T) {
+	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-mixed-on-node": "false"})
 	nd := newManagedAccelNode("node-g", 1)
 	cpuName := cpuFlavorName(nd)
 	require.NotEmpty(t, cpuName, "accel node must expose a CPU flavor name")
@@ -495,6 +494,8 @@ func TestNodeFlavorReconciler_MixingDisabledExcludesAccelNode(t *testing.T) {
 }
 
 func TestNodeFlavorReconciler_RecreatesFlavorAfterMixingSelectorDrift(t *testing.T) {
+	// The CPU-only selector this case drifts is rendered only while mixing is off.
+	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-mixed-on-node": "false"})
 	node := newManagedCPUNode("node-a", 4, 16, 32)
 	name := cpuFlavorName(node)
 	cli := buildNodeFlavorClient(node)

@@ -21,6 +21,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/setting"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/webhook"
@@ -121,11 +122,11 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 		errs = append(errs, nodeErr)
 	}
 	errs = append(errs, validateAdditionalVolumes(inst)...)
-	// Nothing is held yet on create, so every escape the Instance asks for is one it is taking. Both
-	// settings default to off, so a failed settings read denies rather than allows.
+	// Nothing is held yet on create, so every escape the Instance asks for is one it is taking. A
+	// failed settings read denies rather than allows, whatever the settings' defaults.
 	errs = append(errs, validateHostAccess(nil, inst,
-		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
-		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
+		hostAccessAllowed(ctx, settings.InstancePrivilegedAllowed),
+		hostAccessAllowed(ctx, settings.InstanceHostPathVolumeAllowed))...)
 	switch {
 	case inst.Spec.Volume.Ephemeral != nil && inst.Spec.Volume.Persistent != nil:
 		errs = append(errs, field.Forbidden(
@@ -241,8 +242,8 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 	// any point, not only at creation. An escape the Instance already holds passes untouched, which
 	// is what keeps a setting turned off later from stranding it.
 	errs = append(errs, validateHostAccess(instOld, inst,
-		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
-		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
+		hostAccessAllowed(ctx, settings.InstancePrivilegedAllowed),
+		hostAccessAllowed(ctx, settings.InstanceHostPathVolumeAllowed))...)
 
 	// Validate state transition.
 	if starting {
@@ -418,6 +419,17 @@ func validateAdditionalVolumeSource(av *workercore.InstanceAdditionalVolume, fld
 	}
 
 	return errs
+}
+
+// hostAccessAllowed reads a host-access gate, and a failed read denies.
+//
+// A bool Setting falls back to its default when it cannot be read, and a gate that grants a
+// container escape or the node's filesystem must not: its default can be seeded to true on first
+// deploy and closed by an administrator since, and this webhook judges an escape only when an object
+// takes it, so an escape admitted while the read was failing is kept after the read recovers.
+func hostAccessAllowed(ctx context.Context, s setting.Setting) bool {
+	allowed, err := s.ValueBool(ctx)
+	return err == nil && allowed
 }
 
 // validateHostAccess rejects the two ways an Instance crosses the node boundary — privileged mode and

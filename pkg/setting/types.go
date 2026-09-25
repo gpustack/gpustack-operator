@@ -224,12 +224,21 @@ func (s Setting) ShouldValue(ctx context.Context) string {
 }
 
 // ValueBool returns the boolean value of the setting.
+//
+// A failed read falls back to the setting's default, not to false, and the read error is returned
+// alongside it. Callers read through ShouldValueBool, which drops the error, so false would turn a
+// single failed read into the "off" behavior of every setting that defaults to on, and the
+// reconcile that read it would write that behavior back. A caller for which a read error must mean
+// false, such as a gate that grants access, checks the error itself.
 func (s Setting) ValueBool(ctx context.Context) (bool, error) {
+	// Value returns the default in valStr on error, so parse it unconditionally, as
+	// ValueBoolFromRemote does.
 	valStr, err := s.Value(ctx)
+	b, perr := strconv.ParseBool(valStr)
 	if err != nil {
-		return false, err
+		return b, err
 	}
-	return strconv.ParseBool(valStr)
+	return b, perr
 }
 
 // ShouldValueBool returns the boolean value of the setting without error.

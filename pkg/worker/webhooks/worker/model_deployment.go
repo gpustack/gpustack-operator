@@ -559,8 +559,8 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 
 	errs := validateModelDeployment(md, nil)
 	errs = append(errs, validateModelDeploymentHostAccess(nil, md,
-		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
-		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
+		hostAccessAllowed(ctx, settings.InstancePrivilegedAllowed),
+		hostAccessAllowed(ctx, settings.InstanceHostPathVolumeAllowed))...)
 	errs = append(errs, validateModelDeploymentRoleListenPorts(nil, md)...)
 	errs = append(errs, validateModelDeploymentRoleReservedListenPorts(nil, md)...)
 	errs = append(errs, validateModelDeploymentServedModelNames(nil, md)...)
@@ -613,8 +613,8 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	// offending role -- would be refused. That is worse than the reconcile failure the rule prevents.
 	errs := validateModelDeployment(md, modelDeploymentRoleNames(oldObj))
 	errs = append(errs, validateModelDeploymentHostAccess(old, md,
-		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
-		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
+		hostAccessAllowed(ctx, settings.InstancePrivilegedAllowed),
+		hostAccessAllowed(ctx, settings.InstanceHostPathVolumeAllowed))...)
 	errs = append(errs, validateModelDeploymentRoleListenPorts(old, md)...)
 	errs = append(errs, validateModelDeploymentRoleReservedListenPorts(old, md)...)
 	errs = append(errs, validateModelDeploymentServedModelNames(old, md)...)

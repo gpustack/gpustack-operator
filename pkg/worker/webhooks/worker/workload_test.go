@@ -43,8 +43,7 @@ var (
 )
 
 // seedFitAffinity stores the workload-fit-affinity setting in the delegated Secret the setting is
-// read from. A read without it fails and yields false, which is not this setting's default, so every
-// case seeds it.
+// read from. Every case seeds it, so none depends on what a read without it yields.
 func seedFitAffinity(t *testing.T, value string) {
 	t.Helper()
 	settingtest.MergeDelegatedSettings(t, map[string]string{"workload-fit-affinity": value})
