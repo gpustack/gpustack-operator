@@ -92,6 +92,10 @@ webhook configurations already sit on, in Go for the same reason. The cost: `hel
 of them. All are *applied*, not created, so a repeat run only sets `spec`, never clobbering a
 controller-owned status.
 
+No release owns them either, so `helm uninstall` leaves them behind. The AdmissionCheck goes with
+Kueue's CRDs; `files/cleanup.sh` deletes the NodeFeatureRule, but only while it carries the
+`app.kubernetes.io/part-of: gpustack-operator` label the worker puts on it.
+
 ---
 
 **See also** — [Migrating to Bundled Subcharts](../migration/to-subcharts.md) (the ownership

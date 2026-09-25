@@ -1,8 +1,8 @@
 # Migration Troubleshooting
 
-> **Purpose** — recovering from the two failures an in-place operator upgrade or a cluster reset can
-> leave behind: a worker stuck in CrashLoopBackOff while the old replica keeps serving, and a namespace
-> that never finishes deleting.
+> **Purpose** — recovering from the three failures an in-place operator upgrade or a cluster reset can
+> leave behind: a worker stuck in CrashLoopBackOff while the old replica keeps serving, a namespace
+> that never finishes deleting, and Kueue CRDs left Terminating by a teardown.
 > **Audience** operators · **Prerequisites** [Migrating to Bundled Subcharts](to-subcharts.md) ·
 > **Read time** ~8 min
 
@@ -16,6 +16,7 @@ live guidance, for older releases and for the reset any release can meet too.
 
 - [Worker CrashLoopBackOff after an upgrade](#worker-crashloopbackoff-after-an-upgrade)
 - [Namespace stuck Terminating](#namespace-stuck-terminating)
+- [Kueue CRDs stuck Terminating after a teardown](#kueue-crds-stuck-terminating-after-a-teardown)
 - [The safe full-reset order](#the-safe-full-reset-order)
 
 ## Worker CrashLoopBackOff after an upgrade
@@ -125,6 +126,42 @@ finalizer, which is why they surface only on the next operation:
 `metadata.finalizers` away): the namespace object vanishes while whatever the deletion had not reached
 stays behind — CRs, Secrets, the very APIServices above — orphaned for good.
 
+## Kueue CRDs stuck Terminating after a teardown
+
+The symptom: after an image-mode teardown, or after removing a v0.5.x install, some
+`kueue.x-k8s.io` CRDs stay `Terminating`, and their ClusterQueues, ResourceFlavors, Topologies or
+AdmissionChecks still carry `kueue.x-k8s.io/resource-in-use`. The next install under another release
+name, such as a chart-mode `helm install`, fails on `CustomResourceDefinition
+"admissionchecks.kueue.x-k8s.io" ... exists and cannot be imported into the current release`.
+
+What happened: uninstalling the release that owns Kueue removes the controller and its templated
+CRDs in one pass, so nothing is left to clear the finalizers. `cleanup.sh` strips them, but a copy
+from v0.8.6 or earlier recognizes only a Kueue owned by the release in its third argument,
+`gpustack-operator` by default. It skips the `gpustack-operator-device-manager` (image mode) and
+`gpustack-kueue` (v0.5.x) ones.
+
+The chart's migrate-pre hook cannot reap them either: Helm refuses the install on ownership before
+any hook runs.
+
+Recover:
+
+```bash
+NS=gpustack-system
+
+# 1. Confirm the wedge: which Kueue CRDs are Terminating, and which release owns them.
+kubectl get crd -o custom-columns='NAME:.metadata.name,DELETING:.metadata.deletionTimestamp,RELEASE:.metadata.annotations.meta\.helm\.sh/release-name' \
+  | grep kueue
+
+# 2. Run the current cleanup script, which recognizes all three release names.
+bash deploy/gpustack-operator/chart/files/cleanup.sh "$NS"
+#    With a copy from v0.8.6 or earlier, name the owning release from step 1 as the third
+#    argument instead (the second is the worker's certificate Secret):
+bash cleanup.sh "$NS" gpustack-operator-worker-cert gpustack-operator-device-manager
+
+# 3. Verify (expect no row).
+kubectl get crd -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletionTimestamp | grep kueue
+```
+
 ## The safe full-reset order
 
 Re-registering a cluster against a different GPUStack server means wiping the worker install. Done in
@@ -137,7 +174,8 @@ NS=gpustack-system
 kubectl -n "$NS" scale deploy/gpustack-operator-worker --replicas=0
 
 # 2. Run the chart's cleanup script — runtime-installed releases, CRDs and their finalizers,
-#    APIServices and webhooks. It ships under files/ in the chart.
+#    APIServices and webhooks. It ships under files/ in the chart. A copy from v0.8.6 or earlier
+#    leaves an image-mode Kueue Terminating; see the section above.
 bash deploy/gpustack-operator/chart/files/cleanup.sh "$NS"
 #    Chart-mode alternative: helm uninstall gpustack-operator -n "$NS" with cleanupOnUninstall=true.
 

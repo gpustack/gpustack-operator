@@ -13,6 +13,7 @@ function chart_lint() {
   gpustack::helm::verify_images "${ROOT_DIR}/deploy/gpustack-operator/chart"
   HELM_BIN="$(gpustack::helm::helm::bin)" \
     bash "${ROOT_DIR}/deploy/gpustack-operator/chart/ci/test-topograph.sh"
+  bash "${ROOT_DIR}/deploy/gpustack-operator/chart/ci/test-kueue-releases.sh"
   gpustack::helm::lint "${ROOT_DIR}/deploy/gpustack-operator/chart"
 }
 

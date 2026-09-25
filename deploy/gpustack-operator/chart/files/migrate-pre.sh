@@ -41,7 +41,8 @@ CHARTS_DIR="${GPUSTACK_CONF_DIR:-/etc/gpustack}/charts"
 # The Helm releases that may own a Kueue this operator installed: the chart release itself,
 # the release the worker installs from inside the operator image, and the standalone Kueue
 # release earlier versions installed. A Kueue belonging to any other release is a user's own
-# and is never touched.
+# and is never touched. cleanup.sh carries the same line, and `make lint chart` fails when the
+# two differ.
 KUEUE_RELEASES="${RELEASE},gpustack-operator-device-manager,gpustack-kueue"
 
 # The releases the worker installed per application before the subchart layout, which are the
