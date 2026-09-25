@@ -1,9 +1,11 @@
 # This workflow enforces the shell contract of the agent tree on pull requests and pushes that
-# touch shell under .agents/. OpenCodeReview selects nothing there, and `make lint` reads those
-# files for decorative symbols only, so before this gate a change that broke a case file could
-# reach main with nothing red. The check runs bash -n and shellcheck over the CHANGED files only
-# and reports findings new relative to the merge-base, so the backlog the corpus already carries
+# touch shell under .agents/. OpenCodeReview selects nothing there, and outside the image build
+# nothing in CI reads those files for shell, so a change that broke a case file could reach main
+# with nothing red. The check runs bash -n and shellcheck over the CHANGED files only and
+# reports findings new relative to the merge-base, so the backlog the corpus already carries
 # does not block every future edit; a survey counted roughly four hundred existing findings.
+# The image build keeps running for these changes: .dockerignore re-includes .agents into the
+# build context, so ci.yml must not skip them without staling the registry cache.
 
 name: Agents Shell
 
@@ -13,6 +15,14 @@ permissions:
 defaults:
   run:
     shell: bash
+
+concurrency:
+  group: agents-shell-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  # Only a superseded pull-request run is cancelled. A push run on main is an enforcement run
+  # with its own before..HEAD window: cancelling it mid-flight because a later push arrived
+  # would leave that push's regression window reported by nothing — the second run diffs only
+  # its own window.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
   workflow_dispatch: { }
@@ -59,18 +69,38 @@ jobs:
           PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           # The base is where "new relative to" starts: the PR's base commit, or the commit before
-          # the push. A branch's first push carries an all-zero before-sha and workflow_dispatch
-          # carries none; without a base there is no comparison to make, and the self-test above
-          # is what ran. Shallow history that lost the base is the same case, reported the same
-          # way rather than silently checking nothing.
+          # the push. workflow_dispatch carries none by design, and for it the self-test above is
+          # the whole run. Every other shape that cannot name a base — a null before-sha from a
+          # force-pushed branch, a base object the checkout's history no longer reaches — is a
+          # loud failure, not a pass: this workflow is the only enforcement for the paths it
+          # selects, so a run that quietly checked nothing would be the vacuous green the gate
+          # exists to prevent.
           BASE=""
           case "${EVENT_NAME}" in
             pull_request) BASE="${PR_BASE_SHA}" ;;
             push)         BASE="${PUSH_BEFORE_SHA}" ;;
           esac
           NULL_SHA="0000000000000000000000000000000000000000"
-          if [[ -z "${BASE}" || "${BASE}" == "${NULL_SHA}" ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
-            echo "No usable base to diff against; the self-test above is the whole run."
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "Manual run: the self-test above is the whole run."
             exit 0
           fi
+          if [[ -z "${BASE}" || "${BASE}" == "${NULL_SHA}" ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "No usable base to diff against, so the new-findings comparison cannot run." >&2
+            echo "Re-run on the pull request, or push a normal commit so the previous one names the base." >&2
+            exit 1
+          fi
+          # base.sha is where the base branch stood when the PR was created or last synced, not
+          # necessarily where it stands now. The comparison window is the fork point, so the base
+          # resolves through merge-base: if main advanced since, its own changes stay outside the
+          # window instead of leaking into it as either new findings to block on or backlog to
+          # excuse. A merge-base that comes back empty — rewritten histories, an orphan branch —
+          # is the same loud failure as no base at all, never an empty base handed down to a
+          # diff that would then quietly select nothing.
+          MERGE_BASE="$(git merge-base "${BASE}" HEAD 2>/dev/null || true)"
+          if [[ -z "${MERGE_BASE}" ]]; then
+            echo "The base and the head share no common ancestor, so the new-findings comparison cannot run." >&2
+            exit 1
+          fi
+          BASE="${MERGE_BASE}"
           bash hack/check-agents-shell.sh --base "${BASE}"

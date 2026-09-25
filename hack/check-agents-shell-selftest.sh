@@ -147,11 +147,13 @@ expect red "a committed new finding against an older --base" -- --base HEAD~1 "$
 
 echo "== the pin on PATH with an empty .sbin =="
 # The shape bin() exists to survive: the pinned version resolves through PATH while the tree's
-# .sbin is empty, and bin() must answer an ABSOLUTE path — the gate's "[ -x ${SHELLCHECK_BIN} ]"
-# is answered against the working directory, where a bare "shellcheck" names nothing, so a bare
-# answer turned every fixture could-not-run on exactly this machine shape. The pinned binary is
-# PLACED on a stub PATH rather than hoped for on the real one, so the case exercises the shape
-# on every machine, and the tree under test is a fresh copy whose .sbin is empty by construction.
+# .sbin is empty. bin()'s answer is consumed as a SHELLCHECK_BIN override — exactly what this
+# self-test's own driver does with it — and the checker's "[ -x ${SHELLCHECK_BIN} ]" is answered
+# against the working directory, where a bare "shellcheck" names nothing. So the case must feed
+# the checker the VALUE bin() answers, not let it self-resolve: under a bin() that answers the
+# bare name the override fails -x and the case goes red, which is the discrimination its comment
+# claims. The pinned binary is PLACED on a stub PATH rather than hoped for on the real one, and
+# the tree under test is a fresh copy whose .sbin is empty by construction.
 pinpath="${MINI}/pinbin"
 mkdir -p "${pinpath}"
 ln -s "${SHELLCHECK_BIN}" "${pinpath}/shellcheck"
@@ -164,8 +166,23 @@ git -C "${pinrepo}" add -A
 git -C "${pinrepo}" -c user.email=check@example.invalid -c user.name=check \
   -c commit.gpgsign=false commit -qm "base" >/dev/null
 printf '# harmless edit\n' >>"${pinrepo}/.agents/skills/demo/cases/case.sh"
+# What bin() answers in the copy, asked there under the stub PATH, so the answer reflects the
+# empty-.sbin shape rather than this tree's warm one.
+pinbin="$(cd "${pinrepo}" && env PATH="${pinpath}:/usr/bin:/bin" bash -c '
+  ROOT_DIR="$(pwd)"
+  # shellcheck source=hack/lib/util.sh
+  # shellcheck source=hack/lib/log.sh
+  # shellcheck source=hack/lib/style.sh
+  # shellcheck disable=SC1091
+  source hack/lib/util.sh
+  # shellcheck disable=SC1091
+  source hack/lib/log.sh
+  # shellcheck disable=SC1091
+  source hack/lib/style.sh
+  gpustack::lint::shellcheck::bin
+')"
 expect green "a pinned shellcheck on PATH with an empty .sbin resolves absolutely and passes" \
-  SHELLCHECK_BIN= PATH="${pinpath}:/usr/bin:/bin" -- "${pinrepo}"
+  SHELLCHECK_BIN="${pinbin}" PATH="${pinpath}:/usr/bin:/bin" -- "${pinrepo}"
 
 echo "== the instrument itself =="
 # A forced instrument that does not exist is a loud not-run. The pinned resolution the checker
