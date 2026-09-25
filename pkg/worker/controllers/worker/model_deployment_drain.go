@@ -11,16 +11,17 @@ import (
 )
 
 const (
-	// modelDeploymentTerminationGracePeriodSeconds is the whole time a departing replica gets, from
-	// the delete to the kill. It is the Kubernetes default, rendered explicitly because the drain
-	// below is budgeted against it: the kubelet starts this countdown BEFORE the preStop hook and
-	// sends SIGTERM only once the hook returns, so the hook and the engine's own exit share it.
+	// modelDeploymentDefaultTerminationGracePeriodSeconds is the whole time a departing replica gets,
+	// from the delete to the kill, when its role sets no terminationGracePeriodSeconds. It is the
+	// Kubernetes default, rendered explicitly because the drain below is budgeted against it: the
+	// kubelet starts this countdown BEFORE the preStop hook and sends SIGTERM only once the hook
+	// returns, so the hook and the engine's own exit share it.
 	//
-	// It is a constant and not a field. A longer grace holds the replica's accelerators and quota for
-	// longer on every delete, and a rollout replaces one replica per role at a time and waits each
-	// departing one out, so the grace multiplies into every rollout. What a longer request needs is a
-	// router that can move it, which no supported router does.
-	modelDeploymentTerminationGracePeriodSeconds int64 = 30
+	// A role may raise it, and the default stays at the floor on purpose: a longer grace holds the
+	// replica's accelerators and quota for longer on every delete, and a rollout replaces one replica
+	// per role at a time and waits each departing one out, so the grace multiplies into every
+	// rollout. The role that needs more is the one whose engine takes longer to exit, not every role.
+	modelDeploymentDefaultTerminationGracePeriodSeconds int64 = 30
 
 	// modelDeploymentDrainSettleSeconds is how long the engine keeps serving normally after the
 	// delete before the hook starts waiting for it to go idle.
@@ -36,18 +37,29 @@ const (
 	// hook returns and SIGTERM arrives. It holds no request: by then the replica has been idle, or
 	// the hook gave up on the requests still running.
 	modelDeploymentDrainExitSeconds int64 = 5
-
-	// modelDeploymentDrainDeadlineSeconds is the latest the hook returns, counted from its own start.
-	//
-	// It is DERIVED from the grace rather than set beside it, so the two cannot be set such that the
-	// kubelet kills the engine in the middle of the wait. The last read can end up to two seconds past
-	// it -- one read timeout and one poll interval -- which the exit reserve absorbs.
-	//
-	// A REQUEST STILL RUNNING AT THIS POINT IS CUT, and that is the accepted ceiling: vLLM aborts it on
-	// SIGTERM, and SGLang drains it on its own until the kill.
-	modelDeploymentDrainDeadlineSeconds = modelDeploymentTerminationGracePeriodSeconds -
-		modelDeploymentDrainExitSeconds
 )
+
+// modelDeploymentTerminationGracePeriodSeconds is the grace a replica of the role is rendered with:
+// the role's own value, or the default when it sets none.
+func modelDeploymentTerminationGracePeriodSeconds(role *workercore.ModelDeploymentRole) int64 {
+	if role.TerminationGracePeriodSeconds != nil {
+		return *role.TerminationGracePeriodSeconds
+	}
+
+	return modelDeploymentDefaultTerminationGracePeriodSeconds
+}
+
+// modelDeploymentDrainDeadlineSeconds is the latest the hook returns, counted from its own start.
+//
+// It is DERIVED from the grace rather than set beside it, so the two cannot be set such that the
+// kubelet kills the engine in the middle of the wait. The last read can end up to two seconds past
+// it -- one read timeout and one poll interval -- which the exit reserve absorbs.
+//
+// A REQUEST STILL RUNNING AT THIS POINT IS CUT, and that is the accepted ceiling: vLLM aborts it on
+// SIGTERM, and SGLang drains it on its own until the kill.
+func modelDeploymentDrainDeadlineSeconds(graceSeconds int64) int64 {
+	return graceSeconds - modelDeploymentDrainExitSeconds
+}
 
 // modelDeploymentInFlightMetrics names, per engine, the gauges whose sum is the work a replica
 // still has in flight. They are read off the engine's own /metrics, which both engines serve on
@@ -75,7 +87,7 @@ var modelDeploymentInFlightMetrics = map[string][]string{
 
 // modelDeploymentDrainHook is the preStop hook of a replica's engine container: it keeps the engine
 // serving through the settle window, then waits for the engine's in-flight gauges to read zero,
-// and returns no later than the deadline, after which the kubelet sends SIGTERM.
+// and returns no later than the deadline the grace leaves, after which the kubelet sends SIGTERM.
 //
 // THE WAIT HAS TO HAPPEN BEFORE SIGTERM, because neither engine drains well on the signal itself.
 // vLLM's --shutdown-timeout defaults to 0, which aborts every running request at once; set higher,
@@ -94,10 +106,12 @@ var modelDeploymentInFlightMetrics = map[string][]string{
 // It is an exec of the image's own python3, as the KV cache member's hook is: both engines are
 // Python programs, so the interpreter is there. An httpGet hook is not an option, because neither
 // engine has a route that answers only once it is idle.
-func modelDeploymentDrainHook(engine string, port int32, scheme core.URIScheme) *core.LifecycleHandler {
+func modelDeploymentDrainHook(
+	engine string, port int32, scheme core.URIScheme, graceSeconds int64,
+) *core.LifecycleHandler {
 	url := fmt.Sprintf("%s://127.0.0.1:%d/metrics", strings.ToLower(string(scheme)), port)
 	script := modelDeploymentDrainScript(url, modelDeploymentInFlightMetrics[engine],
-		modelDeploymentDrainSettleSeconds, modelDeploymentDrainDeadlineSeconds)
+		modelDeploymentDrainSettleSeconds, modelDeploymentDrainDeadlineSeconds(graceSeconds))
 
 	return &core.LifecycleHandler{
 		Exec: &core.ExecAction{Command: []string{"python3", "-c", script}},
@@ -105,7 +119,7 @@ func modelDeploymentDrainHook(engine string, port int32, scheme core.URIScheme) 
 }
 
 // modelDeploymentDrainScript renders the hook's program. It takes the timings as arguments so a
-// test can run the program on a scale of seconds; the hook passes the constants.
+// test can run the program on a scale of seconds; the hook passes the settle and the deadline.
 //
 // THE ENGINE'S ANSWER DECIDES WHAT HAPPENS NEXT, and the cases are not alike:
 //   - a refused connection, an HTTP error or a TLS failure means there is nothing this hook can
@@ -127,7 +141,7 @@ func modelDeploymentDrainScript(url string, metrics []string, settleSeconds, dea
 		names = append(names, strconv.Quote(m))
 	}
 
-	// The values are operator constants and an integer port, quoted by strconv. For the ASCII they
+	// The values are integers and operator constants, quoted by strconv. For the ASCII they
 	// carry, a Go-quoted string is also a valid Python string literal.
 	return fmt.Sprintf(`import socket, ssl, sys, time, urllib.request
 start = time.monotonic()

@@ -1719,6 +1719,12 @@ func TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput(t *testing.T) {
 			name:  "the runtime class",
 			input: func(in *ModelDeploymentRenderInput) { in.RuntimeClassName = "nvidia" },
 		},
+		{
+			name: "the termination grace",
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].TerminationGracePeriodSeconds = ptr.To[int64](45)
+			},
+		},
 	}
 
 	for _, tc := range testCases {

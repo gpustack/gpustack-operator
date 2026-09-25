@@ -4566,6 +4566,14 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Maximum: ptr.To[float64](64),
 															Minimum: ptr.To[float64](1),
 														},
+														"terminationGracePeriodSeconds": {
+															Description: "TerminationGracePeriodSeconds is the whole time a departing replica of this role gets, from\nits Pod's delete to the kill, and it is written to each Pod's field of the same name. Unset\nrenders 30, the Kubernetes default.\n- The drain hook is budgeted against it: the hook waits for the engine to go idle until\n5 s before this, and those 5 s are left for the engine to exit on SIGTERM. So raising it\nlengthens the wait for running requests and the time the engine has to exit, together.\n- A LONGER GRACE COSTS ACCELERATORS AND QUOTA. A departing replica holds both until it\nexits, on every delete, and a rollout waits each departing replica out one at a time per\nrole, so the grace multiplies into every rollout. An idle replica still exits as soon as\nits engine does; the grace is a ceiling, not a wait.\n- An SGLang prefill or decode role needs about 45: measured idle, such an engine takes\n26-28 s after its delete to exit, which leaves 2 s before a kill at 30.\n- Changing it replaces every replica of the role, as any edit to a rendered Pod field does,\nand the replicas that leave in that rollout leave with the grace they were created with.\n- A take-over role, one that sets Command, gets it written to its Pods as given, and gets\nno drain hook either way; unset, its Pods keep the Kubernetes default.\n- The lower bound keeps a wait between the two fixed ends: the engine serves the first 5 s\nuntouched and the last 5 s are the exit's, and at 15 the 5 s left between them hold the two\nidle reads the hook returns on. The upper bound is an hour, far past any request a replica\nserves; a request that needs longer needs a router that can move it, which no supported\none does.",
+															Type:        "integer",
+															Format:      "int64",
+															Maximum:     ptr.To[float64](3600),
+															Minimum:     ptr.To[float64](15),
+															Nullable:    true,
+														},
 														"topology": {
 															Description: "Topology optionally requires Kueue to place each replica's Pod group in one domain at this level.\nIt applies to this role's independent replica group; it does not require other roles or replicas\nto share that domain.",
 															Type:        "object",

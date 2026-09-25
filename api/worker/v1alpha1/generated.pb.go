@@ -5465,6 +5465,13 @@ func (m *ModelDeploymentRole) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.TerminationGracePeriodSeconds != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.TerminationGracePeriodSeconds))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x88
+	}
 	if m.Topology != nil {
 		{
 			size, err := m.Topology.MarshalToSizedBuffer(dAtA[:i])
@@ -8633,6 +8640,9 @@ func (m *ModelDeploymentRole) Size() (n int) {
 		l = m.Topology.Size()
 		n += 2 + l + sovGenerated(uint64(l))
 	}
+	if m.TerminationGracePeriodSeconds != nil {
+		n += 2 + sovGenerated(uint64(*m.TerminationGracePeriodSeconds))
+	}
 	return n
 }
 
@@ -10560,6 +10570,7 @@ func (this *ModelDeploymentRole) String() string {
 		`Command:` + fmt.Sprintf("%v", this.Command) + `,`,
 		`ReplicaSize:` + fmt.Sprintf("%v", this.ReplicaSize) + `,`,
 		`Topology:` + strings.Replace(this.Topology.String(), "ModelDeploymentRoleTopology", "ModelDeploymentRoleTopology", 1) + `,`,
+		`TerminationGracePeriodSeconds:` + valueToStringGenerated(this.TerminationGracePeriodSeconds) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -28019,6 +28030,26 @@ func (m *ModelDeploymentRole) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 17:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TerminationGracePeriodSeconds", wireType)
+			}
+			var v int64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.TerminationGracePeriodSeconds = &v
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
