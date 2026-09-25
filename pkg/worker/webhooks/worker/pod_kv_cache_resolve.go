@@ -109,6 +109,11 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 		return nil, err
 	}
 
+	var dtype string
+	if workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx) {
+		dtype = binding.Spec.Domain.Dtype
+	}
+
 	return &resolution{
 		// The reuse domain goes to the renderer only while the master can hold it apart: a master
 		// with no tenant ledger collapses every tenant name into its default one, so forwarding the
@@ -118,6 +123,7 @@ func (r *PodKVCacheWebhook) resolve(ctx context.Context, pod *core.Pod) (*resolu
 			Engine: engine,
 			Role:   role,
 			Domain: injectableDomain(binding, backend, pool),
+			Dtype:  dtype,
 			Connection: inject.Connection{
 				MasterAddress: pool.Status.ClientEndpoint,
 				Protocol:      protocol,

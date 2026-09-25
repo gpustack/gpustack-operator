@@ -16,6 +16,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
@@ -182,6 +183,12 @@ func TestKVCachePoolBindingWebhook_ValidateCreate(t *testing.T) {
 			mutate:  func(b *workercore.KVCachePoolBinding) { b.Spec.Domain.Dtype = "fp4_e2m1" },
 			wantMsg: "",
 		},
+		{
+			// Both engines accept it, and both resolve it for themselves, so it binds nothing.
+			name:    "a dtype of auto",
+			mutate:  func(b *workercore.KVCachePoolBinding) { b.Spec.Domain.Dtype = "auto" },
+			wantMsg: `"auto" lets each engine resolve its own`,
+		},
 
 		// The ceiling. There is no case for omitting it: the field is required, so the schema refuses
 		// such an object before any webhook is consulted, and a case here would be asserting against
@@ -280,6 +287,34 @@ func TestKVCachePoolBindingWebhook_ValidateUpdate(t *testing.T) {
 	}, func(wh *KVCachePoolBindingWebhook, oldKvcpb, newKvcpb *workercore.KVCachePoolBinding) error {
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcpb, newKvcpb)
 		return err
+	})
+}
+
+// TestKVCachePoolBindingWebhook_AutoDtypeIsJudgedAtCreationWhileOwned pins the two ways past the
+// refusal of "auto": a Binding already stored with it stays updatable, down to the update that clears
+// its finalizer, and the setting off admits a new one as before.
+func TestKVCachePoolBindingWebhook_AutoDtypeIsJudgedAtCreationWhileOwned(t *testing.T) {
+	auto := func() *workercore.KVCachePoolBinding {
+		kvcpb := newKVCachePoolBinding()
+		kvcpb.Spec.Domain.Dtype = "auto"
+		return kvcpb
+	}
+
+	t.Run("a stored binding updates", func(t *testing.T) {
+		settingtest.MergeDelegatedSettings(t, map[string]string{"model-deployment-kv-cache-dtype-owned": "true"})
+		newKvcpb := auto()
+		newKvcpb.Finalizers = nil
+		oldKvcpb := auto()
+		oldKvcpb.Finalizers = []string{"gpustack.ai/test"}
+
+		_, err := newKVCachePoolBindingWebhook(newKVCachePool()).ValidateUpdate(context.Background(), oldKvcpb, newKvcpb)
+		require.NoError(t, err)
+	})
+	t.Run("the setting off admits a new one", func(t *testing.T) {
+		settingtest.MergeDelegatedSettings(t, map[string]string{"model-deployment-kv-cache-dtype-owned": "false"})
+
+		_, err := newKVCachePoolBindingWebhook(newKVCachePool()).ValidateCreate(context.Background(), auto())
+		require.NoError(t, err)
 	})
 }
 

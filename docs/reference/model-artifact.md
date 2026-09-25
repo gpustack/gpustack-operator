@@ -237,7 +237,8 @@ hexadecimal digits of the manifest digest, or of the SHA-256 of the artifact's U
   keeps the identity, and new replicas would read blocks of the old files. Put new weights in a new
   `ModelArtifact`.
 - The vLLM-Ascend store connector gets no prefix: its key layout was not read.
-- The Binding's `blockSize` and `dtype` are not part of either key (#591).
+- The Binding's `blockSize` and `dtype` are not part of either key. The `dtype` is
+  [handed to the engine](../kv-cache/pool.md#the-dtype-is-handed-to-the-engine) instead.
 
 ## Status
 

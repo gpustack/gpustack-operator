@@ -316,6 +316,17 @@ func checkOwnedKeys(pod *core.Pod, ctr *core.Container, engine inject.Engine, ou
 				"configured; two of them on one command line is undiagnosable", ctr.Name, spelled)
 		}
 	}
+	// The dtype flag is refused for another reason than the two above: it says nothing about a
+	// cache configured elsewhere, it names an element type, and the Binding's is the one every
+	// engine on its domain must write.
+	if slices.Contains(out.Args, inject.KVCacheDtypeArg) {
+		if spelled, found := containerFlag(ctr, engine, inject.KVCacheDtypeArg); found {
+			return fmt.Errorf("container %q already passes %s, but the KV cache dtype comes from "+
+				"the KVCachePoolBinding: the store key does not carry it, so engines writing two "+
+				"dtypes into one domain read each other's blocks wrong; remove it, and name a "+
+				"Binding declaring the dtype you want", ctr.Name, spelled)
+		}
+	}
 
 	// The Pod's own volume list is checked as well as the container's mounts. A volume of this name
 	// can exist on the Pod without the target container mounting it, and appending a second one of

@@ -71,6 +71,8 @@ func (r *KVCachePoolBindingWebhook) ValidateCreate(
 	var warnings ctrladmission.Warnings
 
 	errs := validateKVCachePoolBindingSpec(kvcpb)
+	errs = append(errs, validateKVCachePoolBindingDtypeBinds(
+		kvcpb, workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx))...)
 	// The cross-object questions are asked only once the object's own shape holds. A malformed
 	// domain name would otherwise be reported alongside "no other Binding claims it", which is true
 	// and useless.
@@ -191,6 +193,29 @@ func validateKVCachePoolBindingDomain(
 
 	return errs
 }
+
+// validateKVCachePoolBindingDtypeBinds refuses a new Binding declaring "auto" while the operator
+// hands the dtype to every engine attached through it.
+//
+// "auto" is the one value both engines accept that binds nothing: each resolves it from its own
+// model and checkpoint, so two engines on the domain can still write two element types. It is judged
+// at creation alone, because the dtype is immutable and a Binding stored with it must stay
+// updatable, down to the update that clears its finalizer.
+func validateKVCachePoolBindingDtypeBinds(
+	kvcpb *workercore.KVCachePoolBinding, owned bool,
+) field.ErrorList {
+	if !owned || kvcpb.Spec.Domain.Dtype != kvCachePoolBindingDtypeAuto {
+		return nil
+	}
+
+	return field.ErrorList{field.Invalid(field.NewPath("spec", "domain", "dtype"), kvcpb.Spec.Domain.Dtype,
+		"is handed to every engine attached through this Binding, and \"auto\" lets each engine "+
+			"resolve its own from the model it loads, so two engines on one domain can still write "+
+			"two element types; name the type, for example bfloat16")}
+}
+
+// kvCachePoolBindingDtypeAuto is the dtype spelling both engines resolve for themselves.
+const kvCachePoolBindingDtypeAuto = "auto"
 
 // validateKVCachePoolBindingDomainIsUnclaimed refuses a domain another Binding already registered
 // ON A MASTER THAT ALSO SERVES THIS ONE.

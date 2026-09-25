@@ -32,8 +32,9 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
    and [Hygon MIG Operations](operation/hygon-mig.md) —
    the runbook for enabling and disabling partitioning on a node.
 10. Upgrading: [Migrating to Bundled Subcharts](migration/to-subcharts.md) · [Migrating from
-   v0.5.x](migration/from-v0.5.md) · [Migration Troubleshooting](migration/troubleshooting.md) when it
-   goes wrong.
+   v0.5.x](migration/from-v0.5.md) · [Upgrading to an Enforced Binding
+   Dtype](migration/kv-cache-dtype.md) with a KV cache pool · [Migration
+   Troubleshooting](migration/troubleshooting.md) when it goes wrong.
 
 **I change the code** — read the overview first; it is the map for everything else.
 
@@ -84,6 +85,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [RDMA Operations](operation/rdma.md) | Which RDMA key to ask for and how many endpoints beside N accelerators, what a grant injects, the kubelet policy that aligns the two sides, why no queue meters these keys, and the engine image an EFA leg needs | operators, users | ~16 min |
 | [Migrating to Bundled Subcharts](migration/to-subcharts.md) | The one-time ownership transfer from the runtime-installed releases | operators | ~9 min |
 | [Migrating from v0.5.x](migration/from-v0.5.md) | Upgrading across the scheduling-chain refactor | operators | ~5 min |
+| [Upgrading to an Enforced Binding Dtype](migration/kv-cache-dtype.md) | What a Binding's `dtype` reaching the engine does to existing pool-attached workloads, the pre-upgrade check, and the way out | operators | ~5 min |
 | [Migration Troubleshooting](migration/troubleshooting.md) | Recovering from a wedged upgrade (worker CrashLoopBackOff) or a namespace stuck Terminating | operators | ~8 min |
 | [Instance Type Unit Resources Reference](reference/instance-type-unit-resources.md) | The per-product CPU/RAM tier a derived InstanceType is sized with, and where each tier came from | operators | reference |
 | [Instance Metrics Reference](reference/instance-metrics.md) | The `instances/<name>/metrics` subresource and the Device Manager's Prometheus exporter: the fields, the gauges, their sources and limits | users, operators, console developers | ~9 min |

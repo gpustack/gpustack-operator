@@ -104,7 +104,7 @@ spec:
   domain:
     name: qwen-7b-v1                     # every field here is immutable
     blockSize: 64
-    dtype: bf16
+    dtype: bfloat16
 ```
 
 **The `domain` is the cache's compatibility key, and it is immutable for the reason it exists.** Two

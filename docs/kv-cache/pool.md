@@ -51,7 +51,7 @@ spec:
   domain:                              # required, exactly one, every field immutable
     name: qwen-72b-v2
     blockSize: 64
-    dtype: fp8
+    dtype: fp8_e4m3
 ```
 
 The split follows the one this operator already uses for scheduling: **`ClusterQueue` : `LocalQueue`**.
@@ -143,6 +143,39 @@ Every field of `spec.domain` is rejected on update, and so is `spec.poolRef`:
 
 To change any of them, delete the Binding and create a new one. That is the honest cost: the cache
 under the old domain is not carried over, and pretending otherwise is what the refusal prevents.
+
+### The dtype is handed to the engine
+
+`domain.dtype` is rendered as `--kv-cache-dtype <dtype>`, **verbatim**, on every engine attached
+through the Binding: each `ModelDeployment` role the operator builds the command line of, and each
+[injected Pod](../reference/kv-cache-injection.md). Neither engine's store key carries the dtype, so
+without this two engines on one domain can write two element types under one key.
+
+> **Why** — the failure is silent in one direction. A reader whose dtype is narrower than the
+> writer's asks for fewer bytes than the block holds, the store refuses the read, and the engine
+> recomputes. A reader whose dtype is wider gets the block's bytes as a success over a partly stale
+> buffer, because neither engine compares the bytes read with the bytes expected.
+
+- **The spelling is the engine's**, as the table below says. A Binding serving both engines needs a
+  spelling both accept: `bfloat16`, `fp8_e4m3`, `fp8_e5m2` or `nvfp4`.
+- **A spelling the engine rejects stops every new Pod** at argument parsing, and the dtype is
+  immutable. The recovery is under
+  [Upgrading to an enforced Binding dtype](../migration/kv-cache-dtype.md).
+- **`auto` is refused on a new Binding.** Both engines accept it and resolve it from the model they
+  load, so it binds nothing. A Binding stored with it before the refusal stays usable and updatable.
+- **The engine is not free to disagree.** A role naming `--kv-cache-dtype` itself is refused; the
+  rule and its exceptions are under
+  [What the operator owns](../reference/model-deployment.md#what-the-operator-owns).
+
+All of it follows the Setting `model-deployment-kv-cache-dtype-owned`, on by default; turning it
+off renders and refuses nothing, as before. See [Settings](../settings.md).
+
+| Engine | Accepts |
+|---|---|
+| `vllm`, including on Ascend | `auto`, `bfloat16`, `float16`, `fp8`, `fp8_e4m3`, `fp8_e5m2`, `fp8_inc`, `fp8_ds_mla`, `nvfp4` and the rest of vLLM's `CacheDType` — **not** `bf16` |
+| `sglang` | `auto`, `bfloat16`, `bf16`, `fp8_e4m3`, `fp8_e5m2`, `mxfp8`, `nvfp4`, `fp4_mx_block16` — **not** `fp8` or `float16` |
+
+The lists are read from vLLM v0.29.0 and SGLang v0.5.18; the engine image in use is the authority.
 
 ## The ceiling is a request, the grant is the answer
 

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,6 +14,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
@@ -60,10 +62,12 @@ func TestPodKVCacheInject_VLLMCarriesTheFileVehicle(t *testing.T) {
 	// The flag and its value are checked separately, and the document semantically: comparing the
 	// whole slice pinned a JSON key order that JSON does not define, which is what kept the renderer
 	// hand-building the string instead of marshaling a type.
-	require.Len(t, ctr.Args, 3)
+	require.Len(t, ctr.Args, 5)
 	assert.Equal(t, []string{"serve", "--kv-transfer-config"}, ctr.Args[:2],
 		"the injection is appended, so the workload's own arguments come first and stay intact")
 	assert.JSONEq(t, `{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}`, ctr.Args[2])
+	assert.Equal(t, []string{"--kv-cache-dtype", "bfloat16"}, ctr.Args[3:],
+		"the Binding's dtype, verbatim, because the store key does not carry it")
 
 	require.Len(t, pod.Spec.Volumes, 1)
 	require.Len(t, ctr.VolumeMounts, 1)
@@ -975,6 +979,28 @@ func TestPodKVCacheInject_ConflictRefusals(t *testing.T) {
 				"--hicache-storage-backend-extra-config",
 		},
 		{
+			name: "the container names its own kv cache dtype",
+			mutate: func(ctr *core.Container, _ *core.Pod) {
+				ctr.Args = append(ctr.Args, "--kv-cache-dtype", "fp8")
+			},
+			wantMsg: "already passes --kv-cache-dtype, but the KV cache dtype comes from the KVCachePoolBinding",
+		},
+		{
+			name: "the container names it in vllm's underscore spelling",
+			mutate: func(ctr *core.Container, _ *core.Pod) {
+				ctr.Args = append(ctr.Args, "--kv_cache_dtype=fp8")
+			},
+			wantMsg: "--kv_cache_dtype, which engine \"vllm\" reads as --kv-cache-dtype",
+		},
+		{
+			name:   "an sglang container names its own kv cache dtype",
+			engine: "sglang",
+			mutate: func(ctr *core.Container, _ *core.Pod) {
+				ctr.Args = append(ctr.Args, "--kv-cache-dtype=fp8_e4m3")
+			},
+			wantMsg: "already passes --kv-cache-dtype, but the KV cache dtype comes from the KVCachePoolBinding",
+		},
+		{
 			name: "the mount path is already taken",
 			mutate: func(ctr *core.Container, _ *core.Pod) {
 				ctr.VolumeMounts = []core.VolumeMount{{Name: "other", MountPath: "/etc/gpustack/kvcache"}}
@@ -1017,10 +1043,23 @@ func TestPodKVCacheInject_ConflictRefusals(t *testing.T) {
 // is the workload's own.
 func TestPodKVCacheInject_AdmitsAFlagSharingAStemWithAnOwnedOne(t *testing.T) {
 	pod := kvCachePod()
-	pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "--kv-cache-dtype", "fp8")
+	pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "--kv-cache-memory-bytes", "8589934592")
 
 	require.NoError(t, admit(t, pod))
 	assert.Contains(t, pod.Spec.Containers[0].Args, "--kv-transfer-config")
+}
+
+// TestPodKVCacheInject_DtypeUnownedIsTheBehaviorBefore pins the escape: with the setting off, a
+// container's own dtype is admitted and the Binding's is not rendered beside it.
+func TestPodKVCacheInject_DtypeUnownedIsTheBehaviorBefore(t *testing.T) {
+	settingtest.MergeDelegatedSettings(t, map[string]string{"model-deployment-kv-cache-dtype-owned": "false"})
+	pod := kvCachePod()
+	pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "--kv-cache-dtype", "fp8")
+
+	require.NoError(t, admit(t, pod))
+	args := pod.Spec.Containers[0].Args
+	assert.Equal(t, 1, slices.Index(args, "--kv-cache-dtype"))
+	assert.Equal(t, -1, slices.Index(args[2:], "--kv-cache-dtype"), "nothing is rendered: %v", args)
 }
 
 func TestPodKVCacheInject_TenantFromBindingOverridesAnotherRegisteredDomain(t *testing.T) {

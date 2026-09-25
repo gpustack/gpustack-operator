@@ -1,9 +1,11 @@
 package worker
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -11,6 +13,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 // The mount path, the file name and their join are `inject`'s, not redeclared here. That package
@@ -60,6 +63,10 @@ type ModelDeploymentConnectorInput struct {
 	// CachePrefix is the weight identity the store's keys are prefixed with, derived from the
 	// deployment's ModelArtifact, or empty for a deployment naming none.
 	CachePrefix string
+
+	// Dtype is the Binding's spec.domain.dtype, or empty while the operator does not own the flag
+	// it renders into.
+	Dtype string
 
 	// MasterServerAddress is the address of the store master, observed from the pool.
 	MasterServerAddress string
@@ -405,6 +412,28 @@ func ModelDeploymentArtifactOwnsEnv(engine, name string) bool {
 	return slices.Contains(modelDeploymentArtifactOwnedKeys[engine].Env, name)
 }
 
+// ModelDeploymentOwnsKVCacheDtype reports whether the operator renders a Binding's dtype into the
+// engine and owns the flag it lands in, as the model-deployment-kv-cache-dtype-owned setting says.
+// The render and every refusal of the flag read this one answer.
+//
+// A FAILED READ ANSWERS THE DEFAULT RATHER THAN FALSE. A read that fell to false would drop the
+// flag from every pool-attached Pod on one pass, recreating all of them, and put it back on the
+// next.
+func ModelDeploymentOwnsKVCacheDtype(ctx context.Context) bool {
+	owned, err := strconv.ParseBool(settings.ModelDeploymentKVCacheDtypeOwned.ShouldValue(ctx))
+	return err != nil || owned
+}
+
+// ModelDeploymentKVCacheOwnedArg reports whether the engine's parser reads a command-line entry as
+// the flag the Binding's dtype is rendered into. It applies only while spec.kvCache is set and
+// ModelDeploymentOwnsKVCacheDtype holds.
+//
+// Both engine families spell the flag alike, so the one key serves every engine; the engine still
+// decides how an entry is read, since vLLM rewrites underscores and SGLang does not.
+func ModelDeploymentKVCacheOwnedArg(engine, arg string) (string, bool) {
+	return ModelDeploymentResolveArg(engine, arg, []string{inject.KVCacheDtypeArg})
+}
+
 // ModelDeploymentServedModelNames returns every value a command line gives the served-name flag,
 // in the engine's own reading, and whether the flag appears at all.
 //
@@ -607,6 +636,7 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		Disaggregated: in.Disaggregated,
 		Domain:        in.Domain,
 		CachePrefix:   in.CachePrefix,
+		Dtype:         in.Dtype,
 		Connection: inject.Connection{
 			MasterAddress: in.MasterServerAddress,
 			Protocol:      protocol,

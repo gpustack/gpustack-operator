@@ -364,6 +364,9 @@ func renderVLLM(in Input) (*Result, error) {
 		}
 		result.Args = append(result.Args, vllmTransferConfigArg, string(transferDoc))
 	}
+	if hasStore && in.Dtype != "" {
+		result.Args = append(result.Args, KVCacheDtypeArg, in.Dtype)
+	}
 	if in.KVTransfer && in.Role == RolePrefill {
 		// The port is declared on either vendor: it is where the prefiller's handshake listener
 		// sits, and the admission reservation that keeps a user's own port off it is
