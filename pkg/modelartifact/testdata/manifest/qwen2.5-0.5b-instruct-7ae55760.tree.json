@@ -1,0 +1,68 @@
+[
+ {
+  "type": "file",
+  "oid": "a6344aac8c09253b3b630fb776ae94478aa0275b",
+  "size": 1519,
+  "path": ".gitattributes"
+ },
+ {
+  "type": "file",
+  "oid": "6634c8cc3133b3848ec74b9f275acaaa1ea618ab",
+  "size": 11343,
+  "path": "LICENSE"
+ },
+ {
+  "type": "file",
+  "oid": "4b8373851d093eb9f3017443f27781c6971eff24",
+  "size": 4917,
+  "path": "README.md"
+ },
+ {
+  "type": "file",
+  "oid": "0dbb161213629a23f0fc00ef286e6b1e366d180f",
+  "size": 659,
+  "path": "config.json"
+ },
+ {
+  "type": "file",
+  "oid": "dfc11073787daf1b0f9c0f1499487ab5f4c93738",
+  "size": 242,
+  "path": "generation_config.json"
+ },
+ {
+  "type": "file",
+  "oid": "20024bfe7c83998e9aeaf98a0cd6a2ce6306c2f0",
+  "size": 1671839,
+  "path": "merges.txt"
+ },
+ {
+  "type": "file",
+  "oid": "d7db405a3f0d9bf1ba5bdd4e4211db8022ebe4eb",
+  "size": 988097824,
+  "lfs": {
+   "oid": "fdf756fa7fcbe7404d5c60e26bff1a0c8b8aa1f72ced49e7dd0210fe288fb7fe",
+   "size": 988097824,
+   "pointerSize": 134
+  },
+  "xetHash": "bb5ff7e71536bbce6378f6d4bb523a77f1e9455965702d18bec33f599d5851f7",
+  "path": "model.safetensors"
+ },
+ {
+  "type": "file",
+  "oid": "443909a61d429dff23010e5bddd28ff530edda00",
+  "size": 7031645,
+  "path": "tokenizer.json"
+ },
+ {
+  "type": "file",
+  "oid": "07bfe0640cb5a0037f9322287fbfc682806cf672",
+  "size": 7305,
+  "path": "tokenizer_config.json"
+ },
+ {
+  "type": "file",
+  "oid": "4783fe10ac3adce15ac8f358ef5462739852c569",
+  "size": 2776833,
+  "path": "vocab.json"
+ }
+]
