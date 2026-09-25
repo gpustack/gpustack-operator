@@ -263,14 +263,19 @@ refusal with its fix (`kv-cache-injection.md`), and the lowest engine release ea
 shape has been run with, with its runner image's Mooncake client and store line
 (`engine-versions.md`), what pairs a prefill role with a decode role — the router block, the direct transfer's transport,
 roles on different hardware (`model-deployment-prefill-decode.md`), which replica each managed router
-picks and how to switch its policy (`model-deployment-routing.md`), and what a `ModelDeployment` replica does between its Pod's delete
-and its engine's exit (`model-deployment-shutdown.md`).
+picks and how to switch its policy (`model-deployment-routing.md`), what a `ModelDeployment` replica does between its Pod's delete
+and its engine's exit (`model-deployment-shutdown.md`), and the `ModelArtifact` contract — sources,
+resolution and revalidation, the manifest digest, how a deployment or an Instance consumes it, claim
+placement and the weight identity in KV keys (`model-artifact.md`).
 
 **Not** — `model-deployment-shutdown.md` owns the drain window and what it does not cover; what turns
 a replica over in the first place stays on `model-deployment.md`, which links to it.
 `commands.md` states what a flag does, not when to reach for the command. The procedure a
 one-shot belongs to lives on its operator page (`docs/operation/preflight.md` for `device-manager
 preflight`), and the reference row links to it rather than restating it.
+
+`model-artifact.md` owns everything about weights delivery; `model-deployment.md` keeps one pointer to
+it from its minimal deployment and states nothing about the artifact itself.
 
 **Pinned** — `kv-cache-injection.md` carries per-engine facts read from engine source at named
 versions. Those rows go stale silently when an engine ships a new build, so a change there is a
