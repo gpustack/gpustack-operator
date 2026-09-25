@@ -867,9 +867,9 @@ backend object**, so two Bindings reaching one leader through two objects are bo
    as an error — it surfaces as a cache that keeps losing content nobody asked it to lose.
 3. ⛔ **Two Bindings on one `domain.name` with a different `blockSize` or `dtype` corrupt each
    other's blocks.** The reuse identity an engine is handed is the domain **name alone** —
-   `blockSize` and `dtype` reach no engine; they are a declaration this API validates and records. So
-   two differently-shaped caches land under one identity, which is
-   [the silent cache pollution](../reference/model-deployment.md#the-reuse-domain-is-inherited)
+   each Binding hands its own [`dtype`](pool.md#the-dtype-is-handed-to-the-engine) to its own
+   engines, and `blockSize` reaches no engine at all. So two differently-shaped caches land under
+   one identity, which is [the silent cache pollution](../reference/model-deployment.md#the-reuse-domain-is-inherited)
    a wrong `blockSize` or `dtype` causes, reached here without either value being wrong.
 
 ⇒ If you point two objects at one leader, either keep their pools' Bindings on **different**

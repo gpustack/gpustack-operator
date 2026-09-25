@@ -231,6 +231,17 @@ type Input struct {
 	// Render refuses one that does.
 	CachePrefix string
 
+	// Dtype is the element type the Binding declared, rendered as KVCacheDtypeArg beside the store
+	// and passed through verbatim: the accepted spellings are each engine's, and this package does
+	// not judge them. Empty renders none.
+	//
+	// NEITHER ENGINE'S STORE KEY CARRIES THE DTYPE, so two engines caching one prompt under
+	// different dtypes write the same key. A reader with the wider dtype then loads the narrower
+	// block as a success over a partly stale buffer, because neither engine compares the bytes read
+	// with the bytes expected. Rendering the Binding's value makes every engine on that Binding
+	// write one element type, including an engine left on "auto", which follows the model instead.
+	Dtype string
+
 	// KVTransfer enables the point-to-point connector used by a managed prefill/decode router.
 	// With a complete Connection it is composed with the shared store; without one it is rendered on
 	// its own. The two are orthogonal inputs, not alternatives: both may be on at once.
@@ -294,6 +305,12 @@ func directLegProtocol(in Input) string {
 // MooncakeForceTCPEnv is the variable that makes the Mooncake transfer engine install TCP alone. It
 // is read by the transfer engine rather than by any engine's config class, and only for presence.
 const MooncakeForceTCPEnv = "MC_FORCE_TCP"
+
+// KVCacheDtypeArg is the flag both engine families read the KV cache element type from: vLLM
+// v0.29.0 `vllm/config/cache.py` CacheDType and SGLang v0.5.18 `server_args.py` kv_cache_dtype.
+// Each validates it against its own choices at startup, so a spelling the engine does not know stops
+// the container instead of being ignored.
+const KVCacheDtypeArg = "--kv-cache-dtype"
 
 // directLegForcesTCP reports whether a leg that resolved to tcp is also PINNED to it, beyond
 // being told so.

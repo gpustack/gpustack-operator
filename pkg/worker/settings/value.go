@@ -190,6 +190,29 @@ var (
 		setting.AllowBool(),
 	)
 
+	// ModelDeploymentKVCacheDtypeOwned hands a KVCachePoolBinding's spec.domain.dtype to every
+	// engine attached through it, as --kv-cache-dtype, and makes that flag the operator's.
+	//
+	// Neither engine's store key carries the dtype, so two engines on one Binding running different
+	// KV cache dtypes read each other's blocks as the wrong element type, and the direction where the
+	// reader's type is wider reports a hit. While on, the operator renders the Binding's value on a
+	// ModelDeployment role and on an injected Pod, refuses a role or container naming the flag
+	// itself, and refuses a new Binding declaring "auto", which binds nothing.
+	//
+	// IT IS THE ESCAPE FROM A BINDING WHOSE SPELLING THE ENGINE REJECTS. The value is passed
+	// verbatim, so such a spelling makes every new Pod fail argument parsing, and the dtype is
+	// immutable. Off, nothing is rendered and nothing is refused, which is the behavior before the
+	// flag was owned. Flipping it moves the spec hash of every pool-attached Pod, so their replicas
+	// are recreated at the deployment's next reconcile.
+	ModelDeploymentKVCacheDtypeOwned = settings.NewEditable(
+		"model-deployment-kv-cache-dtype-owned",
+		"Indicates to render a KV cache pool Binding's dtype as --kv-cache-dtype on every engine "+
+			"attached through it, and to refuse a role or Pod naming that flag itself. "+
+			"Turn it off only to recover from a Binding whose dtype the engine rejects.",
+		setting.InitializeFromEnv("true"),
+		setting.AllowBool(),
+	)
+
 	// InstanceAccessStaticAddress is the access static address for all Instances,
 	// which is used to access Instances.
 	InstanceAccessStaticAddress = settings.NewEditable(

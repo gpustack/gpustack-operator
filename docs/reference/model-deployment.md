@@ -342,6 +342,17 @@ the same keys and differ only in the connector the operator names.
 argument cannot be told apart. The refusal names the key, the engine, and `roles[].command` as the
 way to own it instead.
 
+**`--kv-cache-dtype` is owned on both engines while `spec.kvCache` is set**, in every spelling the
+engine reads as it, because the operator renders the Binding's `dtype` there — why is under
+[The dtype is handed to the engine](../kv-cache/pool.md#the-dtype-is-handed-to-the-engine). It is
+not in the table because it is conditional:
+
+- A deployment with no `spec.kvCache`, or a role with `roles[].command`, keeps the flag as its own.
+- With the Setting `model-deployment-kv-cache-dtype-owned` off, nothing is rendered or refused.
+- A deployment stored with the flag before the refusal keeps running on **its own value**, which
+  comes later on the command line and wins. Its next update is refused until the flag is removed; the
+  update that clears its finalizer on deletion is not.
+
 **Defaulted** is the other case, and `MC_TE_METRIC` is the one that matters: the operator sets it to
 `1`, and a user's own value wins with no refusal. It turns on the transfer engine's metrics, without
 which the hit rate this design rests on cannot be measured at all. It is read by the transfer engine
@@ -617,6 +628,7 @@ depends on the `InstanceType` the role names.
 | a `kind` the engine has no term for | the engine and the kind — today, `prefill` or `decode` on SGLang |
 | an owned key in `extraArgs` | the key, the engine, and `roles[].command` as the way to own it |
 | an owned name in `env` | the same three |
+| `--kv-cache-dtype` in `extraArgs` while `spec.kvCache` is set | that it carries the Binding's `dtype`, and a Binding declaring another dtype or `roles[].command` as the ways out — see [What the operator owns](#what-the-operator-owns) |
 | a `--port` in `extraArgs` or `command` naming another port than the role's first `ports` entry | both values and the field each came from. A managed direct decoder is exempt, since its proxy owns the declared port. A stored role is judged only when an edit changes its `ports` or arguments |
 | a port the operator reserves for a listener it synthesizes onto the role — vLLM's KV event ports under `llm-d-router`, or the bootstrap port of a prefiller in a declared pair that names a router or a cache — declared in `ports`, or passed as `--port` in `extraArgs` by a role declaring no `ports` | the port, the field it came from and the reserved set, on `spec.router` when a router is named. A replaced `command` is exempt, since nothing is synthesized onto it. A stored `--port` collision is left alone until an edit changes it; adding a router that creates one is refused |
 | a parallel degree the role's books cannot be read for — a known flag's value missing, non-integer, out of range or below its bound, or a malformed `VLLM_DP_SIZE` | the role, the flag, and `roles[].command` as the way to own the whole line |

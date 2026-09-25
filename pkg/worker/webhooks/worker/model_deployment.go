@@ -564,6 +564,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	errs = append(errs, validateModelDeploymentRoleListenPorts(nil, md)...)
 	errs = append(errs, validateModelDeploymentRoleReservedListenPorts(nil, md)...)
 	errs = append(errs, validateModelDeploymentServedModelNames(nil, md)...)
+	errs = append(errs, validateModelDeploymentKVCacheDtype(md, workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx))...)
 
 	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
 
@@ -617,6 +618,7 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	errs = append(errs, validateModelDeploymentRoleListenPorts(old, md)...)
 	errs = append(errs, validateModelDeploymentRoleReservedListenPorts(old, md)...)
 	errs = append(errs, validateModelDeploymentServedModelNames(old, md)...)
+	errs = append(errs, validateModelDeploymentKVCacheDtype(md, workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx))...)
 	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
 	errs = append(errs, validateModelDeploymentRouterName(md, old)...)
 	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
@@ -1810,6 +1812,46 @@ func validateModelDeploymentRoleArtifactKeys(
 				"engine downloading them reaches the Hub with the artifact's credential; replace the "+
 				"whole command line through %s to own it instead", name, rolePath.Child("command"),
 		)))
+	}
+
+	return errs
+}
+
+// validateModelDeploymentKVCacheDtype refuses, while spec.kvCache is set and the operator owns the
+// flag, a role argument naming --kv-cache-dtype: the operator renders the Binding's dtype there, and
+// a later value would silently replace it while status echoes the Binding's.
+//
+// A role that replaced its command line gets no cache render, so it is not judged. Neither is a
+// deployment being deleted: this rule is newer than objects already stored with the flag, and the
+// update that clears their finalizer must not be refused. Such an object keeps its own value, which
+// wins because it comes later on the command line, until an update of it is refused here.
+func validateModelDeploymentKVCacheDtype(md *workercore.ModelDeployment, owned bool) field.ErrorList {
+	if !owned || md.Spec.KVCache == nil || md.DeletionTimestamp != nil {
+		return nil
+	}
+
+	engine := md.Spec.Engine.Name
+	rolesPath := field.NewPath("spec", "roles")
+	var errs field.ErrorList
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if len(role.Command) > 0 {
+			continue
+		}
+		rolePath := rolesPath.Index(i)
+		for j, arg := range role.ExtraArgs {
+			flag, ok := workerctrl.ModelDeploymentKVCacheOwnedArg(engine, arg)
+			if !ok {
+				continue
+			}
+			errs = append(errs, field.Invalid(rolePath.Child("extraArgs").Index(j), arg, fmt.Sprintf(
+				"%q is set by the operator while spec.kvCache names a pool: it carries the Binding's "+
+					"spec.domain.dtype, because the store key does not and engines writing two dtypes "+
+					"into one domain read each other's blocks wrong; a different dtype needs a Binding "+
+					"declaring it, or replace the whole command line through %s to own it instead",
+				flag, rolePath.Child("command"),
+			)))
+		}
 	}
 
 	return errs

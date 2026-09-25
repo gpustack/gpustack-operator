@@ -122,6 +122,10 @@ kubelet resolves at container start.
 | `vllm-ascend` | a projected file | the same, except the connector is `AscendStoreConnector` — the two engines share the vehicle and the file's keys, but not a connector registry |
 | `sglang` | environment variables | arg `--hicache-storage-backend mooncake` and [`--enable-hierarchical-cache`](#sglangs-host-memory-tier); the `MOONCAKE_*` variables below; **no** volume and **no** mount |
 
+Every engine is also given `--kv-cache-dtype` with the Binding's `dtype`, verbatim — why, and which
+spellings each engine accepts, is under
+[The dtype is handed to the engine](../kv-cache/pool.md#the-dtype-is-handed-to-the-engine).
+
 The file is a `downwardAPI` projection of the Pod's own `kvcache.gpustack.ai/client-config`
 annotation. No ConfigMap is created, so the webhook needs no RBAC for one and leaves nothing to
 garbage-collect: the configuration's lifetime is exactly the Pod's.
@@ -223,6 +227,7 @@ container that starts normally and does not use the cache — a result invisible
 | the container count and their names | several containers and none named; the first is never chosen | set `kvcache.gpustack.ai/container` |
 | a named container that is an init container | it finishes before the workload starts, so configuring it caches nothing | name an app container |
 | a key **this Pod's own engine** would be given — `MOONCAKE_CONFIG_PATH` or `--kv-transfer-config` on the vLLM family, `--hicache-storage-backend` on SGLang | the container already has a KV cache configured, and two sources for one setting is undiagnosable | remove yours, or drop the inject label |
+| `--kv-cache-dtype`, in any spelling the engine reads as it | the dtype comes from the Binding, and engines writing two dtypes into one domain read each other's blocks wrong | remove yours and name a Binding declaring the dtype you want; the Setting `model-deployment-kv-cache-dtype-owned` off admits it as before |
 | a Binding that exists but is being deleted | its reuse domain is being withdrawn from the ledger, so the Pod would be injected and then fail every write with `TENANT_NOT_REGISTERED`, and waiting does not heal it | wait for the deletion to finish and create a new Binding, or point the Pod at one that is not terminating |
 | a pool that has published no client endpoint yet | there is no address to point the engine at | wait for the pool to report `status.clientEndpoint` |
 | a volume name or mount path the webhook owns | the same collision, in the Pod's storage | rename yours |

@@ -213,6 +213,9 @@ func renderSGLang(in Input) (*Result, error) {
 			}
 			result.Args = append(result.Args, sglangBackendExtraConfigArg, string(extra))
 		}
+		if in.Dtype != "" {
+			result.Args = append(result.Args, KVCacheDtypeArg, in.Dtype)
+		}
 		// A decode half never gets the hierarchical cache: SGLang forces the radix cache off on a
 		// decode half (v0.5.18 `arg_groups/pd_disaggregation_hook.py`), and refuses the two flags
 		// together. Every other shape serves prefills and reads the tree the backend feeds.

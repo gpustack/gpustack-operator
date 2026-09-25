@@ -382,8 +382,17 @@ func (r *ModelDeploymentReconciler) resolveModelDeploymentConnection(
 		tenant = ""
 	}
 
+	// The dtype is forwarded whatever the master's ledger, because it is not an identity the store
+	// has to hold apart: it is the element type every engine on this Binding writes, and the store
+	// key does not carry it.
+	var dtype string
+	if ModelDeploymentOwnsKVCacheDtype(ctx) {
+		dtype = domain.KVCache.Domain.Dtype
+	}
+
 	return &ModelDeploymentConnectorInput{
 		Domain:              tenant,
+		Dtype:               dtype,
 		MasterServerAddress: pool.Status.ClientEndpoint,
 		// Every group's effective protocol, never Spec.Transport.Protocol read here: the one
 		// function that owns this mapping resolves Auto, falls back to Auto for an empty value,
