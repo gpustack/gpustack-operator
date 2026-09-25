@@ -119,6 +119,12 @@ node's `Devices` ledger:
 | `sliced-max-free-units.fit.gpustack.ai/<aKey>` | the largest `remaining` on any one card of the model that can serve a logical slice and is free or already sliced | the model has at least one card that can serve a logical slice |
 | `shared-free-cards.fit.gpustack.ai/<aKey>` | the number of cards of the model that can serve a whole-card family, are free or already shared, and have `remaining >= 160000`, one ownership share | the model has at least one whole-card-capable card |
 
+**Corrected after shipping.** The sliced value above left out a card's slice slots: a card hosts at
+most its `logicalSliced.count` slices, 4 on Hygon, and one holding all of them took no further slice
+while this label still offered its free units. The label now takes its maximum only over cards that
+still have a free slot; the rule is in
+[Per-card fit labels](../docs/architecture/scheduling-chain.md#per-card-fit-labels).
+
 `<aKey>` is the accelerated device key, `<manufacturer>-<id>`, the same key as the
 `acceleratable.feature.gpustack.ai/<aKey>` labels and an `InstanceType`'s `spec.acceleratorGroup`.
 A value can be `0`. A label disappears when its model no longer has a card of that population, and

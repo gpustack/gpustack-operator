@@ -717,6 +717,12 @@ type (
 		// Remaining is the remaining allocatable units of the device.
 		Remaining int32 `json:"remaining,omitempty" yaml:"remaining,omitempty" protobuf:"varint,5,opt,name=remaining"`
 
+		// AllocatedSlices is how many logical slices the device currently hosts: one per container
+		// holding a slice of it. A logically sliceable device hosts at most LogicalSliced.Count of
+		// them whatever its Remaining says, so a slice fits only where both have room. Zero, the
+		// value a ledger written before this field existed reads as, counts as no slices.
+		AllocatedSlices int32 `json:"allocatedSlices,omitempty" yaml:"allocatedSlices,omitempty" protobuf:"varint,12,opt,name=allocatedSlices"` // nolint: lll
+
 		// AllocatedProfiles and RemainingProfiles are the per-accelerator physical-slice ledger
 		// the AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the
 		// per-Pod AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below

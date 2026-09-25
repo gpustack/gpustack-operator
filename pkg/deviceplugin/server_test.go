@@ -1065,7 +1065,7 @@ func TestDevicesReconciler_GetAllocatingPod_Feasibility(t *testing.T) {
 			ResourceName: slicedRes,
 			Quantity:     resource.MustParse("1"),
 			SkipReserved: true,
-			Feasible:     s.candidateFeasible(devs, offered, nil),
+			Feasible:     s.candidateFeasible(devs, offered, nil, nil),
 		}
 	}
 
@@ -1157,7 +1157,7 @@ func TestResourceServer_CandidateFeasible_Partitioned(t *testing.T) {
 			ResourceName: partitionRes,
 			Quantity:     resource.MustParse("1"),
 			SkipReserved: true,
-			Feasible:     s.candidateFeasible(devs, nil, nil),
+			Feasible:     s.candidateFeasible(devs, nil, nil, nil),
 		}
 	}
 
@@ -3389,7 +3389,7 @@ func TestResourceServer_PreferredAllocation_HintNamesAnAvailableToken(t *testing
 
 			resp, err := s.getContainerPreferredAllocationResponse(
 				&ContainerPreferredAllocationRequest{AvailableDeviceIDs: availableDeviceIDs, AllocationSize: 1},
-				&core.Pod{}, slicedUnitsContainer(800_000), devs)
+				&core.Pod{}, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs})
 			require.NoError(t, err)
 			require.NotEmpty(t, resp.GetDeviceIDs(), "a fitting card must yield a hint")
 
@@ -3481,7 +3481,7 @@ func TestResourceServer_PreferredAllocation_SlicedPacks(t *testing.T) {
 
 			resp, err := s.getContainerPreferredAllocationResponse(
 				&ContainerPreferredAllocationRequest{AvailableDeviceIDs: availableDeviceIDs, AllocationSize: 1},
-				&core.Pod{}, slicedUnitsContainer(c.units), devs)
+				&core.Pod{}, slicedUnitsContainer(c.units), _SlicedRoom{devs: devs})
 			require.NoError(t, err)
 
 			if c.wantCard == "" {
@@ -3517,7 +3517,7 @@ func TestResourceServer_PreferredAllocation_SlicedPinnedCardThatCannotFit(t *tes
 
 	resp, err := s.getContainerPreferredAllocationResponse(
 		&ContainerPreferredAllocationRequest{AvailableDeviceIDs: availableDeviceIDs, AllocationSize: 1},
-		pod, slicedUnitsContainer(800_000), devs)
+		pod, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs})
 	require.NoError(t, err)
 	require.Len(t, resp.GetDeviceIDs(), 1)
 
@@ -3550,7 +3550,7 @@ func TestResourceServer_PreferredAllocation_SlicedMustIncludeComesFirst(t *testi
 			MustIncludeDeviceIDs: []string{"grp-0:dev-0:0000"},
 			AllocationSize:       1,
 		},
-		&core.Pod{}, slicedUnitsContainer(800_000), devs)
+		&core.Pod{}, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs})
 	require.NoError(t, err)
 	require.Len(t, resp.GetDeviceIDs(), 1)
 
@@ -3585,7 +3585,7 @@ func TestResourceServer_PreferredAllocation_SlicedMustIncludeSurvivesAFullCard(t
 			MustIncludeDeviceIDs: []string{"grp-0:dev-0:0000"},
 			AllocationSize:       1,
 		},
-		&core.Pod{}, slicedUnitsContainer(800_000), devs)
+		&core.Pod{}, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs})
 	require.NoError(t, err)
 	require.Len(t, resp.GetDeviceIDs(), 1)
 
@@ -3972,7 +3972,7 @@ func TestResourceServer_PreferredAllocation_StalePreferredIDDoesNotPanic(t *test
 	// the third accelerator lands in the unselected list the fallback would have sliced.
 	resp, err := s.getContainerPreferredAllocationResponse(
 		&ContainerPreferredAllocationRequest{AvailableDeviceIDs: availableDeviceIDs, AllocationSize: 1},
-		pod, slicedUnitsContainer(800_000), devs)
+		pod, slicedUnitsContainer(800_000), _SlicedRoom{devs: devs})
 	require.NoError(t, err)
 
 	offered := sets.New(availableDeviceIDs...)

@@ -468,6 +468,8 @@ type cardLedger struct {
 	mode              workercore.DeviceAllocationMode
 	remaining         int32
 	remainingProfiles []workercore.AcceleratorProfileCount
+	// allocatedSlices is how many logical slices the card already hosts, per the ledger.
+	allocatedSlices int32
 }
 
 // coveredBy reports whether this card may serve the demand. Matching the flavor is plain equality on
@@ -552,6 +554,7 @@ func collectCards(pool []scopedDevices) []cardLedger {
 					mode:              acc.Mode,
 					remaining:         acc.Remaining,
 					remainingProfiles: acc.RemainingProfiles,
+					allocatedSlices:   acc.AllocatedSlices,
 				})
 			}
 		}
@@ -788,14 +791,15 @@ func fitSharedDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (
 // plugin packs in: filling a card that already carries a slice before breaking into an untouched
 // one keeps whole cards for the larger slices and the exclusive demands still to come.
 //
-// The slice tokens counted are this Workload's own. The ledger records how many units a card has
-// left, not how many slices hold them, so the tokens other Workloads already hold are not seen.
+// A card's free slots are what its count leaves after the slices the ledger already records and the
+// ones this Workload and the inflight ones were given here, so a card holding its full count of small
+// slices takes no more however much memory it has free.
 func fitSlicedDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (kueue.CheckState, string) {
 	freeUnits := func(i int) int32 {
 		c := &cards[i]
 		free := c.freeSliceUnits()
 		if free < 0 || budgets[i].whole || budgets[i].shares > 0 || !c.coveredBy(d) ||
-			budgets[i].slices >= c.capability.LogicalSliced.Count {
+			budgets[i].slices >= c.freeSlots() {
 			return -1
 		}
 		return free - budgets[i].units
@@ -830,14 +834,21 @@ func (c cardLedger) freeShares() int32 {
 }
 
 // freeSliceUnits returns the units the card can still give a logical slice before any demand of
-// this Workload is charged: -1 unless it can serve a logical slice and is free or already held in
-// sliced mode, otherwise its remaining units.
+// this Workload is charged: -1 unless it can serve a logical slice, is free or already held in
+// sliced mode, and has a free slot left, otherwise its remaining units.
 func (c cardLedger) freeSliceUnits() int32 {
 	if !c.servesFamily(nodefeature.ResourceFamilySliced) ||
-		(c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeSliced) {
+		(c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeSliced) ||
+		c.freeSlots() <= 0 {
 		return -1
 	}
 	return c.remaining
+}
+
+// freeSlots returns how many more logical slices the card can host before any demand of this
+// Workload is charged.
+func (c cardLedger) freeSlots() int32 {
+	return device.LogicalSlotsFree(c.capability, c.allocatedSlices)
 }
 
 // fitPartitionDemand gates a partition demand on the per-card placement-aware ledger: a

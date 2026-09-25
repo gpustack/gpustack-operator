@@ -340,6 +340,9 @@ func (m *AcceleratorAllocation) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i = encodeVarintGenerated(dAtA, i, uint64(m.AllocatedSlices))
+	i--
+	dAtA[i] = 0x60
 	i -= len(m.AllocatedPhysicalID)
 	copy(dAtA[i:], m.AllocatedPhysicalID)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.AllocatedPhysicalID)))
@@ -6764,6 +6767,7 @@ func (m *AcceleratorAllocation) Size() (n int) {
 	}
 	l = len(m.AllocatedPhysicalID)
 	n += 1 + l + sovGenerated(uint64(l))
+	n += 1 + sovGenerated(uint64(m.AllocatedSlices))
 	return n
 }
 
@@ -9100,6 +9104,7 @@ func (this *AcceleratorAllocation) String() string {
 		`AllocatedPhysicalPlacements:` + repeatedStringForAllocatedPhysicalPlacements + `,`,
 		`AllocatedLogicalPlacements:` + repeatedStringForAllocatedLogicalPlacements + `,`,
 		`AllocatedPhysicalID:` + fmt.Sprintf("%v", this.AllocatedPhysicalID) + `,`,
+		`AllocatedSlices:` + fmt.Sprintf("%v", this.AllocatedSlices) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -11453,6 +11458,25 @@ func (m *AcceleratorAllocation) Unmarshal(dAtA []byte) error {
 			}
 			m.AllocatedPhysicalID = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
+		case 12:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AllocatedSlices", wireType)
+			}
+			m.AllocatedSlices = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AllocatedSlices |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

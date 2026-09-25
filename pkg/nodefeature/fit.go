@@ -22,7 +22,7 @@ const (
 	FitLabelDomainSuffix = "fit." + systemname.LabelPrefix
 
 	// _FitSlicedMaxFreeUnitsLabelPrefix prefixes the largest free units on any one card that can
-	// serve a logical slice.
+	// serve a logical slice and still has a free slot for one.
 	_FitSlicedMaxFreeUnitsLabelPrefix = "sliced-max-free-units." + FitLabelDomainSuffix
 	// _FitSharedFreeCardsLabelPrefix prefixes the number of cards that can serve a whole-card
 	// family and still have a free ownership share.
@@ -30,7 +30,8 @@ const (
 )
 
 // FitSlicedMaxFreeUnitsLabelKey returns the label key carrying the largest free units on any one
-// card of the accelerator model aKey ("<manufacturer>-<id>") that can serve a logical slice.
+// card of the accelerator model aKey ("<manufacturer>-<id>") that can serve a logical slice and still
+// has a free slot for one.
 func FitSlicedMaxFreeUnitsLabelKey(aKey string) string {
 	return _FitSlicedMaxFreeUnitsLabelPrefix + aKey
 }

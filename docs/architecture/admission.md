@@ -91,13 +91,17 @@ admits them. A second Workload judged in that window would see the first one's a
 
 > **Known behavior: the inflight count follows the allocator's hint.** An inflight slice is fitted on
 > the accelerator the allocator's packing order prefers, which the kubelet normally takes. A kubelet
-> that ignores the hint can put it elsewhere, and a slice judged after it can still oversubscribe an
-> accelerator, because `Allocate` does not gate a slice on units. A Workload without a hostname-level
-> assignment is not counted as inflight; every queue this operator derives assigns one.
+> that ignores the hint can put it elsewhere, and a slice judged after it can then find no room on
+> that accelerator: `Allocate` refuses it and the Pod fails with `UnexpectedAdmissionError`. A Workload
+> without a hostname-level assignment is not counted as inflight; every queue this operator derives
+> assigns one.
 
 Slices share an accelerator the way the allocator packs them: each is charged its `.sliced.units` and
-one of the accelerator's slice tokens on the fullest accelerator that still fits it, so two 30 % slices
+one of the accelerator's slice slots on the fullest accelerator that still fits it, so two 30 % slices
 fit one free accelerator and two 60 % slices do not. Only a free or already-sliced accelerator takes one.
+
+The slots are counted from the ledger's `allocatedSlices` as well as this Workload's own slices, so a
+Hygon accelerator holding its four slices takes no fifth however much memory it has left.
 
 **Under TAS the check judges the node already assigned.** Every queue this operator derives is TAS-only
 and ends at `kubernetes.io/hostname`, so Kueue writes the node into the Workload's
@@ -121,9 +125,9 @@ node named there must host its own share of the PodSet from its own accelerators
 > loop for a pinned Workload: TAS skips the node, and when no node fits, the Workload stays pending
 > on `excluded: affinity` and holds no quota.
 >
-> Reading the pool instead let such a request through: `Allocate`, which does not gate a slice on
-> units, oversubscribed one accelerator's memory, and refuses a shared request its node cannot spread
-> over distinct accelerators, failing the Pod.
+> Reading the pool instead let such a request through to `Allocate`, which refuses a slice its
+> accelerator cannot hold and a shared request its node cannot spread over distinct accelerators,
+> failing the Pod.
 
 **The Workload fit pin.** A mutating webhook on Kueue `Workload` CREATE and UPDATE adds the pin to each
 PodSet: a logical slice of `U` units per accelerator gets `sliced-max-free-units… Gt U-1`, and a
@@ -214,10 +218,16 @@ a node that cannot serve the kind at all — the one placement error `Allocate` 
 At `Allocate`, the Device Manager settles the accelerator, injects the container's visibility env and
 runtime isolation, and records the allocation in the `Devices` ledger. "Settles" differs by family:
 
-- **accelerator-bound** — the kubelet chose the accelerator by choosing the token, so the allocator only
-  refuses one another mode holds;
+- **accelerator-bound** — the kubelet chose the accelerator by choosing the token, so the allocator
+  refuses one another mode holds and, for a logical slice, one without a free slot or the units the
+  slice needs;
 - **partitioned** — the tokens are a fungible count, so the allocator picks the accelerator itself and
   materializes the hardware instance on it.
+
+The slice refusal is the one gate every path reaches — a Pod outside the scheduling chain, or a hint
+the kubelet declined — so a slice the gates above let through by mistake fails its Pod rather than
+oversubscribing an accelerator. Its controller recreates the Pod; the refusal and its off switch are
+in [Container identification](device-discovery.md#container-identification-and-cross-mode-exclusion).
 
 Both paths, and the per-manufacturer isolation each slice gets — it covers every sliceable manufacturer
 — are in [Device Discovery](device-discovery.md#the-device-plugin-allocator). The Pod webhook caps

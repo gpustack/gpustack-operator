@@ -113,7 +113,8 @@ func desiredFitLabels(nd *core.Node, devs *workercore.Devices) map[string]string
 // fitLabelsOf derives the fit labels from a Devices ledger, one pair per "<manufacturer>-<id>"
 // group, joining each allocation on the status side with its capability on the spec side by
 // accelerator ID, as the node-devices check does. A group with no card of a population emits no
-// key for it; one whose cards are all full emits "0".
+// key for it; one whose cards are all full emits "0". A card holding its full count of logical
+// slices is full for the sliced key however much memory it has left, since it takes no further slice.
 func fitLabelsOf(devs *workercore.Devices) map[string]string {
 	capByID := make(map[string]workercore.AcceleratorStatus)
 	for gi := range devs.Spec.Groups {
@@ -133,7 +134,10 @@ func fitLabelsOf(devs *workercore.Devices) map[string]string {
 		)
 		for ai := range g.Accelerators {
 			acc := &g.Accelerators[ai]
-			card := cardLedger{capability: capByID[acc.ID], mode: acc.Mode, remaining: acc.Remaining}
+			card := cardLedger{
+				capability: capByID[acc.ID], mode: acc.Mode, remaining: acc.Remaining,
+				allocatedSlices: acc.AllocatedSlices,
+			}
 			if card.servesFamily(nodefeature.ResourceFamilySliced) {
 				sliceable = true
 				maxFreeUnits = max(maxFreeUnits, card.freeSliceUnits())

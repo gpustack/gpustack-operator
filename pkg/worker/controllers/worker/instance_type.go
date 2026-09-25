@@ -816,7 +816,10 @@ func getAcceleratorResources(devices []workercore.Devices, acceleratorKey string
 					continue
 				}
 				nodeLogicalCards++
-				if free || a.Mode == workercore.DeviceAllocationModeSliced {
+				// A card holding its full count of slices takes no more whatever memory it has
+				// left, so it offers no room to the remaining or the largest single request.
+				if (free || a.Mode == workercore.DeviceAllocationModeSliced) &&
+					device.LogicalSlotsFree(st, a.AllocatedSlices) > 0 {
 					cardSliced := rem / slicedUnit
 					nodeSliced += cardSliced
 					// A sliced request targets a single card (VRAM is the per-card,

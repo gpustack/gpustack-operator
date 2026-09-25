@@ -780,6 +780,11 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			},
 																			XListType: ptr.To[string]("map"),
 																		},
+																		"allocatedSlices": {
+																			Description: "AllocatedSlices is how many logical slices the device currently hosts: one per container\nholding a slice of it. A logically sliceable device hosts at most LogicalSliced.Count of\nthem whatever its Remaining says, so a slice fits only where both have room. Zero, the\nvalue a ledger written before this field existed reads as, counts as no slices.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
 																		"id": {
 																			Description: "ID is the universally unique identifier for this device.",
 																			Type:        "string",
@@ -1436,6 +1441,11 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																				"name",
 																			},
 																			XListType: ptr.To[string]("map"),
+																		},
+																		"allocatedSlices": {
+																			Description: "AllocatedSlices is how many logical slices the device currently hosts: one per container\nholding a slice of it. A logically sliceable device hosts at most LogicalSliced.Count of\nthem whatever its Remaining says, so a slice fits only where both have room. Zero, the\nvalue a ledger written before this field existed reads as, counts as no slices.",
+																			Type:        "integer",
+																			Format:      "int32",
 																		},
 																		"id": {
 																			Description: "ID is the universally unique identifier for this device.",

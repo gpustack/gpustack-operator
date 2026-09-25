@@ -27,3 +27,16 @@ func IsPartitioned(status AcceleratorStatus) bool {
 func IsWholeAcceleratorCapable(status AcceleratorStatus) bool {
 	return !IsPartitioned(status)
 }
+
+// LogicalSlotsFree reports how many more logical slices an accelerator can host, given how many it
+// already hosts: its LogicalSliced.Count less allocatedSlices. A slice needs a free slot as well as
+// free units, and the two run out independently — a card holding its full count of small slices
+// still reports most of its memory free. Every layer that decides whether a slice fits reads this,
+// so the device plugin, the admission check, the fit labels and the InstanceType views agree.
+// Non-positive means no slot is left, and always for an accelerator that is not logically sliceable.
+func LogicalSlotsFree(status AcceleratorStatus, allocatedSlices int32) int32 {
+	if !IsLogicallySliceable(status) {
+		return 0
+	}
+	return status.LogicalSliced.Count - allocatedSlices
+}
