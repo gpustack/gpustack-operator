@@ -20,17 +20,26 @@
 #                  on the same pool with a smaller unit RAM (spec.type is editable while stopped).
 #                  (Whether resize-on-start is the desired semantics is a separate product question;
 #                  this case pins the behavior as it stands.)
+#              Q3: starting a stopped Instance re-runs the create-time validation on resources edited
+#                  while it was stopped: a CPU over the pool's capacity is refused on start on the same
+#                  field create refuses, and an in-cap resize still starts. Guards the regression where
+#                  the start path re-checked only the upper caps, so a request create would refuse could
+#                  be slipped in while stopped and then started.
 # Environment: Any cluster with a materialized general pool whose unit RAM is at least 2Gi (a unit RAM
 #              is a whole number of Gi, so 1Gi leaves no smaller sibling and Q2 SKIPS). No GPU. Reads
 #              the overcommit setting from the settings Secret and asserts the matching branch.
 # Inputs:      All real, nothing mocked — a case-owned sibling InstanceType on the general pool with
-#              unit RAM 1Gi; INST_A (running, the target of the Q1 dry run) and INST_B (running →
-#              stopped → moved to the sibling → started), both alpine. The general InstanceType is
-#              only read: its unit spec is the dry run's target and is never changed.
+#              unit RAM 1Gi; INST_A (running, the target of the Q1 dry run, then stopped → CPU edited
+#              over the pool's capacity → started → CPU edited back → started for Q3) and INST_B
+#              (running → stopped → moved to the sibling → started), both alpine. The general
+#              InstanceType is only read: its unit spec is the dry run's target and is never changed.
 # Expected:    - Q1 — SKIP quoting both refusals; FAIL if either dry run is admitted;
 #              - Q2 precondition — moving the stopped INST_B to the sibling type is accepted;
 #              - Q2 (overcommit ON) — INST_B starts and its spec.resources.ram re-derives to 1Gi;
-#                Q2 (overcommit OFF) — the start is rejected for exceeding the sibling's RAM cap.
+#                Q2 (overcommit OFF) — the start is rejected for exceeding the sibling's RAM cap;
+#              - Q3 — the over-capacity CPU edit sticks while INST_A is stopped, the start is rejected
+#                naming spec.resources.cpu (or the maximum CPU), and after editing the CPU back to 1
+#                the start is accepted.
 # Cleanup:     Trap deletes both test Instances, then the sibling InstanceType, and waits for it to go.
 set -uo pipefail
 
@@ -206,6 +215,45 @@ else
   fi
 fi
 
+# Q3 — start re-validates resources edited while stopped. INST_A is done with Q1 (a dry run changed
+# nothing), so it is stopped and reused rather than creating another Instance. The cap is the pool's
+# CPU capacity, not its once-max request: the latter falls with occupancy, and the webhook no longer
+# bounds by it.
+CAP=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.cpu.capacity}' 2>/dev/null)
+[ -n "$CAP" ] || CAP=1
+OVER=$((CAP + 1000))
+echo "[case-9] Q3: ${IT} Status.CPU.Capacity=${CAP}, over-capacity request=${OVER}"
+kubectl -n default patch instance "$INST_A" --type=merge -p '{"spec":{"stop":true}}' >/dev/null
+if ! wait_phase "$INST_A" Stopped; then
+  record FAIL "Q3 precondition: resources are mutable while stopped" "${INST_A} did not reach Stopped, so nothing below was measured"
+else
+  kubectl -n default patch instance "$INST_A" --type=merge -p "{\"spec\":{\"resources\":{\"cpu\":\"${OVER}\"}}}" >/dev/null 2>&1
+  got=$(kubectl -n default get instance "$INST_A" -o jsonpath='{.spec.resources.cpu}' 2>/dev/null)
+  if [ "$got" != "$OVER" ]; then
+    record FAIL "Q3 precondition: resources are mutable while stopped" "the cpu edit did not stick (got '${got:-<empty>}'), so the start below would not be tested"
+  else
+    record PASS "Q3 precondition: resources are mutable while stopped" "cpu edited to ${OVER} while Stopped"
+    err=$(kubectl -n default patch instance "$INST_A" --type=merge -p '{"spec":{"stop":false}}' 2>&1 >/dev/null)
+    rc=$?
+    # Match the rejected FIELD, not one wording of it: the CPU rejection names the pool's actual state
+    # (over the maximum / no capacity), so pinning one phrase would fail on a pool that is degraded
+    # rather than merely too small.
+    if [ "$rc" -ne 0 ] && echo "$err" | grep -qiE 'spec\.resources\.cpu|maximum CPU'; then
+      record PASS "Q3 start re-validates the CPU edited while stopped" "start rejected cpu=${OVER} (capacity ${CAP}), as create would"
+    else
+      kubectl -n default patch instance "$INST_A" --type=merge -p '{"spec":{"stop":true}}' >/dev/null 2>&1 || true
+      record FAIL "Q3 start re-validates the CPU edited while stopped" \
+        "start rc=${rc} for cpu=${OVER} over capacity ${CAP} — create-time validation bypassed: $(echo "$err" | tr '\n' ' ' | cut -c1-160)"
+    fi
+    kubectl -n default patch instance "$INST_A" --type=merge -p '{"spec":{"resources":{"cpu":"1"}}}' >/dev/null 2>&1
+    if kubectl -n default patch instance "$INST_A" --type=merge -p '{"spec":{"stop":false}}' >/dev/null 2>&1; then
+      record PASS "Q3 start allows an in-cap resize" "cpu=1 starts"
+    else
+      record FAIL "Q3 start allows an in-cap resize" "a start with cpu=1 (within capacity ${CAP}) was rejected"
+    fi
+  fi
+fi
+
 echo
 echo "== CASE 9 — Instance lifecycle survives an InstanceType unit-spec change =="
 {
@@ -217,7 +265,8 @@ if [ "$FAILS" -ne 0 ]; then
   echo
   echo "FAILED ${FAILS} check(s). Q1's state must stay unreachable (both routes refused); Start's"
   echo "outcome against a smaller unit spec follows instance-general-resources-overcommit"
-  echo "(resize-and-start vs cap-and-reject)."
+  echo "(resize-and-start vs cap-and-reject); and Start must re-run create's resource validation on"
+  echo "resources edited while stopped. See webhooks/worker/instance.go."
   exit 1
 fi
 # A skipped row verified NOTHING, and Q1 skips on every cluster today, so the footer counts them
