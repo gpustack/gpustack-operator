@@ -33,7 +33,6 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/json"
-	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
@@ -267,7 +266,8 @@ func mergePodAllocations(
 		// merge: during the grace period their containers can still be running with the working dir
 		// mounted and their hardware still carved, and the reclaimer destroys an instance on pod
 		// deletion rather than on container exit. Dropping them here would report an accelerator
-		// free while it is still physically occupied.
+		// free while it is still physically occupied. A Pod in a terminal phase stays in the live set
+		// for the same reason, and heldAllocation drops from the merge only what it no longer holds.
 		livePodUIDs = append(livePodUIDs, string(pod.UID))
 
 		podStatus, err := allocatedStatusOf(pod)
@@ -284,6 +284,7 @@ func mergePodAllocations(
 				"pod", ctrlcli.ObjectKeyFromObject(pod))
 			continue
 		}
+		podStatus = heldAllocation(pod, podStatus)
 
 		desiredStatus, err = applyAllocatedStatus(podStatus, desiredStatus)
 		if err != nil {
@@ -394,19 +395,7 @@ func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller
 					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
 						return kubemeta.HasAnnotation(e.Object, AllocatedAcceleratorAnnoKey)
 					},
-					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
-						oldPod, newPod := e.ObjectOld, e.ObjectNew
-						if newPod.GetDeletionTimestamp() == nil {
-							return !mapx.EqualWithKey(oldPod.GetAnnotations(), newPod.GetAnnotations(), AllocatedAcceleratorAnnoKey)
-						}
-						if kubemeta.HasAnnotation(oldPod, AllocatedAcceleratorAnnoKey) {
-							if oldPod.GetDeletionTimestamp() == nil {
-								return true
-							}
-							return !oldPod.GetDeletionTimestamp().Equal(newPod.GetDeletionTimestamp())
-						}
-						return false
-					},
+					UpdateFunc: podUpdateChangesLedger,
 				},
 			),
 		).
@@ -1502,7 +1491,9 @@ func (r *DevicesReconciler) LivePhysicalOccupied(ctx context.Context) (Placement
 // currently claim by annotation — the durable half of what a placement decision reads, and the only
 // half that survives a device-manager restart. A terminating Pod still counts, matching the live set
 // every other ledger here is built from: its window is freed when the Pod object is gone, not when
-// its containers exit. It reads the informer cache (no device I/O).
+// its containers exit. A Pod in a terminal phase counts only for what heldAllocation says it still
+// holds, as in the ledger, so a card the ledger reports free also has its window free. It reads the
+// informer cache (no device I/O).
 func (r *DevicesReconciler) LiveLogicalOccupied(ctx context.Context) (Placements, error) {
 	podList := new(core.PodList)
 	if err := r.Client.List(ctx, podList,
@@ -1512,11 +1503,12 @@ func (r *DevicesReconciler) LiveLogicalOccupied(ctx context.Context) (Placements
 	}
 	occupied := make(Placements)
 	for i := range podList.Items {
-		podStatus, err := allocatedStatusOf(&podList.Items[i])
+		pod := &podList.Items[i]
+		podStatus, err := allocatedStatusOf(pod)
 		if err != nil {
 			continue
 		}
-		accumulateLogicalOccupied(podStatus, occupied)
+		accumulateLogicalOccupied(heldAllocation(pod, podStatus), occupied)
 	}
 	return occupied, nil
 }

@@ -1190,6 +1190,12 @@
       "title": "kueue",
       "type": "object"
     },
+    "ledgerReleaseTerminatedPods": {
+      "default": true,
+      "description": "Whether the accelerator ledger stops charging a Pod that has finished (phase Succeeded or\nFailed) for the exclusive cards, shared cards and logical slices kubelet has taken back from it.\nA hardware partition, and a MetaX or Cambricon slice, stay charged until the Pod object is gone,\nbecause they are destroyed only then. Set it to false to charge every finished Pod until its\nobject is gone, as before; the sliced Allocate gate then charges it too, which it did not do\nbefore. Rendered as GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS on the worker,\nwhose node-devices check rebuilds the ledger, and on every device-manager, which publishes it.",
+      "title": "ledgerReleaseTerminatedPods",
+      "type": "boolean"
+    },
     "migrate": {
       "description": "Migration hook Jobs. A pre-install/pre-upgrade Job reaps a Kueue left stranded by an\ninterrupted teardown, and on an upgrade applies the vendored subcharts' CRDs, which Helm\nitself applies on install only. A post-upgrade Job retires the release records of the\nper-application releases these subcharts replaced and prunes what they left behind. Both run\nthe operator image, which bundles kubectl, helm and this chart; `helm upgrade --no-hooks`\nskips them.",
       "properties": {

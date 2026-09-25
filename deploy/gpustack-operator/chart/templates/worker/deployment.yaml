@@ -128,6 +128,10 @@ spec:
               value: "{{ range $i, $s := .Values.global.imagePullSecrets }}{{ if $i }},{{ end }}{{ if kindIs "string" $s }}{{ $s }}{{ else }}{{ $s.name }}{{ end }}{{ end }}"
             - name: GPUSTACK_IMAGE_PULL_POLICY
               value: {{ include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" .Values.worker.image) | quote }}
+            # Read by the node-devices check, which rebuilds the ledger the device-managers publish;
+            # the two must agree on what a finished Pod still holds.
+            - name: GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS
+              value: {{ .Values.ledgerReleaseTerminatedPods | quote }}
             # Propagate each manufacturer's identity, so the worker reads the same facts the
             # chart states: its NodeFeatureRule, its resource accounting and the RuntimeClass
             # it attaches to a workload all come from these.
