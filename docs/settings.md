@@ -99,6 +99,16 @@ place: quota is a scalar total and cannot see per-accelerator fragmentation. Whe
 admitted Workload stay `Pending`, compare the request against the per-accelerator ledger
 (`kubectl get devices <node> -o yaml`) before adding capacity.
 
+**The joint-admission check is attached in both modes.** Every queue backing an InstanceType
+references `gpustack-model-deployment-joint` once it reports `Active`, whoever authored the type and
+whatever this setting says. It holds every replica of a multi-role ModelDeployment until the whole set
+has reserved quota — see [Prefill and decode](reference/model-deployment.md#prefill-and-decode).
+
+It answers `Ready` at once for every other Workload, so the only thing it changes is that a
+multi-role deployment no longer starts one role while another waits for quota. A set that stays short
+of quota is parked after half an hour; the deployment's `QuotaReserved` condition reads `Parked` and
+its message says how to clear it.
+
 **Write the InstanceType against the `InstanceTypeFlavor` catalog.** It is the read-only,
 os/arch-agnostic view of the pools that actually exist — one entry per grouping the settings above
 produce — and its `spec` carries the identity fields an InstanceType is built from:

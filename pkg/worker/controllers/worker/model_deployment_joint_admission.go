@@ -33,7 +33,8 @@ import (
 
 const (
 	// _JointAdmissionCheckName is the AdmissionCheck object every operator-owned ClusterQueue
-	// references, and _JointAdmissionControllerName claims it for the reconciler in this file: Kueue
+	// references once it is Active, whether or not the operator derived the queue's InstanceType,
+	// and _JointAdmissionControllerName claims it for the reconciler in this file: Kueue
 	// routes a Workload's check to whoever declares that name, so no other controller answers it.
 	//
 	// BOTH ARE TAKEN FROM THE PACKAGE THAT INSTALLS THE OBJECT rather than spelled again here. Two

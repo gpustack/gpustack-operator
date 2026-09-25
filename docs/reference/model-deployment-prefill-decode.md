@@ -282,9 +282,9 @@ publishes as its `status.entrance`. Every replica is its own group regardless, s
 going to share a Workload — on two `instanceType`s or on one. The set is admitted together by an
 admission check rather than by Kueue's intra-group rule.
 
-See [One group per replica](model-deployment.md#one-group-per-replica) for what that costs an edit, and the last row of
-[What admission refuses](model-deployment.md#what-admission-refuses) for the one state in which the shape is refused
-instead.
+See [One group per replica](model-deployment.md#one-group-per-replica) for what that costs an edit. The
+check is referenced from every queue backing an InstanceType, so the shape is admitted whether or not
+the operator derived those types.
 
 **Across manufacturers is the same change, not a second one.** A queue's accelerator quota is
 `credits.gpustack.ai/<manufacturer>`, one resource name per manufacturer, and Kueue's own webhook

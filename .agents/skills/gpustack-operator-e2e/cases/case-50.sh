@@ -48,9 +48,10 @@
 #
 # Expected:    With the quota free the two-role subject is admitted (the baseline). With the pool
 #              shorted to one replica, exactly one of the subject's roles reserves quota, every one of
-#              its replicas is still gated -- including the role that reserved -- and the deployment's
-#              status names the waiting role and not the holding one. Releasing the filler admits the
-#              whole group.
+#              its replicas is still gated -- including the role that reserved -- the reserved role's
+#              Workload carries the joint check Pending and naming the waiting role, and the
+#              deployment's status names the waiting role and not the holding one. Releasing the
+#              filler admits the whole group.
 #
 # Cleanup:     A trap deletes all three deployments and releases any Workload still holding their
 #              replicas. Idempotent, runs on pass AND fail, safe to re-run. It creates no
@@ -529,6 +530,34 @@ if [ "${WIDE:-no}" = yes ]; then
     record FAIL "the role that would have fit is gated too" \
       "ungated replicas by role: ${UNGATED}- this is the per-role admission the group exists to prevent"
   fi
+
+  # WHAT HOLDS THE ROLE THAT FIT, read off its own Workload. The row above sees the gate and not who
+  # keeps it: a queue that referenced no joint check would leave the gate on only until Kueue admits,
+  # and the reading above can land before that. This one names the check, its Pending state, and the
+  # role it is waiting for, which is the answer an operator reading the Workload gets.
+  HOLD_WL="$(printf '%s\n' "$VERDICTS" | sed -n 's/=True=.*$//p' | head -n 1)"
+  JC=""
+  for _ in $(seq 1 10); do
+    JC="$(kubectl -n "$NS" get workloads.kueue.x-k8s.io "$HOLD_WL" \
+      -o jsonpath='{range .status.admissionChecks[?(@.name=="gpustack-model-deployment-joint")]}{.state}|{.message}{end}' \
+      2>/dev/null)"
+    case "$JC" in Pending\|*"roles ${WAIT_ROLE}"*) break ;; esac
+    sleep 3
+  done
+  case "$JC" in
+    Pending\|*"roles ${WAIT_ROLE}"*)
+      record PASS "the joint check holds the role that fit, naming the waiting role" \
+        "${HOLD_WL}: Pending, waiting for ${WAIT_ROLE}"
+      ;;
+    "")
+      record FAIL "the joint check holds the role that fit, naming the waiting role" \
+        "${HOLD_WL} carries no gpustack-model-deployment-joint check, so its queue does not reference it"
+      ;;
+    *)
+      record FAIL "the joint check holds the role that fit, naming the waiting role" \
+        "${HOLD_WL}: expected Pending naming ${WAIT_ROLE}, got: ${JC}"
+      ;;
+  esac
 
   # THE OPERATOR'S OWN ACCOUNT OF THE SHORTAGE, which is a different subject from the two rows above.
   # Those read Kueue's Workloads and the kubelet's gates -- state Kueue owns. This reads what

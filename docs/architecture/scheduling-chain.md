@@ -339,6 +339,7 @@ resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
   shared/sliced credits up to 1), a non-accelerated queue only CPU.
 - **AdmissionCheck** — `gpustack-node-devices`, referenced on an accelerated queue once Active, whoever
   authored its InstanceType, and only while [`instance-type-derived-from-node`](../settings.md#authoring-the-instancetype-yourself) is on.
+  `gpustack-model-deployment-joint` is referenced on every queue once Active, whatever that setting says.
 - **Finalizing flavor** — **absent**. Its nodes left, so `NodeFlavorReconciler` deleted it, but Kueue
   holds `resource-in-use` until no ClusterQueue references it, and dropping it from the groups is the
   update Kueue waits for. A workload on a dropped *partial-pool* flavor is evicted and re-admitted on

@@ -35,9 +35,9 @@ func onManufacturer(manufacturer string) func(*worker.InstanceType) {
 // kind, refused by a rule this same path runs on this same fixture. It used to be SGLang's
 // prefill/decode pair, which the kind rules no longer refuse.
 //
-// THE REFUSAL IS CHECKED BY WHICH RULE ANSWERED, not merely that an error came back. Two
-// instanceTypes also engage the barrier rule, and a case asserting only that something was refused
-// would go green on that one while the kind rule stopped working.
+// THE REFUSAL IS CHECKED BY WHICH RULE ANSWERED, not merely that an error came back. A case
+// asserting only that something was refused would go green on any other rule while the kind rule
+// stopped working.
 func TestModelDeploymentWebhook_CrossManufacturerIsAdmitted(t *testing.T) {
 	wholeCard := func() *workercore.ModelDeploymentRoleResources {
 		return &workercore.ModelDeploymentRoleResources{
@@ -103,11 +103,6 @@ func TestModelDeploymentWebhook_CrossManufacturerIsAdmitted(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Two instanceTypes are what every row here declares, and the barrier rule refuses that
-			// unless it can be installed. That rule has its own test; here it must not be what
-			// answers, or these rows would be asserting it by accident.
-			withDerivedFromNode(t, true)
-
 			md := modelDeployment(tc.engine, tc.roles...)
 
 			_, err := newModelDeploymentWebhookWith(live).ValidateCreate(context.Background(), md)
