@@ -12,9 +12,11 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
@@ -1927,6 +1929,95 @@ func TestPoolAcceleratorRuntimeVersions(t *testing.T) {
 			// the ones whose expectation above happens to be a single entry.
 			assert.True(t, slices.IsSortedFunc(got, compareRuntimeVersions),
 				"the list must be ascending: its first element is what gets published as the version")
+		})
+	}
+}
+
+// TestInstanceTypeReconciler_ExpectedWriteFailuresAreQuiet pins how a reconcile ends when the
+// InstanceType changed or was deleted after it was read. Neither is logged as an error or returned.
+// A conflict requeues: the predicate drops status-only and metadata-only updates, so the change
+// behind the conflict may deliver no event. Any other failure is still returned and logged, and the
+// next reconcile writes the status in every case.
+func TestInstanceTypeReconciler_ExpectedWriteFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: workercore.GroupVersion.Group, Resource: "instancetypes"}
+	name := nodeQueueName("generic")
+	testCases := []struct {
+		name       string
+		deleting   bool
+		err        error
+		want       ctrlreconcile.Result
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name: "a conflicting status update requeues quietly",
+			err:  kerrors.NewConflict(gr, name, fmt.Errorf("the object has been modified")),
+			want: _requeueAfterConflict,
+		},
+		{
+			name: "a status update on a deleted instance type ends quietly",
+			err:  kerrors.NewNotFound(gr, name),
+		},
+		{
+			name:     "a conflicting status update while terminating requeues quietly",
+			deleting: true,
+			err:      kerrors.NewConflict(gr, name, fmt.Errorf("the object has been modified")),
+			want:     _requeueAfterConflict,
+		},
+		{
+			name:       "any other status update failure is returned and logged",
+			err:        kerrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			it := &workercore.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: name},
+				Spec: workercore.InstanceTypeSpec{
+					GeneralGroup:  "generic",
+					OS:            "linux",
+					Arch:          "amd64",
+					UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "8Gi"},
+					LocalStorage:  "64Gi",
+				},
+			}
+			objs := []ctrlcli.Object{it}
+			if tc.deleting {
+				systemmeta.Lock(it)
+				it.DeletionTimestamp = ptr.To(meta.Now())
+				objs = append(objs, &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: name}})
+			}
+			var injected bool
+			fail := failOnce(tc.err)
+			cli := ctrlinterceptor.NewClient(buildInstanceTypeClient(objs...).(ctrlcli.WithWatch), ctrlinterceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
+					if _, ok := obj.(*workercore.InstanceType); ok {
+						if err := fail(); err != nil {
+							injected = true
+							return err
+						}
+					}
+					return c.SubResource(sub).Update(ctx, obj, opts...)
+				},
+			})
+			r := &InstanceTypeReconciler{Client: cli, APIReader: cli}
+			req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: name}}
+
+			out := reconcileUntilInjected(t, r, req, &injected)
+			if tc.wantErr {
+				assert.Error(t, out.err)
+			} else {
+				assert.NoError(t, out.err)
+			}
+			assert.Equal(t, tc.want, out.res)
+			assert.Equal(t, tc.wantLogged, out.logged, "error log lines")
+
+			// The next reconcile, which the requeue or the returned error triggers, writes it.
+			_, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+			assert.Equal(t, nodefeature.FormatLocalQueueName(name), getInstanceType(t, cli, name).Status.Entrance)
 		})
 	}
 }

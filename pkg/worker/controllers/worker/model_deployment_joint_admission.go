@@ -105,8 +105,11 @@ func (r *ModelDeploymentJointAdmissionCheckReconciler) Reconcile(
 
 	ac := new(kueue.AdmissionCheck)
 	if err := r.Client.Get(ctx, req.NamespacedName, ac); err != nil {
-		logger.Error(err, "fetch admission check")
-		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+		// A deleted AdmissionCheck has nothing left to activate.
+		if err = ctrlcli.IgnoreNotFound(err); err != nil {
+			logger.Error(err, "fetch admission check")
+		}
+		return ctrl.Result{}, err
 	}
 
 	if ac.Spec.ControllerName != _JointAdmissionControllerName {
@@ -125,8 +128,9 @@ func (r *ModelDeploymentJointAdmissionCheckReconciler) Reconcile(
 		Message: "the model deployment joint admission check controller is running",
 	})
 	if err := r.Client.Status().Update(ctx, ac); err != nil {
-		logger.Error(err, "mark admission check active")
-		return ctrl.Result{}, err
+		// The predicate passes every update of this controller's check, so a conflict is followed
+		// by an event for the newer version.
+		return objectWriteResult(logger, err, "mark admission check active", ctrl.Result{})
 	}
 
 	logger.V(2).Info("activated model deployment joint admission check", "name", ac.Name)
@@ -197,8 +201,11 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 
 	wl := new(kueue.Workload)
 	if err := r.Client.Get(ctx, req.NamespacedName, wl); err != nil {
-		logger.Error(err, "fetch workload")
-		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+		// A deleted Workload has nothing left to judge.
+		if err = ctrlcli.IgnoreNotFound(err); err != nil {
+			logger.Error(err, "fetch workload")
+		}
+		return ctrl.Result{}, err
 	}
 
 	// The same gates the node-devices check states: before reservation there is nothing to confirm,
@@ -246,8 +253,9 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 		if err := r.applyVerdict(
 			ctx, wl, checks, kueue.CheckStatePending, _JointAdmissionUndecidedMessage,
 		); err != nil {
-			logger.Error(err, "write the undecided verdict")
-			return ctrl.Result{}, err
+			// The Workload is watched without a predicate, so a conflict on this or any verdict
+			// write below is followed by an event for the newer version.
+			return objectWriteResult(logger, err, "write the undecided verdict", ctrl.Result{})
 		}
 
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
@@ -266,8 +274,11 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 	// and exposure to the park bound for no atomicity at all -- there is no second role whose
 	// admission has to coincide with its.
 	if md == nil || len(modelDeploymentPodGroups(md)) < 2 {
-		return ctrl.Result{}, r.applyVerdict(ctx, wl, checks, kueue.CheckStateReady,
-			"nothing to wait for: this workload is not one replica of a multi-role model deployment")
+		if err = r.applyVerdict(ctx, wl, checks, kueue.CheckStateReady,
+			"nothing to wait for: this workload is not one replica of a multi-role model deployment"); err != nil {
+			return objectWriteResult(logger, err, "write the verdict", ctrl.Result{})
+		}
+		return ctrl.Result{}, nil
 	}
 
 	held, err := r.jointVerdict(ctx, md)
@@ -284,10 +295,16 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 		r.heldPast(wl, _JointAdmissionInfeasibleAfter) {
 		logger.Info("parking a deployment whose groups have not assembled", "workload", wl.Name)
 
-		return ctrl.Result{}, r.park(ctx, wl, checks, held.Message)
+		if err = r.park(ctx, wl, checks, held.Message); err != nil {
+			return objectWriteResult(logger, err, "park the deployment", ctrl.Result{})
+		}
+		return ctrl.Result{}, nil
 	}
 
-	return ctrl.Result{}, r.applyVerdict(ctx, wl, checks, held.State, held.Message)
+	if err = r.applyVerdict(ctx, wl, checks, held.State, held.Message); err != nil {
+		return objectWriteResult(logger, err, "write the verdict", ctrl.Result{})
+	}
+	return ctrl.Result{}, nil
 }
 
 // heldPast reports whether this controller's check has been Pending for longer than the bound.

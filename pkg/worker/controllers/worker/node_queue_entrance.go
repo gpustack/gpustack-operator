@@ -60,8 +60,11 @@ func (r *NodeQueueEntranceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	cq := new(kueue.ClusterQueue)
 	err := r.Client.Get(ctx, req.NamespacedName, cq)
 	if err != nil {
-		logger.Error(err, "fetch cluster queue")
-		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+		// A deleted ClusterQueue has nothing left to reconcile.
+		if err = ctrlcli.IgnoreNotFound(err); err != nil {
+			logger.Error(err, "fetch cluster queue")
+		}
+		return ctrl.Result{}, err
 	}
 
 	// Skip if deleted.

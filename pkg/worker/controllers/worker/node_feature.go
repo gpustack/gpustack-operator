@@ -41,8 +41,11 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	nd := new(core.Node)
 	err := r.Client.Get(ctx, req.NamespacedName, nd)
 	if err != nil {
-		logger.Error(err, "fetch node")
-		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+		// A deleted Node has nothing left to reconcile.
+		if err = ctrlcli.IgnoreNotFound(err); err != nil {
+			logger.Error(err, "fetch node")
+		}
+		return ctrl.Result{}, err
 	}
 
 	// Skip if deleted.

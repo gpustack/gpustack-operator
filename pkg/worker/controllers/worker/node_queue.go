@@ -129,8 +129,9 @@ func (r *NodeQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)
 		if err = r.Client.Update(ctx, cq); err != nil {
-			logger.Error(err, "hold and drain deleting cluster queue")
-			return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+			// Every write of the queue in this reconciler requeues on a conflict. The usual cause is
+			// Kueue's status churn, which the predicate drops, so no event may follow the conflict.
+			return objectWriteResult(logger, err, "hold and drain deleting cluster queue", _requeueAfterConflict)
 		}
 		logger.V(2).Info("holding and draining deleting cluster queue")
 		return ctrl.Result{}, nil
@@ -303,8 +304,7 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 	}
 	if changed {
 		if err := r.Client.Update(ctx, cq); err != nil {
-			logger.Error(err, "fill cluster queue resource groups")
-			return ctrl.Result{}, err
+			return objectWriteResult(logger, err, "fill cluster queue resource groups", _requeueAfterConflict)
 		}
 		logger.V(2).Info("filled cluster queue resource groups")
 	}
@@ -325,8 +325,7 @@ func (r *NodeQueueReconciler) migrateClusterQueueResourceGroups(
 		cq.Annotations[_TASQueueMigrationStopPolicyAnnotation] = encodeStopPolicy(cq.Spec.StopPolicy)
 		cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)
 		if err := r.Client.Update(ctx, cq); err != nil {
-			logger.Error(err, "start cluster queue topology migration")
-			return ctrl.Result{}, err
+			return objectWriteResult(logger, err, "start cluster queue topology migration", _requeueAfterConflict)
 		}
 		if err := r.setTopologyReadyCondition(ctx, cq, false, "Migrating", "holding and draining before switching topology flavors"); err != nil {
 			return ctrl.Result{}, err
@@ -349,8 +348,7 @@ func (r *NodeQueueReconciler) migrateClusterQueueResourceGroups(
 	}
 	if changed {
 		if err := r.Client.Update(ctx, cq); err != nil {
-			logger.Error(err, "maintain held cluster queue topology migration")
-			return ctrl.Result{}, err
+			return objectWriteResult(logger, err, "maintain held cluster queue topology migration", _requeueAfterConflict)
 		}
 		return ctrl.Result{RequeueAfter: _TASQueueMigrationRequeueAfter}, nil
 	}
@@ -362,8 +360,7 @@ func (r *NodeQueueReconciler) migrateClusterQueueResourceGroups(
 		cq.Spec.ResourceGroups = desired
 		cq.Annotations[_TASQueueMigrationPhaseAnnotation] = _TASQueueMigrationPhaseSwitched
 		if err := r.Client.Update(ctx, cq); err != nil {
-			logger.Error(err, "switch held cluster queue topology flavors")
-			return ctrl.Result{}, err
+			return objectWriteResult(logger, err, "switch held cluster queue topology flavors", _requeueAfterConflict)
 		}
 		return ctrl.Result{RequeueAfter: _TASQueueMigrationRequeueAfter}, nil
 	}
@@ -382,8 +379,7 @@ func (r *NodeQueueReconciler) migrateClusterQueueResourceGroups(
 	delete(cq.Annotations, _TASQueueMigrationPhaseAnnotation)
 	delete(cq.Annotations, _TASQueueMigrationStopPolicyAnnotation)
 	if err := r.Client.Update(ctx, cq); err != nil {
-		logger.Error(err, "restore cluster queue after topology migration")
-		return ctrl.Result{}, err
+		return objectWriteResult(logger, err, "restore cluster queue after topology migration", _requeueAfterConflict)
 	}
 	return ctrl.Result{}, r.setTopologyReadyCondition(ctx, cq, true, "Ready", "all queue flavors are topology-aware and quota is conserved")
 }

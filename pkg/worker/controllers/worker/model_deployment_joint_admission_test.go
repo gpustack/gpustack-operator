@@ -10,7 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	testingclock "k8s.io/utils/clock/testing"
@@ -18,12 +20,14 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 	kueueworkload "sigs.k8s.io/kueue/pkg/workload"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 )
 
 // jointCheckObject is the AdmissionCheck this controller claims. FilterForController reads it to
@@ -1438,4 +1442,128 @@ func anyReplicaMidReplacement(t *testing.T, cli ctrlcli.Client) bool {
 	}
 
 	return false
+}
+
+// TestModelDeploymentJointAdmission_ExpectedWriteFailuresAreQuiet pins how a reconcile ends when the
+// Workload changed or was deleted after it was read. Both heal on their own, the conflict through the
+// change event that reconciles the Workload again, since it is watched without a predicate, so they
+// end the reconcile without an error and without an error log. Any other failure is still returned
+// and logged, and the next reconcile writes the verdict in every case.
+func TestModelDeploymentJointAdmission_ExpectedWriteFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: kueue.GroupVersion.Group, Resource: "workloads"}
+	testCases := []struct {
+		name       string
+		err        error
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name: "a conflicting verdict write ends quietly",
+			err:  apierrors.NewConflict(gr, "wl", fmt.Errorf("the object has been modified")),
+		},
+		{
+			name: "a verdict write on a deleted workload ends quietly",
+			err:  apierrors.NewNotFound(gr, "wl"),
+		},
+		{
+			name:       "any other write failure is returned and logged",
+			err:        apierrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := jointGroupPod("someone-elses", "their-group", "")
+			var injected bool
+			fail := failOnce(tc.err)
+			cli := ctrlinterceptor.NewClient(
+				newJointClient(jointCheckObject(), pod, jointWorkload("wl", true, pod)).(ctrlcli.WithWatch),
+				ctrlinterceptor.Funcs{
+					SubResourcePatch: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, patch ctrlcli.Patch, opts ...ctrlcli.SubResourcePatchOption) error {
+						if err := fail(); err != nil {
+							injected = true
+							return err
+						}
+						return c.SubResource(sub).Patch(ctx, obj, patch, opts...)
+					},
+				})
+			r := &ModelDeploymentJointAdmissionReconciler{Client: cli}
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "team-a", Name: "wl"}}
+
+			out := reconcileUntilInjected(t, r, req, &injected)
+			if tc.wantErr {
+				assert.Error(t, out.err)
+			} else {
+				assert.NoError(t, out.err)
+			}
+			assert.Equal(t, ctrl.Result{}, out.res)
+			assert.Equal(t, tc.wantLogged, out.logged, "error log lines")
+
+			// The next reconcile, which the change event or the returned error triggers, writes it.
+			assert.Equal(t, kueue.CheckStateReady, jointCheckState(reconcileJoint(t, cli, "wl")))
+		})
+	}
+}
+
+// TestModelDeploymentJointAdmissionCheckReconciler_ExpectedWriteFailuresAreQuiet pins the same rule
+// for the AdmissionCheck this controller marks Active: its predicate passes every update of the
+// check, so a conflict or a deleted object ends the reconcile without an error and without an error
+// log, any other failure is returned and logged, and the next reconcile marks the check Active.
+func TestModelDeploymentJointAdmissionCheckReconciler_ExpectedWriteFailuresAreQuiet(t *testing.T) {
+	gr := schema.GroupResource{Group: kueue.GroupVersion.Group, Resource: "admissionchecks"}
+	testCases := []struct {
+		name       string
+		err        error
+		wantErr    bool
+		wantLogged int
+	}{
+		{
+			name: "a conflicting status update ends quietly",
+			err:  apierrors.NewConflict(gr, _JointAdmissionCheckName, fmt.Errorf("the object has been modified")),
+		},
+		{
+			name: "a status update on a deleted admission check ends quietly",
+			err:  apierrors.NewNotFound(gr, _JointAdmissionCheckName),
+		},
+		{
+			name:       "any other update failure is returned and logged",
+			err:        apierrors.NewInternalError(fmt.Errorf("etcd unavailable")),
+			wantErr:    true,
+			wantLogged: 1,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var injected bool
+			fail := failOnce(tc.err)
+			cli := ctrlinterceptor.NewClient(newJointClient(jointCheckObject()).(ctrlcli.WithWatch), ctrlinterceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
+					if err := fail(); err != nil {
+						injected = true
+						return err
+					}
+					return c.SubResource(sub).Update(ctx, obj, opts...)
+				},
+			})
+			r := &ModelDeploymentJointAdmissionCheckReconciler{Client: cli}
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: _JointAdmissionCheckName}}
+
+			out := reconcileUntilInjected(t, r, req, &injected)
+			if tc.wantErr {
+				assert.Error(t, out.err)
+			} else {
+				assert.NoError(t, out.err)
+			}
+			assert.Equal(t, ctrl.Result{}, out.res)
+			assert.Equal(t, tc.wantLogged, out.logged, "error log lines")
+
+			// The next reconcile, which the change event or the returned error triggers, marks it.
+			_, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+			got := new(kueue.AdmissionCheck)
+			require.NoError(t, cli.Get(context.Background(), req.NamespacedName, got))
+			assert.True(t, kubemeta.IsConditionTrue(got.Status.Conditions, kueue.AdmissionCheckActive))
+		})
+	}
 }
