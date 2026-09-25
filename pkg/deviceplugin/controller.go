@@ -999,11 +999,14 @@ func (r *DevicesReconciler) getAllocatingPod(
 // When none is left the tiers come back whole: kubelet and the informer disagree — a pod kubelet
 // holds that the informer has not delivered yet, say — and the heuristic's guess is better than no
 // answer. When several are left the heuristic chooses among them only.
+//
+// With no candidate at all there is nothing to narrow and nothing is logged: the informer has not
+// delivered the Pod kubelet is admitting yet, and the caller retries until it has.
 func narrowToKubeletPending(
 	logger logr.Logger, match _AllocationMatch,
 	feasible, infeasible, claimed []_AllocatingCandidate,
 ) ([]_AllocatingCandidate, []_AllocatingCandidate, []_AllocatingCandidate) {
-	if match.Kubelet == nil {
+	if match.Kubelet == nil || len(feasible)+len(infeasible)+len(claimed) == 0 {
 		return feasible, infeasible, claimed
 	}
 	waiting := func(tier []_AllocatingCandidate) []_AllocatingCandidate {

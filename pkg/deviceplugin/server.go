@@ -455,7 +455,8 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 	selectedResTokens, remainingSize := sel.Selected, sel.RemainingSize
 
 	if preferredDeviceIDsSet.Len() > 0 {
-		s.Logger.Error(nil, "not enough preferred devices: %v", preferredDeviceIDsSet.UnsortedList())
+		s.Logger.Error(nil, "not enough preferred devices",
+			"unmet", sets.List(preferredDeviceIDsSet))
 		if len(sel.Unselected) == 0 {
 			return &ContainerPreferredAllocationResponse{}, nil
 		}
@@ -473,7 +474,8 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 	}
 
 	if remainingSize > 0 {
-		s.Logger.Error(nil, "not enough devices: required %d, but only %d available", allocationSize, allocationSize-remainingSize)
+		s.Logger.Error(nil, "not enough devices",
+			"required", allocationSize, "available", allocationSize-remainingSize)
 		return &ContainerPreferredAllocationResponse{}, nil
 	}
 
