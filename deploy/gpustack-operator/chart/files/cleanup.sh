@@ -7,7 +7,9 @@
 #     installed before Kueue / Node Feature Discovery / the CSI drivers became
 #     subcharts of the operator chart (a compatibility pass: a chart-mode uninstall
 #     has already taken those workloads down with the release);
-#   - the CRDs this release installed (gpustack, and Kueue when this release installed it);
+#   - the CRDs this release installed (gpustack, and Kueue when one of this operator's releases
+#     in this namespace installed it);
+#   - the gpustack-cpu-info NodeFeatureRule the worker applies at boot, which no release owns;
 #   - the finalizers that pin objects once their controllers are gone
 #     (Kueue's `kueue.x-k8s.io/resource-in-use`, the operator's
 #     `gpustack.ai/controlled` on Instances AND InstanceTypes);
@@ -26,8 +28,8 @@
 #     in-cluster with the operator image (which bundles kubectl + helm).
 #
 # Idempotent and safe to re-run. It NEVER deletes namespaces, and touches only the gpustack CRDs plus
-# the Kueue ones THIS release installed — a Kueue the cluster already had is left alone, as are the
-# user's own resources. NFD's CRDs are left in place entirely; see owned_crds for why.
+# the Kueue ones THIS operator's releases installed — a Kueue the cluster already had is left alone,
+# as are the user's own resources. NFD's CRDs are left in place entirely; see owned_crds for why.
 set -uo pipefail
 
 NS="${1:-${GPUSTACK_NAMESPACE:-gpustack-system}}"
@@ -35,6 +37,12 @@ NS="${1:-${GPUSTACK_NAMESPACE:-gpustack-system}}"
 # standalone one's. Defaults to the conventional name for the same reason $2 does: the e2e skills run
 # this script on a host with no release to ask.
 RELEASE="${3:-gpustack-operator}"
+# The Helm releases that may own a Kueue this operator installed: the chart release itself, the
+# release the worker installs from inside the operator image, and the standalone Kueue release
+# earlier versions installed. Kept byte-identical to the same line in migrate-pre.sh, and
+# `make lint chart` fails when the two differ: one script deciding a Kueue is ours while the other
+# does not is how an image-mode teardown stranded its CRDs.
+KUEUE_RELEASES="${RELEASE},gpustack-operator-device-manager,gpustack-kueue"
 echo "[cleanup] namespace=${NS} release=${RELEASE}"
 
 # 0. Preflight. Every sweep below swallows errors by design, so against a wrong or absent
@@ -130,8 +138,14 @@ kubectl get apiservices \
 #
 #    BOTH Helm ownership annotations, because either alone is satisfied by somebody else's release:
 #    a standalone Kueue installed into this same namespace carries the same release-namespace, and a
-#    release of the same name elsewhere carries the same release-name. The pair identifies exactly
-#    one release, which is the only thing that authorises deleting a CRD.
+#    release of the same name elsewhere carries the same release-name. The namespace must be this
+#    one and the name one of KUEUE_RELEASES, which is the only thing that authorises deleting a CRD.
+#
+#    The name is a SET and not $RELEASE alone because step 1 has just uninstalled the other two.
+#    Their Kueue templates its CRDs, so that uninstall removes the controller and the CRDs in one
+#    pass while every ClusterQueue, ResourceFlavor, Topology and AdmissionCheck still carries
+#    kueue.x-k8s.io/resource-in-use. Only this step can release them, and matching $RELEASE alone
+#    skipped it on every image-mode and v0.5.x teardown, leaving the Kueue CRDs Terminating.
 #
 #    NFD IS DELIBERATELY ABSENT, and its CRDs are left in place. Its subchart ships them under
 #    crds/, which Helm installs verbatim and never annotates — so there is no ownership to read and
@@ -147,7 +161,11 @@ owned_crds() {
         case "${crd}" in
           *.gpustack.ai) ;;
           *.kueue.x-k8s.io)
-            [ "${owner_ns}" = "${NS}" ] && [ "${owner_name}" = "${RELEASE}" ] || continue ;;
+            [ "${owner_ns}" = "${NS}" ] && [ -n "${owner_name}" ] || continue
+            case ",${KUEUE_RELEASES}," in
+              *",${owner_name},"*) ;;
+              *) continue ;;
+            esac ;;
           *) continue ;;
         esac
         echo "${crd} ${res}"
@@ -328,6 +346,21 @@ done
 if [ "$(kubectl -n kube-system get rolebinding kueue-visibility-server-auth-reader \
       -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}' 2>/dev/null)" = "${NS}" ]; then
   kubectl -n kube-system delete rolebinding kueue-visibility-server-auth-reader --ignore-not-found 2>/dev/null || true
+fi
+
+# 9. Delete the gpustack-cpu-info NodeFeatureRule. The worker applies it at boot in both install
+#    modes, and no release owns it, so neither `helm uninstall` nor the NFD CRDs' survival (see
+#    owned_crds) ever removes it. Left behind, it keeps an external NFD labelling nodes for an
+#    operator that is gone, and it fails the install of any earlier version whose NFD release
+#    rendered the same rule, on "exists and cannot be imported".
+#
+#    The fixed name only nominates; the part-of label is what confirms it. The worker puts that label
+#    on the rule, and so did the per-application NFD release of v0.5.x. A rule of that name without
+#    the label is somebody else's. Only this one rule is deleted: NFD itself and every other rule
+#    are left alone.
+if [ "$(kubectl get nodefeaturerules.nfd.k8s-sigs.io gpustack-cpu-info \
+      -o jsonpath='{.metadata.labels.app\.kubernetes\.io/part-of}' 2>/dev/null)" = "gpustack-operator" ]; then
+  kubectl delete nodefeaturerules.nfd.k8s-sigs.io gpustack-cpu-info --ignore-not-found 2>/dev/null || true
 fi
 
 echo "[cleanup] done"

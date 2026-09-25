@@ -89,7 +89,10 @@ NS=gpustack-system
 
 # 1. Remove v0.5.x completely, including the runtime-installed Kueue/NFD/CSI sub-releases,
 #    their CRDs/finalizers, and the aggregated APIServices/webhooks. cleanup.sh ships in the
-#    chart under files/; run it against your active context.
+#    chart under files/; run it against your active context. A copy from v0.8.6 or earlier
+#    leaves the gpustack-kueue CRDs Terminating; run it as
+#    `cleanup.sh "$NS" gpustack-operator-worker-cert gpustack-kueue` instead, see
+#    Migration Troubleshooting.
 bash deploy/gpustack-operator/chart/files/cleanup.sh "$NS"
 # (or, if you enabled it, the gated post-delete hook: helm uninstall with cleanupOnUninstall=true)
 
