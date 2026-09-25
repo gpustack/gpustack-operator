@@ -18,10 +18,30 @@ if [ ! -f "$CHECK" ]; then
   echo "FAIL: $CHECK does not exist, so the gate was not exercised." >&2
   exit 2
 fi
-if ! command -v shellcheck >/dev/null 2>&1; then
-  echo "FAIL: no shellcheck on PATH, so the self-test cannot exercise the gate." >&2
+
+# Resolve the pinned shellcheck exactly as the gate does, then drive every fixture with it through
+# SHELLCHECK_BIN. Demanding one on PATH instead broke the image build: its container ships no
+# shellcheck, `make ci` runs `make lint`, and this self-test failed before its first case — which
+# is also why the guard cannot be "try PATH, else skip": a gate that steps aside where shellcheck
+# is absent is exactly the vacuous pass this file exists to bar. A pin that cannot be resolved at
+# all is still a loud failure of the instrument, reported as one.
+SELFTEST_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)"
+ROOT_DIR="$(cd "${SELFTEST_LIB}/../.." && pwd)"
+# shellcheck source=lib/util.sh
+# shellcheck source=lib/log.sh
+# shellcheck source=lib/style.sh
+# shellcheck disable=SC1091
+source "${SELFTEST_LIB}/util.sh"
+# shellcheck disable=SC1091
+source "${SELFTEST_LIB}/log.sh"
+# shellcheck disable=SC1091
+source "${SELFTEST_LIB}/style.sh"
+if ! gpustack::lint::shellcheck::validate; then
+  echo "FAIL: the pinned shellcheck cannot be resolved, so the self-test cannot exercise the gate." >&2
   exit 2
 fi
+SHELLCHECK_BIN="$(gpustack::lint::shellcheck::bin)"
+export SHELLCHECK_BIN
 
 MINI="$(mktemp -d)"
 trap 'rm -rf "${MINI}"' EXIT
