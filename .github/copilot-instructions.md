@@ -2,9 +2,10 @@
 
 GPUStack Operator is a Kubernetes operator that turns raw node hardware into a
 Kueue-based scheduling chain for accelerators (GPU/NPU/TPU), built on Node Feature
-Discovery (NFD) + Kueue. One binary (`cmd/gpustack-operator`) runs three subcommands
+Discovery (NFD) + Kueue. One binary (`cmd/gpustack-operator`) runs four subcommands
 — `worker` (control-plane controllers + aggregated extension API), `worker-gateway`,
-and `device-manager` (per-node DaemonSet) — driving a four-stage chain: NFD labels
+`device-manager` (per-node DaemonSet), and `model-manager` (per-node CSI plugin that
+mounts Hugging Face weights from a verified node cache) — three of which drive a four-stage chain: NFD labels
 nodes → the Device Manager detects accelerators and maintains the `Devices` CR
 ledger (the single authoritative record of who holds what) → the worker profiles
 per-node capacity labels → controllers materialize Kueue `ResourceFlavor` →

@@ -8,7 +8,7 @@
 
 ## Contents
 
-- [One binary, three subcommands](#one-binary-three-subcommands)
+- [One binary, four subcommands](#one-binary-four-subcommands)
 - [Worker startup order matters](#worker-startup-order-matters)
 - [The worker gateway mirrors the cluster API, it does not embed it](#the-worker-gateway-mirrors-the-cluster-api-it-does-not-embed-it)
 - [Device plugins re-register on their own, once per kubelet restart](#device-plugins-re-register-on-their-own-once-per-kubelet-restart)
@@ -16,10 +16,10 @@
 - [CGO bindings (`binding/`)](#cgo-bindings-binding)
 - [The 63-character constraint, recurring](#the-63-character-constraint-recurring)
 
-## One binary, three subcommands
+## One binary, four subcommands
 
-`cmd/gpustack-operator/main.go` wires one binary with the three cobra subcommands
-[Architecture](../architecture.md#one-binary-three-subcommands) tabulates. Beyond that table:
+`cmd/gpustack-operator/main.go` wires one binary with the four cobra subcommands
+[Architecture](../architecture.md#one-binary-four-subcommands) tabulates. Beyond that table:
 
 - **`worker`** (alias `w`) runs an aggregated extension API server *and* a controller-runtime manager in
   one process, plus the scheduling-chain controllers ([Scheduling Chain](scheduling-chain.md)). It can
@@ -27,6 +27,9 @@
   default.
 - **`device-manager`** has subcommands `serve` / `detect` / `monitor`: it detects and monitors local
   accelerators, reports a `NodeFeature` + `Devices` CR, and runs the device-plugin allocator.
+- **`model-manager`** (alias `mm`) is a CSI node plugin on every node, not tied to a manufacturer:
+  it materializes and mounts Hugging Face weights and writes only its own node's `NodeModelStore`
+  status ([Node Model Store Reference](../reference/node-model-store.md)).
 
 ## Worker startup order matters
 

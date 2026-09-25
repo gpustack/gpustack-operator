@@ -22,6 +22,8 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
    inventory, publish a hierarchy, and verify Kueue TAS.
 4. [High Availability Operations](operation/high-availability.md) — the replica knob per component.
 5. [Settings & Environment Variables](settings.md) — online-adjustable settings and every `GPUSTACK_*`.
+   [Model Store Operations](operation/model-store.md) — the node model cache: its watermarks, which
+   delivery a Hugging Face model takes, and the upgrade that switches it.
 6. [Vendor Prerequisites](vendor-prerequisites.md) — what to install per manufacturer, and which vendor
    GPU Operator components to disable.
 7. [Preflight Operations](operation/preflight.md) — one container run that says what a node can
@@ -76,6 +78,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Settings & Environment Variables](settings.md) | Online-adjustable settings, every `GPUSTACK_*` env, per-manufacturer overrides, toolkit paths | operators | ~8 min |
 | [Vendor Prerequisites](vendor-prerequisites.md) | What to install per manufacturer before GPUStack, and which vendor GPU Operator components to keep or disable | operators | ~10 min |
 | [Development](development.md) | Build, lint, test, code generation, vendored subcharts and dependencies | contributors | ~6 min |
+| [Model Store Operations](operation/model-store.md) | Running node delivery: enabling the plugin, where its configuration comes from, reading a node, the capacity rule against kubelet's eviction, switching delivery, upgrade notes, and removing the cache | operators | ~10 min |
 | [High Availability Operations](operation/high-availability.md) | Which knob to raise per control-plane component, and the one topology that cannot be redundant | operators | ~4 min |
 | [Topology-Aware Scheduling Operations](operation/topology-aware-scheduling.md) | Enabling Topograph or publishing generic inventory, requesting a level, verifying TAS, and diagnosing Pending groups | operators, users | ~16 min |
 | [NVIDIA MIG Operations](operation/nvidia-mig.md) | Enabling/disabling MIG, reboot recovery, and a recorded three-configuration walkthrough | operators | ~21 min |
@@ -92,7 +95,8 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Command Reference](reference/commands.md) | Every command the binary offers: what each does, who runs it, its flags, and a runnable invocation | operators, developers | ~10 min |
 | [KV Cache Injection Reference](reference/kv-cache-injection.md) | How any Pod joins a KV cache pool with one label: the contract, what is injected per engine, every refusal, and what a cache changes about a workload | users, operators | ~14 min |
 | [Model Deployment Reference](reference/model-deployment.md) | The `ModelDeployment` contract: the inherited reuse domain, the three override tiers and the owned-key table, and the runner-image formula | users, operators, contributors | ~9 min |
-| [Model Artifact Reference](reference/model-artifact.md) | How a `ModelArtifact` names a model's weights, how it is resolved and revalidated, the manifest digest, and how a `ModelDeployment` or an `Instance` mounts or downloads them | users, operators | ~14 min |
+| [Model Artifact Reference](reference/model-artifact.md) | How a `ModelArtifact` names a model's weights, how it is resolved and revalidated, the manifest digest, file patterns, and how a `ModelDeployment` or an `Instance` mounts or downloads them under each delivery | users, operators | ~16 min |
+| [Node Model Store Reference](reference/node-model-store.md) | The `NodeModelStore` resource and the `model-manager` plugin: every field and its writer, the status guard, mount authorization, how content is downloaded, verified and published, failure reasons, collection and metrics | operators, contributors | ~12 min |
 | [Model Deployment Prefill and Decode Reference](reference/model-deployment-prefill-decode.md) | What pairs a prefill role with a decode role: the connector each engine and router renders, the router block and its fields, the direct transfer's transport, roles on different hardware, and a role's own address | users, operators, contributors | ~4 min |
 | [Engine Versions Reference](reference/engine-versions.md) | The lowest vLLM, vLLM-Ascend and SGLang release each deployment shape has been run with, the Mooncake client its runner image carries, the store line it needs, and which transport each engine can use on each leg | users, operators | reference |
 | [Model Deployment Routing Reference](reference/model-deployment-routing.md) | Which replica each managed router picks by default, why shared-prefix traffic lands on one replica, switching `vllm-router` or `sglang-gateway` to round robin through `spec.router.extraArgs`, and the router series that show which replica served a request | users, operators | ~5 min |

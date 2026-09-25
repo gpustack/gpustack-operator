@@ -5,7 +5,7 @@
 > **Audience** operators, developers · **Prerequisites** [Architecture](../architecture.md) ·
 > **Read time** ~10 min
 
-One binary carries three long-running services and three one-shot commands. The services are what a
+One binary carries four long-running services and three one-shot commands. The services are what a
 deployment runs; the one-shots are what you run by hand on a node, and choosing between them is the
 first thing this page answers.
 
@@ -17,6 +17,7 @@ first thing this page answers.
 - [worker](#worker)
 - [worker-gateway](#worker-gateway)
 - [device-manager serve](#device-manager-serve)
+- [model-manager](#model-manager)
 - [device-manager detect](#device-manager-detect)
 - [device-manager monitor](#device-manager-monitor)
 - [device-manager preflight](#device-manager-preflight)
@@ -28,6 +29,7 @@ first thing this page answers.
 | `worker` | `w` | service | the operator Deployment, one per cluster |
 | `worker-gateway` | `wg` | service | a sidecar beside `worker` |
 | `device-manager serve` | `dm serve` | service | the Device Manager DaemonSet, one per node |
+| `model-manager` | `mm` | service | the Model Manager DaemonSet, one per node |
 | `device-manager detect` | `dm detect` | one-shot | a person, on a node |
 | `device-manager monitor` | `dm monitor` | one-shot | a person, on a node |
 | `device-manager preflight` | `dm preflight` | one-shot | a person, on a node |
@@ -93,6 +95,7 @@ connection; see [Settings](../settings.md) for what is configured through the `S
 | `--gopool-worker-factor` | `100` | goroutine pool size, per CPU core |
 | `--audit-log-path`, `--audit-policy-file`, `--audit-webhook-config-file` | — | request auditing |
 | `--cors-allowed-origins` | all | allowed cross-domain origins, as anchored regular expressions |
+| `--model-manager-service-account` | `gpustack-operator-model-manager` | the ServiceAccount, in the operator namespace, the model-manager plugin runs as; only it may write a `NodeModelStore`'s status |
 
 ```bash
 gpustack-operator worker --secure-port=31443 --disable-applications=kueue
@@ -141,6 +144,29 @@ subset of the allocation modes its hardware would otherwise offer.
 
 ```bash
 gpustack-operator device-manager serve --manufacturer=nvidia --no-partitioned
+```
+
+## model-manager
+
+The per-node model cache. A CSI node plugin serving inline ephemeral volumes of the driver
+`model.csi.gpustack.ai`: it authorizes each mount against the Pod's namespace, downloads and
+verifies a Hugging Face artifact's files once per node, and writes that node's `NodeModelStore`
+status. See [Node Model Store Reference](node-model-store.md).
+
+Runs as the Model Manager DaemonSet beside the `node-driver-registrar` sidecar. Its configuration
+comes from its node's `NodeModelStore.spec`, not from flags.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--node-name` | — | the node it runs on, also its `NodeModelStore`'s name |
+| `--kubelet-dir` | `/var/lib/kubelet` | kubelet's root directory, whose pods directory holds the mount targets |
+| `--cache-root` | `/var/lib/gpustack/models` | the node's cache directory |
+| `--csi-socket` | `<kubelet-dir>/plugins/model.csi.gpustack.ai/csi.sock` | the Unix socket the CSI services listen on |
+| `--secure-port` | `32444` | the HTTPS port: metrics, readiness and liveness |
+| `--bind-address`, `--cert-dir`, `--kube-conn-*`, `--informer-cache-resync-period`, `--gopool-worker-factor` | as `worker` | serving, client and cache tuning |
+
+```bash
+gpustack-operator model-manager --node-name="$(hostname)" --cache-root=/mnt/models
 ```
 
 ## device-manager detect

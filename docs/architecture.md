@@ -18,19 +18,20 @@ chart. Topograph is also vendored, but stays disabled until an administrator sel
 
 ## Contents
 
-- [One binary, three subcommands](#one-binary-three-subcommands)
+- [One binary, four subcommands](#one-binary-four-subcommands)
 - [How it works: four stages](#how-it-works-four-stages)
 - [Life of a sliced-GPU request](#life-of-a-sliced-gpu-request)
 - [Vocabulary](#vocabulary)
 - [Where to go next](#where-to-go-next)
 
-## One binary, three subcommands
+## One binary, four subcommands
 
 | Subcommand | Package | Deployed by | Job |
 |---|---|---|---|
 | `worker` (alias `w`) | `pkg/worker` | this chart, as a control-plane Deployment | aggregated extension API server + the scheduling-chain controllers |
 | `worker-gateway` | `pkg/workergateway` | not this chart; run it yourself, wherever the fleet view belongs | aggregates InstanceTypes and capacity across upstream clusters |
 | `device-manager` | `pkg/devicemanager` | this chart, as one DaemonSet per manufacturer | detects accelerators, maintains the `Devices` ledger, serves the device plugin |
+| `model-manager` (alias `mm`) | `pkg/modelmanager` | this chart, as one DaemonSet on every node | the CSI node plugin that mounts a Hugging Face `ModelArtifact` from the node's verified cache ([Node Model Store Reference](reference/node-model-store.md)) |
 
 Details, and the startup ordering the worker must keep, are in [Internals](architecture/internals.md).
 

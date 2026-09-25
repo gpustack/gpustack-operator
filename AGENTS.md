@@ -23,7 +23,8 @@ Three subcommands (`worker`, `worker-gateway`, `device-manager`) drive a four-st
 nodes → the Device Manager detects accelerators → the worker profiles node capacity → the
 controllers under `pkg/worker/controllers/worker` materialize Kueue `ResourceFlavor` →
 `ClusterQueue` (one isolated queue per pool) → `LocalQueue` plus an `InstanceType` CRD.
-`pkg/nodefeature` holds the label algebra.
+`pkg/nodefeature` holds the label algebra. A fourth, `model-manager`, is a per-node CSI plugin that
+mounts Hugging Face weights from a verified node cache (`pkg/modelmanager`, `NodeModelStore`).
 
 Read `docs/architecture.md` first: one page, the four stages, the life of a request, the vocabulary.
 Then the deep page under `docs/architecture/` for what you are touching — `device-discovery.md` (NFD,

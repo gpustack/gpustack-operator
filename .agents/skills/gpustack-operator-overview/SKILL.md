@@ -10,7 +10,9 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 
 ## Architecture in brief
 
-One `gpustack-operator` binary, three subcommands; the scheduling chain builds in four stages:
+One `gpustack-operator` binary, four subcommands (`worker`, `worker-gateway`, `device-manager`,
+`model-manager`); the scheduling chain builds in four stages, and `model-manager` sits beside it as a
+per-node CSI plugin that delivers Hugging Face weights:
 
 1. **Bootstrap** — the Helm chart deploys NFD, Kueue, the two CSI drivers and the per-manufacturer Device Manager DaemonSets as vendored subcharts of one release; the `worker` installs them itself only where no chart deploys the worker (image mode). Either way the worker applies the two custom resources no chart can carry — the `gpustack-cpu-info` NodeFeatureRule and the `gpustack-node-devices` AdmissionCheck.
 2. **Device discovery** — the Device Manager detects accelerators and writes `acceleratable.feature.gpustack.ai/*` labels.
@@ -25,7 +27,7 @@ stages, the life of a sliced-GPU request, and the vocabulary; load **one** deep 
 ## Key directories
 
 ```
-cmd/gpustack-operator/            single binary entrypoint (3 cobra subcommands)
+cmd/gpustack-operator/            single binary entrypoint (4 cobra subcommands)
 pkg/
   worker/                         control-plane process (worker subcommand)
     worker.go                     Prepare → Start lifecycle (startup ordering)
@@ -45,6 +47,8 @@ pkg/
   kubemetrics/                    Instance utilization from the kubelet, behind both surfaces
                                   (the metrics subresource and the exporter above)
   modelartifact/                  resolves a Hub repository to a commit and its canonical manifest (ModelArtifact)
+  modelmanager/                   model-manager subcommand: the CSI node plugin and its node cache (NodeModelStore)
+  modelstore/                     the node cache's effective configuration: layers, merge, checks
   nodefeature/                    label algebra (node keys, flavors, queues, credits)
   extensionapi/                   generic aggregated-apiserver storage plumbing
 api/
@@ -89,5 +93,6 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 - Settings & `GPUSTACK_*` configuration knobs → [settings.md](../../../docs/settings.md)
 - Every command the binary offers, its flags and a runnable invocation → [reference/commands.md](../../../docs/reference/commands.md)
 - Checking a node can slice before it has to: the procedure → [operation/preflight.md](../../../docs/operation/preflight.md)
+- Node delivery of weights: the plugin and `NodeModelStore` → [reference/node-model-store.md](../../../docs/reference/node-model-store.md); running it → [operation/model-store.md](../../../docs/operation/model-store.md)
 - Build / lint / test / codegen / vendored deps → [development.md](../../../docs/development.md)
 - Writing or updating any of the above → the `gpustack-operator-docs` skill
