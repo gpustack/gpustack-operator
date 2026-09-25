@@ -251,7 +251,20 @@ function gpustack::commit::lint() {
   fi
 
   gpustack::log::debug "commitsar $*"
-  $(gpustack::commit::commitsar::bin) "$@"
+  local out rc=0
+  out="$($(gpustack::commit::commitsar::bin) "$@" 2>&1)" || rc=$?
+  # A branch whose tip equals main has nothing between itself and main to check, and commitsar
+  # reports exactly that as an error ("No commits found, please check you are on a branch outside
+  # of main"). That state is a pass, not a finding: it is what a clean rebase onto main leaves,
+  # and failing it turned `make lint` red on a tree nobody had committed to yet. Every other
+  # verdict keeps its own exit status, so a fixup! or otherwise non-conventional commit is
+  # still red.
+  if grep -q "No commits found, please check you are on a branch outside of main" <<<"${out}"; then
+    gpustack::log::info "no commit between main and HEAD, so there is nothing for the commit lint to check"
+    return 0
+  fi
+  echo "${out}"
+  return "${rc}"
 }
 
 function gpustack::lint::goimports::install() {
