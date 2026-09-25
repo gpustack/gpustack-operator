@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	grpccodes "google.golang.org/grpc/codes"
@@ -718,4 +719,54 @@ func TestResourceServer_PreferredAllocation_SlicedOccupancyUnreadable(t *testing
 	require.NoError(t, err)
 	require.Equal(t, int32(2), podLists.Load(), "the occupancy read was attempted and failed")
 	assert.Equal(t, []string{"grp-0:card-1:0000"}, resp.GetContainerResponses()[0].GetDeviceIDs())
+}
+
+// TestNarrowToKubeletPending_Logs pins when narrowing says it fell back or chose among several: only
+// when kubelet's answer disagrees with a candidate set the informer has. An empty set is the informer
+// not having delivered the Pod yet, which the caller's retry covers, so it is not reported.
+func TestNarrowToKubeletPending_Logs(t *testing.T) {
+	candidate := func(name string) _AllocatingCandidate {
+		return _AllocatingCandidate{
+			pod: &core.Pod{ObjectMeta: meta.ObjectMeta{Name: name, Namespace: "default"}},
+			ctr: &core.Container{Name: workloadContainer},
+		}
+	}
+	waiting := func(names ...string) *_KubeletPending {
+		pods := make(map[types.NamespacedName]map[string]bool, len(names))
+		for _, n := range names {
+			pods[types.NamespacedName{Namespace: "default", Name: n}] = map[string]bool{workloadContainer: false}
+		}
+		return &_KubeletPending{pods: pods}
+	}
+	cases := []struct {
+		name       string
+		feasible   []_AllocatingCandidate
+		kubelet    *_KubeletPending
+		wantLeft   int
+		wantLogged string
+	}{
+		{name: "no candidate yet", kubelet: waiting("a"), wantLeft: 0},
+		{name: "kubelet names one candidate", feasible: []_AllocatingCandidate{candidate("a"), candidate("b")}, kubelet: waiting("b"), wantLeft: 1},
+		{name: "kubelet names none of the candidates", feasible: []_AllocatingCandidate{candidate("a")}, kubelet: waiting("x"), wantLeft: 1, wantLogged: "kubelet reports no pending candidate"},
+		{name: "kubelet names several candidates", feasible: []_AllocatingCandidate{candidate("a"), candidate("b")}, kubelet: waiting("a", "b"), wantLeft: 2, wantLogged: "kubelet reports several candidates"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var logged []string
+			logger := funcr.New(func(_, args string) { logged = append(logged, args) }, funcr.Options{})
+			match := _AllocationMatch{ResourceName: "nvidia.com/gpu.sliced", Kubelet: c.kubelet}
+
+			feasible, infeasible, claimed := narrowToKubeletPending(logger, match, c.feasible, nil, nil)
+
+			assert.Len(t, feasible, c.wantLeft)
+			assert.Empty(t, infeasible)
+			assert.Empty(t, claimed)
+			if c.wantLogged == "" {
+				assert.Empty(t, logged)
+				return
+			}
+			require.Len(t, logged, 1)
+			assert.Contains(t, logged[0], c.wantLogged)
+		})
+	}
 }

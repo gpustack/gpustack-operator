@@ -215,7 +215,14 @@ The change rolls the device-manager Pods, one node at a time. Running workloads 
 device-manager restart does not reach a started container, and its allocation records live on the
 Pods, where the restarted process reads them. A Pod admitted while its node's device manager is
 restarting can fail admission, as across any device-manager restart, and its controller recreates it.
-Remove the value the same way to switch the safeguard back on.
+
+To switch the safeguard back on, remove the value. Set it to `null` with `--set`, not `--set-string`,
+which would store the string `"null"`:
+
+```bash
+helm upgrade gpustack-operator <chart> --namespace gpustack-system --reset-then-reuse-values \
+  --set deviceManager.env.GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE=null
+```
 
 ### Per-manufacturer overrides
 
