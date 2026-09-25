@@ -21,6 +21,12 @@
 #                subresource, which gates the operator's own sliced capacity keys;
 #              - MOCKED: a node-named Devices ledger per node, labelled with the flavor's selector:
 #                A at 640000 units on each accelerator in sliced mode, B at 1600000 each and free;
+#              - MOCKED: the same occupancy as a Pod bound to each fragmented node whose allocation
+#                annotation, in the device plugin's own format, charges every accelerator the units
+#                its ledger shows taken. The fit labels read the published ledger Status, while the
+#                node-devices check rebuilds each ledger from the Pods bound to the node, so a Status
+#                written without its Pods reads as free to the check. No device manager runs on
+#                these nodes, so nothing rewrites the published Status from those Pods;
 #              - real: the fit labels the worker derives, the Workload webhook, TAS, the node-devices
 #                check, and a raw Pod asking for a 50 % slice (800000 units after the Pod webhook).
 # Expected:    - the worker publishes sliced-max-free-units 640000 on A and 1600000 on B;
@@ -33,9 +39,9 @@
 #              - the admitted Pod's spec carries no fit.gpustack.ai key;
 #              - no fit, with B's ledger fragmented too: the Workload reserves no quota and its
 #                pending message names node affinity.
-# Cleanup:     Trap deletes the probe Pods and Workloads, both ledgers and NodeFeatures, removes the
-#              pool it advertised, restores the setting's previous value, and deletes the derived
-#              InstanceType once its flavor is gone.
+# Cleanup:     Trap deletes the probe Pods and Workloads, the charging Pods, both ledgers and
+#              NodeFeatures, removes the pool it advertised, restores the setting's previous value,
+#              and deletes the derived InstanceType once its flavor is gone.
 set -uo pipefail
 
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
@@ -87,6 +93,7 @@ for wl in json.load(sys.stdin).get("items", []):
     done
   done
   for n in $A $B; do
+    kubectl -n default delete pod "${PREFIX}-holds-${n}" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true
     kubectl delete devices.worker.gpustack.ai "$n" --ignore-not-found >/dev/null 2>&1 || true
     kubectl -n "$NS" delete nodefeature "${n}-${PREFIX}-accel" --ignore-not-found >/dev/null 2>&1 || true
   done
@@ -226,6 +233,40 @@ spec:
 EOF
   kubectl patch devices.v1alpha1.worker.gpustack.ai "$n" --subresource=status --type=merge \
     -p "{\"status\":{\"groups\":[{\"id\":\"${AGID}\",\"manufacturer\":\"nvidia\",\"accelerators\":${status}}]}}" >/dev/null
+  charge "$n" "$remaining" "$mode"
+}
+
+# charge <node> <remaining> <mode> states the ledger's occupancy as the Pod the node-devices check
+# rebuilds it from: one Pod bound to the node whose allocation record charges every accelerator
+# 1600000 minus remaining units in mode. A free ledger has no such Pod.
+charge() {
+  local n=$1 remaining=$2 mode=$3 pod="${PREFIX}-holds-$1"
+  if [ "$remaining" -ge 1600000 ]; then
+    kubectl -n default delete pod "$pod" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1
+    return 0
+  fi
+  local alloc
+  alloc=$(N="$n" C="$COUNT" R="$remaining" M="$mode" G="$AGID" python3 -c '
+import json, os
+print(json.dumps({"main": {"devices": {"groups": [{"id": os.environ["G"], "manufacturer": "nvidia", "accelerators": [
+    {"id": "%s-%d" % (os.environ["N"], i), "index": i, "mode": int(os.environ["M"]),
+     "allocated": 1600000 - int(os.environ["R"])} for i in range(int(os.environ["C"]))]}]}}}))')
+  cat <<EOF | kubectl apply -f - >/dev/null || { echo "[case-96] could not bind the charging Pod to ${n}"; exit 1; }
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${pod}
+  namespace: default
+  labels:
+    app.kubernetes.io/part-of: gpustack-operator-e2e
+  annotations:
+    device.gpustack.ai/accelerator.allocated: '${alloc}'
+spec:
+  nodeName: ${n}
+  containers:
+    - name: main
+      image: ${IMAGE}
+EOF
 }
 ledger "$A" 640000 3
 ledger "$B" 1600000 0

@@ -11,12 +11,17 @@
 #              never leaks a card into a family it cannot serve; the unit spec is immutable after create,
 #              lives only on the InstanceType (never a ClusterQueue note or a Node), and its write
 #              touches no Node/NodeFeature; zero Cohort objects exist.
-# Environment: Any cluster BY APPROXIMATION (same recipe as CASE 4) — the non-colliding nvidia-e2emock
-#              key keeps the mocked pool isolated on a real-accelerator cluster too. No real hardware.
+# Environment: Any cluster with one Ready node that has no Devices ledger, BY APPROXIMATION — the
+#              non-colliding nvidia-e2emock key keeps the mocked pool isolated on a real-accelerator
+#              cluster too. No real hardware. AUTO-SKIPS (exit 0, printing NOTHING WAS VERIFIED) when
+#              no such node exists.
 # Inputs:      - MOCKED: a fake accelerator NodeFeature (nvidia-e2emock, count=8, 24Gi A10G-like) →
 #                real derivation of the accelerated ResourceFlavor → ClusterQueue → InstanceType; a
-#                phantom-node Devices CR ledger stepped through 6 states (created under a node the
-#                DeviceManager never runs on, so the mocked status.groups is stable and never fought);
+#                Devices CR ledger named after that node, stepped through 6 states. The worker
+#                deletes a Devices whose node is gone, so a ledger named after no node does not
+#                survive; no DeviceManager runs on a node without a ledger of its own, so the mocked
+#                status.groups is stable and never fought. The four-view reads the published Status
+#                only, so no Pod has to charge it;
 #              - real probe: a patch editing the InstanceType's unit spec (expects rejection);
 #              - NOT mocked (the verification): the flavor/CQ/InstanceType derivation and the
 #                four-view bin-packing math the reconciler runs over the ledger.
@@ -39,7 +44,22 @@ E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/
 [ -n "$E2E_SHIM_DIR" ] && PATH="$E2E_SHIM_DIR:$PATH"
 
 NS="${1:?usage: case-6.sh <NS>}"
-NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+# A Ready node without a Devices ledger of its own. The case writes a node-named ledger and deletes
+# it afterwards, so a node that already has one is never chosen.
+LEDGERS=$(kubectl get devices.worker.gpustack.ai -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+NODE=$(kubectl get nodes -o json | LEDGERS="$LEDGERS" python3 -c '
+import json, os, sys
+taken = set(os.environ["LEDGERS"].split())
+ok = [n["metadata"]["name"] for n in json.load(sys.stdin)["items"]
+      if n["metadata"]["name"] not in taken
+      and any(c["type"] == "Ready" and c["status"] == "True" for c in n["status"].get("conditions", []))]
+print(sorted(ok)[0] if ok else "")')
+if [ -z "$NODE" ]; then
+  echo
+  echo "== CASE 6 — SKIPPED: NOTHING WAS VERIFIED =="
+  echo "No Ready node without a Devices ledger of its own."
+  exit 0
+fi
 AKEY=nvidia-e2emock                                # non-colliding fake key (never a real product) so the mocked pool
                                                    # stays isolated on a real-accelerator cluster — mirrors case-4;
                                                    # manufacturer 'nvidia' still makes it acceleratable + sliceable.
@@ -54,7 +74,7 @@ SLICES_PER_CARD=128                                 # declared logical-slice cap
 ACCEL_NF="${NODE}-gpustack-e2e-accel"               # fake accelerator NodeFeature (case-4/5 style)
 WORKER_NF="${NODE}-gpustack-worker"                 # the worker NodeFeature the unit-spec write must NOT touch
 LABELPFX="acceleratable.feature.gpustack.ai/${AKEY}"
-MOCK_DEV="${NODE}-gpustack-e2e-devices"             # phantom-node Devices CR carrying the mocked ledger
+MOCK_DEV="${NODE}"                                  # node-named Devices CR carrying the mocked ledger
 MANAGED_LABEL="gpustack.ai/managed"
 ITNAME=""
 
@@ -207,7 +227,7 @@ read -r SPEC_OS SPEC_ARCH <<<"$(kubectl get instancetypes.worker.gpustack.ai "$I
   && record PASS "InstanceType materializes spec.os/arch" "spec os=${SPEC_OS} arch=${SPEC_ARCH} (from CQ labels)" \
   || record FAIL "InstanceType materializes spec.os/arch" "spec os='${SPEC_OS:-}' arch='${SPEC_ARCH:-}' vs labels ${OS}/${ARCH} — must read from the CQ kubernetes.io/os|arch labels, not the notes"
 
-# 3. Create the phantom-node Devices CR carrying the mocked per-card ledger.
+# 3. Create the node-named Devices CR carrying the mocked per-card ledger.
 #
 # The ledger alone is not enough. A card's occupancy lives in status, but whether the card may be
 # logically sliced at all is a CAPABILITY, declared on the spec side and indexed per card id — the
