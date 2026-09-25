@@ -83,8 +83,10 @@ if jq -e 'any(.spec.roles[]; any(.env[]?; .name == "MC_FORCE_TCP") or
 fi
 
 pods="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=$MD" -o json)" || exit 2
+# Select by the role-kind label: app.kubernetes.io/component carries the role's free-form NAME, which
+# need not be "prefill" or "decode".
 ready_pod() {
-  jq -r --arg kind "$1" '[.items[] | select(.metadata.labels["app.kubernetes.io/component"] == $kind and
+  jq -r --arg kind "$1" '[.items[] | select(.metadata.labels["modeldeployment.gpustack.ai/role-kind"] == $kind and
     any(.status.conditions[]?; .type == "Ready" and .status == "True"))] |
     if length == 1 then .[0].metadata.name else empty end' <<<"$pods"
 }

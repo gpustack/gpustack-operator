@@ -62,8 +62,9 @@ read -r IT CARDMEM <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>
 import json,sys
 for it in json.load(sys.stdin).get('items',[]):
     s=it.get('spec',{})
-    if s.get('acceleratable') and s.get('sliceable'):
-        print(it['metadata']['name'], s.get('memory','')); break
+    d=it.get('status',{}).get('detail',{}) or {}
+    if s.get('acceleratable') and ((d.get('slicedDetail') or {}).get('logical') or {}).get('count',0)>0:
+        print(it['metadata']['name'], d.get('memory','')); break
 ")"
 [ -n "$IT" ] || { echo "no sliceable accelerated InstanceType found"; exit 1; }
 PHYS_MIB=$(python3 -c "

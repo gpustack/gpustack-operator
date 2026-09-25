@@ -21,7 +21,8 @@
 #                INST_BAD (mem%=25, cores%=25, accelerator=2).
 # Expected:    - Q1 — INST_OK persists accelerator=1, cpu=unitCPU×25% (floor, min 1), ram=unitRAM×25%;
 #              - Q2 — INST_MEMONLY mirrors cores%=50 and sizes cpu=unitCPU×50%, ram=unitRAM×50%;
-#              - Q3 — INST_BAD is REJECTED (a sliceable accelerator must be 1).
+#              - Q3 — INST_BAD is REJECTED with the webhook's message "accelerator request must be exactly 1
+#                for a sliced request"; a denial with any other text fails.
 # Cleanup:     Trap deletes the three test Instances (the InstanceType is never mutated).
 set -uo pipefail
 
@@ -127,9 +128,14 @@ else
 fi
 
 # Q3 — Validate rejects a sliceable request whose accelerator count is not 1.
+# Match the webhook's own message: any admission denial says "denied the request", so a looser
+# pattern would pass on a rejection for an unrelated reason.
+Q3_MSG='accelerator request must be exactly 1 for a sliced request'
 err=$(mk_slice "$INST_BAD" 25 25 2); rc=$?
-if [ "$rc" -ne 0 ] && echo "$err" | grep -qiE 'must be 1|denied|admission|invalid'; then
-  record PASS "Validate rejects accelerator != 1 on sliceable" "rejected: $(echo "$err" | grep -oiE 'accelerator request must be 1' | head -1)"
+if [ "$rc" -ne 0 ] && echo "$err" | grep -qF "$Q3_MSG"; then
+  record PASS "Validate rejects accelerator != 1 on sliceable" "rejected: $(echo "$err" | grep -oF "$Q3_MSG" | head -1)"
+elif [ "$rc" -ne 0 ]; then
+  record FAIL "Validate rejects accelerator != 1 on sliceable" "rejected, but not with '${Q3_MSG}': $(echo "$err" | head -1)"
 else
   kubectl -n default delete instance "$INST_BAD" --ignore-not-found >/dev/null 2>&1 || true
   record FAIL "Validate rejects accelerator != 1 on sliceable" "accepted (rc=${rc}) — sliceable accelerator must be 1"

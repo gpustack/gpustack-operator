@@ -21,7 +21,8 @@
 # Expected:    Node and Devices carry the same topology profile; the accelerated ResourceFlavor
 #              references that profile's Topology; ClusterQueue name and UID stay fixed; the
 #              Workload requests zone placement, receives a topology assignment, both admission
-#              checks become Ready, and its Pod requesting one accelerator binds to that Node.
+#              checks become Ready, and its Pod requesting one accelerator (the chosen card's own
+#              vendor resource, e.g. nvidia.com/gpu or huawei.com/npu) binds to that Node.
 # Cleanup:     Deletes the Workload before the ModelDeployment, deletes the source, and removes the
 #              case selector label. It does not delete operator-owned queues, flavors or Topologies.
 set -uo pipefail
@@ -95,6 +96,26 @@ if [ -z "$ACCELERATOR_KEY" ] || [ -z "$IT" ]; then
   echo "The free accelerator Node has no matching Active InstanceType; key=${ACCELERATOR_KEY:-missing}." >&2
   exit 2
 fi
+# The whole-card resource the Pod must request, for the chosen card's own vendor. The accelerator key
+# is "<manufacturer>-<group id>" and no manufacturer name contains a dash. The table copies the
+# defaults in pkg/nodefeature/knowns.go:163-173; a GPUSTACK_<M>_ACCELERATABLE_RESOURCE_NAME override
+# on the operator is not seen here.
+MANUFACTURER="${ACCELERATOR_KEY%%-*}"
+case "$MANUFACTURER" in
+  amd) ACC_RESOURCE=amd.com/gpu ;;
+  ascend) ACC_RESOURCE=huawei.com/npu ;;
+  cambricon) ACC_RESOURCE=cambricon.com/mlu ;;
+  hygon) ACC_RESOURCE=hygon.com/dcu ;;
+  iluvatar) ACC_RESOURCE=iluvatar.com/gpu ;;
+  metax) ACC_RESOURCE=metax-tech.com/gpu ;;
+  mthreads) ACC_RESOURCE=mthreads.com/gpu ;;
+  nvidia) ACC_RESOURCE=nvidia.com/gpu ;;
+  thead) ACC_RESOURCE=alibabacloud.com/ppu ;;
+  *)
+    echo "Accelerator key ${ACCELERATOR_KEY} names manufacturer '${MANUFACTURER}', which has no known resource name." >&2
+    exit 2
+    ;;
+esac
 
 ENTRANCE="$(kubectl get instancetype.worker.gpustack.ai "$IT" -o jsonpath='{.status.entrance}' 2>/dev/null)"
 CQ="$IT"
@@ -240,14 +261,14 @@ else
     "state=${device_check:-missing}: ${check_message:-no message}"
 fi
 
-gpu_request="$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.spec.containers[0].resources.requests.nvidia\.com/gpu}' 2>/dev/null)"
+gpu_request="$(kubectl -n "$NS" get pod "$POD" -o json 2>/dev/null | jq -r --arg k "$ACC_RESOURCE" '.spec.containers[0].resources.requests[$k] // ""' 2>/dev/null)"
 bound_profile="$(kubectl get node "$BOUND_NODE" -o jsonpath='{.metadata.labels.topology\.gpustack\.ai/profile}' 2>/dev/null)"
 if [ "$BOUND_NODE" = "$NODE" ] && [ "$bound_profile" = "$PROFILE" ] && [ "$gpu_request" = 1 ]; then
   record PASS "the admitted Pod requests and binds the real accelerator" \
-    "pod=${POD}; node=${BOUND_NODE}; profile=${bound_profile}; nvidia.com/gpu=${gpu_request}"
+    "pod=${POD}; node=${BOUND_NODE}; profile=${bound_profile}; ${ACC_RESOURCE}=${gpu_request}"
 else
   record FAIL "the admitted Pod requests and binds the real accelerator" \
-    "pod=${POD:-missing}, node=${BOUND_NODE:-missing}, expected=${NODE}, profile=${bound_profile:-missing}, gpu=${gpu_request:-missing}"
+    "pod=${POD:-missing}, node=${BOUND_NODE:-missing}, expected=${NODE}, profile=${bound_profile:-missing}, ${ACC_RESOURCE}=${gpu_request:-missing}"
 fi
 
 # Device admission and Kueue placement agree only if the Node the assignment named, through the

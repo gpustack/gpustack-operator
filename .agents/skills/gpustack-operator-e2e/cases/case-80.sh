@@ -44,7 +44,8 @@
 #                whose link verdict is not `failed`;
 #              - allocatable of the shared key equals that number times the shared pool size;
 #              - allocatable of the partitioned key equals the number of virtual-function endpoints
-#                whose link verdict is not `failed`;
+#                whose link verdict is not `failed`, and with virtual functions configured the host's
+#                sriov_numvfs total equals the ledger's virtual functions under partitioned functions;
 #              - the retired sliced key is either absent or zero — an extended resource that has
 #                entered a node's status is not removed when the plugin stops serving it, so a node
 #                that once ran the older build keeps the key forever, and only a NON-ZERO value is a
@@ -74,7 +75,9 @@ rdma_probe_try || true
 # 1. The correspondence. The host's own list against the published inventory.
 # ---------------------------------------------------------------------------------------------------
 HOST_DEVICES=$(rdma_host_rdma_devices)
-LEDGER_DEVICES=$(printf '%s' "$F_EP_NAMES" | tr ',' '\n' | grep -v '^$' | LC_ALL=C sort -u)
+# Every rdmaDevice the inventory carries, including a partitioned physical function's own, which is
+# not an endpoint but is still a device the host lists.
+LEDGER_DEVICES=$(printf '%s' "$F_RDMA_NAMES" | tr ',' '\n' | grep -v '^$' | LC_ALL=C sort -u)
 
 if [ "$RDMA_PROBE_READY" -ne 1 ]; then
   record SKIP "the published inventory names the host's RDMA devices" \
@@ -249,12 +252,15 @@ else
   # that carry those virtual functions must be absent from the whole-function population — which is
   # what makes the mode a read off the node rather than a menu.
   PF_COUNT=$(printf '%s' "$HOST_VF_DEVICES" | tr ' ' '\n' | grep -c '=')
-  if [ "${RDMA_ALLOC_PART:-0}" -eq "$F_EP_VF_OK" ] && [ "$F_EP_VF" -gt 0 ]; then
+  # The host's total is compared with the ledger's virtual functions (with or without an rdmaDevice):
+  # a detector that under-reads them shrinks the ledger and allocatable together, which the
+  # allocatable comparison alone would pass.
+  if [ "${RDMA_ALLOC_PART:-0}" -eq "$F_EP_VF_OK" ] && [ "$F_EP_VF" -gt 0 ] && [ "$HOST_VF_TOTAL" -eq "$F_VF_TOTAL" ]; then
     record PASS "the partitioned key counts the host's configured virtual functions" \
-      "host reports ${HOST_VF_DEVICES}(total ${HOST_VF_TOTAL}); ledger has ${F_EP_VF} virtual-function endpoint(s), ${RDMA_KEY_PARTITIONED}=${RDMA_ALLOC_PART}"
+      "host reports ${HOST_VF_DEVICES}(total ${HOST_VF_TOTAL}); ledger has ${F_VF_TOTAL} virtual function(s), ${F_EP_VF} of them endpoint(s), ${RDMA_KEY_PARTITIONED}=${RDMA_ALLOC_PART}"
   else
     record FAIL "the partitioned key counts the host's configured virtual functions" \
-      "host reports ${HOST_VF_DEVICES}(total ${HOST_VF_TOTAL}) but the ledger has ${F_EP_VF} virtual-function endpoint(s) and ${RDMA_KEY_PARTITIONED}=${RDMA_ALLOC_PART:-<absent>}"
+      "host reports ${HOST_VF_DEVICES}(total ${HOST_VF_TOTAL}) but the ledger has ${F_VF_TOTAL} virtual function(s), ${F_EP_VF} virtual-function endpoint(s) (${F_EP_VF_OK} usable), and ${RDMA_KEY_PARTITIONED}=${RDMA_ALLOC_PART:-<absent>}"
   fi
   if [ "$F_SRIOV_IFACES" -eq "$PF_COUNT" ]; then
     record PASS "a physical function with virtual functions counts zero times in the whole-function keys" \

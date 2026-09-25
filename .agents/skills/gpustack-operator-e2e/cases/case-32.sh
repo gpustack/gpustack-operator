@@ -12,10 +12,10 @@
 #              keeps advertising room it does not have, and unlike a transient over-advertisement that
 #              never converges while any GPUStack workload holds the card. Once the card is idle the
 #              other half of the story shows: an instance no allocation accounts for is an orphan, and
-#              the reclaimer destroys it even though it never created it. Placement is the one layer
-#              that reads the live hardware, so it will not double-book the card — and that is the one
-#              thing this case asserts, because it is the difference between an accounting error and a
-#              corrupted card. Everything else is measured and printed, which is what makes
+#              the reclaimer destroys it even though it never created it. Actuation reads the driver's
+#              live instance set, so it will not double-book the card — and that is the one thing this
+#              case asserts, because it is the difference between an accounting error and a corrupted
+#              card. Everything else is measured and printed, which is what makes
 #              "unsupported on a managed node" a documented consequence rather than a guess.
 # Environment: A reachable cluster whose active context is the GPU cluster, an nvidia node with at
 #              least one card that can be put into a hardware partitioning mode, AND SSH to that node
@@ -30,10 +30,11 @@
 #              through the pool's entrance LocalQueue. The profile and its vendor profile id are
 #              DISCOVERED from the card, never composed.
 # Expected:    - the hand-carved instance exists on the card;
+#              - right after the carve, while the instance is confirmed live, a whole-card-profile Pod
+#                does NOT reach Running on the half-occupied card — actuation reads the driver's live
+#                instance set, so it refuses rather than double-booking;
 #              - the node's per-profile keys are RECORDED before and after it, showing whether they
 #                move at all (the residual says they do not);
-#              - a whole-card-profile Pod is NOT admitted onto the half-occupied card — placement reads
-#                the live hardware, so it refuses rather than double-booking;
 #              - whether GPUStack's own reclaimer removes the foreign instance is recorded either way.
 # Cleanup:     Trap deletes every test Pod, destroys the compute and GPU instances it created on the
 #              card with the vendor tool (unconditionally, so a failed run leaves no foreign partition
@@ -123,6 +124,31 @@ fi
 record PASS "a foreign instance exists on a managed card" "${gi} live instance(s) on card ${GPU_INDEX} after 'nvidia-smi mig -cgi ${GIP_ID} -C', with no Pod and no allocation record anywhere in the cluster"
 
 # ---------------------------------------------------------------------------------------------------
+# The one hard assertion: actuation reads the driver's live instance set, so it must not double-book
+# the card. It runs right after the carve: the reclaimer destroys the orphan after a few drained
+# reconciles, so after the observation window the instance is expected to be gone and there would be
+# nothing left to assert. The count is re-read just before the Pod is submitted.
+# ---------------------------------------------------------------------------------------------------
+echo
+echo "[case-32] === a whole-card request against the half-occupied card ==="
+if ! gi_pre="$(node_gi_count)"; then
+  record FAIL "placement refuses to double-book the occupied card" "the node probe did not answer just before the whole-card request, so whether the foreign instance is live is unknown"
+elif [ "${gi_pre:-0}" -lt 1 ]; then
+  record SKIP "placement refuses to double-book the occupied card" "the foreign instance was already gone before the whole-card request (card reports ${gi_pre}), so there is nothing for placement to avoid"
+else
+  B="${PODPFX}-full"
+  mkpod "$B" "$(partition_reslines "$FULLKEY")"
+  ran=0
+  for _ in $(seq 1 20); do running "$B" && { ran=1; break; }; sleep 3; done
+  if [ "$ran" = 1 ]; then
+    record FAIL "placement refuses to double-book the occupied card" "${B} reached Running although half the card was taken by a foreign instance (${gi_pre} live before submit) — actuation must read the driver's live instance set, not only the annotation ledger"
+  else
+    record PASS "placement refuses to double-book the occupied card" "${B} did not run [$(held_reason "$B")] with ${gi_pre} live instance(s) before submit — the node key said there was room, actuation knew better"
+  fi
+  delpod "$B"
+fi
+
+# ---------------------------------------------------------------------------------------------------
 # What the node-level numbers do about it: by design, nothing.
 # ---------------------------------------------------------------------------------------------------
 echo "[case-32] watching the node keys for ${OBSERVE_WINDOW}s"
@@ -149,26 +175,6 @@ gi_now="$(node_gi_count)"
   && record PASS "OBSERVED: what the reclaimer does with the foreign instance" "${gi_now} live instance(s) still present ${OBSERVE_WINDOW}s after the intrusion — the card was not fully drained, so its orphans are held" \
   || record PASS "OBSERVED: what the reclaimer does with the foreign instance" "the instance is GONE after ${OBSERVE_WINDOW}s — the reclaimer destroyed a partition it did not create, which is orphan GC working as designed on an idle card"
 
-# ---------------------------------------------------------------------------------------------------
-# The one hard assertion: placement reads the live hardware, so it must not double-book the card.
-# ---------------------------------------------------------------------------------------------------
-echo
-echo "[case-32] === a whole-card request against the half-occupied card ==="
-if [ "${gi_now:-0}" -lt 1 ]; then
-  record SKIP "placement refuses to double-book the occupied card" "the foreign instance no longer exists, so there is nothing for placement to avoid"
-else
-  B="${PODPFX}-full"
-  mkpod "$B" "$(partition_reslines "$FULLKEY")"
-  ran=0
-  for _ in $(seq 1 20); do running "$B" && { ran=1; break; }; sleep 3; done
-  if [ "$ran" = 1 ]; then
-    record FAIL "placement refuses to double-book the occupied card" "${B} reached Running although half the card is taken by a foreign instance — placement must read the live hardware, not only the annotation ledger"
-  else
-    record PASS "placement refuses to double-book the occupied card" "${B} did not run [$(held_reason "$B")] — the node key said there was room, placement knew better"
-  fi
-  delpod "$B"
-fi
-
 part_results "An instance carved outside GPUStack: placement sees it, the node keys never do"
 
 echo
@@ -183,7 +189,7 @@ echo "-------------------------------------------------------"
 if [ "$FAILS" -ne 0 ]; then
   echo
   echo "FAILED ${FAILS} check(s). Hand-carving a partition on a managed node is unsupported and the node-level"
-  echo "keys cannot see it — but placement reads the live hardware and must never double-book. Diagnose:"
+  echo "keys cannot see it — but actuation reads the driver's live instance set and must never double-book. Diagnose:"
   echo "  ${MIG_NODE_SSH} sudo nvidia-smi mig -lgi"
   echo "  kubectl get devices ${GPU_NODE} -o json | jq '.status.groups[].accelerators[] | {id, allocatedProfiles, remainingProfiles}'"
   echo "  kubectl -n ${NS} logs ds/${DM_DS} --tail=300"

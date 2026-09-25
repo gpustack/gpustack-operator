@@ -231,11 +231,22 @@ spec = d.get("spec", {}) or {}
 endpoints = []          # (kind, iface, name, rdma_device, numa, link_state)
 sriov_ifaces = 0
 whole_ifaces = 0
+# Every RDMA device name the inventory carries, endpoint or not. A partitioned physical function is
+# not an endpoint, but the detector still records its own rdmaDevice and the host still lists it, so
+# the host-side correspondence must read this set rather than the endpoint names.
+rdma_names = set()
+vf_total = 0            # virtual functions under partitioned physical functions, rdmaDevice or not
 for i in spec.get("interfaces", []) or []:
     vfs = i.get("virtualFunctions", []) or []
+    if i.get("rdmaDevice"):
+        rdma_names.add(i.get("rdmaDevice"))
+    for vf in vfs:
+        if vf.get("rdmaDevice"):
+            rdma_names.add(vf.get("rdmaDevice"))
     partitioned = bool(i.get("sriov")) and len(vfs) > 0
     if partitioned:
         sriov_ifaces += 1
+        vf_total += len(vfs)
         for vf in vfs:
             if not vf.get("rdmaDevice"):
                 continue
@@ -301,6 +312,8 @@ emit("F_WHOLE_IFACES", whole_ifaces)
 emit("F_EP_NUMA", ",".join(ep_numa))
 emit("F_EP_NAMES", ",".join(sorted(e[3] for e in endpoints)))
 emit("F_EP_NAMES_OK", ",".join(sorted(e[3] for e in endpoints if usable(e))))
+emit("F_RDMA_NAMES", ",".join(sorted(rdma_names)))
+emit("F_VF_TOTAL", vf_total)
 emit("F_EP_ROWS", ";".join("|".join(str(x) for x in e) for e in endpoints))
 emit("F_ACC_TOTAL", len(accelerators))
 emit("F_ACC_NUMA", ",".join(acc_numa))
@@ -318,6 +331,7 @@ emit("F_GROUPS", ",".join(groups))
   # any requirement whose python branch did not emit it.
   F_EP_TOTAL=0 F_EP_WHOLE=0 F_EP_WHOLE_OK=0 F_EP_VF=0 F_EP_VF_OK=0 F_EP_FAILED=0
   F_SRIOV_IFACES=0 F_WHOLE_IFACES=0 F_EP_NUMA= F_EP_NAMES= F_EP_NAMES_OK= F_EP_ROWS=
+  F_RDMA_NAMES= F_VF_TOTAL=0
   F_ACC_TOTAL=0 F_ACC_NUMA= F_ACC_ON_EP_NUMA=0 F_ACC_OFF_EP_NUMA=0 F_ACC_PARTITIONED=0
   F_ACC_BEST_NUMA= F_ACC_BEST_COUNT=0 F_MANUFACTURERS= F_GROUPS=
   # Every line is KEY=VALUE, and the value is assigned with `printf -v` rather than with `eval`.
