@@ -21,13 +21,17 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// PhaseMessage carries the reason for the phase.
 	PhaseMessage *string `json:"phaseMessage,omitempty"`
 	// Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,
-	// CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady. They are
-	// independent —
+	// CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady,
+	// WeightsReady. They are independent —
 	// "quota reserved but cache not attached" is a real and actionable state — which is what a single
 	// phase string cannot carry.
 	//
 	// KVEventsPublishing reports rendered configuration rather than observing the stream. A publisher
 	// that was configured and then crashed therefore remains True until a live consumer observes it.
+	//
+	// WeightsReady reports whether every engine role's weights are available: a claim artifact
+	// mounted, or an engine's own download of a hub artifact finished. While it is False for a
+	// reason other than a Pod still starting, no replica is created and none that runs is touched.
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 	// Endpoint is the address clients use. Without a router it is the deployment-wide Service, in the
 	// form <scheme>://<name>.<namespace>.svc:<port>. With a router it is the router's Service and is
@@ -56,6 +60,12 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// managed router Pods; S, P, and D count server, prefill, and decode instances. A serving
 	// instance may contain several Pods, so the engine figures are not Pod counts.
 	RoleSummary *string `json:"roleSummary,omitempty"`
+	// Model echoes the weights spec.model.artifactRef resolved to, and how they reach the engine.
+	//
+	// It is ABSENT without spec.model.artifactRef, and while the artifact has not resolved, for the
+	// reason KVCache is: an empty object here cannot be told apart from an identity whose every
+	// field happens to be empty.
+	Model *ModelDeploymentModelStatusApplyConfiguration `json:"model,omitempty"`
 }
 
 // ModelDeploymentStatusApplyConfiguration constructs a declarative configuration of the ModelDeploymentStatus type for use with
@@ -135,5 +145,13 @@ func (b *ModelDeploymentStatusApplyConfiguration) WithRouter(value *ModelDeploym
 // If called multiple times, the RoleSummary field is set to the value of the last call.
 func (b *ModelDeploymentStatusApplyConfiguration) WithRoleSummary(value string) *ModelDeploymentStatusApplyConfiguration {
 	b.RoleSummary = &value
+	return b
+}
+
+// WithModel sets the Model field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Model field is set to the value of the last call.
+func (b *ModelDeploymentStatusApplyConfiguration) WithModel(value *ModelDeploymentModelStatusApplyConfiguration) *ModelDeploymentStatusApplyConfiguration {
+	b.Model = value
 	return b
 }

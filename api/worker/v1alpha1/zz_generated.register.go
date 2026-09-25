@@ -78,6 +78,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&KVCachePoolBinding{},
 		&KVCachePoolBindingList{},
 		&KVCachePoolList{},
+		&ModelArtifact{},
+		&ModelArtifactList{},
 		&ModelDeployment{},
 		&ModelDeploymentList{},
 		&TopologySource{},

@@ -39,6 +39,14 @@ type KVCachePoolBindingListerExpansion interface{}
 // KVCachePoolBindingNamespaceLister.
 type KVCachePoolBindingNamespaceListerExpansion interface{}
 
+// ModelArtifactListerExpansion allows custom methods to be added to
+// ModelArtifactLister.
+type ModelArtifactListerExpansion interface{}
+
+// ModelArtifactNamespaceListerExpansion allows custom methods to be added to
+// ModelArtifactNamespaceLister.
+type ModelArtifactNamespaceListerExpansion interface{}
+
 // ModelDeploymentListerExpansion allows custom methods to be added to
 // ModelDeploymentLister.
 type ModelDeploymentListerExpansion interface{}

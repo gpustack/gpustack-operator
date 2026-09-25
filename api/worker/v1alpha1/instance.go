@@ -171,6 +171,20 @@ type InstanceAdditionalVolume struct {
 	// later change that adds or widens such a mount. One the Instance already holds is never
 	// re-judged, so the Setting going off does not strand it.
 	HostPath *core.HostPathVolumeSource `json:"hostPath,omitempty" protobuf:"bytes,7,opt,name=hostPath"`
+
+	// Model mounts the weights of a ModelArtifact in the same namespace. It is always mounted
+	// read-only, whatever ReadOnly says, and takes no SubPath: the artifact's own path is the
+	// sub-path. Only an artifact on a PersistentVolumeClaim is accepted in this version; one on a
+	// model hub needs node delivery, which does not exist yet.
+	Model *InstanceModelVolumeSource `json:"model,omitempty" protobuf:"bytes,8,opt,name=model"`
+}
+
+// InstanceModelVolumeSource references the ModelArtifact an Instance volume mounts.
+type InstanceModelVolumeSource struct {
+	// ArtifactRef names a ModelArtifact in the Instance's namespace.
+	//
+	// +required
+	ArtifactRef core.LocalObjectReference `json:"artifactRef" protobuf:"bytes,1,name=artifactRef"`
 }
 
 // InstancePort defines the port to expose from the Instance.

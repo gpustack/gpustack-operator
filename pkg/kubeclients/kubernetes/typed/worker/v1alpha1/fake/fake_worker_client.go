@@ -41,6 +41,10 @@ func (c *FakeWorkerV1alpha1) KVCachePoolBindings(namespace string) v1alpha1.KVCa
 	return newFakeKVCachePoolBindings(c, namespace)
 }
 
+func (c *FakeWorkerV1alpha1) ModelArtifacts(namespace string) v1alpha1.ModelArtifactInterface {
+	return newFakeModelArtifacts(c, namespace)
+}
+
 func (c *FakeWorkerV1alpha1) ModelDeployments(namespace string) v1alpha1.ModelDeploymentInterface {
 	return newFakeModelDeployments(c, namespace)
 }
