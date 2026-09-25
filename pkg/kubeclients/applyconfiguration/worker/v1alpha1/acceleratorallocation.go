@@ -21,6 +21,11 @@ type AcceleratorAllocationApplyConfiguration struct {
 	Allocated *int32 `json:"allocated,omitempty"`
 	// Remaining is the remaining allocatable units of the device.
 	Remaining *int32 `json:"remaining,omitempty"`
+	// AllocatedSlices is how many logical slices the device currently hosts: one per container
+	// holding a slice of it. A logically sliceable device hosts at most LogicalSliced.Count of
+	// them whatever its Remaining says, so a slice fits only where both have room. Zero, the
+	// value a ledger written before this field existed reads as, counts as no slices.
+	AllocatedSlices *int32 `json:"allocatedSlices,omitempty"`
 	// AllocatedProfiles and RemainingProfiles are the per-accelerator physical-slice ledger
 	// the AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the
 	// per-Pod AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below
@@ -119,6 +124,14 @@ func (b *AcceleratorAllocationApplyConfiguration) WithAllocated(value int32) *Ac
 // If called multiple times, the Remaining field is set to the value of the last call.
 func (b *AcceleratorAllocationApplyConfiguration) WithRemaining(value int32) *AcceleratorAllocationApplyConfiguration {
 	b.Remaining = &value
+	return b
+}
+
+// WithAllocatedSlices sets the AllocatedSlices field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AllocatedSlices field is set to the value of the last call.
+func (b *AcceleratorAllocationApplyConfiguration) WithAllocatedSlices(value int32) *AcceleratorAllocationApplyConfiguration {
+	b.AllocatedSlices = &value
 	return b
 }
 

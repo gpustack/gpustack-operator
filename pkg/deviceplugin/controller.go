@@ -133,6 +133,14 @@ type (
 		// check and the reservation write (TOCTOU). It is never held across the annotation patch
 		// (I/O), nor across the vendor calls that actuate or name a partition.
 		allocateMutex sync.Mutex
+
+		// kubeletPods asks kubelet which pods and containers it holds, so an Allocate can tell which
+		// container it serves; see _KubeletPending. Nil leaves identification to the pending-Pod
+		// heuristic alone.
+		kubeletPods kubeletPodLister
+		// slicedAllocateGateOff lifts the refusal of a logical slice its card cannot hold, so a
+		// sliced Allocate clamps the ledger and allocates, as it did before the refusal existed.
+		slicedAllocateGateOff bool
 	}
 )
 
@@ -350,6 +358,10 @@ func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller
 
 	r.NodeName = osx.Getenv("KUBERNETES_NODE_NAME")
 	r.Client = opts.Manager.GetClient()
+	if osx.Getenv(IdentifyByKubeletEnv) != "false" {
+		r.kubeletPods = newKubeletPodLister(KubeletPodResourcesSocket)
+	}
+	r.slicedAllocateGateOff = osx.Getenv(SlicedAllocateGateEnv) == "false"
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("deviceplugin.manage.devices").
@@ -911,10 +923,15 @@ type _AllocationMatch struct {
 	// them can otherwise absorb each other's call.
 	//
 	// It is deliberately NOT an admission gate: when it rejects every candidate the search falls
-	// back to the unfiltered set, because the ledger it reads lags reality and must never turn a
-	// resolvable Allocate into a hard failure. Admission is enforced upstream by the Pod webhook
-	// and the node-devices admission check.
+	// back to the unfiltered set, so identifying a container never fails on its account. Refusing
+	// an allocation the card cannot hold is a separate step taken once the container is known (see
+	// rejectSlicedOvercommit), and a refusal there implies every candidate was infeasible, because
+	// both read the same occupancy.
 	Feasible func(pod *core.Pod, ctr *core.Container) bool
+	// Kubelet, when set, is kubelet's own record of which containers still wait for a device of
+	// the resource. It outranks every tier below: a candidate kubelet does not report as waiting
+	// is not the one being admitted. Nil when kubelet could not be asked.
+	Kubelet *_KubeletPending
 }
 
 func (r *DevicesReconciler) getAllocatingPodWithRetry(
@@ -938,8 +955,10 @@ type _AllocatingCandidate struct {
 }
 
 // getAllocatingPod maps a kubelet Allocate/GetPreferredAllocation call to the container being
-// admitted, preferring the oldest Pending pod. Candidates are ranked rather than filtered, and the
-// oldest of the highest-ranked non-empty tier wins:
+// admitted. When kubelet could be asked, only the candidates it reports as still waiting for a device
+// of the resource stay in the running (see narrowToKubeletPending); normally that is one, and it
+// wins whatever tier it falls in. Among what is left the oldest Pending pod is preferred. Candidates
+// are ranked rather than filtered, and the oldest of the highest-ranked non-empty tier wins:
 //
 //   - An unclaimed feasible container.
 //   - Failing that, an unclaimed but infeasible one — the feasibility test disambiguates, it does
@@ -966,9 +985,47 @@ func (r *DevicesReconciler) getAllocatingPod(
 		return a.CreationTimestamp.Compare(b.CreationTimestamp.Time)
 	})
 
+	logger := ctrllog.FromContext(ctx)
 	feasible, infeasible, claimed := r.classifyAllocatingCandidates(podList.Items, match)
+	feasible, infeasible, claimed = narrowToKubeletPending(logger, match, feasible, infeasible, claimed)
 
-	return rankAllocatingCandidate(ctrllog.FromContext(ctx), match, feasible, infeasible, claimed)
+	return rankAllocatingCandidate(logger, match, feasible, infeasible, claimed)
+}
+
+// narrowToKubeletPending keeps, in every tier, only the candidates kubelet reports as waiting for a
+// device of the resource. kubelet admits one pod at a time, so normally exactly one is left, and it is
+// the container this call serves even where the heuristic would have picked an older pod.
+//
+// When none is left the tiers come back whole: kubelet and the informer disagree — a pod kubelet
+// holds that the informer has not delivered yet, say — and the heuristic's guess is better than no
+// answer. When several are left the heuristic chooses among them only.
+func narrowToKubeletPending(
+	logger logr.Logger, match _AllocationMatch,
+	feasible, infeasible, claimed []_AllocatingCandidate,
+) ([]_AllocatingCandidate, []_AllocatingCandidate, []_AllocatingCandidate) {
+	if match.Kubelet == nil {
+		return feasible, infeasible, claimed
+	}
+	waiting := func(tier []_AllocatingCandidate) []_AllocatingCandidate {
+		return slices.DeleteFunc(slices.Clone(tier), func(c _AllocatingCandidate) bool {
+			return !match.Kubelet.waitsForDevice(c.pod, c.ctr)
+		})
+	}
+	narrowedFeasible, narrowedInfeasible, narrowedClaimed := waiting(feasible), waiting(infeasible), waiting(claimed)
+
+	switch n := len(narrowedFeasible) + len(narrowedInfeasible) + len(narrowedClaimed); {
+	case n == 0:
+		logger.Info("kubelet reports no pending candidate as waiting for this resource; "+
+			"identifying the allocating container by the pending-Pod heuristic",
+			"resource", match.ResourceName,
+			"candidates", len(feasible)+len(infeasible)+len(claimed))
+		return feasible, infeasible, claimed
+	case n > 1:
+		logger.Info("kubelet reports several candidates as waiting for this resource; "+
+			"choosing among them by the pending-Pod heuristic",
+			"resource", match.ResourceName, "candidates", n)
+	}
+	return narrowedFeasible, narrowedInfeasible, narrowedClaimed
 }
 
 // classifyAllocatingCandidates walks the node's Pending pods, oldest first, and sorts every
@@ -1314,6 +1371,9 @@ func applyAllocatedStatus(allocatedStatus, remainingStatus workercore.DevicesSta
 			}
 			dstAccelerator.Mode = srcAccelerator.Mode
 			dstAccelerator.Remaining = max(dstAccelerator.Remaining-srcAccelerator.Allocated, 0)
+			if srcAccelerator.Mode == workercore.DeviceAllocationModeSliced {
+				dstAccelerator.AllocatedSlices++
+			}
 		}
 	}
 

@@ -219,6 +219,16 @@ spec:
             {{- end }}
             - name: kubelet-device-plugins-dir
               mountPath: /var/lib/kubelet/device-plugins
+            {{- /*
+              The kubelet pod-resources API, read to learn which container an Allocate is for: the
+              device-plugin RPC does not say. The directory rather than the socket, because kubelet
+              recreates the socket when it restarts and a mount of the old file would go stale. A
+              node without it only loses that lookup: Allocate falls back to the pending-Pod
+              heuristic.
+            */}}
+            - name: kubelet-pod-resources-dir
+              mountPath: /var/lib/kubelet/pod-resources
+              readOnly: true
             {{- if eq $manu "amd" }}
             - name: gpustack-amd-driver
               mountPath: /opt/rocm
@@ -324,6 +334,10 @@ spec:
         - name: kubelet-device-plugins-dir
           hostPath:
             path: /var/lib/kubelet/device-plugins
+            type: DirectoryOrCreate
+        - name: kubelet-pod-resources-dir
+          hostPath:
+            path: /var/lib/kubelet/pod-resources
             type: DirectoryOrCreate
         {{- with $root.Values.deviceManager.containerdConfigDir }}
         - name: containerd-config-dir

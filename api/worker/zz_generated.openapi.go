@@ -2733,6 +2733,13 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 							Format:      "int32",
 						},
 					},
+					"allocatedSlices": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AllocatedSlices is how many logical slices the device currently hosts: one per container holding a slice of it. A logically sliceable device hosts at most LogicalSliced.Count of them whatever its Remaining says, so a slice fits only where both have room. Zero, the value a ledger written before this field existed reads as, counts as no slices.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
 					"allocatedProfiles": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{

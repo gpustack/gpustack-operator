@@ -246,9 +246,13 @@ the node, stamped with the accelerator flavors' selector labels (the feature key
 
 Its `.status` holds the per-accelerator **`AcceleratorAllocation` ledger**: each accelerator's `mode`
 (free / exclusive / shared / sliced / partitioned) and `Remaining` credit budget, plus, for a
-hardware-partitioned one, its allocated and still-placeable partition profiles. This is the **single
-authoritative accounting** of accelerator occupancy, driving the InstanceType four-view display *and*
-feeding the per-accelerator AdmissionCheck (see [Admission](admission.md)).
+hardware-partitioned one, its allocated and still-placeable partition profiles.
+
+For a logically sliced accelerator it also counts the slices it hosts, `allocatedSlices`, one per
+container. An accelerator hosts at most its `logicalSliced.count` of them — 4 on Hygon — whatever its
+`Remaining` says. This is the **single authoritative accounting** of accelerator occupancy, driving the
+InstanceType four-view display *and* feeding the per-accelerator AdmissionCheck (see
+[Admission](admission.md)).
 
 The DM re-detects whenever the device set or health changes. A separate `NodeDevicesReconciler` syncs
 the `gpustack.ai/managed` mark from the Node onto the same-named `Devices`, so the per-node DM never
@@ -829,15 +833,35 @@ slice against itself.
 
 ## Container identification and cross-mode exclusion
 
-`Allocate` carries the assigned device IDs but not the pod identity. The allocator therefore matches
-the node's pending pods requesting the resource: it drops candidates this call could not serve on the
-accelerators offered (a slice demanding more per accelerator than their remaining), skips a (pod,
-container) already holding a reservation, and takes the oldest survivor — those left are
-interchangeable.
+`Allocate` carries the assigned device IDs but not the pod identity. The allocator asks the kubelet
+first, over its pod-resources API: the kubelet adds a pod before admitting it, admits one at a time,
+and records a container's devices only once its `Allocate` returns. So the container this call serves
+is the one the kubelet holds without a device of the resource yet.
 
-The feasibility test **disambiguates, it does not gate**: the ledger lags reality, so an
-all-infeasible set falls back to the unfiltered oldest rather than failing a resolvable request.
-Admission belongs upstream, to the Pod webhook and the AdmissionCheck.
+That answer outranks the order below. The kubelet admits pods in the order they reach it, and
+creation timestamps keep whole seconds only, so two slices created together and bound in the other
+order were recorded on each other: each annotation named the other Pod's accelerator, and each
+container got the other's memory limit.
+
+When the kubelet cannot be asked, names none of the candidates, or names several, the allocator
+matches the node's pending pods itself, among those the kubelet named if any. It drops candidates
+this call could not serve on the accelerators offered, skips a (pod, container) already holding a
+reservation, and takes the oldest survivor.
+
+The feasibility test **disambiguates, it does not gate**: an all-infeasible set falls back to the
+unfiltered oldest rather than failing to identify. Once the container is known, a logical slice its
+accelerator cannot hold is **refused** with `FailedPrecondition`: one with no free slot, or without
+the units the slice needs. The kubelet fails that Pod with `UnexpectedAdmissionError`.
+
+The refusal reads each other container's slice once — the in-process reservation, else the
+annotation — and not the container's own, so a retried `Allocate` is not charged twice. Pods in a
+terminal phase count as free: the kubelet has returned their tokens. The feasibility test and the
+allocation hint read the same room, so when it refuses, no candidate fits that accelerator.
+
+It is the one layer every path reaches, a Pod outside the scheduling chain or a hint the kubelet
+declined, and it fires exactly where the ledger used to clamp `Remaining` at zero. Both the kubelet
+lookup and the refusal have an off switch, `GPUSTACK_DEVICE_PLUGIN_IDENTIFY_BY_KUBELET` and
+`GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE` (see [Settings](../settings.md#configuration-knobs)).
 
 All `Allocate`s of a node run in its single device-manager process, so a per-node mutex serializes
 each workload `Allocate`'s *identify → cross-mode check → reserve* section; the durable-annotation
@@ -893,10 +917,10 @@ can host one large claim.
 The ordering is computed **per `DevicesGroup`**, walking the groups in spec order, not across a
 node's groups at once.
 
-It stays a *preference*: the per-accelerator fit filter lives **only** in this advisory response —
-`Allocate` refuses an accelerator another mode holds, but never one merely short of room — so an
-accelerator's VRAM budget is respected exactly insofar as the kubelet consumes the hint, with no
-backstop below it. Two properties are load-bearing:
+It stays a *preference*: the kubelet may take another accelerator. For a logical slice `Allocate` is
+the backstop — it refuses one short of a slot or of room, reading the same room the hint does (see
+[Container identification](#container-identification-and-cross-mode-exclusion)). A hint read from
+the ledger alone would miss slices reserved since its last rebuild. Two properties are load-bearing:
 
 - every id returned must be one the kubelet actually offered — the full
   `<group>:<accelerator>:<token>` form, since an id the kubelet cannot match is discarded

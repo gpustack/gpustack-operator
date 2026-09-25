@@ -30,6 +30,8 @@ type fitCard struct {
 	mode        workercore.DeviceAllocationMode
 	logical     bool
 	partitioned bool
+	// slices is how many logical slices the card already hosts, of the ten a logical card offers.
+	slices int32
 }
 
 // freeCard is a whole free card that can serve every whole-card family and a logical slice.
@@ -64,7 +66,7 @@ func fitDevices(node string, groups ...fitGroup) *workercore.Devices {
 			}
 			spec = append(spec, workercore.Accelerator{ID: id, Index: uint32(i), Status: capability})
 			status = append(status, workercore.AcceleratorAllocation{
-				ID: id, Index: uint32(i), Mode: c.mode, Remaining: c.remaining,
+				ID: id, Index: uint32(i), Mode: c.mode, Remaining: c.remaining, AllocatedSlices: c.slices,
 			})
 		}
 		d.Spec.Groups = append(d.Spec.Groups, workercore.DevicesGroup{ID: g.model, Manufacturer: "nvidia", Accelerators: spec})
@@ -232,6 +234,8 @@ func TestFitLabelsAgreeWithNodeDevicesFeasibility(t *testing.T) {
 		{"a card without logical slicing", []fitCard{{remaining: 1600000}}},
 		{"less than a share on every card", []fitCard{freeCard(159999), freeCard(1)}},
 		{"every card fully held exclusively", []fitCard{{mode: workercore.DeviceAllocationModeExclusive, logical: true}}},
+		{"the freest card has no slot left", []fitCard{{remaining: 960000, mode: workercore.DeviceAllocationModeSliced, logical: true, slices: 10}, {remaining: 160000, mode: workercore.DeviceAllocationModeSliced, logical: true, slices: 2}}},
+		{"the freest card has one slot left", []fitCard{{remaining: 960000, mode: workercore.DeviceAllocationModeSliced, logical: true, slices: 9}, {remaining: 160000, mode: workercore.DeviceAllocationModeSliced, logical: true, slices: 2}}},
 	}
 	node := fitNode("n", true, nil)
 	for _, l := range ledgers {

@@ -381,6 +381,7 @@ func (s *ResourceServer) GetPreferredAllocation(ctx context.Context, req *Prefer
 	pod, ctr, err := s.Reconciler.getAllocatingPodWithRetry(ctx, _AllocationMatch{
 		ResourceName: resName,
 		Quantity:     resQuantity,
+		Kubelet:      s.Reconciler.kubeletPending(ctx, resName),
 	})
 	if err != nil {
 		s.Logger.Error(err, "get allocating pod for preferred allocation")
@@ -393,7 +394,17 @@ func (s *ResourceServer) GetPreferredAllocation(ctx context.Context, req *Prefer
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get devices for preferred allocation: %v", err)
 	}
 
-	ctrResp, err := s.getContainerPreferredAllocationResponse(ctrReq, pod, ctr, devs)
+	// The hint reads the same room the Allocate refusal will: a hint drawn from the ledger alone
+	// misses the slices reserved since it was last rebuilt, and would steer kubelet onto a card
+	// the Allocate that follows then refuses while another card had room. An occupancy that cannot
+	// be read leaves the hint on the ledger rather than failing it: kubelet fails the Pod's
+	// admission on a hint error, and the Allocate that follows judges the outcome either way.
+	sliced, err := s.slicedOccupancyForAllocate(ctx)
+	if err != nil {
+		sliced = nil
+	}
+
+	ctrResp, err := s.getContainerPreferredAllocationResponse(ctrReq, pod, ctr, s.slicedRoomFor(devs, sliced, pod, ctr))
 	if err != nil {
 		s.Logger.Error(err, "get container preferred allocation response")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get container preferred allocation response: %v", err)
@@ -410,8 +421,9 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 	ctrReq *ContainerPreferredAllocationRequest,
 	pod *core.Pod,
 	ctr *core.Container,
-	devs *workercore.Devices,
+	room _SlicedRoom,
 ) (*ContainerPreferredAllocationResponse, error) {
+	devs := room.devs
 	availableResTokensMap, err := parseResourceTokensByAccelerator(ctrReq.GetAvailableDeviceIDs())
 	if err != nil {
 		return nil, fmt.Errorf("convert available device id %w", err)
@@ -424,14 +436,13 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 	allocationSize := ctrReq.GetAllocationSize()
 	preferredDeviceIDsSet := preferredAcceleratorIDsOf(pod, devs)
 
-	// For sliced, every accelerator this HINT offers must still have this container's
-	// per-accelerator ".sliced.units" (the memory budget the Pod webhook folded in) free. That
-	// constrains the hint, not the outcome: GetPreferredAllocation is advisory, and Allocate
-	// refuses an accelerator another mode holds but never one merely short of room, so a kubelet
-	// that declines the hint can still over-commit an accelerator. The ledger records sliced
-	// allocations in real units, so an accelerator carrying a slice reports Remaining below a fresh
-	// accelerator — which is also what orders the candidates below. Zero → no per-accelerator
-	// bin-fit (a Pod the webhook did not shape); the loop then behaves as before.
+	// For sliced, every accelerator this HINT offers must still have a free slot and this
+	// container's per-accelerator ".sliced.units" (the memory budget the Pod webhook folded in)
+	// free, measured by the same room the Allocate refusal reads. GetPreferredAllocation is
+	// advisory, so a kubelet that declines the hint reaches that refusal instead. Slices are
+	// recorded in real units, so an accelerator carrying a slice has less room than a fresh one —
+	// which is also what orders the candidates below. Zero → no per-accelerator bin-fit (a Pod the
+	// webhook did not shape); the loop then behaves as before.
 	slicedUnits := int32(0)
 	if s.AllocationMode == workercore.DeviceAllocationModeSliced && ctr != nil {
 		if q, ok := ctr.Resources.Limits[nodefeature.GetAcceleratableSlicedUnitsResourceName(s.Manufacturer)]; ok {
@@ -439,7 +450,7 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 		}
 	}
 
-	sel := s.selectPreferredUnits(devs, availableResTokensMap, mustIncludedResTokensMap,
+	sel := s.selectPreferredUnits(room, availableResTokensMap, mustIncludedResTokensMap,
 		preferredDeviceIDsSet, allocationSize, slicedUnits)
 	selectedResTokens, remainingSize := sel.Selected, sel.RemainingSize
 
@@ -517,11 +528,12 @@ type _PreferredSelection struct {
 // caller decides whether to fall back. RemainingSize is returned by value rather than shared, so
 // the loop's exit stays one expression and no part of this walk becomes server state.
 func (s *ResourceServer) selectPreferredUnits(
-	devs *workercore.Devices,
+	room _SlicedRoom,
 	availableResTokensMap, mustIncludedResTokensMap map[Resource][]ResourceToken,
 	preferredDeviceIDsSet sets.Set[string],
 	allocationSize, slicedUnits int32,
 ) _PreferredSelection {
+	devs := room.devs
 	sel := _PreferredSelection{
 		Selected:      make([]ResourceToken, 0, allocationSize),
 		RemainingSize: allocationSize,
@@ -531,7 +543,7 @@ func (s *ResourceServer) selectPreferredUnits(
 		if grp.Manufacturer != s.Manufacturer {
 			continue
 		}
-		for _, j := range slicedPackingOrder(devs, grp, mustIncludedResTokensMap, slicedUnits) {
+		for _, j := range slicedPackingOrder(room, grp, mustIncludedResTokensMap, slicedUnits) {
 			acc := &grp.Accelerators[j]
 			res := Resource{
 				Group:  grp.ID,
@@ -571,12 +583,12 @@ func (s *ResourceServer) selectPreferredUnits(
 				preferredDeviceIDsSet.Delete(res.Device)
 				sel.Selected = append(sel.Selected, mustUnits[0])
 			} else {
-				// Defer an accelerator that cannot fit this slice's per-accelerator units without
-				// over-committing it (its ledger Remaining is below the request). That list is
+				// Defer an accelerator that cannot fit this slice: no free slot, or less room than
+				// the slice's per-accelerator units. That list is
 				// consumed only on the preferred-accelerator path, when the annotation's
 				// accelerators could not all be selected; with no annotation a claim no accelerator
 				// fits yields an empty hint and these accelerators are never used.
-				if slicedUnits > 0 && statusRemainingOf(devs, res) < slicedUnits {
+				if slicedUnits > 0 && room.shortage(res, slicedUnits) != "" {
 					sel.Unselected = append(sel.Unselected, resTokens[0])
 					continue
 				}
@@ -613,11 +625,12 @@ func (s *ResourceServer) selectPreferredUnits(
 //     is the rule device.SelectPartitionPlacements already applies to hardware partitions, for the
 //     same reason.
 //   - Accelerators that cannot take the request sort last, emptiest first, so that if the caller's
-//     preferred-accelerator path has to fall back to one of them it over-commits the least.
+//     preferred-accelerator path has to fall back to one of them it names the one closest to
+//     fitting. Allocate refuses it all the same when it does not fit.
 //   - Ties break on the lower position, so two identical requests against identical state place
 //     identically.
 func slicedPackingOrder(
-	devs *workercore.Devices,
+	room _SlicedRoom,
 	grp *workercore.DevicesGroup,
 	mustInclude map[Resource][]ResourceToken,
 	slicedUnits int32,
@@ -640,8 +653,8 @@ func slicedPackingOrder(
 		if c := slicex.CompareTrueFirst(mustA, mustB); c != 0 {
 			return c
 		}
-		remainingA, remainingB := statusRemainingOf(devs, resA), statusRemainingOf(devs, resB)
-		fitsA, fitsB := remainingA >= slicedUnits, remainingB >= slicedUnits
+		remainingA, remainingB := room.remaining(resA), room.remaining(resB)
+		fitsA, fitsB := room.shortage(resA, slicedUnits) == "", room.shortage(resB, slicedUnits) == ""
 		if c := slicex.CompareTrueFirst(fitsA, fitsB); c != 0 {
 			return c
 		}
@@ -690,6 +703,10 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 	logicalPlacer, placesLogical := s.Responder.(LogicalSlicedResponder)
 	placesLogical = placesLogical && s.AllocationMode == workercore.DeviceAllocationModeSliced
 
+	// Asked before the mutex: kubelet is blocked on this very call, so its answer cannot change
+	// while the call waits for the mutex, and a lookup is I/O the serialized section must not do.
+	kubelet := s.Reconciler.kubeletPending(ctx, s.ResourceName())
+
 	// Identify the pod, enforce the cross-mode invariant, and reserve the accelerators under the
 	// node allocate mutex (see DevicesReconciler.allocateMutex). Holding it across the whole
 	// section makes a concurrent Allocate batch (e.g. Kueue admitting identical Pods together)
@@ -705,7 +722,7 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		s.Reconciler.allocateMutex.Lock()
 		defer s.Reconciler.allocateMutex.Unlock()
 
-		return s.decideAllocation(ctx, allocatedDeviceIDs, allocatedResTokensMap, logicalPlacer, placesLogical)
+		return s.decideAllocation(ctx, allocatedDeviceIDs, allocatedResTokensMap, logicalPlacer, placesLogical, kubelet)
 	}()
 	if err != nil {
 		return nil, err
@@ -781,6 +798,7 @@ func (s *ResourceServer) decideAllocation(
 	tokensByCard map[Resource][]ResourceToken,
 	logicalPlacer LogicalSlicedResponder,
 	placesLogical bool,
+	kubelet *_KubeletPending,
 ) (_AllocationDecision, error) {
 	var d _AllocationDecision
 
@@ -792,11 +810,17 @@ func (s *ResourceServer) decideAllocation(
 	}
 	d.Devices = devs
 
+	sliced, err := s.slicedOccupancyForAllocate(ctx)
+	if err != nil {
+		return d, err
+	}
+
 	d.Pod, d.Container, err = s.Reconciler.getAllocatingPod(ctx, _AllocationMatch{
 		ResourceName: s.ResourceName(),
 		Quantity:     *resource.NewQuantity(int64(len(deviceIDs)), resource.DecimalSI),
 		SkipReserved: true,
-		Feasible:     s.candidateFeasible(devs, tokensByCard, occupied),
+		Feasible:     s.candidateFeasible(devs, tokensByCard, occupied, sliced),
+		Kubelet:      kubelet,
 	})
 	if err != nil {
 		s.Logger.Error(err, "get allocating pod for allocation")
@@ -814,6 +838,10 @@ func (s *ResourceServer) decideAllocation(
 	}
 
 	if err = s.rejectCrossModeCards(devs, tokensByCard, d.Pod); err != nil {
+		return d, err
+	}
+
+	if err = s.rejectSlicedOvercommit(&d, sliced, tokensByCard, unitsPerToken); err != nil {
 		return d, err
 	}
 
@@ -897,6 +925,21 @@ func (s *ResourceServer) snapshotForAllocate(ctx context.Context, placesLogical 
 	return devs, occupied, occupiedLogical, nil
 }
 
+// slicedOccupancyForAllocate reads the logical-slice occupancy a sliced Allocate decides against, or
+// returns nil for every other family and whenever the sliced refusal is switched off, which leaves
+// every decision reading the Devices ledger as before.
+func (s *ResourceServer) slicedOccupancyForAllocate(ctx context.Context) (_SlicedOccupancy, error) {
+	if s.AllocationMode != workercore.DeviceAllocationModeSliced || s.Reconciler.slicedAllocateGateOff {
+		return nil, nil
+	}
+	sliced, err := s.slicedOccupancy(ctx)
+	if err != nil {
+		s.Logger.Error(err, "get logical-slice occupancy for allocation")
+		return nil, grpcstatus.Errorf(grpccodes.Internal, "get logical-slice occupancy for allocation: %v", err)
+	}
+	return sliced, nil
+}
+
 // occupiedPhysicalPlacements unions the two records of what a node's accelerators already carry:
 // the placements live allocations recorded in their Pod annotations, and the selections in-flight
 // allocations published into their reservation before the annotation could land. The union is what
@@ -952,20 +995,21 @@ func (s *ResourceServer) candidateFeasible(
 	devs *workercore.Devices,
 	accelerators map[Resource][]ResourceToken,
 	occupied Placements,
+	sliced _SlicedOccupancy,
 ) func(*core.Pod, *core.Container) bool {
 	switch s.AllocationMode {
 	case workercore.DeviceAllocationModeSliced:
 		unitsResName := nodefeature.GetAcceleratableSlicedUnitsResourceName(s.Manufacturer)
-		return func(_ *core.Pod, ctr *core.Container) bool {
+		return func(pod *core.Pod, ctr *core.Container) bool {
 			q, ok := ctr.Resources.Limits[unitsResName]
 			if !ok || q.Value() <= 0 {
 				// A slice the Pod webhook did not shape carries no per-accelerator budget, so there
 				// is nothing to test it against.
 				return true
 			}
-			units := int32(min(q.Value(), int64(nodefeature.ResourceMaxUnits)))
-			for res := range accelerators {
-				if statusRemainingOf(devs, res) < units {
+			room := s.slicedRoomFor(devs, sliced, pod, ctr)
+			for res, tokens := range accelerators {
+				if room.shortage(res, unitsCharged(q.Value(), len(tokens))) != "" {
 					return false
 				}
 			}
@@ -1421,7 +1465,7 @@ func (s *ResourceServer) accumulateAllocation(
 				// charges a WHOLE accelerator, which would make a single small instance look like
 				// it owned the accelerator and hide the rest of its geometry from every consumer of
 				// the scalar remaining.
-				allocated = int32(min(unitsPerToken*int64(len(resTokens)), int64(nodefeature.ResourceMaxUnits)))
+				allocated = unitsCharged(unitsPerToken, len(resTokens))
 			}
 			if allocated > nodefeature.ResourceMaxUnits {
 				allocated = nodefeature.ResourceMaxUnits
@@ -1715,7 +1759,7 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 
 	resName := s.ResourceName()
 	resQuantity := *resource.NewQuantity(int64(len(ctrReq.GetDevicesIds())), resource.DecimalSI)
-	pod, ctr, err := s.claimVisibilityContainer(ctx, resName, resQuantity)
+	pod, ctr, err := s.claimVisibilityContainer(ctx, resName, resQuantity, s.Reconciler.kubeletPending(ctx, resName))
 	if err != nil {
 		s.Logger.Error(err, "get allocating pod for visibility allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for visibility allocation: %v", err)
@@ -1795,7 +1839,7 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 // pending pod, granting the later ones the first pod's accelerators and, when its owner is
 // partition-backed, the first pod's partition.
 func (s *ResourceServer) claimVisibilityContainer(
-	ctx context.Context, resName core.ResourceName, resQuantity resource.Quantity,
+	ctx context.Context, resName core.ResourceName, resQuantity resource.Quantity, kubelet *_KubeletPending,
 ) (*core.Pod, *core.Container, error) {
 	s.Reconciler.allocateMutex.Lock()
 	defer s.Reconciler.allocateMutex.Unlock()
@@ -1804,6 +1848,7 @@ func (s *ResourceServer) claimVisibilityContainer(
 		ResourceName: resName,
 		Quantity:     resQuantity,
 		SkipGranted:  true,
+		Kubelet:      kubelet,
 	})
 	if err != nil {
 		return nil, nil, err

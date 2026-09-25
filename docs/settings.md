@@ -191,6 +191,31 @@ The Worker (WK) copies every `GPUSTACK_`-prefixed variable from its own Pod spec
 | `GPUSTACK_CONF_DIR` | `/etc/gpustack` | all | Root directory for configuration and metadata, e.g. bundled Helm charts. |
 | `GPUSTACK_PCI_CLASS_PREFIXES` | `02,03,0b,12` | DM | Comma-separated PCI class prefixes treated as display/accelerator devices (see the [PCI class registry](https://admin.pci-ids.ucw.cz/read/PD)). Applied to the DM's local sysfs PCI scan, and to nothing else. The same list appears twice more, and neither reads this variable: the chart value `node-feature-discovery.worker.config.sources.pci.deviceClassWhitelist` decides which classes NFD labels, and `pkg/nodefeature` is what the `gpustack-cpu-info` NodeFeatureRule matches (a Go test holds those two equal). Change one and change all three. |
 | `GPUSTACK_DEVICES_GROUP_ID_WITH_MEMORY` | `false` | DM | When `true`, the devices group ID gains a memory-size suffix (e.g. `nvidia-tesla-t4-16g` instead of `nvidia-tesla-t4`), so same-model devices with different VRAM sizes form distinct groups. |
+| `GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE` | `true` | DM | Whether `Allocate` refuses a logical slice its accelerator cannot hold: one with no free slot, or without the units the slice needs. The Pod fails with `UnexpectedAdmissionError` and its controller recreates it. `false` allocates it anyway and clamps the ledger at zero, as before the refusal existed; see [Switching an allocator safeguard off](#switching-an-allocator-safeguard-off). |
+| `GPUSTACK_DEVICE_PLUGIN_IDENTIFY_BY_KUBELET` | `true` | DM | Whether `Allocate` asks the kubelet's pod-resources API which container it serves. `false` identifies it by the pending-Pod heuristic alone, as before the lookup existed; a node whose kubelet cannot be reached falls back to that heuristic by itself. See [Switching an allocator safeguard off](#switching-an-allocator-safeguard-off). |
+
+### Switching an allocator safeguard off
+
+Two device-plugin safeguards default on, and each has a switch for the case where it misjudges a
+node. Set it through the chart, which renders `deviceManager.env` onto every device-manager DaemonSet:
+
+```bash
+helm upgrade gpustack-operator <chart> --namespace gpustack-system --reset-then-reuse-values \
+  --set-string deviceManager.env.GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE=false
+```
+
+- `GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE=false` is for a slice refused although its accelerator
+  has room — the Pod keeps coming back `UnexpectedAdmissionError` naming that accelerator. With it
+  off, the slice is allocated and the ledger clamps that accelerator's `Remaining` at zero.
+- `GPUSTACK_DEVICE_PLUGIN_IDENTIFY_BY_KUBELET=false` is for allocations recorded on the wrong Pod while
+  the kubelet is reachable. With it off, the device manager picks the oldest pending Pod the request
+  could be for, which can record two Pods bound together on each other.
+
+The change rolls the device-manager Pods, one node at a time. Running workloads are not touched: a
+device-manager restart does not reach a started container, and its allocation records live on the
+Pods, where the restarted process reads them. A Pod admitted while its node's device manager is
+restarting can fail admission, as across any device-manager restart, and its controller recreates it.
+Remove the value the same way to switch the safeguard back on.
 
 ### Per-manufacturer overrides
 

@@ -65,3 +65,35 @@ func TestPopulationPredicates(t *testing.T) {
 		})
 	}
 }
+
+func TestLogicalSlotsFree(t *testing.T) {
+	sliceable := AcceleratorStatus{LogicalSliced: AcceleratorLogicalSliced{Count: 4}}
+	testCases := []struct {
+		name            string
+		status          AcceleratorStatus
+		allocatedSlices int32
+		want            int32
+	}{
+		{name: "empty card offers its whole count", status: sliceable, want: 4},
+		{name: "a ledger without the field reads as empty", status: sliceable, allocatedSlices: 0, want: 4},
+		{name: "one slot left", status: sliceable, allocatedSlices: 3, want: 1},
+		{name: "every slot taken", status: sliceable, allocatedSlices: 4, want: 0},
+		{name: "not logically sliceable offers none", status: AcceleratorStatus{}, want: 0},
+		{
+			name: "partitioned offers none",
+			status: AcceleratorStatus{
+				LogicalSliced:  AcceleratorLogicalSliced{Count: 4},
+				PhysicalSliced: AcceleratorPhysicalSliced{Count: 7},
+			},
+			want: 0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := LogicalSlotsFree(tc.status, tc.allocatedSlices); got != tc.want {
+				t.Errorf("LogicalSlotsFree() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

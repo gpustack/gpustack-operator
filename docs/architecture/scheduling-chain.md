@@ -133,7 +133,7 @@ node's accelerators. Two labels per accelerator model say what one accelerator c
 
 | Label | Value |
 |---|---|
-| `sliced-max-free-units.fit.gpustack.ai/<aKey>` | the largest free `units` on any one accelerator of the model that can serve a logical slice |
+| `sliced-max-free-units.fit.gpustack.ai/<aKey>` | the largest free `units` on any one accelerator of the model that can serve a logical slice and still has a free slot for one |
 | `shared-free-cards.fit.gpustack.ai/<aKey>` | how many accelerators of the model can still grant an ownership share |
 
 - Both values use Gate 3's own per-accelerator predicates. For a single Pod asking for one
@@ -141,6 +141,8 @@ node's accelerators. Two labels per accelerator model say what one accelerator c
   would.
 - A value is `0` when every accelerator of that population is full. A label disappears when the model
   has no accelerator of that population, and when the node stops being managed.
+- An accelerator hosting its full `logicalSliced.count` of slices is full for the sliced label, however
+  much memory it has left: it takes no further slice. On Hygon that is four.
 - A label is written only when its value changes, after a 3 s window that coalesces ledger bursts. The
   cost is at most one Node metadata patch per allocation or release burst per node.
 - The labels filter only; no capacity or quota is ever charged against them.
