@@ -1426,6 +1426,11 @@ func (in *KVCacheBackendMember) DeepCopyInto(out *KVCacheBackendMember) {
 		*out = new(KVCacheBackendMemberTransport)
 		**out = **in
 	}
+	if in.FabricInterfaceCount != nil {
+		in, out := &in.FabricInterfaceCount, &out.FabricInterfaceCount
+		*out = new(int32)
+		**out = **in
+	}
 	if in.SecurityContext != nil {
 		in, out := &in.SecurityContext, &out.SecurityContext
 		*out = new(v1.SecurityContext)

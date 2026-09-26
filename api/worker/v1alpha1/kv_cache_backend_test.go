@@ -172,3 +172,19 @@ func TestKVCacheBackendLeaderSnapshotIsPrunedBySchema(t *testing.T) {
 	assert.Equal(t, highAvailability(map[string]any{"memberAddressing": "Lease"}), pruned,
 		"the block is dropped and the rest of the object is stored as written")
 }
+
+// TestKVCacheBackendFabricInterfaceCountHasNoDefault pins that an unset interface count stays unset
+// in storage. A schema default would store a count on every group, including a TCP group that
+// renders nothing from it, and the object would then read as asking for an interface it never gets.
+// The renderer treats an unset count on RDMA or EFA as one.
+//
+// The minimum stays at one: a count, once written, names real interfaces, and zero is not a number
+// of interfaces a fabric member can run on.
+func TestKVCacheBackendFabricInterfaceCountHasNoDefault(t *testing.T) {
+	count, ok := memberSchema(t).Properties["fabricInterfaceCount"]
+	require.True(t, ok, "a member group must still be able to declare its interface count")
+
+	assert.Nil(t, count.Default, "an unset count is resolved by the renderer from the protocol")
+	require.NotNil(t, count.Minimum, "a declared count must be at least one")
+	assert.InDelta(t, 1, *count.Minimum, 0)
+}

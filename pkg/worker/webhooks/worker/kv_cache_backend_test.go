@@ -1864,3 +1864,119 @@ func TestKVCacheBackendWebhook_ValidateImageFallback(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+// TestKVCacheBackendWebhook_AnInterfaceCountOffAHostFabricOnlyWarns pins what admission says about
+// members[].fabricInterfaceCount on a group whose effective protocol is neither RDMA nor EFA: the
+// value renders nothing there, so it is admitted with a warning rather than refused.
+//
+// A refusal would block the update that moves a group from RDMA back to TCP, which usually still
+// carries the count. The warning fires on a create and on an update that changes the group's count
+// or its effective protocol, and stays quiet on an update that touches neither: the reconciler
+// removing the finalizer is an update too, and repeating the warning there reaches no one.
+func TestKVCacheBackendWebhook_AnInterfaceCountOffAHostFabricOnlyWarns(t *testing.T) {
+	type state struct {
+		protocol      string
+		groupProtocol string
+		count         int32
+	}
+
+	build := func(s state) *workercore.KVCacheBackend {
+		k := newKVCacheBackend()
+		k.Spec.Transport.Protocol = s.protocol
+		if s.groupProtocol != "" {
+			k.Spec.Connection.Managed.Members[0].Transport = &workercore.KVCacheBackendMemberTransport{
+				Protocol: s.groupProtocol,
+			}
+		}
+		if s.count != 0 {
+			k.Spec.Connection.Managed.Members[0].FabricInterfaceCount = ptr.To(s.count)
+		}
+		return k
+	}
+
+	cases := []struct {
+		name     string
+		old      *state
+		new      state
+		wantWarn bool
+	}{
+		{
+			name:     "a create declaring a count on TCP warns",
+			new:      state{protocol: "TCP", count: 2},
+			wantWarn: true,
+		},
+		{
+			name:     "a create declaring a count on a group overriding RDMA with TCP warns",
+			new:      state{protocol: "RDMA", groupProtocol: "TCP", count: 1},
+			wantWarn: true,
+		},
+		{
+			name: "a create declaring a count on RDMA is silent",
+			new:  state{protocol: "RDMA", count: 2},
+		},
+		{
+			name: "a create declaring a count on EFA is silent",
+			new:  state{protocol: "EFA", count: 1},
+		},
+		{
+			name: "a create leaving the count unset on TCP is silent",
+			new:  state{protocol: "TCP"},
+		},
+		{
+			name: "an update touching neither the count nor the protocol is silent",
+			old:  &state{protocol: "TCP", count: 1},
+			new:  state{protocol: "TCP", count: 1},
+		},
+		{
+			name:     "an update changing the count on TCP warns",
+			old:      &state{protocol: "TCP", count: 1},
+			new:      state{protocol: "TCP", count: 2},
+			wantWarn: true,
+		},
+		{
+			name:     "an update moving the backend from RDMA to TCP with the count kept warns",
+			old:      &state{protocol: "RDMA", count: 2},
+			new:      state{protocol: "TCP", count: 2},
+			wantWarn: true,
+		},
+		{
+			name:     "an update moving the group from RDMA to TCP with the count kept warns",
+			old:      &state{protocol: "RDMA", count: 2},
+			new:      state{protocol: "RDMA", groupProtocol: "TCP", count: 2},
+			wantWarn: true,
+		},
+		{
+			name: "an update moving the backend from TCP to RDMA is silent",
+			old:  &state{protocol: "TCP", count: 2},
+			new:  state{protocol: "RDMA", count: 2},
+		},
+	}
+
+	wh := &KVCacheBackendWebhook{}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			newKvcb := build(c.new)
+			// The image is changed on every update so the call is an ordinary edit rather than a
+			// no-op, and the warning cannot come from the update being empty.
+			var (
+				warnings []string
+				err      error
+			)
+			if c.old == nil {
+				warnings, err = wh.ValidateCreate(context.Background(), newKvcb)
+			} else {
+				newKvcb.Spec.Image = "example.com/mooncake:v1"
+				warnings, err = wh.ValidateUpdate(context.Background(), build(*c.old), newKvcb)
+			}
+
+			require.NoError(t, err, "a count off a host fabric renders nothing, so it is never refused")
+			if !c.wantWarn {
+				assert.Empty(t, warnings)
+				return
+			}
+			require.Len(t, warnings, 1)
+			assert.Contains(t, warnings[0], "spec.connection.managed.members[0].fabricInterfaceCount")
+			assert.Contains(t, warnings[0], "has no effect")
+		})
+	}
+}

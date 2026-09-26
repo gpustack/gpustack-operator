@@ -1952,7 +1952,7 @@ func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 		protocol       string
 		groupProtocol  string
 		medium         string
-		interfaceCount int32
+		interfaceCount *int32
 		want           core.ResourceName
 		wantCount      int64
 	}{
@@ -1963,12 +1963,12 @@ func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 		},
 		{
 			name:     "one interface asks for the shared RDMA key",
-			protocol: "RDMA", medium: "DRAM", interfaceCount: 1,
+			protocol: "RDMA", medium: "DRAM", interfaceCount: ptr.To[int32](1),
 			want: rdmaSharedKey, wantCount: 1,
 		},
 		{
 			name:     "multiple interfaces ask for exclusive RDMA resources",
-			protocol: "RDMA", medium: "DRAM", interfaceCount: 2,
+			protocol: "RDMA", medium: "DRAM", interfaceCount: ptr.To[int32](2),
 			want: rdmaExclusiveKey, wantCount: 2,
 		},
 		{
@@ -1983,7 +1983,7 @@ func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 		},
 		{
 			name:     "EFA with one declared interface asks for one and mounts no tree",
-			protocol: "EFA", medium: "DRAM", interfaceCount: 1,
+			protocol: "EFA", medium: "DRAM", interfaceCount: ptr.To[int32](1),
 			want: efaKey, wantCount: 1,
 		},
 		{
@@ -2002,6 +2002,26 @@ func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 		{
 			name:     "the Auto that resolves to tcp is left exactly as rendered",
 			protocol: "Auto", medium: "DRAM",
+		},
+		{
+			name:     "a count declared on TCP grants nothing",
+			protocol: "TCP", medium: "DRAM", interfaceCount: ptr.To[int32](2),
+		},
+		{
+			name:     "a count declared on CANN grants nothing",
+			protocol: "CANN", medium: "DRAM", interfaceCount: ptr.To[int32](1),
+		},
+		{
+			name:     "ROCM grants no device",
+			protocol: "ROCM", medium: "VRAM",
+		},
+		{
+			name:     "MUSA grants no device",
+			protocol: "MUSA", medium: "VRAM",
+		},
+		{
+			name:     "MACA grants no device",
+			protocol: "MACA", medium: "VRAM",
 		},
 	}
 
@@ -2048,6 +2068,31 @@ func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 				assert.NotEqual(t, RDMADevicePath, m.MountPath,
 					"no member mounts the device tree, whichever fabric it was granted")
 			}
+		})
+	}
+}
+
+// TestMemberWorkload_AnUnsetInterfaceCountRendersAsOne pins that leaving the count unset on a host
+// fabric renders the same Pod template as declaring one. The fingerprint is compared, because a
+// difference there is what rolls every running member: the schema default that used to store the
+// one is gone, and a group admitted under it keeps the stored value while a new group leaves it
+// unset.
+func TestMemberWorkload_AnUnsetInterfaceCountRendersAsOne(t *testing.T) {
+	for _, protocol := range []string{"RDMA", "EFA"} {
+		t.Run(protocol, func(t *testing.T) {
+			render := func(count *int32) string {
+				return MemberPodSpecHash(RenderMemberDaemonSet(
+					testMemberBackend(func(k *workercore.KVCacheBackend) {
+						k.Spec.Transport.Protocol = protocol
+						k.Spec.Connection.Managed.Members[0].FabricInterfaceCount = count
+					}), 0, "mooncake:v0.3.13").Spec.Template)
+			}
+
+			assert.Equal(t, render(ptr.To[int32](1)), render(nil),
+				"an unset count and a declared one of one must render the same member")
+			// The positive baseline: without it, a fingerprint that ignored the count would pass
+			// the assertion above just as well.
+			assert.NotEqual(t, render(ptr.To[int32](1)), render(ptr.To[int32](2)))
 		})
 	}
 }
