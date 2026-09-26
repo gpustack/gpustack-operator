@@ -2,9 +2,9 @@
 
 > **Purpose** — running node delivery: enabling the `model-manager` plugin, where its configuration
 > comes from, reading what a node applied and holds, keeping the cache away from kubelet's eviction,
-> switching delivery, upgrading, and removing it.
+> switching delivery, where replicas land, upgrading, and removing it.
 > **Audience** operators · **Prerequisites** [Node Model Store
-> Reference](../reference/node-model-store.md) · **Read time** ~10 min
+> Reference](../reference/node-model-store.md) · **Read time** ~11 min
 
 The `model-manager` DaemonSet keeps one model cache per node and mounts a Hugging Face
 `ModelArtifact` from it, downloading a digest once per node. What it does on each mount is in the
@@ -17,6 +17,7 @@ The `model-manager` DaemonSet keeps one model cache per node and mounts a Huggin
 - [Read a node](#read-a-node)
 - [The capacity rule](#the-capacity-rule)
 - [Switch delivery](#switch-delivery)
+- [Where replicas land](#where-replicas-land)
 - [Upgrade notes](#upgrade-notes)
 - [Uninstall, and moving the cache](#uninstall-and-moving-the-cache)
 - [A deployment waiting for its weights](#a-deployment-waiting-for-its-weights)
@@ -147,6 +148,34 @@ uses the plugin for a Hugging Face artifact, whatever the Setting says.
 - **A filtered artifact needs `Node`.** Under `Engine`, a deployment on an artifact with
   `allowPatterns` or `ignorePatterns` creates no Pod and reports `FilterNeedsNodeDelivery`.
 
+## Where replicas land
+
+A node-delivered Pod prefers the nodes holding its digest when they can take it; the mechanism is in
+[Topology-Aware Scheduling](../architecture/topology-aware-scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
+Compute always comes first, so a warm cache never holds a Pod back.
+
+```bash
+kubectl get pod <replica> -o jsonpath='{.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution}{"\n"}{.spec.nodeName}{"\n"}'
+kubectl get nms -o custom-columns='NODE:.metadata.name,DIGESTS:.status.models[*].digest'
+```
+
+A replica on a node that downloads again is expected when the first command shows one of these
+(each rule is in the mechanism section linked above):
+
+- **a term naming nodes other than `spec.nodeName`**: those hot nodes had no room for it;
+- **no term at all**: no node held the digest when the Pod was created, the Pod is not
+  node-delivered, or it asks for a preferred topology level;
+- **the gate is off**, in a string you override or in a Kueue this chart does not install.
+
+**Turning it off.** Set `TASRespectNodeAffinityPreferred: false` in
+`kueue.managerConfig.controllerManagerConfigYaml`, copying the whole string, since Helm replaces a
+string value whole. The gate is Kueue's, so it also stops Kueue honoring a preferred node affinity
+any other author wrote in a TAS queue. Pods keep their terms, which then change nothing. There is no
+Setting for it.
+
+**The gate is alpha** in the bundled Kueue. A Kueue that does not know a gate its configuration
+names refuses to start, so a Kueue upgrade checks it first.
+
 ## Upgrade notes
 
 **From the version before node delivery.** With the plugin enabled, the upgrade seeds
@@ -159,6 +188,14 @@ ways to avoid the roll:
 
 Either way you can switch later, at a time of your choosing. A later `helm upgrade` never overrides
 the Setting.
+
+**To the version with the placement preference.** Kueue restarts with `TASRespectNodeAffinityPreferred`
+on. Running replicas are not touched; new node-delivered Pods carry the preference. A Pod in a TAS
+queue whose author wrote a preferred node affinity is now ranked by it, where before it was
+ignored. If you override `controllerManagerConfigYaml`, your string keeps its own gates: add the
+line to get the preference.
+
+What the gate is, and how to turn it off, is in [Where replicas land](#where-replicas-land).
 
 **Rolling the plugin.** The DaemonSet rolls one node at a time. Mounted Pods keep running and reading
 throughout: a mount is a kernel bind mount. A mount asked for while a node's plugin restarts fails,

@@ -29,7 +29,7 @@ one, not to widen the overview.
 | Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/architecture/device-discovery.md` |
 | The NIC/RDMA interface inventory, `pciRootId`/`pciSwitches`, the three link states, the `rdma.*` node labels, the RDMA resource keys | `docs/architecture/network-topology.md` |
 | Capacity labels, flavor/queue/InstanceType naming and grouping, the five reconcilers | `docs/architecture/scheduling-chain.md` |
-| Topograph's boundary, `TopologySource`, topology profiles, Kueue Topologies and TAS capacity semantics | `docs/architecture/topology-aware-scheduling.md` |
+| Topograph's boundary, `TopologySource`, topology profiles, Kueue Topologies and TAS capacity semantics, and the placement preference toward nodes holding a model | `docs/architecture/topology-aware-scheduling.md` |
 | Any admission gate, the four-view status, InstanceType/Instance/Pod webhook rules, drain-stop | `docs/architecture/admission.md` |
 | Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/architecture/installation-modes.md` |
 | Startup ordering, the gateway mirror, the device-plugin registration loop, per-manufacturer packages, CGO bindings, the 63-char rule | `docs/architecture/internals.md` |
@@ -42,7 +42,7 @@ one, not to widen the overview.
 | How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/reference/kv-cache-injection.md` |
 | A `ModelArtifact`: its sources, resolution and revalidation, the manifest digest, how a `ModelDeployment` or an `Instance` mounts or downloads it, claim placement, the weight identity in KV keys | `docs/reference/model-artifact.md` |
 | A `NodeModelStore` or the `model-manager` plugin: a field and its writer, the status guard, mount authorization, materialization, a failure reason, collection, a metric | `docs/reference/node-model-store.md` |
-| Running node delivery: the chart values, where the node's configuration comes from, reading a node, the watermark cap, switching delivery, upgrading, removing the cache | `docs/operation/model-store.md` |
+| Running node delivery: the chart values, where the node's configuration comes from, reading a node, the watermark cap, switching delivery, where replicas land and turning the preference off, upgrading, removing the cache | `docs/operation/model-store.md` |
 | A `ModelDeployment` metrics snapshot, which series each field reads per engine, role and router, cache-hit scope or Pod scrape annotation | `docs/reference/model-deployment-metrics.md` |
 | How a prefill role and a decode role are paired: the connector each engine and router renders, `spec.router` and its fields, `spec.kvTransfer`, roles on different hardware, a role's own Service | `docs/reference/model-deployment-prefill-decode.md` |
 | Which replica a managed router picks, its default routing policy, switching it through `spec.router.extraArgs`, the router's own per-replica series | `docs/reference/model-deployment-routing.md` |
