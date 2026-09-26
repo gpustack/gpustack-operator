@@ -172,9 +172,9 @@ that cannot.
 > fails every member.
 
 **That split is what the `kv-cache-backend-image` default cannot cover.** Its value is this project's
-own CPU build, carrying TCP and EFA over DRAM, and one value cannot be right for every backend at
-once: which build a member needs depends on the transport its backend asks for and the hardware its
-group selects. A backend on a vendor fabric names its `spec.image`, which always wins over the
+own CPU build, carrying TCP, RDMA and EFA over DRAM, and one value cannot be right for every backend
+at once: which build a member needs depends on the transport its backend asks for and the hardware
+its group selects. A backend on a vendor fabric names its `spec.image`, which always wins over the
 Setting.
 
 The failure mode moved with the default, and that is what having one costs. Blank made a mismatch an

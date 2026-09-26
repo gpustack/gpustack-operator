@@ -158,23 +158,31 @@ A lease-less image is not refused outright: at one replica the election flags ar
 such an image runs a single-leader backend even with `highAvailability` set — the flags arrive only
 when `replicas` rises past 1, which is where the missing backend would fail the leader at startup.
 
-⛔ **A member group on `RDMA`, `ROCM` or `CANN` cannot run under high availability today.** Those
-transports need a vendor runtime `mirrored-mooncake` does not carry, and the vendor build does not
-carry the leadership backend — the two axes are independent, so covering them means rebuilding each
-variant.
+A member group on `RDMA`, `ROCM` or `CANN` runs under high availability on the build that carries
+its transport: every `mirrored-mooncake` target — the default build and the `cuda`, `cann` and
+`rocm` variants alike — compiles the Lease backend in and proves it with the same four leadership
+probes at image build, the vendor axis and the leadership axis being orthogonal.
 
-`MUSA` and `MACA` are not on that list because this project builds no variant for either, by
+The matching rule is [the backend page's](backend.md#the-image), unchanged: the default build
+covers `RDMA` over DRAM — the transport has no compile switch to leave off, and rdma-core is
+installed — and a `ROCM` or `CANN` group names its variant.
+
+⚠️ What none of those three has is a real-machine run under an election: the Lease backend's
+presence is build-asserted per target, the fabric data path is not.
+
+`MUSA` and `MACA` keep their own rule because this project builds no variant for either, by
 intent: a group on one of them runs an image you built, so whether it also carries the leadership
 backend is a property of your build rather than of anything here.
 
-`EFA` is the one fabric not on that list: it needs no vendor runtime, only libfabric, so
-`mirrored-mooncake` compiles it in — the image build proves the transport installed by running a
-target-mode bench told `--protocol=efa` and refusing the transport map's "Invalid protocol": the
-device-less builder's "No EFA devices found" and an EFA-capable builder's clean run both pass. An
-`EFA` member group runs under high availability, on nodes that have the AWS EFA driver installed.
+`EFA` needs no vendor runtime either, only libfabric, so `mirrored-mooncake` compiles it into the
+default build — the image build proves the transport installed by running a target-mode bench told
+`--protocol=efa` and refusing the transport map's "Invalid protocol": the device-less builder's
+"No EFA devices found" and an EFA-capable builder's clean run both pass. An `EFA` member group runs
+under high availability, on nodes that have the AWS EFA driver installed.
 
-Tracked at [issue #279](https://github.com/gpustack/gpustack-operator/issues/279), together with the
-alternative of leaving members on the leader Service address and letting readiness move the endpoint.
+Which address a member follows under that election is the `memberAddressing` choice documented
+below; [issue #279](https://github.com/gpustack/gpustack-operator/issues/279), which tracked it, is
+closed — the leader Service address is the default and the Lease coordinates are the option.
 
 ⛔ **`enable_oplog` is refused in `leader.extraArgs`**, and not as a policy choice: the store's
 operation log requires the etcd backend, which cannot be compiled together with the Lease backend, so
