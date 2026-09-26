@@ -244,6 +244,7 @@ while saying nothing about.
 | `False` | `RolloutInProgress` | replicas differ from the render and turn over **one per role per pass**; this pass deleted at most one replica per role, and the pass that finds it gone creates the replacement |
 | `False` | `ReplacementInProgress` | every surviving replica matches the render but the declared count is short — what removed them is not this condition's to say, and a preemption reports itself on the quota condition; the pass creates each replacement once the departed replica's ordinal reads empty |
 | `False` | `RolloutHeldByCache` | replicas that differed from the render were **left in place**: no connection resolved this pass, and recreating them on that alone would rebuild every replica whenever the store blinks |
+| `False` | `RolloutHeldByWeights` | replicas that differed from the render were **left in place**: the model weights their replacements need are blocked, so deleting them would only remove serving replicas; `WeightsReady` says what blocks them |
 | `Unknown` | `RolloutNotObserved` | the pass accounted for no replica at all, so it established nothing either way |
 
 A pass answers only for the replicas it can vouch for — ones whose hash it read, or ones it created

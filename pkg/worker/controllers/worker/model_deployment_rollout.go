@@ -39,6 +39,12 @@ const (
 	modelDeploymentReasonRolloutInProgress  = "RolloutInProgress"
 	modelDeploymentReasonRolloutHeldByCache = "RolloutHeldByCache"
 
+	// modelDeploymentReasonRolloutHeldByWeights is the same hold for the other cause: the model
+	// weights a replacement needs are blocked, so the replicas a rollout would delete stay. It is its
+	// own reason because the remedy is on WeightsReady, and a deployment with no KV cache at all
+	// reaches it.
+	modelDeploymentReasonRolloutHeldByWeights = "RolloutHeldByWeights"
+
 	// modelDeploymentReasonReplacementInProgress is the state of a pass whose every surviving
 	// replica matches the render while the declared count is short: a replica left on its own --
 	// a node drained, Kueue reclaiming quota, the kubelet evicting, or a hand deleting it, which
@@ -86,6 +92,10 @@ type modelDeploymentRollout struct {
 	// held counts how many of those were left in place because the KV cache connection could not be
 	// resolved. It is never greater than outdated.
 	held int
+	// heldByWeights counts how many of those were left in place because the model weights their
+	// replacements need are blocked. A role's replicas are counted in held or here, never in both, so
+	// the two together are never greater than outdated.
+	heldByWeights int
 }
 
 // observeModelDeploymentRollout folds one pass's rollout decision into the status.
@@ -144,6 +154,20 @@ func observeModelDeploymentRollout(
 				"changes a running replica's rendered Pod waits with them -- withheld rather than "+
 				"dropped, and it rolls out once the connection returns",
 			rollout.held, rollout.outdated))
+	case rollout.heldByWeights > 0:
+		// The same hold with the other cause, and the cause is what the reader acts on: a message
+		// naming the cache would point a deployment that declares none at a store it never used.
+		//
+		// The two counters exclude each other per role, not per pass: one role can be held by the
+		// cache while another is held by its weights. That pass reports the cache case above, which
+		// outranks this one as it outranks everything, and WeightsReady still names the weights side.
+		ModelDeploymentConditionReplicasUpToDate.False(holder, modelDeploymentReasonRolloutHeldByWeights, fmt.Sprintf(
+			"%d of %d replicas differ from what this pass rendered and were left in place: the model "+
+				"weights their replacements need are blocked, so deleting them would only remove "+
+				"serving replicas. WeightsReady says what blocks them. Until it is True, an edit that "+
+				"changes a running replica's rendered Pod waits with them -- withheld rather than "+
+				"dropped, and it rolls out once the weights are available",
+			rollout.heldByWeights, rollout.outdated))
 	case rollout.outdated > 0:
 		// DELETED, NOT ALL OF THEM AT ONCE. The rollout turns over one replica per role per pass,
 		// never beside a deficit and never beside a surplus this pass already shed, so a count of

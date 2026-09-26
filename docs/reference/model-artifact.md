@@ -281,7 +281,8 @@ hexadecimal digits of the manifest digest, or of the SHA-256 of the artifact's U
 | True | `Mounted`, `Downloaded` | every Pod has its weights |
 
 While nothing is created, the phase message is the `WeightsReady` message. A blocked deployment
-also holds its rollouts: an edited replica is not deleted while its replacement could not be made.
+also holds its rollouts: an edited replica is not deleted while its replacement could not be made,
+and `ReplicasUpToDate` reports that hold with reason `RolloutHeldByWeights`.
 
 If Kueue's `waitForPodsReady` is enabled (the chart leaves it off), a download that outlasts its
 timeout evicts and requeues the replica.
