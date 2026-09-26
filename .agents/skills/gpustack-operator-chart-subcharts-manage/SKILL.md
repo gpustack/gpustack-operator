@@ -206,8 +206,11 @@ strip CRs. Regenerate it with the commands above.
    namespace **chart-testing generates**, which is also what proves the chart names no namespace of its own.
    Needs a reachable Kubernetes cluster with **no conflicting release**: the chart templates cluster-scoped
    objects and Helm refuses any object carrying another release's ownership metadata. `hack/lib/helm.sh`
-   passes `image.tag=dev` and `cleanupOnUninstall=true` through `--helm-extra-set-args`, so the leg needs
-   network egress.
+   passes the operator image (`CHART_TEST_IMAGE_REPOSITORY`:`CHART_TEST_IMAGE_TAG`, default
+   `gpustack/gpustack-operator:dev`) and `cleanupOnUninstall=true` through `--helm-extra-set-args`, so the
+   leg needs network egress. The `dev` image is built from `main`: to test a chart change that needs a binary
+   change, build the tree, load the image into the cluster, and name it in those two variables, as the Chart
+   workflow does.
 
    chart-testing only prints a failed uninstall and still exits 0, so `hack/lib/helm.sh` fails the run on its
    `Error deleting Helm release:` line: a hook Job that fails, or an uninstall that waits out its `--timeout`, is a

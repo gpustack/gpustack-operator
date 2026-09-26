@@ -49,7 +49,7 @@ clone. The verdict on committed `.agents` shell comes from `agents-shell.yml` an
 
 - `make generate chart` — regenerate `README.md` (from `README.md.gotmpl`) and `values.schema.json`. **Never hand-edit those two**: edit `values.yaml`/its annotations/`README.md.gotmpl` and re-run, after **any** `values.yaml` edit — the generated schema is what rejects a bad install. Nothing in `values.yaml` is generated: Kueue's `resources.transformations` is rendered at install time by a chart helper a patch adds to its config.
 - `make lint chart` — `ct lint` in a container, then assert the `global.*` image knobs reach every image the chart and its subcharts render (`gpustack::helm::verify_images`).
-- `make test chart` — `ct install` onto the current cluster in a container; needs a reachable cluster (e.g. kind) and `~/.kube/config`.
+- `make test chart` — `ct install` onto the current cluster in a container; needs a reachable cluster (e.g. kind) and `~/.kube/config`. It installs `CHART_TEST_IMAGE_REPOSITORY`:`CHART_TEST_IMAGE_TAG`, by default the published `gpustack/gpustack-operator:dev`, which is built from `main`. To test a chart change together with the binary it needs, build the tree, load the image into the cluster, and name it in those two variables. The Chart workflow does this on every run.
 
 ### Vendored subcharts
 
