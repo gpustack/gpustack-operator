@@ -206,7 +206,8 @@ failureReasons:                    # reasons of the failed nodes, counted; no me
   node's plugin for its running downloads over the plugin's existing secure port (a new read-only
   path answering digest, bytes and source, the same trust as the device manager's snapshot the
   Instance `metrics` subresource reads). A node that does not answer within 2 seconds contributes its
-  stored value and is not counted in `live`; the whole request is bounded at 5 seconds.
+  stored value and is not counted in `live`; the fixed part is bounded at 5 seconds and the live
+  fan-out adds at most 4 waves of 2 seconds, so the whole request is bounded at 13 seconds.
 - **It is an aggregate and names no node.** It is namespaced and a tenant reads it; node names would
   hand every tenant the cluster's topology. Readers that need the per-node view (administrators,
   GPUStack server) read the `v1` `NodeModelStore`s.
@@ -590,7 +591,7 @@ every API surface exists; T8 proves it end to end.
       Acceptance: `v1` ModelArtifact proxies CRUD without a `status` subresource and serves
       `progress`; `v1` NodeModelStore serves get, list, watch and delete only; printer columns as specified;
       `progress` returns the aggregate with no node name, reads each downloading node's plugin with a
-      2-second bound and 5 seconds overall, and counts only the nodes read live in `live`. Unit tests:
+      2-second bound and 13 seconds overall, and counts only the nodes read live in `live`. Unit tests:
       a fake store set with an answering, a failing and a hanging plugin; an unresolved and a claim
       artifact; a response searched for every node name.
       Verify: `make generate && go test ./pkg/worker/extensionapis/... ./api/...`
