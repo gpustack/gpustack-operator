@@ -42,8 +42,11 @@ type testHub struct {
 	// behavior, set per case.
 	status      func(r *http.Request, n int) int // an error status for the n-th request, or 0
 	ignoreRange bool
-	corrupt     bool
-	short       bool
+	// ignoreRangeFrom makes every request from the n-th on, counted across the hub's life, answer
+	// the whole file whatever range it asked for.
+	ignoreRangeFrom int
+	corrupt         bool
+	short           bool
 	// stallOnce makes the first request for a path send half its range and then hang.
 	stallOnce map[string]bool
 	redirect  *httptest.Server
@@ -81,6 +84,7 @@ func (h *testHub) serve(w http.ResponseWriter, r *http.Request) {
 	})
 	count := len(h.requests)
 	content, ok := h.files[strings.TrimPrefix(r.URL.Path, "/")]
+	ignoreRange := h.ignoreRange || (h.ignoreRangeFrom > 0 && count >= h.ignoreRangeFrom)
 	stall := h.stallOnce[r.URL.Path]
 	if stall {
 		h.stallOnce[r.URL.Path] = false
@@ -110,7 +114,7 @@ func (h *testHub) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start, end := int64(0), int64(len(body))-1
-	if rg := r.Header.Get("Range"); rg != "" && !h.ignoreRange {
+	if rg := r.Header.Get("Range"); rg != "" && !ignoreRange {
 		_, _ = fmt.Sscanf(rg, "bytes=%d-%d", &start, &end)
 		end = min(end, int64(len(body))-1)
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(body)))
@@ -387,12 +391,91 @@ func TestFetchResumes(t *testing.T) {
 			}
 
 			before := len(hub.recorded())
+			// The caller seeds what the resume carries over; the file reports only what arrives.
+			carried := ResumableOffset(f.Dest, f.Checkpoint, f.Size)
+			var held atomic.Int64
+			f.Received = func(n int64) { held.Add(n) }
 			require.NoError(t, testDownloader(hub).Fetch(context.Background(), f))
 			got, err := os.ReadFile(f.Dest)
 			require.NoError(t, err)
 			assert.Equal(t, body, got)
+			assert.Equal(t, int64(len(body)), carried+held.Load(),
+				"the seed plus what the file reports is the whole content, so progress never goes back")
 			resumed := hub.recorded()[before]
 			assert.True(t, strings.HasPrefix(resumed.Range, c.wantStart), "resumed with %q", resumed.Range)
+		})
+	}
+}
+
+func TestFetchStartsOverWhenTheHubStopsRanging(t *testing.T) {
+	body := content(8 << 10)
+	hub := newTestHub(t, map[string][]byte{"f": body})
+	f := testFile(t, hub, "f", body, sha256Digest(body))
+
+	// A first run canceled once 4 KiB is hashed, as in TestFetchResumes.
+	d := testDownloader(hub)
+	d.Window = 1
+	ctx, cancel := context.WithCancel(context.Background())
+	var received atomic.Int64
+	d.Received = func(n int64) {
+		if received.Add(n) >= 5<<10 {
+			cancel()
+		}
+	}
+	err := d.Fetch(ctx, f)
+	require.Error(t, err)
+	assert.Equal(t, ReasonCanceled, ReasonOf(err))
+	require.FileExists(t, f.Checkpoint)
+
+	// The next run resumes from the checkpoint, but the hub stalls the resumed range and then
+	// stops honoring ranges: the file starts over, and everything it was counted as holding —
+	// the carried-over offset and the bytes the stall delivered — is told back, negated.
+	before := len(hub.recorded())
+	hub.stallOnce["/f"] = true
+	hub.ignoreRangeFrom = before + 2
+	carried := ResumableOffset(f.Dest, f.Checkpoint, f.Size)
+	assert.Equal(t, int64(4<<10), carried)
+	var held atomic.Int64
+	f.Received = func(n int64) { held.Add(n) }
+	require.NoError(t, testDownloader(hub).Fetch(context.Background(), f))
+	got, err := os.ReadFile(f.Dest)
+	require.NoError(t, err)
+	assert.Equal(t, body, got)
+	assert.Equal(t, "bytes=4096-5119", hub.recorded()[before].Range, "the resumed range is stalled")
+	assert.Equal(t, int64(len(body)), carried+held.Load(),
+		"the seed plus what the file reports is the whole content after the start-over")
+}
+
+func TestResumableOffset(t *testing.T) {
+	body := content(8 << 10)
+	cases := []struct {
+		name string
+		// checkpoint is the checkpoint file's content; empty means there is no checkpoint.
+		checkpoint string
+		destBytes  int
+		want       int64
+	}{
+		{name: "no checkpoint"},
+		{name: "a checkpoint that is not JSON", checkpoint: "garbage", destBytes: 5 << 10},
+		{name: "an offset beyond the size", checkpoint: `{"offset":9000,"state":""}`, destBytes: 9 << 10},
+		{name: "a negative offset", checkpoint: `{"offset":-1,"state":""}`, destBytes: 5 << 10},
+		{name: "a file shorter than the offset", checkpoint: `{"offset":4096,"state":""}`, destBytes: 3 << 10},
+		{name: "a checkpoint the file covers", checkpoint: `{"offset":4096,"state":""}`, destBytes: 5 << 10, want: 4096},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			dest := filepath.Join(dir, "tree-file")
+			if c.destBytes > 0 {
+				// The content does not matter: only the size is looked at.
+				require.NoError(t, os.WriteFile(dest, make([]byte, c.destBytes), 0o644))
+			}
+			checkpoint := filepath.Join(dir, "checkpoint")
+			if c.checkpoint != "" {
+				require.NoError(t, os.WriteFile(checkpoint, []byte(c.checkpoint), 0o600))
+			}
+
+			assert.Equal(t, c.want, ResumableOffset(dest, checkpoint, int64(len(body))))
 		})
 	}
 }

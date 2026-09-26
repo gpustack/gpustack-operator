@@ -42,9 +42,10 @@ type Collector struct {
 	Store *store.Store
 	// Usage reads the cache filesystem's usage.
 	Usage func() (Usage, error)
-	// Watermarks are the effective high and low watermarks, in percent, and false until a
-	// configuration was applied: there are no watermarks to collect against before that.
-	Watermarks func() (high, low int32, ok bool)
+	// Watermarks are the effective high and low watermarks, in percent, or why there are none to
+	// collect against: no configuration applied yet, or the node's configuration failing its check.
+	// Either way nothing is collected, rather than collect under watermarks not in force.
+	Watermarks func() (high, low int32, unavailable string)
 	// Referenced and Downloading are the digests that must stay. References that cannot be read
 	// are an error, never an empty set: an empty set would make every mounted tree removable.
 	Referenced  func() (map[string]bool, error)
@@ -54,6 +55,15 @@ type Collector struct {
 	PartialTTL  time.Duration
 
 	mu sync.Mutex
+	// reservations are the running downloads' reservations, by their token.
+	reservations map[*reservation]struct{}
+}
+
+// reservation is a running download's claim on the filesystem: its whole size, of which written
+// is already on disk and so already in the filesystem's usage.
+type reservation struct {
+	size    int64
+	written func() int64
 }
 
 // Result is what a collection did.
@@ -73,43 +83,67 @@ func (c *Collector) Collect(ctx context.Context) (Result, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	return c.collect(ctx, 0)
+	return c.collect(ctx, c.inFlight())
 }
 
-// Reserve makes room for bytes more: if they would take usage above the high watermark, it collects,
-// and if they still would, it refuses with InsufficientCapacity.
-func (c *Collector) Reserve(ctx context.Context, bytes int64) error {
+// Reserve makes room for a download of sizeBytes whose attempt holds written() of them on disk so
+// far, and holds the room until the returned release is called. The rest of the download, together
+// with the unwritten rest of every other running reservation, must fit under the high watermark:
+// reservations that each fit and together do not are never all admitted. If they would not fit it
+// collects, and if they still would not, it refuses with InsufficientCapacity.
+func (c *Collector) Reserve(ctx context.Context, hex string, sizeBytes int64, written func() int64) (func(), error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	high, _, ok := c.Watermarks()
-	if !ok {
-		const msg = "the node's configuration has not arrived yet"
-		return &download.Error{Reason: download.ReasonInvalidRequest, Message: msg, Detail: msg}
+	high, _, unavailable := c.Watermarks()
+	if unavailable != "" {
+		return nil, &download.Error{Reason: download.ReasonInvalidRequest, Message: unavailable, Detail: unavailable}
 	}
+	bytes := max(sizeBytes-written(), 0)
+	incoming := bytes + c.inFlight()
 	u, err := c.Usage()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if fits(u, bytes, high) {
-		return nil
-	}
-	res, err := c.collect(ctx, bytes)
-	if err != nil {
-		return err
-	}
-	// The node's own numbers name no tenant, so the whole message is the detail.
-	if res.Skipped != "" {
-		return nodeCapacityError(fmt.Sprintf(
-			"%d bytes do not fit under the high watermark of %d%%, and collection was skipped: %s", bytes, high, res.Skipped))
-	}
-	if fits(res.Usage, bytes, high) {
-		return nil
+	if !fits(u, incoming, high) {
+		res, err := c.collect(ctx, incoming)
+		if err != nil {
+			return nil, err
+		}
+		// The node's own numbers name no tenant, so the whole message is the detail.
+		if res.Skipped != "" {
+			return nil, nodeCapacityError(fmt.Sprintf("%d bytes of sha256:%s do not fit under the high watermark of %d%%, "+
+				"and collection was skipped: %s", bytes, hex[:12], high, res.Skipped))
+		}
+		if !fits(res.Usage, incoming, high) {
+			return nil, nodeCapacityError(fmt.Sprintf("%d bytes of sha256:%s do not fit under the high watermark of %d%%: "+
+				"the cache's filesystem is %.1f%% used of %d bytes with %d more reserved by running downloads, "+
+				"and nothing unreferenced is left to remove",
+				bytes, hex[:12], high, res.Usage.Percent(), res.Usage.Total, incoming-bytes))
+		}
 	}
 
-	return nodeCapacityError(fmt.Sprintf(
-		"%d bytes do not fit under the high watermark of %d%%: the cache's filesystem is %.1f%% used of %d bytes, "+
-			"and nothing unreferenced is left to remove", bytes, high, res.Usage.Percent(), res.Usage.Total))
+	r := &reservation{size: sizeBytes, written: written}
+	if c.reservations == nil {
+		c.reservations = map[*reservation]struct{}{}
+	}
+	c.reservations[r] = struct{}{}
+
+	return func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		delete(c.reservations, r)
+	}, nil
+}
+
+// inFlight is what the running reservations have yet to write. The caller holds c.mu.
+func (c *Collector) inFlight() int64 {
+	var n int64
+	for r := range c.reservations {
+		n += max(r.size-r.written(), 0)
+	}
+
+	return n
 }
 
 func nodeCapacityError(msg string) error {
@@ -127,6 +161,18 @@ func fits(u Usage, bytes int64, high int32) bool {
 func (c *Collector) collect(ctx context.Context, incoming int64) (Result, error) {
 	var res Result
 	now := c.Now()
+
+	// Without watermarks in force nothing is removed, not even a stale partial: the configuration
+	// that would decide what the node keeps is not the one in force.
+	high, low, unavailable := c.Watermarks()
+	if unavailable != "" {
+		u, err := c.Usage()
+		if err != nil {
+			return res, err
+		}
+		res.Usage, res.Skipped = u, unavailable
+		return c.done(res, 0), nil
+	}
 
 	partials, err := c.Store.Partials()
 	if err != nil {
@@ -153,11 +199,6 @@ func (c *Collector) collect(ctx context.Context, incoming int64) (Result, error)
 		return res, err
 	}
 	res.Usage = u
-	high, low, ok := c.Watermarks()
-	if !ok {
-		res.Skipped = "the node's configuration has not been applied yet, so there are no watermarks to collect against"
-		return c.done(res, 0), nil
-	}
 	if fits(u, incoming, high) {
 		return c.done(res, high), nil
 	}

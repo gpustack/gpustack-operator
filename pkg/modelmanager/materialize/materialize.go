@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/codes"
 	klog "k8s.io/klog/v2"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/modelartifact"
 	"gpustack.ai/gpustack/pkg/modelmanager/download"
 	"gpustack.ai/gpustack/pkg/modelmanager/driver"
@@ -58,9 +59,10 @@ type Environment func(ctx context.Context) (Hub, *download.Downloader, error)
 type Materializer struct {
 	Store       *store.Store
 	Environment Environment
-	// Reserve makes room for bytes more on the cache's filesystem, or returns an
-	// InsufficientCapacity error; nil reserves nothing.
-	Reserve func(ctx context.Context, bytes int64) error
+	// Reserve makes room on the cache's filesystem for a download of sizeBytes whose attempt holds
+	// written() of them so far, beside the other running downloads, until the returned release is
+	// called; or it returns an InsufficientCapacity error. Nil reserves nothing.
+	Reserve func(ctx context.Context, hex string, sizeBytes int64, written func() int64) (func(), error)
 	// Changed is told a digest's state changed, for status.
 	Changed func(hex string)
 	Now     func() time.Time
@@ -157,6 +159,29 @@ func (m *Materializer) Ensure(_ context.Context, req driver.Request) driver.Prog
 	go m.run(ctx, j)
 
 	return j.progress()
+}
+
+// DownloadProgress is how far one running materialization is.
+type DownloadProgress struct {
+	// DownloadedBytes is what the attempt holds of the content: what a resume carried over from its
+	// checkpoints and what arrived since. SizeBytes is the manifest's, zero until it is listed.
+	DownloadedBytes int64
+	SizeBytes       int64
+	Source          workercore.NodeModelStoreModelSource
+}
+
+// Progress returns how far each running materialization is, by digest.
+func (m *Materializer) Progress() map[string]DownloadProgress {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]DownloadProgress, len(m.jobs))
+	for hex, j := range m.jobs {
+		out[hex] = DownloadProgress{
+			DownloadedBytes: j.received.Load(), SizeBytes: j.total.Load(), Source: workercore.NodeModelStoreModelSourceHub,
+		}
+	}
+
+	return out
 }
 
 // Downloading returns the digests being materialized.
@@ -318,38 +343,54 @@ func (m *Materializer) fromSource(
 	}
 	j.total.Store(manifest.SizeBytes)
 
-	if m.Reserve != nil {
-		// A resumed attempt already holds some of the bytes on disk, and the filesystem's usage
-		// counts them, so only the rest is reserved.
-		if err := m.Reserve(ctx, max(manifest.SizeBytes-a.SizeBytes(), 0)); err != nil {
-			return err
-		}
-	}
-
 	stateDir := filepath.Join(a.Dir(), "state")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return err
 	}
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(fileParallelism)
 	// Every path is checked before the first download starts, and a file's directory is made inside
 	// its own download: once one has started, the attempt only ends through Wait, so no download
 	// is left writing into the attempt after it was recorded.
 	dests := make([]string, len(manifest.Entries))
+	checkpoints := make([]string, len(manifest.Entries))
 	for i, e := range manifest.Entries {
 		dest, err := a.FilePath(e.Path)
 		if err != nil {
 			return &download.Error{Reason: download.ReasonIntegrityMismatch, Message: err.Error()}
 		}
 		dests[i] = dest
-	}
-	for i, e := range manifest.Entries {
 		sum := sha256.Sum256([]byte(e.Path))
+		checkpoints[i] = filepath.Join(stateDir, hex.EncodeToString(sum[:]))
+	}
+
+	// What the attempt already holds of the content is counted once here, and the downloads keep
+	// the count exact from then on: the count is the attempt's reported progress and the bytes a
+	// reservation does not reserve again. A retry from another source starts the count from what
+	// the previous one left verified.
+	var carried int64
+	for i, e := range manifest.Entries {
+		carried += download.ResumableOffset(dests[i], checkpoints[i], e.Size)
+	}
+	j.received.Store(carried)
+
+	if m.Reserve != nil {
+		// What the attempt holds on disk is in the filesystem's usage already, a resumed attempt's
+		// carried-over bytes included, so the reservation is for the rest; it is held until the
+		// attempt ends, published or not.
+		release, err := m.Reserve(ctx, j.hex, manifest.SizeBytes, j.received.Load)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(fileParallelism)
+	for i, e := range manifest.Entries {
 		f := download.File{
 			Path: e.Path, Size: e.Size, Digest: e.Digest,
 			URL:        hub.FileURL(src.repository, src.commit, e.Path),
 			Dest:       dests[i],
-			Checkpoint: filepath.Join(stateDir, hex.EncodeToString(sum[:])),
+			Checkpoint: checkpoints[i],
 			Token:      src.currentToken,
 			Received:   func(n int64) { j.received.Add(n) },
 		}
@@ -375,6 +416,7 @@ func (m *Materializer) fromSource(
 	return a.Publish(store.Marker{
 		Digest: manifest.Digest, ManifestFormat: modelartifact.ManifestHeader,
 		SizeBytes: manifest.SizeBytes, FileCount: manifest.FileCount, PublishedTime: m.now(),
+		Source: store.SourceHub,
 	})
 }
 
