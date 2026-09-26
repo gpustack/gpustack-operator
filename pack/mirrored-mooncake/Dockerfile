@@ -18,13 +18,16 @@
 # validates that scheme against the same compile-time switch the master does. Measured on the
 # published image, whose client answers `Invalid HA backend entry` and exits after twenty retries.
 #
-# LIMITED: the DEFAULT build of this file covers medium DRAM over protocol Auto, TCP or EFA.
-# The vendor variants are separate build targets of this same file (cuda, cann and
+# LIMITED: the DEFAULT build of this file covers medium DRAM over protocol Auto, TCP, RDMA or
+# EFA. RDMA has no compile switch to leave off -- upstream's common.cmake offers none -- so the
+# transport is always built, and the runtime stage installs rdma-core for it. The vendor variants
+# are separate build targets of this same file (cuda, cann and
 # rocm, defined between the default builder and the final stage below): each recompiles the
 # store on the vendor's own base with the vendor runtime linked in, and each keeps the lease
-# backend on, because the vendor axis and the leadership axis are orthogonal. Whether
-# rebuilding per vendor is the right answer, or whether members should keep the leader Service
-# address and let readiness move the endpoint, is open:
+# backend on, because the vendor axis and the leadership axis are orthogonal. The choice this
+# comment used to call open -- rebuild per vendor, or keep members on the leader Service address
+# -- was settled as both: the variants above, and memberAddressing defaulting to the Service
+# address (docs/kv-cache/leader.md), which closed
 # https://github.com/gpustack/gpustack-operator/issues/279
 #
 # EFA sits on the fabric axis, not the vendor axis: it needs no vendor runtime, only libfabric,
@@ -1713,7 +1716,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # alone is a library that claims no devices -- ibv_get_device_list() returns 0 even where the
 # hardware is visible -- because devices are claimed through the provider plugins.
 #
-# They are here even though this image documents itself as TCP: the master binary carries a
+# Even a deployment that never touches a fabric needs them: the master binary carries a
 # DT_NEEDED on libibverbs.so.1 whether or not a fabric is used, so the loader needs it to start at
 # all. That is measured on the binary, not assumed from the transport setting.
 #
