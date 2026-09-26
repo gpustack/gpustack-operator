@@ -186,6 +186,8 @@ func (*ModelArtifactHubSource) ProtoMessage() {}
 
 func (*ModelArtifactList) ProtoMessage() {}
 
+func (*ModelArtifactNodes) ProtoMessage() {}
+
 func (*ModelArtifactPersistentVolumeClaimSource) ProtoMessage() {}
 
 func (*ModelArtifactResolved) ProtoMessage() {}
@@ -249,6 +251,8 @@ func (*NodeModelStoreCapacity) ProtoMessage() {}
 func (*NodeModelStoreDownload) ProtoMessage() {}
 
 func (*NodeModelStoreHub) ProtoMessage() {}
+
+func (*NodeModelStoreKubelet) ProtoMessage() {}
 
 func (*NodeModelStoreList) ProtoMessage() {}
 

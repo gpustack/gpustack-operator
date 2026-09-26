@@ -9,7 +9,10 @@ package modelstore
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
+	"strconv"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -105,7 +108,48 @@ func Validate(spec workercore.NodeModelStoreSpec) error {
 		}
 	}
 
+	if k := spec.Kubelet; k != nil {
+		for _, t := range []struct{ name, value string }{
+			{"nodefsAvailable", k.NodefsAvailable}, {"imagefsAvailable", k.ImagefsAvailable},
+		} {
+			if t.value == "" {
+				continue
+			}
+			if _, err := ParseThreshold(t.value); err != nil {
+				errs = append(errs, fmt.Errorf("kubelet %s: %w", t.name, err))
+			}
+		}
+		if p := k.ImageGCHighThresholdPercent; p != nil && (*p < 0 || *p > 100) {
+			errs = append(errs, fmt.Errorf("kubelet imageGCHighThresholdPercent: want 0 to 100, got %d", *p))
+		}
+	}
+
 	return errors.Join(errs...)
+}
+
+// Threshold is a kubelet eviction threshold: a percentage of the filesystem, or a quantity of bytes.
+type Threshold struct {
+	IsPercent bool
+	Percent   float64
+	Bytes     int64
+}
+
+// ParseThreshold reads an eviction threshold the way kubelet writes one: "10%" or a quantity such
+// as "20Gi".
+func ParseThreshold(raw string) (Threshold, error) {
+	if p, ok := strings.CutSuffix(raw, "%"); ok {
+		f, err := strconv.ParseFloat(p, 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 || f > 100 {
+			return Threshold{}, fmt.Errorf("%q is not a percentage from 0 to 100", raw)
+		}
+		return Threshold{IsPercent: true, Percent: f}, nil
+	}
+	q, err := resource.ParseQuantity(raw)
+	if err != nil || q.Sign() < 0 {
+		return Threshold{}, fmt.Errorf("%q is neither a percentage nor a non-negative quantity", raw)
+	}
+
+	return Threshold{Bytes: q.Value()}, nil
 }
 
 // ValidateEndpoint accepts an absolute http or https URL with a host. The endpoint Setting admits
@@ -138,4 +182,21 @@ func ParseBandwidth(raw string) (int64, error) {
 	}
 
 	return v, nil
+}
+
+// DownloadsPath is the model-manager plugin's read-only path answering its running downloads, on its
+// secure port. The worker's progress subresource reads it for live progress.
+const DownloadsPath = "/model/downloads"
+
+// Downloads is the answer at DownloadsPath. It names no tenant: a digest, sizes and a source.
+type Downloads struct {
+	Downloads []Download `json:"downloads"`
+}
+
+// Download is one running download on a node.
+type Download struct {
+	Digest          string `json:"digest"`
+	DownloadedBytes int64  `json:"downloadedBytes"`
+	SizeBytes       int64  `json:"sizeBytes"`
+	Source          string `json:"source,omitempty"`
 }

@@ -70,6 +70,14 @@ func (*InstanceTypeFlavorSpec) ProtoMessage() {}
 
 func (*InstanceTypeList) ProtoMessage() {}
 
+func (*ModelArtifact) ProtoMessage() {}
+
+func (*ModelArtifactList) ProtoMessage() {}
+
+func (*ModelArtifactProgress) ProtoMessage() {}
+
+func (*ModelArtifactProgressReason) ProtoMessage() {}
+
 func (*ModelDeployment) ProtoMessage() {}
 
 func (*ModelDeploymentCacheHit) ProtoMessage() {}
@@ -85,5 +93,9 @@ func (*ModelDeploymentMetricWindow) ProtoMessage() {}
 func (*ModelDeploymentMetrics) ProtoMessage() {}
 
 func (*NFSInstancePersistentVolumeSource) ProtoMessage() {}
+
+func (*NodeModelStore) ProtoMessage() {}
+
+func (*NodeModelStoreList) ProtoMessage() {}
 
 func (*S3InstancePersistentVolumeSource) ProtoMessage() {}

@@ -17,6 +17,11 @@ type ModelArtifactStatusApplyConfiguration struct {
 	// a later revalidation moves only LastValidatedTime and the conditions. It is absent until the
 	// first resolution succeeds.
 	Resolved *ModelArtifactResolvedApplyConfiguration `json:"resolved,omitempty"`
+	// Nodes is where the content is: how many nodes hold it ready, are downloading it or failed to,
+	// and how far the downloading ones are. It counts the content, the manifest digest, so artifacts
+	// with the same digest see the same nodes; it holds numbers only. Absent for a claim source and
+	// before the first resolution.
+	Nodes *ModelArtifactNodesApplyConfiguration `json:"nodes,omitempty"`
 	// Conditions: Resolved says whether the source is bound to its immutable identity and the most
 	// recent access check passed; Degraded says a resolution or revalidation is failing, including
 	// one that has not yet revoked access.
@@ -42,6 +47,14 @@ func (b *ModelArtifactStatusApplyConfiguration) WithObservedGeneration(value int
 // If called multiple times, the Resolved field is set to the value of the last call.
 func (b *ModelArtifactStatusApplyConfiguration) WithResolved(value *ModelArtifactResolvedApplyConfiguration) *ModelArtifactStatusApplyConfiguration {
 	b.Resolved = value
+	return b
+}
+
+// WithNodes sets the Nodes field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Nodes field is set to the value of the last call.
+func (b *ModelArtifactStatusApplyConfiguration) WithNodes(value *ModelArtifactNodesApplyConfiguration) *ModelArtifactStatusApplyConfiguration {
+	b.Nodes = value
 	return b
 }
 

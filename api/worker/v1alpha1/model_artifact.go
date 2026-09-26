@@ -30,6 +30,7 @@ import (
 // +k8s:crd-gen:printcolumn:name="Revision",type="string",jsonPath=".status.resolved.revision"
 // +k8s:crd-gen:printcolumn:name="Size",type="integer",jsonPath=".status.resolved.sizeBytes"
 // +k8s:crd-gen:printcolumn:name="Resolved",type="string",jsonPath=".status.conditions[?(@.type=='Resolved')].status"
+// +k8s:crd-gen:printcolumn:name="Ready",type="integer",jsonPath=".status.nodes.ready"
 // +k8s:crd-gen:printcolumn:name="Age",type="date",jsonPath=".metadata.creationTimestamp"
 type ModelArtifact struct {
 	meta.TypeMeta   `json:",inline"`
@@ -154,6 +155,14 @@ type ModelArtifactStatus struct {
 	// +optional
 	Resolved *ModelArtifactResolved `json:"resolved,omitempty" protobuf:"bytes,2,opt,name=resolved"`
 
+	// Nodes is where the content is: how many nodes hold it ready, are downloading it or failed to,
+	// and how far the downloading ones are. It counts the content, the manifest digest, so artifacts
+	// with the same digest see the same nodes; it holds numbers only. Absent for a claim source and
+	// before the first resolution.
+	//
+	// +optional
+	Nodes *ModelArtifactNodes `json:"nodes,omitempty" protobuf:"bytes,4,opt,name=nodes"`
+
 	// Conditions: Resolved says whether the source is bound to its immutable identity and the most
 	// recent access check passed; Degraded says a resolution or revalidation is failing, including
 	// one that has not yet revoked access.
@@ -163,6 +172,38 @@ type ModelArtifactStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []gpustack.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,3,rep,name=conditions"` // nolint: lll
+}
+
+// ModelArtifactNodes counts the nodes whose NodeModelStore lists an artifact's digest, by state. It
+// is written when a count changes or the percentage moves to another step, at most once every 30
+// seconds, so a fleet downloading the content does not rewrite the artifact at every node's write.
+type ModelArtifactNodes struct {
+	// Ready counts the nodes holding the content published.
+	//
+	// +required
+	// +k8s:validation:minimum=0
+	Ready int32 `json:"ready" protobuf:"varint,1,name=ready"`
+
+	// Downloading counts the nodes downloading it.
+	//
+	// +required
+	// +k8s:validation:minimum=0
+	Downloading int32 `json:"downloading" protobuf:"varint,2,name=downloading"`
+
+	// Failed counts the nodes whose last attempt failed and that wait to retry.
+	//
+	// +required
+	// +k8s:validation:minimum=0
+	Failed int32 `json:"failed" protobuf:"varint,3,name=failed"`
+
+	// DownloadingPercent is the mean progress of the downloading nodes, each a whole copy, rounded
+	// down to a multiple of 5. Ready nodes are counted, not averaged in. Absent while no node
+	// downloads.
+	//
+	// +optional
+	// +k8s:validation:minimum=0
+	// +k8s:validation:maximum=100
+	DownloadingPercent *int32 `json:"downloadingPercent,omitempty" protobuf:"varint,4,opt,name=downloadingPercent"`
 }
 
 // ModelArtifactResolved is the identity a source resolved to.

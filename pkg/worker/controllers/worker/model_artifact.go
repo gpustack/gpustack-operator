@@ -81,6 +81,9 @@ type ModelArtifactReconciler struct {
 	// is a reason to ask the Hub again. A changed Secret is. Losing it on restart costs one early
 	// check per artifact, nothing else: whether access is revoked is decided from the conditions.
 	checks sync.Map
+	// nodesWritten remembers, per artifact UID, when its status.nodes was last written, for the
+	// window between two such writes. Losing it on restart costs one early write per artifact.
+	nodesWritten sync.Map
 }
 
 var _ ctrlreconcile.Reconciler = (*ModelArtifactReconciler)(nil)
@@ -133,6 +136,7 @@ func (r *ModelArtifactReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		// existed stays unresolved and says why.
 		ModelArtifactConditionResolved.False(ma, "UnsupportedSource", "the source is not accepted in this version")
 	}
+	result = earliestResult(result, r.reconcileNodes(ctx, ma, before.Nodes))
 
 	if !kubemeta.DeepEqual(before, &ma.Status) {
 		if err := r.Client.Status().Update(ctx, ma); err != nil {
@@ -147,8 +151,24 @@ func (r *ModelArtifactReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if check != nil {
 		r.checks.Store(ma.UID, *check)
 	}
+	if !kubemeta.DeepEqual(before.Nodes, ma.Status.Nodes) {
+		r.nodesWritten.Store(ma.UID, r.now())
+	}
 
 	return result, nil
+}
+
+// earliestResult is the result that comes back soonest of two passes' asks.
+func earliestResult(a, b ctrl.Result) ctrl.Result {
+	switch {
+	case a.RequeueAfter == 0 && !a.Requeue:
+		return b
+	case b.RequeueAfter == 0 && !b.Requeue:
+		return a
+	case b.RequeueAfter > 0 && (a.RequeueAfter == 0 || b.RequeueAfter < a.RequeueAfter):
+		return b
+	}
+	return a
 }
 
 // releaseModelArtifact removes the protection finalizer once nothing references the artifact.
@@ -169,9 +189,10 @@ func (r *ModelArtifactReconciler) releaseModelArtifact(ctx context.Context, ma *
 	if err := r.Client.Update(ctx, ma); err != nil {
 		return err
 	}
-	// A UID is never reused, so the pacing entry of a released artifact would otherwise stay for
+	// A UID is never reused, so the pacing entries of a released artifact would otherwise stay for
 	// the life of the process.
 	r.checks.Delete(ma.UID)
+	r.nodesWritten.Delete(ma.UID)
 
 	return nil
 }
@@ -505,13 +526,24 @@ func (r *ModelArtifactReconciler) newHuggingFaceFromSettings(ctx context.Context
 	}, nil
 }
 
-func (r *ModelArtifactReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
+func (r *ModelArtifactReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
 	// The proxy Setting's default comes from the environment, which no admission reads, and the
 	// value is rendered into tenant Pods: refuse to start rather than render a credential there.
 	if v := settings.ModelArtifactHTTPSProxy.DefaultValue(); v != "" {
 		if err := modelartifact.ValidateProxy(v); err != nil {
 			return fmt.Errorf("setting %s: %w", settings.ModelArtifactHTTPSProxy.Name(), err)
 		}
+	}
+
+	if err := opts.Manager.GetFieldIndexer().IndexField(
+		ctx, &workercore.ModelArtifact{}, IndexingModelArtifactByManifestDigest, indexModelArtifactByManifestDigest,
+	); err != nil {
+		return fmt.Errorf("index model artifact '%s': %w", IndexingModelArtifactByManifestDigest, err)
+	}
+	if err := opts.Manager.GetFieldIndexer().IndexField(
+		ctx, &workercore.NodeModelStore{}, IndexingNodeModelStoreByModelDigest, indexNodeModelStoreByModelDigest,
+	); err != nil {
+		return fmt.Errorf("index node model store '%s': %w", IndexingNodeModelStoreByModelDigest, err)
 	}
 
 	r.Client = opts.Manager.GetClient()
@@ -532,6 +564,7 @@ func (r *ModelArtifactReconciler) SetupController(_ context.Context, opts contro
 			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(time.Second, r.enqueueTerminatingModelArtifactOfDeployment)).
 		Watches(&workercore.Instance{},
 			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(time.Second, r.enqueueTerminatingModelArtifactsOfInstance)).
+		Watches(&workercore.NodeModelStore{}, r.nodeModelStoreHandler()).
 		Complete(r)
 }
 

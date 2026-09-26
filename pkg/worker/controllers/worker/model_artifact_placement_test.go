@@ -583,6 +583,19 @@ func TestNodeModelStoreModelsChanged(t *testing.T) {
 			name: "only the capacity moves", old: nms(workercore.NodeModelStoreModelStateDownloading, 1),
 			new: nms(workercore.NodeModelStoreModelStateDownloading, 2),
 		},
+		{
+			name: "only a download's progress moves",
+			old: func() *workercore.NodeModelStore {
+				o := nms(workercore.NodeModelStoreModelStateDownloading, 1)
+				o.Status.Models[0].DownloadedBytes = 10
+				return o
+			}(),
+			new: func() *workercore.NodeModelStore {
+				n := nms(workercore.NodeModelStoreModelStateDownloading, 1)
+				n.Status.Models[0].DownloadedBytes = 60
+				return n
+			}(),
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

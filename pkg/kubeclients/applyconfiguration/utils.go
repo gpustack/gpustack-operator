@@ -1276,6 +1276,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.InstanceSSHPublicKeySpecApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceType"):
 		return &applyconfigurationworkerv1.InstanceTypeApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("ModelArtifact"):
+		return &applyconfigurationworkerv1.ModelArtifactApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("ModelDeployment"):
 		return &applyconfigurationworkerv1.ModelDeploymentApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("NFSInstancePersistentVolumeSource"):
@@ -1446,6 +1448,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelArtifactApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactHubSource"):
 		return &applyconfigurationworkerv1alpha1.ModelArtifactHubSourceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactNodes"):
+		return &applyconfigurationworkerv1alpha1.ModelArtifactNodesApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactPersistentVolumeClaimSource"):
 		return &applyconfigurationworkerv1alpha1.ModelArtifactPersistentVolumeClaimSourceApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactResolved"):
@@ -1508,6 +1512,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.NodeModelStoreDownloadApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreHub"):
 		return &applyconfigurationworkerv1alpha1.NodeModelStoreHubApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreKubelet"):
+		return &applyconfigurationworkerv1alpha1.NodeModelStoreKubeletApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreModel"):
 		return &applyconfigurationworkerv1alpha1.NodeModelStoreModelApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreSpec"):

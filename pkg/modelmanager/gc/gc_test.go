@@ -12,7 +12,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/utils/ptr"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/modelmanager/download"
 	"gpustack.ai/gpustack/pkg/modelmanager/metrics"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
@@ -83,7 +85,7 @@ func (c *testCache) collector(referenced, downloading map[string]bool) *Collecto
 	return &Collector{
 		Store:       c.store,
 		Usage:       c.usage,
-		Watermarks:  func() (int32, int32, bool) { return 80, 70, true },
+		Watermarks:  func() (int32, int32, string) { return 80, 70, "" },
 		Referenced:  func() (map[string]bool, error) { return referenced, nil },
 		Downloading: func() map[string]bool { return downloading },
 		Now:         func() time.Time { return testNow },
@@ -189,7 +191,7 @@ func TestCollect(t *testing.T) {
 				col.Referenced = func() (map[string]bool, error) { return nil, errors.New("unreadable reference") }
 			}
 			if c.unconfigured {
-				col.Watermarks = func() (int32, int32, bool) { return 0, 0, false }
+				col.Watermarks = func() (int32, int32, string) { return 0, 0, "the node's configuration fails its check" }
 			}
 
 			res, err := col.Collect(context.Background())
@@ -271,7 +273,51 @@ func TestReserve(t *testing.T) {
 			cache.publish(t, hexOf('a'), 100, old)
 			cache.publish(t, hexOf('b'), 100, old)
 
-			err := cache.collector(c.referenced, nil).Reserve(context.Background(), c.bytes)
+			release, err := cache.collector(c.referenced, nil).Reserve(context.Background(), hexOf('z'), c.bytes, nothingWritten)
+			if !c.wantErr {
+				require.NoError(t, err)
+				release()
+				return
+			}
+			require.Error(t, err)
+			assert.Equal(t, download.ReasonInsufficientCapacity, download.ReasonOf(err))
+		})
+	}
+}
+
+func nothingWritten() int64 { return 0 }
+
+// TestReserveCountsWhatIsInFlight pins that a reservation counts the unwritten rest of every other
+// running one: two downloads that each fit and together do not are never both admitted, the
+// overshoot a real node showed when each reservation looked at the filesystem alone.
+func TestReserveCountsWhatIsInFlight(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name string
+		// base is the filesystem's usage; aSize and aWritten the running reservation, already
+		// on disk for aWritten of its bytes (so they are in base too).
+		base            uint64
+		aSize, aWritten int64
+		release         bool
+		bSize           int64
+		wantErr         bool
+	}{
+		{name: "the second of two that each fit is refused", base: 420, aSize: 300, bSize: 300, wantErr: true},
+		{name: "a released reservation leaves room", base: 420, aSize: 300, release: true, bSize: 300},
+		{name: "written bytes count once, in usage", base: 620, aSize: 300, aWritten: 200, bSize: 80},
+		{name: "the unwritten rest still counts", base: 620, aSize: 300, aWritten: 200, bSize: 81, wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cache := newTestCache(t, c.base)
+			col := cache.collector(nil, nil)
+			releaseA, err := col.Reserve(ctx, hexOf('a'), c.aSize, func() int64 { return c.aWritten })
+			require.NoError(t, err)
+			if c.release {
+				releaseA()
+			}
+
+			_, err = col.Reserve(ctx, hexOf('b'), c.bSize, nothingWritten)
 			if !c.wantErr {
 				require.NoError(t, err)
 				return
@@ -286,33 +332,42 @@ func TestKubeletCap(t *testing.T) {
 	const total = 1000 << 30
 	cases := []struct {
 		name       string
-		file       string
-		noFile     bool
+		kubelet    *workercore.NodeModelStoreKubelet
 		want       int32
 		wantSource string
 	}{
-		{name: "an absent file takes kubelet's defaults", noFile: true, want: 80, wantSource: "no kubelet configuration file"},
-		{name: "an unreadable file takes kubelet's defaults", file: "{not yaml", want: 80, wantSource: "cannot be read"},
-		{name: "a file setting none takes kubelet's defaults", file: "kind: KubeletConfiguration\n", want: 80, wantSource: "configuration file at"},
+		{name: "no reading takes kubelet's defaults and says so", want: 80, wantSource: "could not be read"},
+		{name: "a reading setting none takes kubelet's defaults", kubelet: &workercore.NodeModelStoreKubelet{}, want: 80, wantSource: "effective kubelet configuration"},
 		{
-			name: "percent thresholds from the file",
-			file: "evictionHard:\n  nodefs.available: \"5%\"\n  imagefs.available: \"8%\"\nimageGCHighThresholdPercent: 90\n",
-			want: 85, wantSource: "configuration file at",
+			name:    "a node setting nodefs only, as a managed node was measured to",
+			kubelet: &workercore.NodeModelStoreKubelet{NodefsAvailable: "10%", ImageGCHighThresholdPercent: ptr.To[int32](85)},
+			want:    80, wantSource: "effective kubelet configuration",
 		},
 		{
-			name: "a quantity threshold, as a share of the filesystem",
-			file: "evictionHard:\n  nodefs.available: \"200Gi\"\n  imagefs.available: \"1%\"\nimageGCHighThresholdPercent: 99\n",
-			want: 75, wantSource: "configuration file at",
+			name:    "percent thresholds",
+			kubelet: &workercore.NodeModelStoreKubelet{NodefsAvailable: "5%", ImagefsAvailable: "8%", ImageGCHighThresholdPercent: ptr.To[int32](90)},
+			want:    85,
 		},
-		{name: "image collection is the lowest", file: "imageGCHighThresholdPercent: 70\n", want: 65},
+		{
+			name:    "a quantity threshold, as a share of the filesystem",
+			kubelet: &workercore.NodeModelStoreKubelet{NodefsAvailable: "200Gi", ImagefsAvailable: "1%", ImageGCHighThresholdPercent: ptr.To[int32](99)},
+			want:    75,
+		},
+		{name: "image collection is the lowest", kubelet: &workercore.NodeModelStoreKubelet{ImageGCHighThresholdPercent: ptr.To[int32](70)}, want: 65},
+		{
+			name:    "a quantity at or above the filesystem is not a share of it, so kubelet's default applies",
+			kubelet: &workercore.NodeModelStoreKubelet{NodefsAvailable: "1000Gi", ImagefsAvailable: "2000Gi"},
+			want:    80, wantSource: "nodefs.available 1000Gi is not below the filesystem's",
+		},
+		{
+			name:    "a threshold that cannot be read takes the default",
+			kubelet: &workercore.NodeModelStoreKubelet{NodefsAvailable: "ten"},
+			want:    80, wantSource: "nodefs.available ten cannot be read",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "config.yaml")
-			if !c.noFile {
-				require.NoError(t, os.WriteFile(path, []byte(c.file), 0o644))
-			}
-			got := KubeletCap(path, total)
+			got := KubeletCap(c.kubelet, total)
 			assert.Equal(t, c.want, got.Percent)
 			assert.Contains(t, got.Source, c.wantSource)
 		})

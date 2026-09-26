@@ -55,6 +55,14 @@ type InstanceTypeListerExpansion interface{}
 // InstanceTypeFlavorLister.
 type InstanceTypeFlavorListerExpansion interface{}
 
+// ModelArtifactListerExpansion allows custom methods to be added to
+// ModelArtifactLister.
+type ModelArtifactListerExpansion interface{}
+
+// ModelArtifactNamespaceListerExpansion allows custom methods to be added to
+// ModelArtifactNamespaceLister.
+type ModelArtifactNamespaceListerExpansion interface{}
+
 // ModelDeploymentListerExpansion allows custom methods to be added to
 // ModelDeploymentLister.
 type ModelDeploymentListerExpansion interface{}
@@ -62,3 +70,7 @@ type ModelDeploymentListerExpansion interface{}
 // ModelDeploymentNamespaceListerExpansion allows custom methods to be added to
 // ModelDeploymentNamespaceLister.
 type ModelDeploymentNamespaceListerExpansion interface{}
+
+// NodeModelStoreListerExpansion allows custom methods to be added to
+// NodeModelStoreLister.
+type NodeModelStoreListerExpansion interface{}
