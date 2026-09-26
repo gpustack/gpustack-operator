@@ -313,6 +313,36 @@ func TestModelDeploymentArtifactWaitLeavesRunningReplicasAlone(t *testing.T) {
 	assert.Equal(t, "ArtifactNotResolved", ModelDeploymentConditionWeightsReady.GetReason(getModelDeployment(t, cli)))
 }
 
+// TestModelDeploymentArtifactWaitReportsTheRolloutHeldByWeights pins what the held rollout above says
+// about its cause. The deployment declares no KV cache, so a message naming the cache connection
+// would send the reader to a store this deployment never used.
+func TestModelDeploymentArtifactWaitReportsTheRolloutHeldByWeights(t *testing.T) {
+	cli := newModelDeploymentClient(artifactDeploymentFixture(2), newRenderInstanceType(), artifactFixture("", true, true))
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	ma := new(workercore.ModelArtifact)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}, ma))
+	ModelArtifactConditionResolved.False(ma, "AccessDenied", "the credential was revoked")
+	require.NoError(t, cli.Update(context.Background(), ma))
+	md := getModelDeployment(t, cli)
+	md.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
+	require.NoError(t, cli.Update(context.Background(), md))
+	standInForKueue(t, cli, true)
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	got := getModelDeployment(t, cli)
+	require.Nil(t, got.Spec.KVCache, "the fixture must declare no KV cache for the message check to mean anything")
+	assert.True(t, ModelDeploymentConditionReplicasUpToDate.IsFalse(got))
+	assert.Equal(t, modelDeploymentReasonRolloutHeldByWeights, ModelDeploymentConditionReplicasUpToDate.GetReason(got))
+	message := ModelDeploymentConditionReplicasUpToDate.GetMessage(got)
+	assert.Contains(t, message, "2 of 2 replicas")
+	assert.Contains(t, message, "WeightsReady", "the message names the condition that says what blocks the weights")
+	assert.NotContains(t, message, "KV cache")
+}
+
 func TestModelDeploymentArtifactPlacement(t *testing.T) {
 	cli := newModelDeploymentClient(
 		artifactDeploymentFixture(1), newRenderInstanceType(), artifactFixture("models", true, true),

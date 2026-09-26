@@ -655,7 +655,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			// that cannot be placed -- the create below is withheld, so a recreate here would only
 			// delete a serving replica. The edit waits for the weights, as it waits for a lost
 			// connector above.
-			rollout.held += len(outdatedByOrdinal) + len(orphaned)
+			rollout.heldByWeights += len(outdatedByOrdinal) + len(orphaned)
 			outdated = nil
 		}
 

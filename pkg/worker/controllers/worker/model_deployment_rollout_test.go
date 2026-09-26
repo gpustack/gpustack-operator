@@ -66,6 +66,13 @@ func TestModelDeploymentRollout_ReportsWhatThePassDecided(t *testing.T) {
 			wantReason:  modelDeploymentReasonRolloutHeldByCache,
 			wantMessage: "2 of 2 replicas differ from what this pass rendered and were left in place",
 		},
+		{
+			name:        "the weights are blocked and the rollout is held",
+			rollout:     modelDeploymentRollout{accounted: 2, outdated: 2, heldByWeights: 2},
+			wantStatus:  "False",
+			wantReason:  modelDeploymentReasonRolloutHeldByWeights,
+			wantMessage: "2 of 2 replicas differ from what this pass rendered and were left in place",
+		},
 	}
 
 	for _, tc := range cases {
