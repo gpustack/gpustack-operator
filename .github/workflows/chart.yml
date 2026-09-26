@@ -11,6 +11,12 @@ defaults:
   run:
     shell: bash
 
+# The operator image the chart test installs: built by the image job below from the tree under test,
+# loaded into each leg's kind cluster, and named to `make test chart` through these two variables.
+env:
+  CHART_TEST_IMAGE_REPOSITORY: gpustack/gpustack-operator
+  CHART_TEST_IMAGE_TAG: chart-test
+
 on:
   workflow_dispatch: { }
   push:
@@ -35,9 +41,115 @@ on:
       - "hack/**"
 
 jobs:
+  # NB(thxCode): the chart test used to install the published "dev" image, which is built from main.
+  # A chart change that needs a binary change (a subcommand the chart starts, say) was then red on
+  # every leg until it merged and "dev" was published again, and that red hid any real chart defect
+  # beside it. One amd64 build of the tree under test now serves every leg. It reads the registry
+  # build cache the CI workflow writes on main and writes none, and pushes nothing, so it needs no
+  # credentials. Its Go cache shares the CI workflow's key for the same reason.
+  image:
+    # Skip on tag pushes, as lint-test does.
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Prepare Env
+        env:
+          INPUT_REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          # The registry cache lives under the repository owner, as in _image.yml.
+          echo "INPUT_NAMESPACE=$(tr '[:upper:]' '[:lower:]' <<<"${INPUT_REPOSITORY_OWNER}")" >> "$GITHUB_ENV"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Maximize Docker Build Space
+        uses: gpustack/.github/.github/actions/maximize-docker-build-space@main
+        with:
+          deep-clean: true
+          root-reserve-mb: 40960
+      # The builder and the build options below match the CI workflow's _image.yml. The options
+      # are part of every RUN step's cache key, so any difference misses the registry cache, and
+      # one vendor stage at a time is what keeps a standard runner's disk from running out.
+      - name: Setup BuildX
+        id: setup-buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
+            env.BUILDKIT_STEP_LOG_MAX_SIZE=-1
+            env.BUILDKIT_STEP_LOG_MAX_SPEED=-1
+          buildkitd-flags: |
+            --allow-insecure-entitlement=network.host
+            --allow-insecure-entitlement=security.insecure
+            --oci-worker-net=host
+            --oci-worker-gc-keepstorage=204800
+            --oci-max-parallelism=1
+      - name: Setup BuildX Cache
+        id: setup-buildx-cache
+        uses: actions/cache@v4
+        with:
+          path: |-
+            ${{ github.workspace }}/.cache/go-build
+            ${{ github.workspace }}/.cache/go-mod
+            ${{ github.workspace }}/.sbin
+          key: ci-linux/amd64-${{ hashFiles('go.sum') }}
+      - name: Restore BuildX Cache
+        uses: reproducible-containers/buildkit-cache-dance@v3
+        with:
+          builder: ${{ steps.setup-buildx.outputs.name }}
+          cache-map: |-
+            {
+              "${{ github.workspace }}/.cache/go-build": {
+                "target": "/root/.cache/go-build"
+              },
+              "${{ github.workspace }}/.cache/go-mod": {
+                "target": "/go/pkg/mod"
+              },
+              "${{ github.workspace }}/.sbin": {
+                "target": "/usr/local/go/src/gpustack.ai/gpustack/.sbin"
+              }
+            }
+          dockerfile: ${{ github.workspace }}/pack/gpustack-operator/Dockerfile
+          skip-extraction: ${{ steps.setup-buildx-cache.outputs.cache-hit }}
+      - name: Package
+        uses: docker/build-push-action@v6
+        with:
+          allow: |
+            network.host
+            security.insecure
+          ulimit: |
+            nofile=65536:65536
+          shm-size: "16G"
+          provenance: false
+          sbom: false
+          push: false
+          file: ${{ github.workspace }}/pack/gpustack-operator/Dockerfile
+          context: ${{ github.workspace }}
+          platforms: linux/amd64
+          build-args: |
+            GPUSTACK_GIT_COMMIT=${{ github.sha }}
+            GPUSTACK_GIT_VERSION=
+          tags: |
+            ${{ env.CHART_TEST_IMAGE_REPOSITORY }}:${{ env.CHART_TEST_IMAGE_TAG }}
+          cache-from: |
+            type=registry,ref=${{ env.INPUT_NAMESPACE }}/build-cache:gpustack-operator-main-linux-amd64
+          outputs: |
+            type=docker,dest=${{ runner.temp }}/chart-test-image.tar
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: chart-test-image
+          path: ${{ runner.temp }}/chart-test-image.tar
+          retention-days: 1
+
   lint-test:
     # Skip on tag pushes: releases must not be gated by the version matrix.
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    needs:
+      - image
     timeout-minutes: 60
     runs-on: ubuntu-24.04
     strategy:
@@ -86,6 +198,14 @@ jobs:
         with:
           config: ${{ runner.temp }}/kind-config.yaml
           version: v0.32.0
+      - name: Download Image
+        uses: actions/download-artifact@v4
+        with:
+          name: chart-test-image
+          path: ${{ runner.temp }}
+      - name: Load Image
+        # "chart-testing" is helm/kind-action's default cluster name.
+        run: kind load image-archive "${RUNNER_TEMP}/chart-test-image.tar" --name chart-testing
       - name: Generate
         run: make generate chart
       - name: Verify Generated

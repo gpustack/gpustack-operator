@@ -383,10 +383,14 @@ function gpustack::helm::lint() {
 #
 # The values go through --helm-extra-set-args, which chart-testing passes to install and
 # upgrade only. --helm-extra-args also reaches `helm test` and `helm uninstall`, and both
-# reject --set. The operator image is pinned to the published "dev" tag, as the chart's
-# default "v<.Chart.AppVersion>" is never a real image in development. cleanupOnUninstall
-# is written into the release at install, so the uninstall between iterations runs the
-# cleanup hooks that remove the cluster-scoped leftovers.
+# reject --set. The operator image is CHART_TEST_IMAGE_REPOSITORY:CHART_TEST_IMAGE_TAG,
+# gpustack/gpustack-operator:dev unless set, as the chart's default "v<.Chart.AppVersion>" is
+# never a real image in development. The published "dev" image is built from main, so a
+# chart change that needs a binary change is only tested together with it when the caller
+# builds the tree under test and names that image here: the Chart workflow does, and loads it
+# into kind first. cleanupOnUninstall is written into the release at install, so the
+# uninstall between iterations runs the cleanup hooks that remove the cluster-scoped
+# leftovers.
 #
 # A failed uninstall does NOT fail chart-testing: it prints "Error deleting Helm release:"
 # and exits 0, so a broken delete hook would stay green while every run waited out the
@@ -397,7 +401,10 @@ function gpustack::helm::test() {
   local chart_repos
   chart_repos=$(gpustack::helm::ct::chart_repos "${target}")
 
-  gpustack::log::info "testing ${target} ..."
+  local image_repository="${CHART_TEST_IMAGE_REPOSITORY:-gpustack/gpustack-operator}"
+  local image_tag="${CHART_TEST_IMAGE_TAG:-dev}"
+
+  gpustack::log::info "testing ${target} with ${image_repository}:${image_tag} ..."
   local output
   output="$(docker run \
     --rm \
@@ -410,7 +417,7 @@ function gpustack::helm::test() {
     --charts "${target#"${ROOT_DIR}/"}" \
     --chart-repos "${chart_repos}" \
     --helm-extra-args '--timeout 600s' \
-    --helm-extra-set-args '--set=image.tag=dev --set=cleanupOnUninstall=true' \
+    --helm-extra-set-args "--set=image.repository=${image_repository} --set=image.tag=${image_tag} --set=cleanupOnUninstall=true" \
     2>&1 | tee /dev/stderr)"
 
   if grep -q '^Error deleting Helm release:' <<<"${output}"; then
