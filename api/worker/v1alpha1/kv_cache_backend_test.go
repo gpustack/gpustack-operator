@@ -5,7 +5,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	extension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	structuralschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
+	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/pruning"
 	"k8s.io/utils/ptr"
 )
 
@@ -116,4 +119,56 @@ func TestKVCacheBackendDiskTierRequiresItsPath(t *testing.T) {
 	assert.Equal(t, []string{"path"}, localDisks.Items.Schema.Required,
 		"the path is required and the capacity is not: an unset capacity means the store's own "+
 			"ceiling, while an unset path would mean a host directory this operator chose")
+}
+
+// TestKVCacheBackendLeaderSnapshotIsPrunedBySchema pins what the API server does with a
+// `leader.highAvailability.snapshot` block: the schema has no such field, so the block is PRUNED
+// and reported as an unknown field rather than refused by any rule of this operator. A client asking
+// for strict field validation, which is kubectl's default, turns that report into a refusal; one
+// that does not gets a warning and an object stored without the block.
+//
+// It runs the API server's own pruning over the generated schema, because that is the only layer
+// that sees the block at all: the Go type has no field to decode it into, so no webhook can.
+func TestKVCacheBackendLeaderSnapshotIsPrunedBySchema(t *testing.T) {
+	crd := GetCustomResourceDefinitions()["KVCacheBackend"]
+	require.NotNil(t, crd, "KVCacheBackend is not registered")
+	require.Len(t, crd.Spec.Versions, 1)
+
+	var internal apiextensions.JSONSchemaProps
+	require.NoError(t, extension.Convert_v1_JSONSchemaProps_To_apiextensions_JSONSchemaProps(
+		crd.Spec.Versions[0].Schema.OpenAPIV3Schema, &internal, nil))
+	structural, err := structuralschema.NewStructural(&internal)
+	require.NoError(t, err)
+
+	highAvailability := func(ha map[string]any) map[string]any {
+		return map[string]any{
+			"apiVersion": "worker.gpustack.ai/v1alpha1",
+			"kind":       "KVCacheBackend",
+			"metadata":   map[string]any{"name": "mooncake"},
+			"spec": map[string]any{
+				"connection": map[string]any{
+					"managed": map[string]any{
+						"leader": map[string]any{"highAvailability": ha},
+					},
+				},
+			},
+		}
+	}
+
+	// The positive baseline: a field the schema does carry survives, so an empty result below is
+	// the schema speaking and not a pruner that reports nothing.
+	kept := highAvailability(map[string]any{"memberAddressing": "Lease"})
+	assert.Empty(t, pruning.PruneWithOptions(kept, structural, true,
+		structuralschema.UnknownFieldPathOptions{TrackUnknownFieldPaths: true}))
+	assert.Equal(t, highAvailability(map[string]any{"memberAddressing": "Lease"}), kept)
+
+	pruned := highAvailability(map[string]any{
+		"memberAddressing": "Lease",
+		"snapshot":         map[string]any{"persistentVolumeClaimName": "mooncake-snapshots"},
+	})
+	unknown := pruning.PruneWithOptions(pruned, structural, true,
+		structuralschema.UnknownFieldPathOptions{TrackUnknownFieldPaths: true})
+	assert.Equal(t, []string{"spec.connection.managed.leader.highAvailability.snapshot"}, unknown)
+	assert.Equal(t, highAvailability(map[string]any{"memberAddressing": "Lease"}), pruned,
+		"the block is dropped and the rest of the object is stored as written")
 }

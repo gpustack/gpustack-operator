@@ -14,13 +14,11 @@ import (
 
 	conregname "github.com/google/go-containerregistry/pkg/name"
 	core "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	"k8s.io/utils/ptr"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -441,28 +439,6 @@ func validateKVCacheBackendManaged(
 		}
 	}
 
-	// A snapshot is refused at any replica count, because restoring one can make the cache serve
-	// WRONG DATA rather than miss. The snapshot records where each key sits in member memory, and
-	// nothing checks that memory still holds that key when the index is read back: a forced remove
-	// (the path an engine's cache reset takes) frees it for the next write, and a standby loads the
-	// snapshot once at its own start, so by the time it takes over another leader may have reused it.
-	//
-	// An update is judged only when it moves the snapshot or the replica count. An object admitted
-	// before this rule keeps running as it was rendered, and it still has to take an unrelated edit
-	// and the reconciler's removal of its finalizer -- see unchangedPassthrough for that failure.
-	if snapshot := mooncake.LeaderSnapshot(managed.Leader); snapshot != nil {
-		moved := oldManaged == nil ||
-			!equality.Semantic.DeepEqual(mooncake.LeaderSnapshot(oldManaged.Leader), snapshot) ||
-			!ptr.Equal(oldManaged.Leader.Replicas, managed.Leader.Replicas)
-		if moved {
-			errs = append(errs, field.Forbidden(fldPath.Child("leader", "highAvailability", "snapshot"),
-				"snapshots are not supported: a leader restoring one can serve another key's bytes "+
-					"instead of a miss, because the member memory the snapshot points at may have been "+
-					"reused since it was taken -- after a forced remove such as an engine's cache reset, "+
-					"or before a standby that loaded it at its own start takes over"))
-		}
-	}
-
 	// REQUIRED: an update that switches high availability on or off re-runs these rules even over a
 	// list it did not touch, and the exemption below is what makes that necessary. Turning the field
 	// on is what turns `enable_ha`, `ha_backend_type`, `ha_backend_connstring` and `cluster_id` into
@@ -470,20 +446,12 @@ func validateKVCacheBackendManaged(
 	// appends the escape hatch AFTER the derived flags, so `-enable_ha=false` left in the list would
 	// win over the `-enable_ha=true` the election needs -- several unelected masters, admitted by a
 	// rule that only ever looked at whether the list moved.
-	// THE SNAPSHOT DECLARATION IS COUPLED THE SAME WAY, and for the same reason one step down: the
-	// snapshot keys are reserved unconditionally, but an object admitted BEFORE they were reserved
-	// can carry one, and it carries it inside an already-present high-availability block. Comparing
-	// only whether that block appeared or vanished leaves such an update reading as unchanged, the
-	// rules are skipped, and the stale `-enable_snapshot_restore=false` the hatch appends after the
-	// derived flags wins over the declaration that was just added.
 	var oldLeaderExtraArgs []string
 	haUnchanged := true
 	if oldManaged != nil {
 		oldLeaderExtraArgs = oldManaged.Leader.ExtraArgs
 		haUnchanged = (oldManaged.Leader.HighAvailability == nil) ==
-			(managed.Leader.HighAvailability == nil) &&
-			leaderSnapshotDeclared(oldManaged.Leader.HighAvailability) ==
-				leaderSnapshotDeclared(managed.Leader.HighAvailability)
+			(managed.Leader.HighAvailability == nil)
 	}
 	if !haUnchanged ||
 		!unchangedPassthrough(oldManaged != nil, oldLeaderExtraArgs, managed.Leader.ExtraArgs) {
@@ -496,12 +464,12 @@ func validateKVCacheBackendManaged(
 	// argument hatch above rather than to the passthrough alone.
 	//
 	// The reserved list being unconditional is what makes the coupling necessary, not what makes it
-	// unnecessary. What a declaration moves is which of those names the renderer EMITS: the snapshot
-	// path variable is emitted only under a snapshot declaration, and the Pod IP only under high
-	// availability. A list carrying one of those names from before it was reserved is exempted by
-	// the passthrough comparison, and the renderer appends the hatch AFTER the derived variables --
-	// so the update that turns the declaration on is the moment the stale value starts overriding
-	// the mount path the claim arrives at, and it is the one update this rule must not skip.
+	// unnecessary. What a declaration moves is which of those names the renderer EMITS: the Pod's
+	// identity and IP are emitted only under high availability. A list carrying one of those names
+	// from before it was reserved is exempted by the passthrough comparison, and the renderer appends
+	// the hatch AFTER the derived variables -- so the update that turns the declaration on is the
+	// moment the stale value starts overriding the reference the argv arrives with, and it is the one
+	// update this rule must not skip.
 	var oldLeaderExtraEnv []workercore.InstanceEnvVar
 	if oldManaged != nil {
 		oldLeaderExtraEnv = oldManaged.Leader.ExtraEnv
@@ -522,51 +490,9 @@ func validateKVCacheBackendManaged(
 	}
 
 	errs = append(errs, validateKVCacheBackendLocalDiskUniqueness(managed, fldPath)...)
-	errs = append(errs, validateKVCacheBackendSnapshot(managed, fldPath)...)
 	errs = append(errs, validateKVCacheBackendScaleIn(managed, fldPath.Child("scaleIn"))...)
 
 	return errs
-}
-
-// validateKVCacheBackendSnapshot refuses a snapshot that names no storage to keep itself on.
-//
-// The schema already requires the field and bounds its length. What it cannot say is that the value
-// has to be a name Kubernetes can resolve to a claim: an unresolvable one renders a volume the
-// kubelet refuses, so every leader replica stays pending with the reason on a Pod rather than on the
-// object somebody edited.
-//
-// It deliberately does NOT check the claim's ACCESS MODES, which is the requirement that actually
-// decides whether the feature works. That needs a read this handler does not have, against an object
-// that legitimately does not exist yet when the backend is created — claims are usually applied
-// alongside it. The reconciler asks once it can see the claim and publishes the answer as a
-// condition, so the check is late rather than absent.
-func validateKVCacheBackendSnapshot(
-	managed *workercore.KVCacheBackendManaged, fldPath *field.Path,
-) field.ErrorList {
-	snapshot := mooncake.LeaderSnapshot(managed.Leader)
-	if snapshot == nil {
-		return nil
-	}
-
-	claimPath := fldPath.Child("leader", "highAvailability", "snapshot",
-		"persistentVolumeClaimName")
-
-	// Reached when the schema is not the one enforcing this — a cluster whose CRD predates the
-	// field's minLength, or an object arriving through a path that skipped structural validation.
-	// The message names what the storage is FOR, because a reader who left it blank is usually one
-	// who took the snapshot block for a switch.
-	if snapshot.PersistentVolumeClaimName == "" {
-		return field.ErrorList{field.Required(claimPath,
-			"a snapshot has to name the claim it is kept on: the replica that serves writes the "+
-				"snapshot and a standby reads it back, so it cannot live inside either pod")}
-	}
-
-	if msgs := validation.IsDNS1123Subdomain(snapshot.PersistentVolumeClaimName); len(msgs) > 0 {
-		return field.ErrorList{field.Invalid(claimPath, snapshot.PersistentVolumeClaimName,
-			strings.Join(msgs, "; "))}
-	}
-
-	return nil
 }
 
 // validateKVCacheBackendLocalDiskUniqueness enforces that only one member group declares a disk
@@ -1090,12 +1016,6 @@ func hasParentDirComponent(path string) bool {
 		}
 	}
 	return false
-}
-
-// leaderSnapshotDeclared reports whether a high-availability block asks for snapshots, reading an
-// absent block as "no" so the two sides of an update compare without either being dereferenced.
-func leaderSnapshotDeclared(ha *workercore.KVCacheBackendLeaderHighAvailability) bool {
-	return ha != nil && ha.Snapshot != nil
 }
 
 // unchangedPassthrough reports whether this call is an UPDATE that left one passthrough list

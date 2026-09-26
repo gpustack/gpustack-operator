@@ -1390,8 +1390,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendLeaderApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendLeaderHighAvailability"):
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendLeaderHighAvailabilityApplyConfiguration{}
-	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendLeaderSnapshot"):
-		return &applyconfigurationworkerv1alpha1.KVCacheBackendLeaderSnapshotApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendManaged"):
 		return &applyconfigurationworkerv1alpha1.KVCacheBackendManagedApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("KVCacheBackendMember"):

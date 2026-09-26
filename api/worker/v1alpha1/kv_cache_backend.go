@@ -382,23 +382,12 @@ type KVCacheBackendLeader struct {
 // An `enabled: false` beside `replicas: 3` would be a third state that admission would have to
 // adjudicate and every reader would have to remember, while presence has no such state. Lease
 // tuning — duration, renew deadline — can also be added here later without a breaking change.
+//
+// A standby REPLICATES NOTHING. The store's operation log is the only way to feed one, and it runs
+// on a leadership backend this operator's image cannot carry, so a failover or a restart starts
+// from an empty cache. The store's snapshot is not offered either: restoring one can make the cache
+// serve another key's bytes instead of a miss, which is why its flags are refused in extraArgs.
 type KVCacheBackendLeaderHighAvailability struct {
-	// Snapshot is REFUSED AT ADMISSION, at any replica count. It would write the leader's metadata
-	// to a claim for a restarted leader, or a standby taking over, to restore, and that restore can
-	// make the cache serve another key's bytes instead of a miss: the snapshot records where each key
-	// sits in member memory, and nothing checks that the memory still holds that key when the index
-	// is read back. A forced remove, which is how an engine resets its cache, frees it for the next
-	// write, and a standby loads the snapshot once at its own start, before another leader reuses it.
-	//
-	// Without it a standby REPLICATES NOTHING. The store's operation log is the only other way to
-	// feed one, and it runs on a leadership backend this operator's image cannot carry, so a
-	// failover or a restart starts from an empty cache.
-	//
-	// The field is kept so that an object admitted before the refusal keeps rendering as it did: its
-	// flags arrive as soon as the field is set, unlike the election's. An update to such an object
-	// is judged only when it moves this field or Replicas.
-	Snapshot *KVCacheBackendLeaderSnapshot `json:"snapshot,omitempty" protobuf:"bytes,1,opt,name=snapshot"`
-
 	// MemberAddressing selects how a member is told to find the master once an election runs. Both
 	// forms reach the leader that is serving, by different routes, and they are rendered into the
 	// same one variable — so changing this rolls every member group.
@@ -419,57 +408,6 @@ type KVCacheBackendLeaderHighAvailability struct {
 	// +k8s:validation:default="Service"
 	// +k8s:validation:enum=["Lease","Service"]
 	MemberAddressing string `json:"memberAddressing,omitempty" protobuf:"bytes,2,opt,name=memberAddressing"`
-}
-
-// KVCacheBackendLeaderSnapshot is where the leader's metadata baseline is kept, and how much of it.
-//
-// ONE STORAGE SHAPE, and it is the narrower one. The store also speaks S3, which would need an
-// endpoint, a bucket and a credential reference — a group of fields plus Secret handling, for a
-// capability a ReadWriteMany claim already covers inside the cluster. Widening to it later adds a
-// field beside this one and breaks nothing.
-//
-// There is no catalog setting either, because the catalog rides in the same storage: the store's
-// embedded catalog is constructed over the object store itself, so one claim carries both the
-// payloads and the index of which ones exist. The alternative it offers is a Redis, which would add
-// an external dependency to a feature whose whole premise is not having one.
-type KVCacheBackendLeaderSnapshot struct {
-	// PersistentVolumeClaimName names the claim the snapshot is written to and read from, resolved
-	// in the namespace this operator runs its workloads in — a KVCacheBackend is cluster-scoped and
-	// has no namespace of its own to resolve it against.
-	//
-	// REQUIRED: the claim must be ReadWriteMany. The serving leader writes the snapshot and a
-	// standby reads it, they are different Pods, and a claim only one of them can mount leaves the
-	// standby reading an empty directory with nothing logging it. Admission does not check this —
-	// the claim may not exist yet when the backend is created — so the reconciler checks it once it
-	// can see the claim and publishes the answer as a condition.
-	//
-	// EVERY KEY THE CACHE HOLDS IS NAMEABLE FROM THIS VOLUME. A snapshot is the master's metadata
-	// written as plain bytes with no encryption, so whoever can mount this claim can enumerate those
-	// keys, including their tenant names under MultiTenancy. The claim also outlives the backend:
-	// nothing here deletes it.
-	//
-	// +required
-	// +k8s:validation:minLength=1
-	// +k8s:validation:maxLength=253
-	PersistentVolumeClaimName string `json:"persistentVolumeClaimName" protobuf:"bytes,1,name=persistentVolumeClaimName"`
-
-	// IntervalSeconds is how long the store waits between snapshots. Unset renders no flag and
-	// leaves the store's own default in place, so a default that moves upstream shows up as a
-	// behavior change to investigate rather than as a value this API silently re-asserted.
-	//
-	// +k8s:validation:minimum=1
-	IntervalSeconds *int32 `json:"intervalSeconds,omitempty" protobuf:"varint,2,opt,name=intervalSeconds"`
-
-	// RetentionCount is how many recent snapshots are kept, older ones being deleted as newer ones
-	// land. Its floor is one because the store refuses to start when snapshots are on and this is
-	// zero. Unset renders no flag, for the reason above.
-	//
-	// Keeping more than one is not spare capacity: a restore tries the stored snapshots in turn and
-	// falls back to an older one when a payload cannot be read, so the count is how many times that
-	// fallback can happen.
-	//
-	// +k8s:validation:minimum=1
-	RetentionCount *int32 `json:"retentionCount,omitempty" protobuf:"varint,3,opt,name=retentionCount"`
 }
 
 // KVCacheBackendTransport is the data plane the members use.
@@ -979,8 +917,7 @@ type KVCacheBackendStatus struct {
 
 	// Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,
 	// CapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has
-	// something to be a verdict about — SnapshotStorageShared, ElectionObserved and TierWasEmpty,
-	// the last only where a member group carries a local disk tier. Every one is derived from an
+	// something to be a verdict about — ElectionObserved and TierWasEmpty, the last only where a member group carries a local disk tier. Every one is derived from an
 	// observed document.
 	//
 	// +patchMergeKey=type

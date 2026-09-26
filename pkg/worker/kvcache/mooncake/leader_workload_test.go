@@ -645,9 +645,9 @@ func TestLeaderWorkload_ExtraEnv(t *testing.T) {
 // refused for a collision that cannot happen.
 //
 // The union is taken over several fixtures on purpose. No single backend renders all of them: the
-// Pod's identity and IP are emitted only under high availability, and the snapshot path only when a
-// snapshot is declared — which is also why all of them are reserved unconditionally, so the field
-// that turns their rendering on can be edited after the object exists without re-opening the name.
+// Pod's identity and IP are emitted only under high availability — which is also why all of them are
+// reserved unconditionally, so the field that turns their rendering on can be edited after the
+// object exists without re-opening the name.
 func TestLeaderDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 	fixtures := []struct {
 		name string
@@ -655,7 +655,6 @@ func TestLeaderDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 	}{
 		{"a plain backend", testBackend()},
 		{"a backend electing its leader", haBackend()},
-		{"a backend keeping a snapshot", snapshotBackend()},
 	}
 
 	rendered := make(map[string]string)

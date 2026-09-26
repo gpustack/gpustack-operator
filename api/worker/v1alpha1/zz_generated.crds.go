@@ -2492,36 +2492,6 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																				},
 																			},
 																		},
-																		"snapshot": {
-																			Description: "Snapshot is REFUSED AT ADMISSION, at any replica count. It would write the leader's metadata\nto a claim for a restarted leader, or a standby taking over, to restore, and that restore can\nmake the cache serve another key's bytes instead of a miss: the snapshot records where each key\nsits in member memory, and nothing checks that the memory still holds that key when the index\nis read back. A forced remove, which is how an engine resets its cache, frees it for the next\nwrite, and a standby loads the snapshot once at its own start, before another leader reuses it.\nWithout it a standby REPLICATES NOTHING. The store's operation log is the only other way to\nfeed one, and it runs on a leadership backend this operator's image cannot carry, so a\nfailover or a restart starts from an empty cache.\nThe field is kept so that an object admitted before the refusal keeps rendering as it did: its\nflags arrive as soon as the field is set, unlike the election's. An update to such an object\nis judged only when it moves this field or Replicas.",
-																			Type:        "object",
-																			Required: []string{
-																				"persistentVolumeClaimName",
-																			},
-																			Properties: map[string]v1.JSONSchemaProps{
-																				"intervalSeconds": {
-																					Description: "IntervalSeconds is how long the store waits between snapshots. Unset renders no flag and\nleaves the store's own default in place, so a default that moves upstream shows up as a\nbehavior change to investigate rather than as a value this API silently re-asserted.",
-																					Type:        "integer",
-																					Format:      "int32",
-																					Minimum:     ptr.To[float64](1),
-																					Nullable:    true,
-																				},
-																				"persistentVolumeClaimName": {
-																					Description: "PersistentVolumeClaimName names the claim the snapshot is written to and read from, resolved\nin the namespace this operator runs its workloads in — a KVCacheBackend is cluster-scoped and\nhas no namespace of its own to resolve it against.\nREQUIRED: the claim must be ReadWriteMany. The serving leader writes the snapshot and a\nstandby reads it, they are different Pods, and a claim only one of them can mount leaves the\nstandby reading an empty directory with nothing logging it. Admission does not check this —\nthe claim may not exist yet when the backend is created — so the reconciler checks it once it\ncan see the claim and publishes the answer as a condition.\nEVERY KEY THE CACHE HOLDS IS NAMEABLE FROM THIS VOLUME. A snapshot is the master's metadata\nwritten as plain bytes with no encryption, so whoever can mount this claim can enumerate those\nkeys, including their tenant names under MultiTenancy. The claim also outlives the backend:\nnothing here deletes it.",
-																					Type:        "string",
-																					MaxLength:   ptr.To[int64](253),
-																					MinLength:   ptr.To[int64](1),
-																				},
-																				"retentionCount": {
-																					Description: "RetentionCount is how many recent snapshots are kept, older ones being deleted as newer ones\nland. Its floor is one because the store refuses to start when snapshots are on and this is\nzero. Unset renders no flag, for the reason above.\nKeeping more than one is not spare capacity: a restore tries the stored snapshots in turn and\nfalls back to an older one when a payload cannot be read, so the count is how many times that\nfallback can happen.",
-																					Type:        "integer",
-																					Format:      "int32",
-																					Minimum:     ptr.To[float64](1),
-																					Nullable:    true,
-																				},
-																			},
-																			Nullable: true,
-																		},
 																	},
 																	Nullable: true,
 																},
@@ -3188,7 +3158,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 											Nullable: true,
 										},
 										"conditions": {
-											Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,\nCapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has\nsomething to be a verdict about — SnapshotStorageShared, ElectionObserved and TierWasEmpty,\nthe last only where a member group carries a local disk tier. Every one is derived from an\nobserved document.",
+											Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,\nCapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has\nsomething to be a verdict about — ElectionObserved and TierWasEmpty, the last only where a member group carries a local disk tier. Every one is derived from an\nobserved document.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{

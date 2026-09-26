@@ -36,8 +36,7 @@ package mooncake
 //     its own reason because they are not one kind of problem: one changes how every OTHER flag is
 //     read, another names a store nothing reads, another refuses to start the process at all,
 //     another replaces a setting this spec states while leaving the object stating it, another
-//     decides whether a feature this API renders runs at all under a name that mentions no part of
-//     it, and several change no value because this operator's own rendering always wins over them,
+//     runs the store on paths the rules here were never traced under, and several change no value because this operator's own rendering always wins over them,
 //     which makes them configure nothing while reading as a setting that moved.
 type ExtraArgsRules struct {
 	Derived   []string
@@ -105,22 +104,6 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		// would put the leader's half of that decision out of step with the members' half, with
 		// nothing on the object saying so.
 		"enable_offload",
-		// The snapshot group, derived from leader.highAvailability.snapshot. Reserved
-		// UNCONDITIONALLY, like the election group above, and for a sharper version of the same
-		// reason: the two switches say WHERE nothing, and the directory they write and read is an
-		// environment variable set beside the mounted claim. Reached through the hatch without that
-		// claim, enable_snapshot names a local object store whose path variable is unset, and the
-		// master refuses to start -- which is the good case. The one to keep out is the object
-		// admitted with a claim and a passthrough switch disagreeing about whether to use it.
-		//
-		// The last two are rendered only when their fields are set, and are reserved all the same:
-		// a key accepted here would win over a field left unset, so the object would state a
-		// default it is not running with.
-		"enable_snapshot",
-		"enable_snapshot_restore",
-		"snapshot_interval_seconds",
-		"snapshot_object_store_type",
-		"snapshot_retention_count",
 		"enable_multi_tenants",
 		"metrics_port",
 		"offload_on_evict",
@@ -227,58 +210,37 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 			"empty, which this operator never leaves empty, and the etcd leadership backend it " +
 			"names is not compiled into the image this operator runs",
 
-		// The allocator, and the fifth kind of cost: it decides whether a feature this API renders
-		// EXISTS, under a name that says nothing about that feature.
-		//
-		// Measured in the artifact's source: the master builds its snapshot manager inside a
-		// condition that requires the allocator to be the offset one. That is the artifact's own
-		// default, so nothing is wrong today -- and the condition has no else branch and logs
-		// nothing, so an administrator who moves the allocator through the hatch turns snapshot
-		// generation off while every rendered flag, the mounted claim and this object all go on
-		// saying it is on. The standby then restores the last snapshot the leader wrote before the
-		// change, forever, and the object reports the arrangement working.
-		"memory_allocator": "it decides whether the leader generates snapshots at all -- the " +
-			"master builds its snapshot manager only under the default offset allocator, silently " +
-			"and with no log line either way -- so any other value leaves " +
-			"leader.highAvailability.snapshot rendered, mounted and stated while nothing new is " +
-			"ever written to it",
+		// The allocator. The rules in this list were traced with the artifact's default offset
+		// allocator in place, and the artifact makes at least one path conditional on it with no log
+		// line either way: the master builds its snapshot manager only under that allocator. Another
+		// value runs the store on paths nothing here was traced under.
+		"memory_allocator": "it replaces the artifact's default offset allocator, the only one " +
+			"the rules governing this list were traced against",
 
-		// The snapshot's SECOND directory, and it is not the one the claim is mounted at: it is a
-		// forensic copy the store writes beside a failed upload, and setting it changes what a
-		// failure DOES.
-		//
-		// Measured in the artifact's source: the snapshot manager returns the upload error to its
-		// caller only while this is empty. Non-empty, each of the four payload uploads that fails
-		// is logged, saved to this directory and then stepped over, and the snapshot round reports
-		// itself finished. The setting reads like extra durability and buys the opposite -- a
-		// standby bootstrapping from a snapshot that is missing the shard it needed.
-		"snapshot_backup_dir": "it turns a failed snapshot upload from an error the store reports " +
-			"into a local copy it writes and steps over, so snapshot rounds go on reporting " +
-			"success while what lands on the claim is incomplete",
+		// The store's snapshot, and the only keys that turn it on. Restoring a snapshot can make the
+		// cache serve WRONG DATA rather than miss: it records where each key sits in member memory,
+		// and nothing checks that the memory still holds that key when the index is read back. A
+		// forced remove, which is how an engine resets its cache, frees it for the next write, and a
+		// standby loads the snapshot once at its own start, before another leader reuses it.
+		"enable_snapshot":         snapshotKeyReason,
+		"enable_snapshot_restore": snapshotKeyReason,
 
-		// The two deprecated spellings of snapshot_object_store_type, and INERT rather than
-		// harmful, exactly like the deprecated port above. Measured in the artifact's source: the
-		// canonical flag is tested first and wins whenever it was passed, which this operator does
-		// unconditionally under leader.highAvailability.snapshot. Refused because a key admission
-		// accepted and the process ignores reads as a store type that moved.
-		"snapshot_payload_store_type":   snapshotObjectStoreAliasKeyReason,
-		"snapshot_payload_backend_type": snapshotObjectStoreAliasKeyReason,
-
-		// The catalog, and the counterpart to reserving the object store: this operator never
-		// renders it, because the whole design rests on the artifact's own default being the
-		// embedded catalog -- the index of which snapshots exist, written into the object store
-		// itself, so one claim carries both halves. That omission is exactly what makes the key
-		// reachable from extraArgs. Pointed at a Redis, the payloads stay on the claim while the
-		// index moves to a store nothing here creates, seeds or backs up, and a Redis that is later
-		// wiped leaves the master restoring nothing from a claim that is still full.
-		"snapshot_catalog_store_type":   snapshotCatalogStoreKeyReason,
-		"snapshot_catalog_backend_type": snapshotCatalogStoreKeyReason,
-
-		// Read ONLY where the catalog is the Redis one, which is refused above. Reserved anyway,
-		// for the reason the CXL operands are: a key that is accepted and then configures nothing
-		// is how an operator comes to believe a catalog moved.
-		"snapshot_catalog_store_connstring":   snapshotCatalogConnstringKeyReason,
-		"snapshot_catalog_backend_connstring": snapshotCatalogConnstringKeyReason,
+		// Everything else the snapshot reads: its schedule, its retention, its object store under
+		// the canonical and the two deprecated spellings, the backup directory beside a failed
+		// upload, and the catalog with its connection strings. Each is read only once one of the two
+		// switches above is set, so each alone configures nothing -- refused for the reason the CXL
+		// operands are, because a key that is accepted and then read by nothing is how an operator
+		// comes to believe snapshots are on.
+		"snapshot_interval_seconds":           snapshotCompanionKeyReason,
+		"snapshot_retention_count":            snapshotCompanionKeyReason,
+		"snapshot_object_store_type":          snapshotCompanionKeyReason,
+		"snapshot_payload_store_type":         snapshotCompanionKeyReason,
+		"snapshot_payload_backend_type":       snapshotCompanionKeyReason,
+		"snapshot_backup_dir":                 snapshotCompanionKeyReason,
+		"snapshot_catalog_store_type":         snapshotCompanionKeyReason,
+		"snapshot_catalog_backend_type":       snapshotCompanionKeyReason,
+		"snapshot_catalog_store_connstring":   snapshotCompanionKeyReason,
+		"snapshot_catalog_backend_connstring": snapshotCompanionKeyReason,
 	},
 }
 
@@ -289,28 +251,19 @@ const cxlCompanionKeyReason = "it is read only when enable_cxl is set, and that 
 	"here because it discards the -allocation_strategy rendered from leader.allocationStrategy, " +
 	"so this key alone configures nothing at all"
 
-// snapshotObjectStoreAliasKeyReason is why the two deprecated spellings of the snapshot object
-// store type are refused. The canonical flag is rendered unconditionally under
-// leader.highAvailability.snapshot and is read first, so these move nothing while reading as a
-// store type that moved. One constant serves both, because two literals saying the same thing
-// drift apart and the field path already names which key was typed.
-const snapshotObjectStoreAliasKeyReason = "it is a deprecated alias of " +
-	"snapshot_object_store_type, which this operator renders from " +
-	"leader.highAvailability.snapshot and which wins over it, so this key moves nothing while " +
-	"reading as a snapshot store that moved"
+// snapshotKeyReason is why the two keys that turn the store's snapshot on are refused. One constant
+// serves both, because two literals saying the same thing drift apart and the field path already
+// names which key was typed.
+const snapshotKeyReason = "snapshots are not supported: a leader restoring one can serve another " +
+	"key's bytes instead of a miss, because the member memory the snapshot points at may have been " +
+	"reused since it was taken -- after a forced remove such as an engine's cache reset, or before " +
+	"a standby that loaded it at its own start takes over"
 
-// snapshotCatalogStoreKeyReason is why the snapshot catalog's type is refused. It is not a setting
-// this API renders, so nothing collides by name -- the embedded catalog is the artifact's own
-// default and that default is what puts the index on the same claim as the payloads.
-const snapshotCatalogStoreKeyReason = "it moves the index of which snapshots exist off the claim " +
-	"leader.highAvailability.snapshot names and into an external store this operator does not " +
-	"create, seed or delete, leaving a leader that restores nothing from a claim that still holds " +
-	"every payload"
-
-// snapshotCatalogConnstringKeyReason is why the catalog's two connection-string spellings are
-// refused on their own: they are read only under a catalog kind that is itself refused.
-const snapshotCatalogConnstringKeyReason = "it is read only when the snapshot catalog is the " +
-	"external one, and that key is refused here, so this key alone configures nothing at all"
+// snapshotCompanionKeyReason is why every other snapshot key is refused on its own: each is read
+// only under a switch that is itself refused.
+const snapshotCompanionKeyReason = "it is read only when enable_snapshot or " +
+	"enable_snapshot_restore is set, and both are refused here, so this key alone configures " +
+	"nothing at all"
 
 // MemberExtraArgsRules governs a member group's passthrough.
 //
@@ -419,14 +372,12 @@ var MemberDerivedEnvs = []string{
 // It is a PLAIN LIST for the same reason MemberDerivedEnvs is: the exclusive and forbidden kinds
 // would both be empty here, and nothing in the leader's namespace voids another setting.
 //
-// None is rendered unconditionally: the first three only under high availability, the last only
-// under a snapshot declaration. All four are reserved UNCONDITIONALLY for the same reason the
-// election flags are: an object must be creatable with the variable already in place and the field
-// turned on afterwards, and a passthrough value would silently win over the reference the rendered
-// argv or the mounted claim arrives with.
+// None is rendered unconditionally: all three only under high availability. They are reserved
+// UNCONDITIONALLY for the same reason the election flags are: an object must be creatable with the
+// variable already in place and the field turned on afterwards, and a passthrough value would
+// silently win over the reference the rendered argv arrives with.
 var LeaderDerivedEnvs = []string{
 	LeaderPodIPEnv,
 	LeaderPodNameEnv,
 	LeaderPodNamespaceEnv,
-	LeaderSnapshotLocalPathEnv,
 }
