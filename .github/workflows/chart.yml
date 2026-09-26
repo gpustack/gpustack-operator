@@ -1,6 +1,6 @@
 # This workflow lints and tests the Helm chart on pull requests/pushes that
-# touch chart-related files, and publishes it to the gh-pages Helm repository
-# on version tags.
+# touch chart-related files and once a day on main, and publishes it to the
+# gh-pages Helm repository on version tags.
 
 name: Chart
 
@@ -17,8 +17,18 @@ env:
   CHART_TEST_IMAGE_REPOSITORY: gpustack/gpustack-operator
   CHART_TEST_IMAGE_TAG: chart-test
 
+# NB(thxCode): the paths below list only the hack/ files that belong to the chart alone: the
+# upstream chart patches under hack/deploy/, hack/deps.sh that vendors them, and hack/lib/helm.sh.
+# The entrypoints the chart shares with the Go code (the chart branches of hack/lint.sh,
+# hack/test.sh and hack/generate.sh, the rest of hack/lib/ and the Makefile) are deliberately
+# absent: listing them ran this whole workflow on every Go-only change. A change there that breaks
+# the chart surfaces in the daily scheduled run instead, which GitHub starts on the default branch
+# only, so it turns main red within a day rather than landing on the next unrelated chart pull
+# request. Run it by hand through workflow_dispatch to check such a change sooner.
 on:
   workflow_dispatch: { }
+  schedule:
+    - cron: "17 19 * * *"
   push:
     branches:
       - "main"
@@ -29,7 +39,9 @@ on:
       - "deploy/gpustack-operator/chart/**"
       - ".github/workflows/chart.yml"
       - ".github/configs/**"
-      - "hack/**"
+      - "hack/deploy/**"
+      - "hack/deps.sh"
+      - "hack/lib/helm.sh"
   pull_request:
     branches:
       - "main"
@@ -38,7 +50,9 @@ on:
       - "deploy/gpustack-operator/chart/**"
       - ".github/workflows/chart.yml"
       - ".github/configs/**"
-      - "hack/**"
+      - "hack/deploy/**"
+      - "hack/deps.sh"
+      - "hack/lib/helm.sh"
 
 jobs:
   # NB(thxCode): the chart test used to install the published "dev" image, which is built from main.
