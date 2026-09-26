@@ -227,8 +227,8 @@ YAML
   # it would be exercising a cluster we tell users not to run.
   #
   # This is a prerequisite for an engine build that ignores the injected tenant, not a universal one.
-  # Such a client falls back to the store's own default name, and a multi-tenant master, the only kind
-  # a pool accepts, refuses a write from a name absent from its ledger. An engine that consumes the
+  # Such a client falls back to the store's own default name, and a multi-tenant master, the kind this
+  # fixture's pool runs on, refuses a write from a name absent from its ledger. An engine that consumes the
   # injected tenant writes under its Binding's own reuse domain and needs nothing here; this fixture
   # creates it anyway because the other cases share the setup, and case 53 reads it as the Binding
   # that must stay at zero.

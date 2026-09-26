@@ -30,6 +30,9 @@ type KVCacheBackendExternalApplyConfiguration struct {
 	// external backend that named only one leaves either the scrape or every engine with nothing to
 	// point at. It is a list rather than a single address so that a multi-leader backend needs no
 	// API change to describe.
+	//
+	// Today the list therefore holds exactly two entries, one Client and one Admin: entries are keyed
+	// by name, the name has two values, and admission refuses a list missing either.
 	Endpoints []KVCacheBackendEndpointApplyConfiguration `json:"endpoints,omitempty"`
 }
 

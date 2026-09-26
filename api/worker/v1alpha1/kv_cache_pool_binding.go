@@ -157,7 +157,7 @@ type KVCachePoolBindingDomain struct {
 // different things: a figure reading zero was measured as zero, and a missing figure was not
 // measured at all. Reading an absent one as zero is the mistake this distinction exists to prevent.
 type KVCachePoolBindingStatus struct {
-	// Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.
+	// Phase summarizes the conditions: Provisioning, Ready, Error, Deleting.
 	Phase string `json:"phase,omitempty" protobuf:"bytes,1,opt,name=phase"`
 
 	// PhaseMessage carries the reason for the phase.
@@ -214,6 +214,9 @@ type KVCachePoolBindingStatus struct {
 	// when the scrape does not carry this tenant, because a fabricated zero hit rate on a warm cache
 	// is worse than no number at all. Zero blocks and "not in the scrape" are different facts here as
 	// well: zero is a measurement, absence is the lack of one.
+	//
+	// This operator writes neither today, so both are always absent: the current store generation
+	// exports no per-tenant object count, and its hit rate is per master rather than per tenant.
 	Blocks *int64 `json:"blocks,omitempty" protobuf:"varint,8,opt,name=blocks"`
 
 	// HitRate is a ratio held as a STRING with a pattern, never a float. See the pool's own HitRate

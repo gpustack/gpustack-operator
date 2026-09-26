@@ -1291,9 +1291,9 @@ func TestKVCacheBackendWebhook_ValidateUpdate(t *testing.T) {
 // three exits from the deadlock issue 164 reports: a create-time invariant that never protected the
 // later edit.
 //
-// A KVCachePool is refused at creation when its backend runs without a tenant ledger, and nothing
-// refused taking the ledger away afterwards — which strands the pool's own finalizer on a master that
-// has no ledger to release from.
+// A KVCachePool over a backend with a tenant ledger registers its domains there, and nothing refused
+// taking the ledger away afterwards — which strands the pool's own finalizer on a master that has no
+// ledger to release from.
 //
 // The refusal needs its POSITIVE baseline, which is why the table carries the unclaimed backend and
 // the opposite direction: a rule that refused every edit to this field, or every edit to a claimed

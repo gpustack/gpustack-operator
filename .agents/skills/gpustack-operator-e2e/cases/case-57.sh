@@ -328,8 +328,8 @@ fi
 
 # Multi-tenancy withdrawn under a live pool, LAST because it is the one check about the backend.
 #
-# This is where the degradation chain now ends. A KVCachePool is refused at creation when its backend
-# has no tenant ledger, and turning the flag off afterwards used to be the way past that rule: the
+# This is where the degradation chain now ends. A KVCachePool over a backend with a tenant ledger
+# registers its domains there, and turning the flag off afterwards used to strand them: the
 # pool kept running on a master with no ledger, its Pods met the webhook's ledger refusal, and its
 # finalizer could no longer release what it had registered - which wedged a pool and its backend
 # undeletable on a shared cluster. Backend admission now refuses the withdrawal while anything

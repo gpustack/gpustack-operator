@@ -112,9 +112,18 @@ workloads sharing a domain share cached blocks, so a domain that could be edited
 workload start reading blocks another tokenizer wrote. Pick it to match the model and engine
 settings the deployments in this namespace will run; a second, different model gets a second Binding.
 
-**A quota ceiling is not a reservation.** It is the most this namespace may hold at once, and going
-over it does not fail a write — see
+**A quota ceiling is not a reservation.** On a backend with `leader.multiTenancy: true` it is the
+most this namespace may hold at once, and going over it does not fail a write — see
 [What a full quota actually does](pool.md#what-a-full-quota-actually-does).
+
+**On the backend from Step 1 the ceiling is recorded but not enforced.** That leader runs without
+multi-tenancy, so the master holds no tenant ledger: the pool is admitted with a warning, the Binding
+reports `QuotaGranted=True` with reason `Unenforced` and no `EFFECTIVE` figure, and every write lands
+in the store's default tenant. Set `leader.multiTenancy: true` in Step 1 to have ceilings enforced.
+
+**A multi-tenant master refuses a tenant name absent from its ledger.** An engine that ignores the
+injected tenant then needs a second Binding whose domain is `default` — see
+[Tenant compatibility](../reference/kv-cache-injection.md#tenant-compatibility-is-the-image-owners-responsibility).
 
 ## Step 3: the workload
 

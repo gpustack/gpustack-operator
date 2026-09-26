@@ -11,7 +11,7 @@ import (
 //
 // KVCachePoolStatus defines the observed state of KVCachePool.
 type KVCachePoolStatusApplyConfiguration struct {
-	// Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.
+	// Phase summarizes the conditions: Provisioning, Ready, Error, Deleting.
 	Phase *string `json:"phase,omitempty"`
 	// PhaseMessage carries the reason for the phase.
 	PhaseMessage *string `json:"phaseMessage,omitempty"`

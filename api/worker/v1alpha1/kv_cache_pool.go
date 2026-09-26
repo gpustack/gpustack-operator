@@ -78,7 +78,7 @@ type KVCachePoolQuota struct {
 
 // KVCachePoolStatus defines the observed state of KVCachePool.
 type KVCachePoolStatus struct {
-	// Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.
+	// Phase summarizes the conditions: Provisioning, Ready, Error, Deleting.
 	Phase string `json:"phase,omitempty" protobuf:"bytes,1,opt,name=phase"`
 
 	// PhaseMessage carries the reason for the phase.
@@ -207,6 +207,9 @@ type KVCachePoolDomain struct {
 	// Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not
 	// carry this domain. A fabricated zero hit rate on a warm cache is worse than no number, and
 	// zero blocks is a different fact from "not in the scrape".
+	//
+	// This operator writes neither today, so both are always absent: the current store generation
+	// exports no per-domain object count, and its hit rate is per master rather than per domain.
 	Blocks *int64 `json:"blocks,omitempty" protobuf:"varint,5,opt,name=blocks"`
 
 	// HitRate is a ratio held as a STRING with a pattern, never a float, matching the shape the

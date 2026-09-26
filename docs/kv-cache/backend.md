@@ -554,14 +554,16 @@ Five phases — `Provisioning`, `Ready`, `Degraded`, `Error`, `Deleting`. `Ready
 `phaseMessage`; every other phase carries one.
 
 Conditions report the axes: `LeaderAvailable`, `MembersMounted`, `CapacityObserved`, `PoolWrites`, `Deletable` and
-`RolloutComplete`. Two more appear only where they have something to judge —
+`RolloutComplete`. Three more appear only where they have something to judge —
 `SnapshotStorageShared` when [`leader.highAvailability.snapshot`](leader.md#high-availability) is
-set, and `ElectionObserved` above one leader replica.
+set, `ElectionObserved` above one leader replica, and `TierWasEmpty` when a member group carries a
+[local disk tier](local-disk-tier.md).
 
-**Those last three do not move the phase, and that is deliberate.** A rollout in flight, a snapshot
-claim only one Pod can mount, and an election that has not happened are all states in which the
-backend serves normally — reporting them as `Degraded` would put a storage arrangement in the same
-field as a leader nobody can reach. Read the conditions for them; the phase will not tell you.
+**Those last four do not move the phase, and that is deliberate.** A rollout in flight, a snapshot
+claim only one Pod can mount, an election that has not happened, and a disk tier found holding data
+are all states in which the backend serves normally — reporting them as `Degraded` would put a
+storage arrangement in the same field as a leader nobody can reach. Read the conditions for them;
+the phase will not tell you.
 
 **A member that is starting is not a shortfall; a member that is stuck is one.** A Pod still pulling
 its image is left alone — holding it against the backend would report `Degraded` for the length of
@@ -820,8 +822,11 @@ Deployment, no Service, no DaemonSet — and only observes.
         - {name: Admin,  address: mooncake.example:9003}
 ```
 
-Both roles are required, and each address is validated as `host:port` at admission — a blank or
-portless one would otherwise be mirrored into status and handed to an engine that cannot dial it.
+Both roles are required, so the list holds exactly two entries: entries are keyed by `name`, which
+has two values, and admission refuses a list missing either one. Each address is validated as
+`host:port` at admission — a blank or portless one would otherwise be mirrored into status and
+handed to an engine that cannot dial it.
+
 **`Admin` is what this operator reads** — health, metrics and the segment listing — and **`Client` is
 what an inference engine connects to**. The addresses are mirrored into `status.endpoints` unchanged.
 

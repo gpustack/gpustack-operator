@@ -624,7 +624,7 @@ depends on the `InstanceType` the role names.
 | an invalid topology `requiredLevel` | the field path and the [topology placement](#topology-placement) field rule |
 | a `replicas` over 1024, or a `size` over 64 | the bound — refused by the **schema**. It limits how many Pods one pass renders before it writes any of them, so it is this operator's own ceiling rather than a Kubernetes one |
 | `kind: server` beside any other kind | that a server serves whole requests by itself, so the combination describes no arrangement |
-| a `kind` the engine has no term for | the engine and the kind — today, `prefill` or `decode` on SGLang |
+| a `kind` the engine has no rendering term for | the engine and the kind. No engine this API accepts is refused by this rule today: vLLM and SGLang both render `server`, `prefill` and `decode` |
 | an owned key in `extraArgs` | the key, the engine, and `roles[].command` as the way to own it |
 | an owned name in `env` | the same three |
 | `--kv-cache-dtype` in `extraArgs` while `spec.kvCache` is set | that it carries the Binding's `dtype`, and a Binding declaring another dtype or `roles[].command` as the ways out — see [What the operator owns](#what-the-operator-owns) |

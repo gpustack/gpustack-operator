@@ -1470,6 +1470,9 @@ message KVCacheBackendExternal {
   // point at. It is a list rather than a single address so that a multi-leader backend needs no
   // API change to describe.
   //
+  // Today the list therefore holds exactly two entries, one Client and one Admin: entries are keyed
+  // by name, the name has two values, and admission refuses a list missing either.
+  //
   // +required
   // +k8s:validation:minItems=1
   // +listType=map
@@ -1538,10 +1541,11 @@ message KVCacheBackendLeader {
   // key hash, so two callers using different tenant names read each other's cache.
   //
   // It is a FIELD rather than an extraArgs entry because another API validates against it: a
-  // KVCachePool is refused when its backend has no ledger to write quota into, and a webhook
-  // reading an unschema'd "true", "1" or "True" would be judging a value domain that belongs to
-  // whoever typed it. The store's global -quota_bytes flag stays in extraArgs for the converse
-  // reason: no other API needs to interpret it.
+  // KVCachePool over a backend with no ledger to write quota into is admitted with a warning that
+  // no per-tenant quota is in force, withdrawing the flag from a backend a pool already holds is
+  // refused, and a webhook reading an unschema'd "true", "1" or "True" would be judging a value
+  // domain that belongs to whoever typed it. The store's global -quota_bytes flag stays in
+  // extraArgs for the converse reason: no other API needs to interpret it.
   //
   // Unset and false both mean no ledger, and unset renders NO flag rather than an explicit false.
   optional bool multiTenancy = 4;
@@ -2330,8 +2334,9 @@ message KVCacheBackendStatus {
 
   // Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,
   // CapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has
-  // something to be a verdict about — SnapshotStorageShared and ElectionObserved. Every one is
-  // derived from an observed document.
+  // something to be a verdict about — SnapshotStorageShared, ElectionObserved and TierWasEmpty,
+  // the last only where a member group carries a local disk tier. Every one is derived from an
+  // observed document.
   //
   // +patchMergeKey=type
   // +patchStrategy=merge
@@ -2661,7 +2666,7 @@ message KVCachePoolBindingSpec {
 // different things: a figure reading zero was measured as zero, and a missing figure was not
 // measured at all. Reading an absent one as zero is the mistake this distinction exists to prevent.
 message KVCachePoolBindingStatus {
-  // Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.
+  // Phase summarizes the conditions: Provisioning, Ready, Error, Deleting.
   optional string phase = 1;
 
   // PhaseMessage carries the reason for the phase.
@@ -2718,6 +2723,9 @@ message KVCachePoolBindingStatus {
   // when the scrape does not carry this tenant, because a fabricated zero hit rate on a warm cache
   // is worse than no number at all. Zero blocks and "not in the scrape" are different facts here as
   // well: zero is a measurement, absence is the lack of one.
+  //
+  // This operator writes neither today, so both are always absent: the current store generation
+  // exports no per-tenant object count, and its hit rate is per master rather than per tenant.
   optional int64 blocks = 8;
 
   // HitRate is a ratio held as a STRING with a pattern, never a float. See the pool's own HitRate
@@ -2776,6 +2784,9 @@ message KVCachePoolDomain {
   // Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not
   // carry this domain. A fabricated zero hit rate on a warm cache is worse than no number, and
   // zero blocks is a different fact from "not in the scrape".
+  //
+  // This operator writes neither today, so both are always absent: the current store generation
+  // exports no per-domain object count, and its hit rate is per master rather than per domain.
   optional int64 blocks = 5;
 
   // HitRate is a ratio held as a STRING with a pattern, never a float, matching the shape the
@@ -2834,7 +2845,7 @@ message KVCachePoolSpec {
 
 // KVCachePoolStatus defines the observed state of KVCachePool.
 message KVCachePoolStatus {
-  // Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.
+  // Phase summarizes the conditions: Provisioning, Ready, Error, Deleting.
   optional string phase = 1;
 
   // PhaseMessage carries the reason for the phase.
@@ -4215,8 +4226,11 @@ message ModelDeploymentStatus {
   // that telling a cache-sharing misconfiguration from a cache that is merely cold takes one object
   // rather than two.
   //
-  // It is ABSENT while the Binding cannot be resolved, rather than present and empty: an empty
+  // It is ABSENT until the Binding has been resolved once, rather than present and empty: an empty
   // object here would be indistinguishable from a domain whose every field happens to be empty.
+  // Once resolved, it keeps the last domain read when the Binding can no longer be resolved,
+  // because the replicas are still writing into that domain; DomainRegistered is what says the
+  // reading is stale.
   optional ModelDeploymentKVCacheStatus kvCache = 6;
 
   // Router is the observed contract of the managed router requested by spec.router.
