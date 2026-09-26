@@ -55,9 +55,15 @@ type KVCachePoolBindingSpec struct {
 	// +required
 	PoolRef KVCachePoolBindingPoolReference `json:"poolRef" protobuf:"bytes,1,name=poolRef"`
 
-	// Domain is the reuse identity this Binding registers, and it is REQUIRED. It maps to the
-	// storage layer's tenant_id (isolation) and cache_salt (prefix identity), so registering a
-	// domain creates a tenant with a quota ledger of its own.
+	// Domain is the reuse identity this Binding registers, and it is REQUIRED. Its name maps to the
+	// storage layer's tenant_id and to nothing else, so registering a domain creates a tenant with a
+	// quota ledger of its own.
+	//
+	// IT IS NOT A KEY PREFIX. Inside one tenant the store key is formed by the engine from its model
+	// name and token-block hashes; blockSize and dtype are not part of that key. Where a prefix is
+	// rendered at all, it is the weights identity of a ModelDeployment that references a
+	// ModelArtifact, rendered as cache_prefix for vLLM and extra_backend_tag for SGLang, and never
+	// this name.
 	//
 	// EXACTLY ONE DOMAIN AND NOT A LIST, deliberately, so the cardinality is enforced by the schema
 	// and not by a webhook rule: one Binding is one tenant, every figure in Status is a single series
@@ -115,6 +121,11 @@ type KVCachePoolBindingPoolReference struct {
 type KVCachePoolBindingDomain struct {
 	// Name is the domain, and it becomes the storage layer's tenant_id verbatim.
 	//
+	//   - Left unset, it is "default", filled in by the API server before the object is stored. That
+	//     is the tenant the store itself assigns to a writer that names none, so an omitted name and
+	//     an engine that forwards no tenant land on the same ledger entry. It is the natural choice on
+	//     a master running without multi-tenancy, where no tenant is forwarded at all and the name
+	//     only records the registration.
 	//   - It must be claimed by NO OTHER BINDING on a master that serves this Binding's pool, which
 	//     the webhook enforces: two Bindings on one domain over one master would share cache —
 	//     possibly intended — but collide on one quota ledger, which never is. Uniqueness is per
@@ -125,9 +136,10 @@ type KVCachePoolBindingDomain struct {
 	//     like, so nobody learns a second naming rule. This is the ONLY place the shape is judged;
 	//     every consumer downstream copies the name rather than re-judging it.
 	//
-	// +required
+	// +optional
+	// +k8s:validation:default="default"
 	// +k8s:validation:maxLength=63
-	Name string `json:"name" protobuf:"bytes,1,name=name"`
+	Name string `json:"name,omitempty" protobuf:"bytes,1,opt,name=name"`
 
 	// BlockSize is the number of tokens one cache block holds.
 	//

@@ -49,7 +49,7 @@ spec:
   quota:                                # required
     ceiling: 600Gi
   domain:                              # required, exactly one, every field immutable
-    name: qwen-72b-v2
+    name: qwen-72b-v2                   # optional; left out, it is "default"
     blockSize: 64
     dtype: fp8_e4m3
 ```
@@ -105,6 +105,11 @@ identity is what makes the rest follow. Everything below is about *registering* 
 somebody else registered is a separate question, answered in
 [What a Binding does not do](#what-a-binding-does-not-do).
 
+- **Leaving `name` out registers `default`.** The API server stores an omitted `spec.domain.name`
+  as `default`, the store's own tenant for a writer that names none. On a master without
+  multi-tenancy no tenant is forwarded anyway, so the name only records the registration and can be
+  left out. It is claimed like any other name, so two Bindings that both leave it out collide on a
+  shared master.
 - **A domain name is claimed per master.** A second Binding naming a domain another Binding already
   holds is **rejected at admission** when one backend serves both Bindings' pools — anywhere in the
   cluster, not just in that namespace — with a message naming the holder and the shared backend. The

@@ -7,9 +7,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
+	extension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	structuralschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
+	structuraldefaulting "k8s.io/apiextensions-apiserver/pkg/apiserver/schema/defaulting"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -827,4 +832,80 @@ func TestKVCachePoolBindingWebhook_DeleteIsTheFinalizersDecision(t *testing.T) {
 
 	_, err := newKVCachePoolBindingWebhook().ValidateDelete(context.Background(), kvcpb)
 	require.NoError(t, err)
+}
+
+// storedKVCachePoolBinding is a Binding whose author left spec.domain.name out, as the API server
+// stores it: the generated CRD's own structural defaulting is applied before decoding, because that
+// layer runs ahead of admission and is the only one that fills the name in. A fake client applies no
+// schema, so building the object any other way would test a name this webhook never receives.
+func storedKVCachePoolBinding(t *testing.T, namespace, name, pool string) *workercore.KVCachePoolBinding {
+	t.Helper()
+
+	crd := workercore.GetCustomResourceDefinitions()["KVCachePoolBinding"]
+	require.NotNil(t, crd, "KVCachePoolBinding is not registered")
+	require.Len(t, crd.Spec.Versions, 1)
+
+	var internal apiextensions.JSONSchemaProps
+	require.NoError(t, extension.Convert_v1_JSONSchemaProps_To_apiextensions_JSONSchemaProps(
+		crd.Spec.Versions[0].Schema.OpenAPIV3Schema, &internal, nil))
+	structural, err := structuralschema.NewStructural(&internal)
+	require.NoError(t, err)
+
+	obj := map[string]any{
+		"apiVersion": "worker.gpustack.ai/v1alpha1",
+		"kind":       "KVCachePoolBinding",
+		"metadata":   map[string]any{"namespace": namespace, "name": name},
+		"spec": map[string]any{
+			"poolRef": map[string]any{"name": pool},
+			"domain":  map[string]any{"blockSize": int64(16), "dtype": "bfloat16"},
+			"quota":   map[string]any{"ceiling": "1Ti"},
+		},
+	}
+	structuraldefaulting.Default(obj, structural)
+
+	kvcpb := &workercore.KVCachePoolBinding{}
+	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(obj, kvcpb))
+	return kvcpb
+}
+
+// TestKVCachePoolBindingWebhook_AnOmittedDomainNameIsTheDefaultTenant pins what leaving
+// spec.domain.name out means: the store's own "default" tenant, held to the same per-master
+// uniqueness as a name written out.
+func TestKVCachePoolBindingWebhook_AnOmittedDomainNameIsTheDefaultTenant(t *testing.T) {
+	otherPool := newKVCachePool()
+	otherPool.Name = "other-pool"
+	otherPool.Spec.Backends = []string{"mooncake-other"}
+
+	cases := []struct {
+		name       string
+		holderPool string
+		wantMsg    string
+	}{
+		{name: "alone on its master it is admitted"},
+		{
+			name:       "a second one on the same master is refused",
+			holderPool: "shared",
+			wantMsg:    `spec.domain.name: Duplicate value: "reuse domain \"default\" is already registered by team-b/batch`,
+		},
+		{name: "a second one on another master is admitted", holderPool: otherPool.Name},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			objs := []ctrlcli.Object{newKVCachePool(), otherPool}
+			if c.holderPool != "" {
+				objs = append(objs, storedKVCachePoolBinding(t, "team-b", "batch", c.holderPool))
+			}
+			candidate := storedKVCachePoolBinding(t, "team-a", "chat", "shared")
+			require.Equal(t, "default", candidate.Spec.Domain.Name,
+				"the name the API server stores for an omitted one")
+
+			_, err := newKVCachePoolBindingWebhook(objs...).ValidateCreate(context.Background(), candidate)
+			if c.wantMsg == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), c.wantMsg)
+		})
+	}
 }

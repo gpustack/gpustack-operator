@@ -6987,8 +6987,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingDomain(ref common.Ref
 				Properties: map[string]spec.Schema{
 					"name": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Name is the domain, and it becomes the storage layer's tenant_id verbatim.\n\n  - It must be claimed by NO OTHER BINDING on a master that serves this Binding's pool, which\n    the webhook enforces: two Bindings on one domain over one master would share cache —\n    possibly intended — but collide on one quota ledger, which never is. Uniqueness is per\n    master rather than per pool because one master can serve several pools and the tenant space\n    is master-global; it is not cluster-wide because two masters hold two ledgers.\n  - The accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside\n    what the master accepts as a tenant_id and is what a Kubernetes object name already looks\n    like, so nobody learns a second naming rule. This is the ONLY place the shape is judged;\n    every consumer downstream copies the name rather than re-judging it.",
-							Default:     "",
+							Description: "Name is the domain, and it becomes the storage layer's tenant_id verbatim.\n\n  - Left unset, it is \"default\", filled in by the API server before the object is stored. That\n    is the tenant the store itself assigns to a writer that names none, so an omitted name and\n    an engine that forwards no tenant land on the same ledger entry. It is the natural choice on\n    a master running without multi-tenancy, where no tenant is forwarded at all and the name\n    only records the registration.\n  - It must be claimed by NO OTHER BINDING on a master that serves this Binding's pool, which\n    the webhook enforces: two Bindings on one domain over one master would share cache —\n    possibly intended — but collide on one quota ledger, which never is. Uniqueness is per\n    master rather than per pool because one master can serve several pools and the tenant space\n    is master-global; it is not cluster-wide because two masters hold two ledgers.\n  - The accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside\n    what the master accepts as a tenant_id and is what a Kubernetes object name already looks\n    like, so nobody learns a second naming rule. This is the ONLY place the shape is judged;\n    every consumer downstream copies the name rather than re-judging it.",
 							MaxLength:   ptr.To[int64](63),
 							Type:        []string{"string"},
 							Format:      "",
@@ -7012,7 +7011,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingDomain(ref common.Ref
 						},
 					},
 				},
-				Required: []string{"name", "blockSize", "dtype"},
+				Required: []string{"blockSize", "dtype"},
 			},
 		},
 	}
@@ -7154,7 +7153,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCachePoolBindingSpec(ref common.Refer
 					},
 					"domain": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Domain is the reuse identity this Binding registers, and it is REQUIRED. It maps to the storage layer's tenant_id (isolation) and cache_salt (prefix identity), so registering a domain creates a tenant with a quota ledger of its own.\n\nEXACTLY ONE DOMAIN AND NOT A LIST, deliberately, so the cardinality is enforced by the schema and not by a webhook rule: one Binding is one tenant, every figure in Status is a single series rather than a sum, and no rule for dividing one ceiling among several domains has to be invented.\n\nEVERY FIELD IS IMMUTABLE, webhook-enforced. Name re-points this namespace at a different ledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent corruption: the writes succeed, the reads succeed, and the tensors are wrong.",
+							Description: "Domain is the reuse identity this Binding registers, and it is REQUIRED. Its name maps to the storage layer's tenant_id and to nothing else, so registering a domain creates a tenant with a quota ledger of its own.\n\nIT IS NOT A KEY PREFIX. Inside one tenant the store key is formed by the engine from its model name and token-block hashes; blockSize and dtype are not part of that key. Where a prefix is rendered at all, it is the weights identity of a ModelDeployment that references a ModelArtifact, rendered as cache_prefix for vLLM and extra_backend_tag for SGLang, and never this name.\n\nEXACTLY ONE DOMAIN AND NOT A LIST, deliberately, so the cardinality is enforced by the schema and not by a webhook rule: one Binding is one tenant, every figure in Status is a single series rather than a sum, and no rule for dividing one ceiling among several domains has to be invented.\n\nEVERY FIELD IS IMMUTABLE, webhook-enforced. Name re-points this namespace at a different ledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent corruption: the writes succeed, the reads succeed, and the tensors are wrong.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.KVCachePoolBindingDomain{}.OpenAPIModelName()),
 						},

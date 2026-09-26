@@ -301,7 +301,8 @@ combination. A mismatched library may reject the tenant even when the engine rea
 
 An older engine is allowed. It may ignore the injected value and use Mooncake's literal `default`
 tenant instead, without any admission error. Such a pool needs a `KVCachePoolBinding` whose domain is
-`default`; its quota is then shared by every client that falls back to that tenant.
+`default`, which is also what a Binding that leaves `spec.domain.name` out registers; its quota is
+then shared by every client that falls back to that tenant.
 
 `tenantInjected` records only that the webhook wrote the value. It does not prove the image read it
 or that isolation took effect.
