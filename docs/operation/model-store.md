@@ -89,13 +89,16 @@ kubectl get nms                                    # Ready and Used per node
 kubectl get nms gpu-node-01 -o yaml                # spec: what the plugin applies; status: what it holds
 kubectl get nms gpu-node-01 -o jsonpath='{.metadata.generation} {.status.observedGeneration}{"\n"}'
 kubectl describe pod <consumer>                    # FailedMount events carry refusals and download progress
+kubectl get nodemodelstores.v1.worker.gpustack.ai  # the v1 view: Ready, Used, Models, Downloading
 ```
 
 - **`spec` is the effective configuration**, and `observedGeneration` equal to the object's
   `generation` means the plugin applies it. The `Ready` message says when the high watermark was
   capped, and from what.
 - **`status.models`** lists each digest the node holds, is downloading or failed on, and whether a
-  Pod mounts it. It names no tenant: find a deployment's digest in its `status.model.manifestDigest`.
+  Pod mounts it; a download's `downloadedBytes` moves in 5% steps. It names no tenant: find a
+  deployment's digest in its `status.model.manifestDigest`, and an artifact's nodes in its
+  `status.nodes` or its [progress](../reference/model-artifact-views.md#the-progress-subresource).
 - **A `Failed` digest** carries its reason and `retryTime`. Mounts of it do not download again
   before then; fix the cause (the Secret, the proxy, the CA) and the next attempt after `retryTime`
   picks it up.
@@ -116,19 +119,30 @@ as written. When the cache shares kubelet's filesystem (the two paths report the
 cache near the watermark would push kubelet into disk-pressure eviction or image collection, so the
 plugin caps the high watermark:
 
-- It reads `evictionHard["nodefs.available"]`, `evictionHard["imagefs.available"]` and
-  `imageGCHighThresholdPercent` from `<kubeletDir>/config.yaml`, converting a quantity to a
-  percentage of the filesystem.
+- It takes `evictionHard["nodefs.available"]`, `evictionHard["imagefs.available"]` and
+  `imageGCHighThresholdPercent` from the node's `spec.kubelet`, which the worker reads from kubelet's
+  `configz`: what kubelet enforces, its flags, configuration file and drop-ins merged. The plugin
+  reads no kubelet file; the path kubelet reads is its `--config` flag, and on managed nodes the
+  kubeadm path `<kubeletDir>/config.yaml` was measured to hold another, unused file. A quantity is
+  converted to a percentage of the filesystem.
 - The cap is the lowest of `100 - nodefs.available - 5`, `100 - imagefs.available - 5` and
   `imageGCHighThresholdPercent - 5`. The image thresholds count because the plugin cannot see where
   the image store is, so it assumes the same filesystem.
-- A value the file does not set, an absent file and an unparseable one take kubelet's defaults,
-  `10%`, `15%` and `85`, which cap at `80`. **Kubelet flags that override the file are not seen**:
-  a node configured by flags alone is capped from the defaults.
+- A threshold kubelet does not set takes kubelet's default, `10%`, `15%` and `85`, which cap at
+  `80`; so do all three while `spec.kubelet` is absent (configz disabled or unreachable), and the
+  `Ready` message says the effective configuration could not be read. A quantity at or above the
+  filesystem's size cannot be a share of it: it takes the default and the message names it, rather
+  than drive the cap to its 2% floor.
+- A change of the thresholds reaches the plugin through its `spec`, without a restart.
 
 The low watermark is lowered with the cap when it would reach it. When the cap lowers the Setting,
-the `Ready` message says so and whether it came from the file or the defaults; with the defaults
-the Setting's own `80` is not lowered.
+the `Ready` message says so and where the thresholds came from; with the defaults the Setting's own
+`80` is not lowered.
+
+Measured on a node whose cache shares a 265 GB boot disk with kubelet (`nodefs.available` 10%, image
+collection 85/80): filled to 78.5% under the 80% watermark, the next 65.5 GB download was refused,
+kubelet never reported `DiskPressure`, evicted nothing and collected no image. Reservations count
+the downloads still running, so several starting together stay under the watermark as one would.
 
 ## Switch delivery
 

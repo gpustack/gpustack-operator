@@ -47,6 +47,11 @@ status:
     manifestDigest: sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448
     fileCount: 10
     sizeBytes: 999604126
+  nodes:                                 # Hugging Face only; where the content is across nodes
+    ready: 3
+    downloading: 1
+    failed: 0
+    downloadingPercent: 45               # the downloading nodes' mean, in steps of 5
   conditions:
     - {type: Resolved, status: "True", reason: Resolved}
     - {type: Degraded, status: "False", reason: Healthy}
@@ -64,6 +69,12 @@ status:
   and an ignored file is dropped even when allowed. At most 32 per list, 1 to 256 characters each,
   refused on a claim source. A filter that keeps no file is `Resolved=False`, `EmptyManifest`. A
   filtered artifact needs [Node delivery](#referencing-it-from-a-modeldeployment).
+- **`status.nodes` counts the content, not the artifact.** Nodes whose `NodeModelStore` lists the
+  digest `Ready`, `Downloading` or `Failed`; artifacts with the same digest see the same nodes, and
+  only numbers cross namespaces. The mean covers the downloading nodes only, each a whole copy. It is
+  written when a count changes or the mean reaches another step, at most every 30 seconds. The
+  `v1` view's [progress](model-artifact-views.md#the-progress-subresource) answers the same at full
+  precision.
 - **Deletion waits for the last reference.** The finalizer `worker.gpustack.ai/model-artifact-protection`
   holds a referenced artifact in `Terminating` until no `ModelDeployment` or `Instance` in the
   namespace names it. Running Pods are never affected.
@@ -311,7 +322,7 @@ the CSIDriver does not exist the Instance creates no Pod and says so in its phas
   without a token (not measured).
 - **vLLM 0.29.0 needs `--enforce-eager` for InternLM2** with `trust_remote_code`, an engine defect.
 - **Node delivery downloads from the Hub on every cold node.** It does not prefer nodes that hold
-  the weights, and a cold mount reports its progress only in the Pod's `FailedMount` events.
+  the weights.
 - Settings: [Settings & Environment Variables](../settings.md#online-adjustable-settings) carries the
   endpoint, proxy, no-proxy, CA bundle, revalidation interval, delivery mode and the node cache's
   watermarks and download limits.
@@ -319,7 +330,8 @@ the CSIDriver does not exist the Instance creates no Pod and says so in its phas
 ---
 
 **See also** — [Model Deployment Reference](model-deployment.md) for the rest of the deployment
-contract · [Node Model Store Reference](node-model-store.md) for Node delivery · [KV Cache Injection Reference](kv-cache-injection.md) for the store connector this
+contract · [Node Model Store Reference](node-model-store.md) for Node delivery ·
+[Model Artifact Views Reference](model-artifact-views.md) for the `v1` view and `progress` · [KV Cache Injection Reference](kv-cache-injection.md) for the store connector this
 prefixes · [Model Deployment Status Reference](model-deployment-status.md) for the other conditions.
 
 **Next** → [Model Deployment Status Reference](model-deployment-status.md)
