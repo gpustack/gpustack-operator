@@ -18,6 +18,14 @@ type NodeModelStoreModelApplyConfiguration struct {
 	State *workerv1alpha1.NodeModelStoreModelState `json:"state,omitempty"`
 	// SizeBytes is the content's size.
 	SizeBytes *int64 `json:"sizeBytes,omitempty"`
+	// DownloadedBytes is how much of a Downloading entry's content is on the node's disk, the bytes
+	// an earlier attempt left for a resume included, so it never goes back. It is written on
+	// thresholds, not at every byte: once the entry moved by 5% of SizeBytes and 30 seconds passed
+	// since the node's status was last written. Absent outside Downloading.
+	DownloadedBytes *int64 `json:"downloadedBytes,omitempty"`
+	// Source is where the content's bytes come from: Hub, the model hub. It names no repository or
+	// endpoint. Content published before the field existed has none.
+	Source *workerv1alpha1.NodeModelStoreModelSource `json:"source,omitempty"`
 	// Referenced says some Pod mounts the content. Which Pod is never recorded.
 	Referenced *bool `json:"referenced,omitempty"`
 	// LastUsedTime is when the content was last mounted or unmounted, truncated to the hour so that
@@ -63,6 +71,22 @@ func (b *NodeModelStoreModelApplyConfiguration) WithState(value workerv1alpha1.N
 // If called multiple times, the SizeBytes field is set to the value of the last call.
 func (b *NodeModelStoreModelApplyConfiguration) WithSizeBytes(value int64) *NodeModelStoreModelApplyConfiguration {
 	b.SizeBytes = &value
+	return b
+}
+
+// WithDownloadedBytes sets the DownloadedBytes field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DownloadedBytes field is set to the value of the last call.
+func (b *NodeModelStoreModelApplyConfiguration) WithDownloadedBytes(value int64) *NodeModelStoreModelApplyConfiguration {
+	b.DownloadedBytes = &value
+	return b
+}
+
+// WithSource sets the Source field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Source field is set to the value of the last call.
+func (b *NodeModelStoreModelApplyConfiguration) WithSource(value workerv1alpha1.NodeModelStoreModelSource) *NodeModelStoreModelApplyConfiguration {
+	b.Source = &value
 	return b
 }
 

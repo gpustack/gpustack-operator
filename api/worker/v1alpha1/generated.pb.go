@@ -208,6 +208,8 @@ func (m *ModelArtifactHubSource) Reset() { *m = ModelArtifactHubSource{} }
 
 func (m *ModelArtifactList) Reset() { *m = ModelArtifactList{} }
 
+func (m *ModelArtifactNodes) Reset() { *m = ModelArtifactNodes{} }
+
 func (m *ModelArtifactPersistentVolumeClaimSource) Reset() {
 	*m = ModelArtifactPersistentVolumeClaimSource{}
 }
@@ -273,6 +275,8 @@ func (m *NodeModelStoreCapacity) Reset() { *m = NodeModelStoreCapacity{} }
 func (m *NodeModelStoreDownload) Reset() { *m = NodeModelStoreDownload{} }
 
 func (m *NodeModelStoreHub) Reset() { *m = NodeModelStoreHub{} }
+
+func (m *NodeModelStoreKubelet) Reset() { *m = NodeModelStoreKubelet{} }
 
 func (m *NodeModelStoreList) Reset() { *m = NodeModelStoreList{} }
 
@@ -5181,6 +5185,43 @@ func (m *ModelArtifactList) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *ModelArtifactNodes) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelArtifactNodes) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelArtifactNodes) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.DownloadingPercent != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.DownloadingPercent))
+		i--
+		dAtA[i] = 0x20
+	}
+	i = encodeVarintGenerated(dAtA, i, uint64(m.Failed))
+	i--
+	dAtA[i] = 0x18
+	i = encodeVarintGenerated(dAtA, i, uint64(m.Downloading))
+	i--
+	dAtA[i] = 0x10
+	i = encodeVarintGenerated(dAtA, i, uint64(m.Ready))
+	i--
+	dAtA[i] = 0x8
+	return len(dAtA) - i, nil
+}
+
 func (m *ModelArtifactPersistentVolumeClaimSource) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -5405,6 +5446,18 @@ func (m *ModelArtifactStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.Nodes != nil {
+		{
+			size, err := m.Nodes.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x22
+	}
 	if len(m.Conditions) > 0 {
 		for iNdEx := len(m.Conditions) - 1; iNdEx >= 0; iNdEx-- {
 			{
@@ -6903,6 +6956,44 @@ func (m *NodeModelStoreHub) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *NodeModelStoreKubelet) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *NodeModelStoreKubelet) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *NodeModelStoreKubelet) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.ImageGCHighThresholdPercent != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.ImageGCHighThresholdPercent))
+		i--
+		dAtA[i] = 0x18
+	}
+	i -= len(m.ImagefsAvailable)
+	copy(dAtA[i:], m.ImagefsAvailable)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.ImagefsAvailable)))
+	i--
+	dAtA[i] = 0x12
+	i -= len(m.NodefsAvailable)
+	copy(dAtA[i:], m.NodefsAvailable)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.NodefsAvailable)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
 func (m *NodeModelStoreList) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -6970,6 +7061,14 @@ func (m *NodeModelStoreModel) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.Source)
+	copy(dAtA[i:], m.Source)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Source)))
+	i--
+	dAtA[i] = 0x52
+	i = encodeVarintGenerated(dAtA, i, uint64(m.DownloadedBytes))
+	i--
+	dAtA[i] = 0x48
 	if m.RetryTime != nil {
 		{
 			size, err := m.RetryTime.MarshalToSizedBuffer(dAtA[:i])
@@ -7048,6 +7147,18 @@ func (m *NodeModelStoreSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.Kubelet != nil {
+		{
+			size, err := m.Kubelet.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x22
+	}
 	{
 		size, err := m.Hub.MarshalToSizedBuffer(dAtA[:i])
 		if err != nil {
@@ -9399,6 +9510,21 @@ func (m *ModelArtifactList) Size() (n int) {
 	return n
 }
 
+func (m *ModelArtifactNodes) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	n += 1 + sovGenerated(uint64(m.Ready))
+	n += 1 + sovGenerated(uint64(m.Downloading))
+	n += 1 + sovGenerated(uint64(m.Failed))
+	if m.DownloadingPercent != nil {
+		n += 1 + sovGenerated(uint64(*m.DownloadingPercent))
+	}
+	return n
+}
+
 func (m *ModelArtifactPersistentVolumeClaimSource) Size() (n int) {
 	if m == nil {
 		return 0
@@ -9493,6 +9619,10 @@ func (m *ModelArtifactStatus) Size() (n int) {
 			l = e.Size()
 			n += 1 + l + sovGenerated(uint64(l))
 		}
+	}
+	if m.Nodes != nil {
+		l = m.Nodes.Size()
+		n += 1 + l + sovGenerated(uint64(l))
 	}
 	return n
 }
@@ -10048,6 +10178,22 @@ func (m *NodeModelStoreHub) Size() (n int) {
 	return n
 }
 
+func (m *NodeModelStoreKubelet) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.NodefsAvailable)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.ImagefsAvailable)
+	n += 1 + l + sovGenerated(uint64(l))
+	if m.ImageGCHighThresholdPercent != nil {
+		n += 1 + sovGenerated(uint64(*m.ImageGCHighThresholdPercent))
+	}
+	return n
+}
+
 func (m *NodeModelStoreList) Size() (n int) {
 	if m == nil {
 		return 0
@@ -10089,6 +10235,9 @@ func (m *NodeModelStoreModel) Size() (n int) {
 		l = m.RetryTime.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	n += 1 + sovGenerated(uint64(m.DownloadedBytes))
+	l = len(m.Source)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -10104,6 +10253,10 @@ func (m *NodeModelStoreSpec) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = m.Hub.Size()
 	n += 1 + l + sovGenerated(uint64(l))
+	if m.Kubelet != nil {
+		l = m.Kubelet.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
 	return n
 }
 
@@ -11693,6 +11846,19 @@ func (this *ModelArtifactList) String() string {
 	}, "")
 	return s
 }
+func (this *ModelArtifactNodes) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ModelArtifactNodes{`,
+		`Ready:` + fmt.Sprintf("%v", this.Ready) + `,`,
+		`Downloading:` + fmt.Sprintf("%v", this.Downloading) + `,`,
+		`Failed:` + fmt.Sprintf("%v", this.Failed) + `,`,
+		`DownloadingPercent:` + valueToStringGenerated(this.DownloadingPercent) + `,`,
+		`}`,
+	}, "")
+	return s
+}
 func (this *ModelArtifactPersistentVolumeClaimSource) String() string {
 	if this == nil {
 		return "nil"
@@ -11756,6 +11922,7 @@ func (this *ModelArtifactStatus) String() string {
 		`ObservedGeneration:` + fmt.Sprintf("%v", this.ObservedGeneration) + `,`,
 		`Resolved:` + strings.Replace(this.Resolved.String(), "ModelArtifactResolved", "ModelArtifactResolved", 1) + `,`,
 		`Conditions:` + repeatedStringForConditions + `,`,
+		`Nodes:` + strings.Replace(this.Nodes.String(), "ModelArtifactNodes", "ModelArtifactNodes", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -12177,6 +12344,18 @@ func (this *NodeModelStoreHub) String() string {
 	}, "")
 	return s
 }
+func (this *NodeModelStoreKubelet) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&NodeModelStoreKubelet{`,
+		`NodefsAvailable:` + fmt.Sprintf("%v", this.NodefsAvailable) + `,`,
+		`ImagefsAvailable:` + fmt.Sprintf("%v", this.ImagefsAvailable) + `,`,
+		`ImageGCHighThresholdPercent:` + valueToStringGenerated(this.ImageGCHighThresholdPercent) + `,`,
+		`}`,
+	}, "")
+	return s
+}
 func (this *NodeModelStoreList) String() string {
 	if this == nil {
 		return "nil"
@@ -12206,6 +12385,8 @@ func (this *NodeModelStoreModel) String() string {
 		`Reason:` + fmt.Sprintf("%v", this.Reason) + `,`,
 		`Message:` + fmt.Sprintf("%v", this.Message) + `,`,
 		`RetryTime:` + strings.Replace(fmt.Sprintf("%v", this.RetryTime), "Time", "v1.Time", 1) + `,`,
+		`DownloadedBytes:` + fmt.Sprintf("%v", this.DownloadedBytes) + `,`,
+		`Source:` + fmt.Sprintf("%v", this.Source) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -12218,6 +12399,7 @@ func (this *NodeModelStoreSpec) String() string {
 		`Watermarks:` + strings.Replace(strings.Replace(this.Watermarks.String(), "NodeModelStoreWatermarks", "NodeModelStoreWatermarks", 1), `&`, ``, 1) + `,`,
 		`Download:` + strings.Replace(strings.Replace(this.Download.String(), "NodeModelStoreDownload", "NodeModelStoreDownload", 1), `&`, ``, 1) + `,`,
 		`Hub:` + strings.Replace(strings.Replace(this.Hub.String(), "NodeModelStoreHub", "NodeModelStoreHub", 1), `&`, ``, 1) + `,`,
+		`Kubelet:` + strings.Replace(this.Kubelet.String(), "NodeModelStoreKubelet", "NodeModelStoreKubelet", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -28016,6 +28198,133 @@ func (m *ModelArtifactList) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
+func (m *ModelArtifactNodes) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelArtifactNodes: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelArtifactNodes: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Ready", wireType)
+			}
+			m.Ready = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Ready |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Downloading", wireType)
+			}
+			m.Downloading = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Downloading |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Failed", wireType)
+			}
+			m.Failed = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Failed |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field DownloadingPercent", wireType)
+			}
+			var v int32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.DownloadingPercent = &v
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 func (m *ModelArtifactPersistentVolumeClaimSource) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -28771,6 +29080,42 @@ func (m *ModelArtifactStatus) Unmarshal(dAtA []byte) error {
 			}
 			m.Conditions = append(m.Conditions, v12.Condition{})
 			if err := m.Conditions[len(m.Conditions)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Nodes", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Nodes == nil {
+				m.Nodes = &ModelArtifactNodes{}
+			}
+			if err := m.Nodes.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -33704,6 +34049,140 @@ func (m *NodeModelStoreHub) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
+func (m *NodeModelStoreKubelet) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: NodeModelStoreKubelet: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: NodeModelStoreKubelet: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NodefsAvailable", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NodefsAvailable = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ImagefsAvailable", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ImagefsAvailable = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ImageGCHighThresholdPercent", wireType)
+			}
+			var v int32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.ImageGCHighThresholdPercent = &v
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 func (m *NodeModelStoreList) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -34089,6 +34568,57 @@ func (m *NodeModelStoreModel) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 9:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field DownloadedBytes", wireType)
+			}
+			m.DownloadedBytes = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.DownloadedBytes |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Source", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Source = NodeModelStoreModelSource(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -34235,6 +34765,42 @@ func (m *NodeModelStoreSpec) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			if err := m.Hub.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Kubelet", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Kubelet == nil {
+				m.Kubelet = &NodeModelStoreKubelet{}
+			}
+			if err := m.Kubelet.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

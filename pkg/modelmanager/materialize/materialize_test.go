@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -223,11 +224,31 @@ func TestEnsureMaterializesAndPublishes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), m.FileCount)
 	assert.Equal(t, modelartifact.ManifestHeader, m.ManifestFormat)
+	assert.Equal(t, store.SourceHub, m.Source, "the tree records where its bytes came from")
 
 	assert.True(t, env.m.Ensure(context.Background(), req).Published)
 	for _, r := range env.hub.recorded() {
 		assert.Equal(t, "Bearer token-a", r.auth)
 	}
+}
+
+func TestProgressReportsTheRunningAttempts(t *testing.T) {
+	env := newTestEnv(t, repoFiles())
+	env.hub.gate = make(chan struct{})
+	req := env.request("owner/repo", "uid-a", "token-a")
+	assert.Empty(t, env.m.Progress(), "nothing runs yet")
+
+	env.m.Ensure(context.Background(), req)
+	total := env.hub.manifest("owner/repo").SizeBytes
+	require.Eventually(t, func() bool { return env.m.Progress()[req.Hex].SizeBytes == total }, 5*time.Second, 10*time.Millisecond,
+		"the size is known once the manifest is listed")
+	p := env.m.Progress()[req.Hex]
+	assert.Equal(t, workercore.NodeModelStoreModelSourceHub, p.Source)
+	assert.Zero(t, p.DownloadedBytes, "the hub holds every byte back")
+
+	close(env.hub.gate)
+	env.waitIdle(t, req.Hex)
+	assert.Empty(t, env.m.Progress(), "a published digest is no longer running")
 }
 
 func TestEnsureJoinsTheRunningAttempt(t *testing.T) {
@@ -382,8 +403,8 @@ func TestEnsureKeepsEachCredentialWithItsRepository(t *testing.T) {
 
 func TestEnsureReportsNoRoom(t *testing.T) {
 	env := newTestEnv(t, repoFiles())
-	env.m.Reserve = func(context.Context, int64) error {
-		return &download.Error{Reason: download.ReasonInsufficientCapacity, Message: "3 KiB do not fit under the high watermark", Detail: "3 KiB do not fit under the high watermark"}
+	env.m.Reserve = func(context.Context, string, int64, func() int64) (func(), error) {
+		return nil, &download.Error{Reason: download.ReasonInsufficientCapacity, Message: "3 KiB do not fit under the high watermark", Detail: "3 KiB do not fit under the high watermark"}
 	}
 	req := env.request("owner/repo", "uid-a", "token-a")
 
@@ -420,31 +441,60 @@ func TestEnsureWaitsForAValidConfiguration(t *testing.T) {
 }
 
 func TestEnsureReservesOnlyTheMissingBytes(t *testing.T) {
-	env := newTestEnv(t, repoFiles())
-	req := env.request("owner/repo", "uid-a", "token-a")
-	// An earlier attempt left part of the weights on disk.
-	a, err := env.store.NewAttempt(req.Hex)
-	require.NoError(t, err)
-	partial, err := a.FilePath("sub/model.safetensors")
-	require.NoError(t, err)
-	require.NoError(t, os.MkdirAll(filepath.Dir(partial), 0o755))
-	require.NoError(t, os.WriteFile(partial, bytes.Repeat([]byte("w"), 1000), 0o644))
-
-	var reserved []int64
-	var mu sync.Mutex
-	env.m.Reserve = func(_ context.Context, n int64) error {
-		mu.Lock()
-		defer mu.Unlock()
-		reserved = append(reserved, n)
-		return nil
+	cases := []struct {
+		name string
+		// carried is the offset an earlier attempt's checkpoint records, 0 for no checkpoint.
+		carried int64
+	}{
+		{name: "a checkpoint carries the verified bytes over", carried: 1000},
+		{name: "bytes without a checkpoint are downloaded again", carried: 0},
 	}
-	env.m.Ensure(context.Background(), req)
-	env.waitIdle(t, req.Hex)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			env := newTestEnv(t, repoFiles())
+			req := env.request("owner/repo", "uid-a", "token-a")
+			// An earlier attempt left part of the weights on disk.
+			a, err := env.store.NewAttempt(req.Hex)
+			require.NoError(t, err)
+			partial, err := a.FilePath("sub/model.safetensors")
+			require.NoError(t, err)
+			require.NoError(t, os.MkdirAll(filepath.Dir(partial), 0o755))
+			require.NoError(t, os.WriteFile(partial, bytes.Repeat([]byte("w"), 1000), 0o644))
+			if c.carried > 0 {
+				sum := sha256.Sum256([]byte("sub/model.safetensors"))
+				state := filepath.Join(a.Dir(), "state")
+				require.NoError(t, os.MkdirAll(state, 0o755))
+				cp := fmt.Sprintf(`{"offset":%d,"state":""}`, c.carried)
+				require.NoError(t, os.WriteFile(filepath.Join(state, hex.EncodeToString(sum[:])), []byte(cp), 0o600))
+			}
 
-	mu.Lock()
-	defer mu.Unlock()
-	total := env.hub.manifest("owner/repo").SizeBytes
-	assert.Equal(t, []int64{total - 1000}, reserved, "the 1000 bytes already on disk are not reserved again")
+			var (
+				reserved []int64
+				released int
+				mu       sync.Mutex
+			)
+			env.m.Reserve = func(_ context.Context, hex string, size int64, written func() int64) (func(), error) {
+				mu.Lock()
+				defer mu.Unlock()
+				assert.Equal(t, req.Hex, hex)
+				reserved = append(reserved, size-written())
+				return func() {
+					mu.Lock()
+					defer mu.Unlock()
+					released++
+				}, nil
+			}
+			env.m.Ensure(context.Background(), req)
+			env.waitIdle(t, req.Hex)
+
+			mu.Lock()
+			defer mu.Unlock()
+			total := env.hub.manifest("owner/repo").SizeBytes
+			assert.Equal(t, []int64{total - c.carried}, reserved,
+				"the verified bytes the attempt holds are not reserved again")
+			assert.Equal(t, 1, released, "the reservation is released when the attempt ends")
+		})
+	}
 }
 
 // TestAFailurePublishesNoTenant pins that a failure reaches the node's record, and from it the

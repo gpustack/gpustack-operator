@@ -87,9 +87,14 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&InstanceTypeFlavor{},
 		&InstanceTypeFlavorList{},
 		&InstanceTypeList{},
+		&ModelArtifact{},
+		&ModelArtifactList{},
+		&ModelArtifactProgress{},
 		&ModelDeployment{},
 		&ModelDeploymentList{},
 		&ModelDeploymentMetrics{},
+		&NodeModelStore{},
+		&NodeModelStoreList{},
 	)
 	// AddToGroupVersion allows the serialization of client types like ListOptions.
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)

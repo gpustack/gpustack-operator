@@ -4345,6 +4345,44 @@ func crd_gpustack_api_worker_v1alpha1_ModelArtifact() *v1.CustomResourceDefiniti
 											},
 											XListType: ptr.To[string]("map"),
 										},
+										"nodes": {
+											Description: "Nodes is where the content is: how many nodes hold it ready, are downloading it or failed to,\nand how far the downloading ones are. It counts the content, the manifest digest, so artifacts\nwith the same digest see the same nodes; it holds numbers only. Absent for a claim source and\nbefore the first resolution.",
+											Type:        "object",
+											Required: []string{
+												"ready",
+												"downloading",
+												"failed",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"downloading": {
+													Description: "Downloading counts the nodes downloading it.",
+													Type:        "integer",
+													Format:      "int32",
+													Minimum:     ptr.To[float64](0),
+												},
+												"downloadingPercent": {
+													Description: "DownloadingPercent is the mean progress of the downloading nodes, each a whole copy, rounded\ndown to a multiple of 5. Ready nodes are counted, not averaged in. Absent while no node\ndownloads.",
+													Type:        "integer",
+													Format:      "int32",
+													Maximum:     ptr.To[float64](100),
+													Minimum:     ptr.To[float64](0),
+													Nullable:    true,
+												},
+												"failed": {
+													Description: "Failed counts the nodes whose last attempt failed and that wait to retry.",
+													Type:        "integer",
+													Format:      "int32",
+													Minimum:     ptr.To[float64](0),
+												},
+												"ready": {
+													Description: "Ready counts the nodes holding the content published.",
+													Type:        "integer",
+													Format:      "int32",
+													Minimum:     ptr.To[float64](0),
+												},
+											},
+											Nullable: true,
+										},
 										"observedGeneration": {
 											Description: "ObservedGeneration is the generation the status was written for.",
 											Type:        "integer",
@@ -4420,6 +4458,14 @@ func crd_gpustack_api_worker_v1alpha1_ModelArtifact() *v1.CustomResourceDefiniti
 							Description: "",
 							Priority:    0,
 							JSONPath:    ".status.conditions[?(@.type=='Resolved')].status",
+						},
+						{
+							Name:        "Ready",
+							Type:        "integer",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.nodes.ready",
 						},
 						{
 							Name:        "Age",
@@ -5546,6 +5592,29 @@ func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinit
 												},
 											},
 										},
+										"kubelet": {
+											Description: "Kubelet is the node's effective kubelet thresholds the cache's cap derives from, as the worker\nread them from kubelet's configz endpoint, which merges kubelet's flags, configuration file and\ndrop-ins. It is absent while they could not be read, and the plugin then assumes kubelet's\ndefaults and says so.\nThe worker writes it; nothing else does. It is an observed value held in the spec, not the\nstatus, because the plugin reads its whole configuration from its spec and owns the status,\nand reading configz needs the nodes/proxy permission, which the plugin never holds: it\nreaches every kubelet endpoint. Nothing reconciles toward it as a desired state: the worker\nrefreshes the reading and writes what it read, so a hand edit holds only until the next\nreading.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"imageGCHighThresholdPercent": {
+													Description: "ImageGCHighThresholdPercent is the disk usage at which kubelet starts collecting images.",
+													Type:        "integer",
+													Format:      "int32",
+													Maximum:     ptr.To[float64](100),
+													Minimum:     ptr.To[float64](0),
+													Nullable:    true,
+												},
+												"imagefsAvailable": {
+													Description: "ImagefsAvailable is evictionHard[\"imagefs.available\"], in the same forms; empty when kubelet\nsets none.",
+													Type:        "string",
+												},
+												"nodefsAvailable": {
+													Description: "NodefsAvailable is evictionHard[\"nodefs.available\"] as kubelet reports it, a percentage such\nas \"10%\" or a quantity such as \"20Gi\"; empty when kubelet sets none.",
+													Type:        "string",
+												},
+											},
+											Nullable: true,
+										},
 										"watermarks": {
 											Description: "Watermarks bound the cache filesystem's usage.",
 											Type:        "object",
@@ -5682,6 +5751,12 @@ func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinit
 															Description: "Digest is the manifest digest, the content's address.",
 															Type:        "string",
 														},
+														"downloadedBytes": {
+															Description: "DownloadedBytes is how much of a Downloading entry's content is on the node's disk, the bytes\nan earlier attempt left for a resume included, so it never goes back. It is written on\nthresholds, not at every byte: once the entry moved by 5% of SizeBytes and 30 seconds passed\nsince the node's status was last written. Absent outside Downloading.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
 														"lastUsedTime": {
 															Description: "LastUsedTime is when the content was last mounted or unmounted, truncated to the hour so that\nuse does not rewrite the object.",
 															Type:        "string",
@@ -5710,6 +5785,15 @@ func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinit
 															Description: "SizeBytes is the content's size.",
 															Type:        "integer",
 															Format:      "int64",
+														},
+														"source": {
+															Description: "Source is where the content's bytes come from: Hub, the model hub. It names no repository or\nendpoint. Content published before the field existed has none.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"Hub"`),
+																},
+															},
 														},
 														"state": {
 															Description: "State is Downloading, Ready or Failed.",

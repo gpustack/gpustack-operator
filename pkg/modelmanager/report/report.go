@@ -1,5 +1,6 @@
 // Package report applies a node's effective configuration to the plugin and writes what the node
-// holds into its NodeModelStore's status, only when that changes.
+// holds into its NodeModelStore's status, only when that changes: a state change at once, download
+// progress on thresholds.
 package report
 
 import (
@@ -49,6 +50,19 @@ const (
 // DefaultInterval is how often the reporter collects and reports without an event.
 const DefaultInterval = 5 * time.Minute
 
+// The progress write rule. The fields that move with every received byte, an entry's
+// downloadedBytes and, while a download runs, capacity.storedBytes, are written only once
+// progressInterval passed since the last write and some download moved by progressStep of its size,
+// or together with a change of any other field. A download then writes at most 1/progressStep times
+// for its progress whatever its speed, and at most once per progressInterval.
+const (
+	progressInterval = 30 * time.Second
+	progressStep     = 0.05
+	// ProgressTick is how often the reporter looks at running downloads, so progress reaches the
+	// object on its threshold rather than on the next unrelated event.
+	ProgressTick = 10 * time.Second
+)
+
 // conflictRetry is how long a report that lost a write to a newer object waits before it reads the
 // object again, so the informer has caught up rather than serving the same stale copy.
 const conflictRetry = time.Second
@@ -66,10 +80,12 @@ type Reporter struct {
 	Store       *store.Store
 	Collector   *gc.Collector
 	Downloading func() map[string]bool
-	Downloader  *download.Downloader
-	// KubeletCap is the cap on the high watermark when the cache shares kubelet's filesystem, nil
-	// when it does not.
-	KubeletCap func(totalBytes uint64) *gc.Cap
+	// Progress is how far each running download is, by digest; nil reports no progress.
+	Progress   func() map[string]materialize.DownloadProgress
+	Downloader *download.Downloader
+	// KubeletCap is the cap on the high watermark from the node's kubelet thresholds when the cache
+	// shares kubelet's filesystem, nil when it does not.
+	KubeletCap func(k *workercore.NodeModelStoreKubelet, totalBytes uint64) *gc.Cap
 	Now        func() time.Time
 	Interval   time.Duration
 
@@ -82,6 +98,8 @@ type Reporter struct {
 	high, low int32
 	capNote   string
 	trigger   chan struct{}
+	// lastWrite is when this plugin last wrote the status; Report is its only writer.
+	lastWrite time.Time
 }
 
 var _ materialize.Environment = (*Reporter)(nil).Environment
@@ -124,12 +142,21 @@ func (r *Reporter) used(hex string) {
 	r.Trigger(hex)
 }
 
-// Watermarks are the effective watermarks, for collection, and false until a configuration was
-// applied.
-func (r *Reporter) Watermarks() (int32, int32, bool) {
+// Watermarks are the effective watermarks, for collection, or why there are none in force: no spec
+// applied yet, or the node's spec failing its check. A spec that fails after an earlier one applied
+// does not leave the earlier watermarks in force, since the node reports that configuration as not
+// in force either.
+func (r *Reporter) Watermarks() (int32, int32, string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.high, r.low, r.spec != nil
+	switch {
+	case r.specErr != nil:
+		return 0, 0, "the node's configuration fails its check, so nothing is collected under the previous one"
+	case r.spec == nil:
+		return 0, 0, "the node's configuration has not been applied yet, so there are no watermarks to collect against"
+	}
+
+	return r.high, r.low, ""
 }
 
 // Environment returns the hub and the downloader built from the node's current configuration, or an
@@ -180,15 +207,27 @@ func (r *Reporter) Run(ctx context.Context) error {
 	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
+	pt := time.NewTicker(ProgressTick)
+	defer pt.Stop()
 	for {
 		if err := r.Report(ctx); err != nil {
 			klog.ErrorS(err, "report the node's model cache")
 		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-t.C:
-		case <-r.trigger:
+	wait:
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-t.C:
+				break wait
+			case <-r.trigger:
+				break wait
+			case <-pt.C:
+				// Only a running download has progress to report.
+				if len(r.Downloading()) > 0 {
+					break wait
+				}
+			}
 		}
 	}
 }
@@ -217,6 +256,9 @@ func (r *Reporter) Report(ctx context.Context) error {
 	if equality.Semantic.DeepEqual(status, nms.Status) {
 		return nil
 	}
+	if onlyProgressMoved(status, nms.Status) && !r.progressDue(status, nms.Status) {
+		return nil
+	}
 	nms.Status = status
 	if err := r.Client.Status().Update(ctx, nms); err != nil {
 		if kerrors.IsConflict(err) {
@@ -225,8 +267,54 @@ func (r *Reporter) Report(ctx context.Context) error {
 		}
 		return fmt.Errorf("update status: %w", err)
 	}
+	r.lastWrite = r.now()
 
 	return nil
+}
+
+// onlyProgressMoved says next differs from old in progress fields alone: an entry's
+// downloadedBytes, and capacity.storedBytes while some entry downloads. Without a running download
+// storedBytes moves only when content is removed, which is a state change.
+func onlyProgressMoved(next, old workercore.NodeModelStoreStatus) bool {
+	written := make(map[string]int64, len(old.Models))
+	for _, m := range old.Models {
+		written[m.Digest] = m.DownloadedBytes
+	}
+	held := *next.DeepCopy()
+	downloading := false
+	for i := range held.Models {
+		m := &held.Models[i]
+		if m.State == workercore.NodeModelStoreModelStateDownloading {
+			downloading = true
+		}
+		if b, ok := written[m.Digest]; ok {
+			m.DownloadedBytes = b
+		}
+	}
+	if downloading && held.Capacity != nil && old.Capacity != nil {
+		held.Capacity.StoredBytes = old.Capacity.StoredBytes
+	}
+
+	return equality.Semantic.DeepEqual(held, old)
+}
+
+// progressDue says a progress-only write may go: progressInterval passed since the last write, and
+// some download moved by progressStep of its size since the value written.
+func (r *Reporter) progressDue(next, old workercore.NodeModelStoreStatus) bool {
+	if r.now().Sub(r.lastWrite) < progressInterval {
+		return false
+	}
+	written := make(map[string]int64, len(old.Models))
+	for _, m := range old.Models {
+		written[m.Digest] = m.DownloadedBytes
+	}
+	for _, m := range next.Models {
+		if m.SizeBytes > 0 && float64(m.DownloadedBytes-written[m.Digest]) >= progressStep*float64(m.SizeBytes) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // apply takes the spec as the plugin's configuration, after checking it again: a hand edit of the
@@ -281,7 +369,17 @@ func (r *Reporter) apply(ctx context.Context, nms *workercore.NodeModelStore) {
 	}
 	high, low, note := spec.Watermarks.HighPercent, spec.Watermarks.LowPercent, ""
 	if total > 0 {
-		high, low, note = gc.Effective(high, low, r.KubeletCap(total))
+		c := r.KubeletCap(spec.Kubelet, total)
+		high, low, note = gc.Effective(high, low, c)
+		// Both are said whether or not the cap lowers the watermark: the defaults, or the threshold the
+		// cap set aside, may not be what kubelet enforces.
+		if spec.Kubelet == nil {
+			note = joinNotes("the node's effective kubelet configuration could not be read, so the cap on the "+
+				"filesystem the cache shares with kubelet assumes kubelet's defaults", note)
+		}
+		if c != nil && c.Ignored != "" && note == "" {
+			note = "the cap on the filesystem the cache shares with kubelet set a threshold aside: " + c.Ignored
+		}
 	}
 	r.spec, r.client, r.ca, r.capTotal, r.high, r.low, r.capNote = &spec, client, ca, total, high, low, note
 	r.Downloader.SetClient(client)
@@ -348,6 +446,10 @@ func (r *Reporter) models() ([]workercore.NodeModelStoreModel, int, int64, error
 		referenced[ref.Hex] = true
 	}
 	downloading := r.Downloading()
+	var progress map[string]materialize.DownloadProgress
+	if r.Progress != nil {
+		progress = r.Progress()
+	}
 
 	var stored int64
 	seen := map[string]bool{}
@@ -358,6 +460,7 @@ func (r *Reporter) models() ([]workercore.NodeModelStoreModel, int, int64, error
 		stored += m.SizeBytes
 		models = append(models, workercore.NodeModelStoreModel{
 			Digest: m.Digest, State: workercore.NodeModelStoreModelStateReady, SizeBytes: m.SizeBytes,
+			Source:     workercore.NodeModelStoreModelSource(m.Source),
 			Referenced: referenced[hex], LastUsedTime: hourOf(records[hex].LastUsedTime),
 		})
 	}
@@ -369,8 +472,10 @@ func (r *Reporter) models() ([]workercore.NodeModelStoreModel, int, int64, error
 			continue
 		}
 		seen[hex] = true
+		p := progress[hex]
 		models = append(models, workercore.NodeModelStoreModel{
 			Digest: "sha256:" + hex, State: workercore.NodeModelStoreModelStateDownloading,
+			SizeBytes: p.SizeBytes, DownloadedBytes: max(p.DownloadedBytes, 0), Source: p.Source,
 			LastUsedTime: hourOf(records[hex].LastUsedTime),
 		})
 	}
@@ -378,7 +483,9 @@ func (r *Reporter) models() ([]workercore.NodeModelStoreModel, int, int64, error
 		if seen[hex] || rec.Reason == "" || rec.Reason == download.ReasonCanceled {
 			continue
 		}
-		retry := meta.NewTime(rec.RetryTime.UTC())
+		// The ledger keeps nanoseconds but a stored metav1.Time is read back in seconds; without
+		// the truncation the two never compare equal and every report writes.
+		retry := meta.NewTime(rec.RetryTime.UTC().Truncate(time.Second))
 		models = append(models, workercore.NodeModelStoreModel{
 			Digest: "sha256:" + hex, State: workercore.NodeModelStoreModelStateFailed,
 			LastUsedTime: hourOf(rec.LastUsedTime), Reason: rec.Reason, Message: rec.Message, RetryTime: &retry,

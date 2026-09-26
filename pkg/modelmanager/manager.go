@@ -83,13 +83,15 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	reporter := &report.Reporter{
 		Reader: cm.GetCache(), Client: cm.GetClient(), NodeName: m.NodeName, Namespace: systemname.NamespaceName,
-		Store: m.Store, Collector: collector, Downloading: materializer.Downloading, Downloader: downloader,
+		Store: m.Store, Collector: collector, Downloading: materializer.Downloading, Progress: materializer.Progress, Downloader: downloader,
 		KubeletCap: kubeletCap, Now: time.Now,
 	}
 	collector.Watermarks = reporter.Watermarks
 	materializer.Environment = reporter.Environment
 	materializer.Reserve = collector.Reserve
 	materializer.Changed = reporter.Trigger
+
+	cm.GetWebhookServer().Register(modelstore.DownloadsPath, newDownloadsHandler(materializer.Progress))
 
 	d := &driver.Driver{
 		Name:         modelstore.DriverName,
@@ -122,19 +124,30 @@ func (m *Manager) Start(ctx context.Context) error {
 			return fmt.Errorf("watch ModelArtifacts: %w", err)
 		}
 		// The node's object is created by the worker after this plugin registers, and its spec and
-		// the CA bundle change at runtime: each is a reason to apply and report again.
-		for _, obj := range []ctrlcli.Object{&workercore.NodeModelStore{}, &core.ConfigMap{}} {
-			inf, err := cm.GetCache().GetInformer(ctx, obj)
+		// the CA bundle change at runtime: each is a reason to apply and report again. The object's
+		// own status updates are not: they are this plugin's writes coming back.
+		for _, w := range []struct {
+			obj     ctrlcli.Object
+			changed func(oldObj, newObj any) bool
+		}{
+			{&workercore.NodeModelStore{}, ownObjectChanged},
+			{&core.ConfigMap{}, func(any, any) bool { return true }},
+		} {
+			inf, err := cm.GetCache().GetInformer(ctx, w.obj)
 			if err != nil {
-				return fmt.Errorf("watch %T: %w", obj, err)
+				return fmt.Errorf("watch %T: %w", w.obj, err)
 			}
 			trigger := func(any) { reporter.Trigger("") }
 			if _, err := inf.AddEventHandler(toolscache.ResourceEventHandlerFuncs{
-				AddFunc:    trigger,
-				UpdateFunc: func(_, o any) { trigger(o) },
+				AddFunc: trigger,
+				UpdateFunc: func(o, n any) {
+					if w.changed(o, n) {
+						trigger(n)
+					}
+				},
 				DeleteFunc: trigger,
 			}); err != nil {
-				return fmt.Errorf("watch %T: %w", obj, err)
+				return fmt.Errorf("watch %T: %w", w.obj, err)
 			}
 		}
 		m.ready.Store(true)
@@ -194,8 +207,10 @@ func (m *Manager) referenced() (map[string]bool, error) {
 }
 
 // kubeletCap returns the high watermark's cap when the cache shares kubelet's filesystem, and nil
-// when the cache has a filesystem of its own, where the Setting applies as written.
-func (m *Manager) kubeletCap() (func(uint64) *gc.Cap, error) {
+// when the cache has a filesystem of its own, where the Setting applies as written. The thresholds
+// come from the node's spec; the plugin reads no kubelet file, since the path kubelet reads is its
+// --config flag and nothing on the node says what that is.
+func (m *Manager) kubeletCap() (func(*workercore.NodeModelStoreKubelet, uint64) *gc.Cap, error) {
 	cache, err := store.Device(m.Store.Root())
 	if err != nil {
 		return nil, err
@@ -207,10 +222,8 @@ func (m *Manager) kubeletCap() (func(uint64) *gc.Cap, error) {
 	if cache != kubelet {
 		return nil, nil
 	}
-	config := filepath.Join(m.KubeletDir, "config.yaml")
-
-	return func(total uint64) *gc.Cap {
-		c := gc.KubeletCap(config, total)
+	return func(k *workercore.NodeModelStoreKubelet, total uint64) *gc.Cap {
+		c := gc.KubeletCap(k, total)
 		return &c
 	}, nil
 }

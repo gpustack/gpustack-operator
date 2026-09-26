@@ -253,3 +253,91 @@ store_state() {
 model_workers() {
   kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{.items[*].metadata.name}'
 }
+
+# nms_watch NODE OUT: records every event of NODE's NodeModelStore into OUT, one JSON line each (the
+# wall time, the event type, the resourceVersion and the status), until it is killed; prints its PID.
+# It reads the raw watch, so a write is counted once however the object is read afterwards. The call
+# carries its own --request-timeout=0: a watch is meant to stay open, and without a caller-chosen
+# bound the kubectl shim bounds the call to 30s and retries the original URL, which replays every
+# event since the resourceVersion the URL embedded — the same write then lands here twice.
+nms_watch() {
+  python3 - "$1" "$2" >/dev/null 2>&1 <<'PY' &
+import json, subprocess, sys, time
+node, out = sys.argv[1], sys.argv[2]
+rv = ""
+with open(out, "a") as f:
+    while True:
+        path = f"/apis/worker.gpustack.ai/v1alpha1/nodemodelstores?watch=1&fieldSelector=metadata.name={node}"
+        if rv:
+            path += f"&resourceVersion={rv}"
+        p = subprocess.Popen(["kubectl", "get", "--raw", path, "--request-timeout=0"], stdout=subprocess.PIPE, text=True)
+        for line in p.stdout:
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if ev.get("type") == "ERROR":
+                rv = ""
+                break
+            o = ev.get("object", {})
+            rv = o.get("metadata", {}).get("resourceVersion", rv)
+            f.write(json.dumps({"t": time.time(), "type": ev.get("type"), "rv": rv, "status": o.get("status", {})}) + "\n")
+            f.flush()
+        p.wait()
+        time.sleep(1)
+PY
+  echo $!
+}
+
+# nms_write_stats OUT DIGEST: the writes OUT recorded, as "progress=N mingap=S intermediate=K last=T":
+# N writes that changed only progress fields (an entry's downloadedBytes, capacity.storedBytes), the
+# least gap in seconds between two of them, K distinct downloadedBytes values of DIGEST strictly
+# between 0 and its size, and T the wall time of the last write. Events are deduplicated by
+# resourceVersion first: a write always lands on a fresh one, so a repeated one is a redelivery from
+# a reconnect, not another write.
+nms_write_stats() {
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+out, digest = sys.argv[1], sys.argv[2]
+seen_rv, evs = set(), []
+for l in open(out):
+    if not l.strip():
+        continue
+    e = json.loads(l)
+    if e.get("rv") in seen_rv:
+        continue
+    seen_rv.add(e.get("rv"))
+    evs.append(e)
+writes = [e for e in evs if e["type"] == "MODIFIED"]
+def held(st, old):
+    st = json.loads(json.dumps(st))
+    written = {m["digest"]: m.get("downloadedBytes", 0) for m in old.get("models", [])}
+    for m in st.get("models", []):
+        if m["digest"] in written:
+            m["downloadedBytes"] = written[m["digest"]]
+        elif "downloadedBytes" in m:
+            m["downloadedBytes"] = 0
+    if st.get("capacity") and old.get("capacity"):
+        st["capacity"]["storedBytes"] = old["capacity"]["storedBytes"]
+    return st
+progress, times, seen = 0, [], set()
+for a, b in zip(evs, evs[1:]):
+    if b["type"] != "MODIFIED":
+        continue
+    if held(b["status"], a["status"]) == held(a["status"], a["status"]):
+        progress += 1
+        times.append(b["t"])
+for e in writes:
+    for m in e["status"].get("models", []):
+        if m["digest"] == digest and 0 < m.get("downloadedBytes", 0) < m.get("sizeBytes", 0):
+            seen.add(m["downloadedBytes"])
+gaps = [y - x for x, y in zip(times, times[1:])]
+print(f"progress={progress} mingap={int(min(gaps)) if gaps else -1} intermediate={len(seen)} last={int(writes[-1]['t']) if writes else 0}")
+PY
+}
+
+# progress_as NS NAME SUBJECT: the artifact's v1 progress read as SUBJECT (impersonated), or the
+# error kubectl prints; the exit status is kubectl's.
+progress_as() {
+  kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/$1/modelartifacts/$2/progress" --as="$3" 2>&1
+}

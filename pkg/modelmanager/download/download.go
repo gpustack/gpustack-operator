@@ -57,8 +57,12 @@ type File struct {
 	// the tree Dest belongs to.
 	Dest       string
 	Checkpoint string
-	// Received, when set, is told this file's byte counts as they arrive. A large file's ranges
-	// arrive at once, so it is called concurrently and must be safe for that.
+	// Received, when set, is told each byte count as it arrives. The counts a resume carries over
+	// are not reported: the caller seeds them from ResumableOffset before the download starts, so
+	// that the seed plus these counts is what the attempt holds of the file. A file the hub makes
+	// start over is told back, negated, everything it was counted as holding: its seeded offset and
+	// what arrived since. A large file's ranges arrive at once, so it is called concurrently and
+	// must be safe for that.
 	Received func(n int64)
 	// Token returns the credential for this file's repository at the moment a request is sent, so a
 	// rotated Secret reaches the next request. It returns "" for a public repository. A credential
@@ -190,6 +194,11 @@ func (d *Downloader) fetchRanges(ctx context.Context, f File, out *os.File, v *v
 	if errors.Is(err, errRangesUnsupported) && offset > 0 {
 		if err := out.Truncate(0); err != nil {
 			return d.diskError(f, err)
+		}
+		// The file held reached bytes: the caller's seed counted the resume offset, and what
+		// arrived since was reported as it came. All of it is gone with the truncation.
+		if f.Received != nil {
+			f.Received(-reached)
 		}
 		fresh, verr := newVerifier(f.Digest, f.Size)
 		if verr != nil {

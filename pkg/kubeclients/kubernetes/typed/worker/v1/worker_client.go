@@ -25,7 +25,9 @@ type WorkerV1Interface interface {
 	InstanceSSHPublicKeysGetter
 	InstanceTypesGetter
 	InstanceTypeFlavorsGetter
+	ModelArtifactsGetter
 	ModelDeploymentsGetter
+	NodeModelStoresGetter
 }
 
 // WorkerV1Client is used to interact with features provided by the worker.gpustack.ai group.
@@ -65,8 +67,16 @@ func (c *WorkerV1Client) InstanceTypeFlavors() InstanceTypeFlavorInterface {
 	return newInstanceTypeFlavors(c)
 }
 
+func (c *WorkerV1Client) ModelArtifacts(namespace string) ModelArtifactInterface {
+	return newModelArtifacts(c, namespace)
+}
+
 func (c *WorkerV1Client) ModelDeployments(namespace string) ModelDeploymentInterface {
 	return newModelDeployments(c, namespace)
+}
+
+func (c *WorkerV1Client) NodeModelStores() NodeModelStoreInterface {
+	return newNodeModelStores(c)
 }
 
 // NewForConfig creates a new WorkerV1Client for the given config.

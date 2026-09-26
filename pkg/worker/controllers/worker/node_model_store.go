@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"slices"
+	"sync"
 	"time"
 
 	core "k8s.io/api/core/v1"
@@ -41,9 +42,17 @@ const nodeModelStoreInvalidRetry = time.Minute
 // The owner reference to the Node collects it with the Node. The component's removal is read at the
 // cluster level instead: while the CSIDriver object does not exist, every NodeModelStore is deleted.
 //
-// It writes spec only. Status belongs to the plugin on the node.
+// It writes spec only: the Settings' merge, and the node's kubelet thresholds read from its
+// configz, which the plugin must not read itself because nodes/proxy reaches every kubelet endpoint.
+// Status belongs to the plugin on the node.
 type NodeModelStoreReconciler struct {
 	Client ctrlcli.Client
+	// ReadKubelet reads a node's kubelet thresholds; nil reads its configz through the API server.
+	ReadKubelet func(ctx context.Context, node string) (*workercore.NodeModelStoreKubelet, error)
+	Now         func() time.Time
+
+	kubeletMu sync.Mutex
+	kubelet   map[string]kubeletReading
 }
 
 var _ ctrlreconcile.Reconciler = (*NodeModelStoreReconciler)(nil)
@@ -66,6 +75,9 @@ func (r *NodeModelStoreReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	nd := new(core.Node)
 	if err := r.Client.Get(ctx, req.NamespacedName, nd); err != nil {
 		// A deleted Node takes its NodeModelStore with it through the owner reference.
+		if kerrors.IsNotFound(err) {
+			r.forgetKubelet(req.Name)
+		}
 		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
 	}
 	if nd.DeletionTimestamp != nil {
@@ -90,6 +102,13 @@ func (r *NodeModelStoreReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		logger.Error(err, "the node model cache's configuration fails its check; the node's spec is left as it is")
 		return ctrl.Result{RequeueAfter: nodeModelStoreInvalidRetry}, nil
+	}
+	kubelet, read := r.kubeletThresholds(ctx, nd.Name, existing.Spec.Kubelet)
+	spec.Kubelet = kubelet
+	if err := modelstore.Validate(spec); err != nil {
+		// A kubelet answer this check refuses is not written; the node keeps kubelet's defaults.
+		logger.Error(err, "the node's kubelet thresholds fail their check and are not written")
+		spec.Kubelet = nil
 	}
 
 	eNms := &workercore.NodeModelStore{
@@ -116,7 +135,12 @@ func (r *NodeModelStoreReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return objectWriteResult(logger, err, "sync node model store", _requeueAfterConflict)
 	}
 
-	return ctrl.Result{}, nil
+	if !read {
+		// The kubelet's answer is missing or stale; try it again well before the next refresh.
+		return ctrl.Result{RequeueAfter: nodeModelStoreKubeletRetry}, nil
+	}
+
+	return ctrl.Result{RequeueAfter: nodeModelStoreKubeletRefresh}, nil
 }
 
 // driverInstalled reports whether the plugin's CSIDriver object exists.

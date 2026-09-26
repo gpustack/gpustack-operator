@@ -156,6 +156,26 @@ func (in InstanceTypeList) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelArtifact) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelArtifact"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelArtifactList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelArtifactList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelArtifactProgress) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelArtifactProgress"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelArtifactProgressReason) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelArtifactProgressReason"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeployment) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.ModelDeployment"
 }
@@ -193,6 +213,16 @@ func (in ModelDeploymentMetrics) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in NFSInstancePersistentVolumeSource) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.NFSInstancePersistentVolumeSource"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NodeModelStore) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.NodeModelStore"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NodeModelStoreList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.NodeModelStoreList"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

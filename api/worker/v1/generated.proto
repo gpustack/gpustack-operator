@@ -591,6 +591,93 @@ message InstanceTypeList {
   repeated InstanceType items = 2;
 }
 
+// ModelArtifact is the v1 view of a model's weights: where they come from and where they are.
+//
+// It proxies the v1alpha1 resource for every verb and serves the progress subresource. IT HAS NO
+// WRITABLE STATUS SUBRESOURCE: the proxy writes with the worker's identity, and the status guard
+// admits exactly that identity to a ModelArtifact's status, which mounts are authorized by. The status
+// is read through the object.
+//
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
+message ModelArtifact {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelArtifactSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelArtifactStatus status = 3;
+}
+
+// ModelArtifactList holds the list of ModelArtifacts.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelArtifactList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelArtifact items = 2;
+}
+
+// ModelArtifactProgress is where a ModelArtifact's content is across the cluster's nodes, computed
+// when asked and never stored: the nodes' NodeModelStores, with each downloading node's bytes read
+// live from its plugin where it answers.
+//
+// It is an aggregate and NAMES NO NODE: it is namespaced and a tenant reads it, and node names would
+// hand every tenant the cluster's topology. The per-node view is the NodeModelStore.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelArtifactProgress {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  // Timestamp is when it was computed.
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time timestamp = 2;
+
+  // ManifestDigest and SizeBytes are the content's, from the artifact's resolution.
+  optional string manifestDigest = 3;
+
+  optional int64 sizeBytes = 4;
+
+  // Ready, Downloading and Failed count the nodes holding the content published, downloading it,
+  // and waiting to retry a failed attempt.
+  optional int32 ready = 5;
+
+  optional int32 downloading = 6;
+
+  optional int32 failed = 7;
+
+  // DownloadingPercent is the mean progress of the downloading nodes, each a whole copy, in whole
+  // percent; absent while no node downloads.
+  //
+  // +optional
+  optional int32 downloadingPercent = 8;
+
+  // DownloadingBytes is what the downloading nodes hold of it, summed.
+  optional int64 downloadingBytes = 9;
+
+  // Live counts the downloading nodes whose bytes were read from their plugin for this answer; the
+  // others contribute the value their node last wrote, on its 5% threshold.
+  optional int32 live = 10;
+
+  // FailureReasons counts the failed nodes by reason, without a message or a node.
+  //
+  // +listType=atomic
+  // +optional
+  repeated ModelArtifactProgressReason failureReasons = 11;
+
+  // Reason says why there is nothing to count: the artifact is not resolved, or its claim source is
+  // mounted from its volume and never downloaded.
+  //
+  // +optional
+  optional string reason = 12;
+}
+
+// ModelArtifactProgressReason is how many failed nodes share a reason.
+message ModelArtifactProgressReason {
+  optional string reason = 1;
+
+  optional int32 count = 2;
+}
+
 // ModelDeployment is the v1 view of a managed serving deployment.
 //
 // +genclient
@@ -761,6 +848,33 @@ message NFSInstancePersistentVolumeSource {
   //
   // +default=["hard","vers=4","rsize=1048576","wsize=1048576","noatime","nodiratime"]
   repeated string mountOptions = 5;
+}
+
+// NodeModelStore is the v1 view of one node's model cache: what the node holds, how far its
+// downloads are, and its effective configuration. Its writers, the worker and the node's plugin,
+// write the v1alpha1 resource; this view serves get, list, watch and delete, the last for the
+// garbage collector, which watches the group's preferred version.
+//
+// +genclient
+// +genclient:nonNamespaced
+// +genclient:onlyVerbs=get,list,watch,delete
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"]
+message NodeModelStore {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.NodeModelStoreSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.NodeModelStoreStatus status = 3;
+}
+
+// NodeModelStoreList holds the list of NodeModelStores.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message NodeModelStoreList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated NodeModelStore items = 2;
 }
 
 // S3InstancePersistentVolumeSource defines the source of S3.

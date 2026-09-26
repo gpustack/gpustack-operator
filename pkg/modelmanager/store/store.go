@@ -135,7 +135,13 @@ type Marker struct {
 	FileCount int64 `json:"fileCount"`
 	// PublishedTime is when it was published.
 	PublishedTime time.Time `json:"publishedTime"`
+	// Source is where the tree's bytes came from, SourceHub; empty for a tree published before it
+	// was recorded.
+	Source string `json:"source,omitempty"`
 }
+
+// SourceHub is a tree downloaded from the model hub.
+const SourceHub = "Hub"
 
 // IsPublished reports whether hex has a published tree. It reads only the marker, so the check a
 // mount makes is one stat whatever the tree's size.
@@ -410,22 +416,6 @@ func (s *Store) latestPartial(hex string) (int64, error) {
 
 // Dir is the attempt's directory.
 func (a *Attempt) Dir() string { return a.store.attemptDir(a.Hex, a.Number) }
-
-// SizeBytes is what the attempt's files occupy so far: the bytes a resumed attempt carried over.
-func (a *Attempt) SizeBytes() int64 {
-	var size int64
-	// Best effort: a file that cannot be read is counted as missing, which only reserves more.
-	_ = filepath.WalkDir(filepath.Join(a.Dir(), treeDir), func(_ string, e fs.DirEntry, walkErr error) error {
-		if walkErr == nil && !e.IsDir() {
-			if info, ierr := e.Info(); ierr == nil {
-				size += info.Size()
-			}
-		}
-		return nil
-	})
-
-	return size
-}
 
 // FilePath is where a manifest path's file is written in this attempt. Manifest paths are relative
 // and hold no empty, "." or ".." segment by the manifest format's own rules; this checks it again,

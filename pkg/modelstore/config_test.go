@@ -109,6 +109,41 @@ func TestValidate(t *testing.T) {
 		{name: "an ftp endpoint", mutate: func(s *workercore.NodeModelStoreSpec) { s.Hub.HuggingFaceEndpoint = "ftp://hub" }, wantErr: "endpoint"},
 		{name: "a blank endpoint", mutate: func(s *workercore.NodeModelStoreSpec) { s.Hub.HuggingFaceEndpoint = "" }, wantErr: "endpoint"},
 		{name: "a proxy with credentials", mutate: func(s *workercore.NodeModelStoreSpec) { s.Hub.HTTPSProxy = "http://u:p@proxy:3128" }, wantErr: "proxy"},
+		{
+			name: "kubelet thresholds as percentages and quantities are valid",
+			mutate: func(s *workercore.NodeModelStoreSpec) {
+				s.Kubelet = &workercore.NodeModelStoreKubelet{NodefsAvailable: "10%", ImagefsAvailable: "20Gi", ImageGCHighThresholdPercent: ptr.To[int32](85)}
+			},
+		},
+		{name: "kubelet thresholds all unset are valid", mutate: func(s *workercore.NodeModelStoreSpec) { s.Kubelet = &workercore.NodeModelStoreKubelet{} }},
+		{
+			name: "a nodefs threshold that is neither a percentage nor a quantity",
+			mutate: func(s *workercore.NodeModelStoreSpec) {
+				s.Kubelet = &workercore.NodeModelStoreKubelet{NodefsAvailable: "ten"}
+			},
+			wantErr: "nodefsAvailable",
+		},
+		{
+			name: "an imagefs percentage above 100",
+			mutate: func(s *workercore.NodeModelStoreSpec) {
+				s.Kubelet = &workercore.NodeModelStoreKubelet{ImagefsAvailable: "150%"}
+			},
+			wantErr: "imagefsAvailable",
+		},
+		{
+			name: "a negative quantity",
+			mutate: func(s *workercore.NodeModelStoreSpec) {
+				s.Kubelet = &workercore.NodeModelStoreKubelet{NodefsAvailable: "-1Gi"}
+			},
+			wantErr: "nodefsAvailable",
+		},
+		{
+			name: "an image threshold above 100",
+			mutate: func(s *workercore.NodeModelStoreSpec) {
+				s.Kubelet = &workercore.NodeModelStoreKubelet{ImageGCHighThresholdPercent: ptr.To[int32](101)}
+			},
+			wantErr: "imageGCHighThresholdPercent",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -160,6 +195,42 @@ func TestParseBandwidth(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, c.want, got)
+		})
+	}
+}
+
+func TestParseThreshold(t *testing.T) {
+	cases := []struct {
+		raw         string
+		wantPercent float64
+		wantBytes   int64
+		wantErr     bool
+	}{
+		{raw: "10%", wantPercent: 10},
+		{raw: "7.5%", wantPercent: 7.5},
+		{raw: "85%", wantPercent: 85},
+		{raw: "0%", wantPercent: 0},
+		{raw: "100%", wantPercent: 100},
+		{raw: "20Gi", wantBytes: 20 << 30},
+		{raw: "500M", wantBytes: 500_000_000},
+		{raw: "101%", wantErr: true},
+		{raw: "-1%", wantErr: true},
+		{raw: "NaN%", wantErr: true},
+		{raw: "+Inf%", wantErr: true},
+		{raw: "-Inf%", wantErr: true},
+		{raw: "-1Gi", wantErr: true},
+		{raw: "ten", wantErr: true},
+		{raw: "", wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.raw, func(t *testing.T) {
+			got, err := ParseThreshold(c.raw)
+			if c.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, Threshold{Percent: c.wantPercent, Bytes: c.wantBytes, IsPercent: c.wantBytes == 0}, got)
 		})
 	}
 }

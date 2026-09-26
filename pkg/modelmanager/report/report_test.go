@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -192,6 +193,33 @@ func TestReportWritesNothingWhenNothingChanged(t *testing.T) {
 	assert.Equal(t, int64(2), env.writes.Load(), "crossing a step writes once")
 }
 
+// TestReportWritesARetryTimeInSeconds pins that a failed record's retry time is reported in
+// seconds: the ledger keeps nanoseconds but a stored metav1.Time is read back in seconds, so an
+// untruncated value never compares equal to the stored one and every report writes.
+func TestReportWritesARetryTimeInSeconds(t *testing.T) {
+	env := newTestEnv(t, validSpec())
+	require.NoError(t, env.store.WriteDigest(hexOf('d'), store.DigestRecord{
+		Failures: 1, Reason: download.ReasonIntegrityMismatch, Message: "config.json: hash mismatch",
+		RetryTime: testNow.Add(time.Minute).Add(123456789 * time.Nanosecond),
+	}))
+
+	require.NoError(t, env.r.Report(context.Background()))
+	nms := env.nms(t)
+	require.Len(t, nms.Status.Models, 1)
+	require.NotNil(t, nms.Status.Models[0].RetryTime)
+	assert.Zero(t, nms.Status.Models[0].RetryTime.Nanosecond(), "a stored metav1.Time keeps seconds")
+
+	// What the apiserver returns is the status in seconds.
+	nms.Status.Models[0].RetryTime.Time = nms.Status.Models[0].RetryTime.Truncate(time.Second)
+	require.NoError(t, env.cli.Status().Update(context.Background(), nms))
+	writes := env.writes.Load()
+
+	for range 3 {
+		require.NoError(t, env.r.Report(context.Background()))
+	}
+	assert.Equal(t, writes, env.writes.Load(), "a failure read back from the API writes nothing")
+}
+
 func TestReportRefusesAnInvalidSpec(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -244,6 +272,32 @@ func TestReportNeverCollectsBeforeTheSpecApplies(t *testing.T) {
 	assert.Contains(t, ready.Message, "collection skipped")
 }
 
+// TestReportStopsCollectingWhenTheSpecBecomesInvalid pins that a spec failing its check after a
+// valid one applied stops collection instead of collecting under the previous watermarks, which a
+// real node was measured to do while it reported the configuration as not in force.
+func TestReportStopsCollectingWhenTheSpecBecomesInvalid(t *testing.T) {
+	env := newTestEnv(t, validSpec())
+	require.NoError(t, env.r.Report(context.Background()))
+	_, _, unavailable := env.r.Watermarks()
+	require.Empty(t, unavailable, "the valid spec applied")
+
+	nms := env.nms(t)
+	nms.Spec.Hub.CABundleConfigMap = "hub-ca" // missing: the new spec fails its check
+	require.NoError(t, env.cli.Update(context.Background(), nms))
+	env.usage.Used = 950
+	env.publish(t, hexOf('a'), 100)
+	require.NoError(t, env.store.WriteDigest(hexOf('a'), store.DigestRecord{LastUsedTime: testNow.Add(-2 * time.Hour)}))
+
+	require.NoError(t, env.r.Report(context.Background()))
+	assert.True(t, env.store.IsPublished(hexOf('a')),
+		"an unreferenced tree past its grace above the high watermark stays under an invalid spec")
+	_, _, unavailable = env.r.Watermarks()
+	assert.Contains(t, unavailable, "fails its check")
+	ready := findCondition(env.nms(t).Status.Conditions, ConditionReady)
+	assert.Equal(t, ReasonInvalidConfiguration, ready.Reason)
+	assert.Contains(t, ready.Message, "collection skipped")
+}
+
 func TestReportKeepsTheClientOfAnUnchangedSpec(t *testing.T) {
 	env := newTestEnv(t, validSpec())
 	require.NoError(t, env.r.Report(context.Background()))
@@ -276,20 +330,70 @@ func TestReportCapsTheWatermarkOnKubeletsFilesystem(t *testing.T) {
 	spec := validSpec()
 	spec.Watermarks = workercore.NodeModelStoreWatermarks{HighPercent: 90, LowPercent: 85}
 	env := newTestEnv(t, spec)
-	env.r.KubeletCap = func(uint64) *gc.Cap { return &gc.Cap{Percent: 80, Source: "kubelet's default thresholds"} }
+	env.r.KubeletCap = func(*workercore.NodeModelStoreKubelet, uint64) *gc.Cap {
+		return &gc.Cap{Percent: 80, Source: "kubelet's default thresholds"}
+	}
 
 	require.NoError(t, env.r.Report(context.Background()))
-	high, low, ok := env.r.Watermarks()
-	require.True(t, ok)
+	high, low, unavailable := env.r.Watermarks()
+	require.Empty(t, unavailable)
 	assert.Equal(t, []int32{80, 79}, []int32{high, low})
 	assert.Contains(t, findCondition(env.nms(t).Status.Conditions, ConditionReady).Message, "capped at 80%")
+}
+
+// TestReportFollowsTheKubeletThresholdsInTheSpec pins that the cap comes from the node's spec, so a
+// change of kubelet's thresholds the worker read reaches the watermarks at the next report, without a
+// restart, and that a node whose thresholds could not be read says so.
+func TestReportFollowsTheKubeletThresholdsInTheSpec(t *testing.T) {
+	spec := validSpec()
+	spec.Watermarks = workercore.NodeModelStoreWatermarks{HighPercent: 90, LowPercent: 85}
+	env := newTestEnv(t, spec)
+	env.r.KubeletCap = func(k *workercore.NodeModelStoreKubelet, total uint64) *gc.Cap {
+		c := gc.KubeletCap(k, total)
+		return &c
+	}
+
+	require.NoError(t, env.r.Report(context.Background()))
+	high, _, _ := env.r.Watermarks()
+	assert.Equal(t, int32(80), high, "no reading: kubelet's defaults")
+	assert.Contains(t, findCondition(env.nms(t).Status.Conditions, ConditionReady).Message,
+		"effective kubelet configuration could not be read")
+
+	nms := env.nms(t)
+	nms.Spec.Kubelet = &workercore.NodeModelStoreKubelet{NodefsAvailable: "30%", ImageGCHighThresholdPercent: ptr.To[int32](95)}
+	require.NoError(t, env.cli.Update(context.Background(), nms))
+	require.NoError(t, env.r.Report(context.Background()))
+	high, _, _ = env.r.Watermarks()
+	assert.Equal(t, int32(65), high, "100 - 30 - 5, applied from the spec at the next report")
+	assert.NotContains(t, findCondition(env.nms(t).Status.Conditions, ConditionReady).Message, "could not be read")
+}
+
+// TestReportSaysAThresholdWasSetAside pins the #634 message: a quantity threshold the filesystem
+// cannot hold is set aside for kubelet's default, and Ready says so even when the resulting cap does
+// not lower the watermark, the default Setting's case.
+func TestReportSaysAThresholdWasSetAside(t *testing.T) {
+	spec := validSpec()
+	spec.Kubelet = &workercore.NodeModelStoreKubelet{NodefsAvailable: "2000"} // bytes, on a 1000-byte filesystem
+	env := newTestEnv(t, spec)
+	env.r.KubeletCap = func(k *workercore.NodeModelStoreKubelet, total uint64) *gc.Cap {
+		c := gc.KubeletCap(k, total)
+		return &c
+	}
+
+	require.NoError(t, env.r.Report(context.Background()))
+	high, _, _ := env.r.Watermarks()
+	assert.Equal(t, int32(80), high, "the default cap, not the 2% floor")
+	assert.Contains(t, findCondition(env.nms(t).Status.Conditions, ConditionReady).Message,
+		"nodefs.available 2000 is not below the filesystem's 1000 bytes")
 }
 
 func TestReportKeepsTheKubeletCapWhenUsageCannotBeRead(t *testing.T) {
 	spec := validSpec()
 	spec.Watermarks = workercore.NodeModelStoreWatermarks{HighPercent: 90, LowPercent: 85}
 	capped := func(env *testEnv) {
-		env.r.KubeletCap = func(uint64) *gc.Cap { return &gc.Cap{Percent: 80, Source: "kubelet's default thresholds"} }
+		env.r.KubeletCap = func(*workercore.NodeModelStoreKubelet, uint64) *gc.Cap {
+			return &gc.Cap{Percent: 80, Source: "kubelet's default thresholds"}
+		}
 	}
 
 	t.Run("without a reading yet the spec is not applied and nothing is collected", func(t *testing.T) {
@@ -301,8 +405,8 @@ func TestReportKeepsTheKubeletCapWhenUsageCannotBeRead(t *testing.T) {
 		env.usageFails = 1
 
 		require.NoError(t, env.r.Report(context.Background()))
-		_, _, ok := env.r.Watermarks()
-		assert.False(t, ok, "no uncapped watermarks")
+		_, _, unavailable := env.r.Watermarks()
+		assert.NotEmpty(t, unavailable, "no uncapped watermarks")
 		assert.True(t, env.store.IsPublished(hexOf('a')))
 		ready := findCondition(env.nms(t).Status.Conditions, ConditionReady)
 		assert.Contains(t, ready.Message, "kubelet cap")
@@ -316,8 +420,8 @@ func TestReportKeepsTheKubeletCapWhenUsageCannotBeRead(t *testing.T) {
 		env.usageFails = 1
 
 		require.NoError(t, env.r.Report(context.Background()))
-		high, low, ok := env.r.Watermarks()
-		require.True(t, ok)
+		high, low, unavailable := env.r.Watermarks()
+		require.Empty(t, unavailable)
 		assert.Equal(t, []int32{80, 79}, []int32{high, low})
 		assert.Same(t, first, env.r.client)
 	})

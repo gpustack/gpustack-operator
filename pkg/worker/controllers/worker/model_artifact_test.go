@@ -101,6 +101,8 @@ func newTestArtifactEnv(t *testing.T, objs ...ctrlcli.Object) *testArtifactEnv {
 	hub := newTestArtifactHub(t)
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
 		WithStatusSubresource(&workercore.ModelArtifact{}).
+		WithIndex(&workercore.ModelArtifact{}, IndexingModelArtifactByManifestDigest, indexModelArtifactByManifestDigest).
+		WithIndex(&workercore.NodeModelStore{}, IndexingNodeModelStoreByModelDigest, indexNodeModelStoreByModelDigest).
 		WithObjects(objs...).Build()
 	clock := &testArtifactClock{now: time.Date(2026, 9, 25, 6, 0, 0, 0, time.UTC)}
 	recorder := ctrlrecord.NewFakeRecorder(16)
@@ -674,6 +676,27 @@ func TestModelArtifactReconcileJudgesTheTokenOnlyWhenItChanges(t *testing.T) {
 	env.clock.now = env.clock.now.Add(25 * time.Hour)
 	env.reconcile(t, "qwen")
 	assert.Empty(t, env.recorder.Events, "an unchanged rejected token is not reported again")
+}
+
+func TestEarliestResult(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b ctrl.Result
+		want ctrl.Result
+	}{
+		{name: "neither asks", a: ctrl.Result{}, b: ctrl.Result{}, want: ctrl.Result{}},
+		{name: "one asks for a timed pass", a: ctrl.Result{}, b: ctrl.Result{RequeueAfter: time.Minute}, want: ctrl.Result{RequeueAfter: time.Minute}},
+		{name: "the sooner timed pass wins", a: ctrl.Result{RequeueAfter: time.Minute}, b: ctrl.Result{RequeueAfter: time.Hour}, want: ctrl.Result{RequeueAfter: time.Minute}},
+		{name: "the sooner timed pass wins reversed", a: ctrl.Result{RequeueAfter: time.Hour}, b: ctrl.Result{RequeueAfter: time.Minute}, want: ctrl.Result{RequeueAfter: time.Minute}},
+		{name: "a bare requeue survives a timed ask", a: ctrl.Result{Requeue: true}, b: ctrl.Result{RequeueAfter: time.Minute}, want: ctrl.Result{Requeue: true}},
+		{name: "a bare requeue survives a timed ask reversed", a: ctrl.Result{RequeueAfter: time.Minute}, b: ctrl.Result{Requeue: true}, want: ctrl.Result{Requeue: true}},
+		{name: "a bare requeue survives an empty ask", a: ctrl.Result{}, b: ctrl.Result{Requeue: true}, want: ctrl.Result{Requeue: true}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, earliestResult(c.a, c.b))
+		})
+	}
 }
 
 // ctrlclientWithWatch is the fake client's own interface, which the interceptor wraps.

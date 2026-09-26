@@ -446,6 +446,11 @@ func (in ModelArtifactList) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelArtifactNodes) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelArtifactNodes"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelArtifactPersistentVolumeClaimSource) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelArtifactPersistentVolumeClaimSource"
 }
@@ -603,6 +608,11 @@ func (in NodeModelStoreDownload) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in NodeModelStoreHub) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.NodeModelStoreHub"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NodeModelStoreKubelet) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.NodeModelStoreKubelet"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

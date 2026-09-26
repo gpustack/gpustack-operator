@@ -52,6 +52,10 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstanceTypeFlavorList{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_InstanceTypeFlavorList(ref),
 		v1.InstanceTypeFlavorSpec{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_InstanceTypeFlavorSpec(ref),
 		v1.InstanceTypeList{}.OpenAPIModelName():                                     schema_gpustack_api_worker_v1_InstanceTypeList(ref),
+		v1.ModelArtifact{}.OpenAPIModelName():                                        schema_gpustack_api_worker_v1_ModelArtifact(ref),
+		v1.ModelArtifactList{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1_ModelArtifactList(ref),
+		v1.ModelArtifactProgress{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1_ModelArtifactProgress(ref),
+		v1.ModelArtifactProgressReason{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_ModelArtifactProgressReason(ref),
 		v1.ModelDeployment{}.OpenAPIModelName():                                      schema_gpustack_api_worker_v1_ModelDeployment(ref),
 		v1.ModelDeploymentCacheHit{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1_ModelDeploymentCacheHit(ref),
 		v1.ModelDeploymentList{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1_ModelDeploymentList(ref),
@@ -60,6 +64,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.ModelDeploymentMetricWindow{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_ModelDeploymentMetricWindow(ref),
 		v1.ModelDeploymentMetrics{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_ModelDeploymentMetrics(ref),
 		v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref),
+		v1.NodeModelStore{}.OpenAPIModelName():                                       schema_gpustack_api_worker_v1_NodeModelStore(ref),
+		v1.NodeModelStoreList{}.OpenAPIModelName():                                   schema_gpustack_api_worker_v1_NodeModelStoreList(ref),
 		v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref),
 		v1alpha1.Accelerator{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1alpha1_Accelerator(ref),
 		v1alpha1.AcceleratorAllocation{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref),
@@ -149,6 +155,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelArtifact{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1alpha1_ModelArtifact(ref),
 		v1alpha1.ModelArtifactHubSource{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_ModelArtifactHubSource(ref),
 		v1alpha1.ModelArtifactList{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelArtifactList(ref),
+		v1alpha1.ModelArtifactNodes{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_ModelArtifactNodes(ref),
 		v1alpha1.ModelArtifactPersistentVolumeClaimSource{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_ModelArtifactPersistentVolumeClaimSource(ref),
 		v1alpha1.ModelArtifactResolved{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelArtifactResolved(ref),
 		v1alpha1.ModelArtifactSource{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelArtifactSource(ref),
@@ -181,6 +188,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.NodeModelStoreCapacity{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_NodeModelStoreCapacity(ref),
 		v1alpha1.NodeModelStoreDownload{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_NodeModelStoreDownload(ref),
 		v1alpha1.NodeModelStoreHub{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_NodeModelStoreHub(ref),
+		v1alpha1.NodeModelStoreKubelet{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_NodeModelStoreKubelet(ref),
 		v1alpha1.NodeModelStoreList{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_NodeModelStoreList(ref),
 		v1alpha1.NodeModelStoreModel{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_NodeModelStoreModel(ref),
 		v1alpha1.NodeModelStoreSpec{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_NodeModelStoreSpec(ref),
@@ -1965,6 +1973,257 @@ func schema_gpustack_api_worker_v1_InstanceTypeList(ref common.ReferenceCallback
 	}
 }
 
+func schema_gpustack_api_worker_v1_ModelArtifact(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifact is the v1 view of a model's weights: where they come from and where they are.\n\nIt proxies the v1alpha1 resource for every verb and serves the progress subresource. IT HAS NO WRITABLE STATUS SUBRESOURCE: the proxy writes with the worker's identity, and the status guard admits exactly that identity to a ModelArtifact's status, which mounts are authorized by. The status is read through the object.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelArtifactSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelArtifactStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelArtifactSpec{}.OpenAPIModelName(), v1alpha1.ModelArtifactStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelArtifactList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifactList holds the list of ModelArtifacts.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelArtifact{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.ModelArtifact{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelArtifactProgress(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifactProgress is where a ModelArtifact's content is across the cluster's nodes, computed when asked and never stored: the nodes' NodeModelStores, with each downloading node's bytes read live from its plugin where it answers.\n\nIt is an aggregate and NAMES NO NODE: it is namespaced and a tenant reads it, and node names would hand every tenant the cluster's topology. The per-node view is the NodeModelStore.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"timestamp": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Timestamp is when it was computed.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"manifestDigest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ManifestDigest and SizeBytes are the content's, from the artifact's resolution.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"sizeBytes": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int64",
+						},
+					},
+					"ready": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Ready, Downloading and Failed count the nodes holding the content published, downloading it, and waiting to retry a failed attempt.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"downloading": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int32",
+						},
+					},
+					"failed": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int32",
+						},
+					},
+					"downloadingPercent": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DownloadingPercent is the mean progress of the downloading nodes, each a whole copy, in whole percent; absent while no node downloads.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"downloadingBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DownloadingBytes is what the downloading nodes hold of it, summed.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"live": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Live counts the downloading nodes whose bytes were read from their plugin for this answer; the others contribute the value their node last wrote, on its 5% threshold.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"failureReasons": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "FailureReasons counts the failed nodes by reason, without a message or a node.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelArtifactProgressReason{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Reason says why there is nothing to count: the artifact is not resolved, or its claim source is mounted from its volume and never downloaded.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"timestamp", "ready", "downloading", "failed", "downloadingBytes", "live"},
+			},
+		},
+		Dependencies: []string{
+			v1.ModelArtifactProgressReason{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelArtifactProgressReason(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifactProgressReason is how many failed nodes share a reason.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"count": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int32",
+						},
+					},
+				},
+				Required: []string{"reason", "count"},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1_ModelDeployment(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -2554,6 +2813,103 @@ func schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref common.
 				Required: []string{"server"},
 			},
 		},
+	}
+}
+
+func schema_gpustack_api_worker_v1_NodeModelStore(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStore is the v1 view of one node's model cache: what the node holds, how far its downloads are, and its effective configuration. Its writers, the worker and the node's plugin, write the v1alpha1 resource; this view serves get, list, watch and delete, the last for the garbage collector, which watches the group's preferred version.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.NodeModelStoreSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.NodeModelStoreStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.NodeModelStoreSpec{}.OpenAPIModelName(), v1alpha1.NodeModelStoreStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_NodeModelStoreList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStoreList holds the list of NodeModelStores.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.NodeModelStore{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.NodeModelStore{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -7738,6 +8094,56 @@ func schema_gpustack_api_worker_v1alpha1_ModelArtifactList(ref common.ReferenceC
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelArtifactNodes(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifactNodes counts the nodes whose NodeModelStore lists an artifact's digest, by state. It is written when a count changes or the percentage moves to another step, at most once every 30 seconds, so a fleet downloading the content does not rewrite the artifact at every node's write.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"ready": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Ready counts the nodes holding the content published.",
+							Default:     0,
+							Minimum:     ptr.To[float64](0),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"downloading": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Downloading counts the nodes downloading it.",
+							Default:     0,
+							Minimum:     ptr.To[float64](0),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"failed": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Failed counts the nodes whose last attempt failed and that wait to retry.",
+							Default:     0,
+							Minimum:     ptr.To[float64](0),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"downloadingPercent": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DownloadingPercent is the mean progress of the downloading nodes, each a whole copy, rounded down to a multiple of 5. Ready nodes are counted, not averaged in. Absent while no node downloads.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](100),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"ready", "downloading", "failed"},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelArtifactPersistentVolumeClaimSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -7943,6 +8349,12 @@ func schema_gpustack_api_worker_v1alpha1_ModelArtifactStatus(ref common.Referenc
 							Ref:         ref(v1alpha1.ModelArtifactResolved{}.OpenAPIModelName()),
 						},
 					},
+					"nodes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Nodes is where the content is: how many nodes hold it ready, are downloading it or failed to, and how far the downloading ones are. It counts the content, the manifest digest, so artifacts with the same digest see the same nodes; it holds numbers only. Absent for a claim source and before the first resolution.",
+							Ref:         ref(v1alpha1.ModelArtifactNodes{}.OpenAPIModelName()),
+						},
+					},
 					"conditions": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
@@ -7971,7 +8383,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelArtifactStatus(ref common.Referenc
 			},
 		},
 		Dependencies: []string{
-			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelArtifactResolved{}.OpenAPIModelName()},
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelArtifactNodes{}.OpenAPIModelName(), v1alpha1.ModelArtifactResolved{}.OpenAPIModelName()},
 	}
 }
 
@@ -9481,6 +9893,42 @@ func schema_gpustack_api_worker_v1alpha1_NodeModelStoreHub(ref common.ReferenceC
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_NodeModelStoreKubelet(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodeModelStoreKubelet is the part of a node's effective kubelet configuration that bounds a cache sharing kubelet's filesystem: kubelet evicts Pods below the available thresholds and collects images above the image threshold.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"nodefsAvailable": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodefsAvailable is evictionHard[\"nodefs.available\"] as kubelet reports it, a percentage such as \"10%\" or a quantity such as \"20Gi\"; empty when kubelet sets none.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"imagefsAvailable": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagefsAvailable is evictionHard[\"imagefs.available\"], in the same forms; empty when kubelet sets none.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"imageGCHighThresholdPercent": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImageGCHighThresholdPercent is the disk usage at which kubelet starts collecting images.",
+							Minimum:     ptr.To[float64](0),
+							Maximum:     ptr.To[float64](100),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_NodeModelStoreList(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -9561,6 +10009,22 @@ func schema_gpustack_api_worker_v1alpha1_NodeModelStoreModel(ref common.Referenc
 							Format:      "int64",
 						},
 					},
+					"downloadedBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DownloadedBytes is how much of a Downloading entry's content is on the node's disk, the bytes an earlier attempt left for a resume included, so it never goes back. It is written on thresholds, not at every byte: once the entry moved by 5% of SizeBytes and 30 seconds passed since the node's status was last written. Absent outside Downloading.",
+							Minimum:     ptr.To[float64](0),
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"source": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Source is where the content's bytes come from: Hub, the model hub. It names no repository or endpoint. Content published before the field existed has none.\n\n\nPossible enum values:\n - `\"Hub\"` is a download from the model hub.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Hub"},
+						},
+					},
 					"referenced": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Referenced says some Pod mounts the content. Which Pod is never recorded.",
@@ -9631,12 +10095,18 @@ func schema_gpustack_api_worker_v1alpha1_NodeModelStoreSpec(ref common.Reference
 							Ref:         ref(v1alpha1.NodeModelStoreHub{}.OpenAPIModelName()),
 						},
 					},
+					"kubelet": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kubelet is the node's effective kubelet thresholds the cache's cap derives from, as the worker read them from kubelet's configz endpoint, which merges kubelet's flags, configuration file and drop-ins. It is absent while they could not be read, and the plugin then assumes kubelet's defaults and says so.\n\nThe worker writes it; nothing else does. It is an observed value held in the spec, not the status, because the plugin reads its whole configuration from its spec and owns the status, and reading configz needs the nodes/proxy permission, which the plugin never holds: it reaches every kubelet endpoint. Nothing reconciles toward it as a desired state: the worker refreshes the reading and writes what it read, so a hand edit holds only until the next reading.",
+							Ref:         ref(v1alpha1.NodeModelStoreKubelet{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"watermarks", "download", "hub"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.NodeModelStoreDownload{}.OpenAPIModelName(), v1alpha1.NodeModelStoreHub{}.OpenAPIModelName(), v1alpha1.NodeModelStoreWatermarks{}.OpenAPIModelName()},
+			v1alpha1.NodeModelStoreDownload{}.OpenAPIModelName(), v1alpha1.NodeModelStoreHub{}.OpenAPIModelName(), v1alpha1.NodeModelStoreKubelet{}.OpenAPIModelName(), v1alpha1.NodeModelStoreWatermarks{}.OpenAPIModelName()},
 	}
 }
 

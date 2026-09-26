@@ -68,6 +68,26 @@ func (v *verifier) check(path string) error {
 	return nil
 }
 
+// ResumableOffset is what a download of a file at dest with its checkpoint at path carries over
+// from a previous attempt: the checkpoint's offset while it is valid for the file on disk, else 0.
+// It decides as resume does, without touching the file, so a caller counts the carried-over bytes
+// before the download starts.
+func ResumableOffset(dest, path string, size int64) int64 {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	var cp checkpoint
+	if json.Unmarshal(b, &cp) != nil || cp.Offset < 0 || cp.Offset > size {
+		return 0
+	}
+	if info, err := os.Stat(dest); err != nil || info.Size() < cp.Offset {
+		return 0
+	}
+
+	return cp.Offset
+}
+
 // checkpoint is what a resume starts from: the bytes before Offset were hashed, and synced to disk
 // before this was written, so the hash state covers bytes that are really there.
 type checkpoint struct {

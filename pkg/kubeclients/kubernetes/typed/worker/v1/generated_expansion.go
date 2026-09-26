@@ -23,4 +23,8 @@ type InstanceTypeExpansion interface{}
 
 type InstanceTypeFlavorExpansion interface{}
 
+type ModelArtifactExpansion interface{}
+
 type ModelDeploymentExpansion interface{}
+
+type NodeModelStoreExpansion interface{}

@@ -49,8 +49,16 @@ func (c *FakeWorkerV1) InstanceTypeFlavors() v1.InstanceTypeFlavorInterface {
 	return newFakeInstanceTypeFlavors(c)
 }
 
+func (c *FakeWorkerV1) ModelArtifacts(namespace string) v1.ModelArtifactInterface {
+	return newFakeModelArtifacts(c, namespace)
+}
+
 func (c *FakeWorkerV1) ModelDeployments(namespace string) v1.ModelDeploymentInterface {
 	return newFakeModelDeployments(c, namespace)
+}
+
+func (c *FakeWorkerV1) NodeModelStores() v1.NodeModelStoreInterface {
+	return newFakeNodeModelStores(c)
 }
 
 // RESTClient returns a RESTClient that is used to communicate

@@ -17,6 +17,18 @@ type NodeModelStoreSpecApplyConfiguration struct {
 	Download *NodeModelStoreDownloadApplyConfiguration `json:"download,omitempty"`
 	// Hub is how the node reaches the model hub.
 	Hub *NodeModelStoreHubApplyConfiguration `json:"hub,omitempty"`
+	// Kubelet is the node's effective kubelet thresholds the cache's cap derives from, as the worker
+	// read them from kubelet's configz endpoint, which merges kubelet's flags, configuration file and
+	// drop-ins. It is absent while they could not be read, and the plugin then assumes kubelet's
+	// defaults and says so.
+	//
+	// The worker writes it; nothing else does. It is an observed value held in the spec, not the
+	// status, because the plugin reads its whole configuration from its spec and owns the status,
+	// and reading configz needs the nodes/proxy permission, which the plugin never holds: it
+	// reaches every kubelet endpoint. Nothing reconciles toward it as a desired state: the worker
+	// refreshes the reading and writes what it read, so a hand edit holds only until the next
+	// reading.
+	Kubelet *NodeModelStoreKubeletApplyConfiguration `json:"kubelet,omitempty"`
 }
 
 // NodeModelStoreSpecApplyConfiguration constructs a declarative configuration of the NodeModelStoreSpec type for use with
@@ -46,5 +58,13 @@ func (b *NodeModelStoreSpecApplyConfiguration) WithDownload(value *NodeModelStor
 // If called multiple times, the Hub field is set to the value of the last call.
 func (b *NodeModelStoreSpecApplyConfiguration) WithHub(value *NodeModelStoreHubApplyConfiguration) *NodeModelStoreSpecApplyConfiguration {
 	b.Hub = value
+	return b
+}
+
+// WithKubelet sets the Kubelet field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Kubelet field is set to the value of the last call.
+func (b *NodeModelStoreSpecApplyConfiguration) WithKubelet(value *NodeModelStoreKubeletApplyConfiguration) *NodeModelStoreSpecApplyConfiguration {
+	b.Kubelet = value
 	return b
 }

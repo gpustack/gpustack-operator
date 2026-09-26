@@ -42,6 +42,10 @@ spec:                                        # the worker: this node's effective
     httpsProxy: ""
     noProxy: ""
     caBundleConfigMap: ""                    # a ConfigMap in the operator namespace, key ca.crt
+  kubelet:                                   # the node's effective kubelet thresholds, from its configz
+    nodefsAvailable: "10%"                   # evictionHard["nodefs.available"]; empty = kubelet sets none
+    imagefsAvailable: ""                     # evictionHard["imagefs.available"]
+    imageGCHighThresholdPercent: 85
 status:                                      # the plugin on that node: its facts
   observedGeneration: 3                      # the spec generation the plugin applies
   capacity:
@@ -57,6 +61,12 @@ status:                                      # the plugin on that node: its fact
       reason: ""                             # Failed: see Failure reasons
       message: ""
       retryTime: null                        # Failed: the earliest next attempt
+      source: Hub                            # where its bytes came from; none on older trees
+    - digest: sha256:7a1e...
+      state: Downloading
+      sizeBytes: 145424101604                # set once the manifest is listed
+      downloadedBytes: 61741236224           # what the attempt holds, a resume's checkpoints included
+      source: Hub
   conditions:
     - {type: Ready, status: "True", reason: Serving}
     - {type: CapacityLow, status: "False", reason: WithinWatermarks}
@@ -70,15 +80,20 @@ status:                                      # the plugin on that node: its fact
   with the file and the URL, is in the plugin's log.
 - **`status` is rebuilt from the node**, never from the previous status: from what is on disk and
   what is mounted. A plugin restart rewrites it.
-- **It is written only on change**: an entry's state, `referenced`, the hour of `lastUsedTime`,
-  `usedPercent`, `storedBytes`, a condition, or `observedGeneration`. A quiet node writes nothing.
+- **Download progress is written on thresholds.** The progress fields, `downloadedBytes` and,
+  while a download runs, `storedBytes`, are written only once 30 seconds passed since the last write
+  and some download moved by 5% of its size: at most twenty progress writes per download, and at
+  most two a minute.
+- **Everything else is written on change**, at once and with the current progress: an entry's state,
+  `referenced`, the hour of `lastUsedTime`, `usedPercent`, a condition, `observedGeneration`. The
+  plugin's own writes never trigger its next report, and a quiet node writes nothing.
 - **More content than 256 entries**: the referenced ones are kept, then the most recently used; the
   `Ready` message counts what was left out.
 
 | Condition | Reason | Meaning |
 | --- | --- | --- |
 | `Ready=True` | `Serving` | the plugin serves mounts and applies `observedGeneration`; the message says when the high watermark is capped |
-| `Ready=False` | `InvalidConfiguration` | `spec` or its CA ConfigMap fails the plugin's own check; no download starts, mounts of published content still work |
+| `Ready=False` | `InvalidConfiguration` | `spec` or its CA ConfigMap fails the plugin's own check; no download starts and nothing is collected, not under the previous `spec` either; mounts of published content still work |
 | `CapacityLow=True` | `NothingToRemove` | usage is above the high watermark and every tree on the filesystem is in use |
 | `CapacityLow=False` | `WithinWatermarks` | collection can keep usage within the watermarks |
 
@@ -88,7 +103,13 @@ status:                                      # the plugin on that node: its fact
 | --- | --- | --- |
 | the object | worker | created when the node's `CSINode` lists `model.csi.gpustack.ai`; removed with the Node, and all of them while the `CSIDriver` object does not exist |
 | `spec` | worker | the merge of the configuration layers, rewritten within a minute of a Setting change; never a value that fails its check |
+| `spec.kubelet` | worker | the node's kubelet thresholds, read through `nodes/<node>/proxy/configz` when the object is written and every 30 minutes; a failed read keeps the last reading, and a node never read has none. The plugin gets no `nodes/proxy` access |
 | `status` | the plugin on that node | admitted only through the status webhook below |
+
+With `kubectl`, a write to the object names `v1alpha1` (`nodemodelstores.v1alpha1.worker.gpustack.ai`):
+the group's preferred version is the [`v1` view](model-artifact-views.md#the-v1-views), which serves
+reads and `delete` only. A deleted object is created again by the worker while its node runs the
+plugin.
 
 The worker does **not** delete an object when the driver leaves `CSINode`, because every plugin
 restart unregisters it for a moment. A node the plugin no longer runs on keeps a stale object whose
@@ -163,8 +184,10 @@ to about two minutes later.
 
 1. **Manifest.** The tree at `status.resolved.revision` is listed with the mount's credential and
    filtered by the artifact's patterns; its canonical digest must equal `manifestDigest`.
-2. **Capacity.** The manifest's size is reserved against the high watermark, collecting first when
-   it does not fit.
+2. **Capacity.** The rest of the manifest's size, together with what every other running download
+   has yet to write, is reserved against the high watermark, collecting first when it does not fit;
+   two downloads that each fit and together do not are never both admitted. The reservation is held
+   until the attempt ends.
 3. **Download.** From `{endpoint}/{repository}/resolve/{commit}/{path}`, redirects followed, through
    `spec.hub`'s proxy and CA. At most `download.concurrency` requests run on the node across every
    download, under one `bytesPerSecond` limit, and large files are fetched as parallel byte ranges.
@@ -224,10 +247,13 @@ five minutes. It removes, oldest `lastUsedTime` first and down to the low waterm
   after the last failure, so `status.models` stops listing them.
 
 It never removes a referenced tree or a partial being written, and it reads references from the
-node's own mounts, never from the API. When the references cannot be read, or no configuration has
-been applied yet so there are no watermarks, a collection removes no tree and the `Ready` message
-says `collection skipped` and why. How the watermarks are capped when the cache shares kubelet's
+node's own mounts, never from the API. How the watermarks are capped when the cache shares kubelet's
 filesystem is under [the capacity rule](../operation/model-store.md#the-capacity-rule).
+
+When the references cannot be read, no configuration has been applied yet, or the node's `spec`
+fails its check, a collection removes nothing, a stale partial included, and the `Ready` message
+says `collection skipped` and why. A `spec` that fails after an earlier one applied does not leave
+the earlier watermarks in force.
 
 ## Metrics
 
@@ -244,6 +270,11 @@ Served on the plugin's HTTPS port (`modelManager.securePort`, 32444), beside `/r
 
 No label carries a namespace, an artifact, a repository or a Pod.
 
+The same port serves `GET /model/downloads`: the running downloads, each a `digest`,
+`downloadedBytes`, `sizeBytes` and `source`. The ModelArtifact
+[progress](model-artifact-views.md#the-progress-subresource) subresource reads it for live bytes
+between the status thresholds.
+
 ## Requirements and limits
 
 - **Kubernetes 1.29** for node delivery, the floor the ModelArtifact reference states, though the
@@ -251,8 +282,9 @@ No label carries a namespace, an artifact, a repository or a Pod.
   tokens carry since 1.22, and the worker learns its own identity with a `SelfSubjectReview` (GA in
   1.28) or, before that, a `TokenReview`.
 - **A Hugging Face source only.** A claim artifact is always mounted directly.
-- **No progress in the API.** A cold mount's bytes-of-total appear only in the Pod's `FailedMount`
-  events.
+- **kubelet's configz**, served while its debugging handlers are enabled (the default). Without it
+  a node has no `spec.kubelet` and its cap assumes kubelet's defaults, which the `Ready` message
+  says.
 - **No placement preference.** Node delivery schedules Pods as before; a node without the digest
   downloads it.
 - **Every download comes from the Hub**, directly or through the proxy; nodes do not fetch from each
@@ -261,7 +293,8 @@ No label carries a namespace, an artifact, a repository or a Pod.
 ---
 
 **See also** — [Model Artifact Reference](model-artifact.md) for the artifact and its other
-deliveries · [Model Store Operations](../operation/model-store.md) for enabling, configuring and
+deliveries · [Model Artifact Views Reference](model-artifact-views.md) for the `v1` views and
+`progress` · [Model Store Operations](../operation/model-store.md) for enabling, configuring and
 upgrading · [Settings](../settings.md#online-adjustable-settings) for the Settings `spec` is built
 from.
 
