@@ -101,6 +101,8 @@ func newTestArtifactEnv(t *testing.T, objs ...ctrlcli.Object) *testArtifactEnv {
 	hub := newTestArtifactHub(t)
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
 		WithStatusSubresource(&workercore.ModelArtifact{}).
+		WithIndex(&workercore.ModelArtifact{}, IndexingModelArtifactByManifestDigest, indexModelArtifactByManifestDigest).
+		WithIndex(&workercore.NodeModelStore{}, IndexingNodeModelStoreByModelDigest, indexNodeModelStoreByModelDigest).
 		WithObjects(objs...).Build()
 	clock := &testArtifactClock{now: time.Date(2026, 9, 25, 6, 0, 0, 0, time.UTC)}
 	recorder := ctrlrecord.NewFakeRecorder(16)

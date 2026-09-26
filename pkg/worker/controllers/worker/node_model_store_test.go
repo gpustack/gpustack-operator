@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -63,7 +64,10 @@ func newTestNodeModelStoreEnv(t *testing.T, objs ...ctrlcli.Object) (*NodeModelS
 		WithStatusSubresource(&workercore.NodeModelStore{}).
 		WithObjects(objs...).Build()
 
-	return &NodeModelStoreReconciler{Client: cli}, cli
+	// No kubelet answers in a unit test: the node keeps kubelet's defaults unless a case sets a reader.
+	return &NodeModelStoreReconciler{Client: cli, ReadKubelet: func(context.Context, string) (*workercore.NodeModelStoreKubelet, error) {
+		return nil, errors.New("no kubelet in a unit test")
+	}}, cli
 }
 
 func reconcileNodeModelStore(t *testing.T, r *NodeModelStoreReconciler, node string) ctrl.Result {

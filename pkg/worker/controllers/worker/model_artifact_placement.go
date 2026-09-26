@@ -524,13 +524,25 @@ func (r *ModelDeploymentReconciler) mapModelDeploymentNodeModelStore(ctx context
 // deployment reads nothing else from the node, and the capacity and conditions move during every
 // download without changing what any deployment sees.
 func nodeModelStoreModelsChanged() ctrlpredicate.Predicate {
+	// A download's progress moves on every threshold the node writes, and no deployment reads it.
 	return ctrlpredicate.Funcs{
 		UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 			o, okOld := e.ObjectOld.(*workercore.NodeModelStore)
 			n, okNew := e.ObjectNew.(*workercore.NodeModelStore)
-			return !okOld || !okNew || !kubemeta.DeepEqual(o.Status.Models, n.Status.Models)
+			return !okOld || !okNew || !kubemeta.DeepEqual(modelsWithoutProgress(o), modelsWithoutProgress(n))
 		},
 	}
+}
+
+// modelsWithoutProgress is the node's entries with the download progress left out.
+func modelsWithoutProgress(nms *workercore.NodeModelStore) []workercore.NodeModelStoreModel {
+	models := make([]workercore.NodeModelStoreModel, len(nms.Status.Models))
+	for i, m := range nms.Status.Models {
+		m.DownloadedBytes = 0
+		models[i] = m
+	}
+
+	return models
 }
 
 // mapModelDeploymentDelivery enqueues every deployment on an artifact. Which delivery a hub artifact
