@@ -49,7 +49,8 @@ import (
 //     itself. (This covers both an admin's direct delete and the InstanceType teardown's delete.)
 //   - Flavors present: fill the resource groups from the flavors, smallest per-node count
 //     first so Kueue packs small nodes before large ones, reference the node-devices
-//     AdmissionCheck on an accelerated derived queue once it is Active, reactivate a queue
+//     AdmissionCheck on an accelerated derived queue and the joint-admission AdmissionCheck on
+//     every queue once each is Active, reactivate a queue
 //     that had been drained to empty (StopPolicy None), and drop the marker from the Hold this
 //     reconciler placed on a queue that had no resource groups yet, leaving its release to the
 //     InstanceTypeReconciler.
@@ -225,14 +226,19 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 	//
 	// The derived-from-node setting below is read as a cluster-wide switch, not as "was THIS
 	// queue derived": with it off the administrator authors ClusterQueues through the
-	// InstanceType API, and this reconciler still fills them but references the check on none
-	// of them. So the gate runs on every accelerated queue in the cluster, or on no queue at all.
+	// InstanceType API, and this reconciler still fills them but references the node-devices check
+	// on none of them. So that gate runs on every accelerated queue in the cluster, or on no queue
+	// at all.
 	//
-	// THE JOINT-ADMISSION CHECK IS REFERENCED FROM EVERY QUEUE, NOT ONLY THE ACCELERATED ONES, and
-	// that difference is load-bearing. It gates a deployment whose roles sit on several
-	// instanceTypes, and one of those groups can be on a CPU-only pool; borrowing the node-devices
-	// reference's `acceleratable` gate would leave that group ungated, and a barrier with a hole in
-	// it opens for the deployment it was supposed to hold.
+	// THE JOINT-ADMISSION CHECK IS REFERENCED FROM EVERY QUEUE, NOT ONLY THE ACCELERATED ONES AND NOT
+	// ONLY WHILE THE SETTING IS ON, and both differences are load-bearing. It gates a deployment
+	// whose roles are separate Workloads, and one of those groups can be on a CPU-only pool;
+	// borrowing the node-devices reference's `acceleratable` gate would leave that group ungated, and
+	// a barrier with a hole in it opens for the deployment it was supposed to hold. Borrowing the
+	// `derived` gate would leave every multi-role deployment ungated in the mode where the
+	// administrator authors the InstanceTypes, so one role could be admitted and serve while the
+	// other never is. The check is Ready at once for anything that is not a multi-role deployment,
+	// so it holds nothing else a queue admits.
 	derived := settings.InstanceTypeDerivedFromNode.ShouldValueBool(ctx)
 
 	var rules []kueue.AdmissionCheckStrategyRule
@@ -240,7 +246,7 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 		rules = append(rules,
 			kueue.AdmissionCheckStrategyRule{Name: kueue.AdmissionCheckReference(_NodeDevicesAdmissionCheckName)})
 	}
-	if derived && r.admissionCheckActive(ctx, _JointAdmissionCheckName) {
+	if r.admissionCheckActive(ctx, _JointAdmissionCheckName) {
 		rules = append(rules,
 			kueue.AdmissionCheckStrategyRule{Name: kueue.AdmissionCheckReference(_JointAdmissionCheckName)})
 	}
@@ -800,13 +806,25 @@ func parseResourceFlavorCapacity(rf *kueue.ResourceFlavor) int64 {
 	return 0
 }
 
-// admissionCheckActive reports whether the named AdmissionCheck exists and is Active. The queue
-// references one only when true, since listing an inactive check would turn the ClusterQueue
-// inactive and stop it admitting.
+// nodeQueueAdmissionCheck reports whether an AdmissionCheck is one a queue can reference: the
+// node-devices check or the joint-admission check. Either one turning Active, going inactive, or
+// being deleted changes what the queue's reference should be.
+func nodeQueueAdmissionCheck(ac *kueue.AdmissionCheck) bool {
+	return ac.Spec.ControllerName == _NodeDevicesControllerName ||
+		ac.Spec.ControllerName == _JointAdmissionControllerName
+}
+
+// admissionCheckActive reports whether the named AdmissionCheck exists, is not being deleted, and
+// is Active. The queue references one only when true, since listing an inactive check would turn
+// the ClusterQueue inactive and stop it admitting.
+//
+// A check being deleted counts as absent even while it still reads Active. Kueue holds its
+// resource-in-use finalizer until no ClusterQueue references the check, so a queue that kept the
+// reference would hold the delete open for good.
 func (r *NodeQueueReconciler) admissionCheckActive(ctx context.Context, name string) bool {
 	ac := new(kueue.AdmissionCheck)
 	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: name}, ac, ctrlclix.WithoutQuorum)
-	if err != nil {
+	if err != nil || ac.DeletionTimestamp != nil {
 		return false
 	}
 
@@ -866,8 +884,8 @@ func (r *NodeQueueReconciler) SetupController(_ context.Context, opts controller
 			),
 		).
 		Watches(
-			// Re-enqueue the operator-owned queues when the node-devices AdmissionCheck changes,
-			// so an accelerated derived queue acquires the reference once it turns Active (or drops
+			// Re-enqueue the operator-owned queues when either AdmissionCheck a queue can reference
+			// changes, so each queue acquires the reference once the check turns Active (or drops
 			// it should the check go inactive/away).
 			&kueue.AdmissionCheck{},
 			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
@@ -876,11 +894,10 @@ func (r *NodeQueueReconciler) SetupController(_ context.Context, opts controller
 				r.enqueueNodeQueuesWhenAdmissionCheckChanged,
 			),
 			ctrlbuilder.WithPredicates(
-				// Trigger reconciliation when the node-devices AdmissionCheck is created, updated,
-				// or deleted (its Active state gates the reference).
+				// Trigger reconciliation when the node-devices or joint-admission AdmissionCheck is
+				// created, updated, or deleted (its Active state gates the reference).
 				ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
-					ac := obj.(*kueue.AdmissionCheck)
-					return ac.Spec.ControllerName == _NodeDevicesControllerName
+					return nodeQueueAdmissionCheck(obj.(*kueue.AdmissionCheck))
 				}),
 			),
 		).
@@ -938,16 +955,15 @@ func (r *NodeQueueReconciler) enqueueNodeQueueWhenResourceFlavorChanged(
 }
 
 // enqueueNodeQueuesWhenAdmissionCheckChanged enqueues every operator-owned ClusterQueue when
-// the node-devices AdmissionCheck changes, so each accelerated pool (re)acquires the reference
-// once the check turns Active (or drops it should the check go inactive/away).
+// the node-devices or joint-admission AdmissionCheck changes, so each queue (re)acquires the
+// reference once the check turns Active (or drops it should the check go inactive/away).
 func (r *NodeQueueReconciler) enqueueNodeQueuesWhenAdmissionCheckChanged(
 	ctx context.Context, obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
 	logger := ctrllog.FromContext(ctx).
 		WithValues("admission check", ctrlcli.ObjectKeyFromObject(obj))
 
-	ac := obj.(*kueue.AdmissionCheck)
-	if ac.Spec.ControllerName != _NodeDevicesControllerName {
+	if !nodeQueueAdmissionCheck(obj.(*kueue.AdmissionCheck)) {
 		return nil
 	}
 

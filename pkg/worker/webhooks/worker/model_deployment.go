@@ -566,8 +566,6 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	errs = append(errs, validateModelDeploymentServedModelNames(nil, md)...)
 	errs = append(errs, validateModelDeploymentKVCacheDtype(md, workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx))...)
 
-	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
-
 	typeErrs, err := r.validateRoleResourcesAgainstInstanceTypes(ctx, md)
 	if err != nil {
 		return nil, err
@@ -621,7 +619,6 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	errs = append(errs, validateModelDeploymentKVCacheDtype(md, workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx))...)
 	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
 	errs = append(errs, validateModelDeploymentRouterName(md, old)...)
-	errs = append(errs, validateModelDeploymentBarrierIsInstallable(ctx, md)...)
 
 	typeErrs, err := r.validateRoleResourcesAgainstInstanceTypes(ctx, md)
 	if err != nil {
@@ -2342,71 +2339,6 @@ func validateModelDeploymentPairCannotShareOneAccelerator(
 	}
 
 	return errs
-}
-
-// validateModelDeploymentBarrierIsInstallable refuses a deployment whose roles span several
-// instanceTypes when nothing in the cluster can gate the set.
-//
-// SEVERAL instanceTypes ARE SEVERAL CLUSTER QUEUES, and the queues are what this rule turns on.
-// Being several Workloads is not what separates the refused shape from the accepted one -- every
-// deployment of more than one replica is several Workloads, since each replica is admitted as its
-// own. Being answered by several QUEUES is. What relates Workloads across queues is the
-// joint-admission check, and that check reaches a Workload only through a ClusterQueue that
-// references it -- which the queue reconciler does only while the derived-from-node setting is on.
-// With it off an administrator authors queues through the InstanceType API, no queue carries the
-// check, and the barrier is not installed anywhere.
-//
-// THE SHAPE IS REFUSED RATHER THAN ADMITTED UNGUARDED. Admitting it would let a prefiller start and
-// serve while its decoder waits for capacity that never arrives -- a deployment that reads as
-// half-started and is in fact never going to finish, with nothing naming the reason. A refusal at the
-// API names the setting, which is the one thing the operator can act on.
-//
-// A SINGLE-instanceType DEPLOYMENT IS NOT REFUSED HERE whatever the setting says, and that is
-// narrower than it reads. Its roles are still several Workloads and Kueue still admits them one at
-// a time; what it is not is several queues, so there is no second quota pool that can be empty
-// while the first is not. The joint-admission barrier still covers such a deployment wherever a
-// queue carries the check -- this rule is about the shape no check can be installed for, not about
-// a shape that needs none.
-func validateModelDeploymentBarrierIsInstallable(
-	ctx context.Context, md *workercore.ModelDeployment,
-) field.ErrorList {
-	// A DEPLOYMENT BEING DELETED IS NOT ASKING TO BE ADMITTED, and refusing it strands the object.
-	// This rule reads cluster state, so it can start refusing an object that was accepted: a
-	// multi-instanceType deployment created while the setting was on is refused by this rule the
-	// moment the setting goes off. Validation still runs during the deletion window, so the update
-	// that clears the finalizer is refused too -- and since instanceType is frozen, the operator
-	// cannot edit their way out of it either. The object then has no reachable state from which it
-	// can be removed.
-	//
-	// IT IS THE SAME GATE THE TYPE-READING RULES TAKE, for the same reason rather than by analogy: a
-	// rule whose answer depends on something outside the object must not be able to hold that object
-	// hostage. What it costs is named rather than hidden -- an edit made while a deployment is being
-	// deleted can produce a multi-instanceType shape the cluster cannot gate. Nothing renders it,
-	// because the deployment is going away.
-	if md.DeletionTimestamp != nil {
-		return nil
-	}
-
-	types := sets.New[string]()
-	for i := range md.Spec.Roles {
-		types.Insert(md.Spec.Roles[i].InstanceType)
-	}
-	if types.Len() < 2 {
-		return nil
-	}
-
-	if settings.InstanceTypeDerivedFromNode.ShouldValueBool(ctx) {
-		return nil
-	}
-
-	return field.ErrorList{field.Forbidden(
-		field.NewPath("spec", "roles"),
-		"roles on several instance types are several Kueue workloads, and what admits them together "+
-			"is an admission check referenced from the queues this operator derives. The "+
-			"instance-type-derived-from-node setting is off, so no queue carries it and the "+
-			"deployment could start one role and never the other. Put every role on one instance "+
-			"type, or turn that setting on",
-	)}
 }
 
 // roleRequestsALogicalSlice reports whether a role asks for a fraction of a card in software.

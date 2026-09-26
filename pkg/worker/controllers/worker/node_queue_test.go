@@ -1045,26 +1045,46 @@ func jointCheck(active bool) *kueue.AdmissionCheck {
 	return ac
 }
 
+// nodeDevicesCheck builds the node-devices AdmissionCheck, Active or not.
+func nodeDevicesCheck(active bool) *kueue.AdmissionCheck {
+	ac := jointCheck(active)
+	ac.Name = _NodeDevicesAdmissionCheckName
+	ac.Spec.ControllerName = _NodeDevicesControllerName
+
+	return ac
+}
+
 // TestNodeQueueReconciler_ReferencesTheJointCheckFromEveryQueue pins the difference that makes the
 // joint barrier whole.
 //
-// THE CPU-ONLY QUEUE IS THE CASE, AND IT IS THE ONLY ONE THAT DISCRIMINATES. The node-devices
-// reference is gated on `acceleratable`; borrowing that gate here would look correct on every
-// accelerated queue and leave a multi-group deployment's CPU-pool group ungated -- a barrier with a
-// hole in it, opening for exactly the deployment it was supposed to hold.
+// THE CPU-ONLY QUEUE IS ONE CASE THAT DISCRIMINATES. The node-devices reference is gated on
+// `acceleratable`; borrowing that gate here would look correct on every accelerated queue and leave
+// a multi-group deployment's CPU-pool group ungated -- a barrier with a hole in it, opening for
+// exactly the deployment it was supposed to hold.
+//
+// THE SETTING-OFF CASES ARE THE OTHER. The node-devices reference is also gated on
+// instance-type-derived-from-node, and borrowing that gate leaves every multi-role deployment in the
+// administrator-authored mode ungated: its roles are separate Workloads, and one can be admitted and
+// serve while the other never is. Both checks are present and Active in every case, so the rows also
+// pin that the node-devices reference keeps both of its gates.
 func TestNodeQueueReconciler_ReferencesTheJointCheckFromEveryQueue(t *testing.T) {
-	enableInstanceTypeDerivedFromNode(t)
-
 	cases := []struct {
-		name          string
-		acceleratable bool
+		name            string
+		derived         bool
+		acceleratable   bool
+		wantNodeDevices bool
 	}{
-		{name: "accelerated_queue", acceleratable: true},
-		{name: "cpu_only_queue", acceleratable: false},
+		{name: "derived_accelerated_queue", derived: true, acceleratable: true, wantNodeDevices: true},
+		{name: "derived_cpu_only_queue", derived: true, acceleratable: false},
+		{name: "authored_accelerated_queue", derived: false, acceleratable: true},
+		{name: "authored_cpu_only_queue", derived: false, acceleratable: false},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			settingtest.MergeDelegatedSettings(t,
+				map[string]string{"instance-type-derived-from-node": strconv.FormatBool(c.derived)})
+
 			key := "nvidia-a10g"
 			if !c.acceleratable {
 				key = "generic"
@@ -1078,22 +1098,24 @@ func TestNodeQueueReconciler_ReferencesTheJointCheckFromEveryQueue(t *testing.T)
 			rf := newNodesFlavor("gpustack-"+key+"-linux-amd64-1d", key, 1, 4, opts...)
 
 			cli := buildNodeQueueClient(
-				newInstanceTypeQueue(key, c.acceleratable), rf, jointCheck(true))
+				newInstanceTypeQueue(key, c.acceleratable), rf, nodeDevicesCheck(true), jointCheck(true))
 
 			reconcileNodeQueueN(t, cli, name, 2)
 
 			got, err := getClusterQueue(t, cli, name)
 			require.NoError(t, err)
 			require.NotNil(t, got.Spec.AdmissionChecksStrategy,
-				"every operator-owned queue carries the joint check, accelerated or not")
+				"every operator-owned queue carries the joint check, whatever the setting and the pool")
 
-			var found bool
-			for _, rule := range got.Spec.AdmissionChecksStrategy.AdmissionChecks {
-				if rule.Name == kueue.AdmissionCheckReference(_JointAdmissionCheckName) {
-					found = true
-				}
+			want := []kueue.AdmissionCheckReference{_JointAdmissionCheckName}
+			if c.wantNodeDevices {
+				want = append(want, _NodeDevicesAdmissionCheckName)
 			}
-			assert.True(t, found, "the joint check is referenced from a %s queue", c.name)
+			checks := make([]kueue.AdmissionCheckReference, 0, len(got.Spec.AdmissionChecksStrategy.AdmissionChecks))
+			for _, rule := range got.Spec.AdmissionChecksStrategy.AdmissionChecks {
+				checks = append(checks, rule.Name)
+			}
+			assert.ElementsMatch(t, want, checks)
 		})
 	}
 }
@@ -1113,6 +1135,87 @@ func TestNodeQueueReconciler_TheJointCheckWaitsForActive(t *testing.T) {
 	got, err := getClusterQueue(t, cli, nodeQueueName(key))
 	require.NoError(t, err)
 	assert.Nil(t, got.Spec.AdmissionChecksStrategy, "an inactive check is not referenced")
+}
+
+// TestNodeQueueReconciler_FollowsTheJointCheckItself pins that the joint check's own changes reach
+// the queues, in both directions, without waiting for some other event.
+//
+// A QUEUE ONLY RE-READS THE CHECK WHEN IT IS ENQUEUED. Activation that no watch delivers leaves a
+// queue that was filled a moment earlier without the barrier until a flavor or spec change happens
+// along. A deletion is held open by Kueue's finalizer until no queue references the check, so a
+// queue that neither hears of it nor treats a check being deleted as absent keeps the delete open
+// for good. The other check's events used to mask the first gap, because both checks turn Active
+// at start-up, but in the administrator-authored mode the joint check is the only reference a queue
+// can carry.
+func TestNodeQueueReconciler_FollowsTheJointCheckItself(t *testing.T) {
+	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-derived-from-node": "false"})
+
+	key := "generic"
+	name := nodeQueueName(key)
+	rf := newNodesFlavor("gpustack-generic-linux-amd64-1d", key, 1, 4)
+	ac := jointCheck(false)
+	// Kueue holds this finalizer while any ClusterQueue references the check, so a delete leaves the
+	// check in place, still Active, until the queues drop the reference.
+	ac.Finalizers = []string{"kueue.x-k8s.io/resource-in-use"}
+	cli := buildNodeQueueClient(newInstanceTypeQueue(key, false), rf, ac)
+	r := &NodeQueueReconciler{Client: cli}
+	ctx := context.Background()
+
+	reconcileNodeQueueN(t, cli, name, 2)
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	require.Nil(t, got.Spec.AdmissionChecksStrategy, "the baseline: an inactive check is not referenced")
+
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(ac), ac))
+	ac.Status.Conditions = jointCheck(true).Status.Conditions
+	require.NoError(t, cli.Update(ctx, ac))
+	assert.Equal(t, []ctrlreconcile.Request{{NamespacedName: ctrlcli.ObjectKey{Name: name}}},
+		r.enqueueNodeQueuesWhenAdmissionCheckChanged(ctx, ac), "activation enqueues the queue")
+	reconcileNodeQueueN(t, cli, name, 1)
+	got, err = getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	require.NotNil(t, got.Spec.AdmissionChecksStrategy, "the enqueued queue gains the reference")
+
+	require.NoError(t, cli.Delete(ctx, ac))
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(ac), ac), "the finalizer keeps the check")
+	assert.Equal(t, []ctrlreconcile.Request{{NamespacedName: ctrlcli.ObjectKey{Name: name}}},
+		r.enqueueNodeQueuesWhenAdmissionCheckChanged(ctx, ac), "deletion enqueues the queue")
+	reconcileNodeQueueN(t, cli, name, 1)
+	got, err = getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Nil(t, got.Spec.AdmissionChecksStrategy,
+		"the enqueued queue drops the reference to a check being deleted, which is what lets the delete finish")
+}
+
+// TestNodeQueueReconciler_EnqueuesOnlyForItsOwnChecks pins which AdmissionChecks re-enqueue the
+// queues: the two a queue can reference, and no other. A foreign check changes nothing a queue
+// reads, so enqueueing every queue for it would be churn.
+func TestNodeQueueReconciler_EnqueuesOnlyForItsOwnChecks(t *testing.T) {
+	foreign := jointCheck(true)
+	foreign.Name = "foreign"
+	foreign.Spec.ControllerName = "example.com/foreign"
+
+	cases := []struct {
+		name string
+		ac   *kueue.AdmissionCheck
+		want bool
+	}{
+		{name: "node_devices", ac: nodeDevicesCheck(true), want: true},
+		{name: "joint", ac: jointCheck(true), want: true},
+		{name: "foreign", ac: foreign, want: false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			key := "generic"
+			cli := buildNodeQueueClient(newInstanceTypeQueue(key, false))
+			r := &NodeQueueReconciler{Client: cli}
+
+			reqs := r.enqueueNodeQueuesWhenAdmissionCheckChanged(context.Background(), c.ac)
+			assert.Equal(t, c.want, len(reqs) == 1, "requests: %v", reqs)
+			assert.Equal(t, c.want, nodeQueueAdmissionCheck(c.ac), "the watch predicate agrees")
+		})
+	}
 }
 
 // TestNodeQueueReconciler_UpdatesQuotaInPlaceWhenNoFlavorIsRemoved pins that only removing a

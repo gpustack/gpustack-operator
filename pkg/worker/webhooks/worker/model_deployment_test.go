@@ -2316,8 +2316,6 @@ func TestModelDeploymentWebhook_Default(t *testing.T) {
 // while that queue charges them nothing -- and the siblings sharing the type are charged for every
 // card they hold, competing for a pool this role spends from uncounted.
 func TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup(t *testing.T) {
-	withDerivedFromNode(t, true)
-
 	zero := resource.NewQuantity(0, resource.DecimalSI)
 	one := resource.NewQuantity(1, resource.DecimalSI)
 	zeroOnA100 := roleWithAccelerator("decode", zero)
@@ -3382,11 +3380,6 @@ func TestModelDeploymentWebhook_APairMayNotShareOneAccelerator(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// The disjoint case puts the pair on two instance types, which the barrier rule refuses
-			// unless it can be installed. That rule has its own test; here it must not be what
-			// answers, or this table would be asserting it by accident.
-			withDerivedFromNode(t, true)
-
 			r := newModelDeploymentWebhookWith(live)
 
 			md := modelDeployment(workercore.ModelDeploymentEngineVLLM, tc.roles...)
@@ -3444,8 +3437,6 @@ func TestModelDeploymentWebhook_ThePairRuleReadsEveryPair(t *testing.T) {
 		servingInstanceType("a100-8x", 8, offeringLogicalSlices, inAcceleratorGroup(otherGroup)),
 	}
 
-	withDerivedFromNode(t, true)
-
 	r := newModelDeploymentWebhookWith(live)
 
 	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
@@ -3480,42 +3471,6 @@ func TestModelDeploymentWebhook_ThePairRuleReadsEveryPair(t *testing.T) {
 		pairRefusal)
 }
 
-// TestModelDeploymentWebhook_TheBarrierRuleCannotStrandAnObject covers the rule's own escape hatch.
-//
-// THIS RULE READS CLUSTER STATE, SO IT CAN START REFUSING AN OBJECT IT ONCE ACCEPTED. A deployment
-// spanning two instance types is admitted while the derived-from-node setting is on, and refused the
-// moment it goes off. Validation still runs while an object is being deleted, so the update that
-// clears the finalizer is refused too -- and instanceType is frozen by the identity rule, so the
-// operator cannot edit their way out either. The object then has no reachable state from which it
-// can be removed, which is a worse outcome than the shape this rule exists to prevent.
-//
-// BOTH SIDES ARE REQUIRED. A rule that never refused anything would pass the deletion case, and the
-// refusal is what the whole rule is for.
-func TestModelDeploymentWebhook_TheBarrierRuleCannotStrandAnObject(t *testing.T) {
-	withDerivedFromNode(t, false)
-
-	spanning := func() *workercore.ModelDeployment {
-		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
-			role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
-			role(func(r *workercore.ModelDeploymentRole) {
-				r.Name, r.InstanceType = "decode", "a100-8x"
-			}),
-		)
-
-		return md
-	}
-
-	live := spanning()
-	assert.NotEmpty(t, validateModelDeploymentBarrierIsInstallable(context.Background(), live),
-		"with the setting off nothing installs the barrier, and this shape needs it")
-
-	deleting := spanning()
-	deleting.DeletionTimestamp = ptr.To(meta.Now())
-	assert.Empty(t, validateModelDeploymentBarrierIsInstallable(context.Background(), deleting),
-		"a deployment being deleted is not asking to be admitted, and refusing it strands the object "+
-			"forever: the finalizer-clearing update is refused too, and instanceType cannot be edited")
-}
-
 // TestModelDeploymentWebhook_AMissingTypeDoesNotHideTheRest covers how a named-but-absent
 // InstanceType comes back.
 //
@@ -3524,8 +3479,6 @@ func TestModelDeploymentWebhook_TheBarrierRuleCannotStrandAnObject(t *testing.T)
 // Invalid naming the path, and it SHORT-CIRCUITED -- one mistyped instanceType hid every other
 // validation error on the object, so the operator fixed one thing per apply.
 func TestModelDeploymentWebhook_AMissingTypeDoesNotHideTheRest(t *testing.T) {
-	withDerivedFromNode(t, true)
-
 	r := newModelDeploymentWebhookWith(nil)
 
 	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
@@ -3572,8 +3525,6 @@ func TestModelDeploymentWebhook_AnUnsetAcceleratorGroupIsUnknown(t *testing.T) {
 		servingInstanceType("a100-8x", 8, offeringLogicalSlices),
 	}
 
-	withDerivedFromNode(t, true)
-
 	r := newModelDeploymentWebhookWith(live)
 
 	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
@@ -3599,49 +3550,36 @@ func withDerivedFromNode(t *testing.T, on bool) {
 	settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-derived-from-node": strconv.FormatBool(on)})
 }
 
-// TestModelDeploymentWebhook_SeveralInstanceTypesNeedTheBarrier covers the barrier refusal in both
-// directions.
+// TestModelDeploymentWebhook_SeveralInstanceTypesAreAcceptedInEitherMode covers what replaced the
+// refusal of roles on several instance types while instance-type-derived-from-node is off.
 //
-// THE POSITIVE CASE IS WHAT MAKES THE REFUSAL MEAN ANYTHING. Without it, a rule refusing every
-// multi-instanceType deployment passes the negative case exactly as the correct rule does -- and the
-// shape it would be refusing is the one this whole design exists to enable.
-func TestModelDeploymentWebhook_SeveralInstanceTypesNeedTheBarrier(t *testing.T) {
-	twoTypes := func() *workercore.ModelDeployment {
-		return modelDeployment(workercore.ModelDeploymentEngineVLLM,
-			role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
-			role(func(r *workercore.ModelDeploymentRole) {
-				r.Name, r.InstanceType = "decode", "a100-8x"
-			}),
-		)
+// THE REFUSAL EXISTED BECAUSE NO QUEUE CARRIED THE JOINT CHECK IN THAT MODE, and every operator-owned
+// queue now does, whoever authored its InstanceType. The setting-on row is the control: without it a
+// handler that refused this shape for some other reason would fail both rows alike.
+func TestModelDeploymentWebhook_SeveralInstanceTypesAreAcceptedInEitherMode(t *testing.T) {
+	whole := func() *workercore.ModelDeploymentRoleResources {
+		return &workercore.ModelDeploymentRoleResources{Accelerator: resource.NewQuantity(1, resource.DecimalSI)}
 	}
 
-	t.Run("setting_off_refuses", func(t *testing.T) {
-		withDerivedFromNode(t, false)
+	for _, derived := range []bool{true, false} {
+		t.Run("derived_"+strconv.FormatBool(derived), func(t *testing.T) {
+			withDerivedFromNode(t, derived)
 
-		errs := validateModelDeploymentBarrierIsInstallable(context.Background(), twoTypes())
-		require.Len(t, errs, 1)
-		assert.Equal(t, "spec.roles", errs[0].Field)
-		assert.Contains(t, errs[0].Detail, "instance-type-derived-from-node",
-			"the message names the setting, which is the one thing the operator can act on")
-	})
+			r := newModelDeploymentWebhookWith([]ctrlcli.Object{
+				servingInstanceType("h20-8x", 8),
+				servingInstanceType("a100-8x", 8),
+			})
 
-	t.Run("setting_on_accepts", func(t *testing.T) {
-		withDerivedFromNode(t, true)
+			md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+				pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", whole()),
+				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "a100-8x", whole()),
+			)
+			md.Spec.KVCache.Connector = "mooncake"
 
-		assert.Empty(t, validateModelDeploymentBarrierIsInstallable(context.Background(), twoTypes()),
-			"this is the shape roles on two instance types exist to make possible")
-	})
-
-	t.Run("one_type_is_unaffected_with_the_setting_off", func(t *testing.T) {
-		withDerivedFromNode(t, false)
-
-		one := modelDeployment(workercore.ModelDeploymentEngineVLLM,
-			role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
-			role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode" }),
-		)
-		assert.Empty(t, validateModelDeploymentBarrierIsInstallable(context.Background(), one),
-			"one group is admitted as a unit by Kueue without help from this barrier")
-	})
+			_, err := r.ValidateCreate(context.Background(), md)
+			assert.NoError(t, err, "every queue carries the joint check, so the set is gated in this mode too")
+		})
+	}
 }
 
 // TestValidateModelDeploymentRouter_EngineMatched pins the pairing table, both directions.

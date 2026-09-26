@@ -99,6 +99,15 @@ place: quota is a scalar total and cannot see per-accelerator fragmentation. Whe
 admitted Workload stay `Pending`, compare the request against the per-accelerator ledger
 (`kubectl get devices <node> -o yaml`) before adding capacity.
 
+**The joint-admission check is attached in both modes.** Every queue backing an InstanceType
+references `gpustack-model-deployment-joint` once it reports `Active`, whoever authored the type and
+whatever this setting says.
+
+It answers `Ready` at once for every Workload that is not a replica of a multi-role ModelDeployment,
+so the only thing it changes in this mode is that such a deployment is admitted as a set — see
+[Prefill and decode](reference/model-deployment.md#prefill-and-decode), and
+[Status](reference/model-deployment-status.md#status) for a set that stays short of quota.
+
 **Write the InstanceType against the `InstanceTypeFlavor` catalog.** It is the read-only,
 os/arch-agnostic view of the pools that actually exist — one entry per grouping the settings above
 produce — and its `spec` carries the identity fields an InstanceType is built from:

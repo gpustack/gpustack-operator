@@ -595,8 +595,8 @@ than forbid the shape the roles are simply not made to share.
 `replicas` adds or removes whole groups and leaves every surviving replica's group, Workload and
 admission untouched; a role-field edit rolls that role's replicas one at a time.
 
-The groups are still admitted as a **set** — see the last row of
-[What admission refuses](#what-admission-refuses) for what happens when that gate cannot be installed.
+The groups are still admitted as a **set**, by the admission check described in
+[Prefill and decode](#prefill-and-decode), whichever `instanceType`s they name.
 
 A scale-down sheds the **highest ordinals first**, deleting each departing replica's Pod together with
 its own Workload: the Workload delete is what releases Kueue's finalizer on the Pod and the quota the
@@ -619,7 +619,6 @@ depends on the `InstanceType` the role names.
 | a negative or fractional `resources.interface`, or one with no effective RDMA/EFA leg | the role's interface field and the protocol that prevents allocation; mixed backend groups and mixed fabric legs are rejected |
 | an explicit `accelerator: 0` on an acceleratable `InstanceType` shared by another role | the accelerator field, the shared type, and two recommended remedies: request at least one accelerator or move the CPU-only role to a non-acceleratable type |
 | a `prefill` and a `decode` role both requesting a **logical slice** from types that draw on the same accelerator group | both roles and the slice field. Whole cards and partition profiles are accepted — including on one card, because partitions are isolated by the device |
-| roles on several `instanceType`s **when `instance-type-derived-from-node` is off** | that setting. The groups are gated as a set by an admission check this operator references from the queues it derives, and with the setting off no queue carries it |
 | a role whose `<deployment>-<role>` is not a DNS-1035 label | the combined **Service** name, which is what the pair becomes; over 63 characters or carrying a dot from a subdomain-shaped deployment name. A role the object **already had** is exempt, so a rule added later cannot strand a stored object |
 | two roles whose Services would be named the same | the shared name and both claimants — a role named `x-r0` collides with a role `x` of several members, whose instance 0 is published behind `<deployment>-x-r0`. Checked on every edit, since `replicas` decides how many instance Services a role derives |
 | an invalid topology `requiredLevel` | the field path and the [topology placement](#topology-placement) field rule |
