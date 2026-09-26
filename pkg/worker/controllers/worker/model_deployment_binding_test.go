@@ -559,6 +559,18 @@ func TestResolveModelDeploymentConnection(t *testing.T) {
 			wantProt:   "rdma",
 		},
 		{
+			// An omitted spec.domain.name is stored as "default", and a master holding a ledger is
+			// handed it explicitly rather than left to fall back to its own default tenant.
+			name: "a domain left to its default name",
+			domain: &modelDeploymentDomain{Ready: true, KVCache: &workercore.ModelDeploymentKVCacheStatus{
+				Pool:   "shared",
+				Domain: workercore.ModelDeploymentKVCacheDomain{Name: "default"},
+			}},
+			objs:       []ctrlcli.Object{pool(nil), backend},
+			wantDomain: "default",
+			wantProt:   "rdma",
+		},
+		{
 			// A ledger-less master collapses every tenant name into its default one, so the
 			// connector carries NO domain: the engines render no tenant identity, and the store
 			// serves the single tenant it has.

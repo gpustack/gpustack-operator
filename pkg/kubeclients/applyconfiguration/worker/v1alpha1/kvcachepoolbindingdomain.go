@@ -10,6 +10,11 @@ package v1alpha1
 type KVCachePoolBindingDomainApplyConfiguration struct {
 	// Name is the domain, and it becomes the storage layer's tenant_id verbatim.
 	//
+	// - Left unset, it is "default", filled in by the API server before the object is stored. That
+	// is the tenant the store itself assigns to a writer that names none, so an omitted name and
+	// an engine that forwards no tenant land on the same ledger entry. It is the natural choice on
+	// a master running without multi-tenancy, where no tenant is forwarded at all and the name
+	// only records the registration.
 	// - It must be claimed by NO OTHER BINDING on a master that serves this Binding's pool, which
 	// the webhook enforces: two Bindings on one domain over one master would share cache —
 	// possibly intended — but collide on one quota ledger, which never is. Uniqueness is per

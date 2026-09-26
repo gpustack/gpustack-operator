@@ -459,6 +459,27 @@ func TestKVCachePoolReconcile_ConvergesOneMaster(t *testing.T) {
 	})
 }
 
+// TestKVCachePoolReconcile_TheDefaultDomainIsAnOrdinaryTenant pins the ledger side of an omitted
+// spec.domain.name. The API server stores it as "default", and from there nothing in this pass
+// treats the name specially: it is registered, reported and given its ceiling like any other.
+func TestKVCachePoolReconcile_TheDefaultDomainIsAnOrdinaryTenant(t *testing.T) {
+	master := newFakeMaster()
+	address := master.start(t)
+
+	r, cli := newReconciler(
+		newReconcileBackend("mooncake-dram", address),
+		newTestKVCachePool("shared", "mooncake-dram"),
+		newBoundBinding("team-a", "chat", "shared", "default", resource.MustParse("20Ti")),
+	)
+
+	reconcilePool(t, r, "shared")
+
+	assert.Equal(t, map[string]int64{"default": quantityValue("20Ti")}, master.held())
+	kvcp := readPool(t, cli, "shared")
+	require.Len(t, kvcp.Status.Domains, 1)
+	assert.Equal(t, "default", kvcp.Status.Domains[0].Name)
+}
+
 // TestKVCachePoolReconcile_SettledMasterTakesNoWrite is the call-counting assertion the spec asks
 // for. Nothing in the resulting status would show a pass that rewrote every entry it already agreed
 // with, and the cost is one write per tenant per pass, forever.

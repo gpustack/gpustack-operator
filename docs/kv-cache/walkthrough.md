@@ -101,8 +101,7 @@ spec:
   poolRef: {name: shared-dram}
   quota:
     ceiling: 8Gi
-  domain:
-    name: qwen-7b-v1                     # every field here is immutable
+  domain:                                # every field here is immutable
     blockSize: 64
     dtype: bfloat16
 ```
@@ -111,6 +110,10 @@ spec:
 workloads sharing a domain share cached blocks, so a domain that could be edited would let a running
 workload start reading blocks another tokenizer wrote. Pick it to match the model and engine
 settings the deployments in this namespace will run; a second, different model gets a second Binding.
+
+**`domain.name` is left out, so it is `default`.** The backend from Step 1 runs without
+multi-tenancy, so no tenant is forwarded to the engines and the name only records the registration.
+On a multi-tenant backend, name each domain; the name is the tenant id the engines are handed.
 
 **A quota ceiling is not a reservation.** On a backend with `leader.multiTenancy: true` it is the
 most this namespace may hold at once, and going over it does not fail a write — see
@@ -122,7 +125,7 @@ reports `QuotaGranted=True` with reason `Unenforced` and no `EFFECTIVE` figure, 
 in the store's default tenant. Set `leader.multiTenancy: true` in Step 1 to have ceilings enforced.
 
 **A multi-tenant master refuses a tenant name absent from its ledger.** An engine that ignores the
-injected tenant then needs a second Binding whose domain is `default` — see
+injected tenant then needs a second Binding whose domain is `default`, or that leaves `name` out — see
 [Tenant compatibility](../reference/kv-cache-injection.md#tenant-compatibility-is-the-image-owners-responsibility).
 
 ## Step 3: the workload

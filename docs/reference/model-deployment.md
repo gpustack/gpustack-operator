@@ -234,7 +234,7 @@ Scheduling Operations](../operation/topology-aware-scheduling.md).
 ## The reuse domain is inherited
 
 The reuse domain — `name`, `blockSize`, `dtype` — is a required, immutable block on the
-`KVCachePoolBinding`. `ModelDeploymentSpec` has **no domain field**, and that is a security property
+`KVCachePoolBinding`; its `name` alone may be left out, and is then `default`. `ModelDeploymentSpec` has **no domain field**, and that is a security property
 rather than tidiness.
 
 > **Why** — a workload free to name its own domain could mint tenants and escape its namespace's

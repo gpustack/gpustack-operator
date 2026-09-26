@@ -11,9 +11,15 @@ type KVCachePoolBindingSpecApplyConfiguration struct {
 	// re-pointing a Binding would move a namespace's grant silently and leave its bytes on
 	// the old master.
 	PoolRef *KVCachePoolBindingPoolReferenceApplyConfiguration `json:"poolRef,omitempty"`
-	// Domain is the reuse identity this Binding registers, and it is REQUIRED. It maps to the
-	// storage layer's tenant_id (isolation) and cache_salt (prefix identity), so registering a
-	// domain creates a tenant with a quota ledger of its own.
+	// Domain is the reuse identity this Binding registers, and it is REQUIRED. Its name maps to the
+	// storage layer's tenant_id and to nothing else, so registering a domain creates a tenant with a
+	// quota ledger of its own.
+	//
+	// IT IS NOT A KEY PREFIX. Inside one tenant the store key is formed by the engine from its model
+	// name and token-block hashes; blockSize and dtype are not part of that key. Where a prefix is
+	// rendered at all, it is the weights identity of a ModelDeployment that references a
+	// ModelArtifact, rendered as cache_prefix for vLLM and extra_backend_tag for SGLang, and never
+	// this name.
 	//
 	// EXACTLY ONE DOMAIN AND NOT A LIST, deliberately, so the cardinality is enforced by the schema
 	// and not by a webhook rule: one Binding is one tenant, every figure in Status is a single series

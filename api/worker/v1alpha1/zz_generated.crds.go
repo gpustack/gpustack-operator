@@ -3795,10 +3795,9 @@ func crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding() *v1.CustomResourceDef
 									},
 									Properties: map[string]v1.JSONSchemaProps{
 										"domain": {
-											Description: "Domain is the reuse identity this Binding registers, and it is REQUIRED. It maps to the\nstorage layer's tenant_id (isolation) and cache_salt (prefix identity), so registering a\ndomain creates a tenant with a quota ledger of its own.\nEXACTLY ONE DOMAIN AND NOT A LIST, deliberately, so the cardinality is enforced by the schema\nand not by a webhook rule: one Binding is one tenant, every figure in Status is a single series\nrather than a sum, and no rule for dividing one ceiling among several domains has to be\ninvented.\nEVERY FIELD IS IMMUTABLE, webhook-enforced. Name re-points this namespace at a different\nledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent\ncorruption: the writes succeed, the reads succeed, and the tensors are wrong.",
+											Description: "Domain is the reuse identity this Binding registers, and it is REQUIRED. Its name maps to the\nstorage layer's tenant_id and to nothing else, so registering a domain creates a tenant with a\nquota ledger of its own.\nIT IS NOT A KEY PREFIX. Inside one tenant the store key is formed by the engine from its model\nname and token-block hashes; blockSize and dtype are not part of that key. Where a prefix is\nrendered at all, it is the weights identity of a ModelDeployment that references a\nModelArtifact, rendered as cache_prefix for vLLM and extra_backend_tag for SGLang, and never\nthis name.\nEXACTLY ONE DOMAIN AND NOT A LIST, deliberately, so the cardinality is enforced by the schema\nand not by a webhook rule: one Binding is one tenant, every figure in Status is a single series\nrather than a sum, and no rule for dividing one ceiling among several domains has to be\ninvented.\nEVERY FIELD IS IMMUTABLE, webhook-enforced. Name re-points this namespace at a different\nledger and strands the old one. BlockSize or Dtype changed under a warm cache is silent\ncorruption: the writes succeed, the reads succeed, and the tensors are wrong.",
 											Type:        "object",
 											Required: []string{
-												"name",
 												"blockSize",
 												"dtype",
 											},
@@ -3814,9 +3813,12 @@ func crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding() *v1.CustomResourceDef
 													MaxLength:   ptr.To[int64](32),
 												},
 												"name": {
-													Description: "Name is the domain, and it becomes the storage layer's tenant_id verbatim.\n- It must be claimed by NO OTHER BINDING on a master that serves this Binding's pool, which\nthe webhook enforces: two Bindings on one domain over one master would share cache —\npossibly intended — but collide on one quota ledger, which never is. Uniqueness is per\nmaster rather than per pool because one master can serve several pools and the tenant space\nis master-global; it is not cluster-wide because two masters hold two ledgers.\n- The accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside\nwhat the master accepts as a tenant_id and is what a Kubernetes object name already looks\nlike, so nobody learns a second naming rule. This is the ONLY place the shape is judged;\nevery consumer downstream copies the name rather than re-judging it.",
+													Description: "Name is the domain, and it becomes the storage layer's tenant_id verbatim.\n- Left unset, it is \"default\", filled in by the API server before the object is stored. That\nis the tenant the store itself assigns to a writer that names none, so an omitted name and\nan engine that forwards no tenant land on the same ledger entry. It is the natural choice on\na master running without multi-tenancy, where no tenant is forwarded at all and the name\nonly records the registration.\n- It must be claimed by NO OTHER BINDING on a master that serves this Binding's pool, which\nthe webhook enforces: two Bindings on one domain over one master would share cache —\npossibly intended — but collide on one quota ledger, which never is. Uniqueness is per\nmaster rather than per pool because one master can serve several pools and the tenant space\nis master-global; it is not cluster-wide because two masters hold two ledgers.\n- The accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside\nwhat the master accepts as a tenant_id and is what a Kubernetes object name already looks\nlike, so nobody learns a second naming rule. This is the ONLY place the shape is judged;\nevery consumer downstream copies the name rather than re-judging it.",
 													Type:        "string",
-													MaxLength:   ptr.To[int64](63),
+													Default: &v1.JSON{
+														Raw: []byte(`"default"`),
+													},
+													MaxLength: ptr.To[int64](63),
 												},
 											},
 										},
