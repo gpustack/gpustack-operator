@@ -366,6 +366,15 @@ to trust if the two ever disagree. The request is the permission — a bind moun
 not — so the member that gets one can `open()` the adapter and the member that gets none could not
 have.
 
+**`members[].fabricInterfaceCount` sets how many interfaces each member asks for, on `RDMA` and
+`EFA` only.** Left unset it counts as one, and an unset count renders the same member as a written
+`1`. On `RDMA`, one asks for the shared key and more than one asks for that many exclusive
+`device.gpustack.ai/rdma`. A written count is at least `1`.
+
+On every other protocol the count has no effect: no device is requested. Admission **warns rather
+than refuses** when a group writes one there, so the update that moves a group from `RDMA` back to
+`TCP` still goes through with the count in it.
+
 ⚠️ **On a cluster tracking the default branch, this changes what running RDMA members ask for.** No
 release has ever carried this API, so there is no upgrade path to migrate; but a development cluster
 whose `RDMA` backend predates the change will have its members re-rendered against

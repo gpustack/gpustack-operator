@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/utils/ptr"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -84,11 +85,12 @@ func (r *KVCacheBackendWebhook) ReceiveDeletionUpdate() {}
 func (r *KVCacheBackendWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (ctrladmission.Warnings, error) {
 	kvcb := obj.(*workercore.KVCacheBackend)
 
+	warnings := warnKVCacheBackendIdleFabricInterfaceCount(kvcb, nil)
 	if errs := validateKVCacheBackendSpec(ctx, kvcb, nil, true); len(errs) > 0 {
-		return nil, kerrors.NewInvalid(kvcb.GroupVersionKind().GroupKind(), kvcb.Name, errs)
+		return warnings, kerrors.NewInvalid(kvcb.GroupVersionKind().GroupKind(), kvcb.Name, errs)
 	}
 
-	return nil, nil
+	return warnings, nil
 }
 
 func (r *KVCacheBackendWebhook) ValidateUpdate(
@@ -96,14 +98,15 @@ func (r *KVCacheBackendWebhook) ValidateUpdate(
 ) (ctrladmission.Warnings, error) {
 	oldKvcb, newKvcb := oldObj.(*workercore.KVCacheBackend), newObj.(*workercore.KVCacheBackend)
 
+	warnings := warnKVCacheBackendIdleFabricInterfaceCount(newKvcb, oldKvcb)
 	errs := validateKVCacheBackendSpec(ctx, newKvcb, oldKvcb, oldKvcb.Spec.Image != newKvcb.Spec.Image)
 	errs = append(errs, validateKVCacheBackendImmutable(oldKvcb, newKvcb)...)
 	errs = append(errs, validateKVCacheBackendMultiTenancyWithdrawal(oldKvcb, newKvcb)...)
 	if len(errs) > 0 {
-		return nil, kerrors.NewInvalid(newKvcb.GroupVersionKind().GroupKind(), newKvcb.Name, errs)
+		return warnings, kerrors.NewInvalid(newKvcb.GroupVersionKind().GroupKind(), newKvcb.Name, errs)
 	}
 
-	return nil, nil
+	return warnings, nil
 }
 
 func (r *KVCacheBackendWebhook) ValidateDelete(
@@ -112,6 +115,46 @@ func (r *KVCacheBackendWebhook) ValidateDelete(
 	// Deletion is refused by the reconciler's finalizer while status.usedBy is non-empty, not
 	// here: this handler sees only the object, while the decision needs the consumers it holds.
 	return nil, nil
+}
+
+// warnKVCacheBackendIdleFabricInterfaceCount warns about a member group that writes a fabric
+// interface count while its effective protocol is neither RDMA nor EFA, where the count renders
+// nothing.
+//
+// It warns and never refuses, because the update that moves a group from RDMA back to TCP usually
+// still carries the count, and refusing it would block that change. old is nil on create. On an
+// update a group warns only when this update changed its count or its effective protocol: every
+// other update, the reconciler removing the finalizer included, would repeat a warning nobody
+// reads. Groups are matched by position, which is their identity.
+func warnKVCacheBackendIdleFabricInterfaceCount(kvcb, old *workercore.KVCacheBackend) ctrladmission.Warnings {
+	managed := kvcb.Spec.Connection.Managed
+	if managed == nil {
+		return nil
+	}
+	var oldMembers []workercore.KVCacheBackendMember
+	if old != nil && old.Spec.Connection.Managed != nil {
+		oldMembers = old.Spec.Connection.Managed.Members
+	}
+
+	var warnings ctrladmission.Warnings
+	membersPath := field.NewPath("spec", "connection", "managed", "members")
+	for i, member := range managed.Members {
+		if member.FabricInterfaceCount == nil || mooncake.MemberGroupIsHostFabric(kvcb, member) {
+			continue
+		}
+		if old != nil && i < len(oldMembers) &&
+			ptr.Equal(oldMembers[i].FabricInterfaceCount, member.FabricInterfaceCount) &&
+			mooncake.MemberProtocolForGroup(old, oldMembers[i]) == mooncake.MemberProtocolForGroup(kvcb, member) {
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf(
+			"%s has no effect: the group's effective protocol is neither RDMA nor EFA, so no "+
+				"fabric device is requested; remove it, or it applies again if the group moves "+
+				"to RDMA or EFA",
+			membersPath.Index(i).Child("fabricInterfaceCount")))
+	}
+
+	return warnings
 }
 
 // validateKVCacheBackendSpec holds every rule that applies to a spec whether it arrived by create

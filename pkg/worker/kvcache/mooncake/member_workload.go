@@ -336,13 +336,18 @@ var memberProtocols = map[string]string{
 // the member's interface count selects its quantity and RDMA allocation mode, so this predicate
 // answers "is a device granted" as well. Neither mounts the device tree; RDMADevicePath says why.
 //
-// It is UNEXPORTED, and was not always: admission used to ask the same question, because the device
-// resource was declared on the object and a declared name is consequential only on these protocols.
-// That rule is gone with the field, and the pair is now stated in exactly two places, both in this
-// file and both total over it — here and in FabricDeviceResource. A second spelling anywhere else
-// is what would let them drift apart the day a third fabric joins.
+// It is UNEXPORTED so that the pair is stated in exactly two places, both in this file and both
+// total over it — here and in FabricDeviceResource. A second spelling anywhere else is what would
+// let them drift apart the day a third fabric joins. Admission asks the same question through
+// MemberGroupIsHostFabric, which delegates here.
 func memberProtocolIsHostFabric(protocol string) bool {
 	return protocol == memberProtocolRDMA || protocol == memberProtocolEFA
+}
+
+// MemberGroupIsHostFabric reports whether one member group's effective protocol is RDMA or EFA,
+// which is where the group's fabric interface count selects a device request.
+func MemberGroupIsHostFabric(kvcb *workercore.KVCacheBackend, group workercore.KVCacheBackendMember) bool {
+	return memberProtocolIsHostFabric(MemberProtocolForGroup(kvcb, group))
 }
 
 // MemberObjectName is the name of the objects rendered for one member group.
@@ -505,7 +510,9 @@ func RenderMemberDaemonSet(
 		},
 	}
 
-	applyMemberFabric(ds, MemberProtocolForGroup(kvcb, member), member.FabricInterfaceCount)
+	// An unset count is one: the schema stores no default, so a group that never wrote it renders
+	// exactly what a group that wrote one does.
+	applyMemberFabric(ds, MemberProtocolForGroup(kvcb, member), ptr.Deref(member.FabricInterfaceCount, 1))
 	applyMemberLocalDisk(ds, kvcb, member, group)
 	applyMemberHostPaths(ds, member)
 	// Last of the four, because it merges onto whatever the fabric path put there and so has to see
@@ -960,9 +967,6 @@ func applyMemberFabric(ds *apps.DaemonSet, protocol string, interfaceCount int32
 		container.Resources.Limits = core.ResourceList{}
 	}
 
-	if interfaceCount == 0 {
-		interfaceCount = 1
-	}
 	container.Resources.Limits[device] = *resource.NewQuantity(int64(interfaceCount), resource.DecimalSI)
 }
 

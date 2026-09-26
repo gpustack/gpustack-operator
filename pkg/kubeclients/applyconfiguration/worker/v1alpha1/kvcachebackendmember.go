@@ -129,9 +129,14 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	Transport *KVCacheBackendMemberTransportApplyConfiguration `json:"transport,omitempty"`
 	// FabricInterfaceCount is how many distinct host-fabric interfaces each member requires.
 	//
-	// Left unset, it defaults to one. An RDMA count of one asks for a shared resource; a count above
-	// one asks for exclusive resources, because a second shared token can be a second claim on the
-	// same endpoint and would otherwise satisfy a multi-interface request without an error.
+	// It applies only when the group's effective protocol is RDMA or EFA, and left unset it counts as
+	// one there. Every other protocol grants no fabric device, so a count written on such a group
+	// has no effect, and admission warns rather than refuses: the update that moves a group from RDMA
+	// back to TCP usually still carries it. Zero is not a count: a written value is at least one.
+	//
+	// An RDMA count of one asks for a shared resource; a count above one asks for exclusive
+	// resources, because a second shared token can be a second claim on the same endpoint and would
+	// otherwise satisfy a multi-interface request without an error.
 	//
 	// The count changes placement density: one member can use shared-token capacity, while a count
 	// above one limits a node to its endpoint count divided by the count.
