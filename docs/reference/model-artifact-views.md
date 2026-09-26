@@ -74,8 +74,10 @@ failureReasons:
 
 - **It is computed on each request and never written.** The worker reads the artifact and the
   `NodeModelStore`s listing its digest; for each node downloading it, it reads that node's plugin
-  (`GET /model/downloads` on its HTTPS port) within 2 seconds, the whole answer within 5 seconds. A
-  node that does not answer contributes the bytes it last wrote and is not counted in `live`.
+  (`GET /model/downloads` on its HTTPS port) within 2 seconds, the fixed part within 5 seconds, the
+  whole answer within 13 seconds. Live reads cover at most 64 downloading nodes; a node past that
+  cap, or one that does not answer, contributes the bytes it last wrote and is not counted in
+  `live`.
 - **It names no node.** It is namespaced and tenants read it; node names would give every tenant the
   cluster's topology. The per-node view is the `v1` NodeModelStore.
 - **The mean covers the downloading nodes only**, each downloading a whole copy; a node starting a
