@@ -113,10 +113,10 @@ var engineRoleSupport = map[Engine][]Role{
 	EngineVLLM:       {RoleNone, RolePrefill, RoleDecode},
 	EngineVLLMAscend: {RoleNone, RolePrefill, RoleDecode},
 	// SGLang's store client is role-blind, but its disaggregation arguments carry both roles, so
-	// all three render. The two kinds' ONLY rendering is the disaggregation one -- a kind asked
-	// for without the point-to-point leg is refused by the renderer rather than rendered as a
-	// store member wearing a label, which would be a container that looks configured and pairs
-	// with nothing.
+	// all three render. The two kinds' ONLY rendering is the disaggregation one, and it follows
+	// the declared pair: a kind without one, which includes every Pod the injection webhook
+	// admits, renders the shared store alone, exactly as no role does. What the renderer refuses
+	// is the converse, a point-to-point leg with no kind to pair.
 	EngineSGLang: {RoleNone, RolePrefill, RoleDecode},
 }
 

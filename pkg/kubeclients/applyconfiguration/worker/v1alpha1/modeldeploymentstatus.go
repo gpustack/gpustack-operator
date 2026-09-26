@@ -47,8 +47,11 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// that telling a cache-sharing misconfiguration from a cache that is merely cold takes one object
 	// rather than two.
 	//
-	// It is ABSENT while the Binding cannot be resolved, rather than present and empty: an empty
+	// It is ABSENT until the Binding has been resolved once, rather than present and empty: an empty
 	// object here would be indistinguishable from a domain whose every field happens to be empty.
+	// Once resolved, it keeps the last domain read when the Binding can no longer be resolved,
+	// because the replicas are still writing into that domain; DomainRegistered is what says the
+	// reading is stale.
 	KVCache *ModelDeploymentKVCacheStatusApplyConfiguration `json:"kvCache,omitempty"`
 	// Router is the observed contract of the managed router requested by spec.router.
 	//

@@ -56,10 +56,11 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// key hash, so two callers using different tenant names read each other's cache.
 	//
 	// It is a FIELD rather than an extraArgs entry because another API validates against it: a
-	// KVCachePool is refused when its backend has no ledger to write quota into, and a webhook
-	// reading an unschema'd "true", "1" or "True" would be judging a value domain that belongs to
-	// whoever typed it. The store's global -quota_bytes flag stays in extraArgs for the converse
-	// reason: no other API needs to interpret it.
+	// KVCachePool over a backend with no ledger to write quota into is admitted with a warning that
+	// no per-tenant quota is in force, withdrawing the flag from a backend a pool already holds is
+	// refused, and a webhook reading an unschema'd "true", "1" or "True" would be judging a value
+	// domain that belongs to whoever typed it. The store's global -quota_bytes flag stays in
+	// extraArgs for the converse reason: no other API needs to interpret it.
 	//
 	// Unset and false both mean no ledger, and unset renders NO flag rather than an explicit false.
 	MultiTenancy *bool `json:"multiTenancy,omitempty"`

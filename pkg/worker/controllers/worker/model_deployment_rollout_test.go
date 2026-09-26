@@ -169,7 +169,7 @@ func TestModelDeploymentReconciler_ReportsARolloutHeldByAnUnreachableStore(t *te
 		"the guard's second half reads a domain this deployment already resolved")
 
 	kvcpb := getModelDeploymentBinding(t, cli)
-	kvcpb.Status.Phase = KVCachePoolPhaseDegraded
+	kvcpb.Status.Phase = KVCachePoolPhaseError
 	kvcpb.Status.PhaseMessage = "the master's figures could not be read this pass"
 	require.NoError(t, cli.Status().Update(context.Background(), kvcpb))
 
@@ -206,7 +206,7 @@ func TestModelDeploymentReconciler_AResizeDuringAnOutageStillAnswersForWhatItDid
 	require.Len(t, replicaHashes(t, cli), 2)
 
 	kvcpb := getModelDeploymentBinding(t, cli)
-	kvcpb.Status.Phase = KVCachePoolPhaseDegraded
+	kvcpb.Status.Phase = KVCachePoolPhaseError
 	require.NoError(t, cli.Status().Update(context.Background(), kvcpb))
 
 	changed := getModelDeployment(t, cli)
@@ -262,7 +262,7 @@ func TestModelDeploymentReconciler_AnOutageDoesNotCarryAWithheldEditOntoTheRunni
 	require.Len(t, replicaImages(t, cli), 2)
 
 	kvcpb := getModelDeploymentBinding(t, cli)
-	kvcpb.Status.Phase = KVCachePoolPhaseDegraded
+	kvcpb.Status.Phase = KVCachePoolPhaseError
 	require.NoError(t, cli.Status().Update(context.Background(), kvcpb))
 
 	edited := getModelDeployment(t, cli)
@@ -592,7 +592,7 @@ func TestModelDeploymentReconciler_HoldsWithNoEditAtAll(t *testing.T) {
 	require.Len(t, before, 2)
 
 	kvcpb := getModelDeploymentBinding(t, cli)
-	kvcpb.Status.Phase = KVCachePoolPhaseDegraded
+	kvcpb.Status.Phase = KVCachePoolPhaseError
 	require.NoError(t, cli.Status().Update(context.Background(), kvcpb))
 
 	_, err = reconcileModelDeployment(t, cli)
@@ -622,7 +622,7 @@ func TestModelDeploymentReconciler_AnOutageDoesNotHoldTheScaleItself(t *testing.
 	require.Len(t, before, 2)
 
 	kvcpb := getModelDeploymentBinding(t, cli)
-	kvcpb.Status.Phase = KVCachePoolPhaseDegraded
+	kvcpb.Status.Phase = KVCachePoolPhaseError
 	require.NoError(t, cli.Status().Update(context.Background(), kvcpb))
 
 	resized := getModelDeployment(t, cli)
@@ -652,7 +652,7 @@ func TestModelDeploymentReconciler_ClearsTheHeldConditionWhenTheStoreReturns(t *
 	require.Len(t, replicaHashes(t, cli), 2)
 
 	kvcpb := getModelDeploymentBinding(t, cli)
-	kvcpb.Status.Phase = KVCachePoolPhaseDegraded
+	kvcpb.Status.Phase = KVCachePoolPhaseError
 	require.NoError(t, cli.Status().Update(context.Background(), kvcpb))
 
 	changed := getModelDeployment(t, cli)

@@ -189,10 +189,14 @@ The lists are read from vLLM v0.29.0 and SGLang v0.5.18; the engine image in use
   policy file and reads the resulting grants back.
 
 The pool's verdict on the sum is a Condition, not a refusal: `QuotaWithinTotal` on the pool is
-`True` while every Binding's ceiling can be granted in full, and turns `False` with reason
+`True` while the ceilings fit within the pool's declared `total`, and turns `False` with reason
 `Oversubscribed` — naming the sum and the `total` — the moment the ceilings pass it. Nothing is
 refused; the store keeps serving, and each Binding's `status.effectiveQuota` is the proportional
 share already described.
+
+**`QuotaWithinTotal=True` does not promise a full grant.** It compares the ceilings with the declared
+`total`, not with the master's allocatable capacity, so the grants still fall below the ceilings
+whenever the ceilings sum past what the members have mounted.
 
 `status.usage` is what the master reports the domain as holding, republished as read — the operator
 caps nothing. What is bounded is the **store's charge**: it refuses a charge that would overshoot the
@@ -360,7 +364,9 @@ last pool. Its deleting Bindings are released once it is gone, and its claim no 
 — see [KV Cache Backend](backend.md#operating-notes) for the rule and the remedy. What it protects on
 this side is a pool's own exit: releasing a pool means releasing every quota it registered.
 
-**Read the grant, not the ceiling, when diagnosing.** `kubectl get kvcpb` prints both:
+**Read the grant, not the ceiling, when diagnosing.** `kubectl get kvcpb` prints both. The output
+below is from a backend with `leader.multiTenancy: true`; without it there is no ledger, and
+`EFFECTIVE` and `USAGE` stay empty:
 
 ```
 NAME     POOL          DOMAIN        EFFECTIVE   USAGE    PHASE   AGE

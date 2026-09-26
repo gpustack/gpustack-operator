@@ -1330,9 +1330,9 @@ const kvCacheBackendMaxConsumerNames = 20
 // validateKVCacheBackendMultiTenancyWithdrawal refuses taking the tenant ledger away from a backend
 // something already holds.
 //
-// A KVCachePool is refused at creation when its backend runs without multi-tenancy. That rule
-// governs one admission moment and leaves the other open — the flag can be withdrawn under a pool
-// already admitted — and this is the second half of it.
+// A KVCachePool over a backend with multi-tenancy registers its reuse domains on that master's
+// ledger. Pool admission only warns about a backend without it, so nothing there stops the flag being
+// withdrawn under a pool that has already registered, and this rule is what does.
 //
 // What the withdrawal costs is not only quota correctness, where every request falls into one default
 // tenant and two reuse domains read each other's blocks. It costs the EXIT: a pool's finalizer

@@ -28,6 +28,9 @@ type KVCachePoolDomainApplyConfiguration struct {
 	// Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not
 	// carry this domain. A fabricated zero hit rate on a warm cache is worse than no number, and
 	// zero blocks is a different fact from "not in the scrape".
+	//
+	// This operator writes neither today, so both are always absent: the current store generation
+	// exports no per-domain object count, and its hit rate is per master rather than per domain.
 	Blocks *int64 `json:"blocks,omitempty"`
 	// HitRate is a ratio held as a STRING with a pattern, never a float, matching the shape the
 	// measured surface itself uses. The pattern is safe here in a way an enum on an echoed vendor

@@ -87,7 +87,6 @@ func indexKVCachePoolByBackend(obj ctrlcli.Object) []string {
 const (
 	KVCachePoolPhaseProvisioning = "Provisioning"
 	KVCachePoolPhaseReady        = "Ready"
-	KVCachePoolPhaseDegraded     = "Degraded"
 	KVCachePoolPhaseError        = "Error"
 	KVCachePoolPhaseDeleting     = "Deleting"
 )
@@ -119,7 +118,7 @@ const (
 	// backend; admission refuses only the one ceiling that could never be granted alone.
 	//
 	// It is deliberately absent from the axes summarizeKVCachePool reads, so an oversubscribed pool
-	// does not read as Degraded: what False names is a proportional division the store performs by
+	// does not read as Error: what False names is a proportional division the store performs by
 	// design, and a pool telling an operator to fix what is working is the reading this spelling
 	// exists to avoid.
 	KVCachePoolConditionQuotaWithinTotal kubeapistatus.ConditionType = "QuotaWithinTotal"
@@ -908,8 +907,10 @@ func observeKVCachePoolQuotaWithinTotal(
 		// the arithmetic did not check.
 		if excluded.Len() > 0 {
 			KVCachePoolConditionQuotaWithinTotal.True(holder, "WithinTotal", fmt.Sprintf(
-				"every uncontested binding's ceiling can be granted in full: those ceilings sum to "+
-					"%s against the pool's declared total of %s. The contested domains %s are left "+
+				"every uncontested binding's ceiling fits within the pool's declared total: those "+
+					"ceilings sum to %s against a total of %s. Whether the master grants them in full "+
+					"depends on its allocatable capacity, and each binding's status.effectiveQuota "+
+					"reports the grant. The contested domains %s are left "+
 					"out of that sum, and no ceiling is written for them at all, so this comparison "+
 					"says nothing about what they asked for",
 				sum.String(), total.String(), strings.Join(sets.List(excluded), ", ")))
@@ -917,8 +918,10 @@ func observeKVCachePoolQuotaWithinTotal(
 			return
 		}
 		KVCachePoolConditionQuotaWithinTotal.True(holder, "WithinTotal",
-			fmt.Sprintf("every binding's ceiling can be granted in full: the ceilings sum to %s "+
-				"against the pool's declared total of %s", sum.String(), total.String()))
+			fmt.Sprintf("every binding's ceiling fits within the pool's declared total: the ceilings "+
+				"sum to %s against a total of %s. Whether the master grants them in full depends on "+
+				"its allocatable capacity, and each binding's status.effectiveQuota reports the grant",
+				sum.String(), total.String()))
 
 		return
 	}

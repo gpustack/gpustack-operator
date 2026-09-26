@@ -2367,7 +2367,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 													},
 													Properties: map[string]v1.JSONSchemaProps{
 														"endpoints": {
-															Description: "Endpoints are the addresses of a backend somebody else runs, one entry per named role. Both\nroles are required: this operator reads the Admin address and publishes the Client one, so an\nexternal backend that named only one leaves either the scrape or every engine with nothing to\npoint at. It is a list rather than a single address so that a multi-leader backend needs no\nAPI change to describe.",
+															Description: "Endpoints are the addresses of a backend somebody else runs, one entry per named role. Both\nroles are required: this operator reads the Admin address and publishes the Client one, so an\nexternal backend that named only one leaves either the scrape or every engine with nothing to\npoint at. It is a list rather than a single address so that a multi-leader backend needs no\nAPI change to describe.\nToday the list therefore holds exactly two entries, one Client and one Admin: entries are keyed\nby name, the name has two values, and admission refuses a list missing either.",
 															Type:        "array",
 															MinItems:    ptr.To[int64](1),
 															Items: &v1.JSONSchemaPropsOrArray{
@@ -2526,7 +2526,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	Nullable: true,
 																},
 																"multiTenancy": {
-																	Description: "MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index\nbehind it. Off, every request falls into one default tenant and the index degrades to a plain\nkey hash, so two callers using different tenant names read each other's cache.\nIt is a FIELD rather than an extraArgs entry because another API validates against it: a\nKVCachePool is refused when its backend has no ledger to write quota into, and a webhook\nreading an unschema'd \"true\", \"1\" or \"True\" would be judging a value domain that belongs to\nwhoever typed it. The store's global -quota_bytes flag stays in extraArgs for the converse\nreason: no other API needs to interpret it.\nUnset and false both mean no ledger, and unset renders NO flag rather than an explicit false.",
+																	Description: "MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index\nbehind it. Off, every request falls into one default tenant and the index degrades to a plain\nkey hash, so two callers using different tenant names read each other's cache.\nIt is a FIELD rather than an extraArgs entry because another API validates against it: a\nKVCachePool over a backend with no ledger to write quota into is admitted with a warning that\nno per-tenant quota is in force, withdrawing the flag from a backend a pool already holds is\nrefused, and a webhook reading an unschema'd \"true\", \"1\" or \"True\" would be judging a value\ndomain that belongs to whoever typed it. The store's global -quota_bytes flag stays in\nextraArgs for the converse reason: no other API needs to interpret it.\nUnset and false both mean no ledger, and unset renders NO flag rather than an explicit false.",
 																	Type:        "boolean",
 																},
 																"replicas": {
@@ -3188,7 +3188,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 											Nullable: true,
 										},
 										"conditions": {
-											Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,\nCapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has\nsomething to be a verdict about — SnapshotStorageShared and ElectionObserved. Every one is\nderived from an observed document.",
+											Description: "Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,\nCapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has\nsomething to be a verdict about — SnapshotStorageShared, ElectionObserved and TierWasEmpty,\nthe last only where a member group carries a local disk tier. Every one is derived from an\nobserved document.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{
@@ -3628,7 +3628,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCachePool() *v1.CustomResourceDefinition
 															Format:      "int32",
 														},
 														"blocks": {
-															Description: "Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not\ncarry this domain. A fabricated zero hit rate on a warm cache is worse than no number, and\nzero blocks is a different fact from \"not in the scrape\".",
+															Description: "Blocks and HitRate are OBSERVED, never declared, and they are ABSENT when the scrape does not\ncarry this domain. A fabricated zero hit rate on a warm cache is worse than no number, and\nzero blocks is a different fact from \"not in the scrape\".\nThis operator writes neither today, so both are always absent: the current store generation\nexports no per-domain object count, and its hit rate is per master rather than per domain.",
 															Type:        "integer",
 															Format:      "int64",
 															Nullable:    true,
@@ -3656,7 +3656,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCachePool() *v1.CustomResourceDefinition
 											XListType: ptr.To[string]("map"),
 										},
 										"phase": {
-											Description: "Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.",
+											Description: "Phase summarizes the conditions: Provisioning, Ready, Error, Deleting.",
 											Type:        "string",
 										},
 										"phaseMessage": {
@@ -3892,7 +3892,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding() *v1.CustomResourceDef
 									Type: "object",
 									Properties: map[string]v1.JSONSchemaProps{
 										"blocks": {
-											Description: "Blocks and HitRate are OBSERVED from the master and the engine, never declared. They are absent\nwhen the scrape does not carry this tenant, because a fabricated zero hit rate on a warm cache\nis worse than no number at all. Zero blocks and \"not in the scrape\" are different facts here as\nwell: zero is a measurement, absence is the lack of one.",
+											Description: "Blocks and HitRate are OBSERVED from the master and the engine, never declared. They are absent\nwhen the scrape does not carry this tenant, because a fabricated zero hit rate on a warm cache\nis worse than no number at all. Zero blocks and \"not in the scrape\" are different facts here as\nwell: zero is a measurement, absence is the lack of one.\nThis operator writes neither today, so both are always absent: the current store generation\nexports no per-tenant object count, and its hit rate is per master rather than per tenant.",
 											Type:        "integer",
 											Format:      "int64",
 											Nullable:    true,
@@ -3986,7 +3986,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding() *v1.CustomResourceDef
 											Nullable:    true,
 										},
 										"phase": {
-											Description: "Phase summarizes the conditions: Provisioning, Ready, Degraded, Error, Deleting.",
+											Description: "Phase summarizes the conditions: Provisioning, Ready, Error, Deleting.",
 											Type:        "string",
 										},
 										"phaseMessage": {
@@ -5138,7 +5138,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											MaxLength:   ptr.To[int64](512),
 										},
 										"kvCache": {
-											Description: "KVCache is the reuse domain this deployment actually attached to, read from the Binding, so\nthat telling a cache-sharing misconfiguration from a cache that is merely cold takes one object\nrather than two.\nIt is ABSENT while the Binding cannot be resolved, rather than present and empty: an empty\nobject here would be indistinguishable from a domain whose every field happens to be empty.",
+											Description: "KVCache is the reuse domain this deployment actually attached to, read from the Binding, so\nthat telling a cache-sharing misconfiguration from a cache that is merely cold takes one object\nrather than two.\nIt is ABSENT until the Binding has been resolved once, rather than present and empty: an empty\nobject here would be indistinguishable from a domain whose every field happens to be empty.\nOnce resolved, it keeps the last domain read when the Binding can no longer be resolved,\nbecause the replicas are still writing into that domain; DomainRegistered is what says the\nreading is stale.",
 											Type:        "object",
 											Required: []string{
 												"binding",

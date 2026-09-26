@@ -38,7 +38,7 @@ characters, so everything of unbounded length is an annotation.
 | annotation | `kvcache.gpustack.ai/binding` | a `KVCachePoolBinding` name, in this Pod's namespace | yes |
 | annotation | `kvcache.gpustack.ai/engine` | `vllm` \| `sglang` | yes |
 | annotation | `kvcache.gpustack.ai/manufacturer` | `ascend` | no — only with `engine: vllm`; selects the vLLM-Ascend runtime |
-| annotation | `kvcache.gpustack.ai/role` | `prefill` \| `decode`; omitted for a plain server | no — **vLLM family only**; SGLang refuses any role |
+| annotation | `kvcache.gpustack.ai/role` | `prefill` \| `decode`; omitted for a plain server | no — **read by the vLLM family only**; an SGLang Pod carrying one is admitted and injected exactly as without it |
 | annotation | `kvcache.gpustack.ai/container` | a container name | only when the Pod has more than one container |
 | annotation | `kvcache.gpustack.ai/launch-args-forwarded` | `"true"` | no — only when an unrecognised launcher, script, or image ENTRYPOINT forwards appended arguments to the declared engine |
 
@@ -47,6 +47,10 @@ For a plain server, one that is not half of a prefill/decode split, LEAVE THE RO
 spelled `server` on `ModelDeployment.spec.roles[].kind`, which even defaults to it. The value that
 is correct there turns a Pod away here. An absent annotation renders the read-and-write
 configuration a shared cache wants.
+
+**On an SGLang Pod the role changes nothing.** That engine's store client does not distinguish
+roles, and the prefill/decode split is rendered only for a `ModelDeployment`, so a Pod with the
+annotation and one without get the same injection.
 
 ```yaml
 apiVersion: apps/v1
@@ -238,7 +242,6 @@ container that starts normally and does not use the cache — a result invisible
 | a container launched through a shell's `-c` | an appended flag becomes the shell's `$0`, so it never reaches the engine and the Pod is stamped as injected anyway | launch the engine directly — its executable in `command`, its arguments in `args` — or add the connector flag to the script yourself |
 | a command line hidden inside one argument — `env -S "…"` and its `--split-string` spellings | there is nothing on the command line to test: the launcher splits that string itself, so admission cannot tell whether a shell is inside it | launch the engine directly, add the connector flag inside that argument, or declare that it forwards appended arguments |
 | a program whose name ends in `.sh` — `./run.sh`, and `sh /app/run.sh` alike | whether an appended argument reaches the engine depends on whether the script forwards `"$@"`, which is a file inside the image rather than a token on the command line | launch the engine directly, add the connector flag inside the script, or declare that it forwards appended arguments |
-| the `role` annotation on an SGLang Pod | that engine has no prefill/decode equivalent, and accepting the role while ignoring it would leave the container looking configured and behaving otherwise | drop the annotation, or use a vLLM-family engine |
 | an unrecognised `kvcache.gpustack.ai/` key | a typo would otherwise be ignored, leaving the Pod configured differently from its manifest | fix the key |
 | `kvcache.gpustack.ai/client-config` or `.../injected` | these record what the webhook decided; a submitted value would be a record of a decision nobody made | remove them |
 

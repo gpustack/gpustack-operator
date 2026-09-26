@@ -227,6 +227,9 @@ type KVCacheBackendExternal struct {
 	// point at. It is a list rather than a single address so that a multi-leader backend needs no
 	// API change to describe.
 	//
+	// Today the list therefore holds exactly two entries, one Client and one Admin: entries are keyed
+	// by name, the name has two values, and admission refuses a list missing either.
+	//
 	// +required
 	// +k8s:validation:minItems=1
 	// +listType=map
@@ -330,10 +333,11 @@ type KVCacheBackendLeader struct {
 	// key hash, so two callers using different tenant names read each other's cache.
 	//
 	// It is a FIELD rather than an extraArgs entry because another API validates against it: a
-	// KVCachePool is refused when its backend has no ledger to write quota into, and a webhook
-	// reading an unschema'd "true", "1" or "True" would be judging a value domain that belongs to
-	// whoever typed it. The store's global -quota_bytes flag stays in extraArgs for the converse
-	// reason: no other API needs to interpret it.
+	// KVCachePool over a backend with no ledger to write quota into is admitted with a warning that
+	// no per-tenant quota is in force, withdrawing the flag from a backend a pool already holds is
+	// refused, and a webhook reading an unschema'd "true", "1" or "True" would be judging a value
+	// domain that belongs to whoever typed it. The store's global -quota_bytes flag stays in
+	// extraArgs for the converse reason: no other API needs to interpret it.
 	//
 	// Unset and false both mean no ledger, and unset renders NO flag rather than an explicit false.
 	MultiTenancy bool `json:"multiTenancy,omitempty" protobuf:"varint,4,opt,name=multiTenancy"`
@@ -975,8 +979,9 @@ type KVCacheBackendStatus struct {
 
 	// Conditions is the finer view, one condition per axis: LeaderAvailable, MembersMounted,
 	// CapacityObserved, PoolWrites, Deletable, RolloutComplete, and — each only where it has
-	// something to be a verdict about — SnapshotStorageShared and ElectionObserved. Every one is
-	// derived from an observed document.
+	// something to be a verdict about — SnapshotStorageShared, ElectionObserved and TierWasEmpty,
+	// the last only where a member group carries a local disk tier. Every one is derived from an
+	// observed document.
 	//
 	// +patchMergeKey=type
 	// +patchStrategy=merge

@@ -92,7 +92,7 @@ moved — the address is still the operator's own — and the kubelet does not v
 certificate on a probe, so a self-signed pair is graded like any other.
 
 ⛔ **Three shapes carry no gates at all**: a role that replaces the command through
-`template.command`; a role that moves where its engine listens, with `--host` or `--port`, or that
+`roles[].command`; a role that moves where its engine listens, with `--host` or `--port`, or that
 demands a client certificate a probe has none to present, with `--ssl-cert-reqs` set to anything but
 `0` or `1` **alongside a certificate or key**; and a role declaring its port as `UDP` or `SCTP`.
 
@@ -137,8 +137,9 @@ That is the field's contract rather than a gap in it. The answer is read through
 per-accelerator admission gate uses, and a flavor reported here that the gate would not fit against
 would be worse than none.
 
-Seven conditions carry the axes a single phase cannot. They are independent: "quota reserved but
-cache not attached" is a real and actionable state.
+Eight conditions carry the axes a single phase cannot. They are independent: "quota reserved but
+cache not attached" is a real and actionable state. Seven are described below; `WeightsReady` is
+described with the artifact it reports on, in [Model Artifact Reference](model-artifact.md#status).
 
 **`DomainRegistered`** — whether the referenced Binding resolved and its domain was read.
 
@@ -217,6 +218,7 @@ or a log line.
 
 | Value | Reason | Meaning |
 |---|---|---|
+| `True` | `NotApplicable` | the deployment declares no `kvCache`, so there is no cache to attach |
 | `True` | `CacheActive` | a ready replica reports succeeding store operations |
 | `True` | `CacheActive` | no replica gave an account, and the reuse domain holds data — this attributes to the domain, which is shared by every deployment on its Binding |
 | `False` | `CacheOperationsFailing` | a ready replica reports store operations of which **none** succeeded; the engine is serving without the cache |
