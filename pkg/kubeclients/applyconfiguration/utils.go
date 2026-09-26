@@ -1280,6 +1280,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.ModelArtifactApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("ModelDeployment"):
 		return &applyconfigurationworkerv1.ModelDeploymentApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("ModelPrefetch"):
+		return &applyconfigurationworkerv1.ModelPrefetchApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("NFSInstancePersistentVolumeSource"):
 		return &applyconfigurationworkerv1.NFSInstancePersistentVolumeSourceApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("S3InstancePersistentVolumeSource"):
@@ -1504,6 +1506,40 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetch"):
+		return &applyconfigurationworkerv1alpha1.ModelPrefetchApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetchArtifactReference"):
+		return &applyconfigurationworkerv1alpha1.ModelPrefetchArtifactReferenceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetchBindingReference"):
+		return &applyconfigurationworkerv1alpha1.ModelPrefetchBindingReferenceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetchPlacement"):
+		return &applyconfigurationworkerv1alpha1.ModelPrefetchPlacementApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetchRetention"):
+		return &applyconfigurationworkerv1alpha1.ModelPrefetchRetentionApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetchSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelPrefetchSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetchStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelPrefetchStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStore"):
+		return &applyconfigurationworkerv1alpha1.ModelStoreApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreBinding"):
+		return &applyconfigurationworkerv1alpha1.ModelStoreBindingApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreBindingQuota"):
+		return &applyconfigurationworkerv1alpha1.ModelStoreBindingQuotaApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreBindingSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelStoreBindingSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreBindingStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelStoreBindingStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreBindingStoreReference"):
+		return &applyconfigurationworkerv1alpha1.ModelStoreBindingStoreReferenceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreCapacity"):
+		return &applyconfigurationworkerv1alpha1.ModelStoreCapacityApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreDownload"):
+		return &applyconfigurationworkerv1alpha1.ModelStoreDownloadApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreSpec"):
+		return &applyconfigurationworkerv1alpha1.ModelStoreSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelStoreStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStore"):
 		return &applyconfigurationworkerv1alpha1.NodeModelStoreApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreCapacity"):

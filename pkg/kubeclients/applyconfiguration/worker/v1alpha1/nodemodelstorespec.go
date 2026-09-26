@@ -29,6 +29,16 @@ type NodeModelStoreSpecApplyConfiguration struct {
 	// refreshes the reading and writes what it read, so a hand edit holds only until the next
 	// reading.
 	Kubelet *NodeModelStoreKubeletApplyConfiguration `json:"kubelet,omitempty"`
+	// Store names the ModelStore whose per-pool policy this node's effective configuration carries:
+	// the alphabetically first store whose selector matches the node when two match, and empty when
+	// none does, so the cluster defaults apply. The worker writes it; nothing else does.
+	Store *string `json:"store,omitempty"`
+	// Pinned lists the manifest digests the node must retain: the union of the prefetches whose
+	// retention pins them and whose target set holds this node. A pinned digest is never a
+	// collection candidate, though it still counts toward usage. The prefetch controller writes
+	// the field and the configuration reconciler carries it over untouched, so the two never
+	// overwrite each other's work on the same object.
+	Pinned []string `json:"pinned,omitempty"`
 }
 
 // NodeModelStoreSpecApplyConfiguration constructs a declarative configuration of the NodeModelStoreSpec type for use with
@@ -66,5 +76,23 @@ func (b *NodeModelStoreSpecApplyConfiguration) WithHub(value *NodeModelStoreHubA
 // If called multiple times, the Kubelet field is set to the value of the last call.
 func (b *NodeModelStoreSpecApplyConfiguration) WithKubelet(value *NodeModelStoreKubeletApplyConfiguration) *NodeModelStoreSpecApplyConfiguration {
 	b.Kubelet = value
+	return b
+}
+
+// WithStore sets the Store field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Store field is set to the value of the last call.
+func (b *NodeModelStoreSpecApplyConfiguration) WithStore(value string) *NodeModelStoreSpecApplyConfiguration {
+	b.Store = &value
+	return b
+}
+
+// WithPinned adds the given value to the Pinned field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Pinned field.
+func (b *NodeModelStoreSpecApplyConfiguration) WithPinned(values ...string) *NodeModelStoreSpecApplyConfiguration {
+	for i := range values {
+		b.Pinned = append(b.Pinned, values[i])
+	}
 	return b
 }

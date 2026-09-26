@@ -406,6 +406,38 @@ func (in *ModelDeployment) CopyStatusTo(out runtime.Object) {
 	out.(*ModelDeployment).Status = in.Status
 }
 
+var _ rest.Scoper = (*ModelPrefetch)(nil)
+
+func (*ModelPrefetch) NamespaceScoped() bool {
+	return true
+}
+
+var _ rest.KindProvider = (*ModelPrefetch)(nil)
+
+func (*ModelPrefetch) Kind() string {
+	return "ModelPrefetch"
+}
+
+var _ rest.SingularNameProvider = (*ModelPrefetch)(nil)
+
+func (*ModelPrefetch) GetSingularName() string {
+	return "modelprefetch"
+}
+
+var _ rest.ShortNamesProvider = (*ModelPrefetch)(nil)
+
+func (*ModelPrefetch) ShortNames() []string {
+	return []string{}
+}
+
+var _ rest.CategoriesProvider = (*ModelPrefetch)(nil)
+
+func (*ModelPrefetch) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
 var _ rest.Scoper = (*NodeModelStore)(nil)
 
 func (*NodeModelStore) NamespaceScoped() bool {

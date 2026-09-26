@@ -24,6 +24,9 @@ func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 		"KVCachePoolBinding": crd_gpustack_api_worker_v1alpha1_KVCachePoolBinding(),
 		"ModelArtifact":      crd_gpustack_api_worker_v1alpha1_ModelArtifact(),
 		"ModelDeployment":    crd_gpustack_api_worker_v1alpha1_ModelDeployment(),
+		"ModelPrefetch":      crd_gpustack_api_worker_v1alpha1_ModelPrefetch(),
+		"ModelStore":         crd_gpustack_api_worker_v1alpha1_ModelStore(),
+		"ModelStoreBinding":  crd_gpustack_api_worker_v1alpha1_ModelStoreBinding(),
 		"NodeModelStore":     crd_gpustack_api_worker_v1alpha1_NodeModelStore(),
 		"TopologySource":     crd_gpustack_api_worker_v1alpha1_TopologySource(),
 	}
@@ -5490,6 +5493,872 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 	}
 }
 
+func crd_gpustack_api_worker_v1alpha1_ModelPrefetch() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "modelprefetches.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "modelprefetches",
+				Singular: "modelprefetch",
+				ShortNames: []string{
+					"mpf",
+				},
+				Kind:     "ModelPrefetch",
+				ListKind: "ModelPrefetchList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Namespaced",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "ModelPrefetch is the schema for worker.gpustack.ai.\nIt is a tenant's RESIDENCY INTENT for one model artifact: keep the artifact's weights on a set of\nnodes ahead of any Pod that mounts them. The worker delivers it the same way it delivers a cold\nmount — one warm-up Pod per target node, the artifact's own CSI volume, no accelerator request —\nso the bytes land through the node cache's ordinary path, once per node, verified, and Pod exits\nonce the tree is readable. The Pod IS the delivery operation; there is no separate job state.\nPlacement narrows the target set: the InstanceTypes of a node pool, or a nodeSelector for named\nnodes, or — when both are left out — the InstanceTypes of the namespace's own deployments that\nreference the artifact. Retention decides what happens after: whether the content is pinned\nagainst collection (an admin-granted capability) and how long a node keeps it after its last use.\nDeleting the object revokes the intent: the warm-up Pods go, the nodes' pins drop, and the bytes\nare reclaimed by the node cache's own collection once they are unreferenced and past its grace.\nNothing is torn out from under a Pod still reading the tree.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"artifactRef",
+										"bindingRef",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"artifactRef": {
+											Description: "ArtifactRef names the ModelArtifact in this namespace whose weights warm the target set. It\nmust be resolved before any Pod is rendered: admission and delivery both read its digest.",
+											Type:        "object",
+											Required: []string{
+												"name",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"name": {
+													Type: "string",
+												},
+											},
+										},
+										"bindingRef": {
+											Description: "BindingRef names the ModelStoreBinding in this namespace that pays for the bytes. It must\ngrant a store covering the target set, and its budget bounds the prefetch at admission.",
+											Type:        "object",
+											Required: []string{
+												"name",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"name": {
+													Type: "string",
+												},
+											},
+										},
+										"minReady": {
+											Description: "MinReady is how many target nodes holding the content make the prefetch Available; 0 means\nall of them.",
+											Type:        "integer",
+											Format:      "int32",
+											Default: &v1.JSON{
+												Raw: []byte(`0`),
+											},
+											Minimum: ptr.To[float64](0),
+										},
+										"placement": {
+											Description: "Placement narrows the target set. InstanceTypes and NodeSelector are mutually exclusive;\nboth set is refused, and both left out derives the target set from the namespace's own\ndeployments that reference the artifact. The relational rules are webhook-enforced.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"instanceTypes": {
+													Description: "InstanceTypes names the node pools to warm, by the InstanceType objects the scheduling chain\nalready publishes. The target set is every node carrying one of these types' flavors.",
+													Type:        "array",
+													MaxItems:    ptr.To[int64](8),
+													MinItems:    ptr.To[int64](1),
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "string",
+														},
+													},
+													Nullable:  true,
+													XListType: ptr.To[string]("atomic"),
+												},
+												"nodeSelector": {
+													Description: "NodeSelector selects the target nodes directly, the \"download to these nodes\" form.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"matchExpressions": {
+															Description: "matchExpressions is a list of label selector requirements. The requirements are ANDed.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"key",
+																		"operator",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"key": {
+																			Description: "key is the label key that the selector applies to.",
+																			Type:        "string",
+																		},
+																		"operator": {
+																			Description: "operator represents a key's relationship to a set of values.\nValid operators are In, NotIn, Exists and DoesNotExist.",
+																			Type:        "string",
+																		},
+																		"values": {
+																			Description: "values is an array of string values. If the operator is In or NotIn,\nthe values array must be non-empty. If the operator is Exists or DoesNotExist,\nthe values array must be empty. This array is replaced during a strategic\nmerge patch.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "string",
+																				},
+																			},
+																			Nullable:  true,
+																			XListType: ptr.To[string]("atomic"),
+																		},
+																	},
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("atomic"),
+														},
+														"matchLabels": {
+															Description: "matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels\nmap is equivalent to an element of matchExpressions, whose key field is \"key\", the\noperator is \"In\", and the values array contains only \"value\". The requirements are ANDed.",
+															Type:        "object",
+															AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+																Allows: true,
+																Schema: &v1.JSONSchemaProps{
+																	Type: "string",
+																},
+															},
+															Nullable: true,
+														},
+													},
+													Nullable: true,
+												},
+											},
+											Nullable: true,
+										},
+										"retention": {
+											Description: "Retention decides what happens to the content after it has landed.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"pinned": {
+													Description: "Pinned keeps the content on every target node against the node cache's collection: a pinned\ndigest is never an eviction candidate, though it still counts toward usage. It requires the\nBinding to allow pinning, and admission refuses it otherwise.",
+													Type:        "boolean",
+												},
+												"ttlAfterLastUse": {
+													Description: "TTLAfterLastUse unpins a node's copy once nothing mounted it for this long. It is enforced\nat the hour granularity the node's report already carries: retention does not need finer\nprecision, and finer recording would multiply the node's writes for a decision that cannot\ntell the difference.",
+													Type:        "string",
+													Format:      "duration",
+													Nullable:    true,
+												},
+											},
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"conditions": {
+											Description: "Conditions: Progressing says delivery is under way; Available says ReadyNodes reached the\nMinReady bar; Degraded says a target node gave up, and the message says why.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"desiredNodes": {
+											Description: "DesiredNodes is the size of the target set the current placement resolves to.",
+											Type:        "integer",
+											Format:      "int32",
+										},
+										"downloadingNodes": {
+											Description: "DownloadingNodes is how many target nodes are still fetching it.",
+											Type:        "integer",
+											Format:      "int32",
+										},
+										"readyNodes": {
+											Description: "ReadyNodes is how many target nodes report the digest published and mountable.",
+											Type:        "integer",
+											Format:      "int32",
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Artifact",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.artifactRef.name",
+						},
+						{
+							Name:        "Binding",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.bindingRef.name",
+						},
+						{
+							Name:        "Ready",
+							Type:        "integer",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.readyNodes",
+						},
+						{
+							Name:        "Desired",
+							Type:        "integer",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.desiredNodes",
+						},
+						{
+							Name:        "Pinned",
+							Type:        "boolean",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.retention.pinned",
+						},
+						{
+							Name:        "Age",
+							Type:        "date",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".metadata.creationTimestamp",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_ModelStore() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "modelstores.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "modelstores",
+				Singular: "modelstore",
+				ShortNames: []string{
+					"ms",
+				},
+				Kind:     "ModelStore",
+				ListKind: "ModelStoreList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Cluster",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "ModelStore is the schema for worker.gpustack.ai.\nIt is ONE NODE POOL'S CACHE POLICY, the admin's per-pool layer above the cluster defaults: the\nwatermarks and download limits of every node its selector matches, overriding only the fields it\nsets. Nodes no store matches keep the Settings' cluster defaults, so this object never has to\nrestate them.\nThe cache's root path is deliberately absent: it is the plugin DaemonSet's hostPath, decided at\ndeployment, and a per-pool path would need a per-pool DaemonSet rather than a field here.\nTWO STORES MUST NOT MATCH ONE NODE. The worker refuses to guess: it picks the alphabetically\nfirst name deterministically, records that choice in the node's NodeModelStore.spec.store, and\nsets SelectorOverlap on both stores so the misconfiguration is visible where it was made.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"nodeSelector",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"download": {
+											Description: "Download limits the matched nodes' downloads. Nil keeps the cluster defaults.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"bytesPerSecond": {
+													Description: "BytesPerSecond is the matched nodes' download rate limit; 0 is unlimited. Left out, the\ncluster default applies.",
+													Type:        "integer",
+													Format:      "int64",
+													Minimum:     ptr.To[float64](0),
+													Nullable:    true,
+												},
+												"concurrency": {
+													Description: "Concurrency is how many HTTP requests the matched nodes run at once; left out, the cluster\ndefault applies.",
+													Type:        "integer",
+													Format:      "int32",
+													Maximum:     ptr.To[float64](64),
+													Minimum:     ptr.To[float64](1),
+													Nullable:    true,
+												},
+											},
+											Nullable: true,
+										},
+										"nodeSelector": {
+											Description: "NodeSelector selects the pool's nodes. Two stores whose selectors match one node are a\nmisconfiguration this API reports rather than resolves silently; see SelectorOverlap.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"matchExpressions": {
+													Description: "matchExpressions is a list of label selector requirements. The requirements are ANDed.",
+													Type:        "array",
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "object",
+															Required: []string{
+																"key",
+																"operator",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"key": {
+																	Description: "key is the label key that the selector applies to.",
+																	Type:        "string",
+																},
+																"operator": {
+																	Description: "operator represents a key's relationship to a set of values.\nValid operators are In, NotIn, Exists and DoesNotExist.",
+																	Type:        "string",
+																},
+																"values": {
+																	Description: "values is an array of string values. If the operator is In or NotIn,\nthe values array must be non-empty. If the operator is Exists or DoesNotExist,\nthe values array must be empty. This array is replaced during a strategic\nmerge patch.",
+																	Type:        "array",
+																	Items: &v1.JSONSchemaPropsOrArray{
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:  true,
+																	XListType: ptr.To[string]("atomic"),
+																},
+															},
+														},
+													},
+													Nullable:  true,
+													XListType: ptr.To[string]("atomic"),
+												},
+												"matchLabels": {
+													Description: "matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels\nmap is equivalent to an element of matchExpressions, whose key field is \"key\", the\noperator is \"In\", and the values array contains only \"value\". The requirements are ANDed.",
+													Type:        "object",
+													AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+														Allows: true,
+														Schema: &v1.JSONSchemaProps{
+															Type: "string",
+														},
+													},
+													Nullable: true,
+												},
+											},
+										},
+										"watermarks": {
+											Description: "Watermarks bounds the matched nodes' cache filesystem usage. Nil keeps the cluster defaults.",
+											Type:        "object",
+											Required: []string{
+												"highPercent",
+												"lowPercent",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"highPercent": {
+													Description: "HighPercent is the usage above which the plugin removes unreferenced content. On a filesystem\nthe cache shares with kubelet, the plugin may apply a lower one so kubelet neither evicts Pods\nnor collects images because of the cache.",
+													Type:        "integer",
+													Format:      "int32",
+													Maximum:     ptr.To[float64](95),
+													Minimum:     ptr.To[float64](2),
+												},
+												"lowPercent": {
+													Description: "LowPercent is the usage a collection removes down to, below HighPercent.",
+													Type:        "integer",
+													Format:      "int32",
+													Maximum:     ptr.To[float64](94),
+													Minimum:     ptr.To[float64](1),
+												},
+											},
+											Nullable: true,
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"capacity": {
+											Description: "Capacity sums the matched nodes' NodeModelStore capacity readings. It is absent while no\nmatched node has reported one.",
+											Type:        "object",
+											Required: []string{
+												"totalBytes",
+												"storedBytes",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"storedBytes": {
+													Description: "StoredBytes is what the matched nodes' published trees and partial downloads occupy.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+												"totalBytes": {
+													Description: "TotalBytes is the summed size of the matched nodes' cache filesystems.",
+													Type:        "integer",
+													Format:      "int64",
+												},
+											},
+											Nullable: true,
+										},
+										"conditions": {
+											Type: "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"nodes": {
+											Description: "Nodes is the number of nodes the selector currently matches.",
+											Type:        "integer",
+											Format:      "int32",
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Nodes",
+							Type:        "integer",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.nodes",
+						},
+						{
+							Name:        "High",
+							Type:        "integer",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.watermarks.highPercent",
+						},
+						{
+							Name:        "Low",
+							Type:        "integer",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.watermarks.lowPercent",
+						},
+						{
+							Name:        "Age",
+							Type:        "date",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".metadata.creationTimestamp",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_ModelStoreBinding() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "modelstorebindings.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "modelstorebindings",
+				Singular: "modelstorebinding",
+				ShortNames: []string{
+					"msb",
+				},
+				Kind:     "ModelStoreBinding",
+				ListKind: "ModelStoreBindingList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Namespaced",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "ModelStoreBinding is the schema for worker.gpustack.ai.\nIt is the PROVISIONING POINT for model prefetch: creating one in a namespace is what grants that\nnamespace a byte budget on the named stores and the right to pin, so both are grants an admin can\nRBAC and audit rather than powers a tenant assumes. A namespace without a Binding cannot warm\nanything, and a Binding is the single place its consumption is reported back to it.\nTHE GRANT IS EXPLICIT. There is no default pool a Binding falls back to: the chart's default\npool is deployment configuration, not an authorization basis, and a fallback would create a\nsecond source of truth for who may warm where.\nIt is NOT an enforcement boundary and must not be described as one. The budget gates prefetch\nadmission and accounting; bytes a workload mounts through the ordinary delivery path are charged\nto the node's watermarks exactly as before, never to this object.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"storeRefs",
+										"quota",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"allowPinned": {
+											Description: "AllowPinned is whether prefetches in this namespace may pin. It defaults to false, and it is\nthe only path to pinning: pinning is an admin-granted capability, never a tenant default.",
+											Type:        "boolean",
+											Nullable:    true,
+										},
+										"quota": {
+											Description: "Quota is the namespace's byte budget.",
+											Type:        "object",
+											Required: []string{
+												"bytes",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"bytes": {
+													Description: "Bytes is what the namespace's prefetches may occupy in total. The measure is the content's\nown size, per digest and per node holding it, so a tree two namespaces share counts fully\nagainst each of them — conservative, and impossible to game by warming what another tenant\nalready warmed. An increase passes admission; a decrease is refused.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+											},
+										},
+										"storeRefs": {
+											Description: "StoreRefs names the ModelStores this namespace may prefetch into, at least one of them.\nPrefetch admission refuses a prefetch whose target set falls outside every granted store.",
+											Type:        "array",
+											MaxItems:    ptr.To[int64](8),
+											MinItems:    ptr.To[int64](1),
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"name",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"name": {
+															Type: "string",
+														},
+													},
+												},
+											},
+											Nullable:  true,
+											XListType: ptr.To[string]("atomic"),
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"conditions": {
+											Description: "Conditions is the finer view, one condition per axis.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"phase": {
+											Description: "Phase summarizes the conditions: Ready, OverQuota, Error.",
+											Type:        "string",
+										},
+										"phaseMessage": {
+											Description: "PhaseMessage carries the reason for the phase.",
+											Type:        "string",
+										},
+										"usedBytes": {
+											Description: "UsedBytes is what the namespace's prefetches occupy, the full size of every distinct digest\nany of them targets on any node holding it. It is absent while nothing has been measured,\nand zero is a measurement rather than the lack of one.",
+											Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+											AnyOf: []v1.JSONSchemaProps{
+												{
+													Type: "integer",
+												},
+												{
+													Type: "string",
+												},
+											},
+											Nullable:     true,
+											XIntOrString: true,
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+					AdditionalPrinterColumns: []v1.CustomResourceColumnDefinition{
+						{
+							Name:        "Quota",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.quota.bytes",
+						},
+						{
+							Name:        "AllowPinned",
+							Type:        "boolean",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".spec.allowPinned",
+						},
+						{
+							Name:        "Used",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.usedBytes",
+						},
+						{
+							Name:        "Phase",
+							Type:        "string",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".status.phase",
+						},
+						{
+							Name:        "Age",
+							Type:        "date",
+							Format:      "",
+							Description: "",
+							Priority:    0,
+							JSONPath:    ".metadata.creationTimestamp",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinition {
 	return &v1.CustomResourceDefinition{
 		TypeMeta: metav1.TypeMeta{
@@ -5614,6 +6483,22 @@ func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinit
 												},
 											},
 											Nullable: true,
+										},
+										"pinned": {
+											Description: "Pinned lists the manifest digests the node must retain: the union of the prefetches whose\nretention pins them and whose target set holds this node. A pinned digest is never a\ncollection candidate, though it still counts toward usage. The prefetch controller writes\nthe field and the configuration reconciler carries it over untouched, so the two never\noverwrite each other's work on the same object.",
+											Type:        "array",
+											MaxItems:    ptr.To[int64](256),
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "string",
+												},
+											},
+											Nullable:  true,
+											XListType: ptr.To[string]("set"),
+										},
+										"store": {
+											Description: "Store names the ModelStore whose per-pool policy this node's effective configuration carries:\nthe alphabetically first store whose selector matches the node when two match, and empty when\nnone does, so the cluster defaults apply. The worker writes it; nothing else does.",
+											Type:        "string",
 										},
 										"watermarks": {
 											Description: "Watermarks bound the cache filesystem's usage.",

@@ -49,6 +49,18 @@ func (c *FakeWorkerV1alpha1) ModelDeployments(namespace string) v1alpha1.ModelDe
 	return newFakeModelDeployments(c, namespace)
 }
 
+func (c *FakeWorkerV1alpha1) ModelPrefetches(namespace string) v1alpha1.ModelPrefetchInterface {
+	return newFakeModelPrefetches(c, namespace)
+}
+
+func (c *FakeWorkerV1alpha1) ModelStores() v1alpha1.ModelStoreInterface {
+	return newFakeModelStores(c)
+}
+
+func (c *FakeWorkerV1alpha1) ModelStoreBindings(namespace string) v1alpha1.ModelStoreBindingInterface {
+	return newFakeModelStoreBindings(c, namespace)
+}
+
 func (c *FakeWorkerV1alpha1) NodeModelStores() v1alpha1.NodeModelStoreInterface {
 	return newFakeNodeModelStores(c)
 }

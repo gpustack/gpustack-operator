@@ -27,6 +27,7 @@ type WorkerV1Interface interface {
 	InstanceTypeFlavorsGetter
 	ModelArtifactsGetter
 	ModelDeploymentsGetter
+	ModelPrefetchesGetter
 	NodeModelStoresGetter
 }
 
@@ -73,6 +74,10 @@ func (c *WorkerV1Client) ModelArtifacts(namespace string) ModelArtifactInterface
 
 func (c *WorkerV1Client) ModelDeployments(namespace string) ModelDeploymentInterface {
 	return newModelDeployments(c, namespace)
+}
+
+func (c *WorkerV1Client) ModelPrefetches(namespace string) ModelPrefetchInterface {
+	return newModelPrefetches(c, namespace)
 }
 
 func (c *WorkerV1Client) NodeModelStores() NodeModelStoreInterface {
