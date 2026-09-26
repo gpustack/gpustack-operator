@@ -3,6 +3,8 @@ package worker
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -710,9 +712,20 @@ func (r *InstanceReconciler) convertPodFromInstance(
 	}
 
 	// A claim bound to a PV with node affinity is placed where that PV is; Kueue's topology-aware
-	// scheduling reads the Pod's affinity and not its volumes.
-	for _, w := range models {
+	// scheduling reads the Pod's affinity and not its volumes. A node-delivered artifact adds its
+	// preference for the nodes holding it, once per digest and in volume order, so a node holding
+	// more of the Instance's weights scores higher and the same Instance renders the same terms.
+	preferred := map[string]bool{}
+	for _, i := range slices.Sorted(maps.Keys(models)) {
+		w := models[i]
 		injectModelArtifactAffinity(pod, w.Affinity)
+		if w.Render == nil || preferred[w.Render.ManifestDigest] {
+			continue
+		}
+		if term := w.placementPreference(ctx, r.Client); term != nil {
+			preferred[w.Render.ManifestDigest] = true
+			injectModelPlacementPreference(pod, term)
+		}
 	}
 
 	systemmeta.NoteResource(pod, "instances", nil)
