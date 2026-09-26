@@ -65,6 +65,10 @@
 #              Linux Nodes carrying topology.kubernetes.io/zone, no zone holding three of them, and
 #              a zone holding at least two. A cluster without that shape makes the refusal provably
 #              unprovable, so those rows SKIP naming the measured shape rather than failing on it.
+#              The ModelDeployment shortage probes need every Node the operator queue reaches to
+#              hold exactly one replica, and a replica is sized by the InstanceType, not the Node;
+#              the case builds that shape with ballast Pods and SKIPs those probes, naming each
+#              Node's measured room, when the ballast cannot build it.
 #              EXITS 2 (input required) when the ModelDeployment half has no InstanceType or no
 #              reachable entrance LocalQueue.
 #
@@ -74,7 +78,8 @@
 #              deleted by name; the ClusterQueue references no AdmissionCheck, so no operator
 #              barrier gates the hand-built queue. The ModelDeployments name an explicit image
 #              because a CPU-only InstanceType synthesizes none; override with E2E_MD_IMAGE, the
-#              InstanceType with E2E_MD_INSTANCE_TYPE.
+#              InstanceType with E2E_MD_INSTANCE_TYPE. The ballast is one pause Pod per queue Node in
+#              the system namespace, which Kueue does not manage, labelled with the case prefix.
 #
 # Expected:    Every source reaches its documented Ready/stale/expired/recovered states and produces
 #              the exact generated Topology levels; each writing source's snapshot values appear on
@@ -93,8 +98,8 @@
 #
 # Cleanup:     A trap force-releases every Workload owning each deployment's Pods BEFORE deleting
 #              the ModelDeployments (a serving group's finalizer is released by nothing but its
-#              Workload being deleted), releases again after, deletes the two Jobs and then the
-#              case-prefixed fixtures and temporary Node selector labels. The operator's generated
+#              Workload being deleted), releases again after, deletes the two Jobs, the ballast Pods
+#              and then the case-prefixed fixtures and temporary Node selector labels. The operator's generated
 #              Topologies and ResourceFlavors retire once their profiles lose all references; the
 #              managed ClusterQueue keeps its identity. Idempotent and runs on pass AND fail.
 #
@@ -121,6 +126,9 @@ INTERVAL="${E2E_TAS_INTERVAL:-20}"
 # A topology.gpustack.ai/* label no source owns, set straight on one Node by this case. Sources publish
 # only through their own NodeFeatures, so retiring a source must leave this label where it is.
 FOREIGN_LABEL="topology.gpustack.ai/e2e-foreign"
+
+# The label on the ballast Pods that shape each queue Node to one replica; its value is the prefix.
+BALLAST_LABEL="e2e.gpustack.ai/case87-ballast"
 
 FAILS=0
 ROWS=()
@@ -165,6 +173,8 @@ cleanup() {
     tas_md_force_release "$NS" "$md"
   done
   kubectl -n "$NS" delete job.batch "${PREFIX}-fit" "${PREFIX}-refuse" \
+    --ignore-not-found --wait=false >/dev/null 2>&1
+  kubectl -n "$SYSTEM_NS" delete pods -l "${BALLAST_LABEL}=${PREFIX}" \
     --ignore-not-found --wait=false >/dev/null 2>&1
   kubectl delete topologysources.worker.gpustack.ai \
     "${PREFIX}-native" "${PREFIX}-rack" "${PREFIX}-webhook" \
@@ -833,13 +843,20 @@ else
     "never read Ready=False/Stale; source=$(source_condition "${PREFIX}-webhook" Ready)"
 fi
 if wait_source "${PREFIX}-webhook" 'False|Expired'; then
-  remaining="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.labels.topology\.gpustack\.ai/webhook-domain}{"\n"}{end}' | grep -c . || true)"
-  expired_features="$(tas_source_nodefeatures "$SYSTEM_NS" "$WEBHOOK_SOURCE_UID")"
+  # Expired is written once the source has deleted its NodeFeatures; NFD removes the labels they
+  # carried afterwards and on its own schedule. One read right after Expired can land between the
+  # two, so both are polled to zero within the same bound as every source wait.
+  for _ in $(seq 1 60); do
+    remaining="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.labels.topology\.gpustack\.ai/webhook-domain}{"\n"}{end}' | grep -c . || true)"
+    expired_features="$(tas_source_nodefeatures "$SYSTEM_NS" "$WEBHOOK_SOURCE_UID")"
+    [ "$remaining" = 0 ] && [ "$expired_features" = 0 ] && break
+    sleep 2
+  done
   if [ "$remaining" = 0 ] && [ "$expired_features" = 0 ]; then
     record PASS "an unavailable webhook expires and removes only its owned labels" "Ready=False/Expired; zero webhook-domain labels and zero NodeFeatures remain"
   else
     record FAIL "an unavailable webhook expires and removes only its owned labels" \
-      "${remaining} owned labels and ${expired_features:-unreadable} NodeFeatures remain after Expired"
+      "${remaining} owned labels and ${expired_features:-unreadable} NodeFeatures still remain 120s after Expired"
   fi
 else
   record FAIL "an unavailable webhook expires and removes only its owned labels" "source=$(source_condition "${PREFIX}-webhook" Ready)"
@@ -1134,6 +1151,145 @@ if [ -z "$CQ" ]; then
   exit_input_required
 fi
 
+# --- one replica per queue Node, for the ModelDeployment refusal and shortage probes -------------
+#
+# A replica's request comes from its InstanceType, not from the Node. On Nodes with room for several
+# replicas a size-three group fits one Node, and a filler of one replica per Node leaves most of
+# every Node free, so neither probe measures what it names. The probes therefore build the shape
+# they need: one pause Pod per queue Node, in the system namespace Kueue does not manage, requesting
+# all of that Node's free CPU but one and a half replicas. Kueue's TAS subtracts the Pods it does
+# not manage from each Node, so every queue Node then holds exactly one replica. The shape is read
+# back once the ballast binds, and a probe it does not hold for SKIPs naming each Node's room.
+
+# jq definitions for which Nodes a ClusterQueue's flavors reach. A flavor reaches a schedulable Node
+# its nodeLabels select when its own tolerations cover every NoSchedule and NoExecute taint there:
+# Kueue adds a flavor's tolerations to the Pods it admits through it, and the operator's flavors
+# tolerate every taint, so a tainted control plane they select is one more hostname domain.
+# shellcheck disable=SC2016  # the dollar names are jq variables, and must not expand
+REACH_JQ='
+  def tolerated($tols): . as $t | any($tols[]?;
+    ((.effect // "") == "" or .effect == $t.effect)
+    and (if (.operator // "Equal") == "Exists" then ((.key // "") == "" or .key == $t.key)
+         else (.key == $t.key and (.value // "") == ($t.value // "")) end));
+  def reaches($f): .spec.unschedulable != true
+    and (.metadata.labels as $l | all(($f.spec.nodeLabels // {}) | to_entries[]; $l[.key] == .value))
+    and all((.spec.taints // [])[] | select(.effect == "NoSchedule" or .effect == "NoExecute");
+      tolerated($f.spec.tolerations // []));'
+
+# One line per Node the ClusterQueue's flavors reach: name|zone|free CPU millicores|free memory MiB.
+# Free is allocatable less the effective request of every unfinished Pod bound to the Node, which is
+# what TAS subtracts; a gated Pod is bound nowhere and is not counted.
+queue_node_room() {
+  kubectl get clusterqueue.kueue.x-k8s.io "$1" -o json 2>/dev/null | jq -r \
+    --slurpfile nodes <(kubectl get nodes -o json 2>/dev/null) \
+    --slurpfile flavors <(kubectl get resourceflavors.kueue.x-k8s.io -o json 2>/dev/null) \
+    --slurpfile pods <(kubectl get pods -A -o json 2>/dev/null) "${REACH_JQ}"'
+    def cpu_m: if . == null then 0 else tostring
+      | if endswith("m") then (.[:-1] | tonumber) else (tonumber * 1000) end end;
+    def mem_mi: if . == null then 0 else tostring | capture("^(?<n>[0-9.]+)(?<u>[A-Za-z]*)$") as $q
+      | ($q.n | tonumber) * ({"": 1, "k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "Ki": 1024,
+          "Mi": 1048576, "Gi": 1073741824, "Ti": 1099511627776}[$q.u] // 0) / 1048576 end;
+    def effective(f):
+      ([.spec.containers[]? | .resources.requests // {} | f] | add // 0) as $main
+      | ([.spec.initContainers[]? | select(.restartPolicy == "Always") | .resources.requests // {} | f] | add // 0) as $side
+      | ([.spec.initContainers[]? | select(.restartPolicy != "Always") | .resources.requests // {} | f] | max // 0) as $init
+      | ([$main + $side, $init] | max) + (.spec.overhead // {} | f);
+    [.spec.resourceGroups[]?.flavors[]?.name] as $names
+    | [$flavors[0].items[] | select(.metadata.name as $n | any($names[]; . == $n))] as $queue
+    | $nodes[0].items[] | . as $node | select(any($queue[]; . as $f | $node | reaches($f)))
+    | .metadata.name as $name
+    | [$pods[0].items[] | select(.spec.nodeName == $name)
+        | select(.status.phase != "Succeeded" and .status.phase != "Failed")] as $bound
+    | [$name, (.metadata.labels["topology.kubernetes.io/zone"] // ""),
+       ((.status.allocatable.cpu | cpu_m) - ([$bound[] | effective(.cpu | cpu_m)] | add // 0) | floor | tostring),
+       ((.status.allocatable.memory | mem_mi) - ([$bound[] | effective(.memory | mem_mi)] | add // 0) | floor | tostring)]
+    | join("|")' 2>/dev/null
+}
+
+# Delete this case's ballast and wait for it to be gone, so the room it held is free again.
+ballast_delete() {
+  kubectl -n "$SYSTEM_NS" delete pods -l "${BALLAST_LABEL}=${PREFIX}" \
+    --ignore-not-found --wait=false >/dev/null 2>&1
+  for _ in $(seq 1 45); do
+    [ "$(kubectl -n "$SYSTEM_NS" get pods -l "${BALLAST_LABEL}=${PREFIX}" \
+      --no-headers 2>/dev/null | wc -l | tr -d ' ')" = 0 ] && return 0
+    sleep 2
+  done
+  return 1
+}
+
+# Shape every Node the ClusterQueue reaches to hold one replica of <cpu millicores> <memory MiB>,
+# then read the shape back. Sets SHAPE_OK (yes when no Node holds two and at least one holds one),
+# SHAPE_ONE (the Nodes holding one), SHAPE_ZONED (how many of those carry a zone), SHAPE_MAX_ZONE
+# (the most any one zone holds) and SHAPE_READING ("node=replicas" for every queue Node).
+ballast_apply() {
+  local cq="$1" req_cpu="$2" req_mem="$3" name zone cpu mem size slots idx=0 bound zones=""
+  ballast_delete
+  while IFS='|' read -r name zone cpu mem; do
+    [ -n "$name" ] || continue
+    size=$((cpu - req_cpu * 3 / 2))
+    [ "$size" -gt 0 ] || continue
+    idx=$((idx + 1))
+    cat <<YAML | kubectl apply -f - >/dev/null 2>&1
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${PREFIX}-ballast-${idx}
+  namespace: ${SYSTEM_NS}
+  labels:
+    ${BALLAST_LABEL}: "${PREFIX}"
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchFields:
+              - {key: metadata.name, operator: In, values: ["${name}"]}
+  tolerations:
+    - operator: Exists
+  containers:
+    - name: pause
+      image: registry.k8s.io/pause:3.10
+      resources:
+        requests:
+          cpu: ${size}m
+YAML
+  done <<EOF
+$(queue_node_room "$cq")
+EOF
+  for _ in $(seq 1 30); do
+    bound="$(kubectl -n "$SYSTEM_NS" get pods -l "${BALLAST_LABEL}=${PREFIX}" -o json 2>/dev/null \
+      | jq '[.items[]? | select((.spec.nodeName // "") != "")] | length')"
+    [ "${bound:-0}" = "$idx" ] && break
+    sleep 2
+  done
+
+  SHAPE_OK=yes
+  SHAPE_ONE=""
+  SHAPE_READING=""
+  while IFS='|' read -r name zone cpu mem; do
+    [ -n "$name" ] || continue
+    slots=0
+    if [ "$cpu" -gt 0 ] && [ "$mem" -gt 0 ]; then
+      slots=$((cpu / req_cpu))
+      [ $((mem / req_mem)) -lt "$slots" ] && slots=$((mem / req_mem))
+    fi
+    SHAPE_READING="${SHAPE_READING}${name}=${slots} "
+    [ "$slots" -ge 2 ] && SHAPE_OK=no
+    if [ "$slots" = 1 ]; then
+      SHAPE_ONE="${SHAPE_ONE}${name} "
+      [ -n "$zone" ] && zones="${zones}${zone}
+"
+    fi
+  done <<EOF
+$(queue_node_room "$cq")
+EOF
+  [ -n "$SHAPE_ONE" ] || SHAPE_OK=no
+  SHAPE_ZONED="$(printf '%s' "$zones" | grep -c . || true)"
+  SHAPE_MAX_ZONE="$(printf '%s' "$zones" | sort | uniq -c | awk '$1 > m {m = $1} END {print m + 0}')"
+  SHAPE_READING="${SHAPE_READING}(ballast ${bound:-0} of ${idx} bound)"
+}
+
 # --- ModelDeployment topology request through the operator-managed TAS queue --------------------
 
 tas_md_apply "${PREFIX}-zone-fit" "$NS" "$BINDING" \
@@ -1187,8 +1343,38 @@ else
   record FAIL "both Pods of the size-two ModelDeployment bind in one observed zone" \
     "pods=$(printf '%s' "$ZONE_FIT_ROWS" | tr '\n' ';'), zones=${ZONE_FIT_ZONES:-missing}"
 fi
+# One replica's request, read from a Pod the operator rendered: it is what TAS places, and the
+# ballast below is sized from it.
+ZONE_REQ_CPU="$(tas_millis "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${PREFIX}-zone-fit" \
+  -o jsonpath='{.items[0].spec.containers[0].resources.requests.cpu}' 2>/dev/null)")"
+ZONE_REQ_MEM="$(tas_mib "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${PREFIX}-zone-fit" \
+  -o jsonpath='{.items[0].spec.containers[0].resources.requests.memory}' 2>/dev/null)")"
 tas_md_force_release "$NS" "${PREFIX}-zone-fit"
 kubectl -n "$NS" delete modeldeployment "${PREFIX}-zone-fit" --wait=false >/dev/null 2>&1
+for _ in $(seq 1 60); do
+  [ "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${PREFIX}-zone-fit" \
+    --no-headers 2>/dev/null | wc -l | tr -d ' ')" = 0 ] && break
+  sleep 2
+done
+
+# THE REFUSAL NEEDS NO ZONE THAT FITS THREE REPLICAS. Four Nodes split two per zone refuse a
+# size-three zone request only while each Node holds one replica; the ballast makes that so and the
+# row below reads it back, including the zones of the Nodes that hold one.
+ZONE_SHAPE_OK=no
+if [ "$ZONE_REQ_CPU" -le 0 ] || [ "$ZONE_REQ_MEM" -le 0 ] || [ -z "$CQ" ]; then
+  record SKIP "every queue Node holds exactly one replica for the zone refusal" \
+    "could not read the inputs: replica request ${ZONE_REQ_CPU}m/${ZONE_REQ_MEM}Mi, queue='${CQ}'"
+else
+  ballast_apply "$CQ" "$ZONE_REQ_CPU" "$ZONE_REQ_MEM"
+  if [ "$SHAPE_OK" = yes ] && [ "$SHAPE_ZONED" -ge 3 ] && [ "$SHAPE_MAX_ZONE" -le 2 ]; then
+    ZONE_SHAPE_OK=yes
+    record PASS "every queue Node holds exactly one replica for the zone refusal" \
+      "${ZONE_REQ_CPU}m replicas: ${SHAPE_READING}; ${SHAPE_ZONED} zoned, at most ${SHAPE_MAX_ZONE} per zone"
+  else
+    record SKIP "every queue Node holds exactly one replica for the zone refusal" \
+      "${ZONE_REQ_CPU}m replicas: ${SHAPE_READING}; ${SHAPE_ZONED} zoned, at most ${SHAPE_MAX_ZONE} per zone; the refusal needs no Node holding two, three zoned and no zone holding three"
+  fi
+fi
 
 # THE REFUSAL NEEDS A CONTROL ON THE SAME QUEUE. Four Nodes is a count, not proof that quota and live
 # capacity hold three of these Pods; the same size-three group WITHOUT a required level must be
@@ -1243,7 +1429,10 @@ if [ -n "$ZONE_REFUSE_WL" ]; then
   sleep "$INTERVAL"
   zone_refuse_sample
 fi
-if [ -n "$ZONE_REFUSE_WL" ] && [ "$ZONE_CONTROL_ADMITTED" = yes ] \
+if [ "$ZONE_SHAPE_OK" != yes ]; then
+  record SKIP "a size-three zone request stays Pending despite four aggregate Nodes" \
+    "no zone-refusal shape to read against (see the one-replica row); admission=${ZONE_REFUSE_ADMISSION:-none}"
+elif [ -n "$ZONE_REFUSE_WL" ] && [ "$ZONE_CONTROL_ADMITTED" = yes ] \
   && [ "${ZONE_REFUSE_FIRST_READABLE:-no}" = yes ] && [ "${ZONE_REFUSE_READABLE:-no}" = yes ] \
   && [ -z "$ZONE_REFUSE_FIRST_ADMISSION" ] \
   && [ "$ZONE_REFUSE_FIRST_RESERVED" != True ] && [ "$ZONE_REFUSE_FIRST_BOUND" = 0 ] \
@@ -1258,6 +1447,8 @@ else
 fi
 tas_md_force_release "$NS" "${PREFIX}-zone-refuse"
 kubectl -n "$NS" delete modeldeployment "${PREFIX}-zone-refuse" --wait=false >/dev/null 2>&1
+# The probes up to the shortage read admission against the cluster's own room.
+ballast_delete
 
 tas_md_apply "${PREFIX}-omit" "$NS" "$BINDING" \
   "$(tas_md_role_block server '' "$IT" 1 "$IMAGE")"
@@ -1345,11 +1536,11 @@ if [ -n "$INSTANCE_WL" ]; then
 fi
 kubectl -n "$NS" delete instance "${PREFIX}-instance" --ignore-not-found --wait=false >/dev/null 2>&1
 
-# THE SHORTAGE MUST BE A SHORTAGE. Borrowing through a cohort or a second schedulable flavor would
-# let the starved deployment reserve anyway. A cordoned GPU Node, or a Node tainted NoSchedule or
-# NoExecute such as a kind control-plane, can leave a CPU ResourceFlavor in this queue, but it cannot
-# contribute a live TAS domain for Pods that tolerate neither. Both cohort spellings are read because
-# the served version carries either.
+# THE SHORTAGE MUST BE A SHORTAGE. Borrowing through a cohort would let the starved deployment
+# reserve anyway, so a queue in a cohort SKIPs. A second flavor would too, unless its Nodes are
+# occupied as well: the filler below is sized over every Node any flavor of this queue reaches,
+# tainted ones included, so every flavor that reaches a Node is counted here the same way. Both
+# cohort spellings are read because the served version carries either.
 PRE_RAW="$(kubectl get clusterqueue.kueue.x-k8s.io "$CQ" \
   -o jsonpath='{.apiVersion}|{.spec.cohort}{.spec.cohortName}|{range .spec.resourceGroups[*].flavors[*]}{.name}{" "}{end}' 2>/dev/null)"
 PRE_VER="${PRE_RAW%%|*}"
@@ -1358,14 +1549,10 @@ PRE_COHORT="${PRE_REST%%|*}"
 PRE_FLAVORS="$(printf '%s' "${PRE_REST#*|}" | wc -w | tr -d ' ')"
 PRE_REACHABLE="$(kubectl get clusterqueue.kueue.x-k8s.io "$CQ" -o json | jq -r \
   --slurpfile nodes <(kubectl get nodes -o json) \
-  --slurpfile flavors <(kubectl get resourceflavors.kueue.x-k8s.io -o json) '
+  --slurpfile flavors <(kubectl get resourceflavors.kueue.x-k8s.io -o json) "${REACH_JQ}"'
     [.spec.resourceGroups[]?.flavors[]?.name as $name |
       $flavors[0].items[] | select(.metadata.name == $name) as $flavor |
-      select(any($nodes[0].items[];
-        .spec.unschedulable != true and
-        ([(.spec.taints // [])[] | select(.effect == "NoSchedule" or .effect == "NoExecute")] | length == 0) and
-        (.metadata.labels as $labels |
-          all($flavor.spec.nodeLabels | to_entries[]; $labels[.key] == .value)))) |
+      select(any($nodes[0].items[]; reaches($flavor))) |
       .metadata.name] | unique | .[]' 2>/dev/null)"
 PRE_REACHABLE_FLAVORS="$(printf '%s\n' "$PRE_REACHABLE" | grep -c . || true)"
 
@@ -1382,13 +1569,13 @@ elif [ -n "$PRE_COHORT" ]; then
   record SKIP "the shortage cannot be relieved by borrowing or by another flavor" \
     "cluster queue '${CQ}' is in cohort '${PRE_COHORT}', so occupying its nominalQuota does not make the pool short"
   MD_NEG=no
-elif [ "$PRE_REACHABLE_FLAVORS" != 1 ]; then
+elif [ "$PRE_REACHABLE_FLAVORS" -lt 1 ]; then
   record SKIP "the shortage cannot be relieved by borrowing or by another flavor" \
-    "cluster queue '${CQ}' offers ${PRE_FLAVORS} flavors, ${PRE_REACHABLE_FLAVORS} with schedulable matching Nodes; this case needs one live flavor"
+    "cluster queue '${CQ}' offers ${PRE_FLAVORS} flavors and none reaches a schedulable Node"
   MD_NEG=no
 else
   record PASS "the shortage cannot be relieved by borrowing or by another flavor" \
-    "cluster queue '${CQ}' (${PRE_VER}) is in no cohort; ${PRE_REACHABLE_FLAVORS} of ${PRE_FLAVORS} flavors have schedulable matching Nodes"
+    "cluster queue '${CQ}' (${PRE_VER}) is in no cohort; ${PRE_REACHABLE_FLAVORS} of ${PRE_FLAVORS} flavors reach Nodes, and the filler occupies the Nodes of all of them"
 fi
 
 # --- the fitting half: both roles admitted jointly ---
@@ -1458,6 +1645,8 @@ fi
 REQ_RAW="$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${PREFIX}-md" \
   -o jsonpath='{.items[0].spec.containers[0].resources.requests.cpu}' 2>/dev/null)"
 REQ="$(tas_millis "$REQ_RAW")"
+REQ_MEM="$(tas_mib "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=${PREFIX}-md" \
+  -o jsonpath='{.items[0].spec.containers[0].resources.requests.memory}' 2>/dev/null)")"
 QUOTA_RAW="$(kubectl get clusterqueue.kueue.x-k8s.io "$CQ" \
   -o jsonpath='{.spec.resourceGroups[0].flavors[0].resources[?(@.name=="cpu")].nominalQuota}' 2>/dev/null)"
 QUOTA="$(tas_millis "$QUOTA_RAW")"
@@ -1472,15 +1661,27 @@ done
 tas_md_force_release "$NS" "${PREFIX}-md"
 
 # THE FILLER OCCUPIES EVERY LIVE HOSTNAME DOMAIN, NOT THE QUEUE'S PAPER QUOTA. TAS subtracts
-# non-Kueue Pods from each domain, so nominalQuota can describe ten replicas while four system-loaded
-# Nodes can admit only one each. Sizing from nominalQuota would test an inadmissible filler instead
-# of the intended shortage. One admitted replica per observed Node is the live-capacity boundary the
-# first half of this case already established.
-FILL="${TAS_NODES:-0}"
-if [ "$MD_NEG" = yes ] && { [ "$REQ" -le 0 ] || [ "$FILL" -lt 1 ]; }; then
+# non-Kueue Pods from each domain, so nominalQuota can describe a hundred replicas while the Nodes
+# admit far fewer. Sizing from nominalQuota would test an inadmissible filler instead of the
+# intended shortage. The ballast shapes every Node the queue reaches to hold exactly one replica, so
+# one replica per Node that holds one leaves no room anywhere for either role of the next deployment.
+FILL=0
+if [ "$MD_NEG" = yes ] && { [ "$REQ" -le 0 ] || [ "$REQ_MEM" -le 0 ]; }; then
   record SKIP "every live hostname domain can be occupied" \
-    "could not read the inputs: request='${REQ_RAW}', observed Nodes='${FILL}'"
+    "could not read the inputs: request='${REQ_RAW}', memory='${REQ_MEM}Mi'"
   MD_NEG=no
+fi
+if [ "$MD_NEG" = yes ]; then
+  ballast_apply "$CQ" "$REQ" "$REQ_MEM"
+  FILL="$(printf '%s' "$SHAPE_ONE" | wc -w | tr -d ' ')"
+  if [ "$SHAPE_OK" = yes ]; then
+    record PASS "every queue Node holds exactly one replica for the shortage" \
+      "${REQ}m replicas: ${SHAPE_READING}"
+  else
+    record SKIP "every queue Node holds exactly one replica for the shortage" \
+      "${REQ}m replicas: ${SHAPE_READING}; the shortage needs no Node holding two and one holding one"
+    MD_NEG=no
+  fi
 fi
 
 if [ "$MD_NEG" = yes ]; then
@@ -1505,7 +1706,7 @@ EOF
   fi
   if [ "$FILLER_OK" = yes ]; then
     record PASS "every live hostname domain is occupied" \
-      "${FILL} observed Nodes each hold one admitted ${REQ}m filler replica; nominal quota is ${QUOTA}m"
+      "${FILL} queue Nodes (${SHAPE_ONE% }) each hold one admitted ${REQ}m filler replica; nominal quota is ${QUOTA}m"
   else
     record FAIL "every live hostname domain is occupied" \
       "${FILLER_ADMITTED:-0} of ${FILL} filler Workloads admitted; apply said: ${TAS_APPLY_OUT:0:200}"
