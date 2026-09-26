@@ -336,6 +336,38 @@ func (*InstanceTypeFlavor) Categories() []string {
 	}
 }
 
+var _ rest.Scoper = (*ModelArtifact)(nil)
+
+func (*ModelArtifact) NamespaceScoped() bool {
+	return true
+}
+
+var _ rest.KindProvider = (*ModelArtifact)(nil)
+
+func (*ModelArtifact) Kind() string {
+	return "ModelArtifact"
+}
+
+var _ rest.SingularNameProvider = (*ModelArtifact)(nil)
+
+func (*ModelArtifact) GetSingularName() string {
+	return "modelartifact"
+}
+
+var _ rest.ShortNamesProvider = (*ModelArtifact)(nil)
+
+func (*ModelArtifact) ShortNames() []string {
+	return []string{}
+}
+
+var _ rest.CategoriesProvider = (*ModelArtifact)(nil)
+
+func (*ModelArtifact) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
 var _ rest.Scoper = (*ModelDeployment)(nil)
 
 func (*ModelDeployment) NamespaceScoped() bool {
@@ -372,4 +404,36 @@ var _ WithStatusSubResource = (*ModelDeployment)(nil)
 
 func (in *ModelDeployment) CopyStatusTo(out runtime.Object) {
 	out.(*ModelDeployment).Status = in.Status
+}
+
+var _ rest.Scoper = (*NodeModelStore)(nil)
+
+func (*NodeModelStore) NamespaceScoped() bool {
+	return false
+}
+
+var _ rest.KindProvider = (*NodeModelStore)(nil)
+
+func (*NodeModelStore) Kind() string {
+	return "NodeModelStore"
+}
+
+var _ rest.SingularNameProvider = (*NodeModelStore)(nil)
+
+func (*NodeModelStore) GetSingularName() string {
+	return "nodemodelstore"
+}
+
+var _ rest.ShortNamesProvider = (*NodeModelStore)(nil)
+
+func (*NodeModelStore) ShortNames() []string {
+	return []string{}
+}
+
+var _ rest.CategoriesProvider = (*NodeModelStore)(nil)
+
+func (*NodeModelStore) Categories() []string {
+	return []string{
+		"gpustack",
+	}
 }

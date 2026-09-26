@@ -59,6 +59,45 @@ type NodeModelStoreSpec struct {
 	//
 	// +required
 	Hub NodeModelStoreHub `json:"hub" protobuf:"bytes,3,name=hub"`
+
+	// Kubelet is the node's effective kubelet thresholds the cache's cap derives from, as the worker
+	// read them from kubelet's configz endpoint, which merges kubelet's flags, configuration file and
+	// drop-ins. It is absent while they could not be read, and the plugin then assumes kubelet's
+	// defaults and says so.
+	//
+	// The worker writes it; nothing else does. It is an observed value held in the spec, not the
+	// status, because the plugin reads its whole configuration from its spec and owns the status,
+	// and reading configz needs the nodes/proxy permission, which the plugin never holds: it
+	// reaches every kubelet endpoint. Nothing reconciles toward it as a desired state: the worker
+	// refreshes the reading and writes what it read, so a hand edit holds only until the next
+	// reading.
+	//
+	// +optional
+	Kubelet *NodeModelStoreKubelet `json:"kubelet,omitempty" protobuf:"bytes,4,opt,name=kubelet"`
+}
+
+// NodeModelStoreKubelet is the part of a node's effective kubelet configuration that bounds a cache
+// sharing kubelet's filesystem: kubelet evicts Pods below the available thresholds and collects
+// images above the image threshold.
+type NodeModelStoreKubelet struct {
+	// NodefsAvailable is evictionHard["nodefs.available"] as kubelet reports it, a percentage such
+	// as "10%" or a quantity such as "20Gi"; empty when kubelet sets none.
+	//
+	// +optional
+	NodefsAvailable string `json:"nodefsAvailable,omitempty" protobuf:"bytes,1,opt,name=nodefsAvailable"`
+
+	// ImagefsAvailable is evictionHard["imagefs.available"], in the same forms; empty when kubelet
+	// sets none.
+	//
+	// +optional
+	ImagefsAvailable string `json:"imagefsAvailable,omitempty" protobuf:"bytes,2,opt,name=imagefsAvailable"`
+
+	// ImageGCHighThresholdPercent is the disk usage at which kubelet starts collecting images.
+	//
+	// +optional
+	// +k8s:validation:minimum=0
+	// +k8s:validation:maximum=100
+	ImageGCHighThresholdPercent *int32 `json:"imageGCHighThresholdPercent,omitempty" protobuf:"varint,3,opt,name=imageGCHighThresholdPercent"` // nolint: lll
 }
 
 // NodeModelStoreWatermarks are percentages of the cache filesystem's usage by everything on it.
@@ -196,6 +235,22 @@ type NodeModelStoreModel struct {
 	// +optional
 	SizeBytes int64 `json:"sizeBytes,omitempty" protobuf:"varint,3,opt,name=sizeBytes"`
 
+	// DownloadedBytes is how much of a Downloading entry's content is on the node's disk, the bytes
+	// an earlier attempt left for a resume included, so it never goes back. It is written on
+	// thresholds, not at every byte: once the entry moved by 5% of SizeBytes and 30 seconds passed
+	// since the node's status was last written. Absent outside Downloading.
+	//
+	// +optional
+	// +k8s:validation:minimum=0
+	DownloadedBytes int64 `json:"downloadedBytes,omitempty" protobuf:"varint,9,opt,name=downloadedBytes"`
+
+	// Source is where the content's bytes come from: Hub, the model hub. It names no repository or
+	// endpoint. Content published before the field existed has none.
+	//
+	// +optional
+	// +k8s:validation:enum=["Hub"]
+	Source NodeModelStoreModelSource `json:"source,omitempty" protobuf:"bytes,10,opt,name=source,casttype=NodeModelStoreModelSource"` // nolint: lll
+
 	// Referenced says some Pod mounts the content. Which Pod is never recorded.
 	//
 	// +optional
@@ -227,6 +282,13 @@ type NodeModelStoreModel struct {
 	// +optional
 	RetryTime *meta.Time `json:"retryTime,omitempty" protobuf:"bytes,8,opt,name=retryTime"`
 }
+
+// NodeModelStoreModelSource is where a node's content comes from.
+// +enum
+type NodeModelStoreModelSource string
+
+// NodeModelStoreModelSourceHub is a download from the model hub.
+const NodeModelStoreModelSourceHub NodeModelStoreModelSource = "Hub"
 
 // NodeModelStoreModelState is where a digest is on a node.
 // +enum

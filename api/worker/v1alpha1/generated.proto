@@ -2890,6 +2890,7 @@ message KVCachePoolUsage {
 // +k8s:crd-gen:printcolumn:name="Revision",type="string",jsonPath=".status.resolved.revision"
 // +k8s:crd-gen:printcolumn:name="Size",type="integer",jsonPath=".status.resolved.sizeBytes"
 // +k8s:crd-gen:printcolumn:name="Resolved",type="string",jsonPath=".status.conditions[?(@.type=='Resolved')].status"
+// +k8s:crd-gen:printcolumn:name="Ready",type="integer",jsonPath=".status.nodes.ready"
 // +k8s:crd-gen:printcolumn:name="Age",type="date",jsonPath=".metadata.creationTimestamp"
 message ModelArtifact {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
@@ -2933,6 +2934,38 @@ message ModelArtifactList {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
 
   repeated ModelArtifact items = 2;
+}
+
+// ModelArtifactNodes counts the nodes whose NodeModelStore lists an artifact's digest, by state. It
+// is written when a count changes or the percentage moves to another step, at most once every 30
+// seconds, so a fleet downloading the content does not rewrite the artifact at every node's write.
+message ModelArtifactNodes {
+  // Ready counts the nodes holding the content published.
+  //
+  // +required
+  // +k8s:validation:minimum=0
+  optional int32 ready = 1;
+
+  // Downloading counts the nodes downloading it.
+  //
+  // +required
+  // +k8s:validation:minimum=0
+  optional int32 downloading = 2;
+
+  // Failed counts the nodes whose last attempt failed and that wait to retry.
+  //
+  // +required
+  // +k8s:validation:minimum=0
+  optional int32 failed = 3;
+
+  // DownloadingPercent is the mean progress of the downloading nodes, each a whole copy, rounded
+  // down to a multiple of 5. Ready nodes are counted, not averaged in. Absent while no node
+  // downloads.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  // +k8s:validation:maximum=100
+  optional int32 downloadingPercent = 4;
 }
 
 // ModelArtifactPersistentVolumeClaimSource is a directory inside a claim.
@@ -3055,6 +3088,14 @@ message ModelArtifactStatus {
   //
   // +optional
   optional ModelArtifactResolved resolved = 2;
+
+  // Nodes is where the content is: how many nodes hold it ready, are downloading it or failed to,
+  // and how far the downloading ones are. It counts the content, the manifest digest, so artifacts
+  // with the same digest see the same nodes; it holds numbers only. Absent for a claim source and
+  // before the first resolution.
+  //
+  // +optional
+  optional ModelArtifactNodes nodes = 4;
 
   // Conditions: Resolved says whether the source is bound to its immutable identity and the most
   // recent access check passed; Degraded says a resolution or revalidation is failing, including
@@ -4300,6 +4341,30 @@ message NodeModelStoreHub {
   optional string caBundleConfigMap = 4;
 }
 
+// NodeModelStoreKubelet is the part of a node's effective kubelet configuration that bounds a cache
+// sharing kubelet's filesystem: kubelet evicts Pods below the available thresholds and collects
+// images above the image threshold.
+message NodeModelStoreKubelet {
+  // NodefsAvailable is evictionHard["nodefs.available"] as kubelet reports it, a percentage such
+  // as "10%" or a quantity such as "20Gi"; empty when kubelet sets none.
+  //
+  // +optional
+  optional string nodefsAvailable = 1;
+
+  // ImagefsAvailable is evictionHard["imagefs.available"], in the same forms; empty when kubelet
+  // sets none.
+  //
+  // +optional
+  optional string imagefsAvailable = 2;
+
+  // ImageGCHighThresholdPercent is the disk usage at which kubelet starts collecting images.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  // +k8s:validation:maximum=100
+  optional int32 imageGCHighThresholdPercent = 3;
+}
+
 // NodeModelStoreList holds the list of NodeModelStore.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -4326,6 +4391,22 @@ message NodeModelStoreModel {
   //
   // +optional
   optional int64 sizeBytes = 3;
+
+  // DownloadedBytes is how much of a Downloading entry's content is on the node's disk, the bytes
+  // an earlier attempt left for a resume included, so it never goes back. It is written on
+  // thresholds, not at every byte: once the entry moved by 5% of SizeBytes and 30 seconds passed
+  // since the node's status was last written. Absent outside Downloading.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  optional int64 downloadedBytes = 9;
+
+  // Source is where the content's bytes come from: Hub, the model hub. It names no repository or
+  // endpoint. Content published before the field existed has none.
+  //
+  // +optional
+  // +k8s:validation:enum=["Hub"]
+  optional string source = 10;
 
   // Referenced says some Pod mounts the content. Which Pod is never recorded.
   //
@@ -4379,6 +4460,21 @@ message NodeModelStoreSpec {
   //
   // +required
   optional NodeModelStoreHub hub = 3;
+
+  // Kubelet is the node's effective kubelet thresholds the cache's cap derives from, as the worker
+  // read them from kubelet's configz endpoint, which merges kubelet's flags, configuration file and
+  // drop-ins. It is absent while they could not be read, and the plugin then assumes kubelet's
+  // defaults and says so.
+  //
+  // The worker writes it; nothing else does. It is an observed value held in the spec, not the
+  // status, because the plugin reads its whole configuration from its spec and owns the status,
+  // and reading configz needs the nodes/proxy permission, which the plugin never holds: it
+  // reaches every kubelet endpoint. Nothing reconciles toward it as a desired state: the worker
+  // refreshes the reading and writes what it read, so a hand edit holds only until the next
+  // reading.
+  //
+  // +optional
+  optional NodeModelStoreKubelet kubelet = 4;
 }
 
 // NodeModelStoreStatus is what the plugin reports about its node, rebuilt from the node's disk and
