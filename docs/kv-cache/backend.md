@@ -554,16 +554,14 @@ Five phases — `Provisioning`, `Ready`, `Degraded`, `Error`, `Deleting`. `Ready
 `phaseMessage`; every other phase carries one.
 
 Conditions report the axes: `LeaderAvailable`, `MembersMounted`, `CapacityObserved`, `PoolWrites`, `Deletable` and
-`RolloutComplete`. Three more appear only where they have something to judge —
-`SnapshotStorageShared` when [`leader.highAvailability.snapshot`](leader.md#high-availability) is
-set, `ElectionObserved` above one leader replica, and `TierWasEmpty` when a member group carries a
+`RolloutComplete`. Two more appear only where they have something to judge — `ElectionObserved`
+above one leader replica, and `TierWasEmpty` when a member group carries a
 [local disk tier](local-disk-tier.md).
 
-**Those last four do not move the phase, and that is deliberate.** A rollout in flight, a snapshot
-claim only one Pod can mount, an election that has not happened, and a disk tier found holding data
-are all states in which the backend serves normally — reporting them as `Degraded` would put a
-storage arrangement in the same field as a leader nobody can reach. Read the conditions for them;
-the phase will not tell you.
+**Those last three do not move the phase, and that is deliberate.** A rollout in flight, an election
+that has not happened, and a disk tier found holding data are all states in which the backend serves
+normally — reporting them as `Degraded` would put a storage arrangement in the same field as a
+leader nobody can reach. Read the conditions for them; the phase will not tell you.
 
 **A member that is starting is not a shortfall; a member that is stuck is one.** A Pod still pulling
 its image is left alone — holding it against the backend would report `Degraded` for the length of

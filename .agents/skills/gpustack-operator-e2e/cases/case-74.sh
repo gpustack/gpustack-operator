@@ -1,32 +1,36 @@
 #!/usr/bin/env bash
 #
-# CASE 74 — A leader snapshot is refused at admission, on create and on an update that adds it, and
-#            the refusal names the field and the reason   (MUTATING, self-recovering)
+# CASE 74 — The API has no leader snapshot, and the store's snapshot flags are refused in the leader's
+#            extraArgs with the reason   (MUTATING, self-recovering)
 #
 #   case-74.sh <NS>
 #
-# Goal:        `leader.highAvailability.snapshot` is refused at any replica count, because restoring
-#              a snapshot can make the cache serve another key's bytes instead of a miss. This case
-#              proves the refusal on a live API server, where the webhook's registration, not only
-#              its code, decides whether it fires: a create carrying the field is refused under one
-#              replica and under three, an update adding it to a running backend is refused, and
-#              each refusal is reported on the field itself with its reason.
+# Goal:        The store's snapshot is not offered, because restoring one can make the cache serve
+#              another key's bytes instead of a miss. This case proves both halves on a live API
+#              server: `leader.highAvailability.snapshot` is not a field of the installed schema, so a
+#              strict client is refused on it as an unknown field and a lenient one has it pruned; and
+#              the flags that would turn the snapshot on through the escape hatch are refused by the
+#              webhook with that reason, on create and on an update to a running backend.
 #
 # Environment: Any cluster with the operator deployed; no GPU, no RDMA, no storage class. <NS> keeps
-#              the suite's calling convention and is not read: a backend is cluster-scoped, and no
-#              claim is created because admission refuses the field before one would be looked up.
+#              the suite's calling convention and is read only to clean up the leader Lease: a backend
+#              is cluster-scoped.
 #
-# Inputs:      All real, nothing mocked. The creates and the update are sent as server-side dry runs,
+# Inputs:      All real, nothing mocked. The creates and the updates are sent as server-side dry runs,
 #              which pass through admission and persist nothing. The update needs an object to
-#              update, so the case creates one backend with high availability and no snapshot, whose
-#              member group selects no node: it renders a leader and no member Pod.
+#              update, so the case creates one backend with high availability, whose member group
+#              selects no node: it renders a leader and no member Pod.
 #
-# Expected:    - the same manifest without the snapshot is accepted, under one replica and under
-#              three (the positive baseline: without it a refusal of every backend would pass);
-#              - with the snapshot it is refused under one replica and under three, each message
-#              naming `spec.connection.managed.leader.highAvailability.snapshot` and the reason;
-#              - on the running backend, an update adding the snapshot is refused the same way, and
-#              an update changing only the image is accepted.
+# Expected:    - the manifest without a snapshot is accepted (the positive baseline: without it a
+#              refusal of every backend would pass);
+#              - with `leader.highAvailability.snapshot`, a strict create is refused naming that
+#              path as an unknown field, and a lenient create is accepted with the block pruned from
+#              the object the server returns;
+#              - `-enable_snapshot=true` in leader.extraArgs is refused on that entry with the
+#              wrong-data reason, and `-snapshot_interval_seconds=60` with the reason that it is
+#              read only under a refused switch;
+#              - on the running backend, an update changing only the image is accepted, and an update
+#              adding `-enable_snapshot_restore=true` is refused with the wrong-data reason.
 #
 # Cleanup:     Trap deletes the one backend the case created, then its leader Lease by name (the
 #              Lease carries no owner reference). Idempotent, runs on pass AND fail, safe to re-run.
@@ -47,11 +51,12 @@ SFX="$(set +o pipefail; LC_ALL=C tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | hea
 [ -n "$SFX" ] || SFX="$$$(date +%s)"
 BACKEND="kvcb-snap-${SFX}"
 LEADER="${BACKEND}-leader"
-PVC="${BACKEND}-snap"
 
-# The refusal is matched on its field AND its reason. The claim-name rule reports on a path under
-# this one, so the path alone would also match that rule.
-REFUSAL_RE='spec\.connection\.managed\.leader\.highAvailability\.snapshot: Forbidden: .*can serve another key.s bytes instead of a miss'
+# Every refusal is matched on its field AND its reason: extraArgs carries several refusals for other
+# keys, so the path alone would pass on any of them.
+UNKNOWN_RE='unknown field "spec\.connection\.managed\.leader\.highAvailability\.snapshot"'
+SWITCH_RE='spec\.connection\.managed\.leader\.extraArgs\[0\]: Forbidden: snapshots are not supported: .*can serve another key.s bytes instead of a miss'
+COMPANION_RE='spec\.connection\.managed\.leader\.extraArgs\[0\]: Forbidden: it is read only when enable_snapshot or enable_snapshot_restore is set'
 
 FAILS=0
 ROWS=()
@@ -77,15 +82,10 @@ teardown() {
 }
 trap teardown EXIT
 
-# manifest <replicas> <with-snapshot:yes|no> prints one backend. The member group selects a label no
-# node carries, so the one object this case persists renders no member Pod.
+# manifest <leader-extra-yaml> prints one backend with three elected leaders. The argument lands
+# under `leader:`, so it can add a snapshot block or an extraArgs list. The member group selects a
+# label no node carries, so the one object this case persists renders no member Pod.
 manifest() {
-  local ha="highAvailability: {}"
-  if [ "$2" = yes ]; then
-    ha="highAvailability:
-          snapshot:
-            persistentVolumeClaimName: ${PVC}"
-  fi
   cat <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: KVCacheBackend
@@ -99,8 +99,10 @@ spec:
   connection:
     managed:
       leader:
-        replicas: $1
-        ${ha}
+        replicas: 3
+        highAvailability:
+          memberAddressing: Service
+${1:-}
       members:
         - nodeSelector: {gpustack.ai/case-74-selects-no-node: "true"}
           medium: DRAM
@@ -108,27 +110,61 @@ spec:
 YAML
 }
 
+SNAPSHOT_YAML='          snapshot:
+            persistentVolumeClaimName: mooncake-snapshots'
+
+# expect_refused <label> <regex> <leader-extra-yaml> sends a server-side dry-run create and records
+# whether it was refused for the reason the regex names, rather than for any other.
+expect_refused() {
+  local out
+  if out="$(manifest "$3" | kubectl create --dry-run=server -f - 2>&1)"; then
+    record FAIL "$1" "accepted: ${out}"
+  elif [[ "$out" =~ $2 ]]; then
+    record PASS "$1" "${BACKEND}"
+  else
+    record FAIL "$1" "refused by another rule: ${out}"
+  fi
+}
+
 # ------------------------------------------------------------- create, as dry runs
 
-for replicas in 1 3; do
-  if out="$(manifest "$replicas" no | kubectl create --dry-run=server -f - 2>&1)"; then
-    record PASS "create without a snapshot is accepted (replicas ${replicas})" "${BACKEND}"
-  else
-    record FAIL "create without a snapshot is accepted (replicas ${replicas})" "${out}"
-  fi
+if out="$(manifest | kubectl create --dry-run=server -f - 2>&1)"; then
+  record PASS "create without a snapshot is accepted" "${BACKEND}"
+else
+  record FAIL "create without a snapshot is accepted" "${out}"
+fi
 
-  if out="$(manifest "$replicas" yes | kubectl create --dry-run=server -f - 2>&1)"; then
-    record FAIL "create with a snapshot is refused (replicas ${replicas})" "accepted: ${out}"
-  elif [[ "$out" =~ $REFUSAL_RE ]]; then
-    record PASS "create with a snapshot is refused (replicas ${replicas})" "${BACKEND}"
+if out="$(manifest "$SNAPSHOT_YAML" | kubectl create --dry-run=server --validate=strict -f - 2>&1)"; then
+  record FAIL "a strict create with a snapshot is refused as an unknown field" "accepted: ${out}"
+elif [[ "$out" =~ $UNKNOWN_RE ]]; then
+  record PASS "a strict create with a snapshot is refused as an unknown field" "${BACKEND}"
+else
+  record FAIL "a strict create with a snapshot is refused as an unknown field" "refused by another rule: ${out}"
+fi
+
+# The lenient path: the warning goes to stderr and the object the server would store to stdout, so
+# the two are read apart.
+warn_file="$(mktemp)"
+if obj="$(manifest "$SNAPSHOT_YAML" | kubectl create --dry-run=server --validate=warn -o json -f - 2>"$warn_file")"; then
+  ha="$(printf '%s' "$obj" | jq -c '.spec.connection.managed.leader.highAvailability')"
+  if [[ "$(cat "$warn_file")" =~ $UNKNOWN_RE ]] && [ "$(printf '%s' "$obj" | jq '.spec.connection.managed.leader.highAvailability | has("snapshot")')" = false ]; then
+    record PASS "a lenient create with a snapshot is accepted with the block pruned" "highAvailability=${ha}"
   else
-    record FAIL "create with a snapshot is refused (replicas ${replicas})" "refused by another rule: ${out}"
+    record FAIL "a lenient create with a snapshot is accepted with the block pruned" "highAvailability=${ha} warnings=$(cat "$warn_file")"
   fi
-done
+else
+  record FAIL "a lenient create with a snapshot is accepted with the block pruned" "refused: $(cat "$warn_file")"
+fi
+rm -f "$warn_file"
+
+expect_refused "-enable_snapshot in extraArgs is refused for serving wrong data" "$SWITCH_RE" \
+  '        extraArgs: ["-enable_snapshot=true"]'
+expect_refused "-snapshot_interval_seconds in extraArgs is refused as read only under a refused switch" "$COMPANION_RE" \
+  '        extraArgs: ["-snapshot_interval_seconds=60"]'
 
 # ------------------------------------------------------------- update, against a running backend
 
-if ! out="$(manifest 3 no | kubectl create -f - 2>&1)"; then
+if ! out="$(manifest | kubectl create -f - 2>&1)"; then
   record FAIL "the backend to update is created" "${out}"
   results; exit 1
 fi
@@ -141,12 +177,12 @@ else
 fi
 
 if out="$(kubectl patch kvcachebackends.worker.gpustack.ai "$BACKEND" --dry-run=server --type=merge \
-  -p "{\"spec\":{\"connection\":{\"managed\":{\"leader\":{\"highAvailability\":{\"snapshot\":{\"persistentVolumeClaimName\":\"${PVC}\"}}}}}}}" 2>&1)"; then
-  record FAIL "an update adding a snapshot is refused" "accepted: ${out}"
-elif [[ "$out" =~ $REFUSAL_RE ]]; then
-  record PASS "an update adding a snapshot is refused" "${BACKEND}"
+  -p '{"spec":{"connection":{"managed":{"leader":{"extraArgs":["-enable_snapshot_restore=true"]}}}}}' 2>&1)"; then
+  record FAIL "an update adding -enable_snapshot_restore is refused" "accepted: ${out}"
+elif [[ "$out" =~ $SWITCH_RE ]]; then
+  record PASS "an update adding -enable_snapshot_restore is refused" "${BACKEND}"
 else
-  record FAIL "an update adding a snapshot is refused" "refused by another rule: ${out}"
+  record FAIL "an update adding -enable_snapshot_restore is refused" "refused by another rule: ${out}"
 fi
 
 results

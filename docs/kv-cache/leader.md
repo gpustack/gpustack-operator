@@ -52,9 +52,8 @@ recently-read set rather than everything written. Raise it where replicas share 
 turns; the cost arrives only once the set read within the window outgrows the store itself.
 
 `leader.extraEnv` is the same hatch for the environment: every entry renders after the derived
-variables, and a name the renderer derives — the pod's own identity variables and the snapshot path —
-is refused with the same message a member gets. The schema keys the list by `name`, so one name
-cannot carry two values.
+variables, and a name the renderer derives — the pod's own identity variables — is refused with the
+same message a member gets. The schema keys the list by `name`, so one name cannot carry two values.
 
 `replicas` defaults to `1`, and `5` is the ceiling in the **webhook** and in the schema alike: only
 one leader ever serves, so further replicas are spare processes rather than capacity. More than one
@@ -244,26 +243,18 @@ leader also waits for its replacement to be scheduled and its image pulled.
 **Run one leader by default.** Add replicas when that gap costs more than what an election needs: the
 store image and the two accounts described above.
 
-⛔ **`leader.highAvailability.snapshot` is refused at admission, at any replica count.** A snapshot
-records where each key sits in member memory, and restoring one does not check that the memory still
-holds that key. Once the memory has been reused, the restored index hands out another key's bytes
-instead of a miss — to an engine, a wrong KV block rather than a cold one.
+⛔ **The store's snapshot is not offered, and its flags are refused in `leader.extraArgs`.** A
+snapshot records where each key sits in member memory, and restoring one does not check that the
+memory still holds that key. Once the memory has been reused, the restored index hands out another
+key's bytes instead of a miss — to an engine, a wrong KV block rather than a cold one.
 
 Two ordinary events reuse it. A forced remove, which is how an engine resets its cache, frees it
 before the next snapshot is taken. A standby loads the snapshot once at its own start, so by the time
 it takes over, another leader may have given that memory to other keys.
 
-An object admitted with the field before the refusal keeps running as it was rendered, and an update
-to it is refused only when it moves the field or `replicas`. Removing the field is always accepted.
-
-⛔ **A claim such an object wrote to outlives it, and every key in its cache is nameable from it.** A
-snapshot is the master's metadata written as plain bytes with no encryption, including tenant names
-under multi-tenancy. Nothing here deletes the claim.
-
-⛔ **`memory_allocator` is refused in `leader.extraArgs` because of this feature**, under a name that
-mentions no part of it: the store builds its snapshot manager only under its default allocator,
-silently and with no log line either way. Any other value would leave the flags rendered, the claim
-mounted and this object stating a snapshot that is never written again.
+`enable_snapshot` and `enable_snapshot_restore` are refused with that reason. Every other
+`snapshot_*` key is refused because it is read only under one of those two, and `memory_allocator`
+because it moves the store off the allocator these rules were traced under.
 
 **A missing grant fails differently on each side, and one of them is silent.** A leader that cannot
 reach the Lease retries every second forever — liveness is ungated, so nothing restarts and the

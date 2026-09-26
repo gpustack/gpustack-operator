@@ -219,26 +219,6 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
 			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		}, ""},
-		// The snapshot's claim. The whole block is refused on its own -- see
-		// TestKVCacheBackendWebhook_LeaderSnapshotIsRefused -- and these cases pin that the claim is
-		// still judged beside that refusal, so a block naming none is told about both.
-		{"a snapshot naming no claim", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
-			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{
-				Snapshot: &workercore.KVCacheBackendLeaderSnapshot{},
-			}
-		}, "has to name the claim it is kept on"},
-		// A name no API server would resolve. Left through, it renders a volume the kubelet refuses,
-		// so every leader replica stays pending with the reason on a Pod rather than on the object
-		// somebody edited.
-		{"a snapshot naming something that is not a claim name", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
-			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{
-				Snapshot: &workercore.KVCacheBackendLeaderSnapshot{
-					PersistentVolumeClaimName: "Mooncake Snapshots",
-				},
-			}
-		}, "persistentVolumeClaimName"},
 
 		// The oplog key: refused because the leader cannot START with it, not because this operator
 		// took a view on what it writes. The message says which backend is missing, because the flag
@@ -261,33 +241,26 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		{"cluster_id through the escape hatch", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = []string{"-cluster_id=shared"}
 		}, "derived from a field"},
-		// The snapshot's own switch, refused as derived like the election's -- and refused on a
-		// backend that asks for no snapshot at all, which is the point of reserving it
-		// unconditionally: the key alone names a local store whose path variable only the field
-		// renders.
+		// The snapshot's switches, refused for the reason the store's snapshot is not offered at all:
+		// restoring one can serve another key's bytes instead of a miss.
 		{"enable_snapshot through the escape hatch", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = []string{"-enable_snapshot=true"}
-		}, "derived from a field"},
-		// The allocator, and the message has to name the snapshot rather than the allocator: the key
-		// reads like a tuning knob and its cost is that snapshot generation stops, silently.
-		{"memory_allocator through the escape hatch", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Leader.ExtraArgs = []string{"-memory_allocator=cachelib"}
-		}, "whether the leader generates snapshots at all"},
-		// The backup directory, whose cost is the opposite of what its name suggests: a failed
-		// upload stops being reported.
-		{"snapshot_backup_dir through the escape hatch", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Leader.ExtraArgs = []string{"-snapshot_backup_dir=/tmp/backup"}
-		}, "reporting success while what lands on the claim is incomplete"},
-		// A deprecated alias the canonical flag wins over, so it reads as a store that moved and
-		// moves nothing.
-		{"snapshot_payload_store_type through the escape hatch", func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Leader.ExtraArgs = []string{"-snapshot_payload_store_type=s3"}
-		}, "deprecated alias"},
-		// The catalog, which this operator renders nothing for -- that omission is exactly what
-		// leaves the key reachable.
+		}, "can serve another key's bytes instead of a miss"},
+		{"enable_snapshot_restore through the escape hatch", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = []string{"-enable_snapshot_restore=true"}
+		}, "can serve another key's bytes instead of a miss"},
+		// Every other snapshot key is read only under one of those switches, and the message says so
+		// rather than describing a snapshot that cannot run.
+		{"snapshot_interval_seconds through the escape hatch", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = []string{"-snapshot_interval_seconds=60"}
+		}, "read only when enable_snapshot or enable_snapshot_restore is set"},
 		{"snapshot_catalog_store_type through the escape hatch", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.ExtraArgs = []string{"-snapshot_catalog_store_type=redis"}
-		}, "index of which snapshots exist"},
+		}, "read only when enable_snapshot or enable_snapshot_restore is set"},
+		// The allocator, refused because the rules here were traced only under the default one.
+		{"memory_allocator through the escape hatch", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ExtraArgs = []string{"-memory_allocator=cachelib"}
+		}, "default offset allocator"},
 		// A second group is admitted. It used to be refused as "a second medium tier", which the
 		// tiering work has now answered — a tier is a layer on a group rather than a group of its
 		// own, so a second group is just more nodes and nothing here has to arbitrate between them.
@@ -1034,50 +1007,6 @@ func TestKVCacheBackendWebhook_AGrandfatheredExtraArgIsNotRefusedOnEveryUpdate(t
 		require.Contains(t, err.Error(), "derived from a field of this spec")
 	})
 
-	// The same blind spot one level down, and the one the presence check alone does not see: the
-	// snapshot keys become derived when the snapshot is DECLARED, which happens inside a
-	// high-availability block that was already there. Comparing only whether that block appeared
-	// leaves such an update reading as unchanged, so the rules are skipped and a grandfathered
-	// `-enable_snapshot_restore=false` reaches the renderer, which appends the hatch after the
-	// derived flags -- the stale value wins over the declaration just added.
-	t.Run("declaring a snapshot re-reads a list it did not touch", func(t *testing.T) {
-		ha := func() *workercore.KVCacheBackendLeaderHighAvailability {
-			return &workercore.KVCacheBackendLeaderHighAvailability{}
-		}
-		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		grandfathered := []string{"-enable_snapshot_restore=false"}
-		oldKvcb.Spec.Connection.Managed.Leader.HighAvailability = ha()
-		oldKvcb.Spec.Connection.Managed.Leader.ExtraArgs = grandfathered
-		newKvcb.Spec.Connection.Managed.Leader.HighAvailability = ha()
-		newKvcb.Spec.Connection.Managed.Leader.HighAvailability.Snapshot = &workercore.KVCacheBackendLeaderSnapshot{PersistentVolumeClaimName: "snapshots"}
-		newKvcb.Spec.Connection.Managed.Leader.ExtraArgs = slices.Clone(grandfathered)
-
-		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
-		require.Error(t, err, "the snapshot declaration moved, so the keys it derives are read again")
-		require.Contains(t, err.Error(), "derived from a field of this spec")
-	})
-
-	t.Run("an update leaving both the block and the snapshot alone still exempts the list", func(t *testing.T) {
-		// The positive baseline for the case above. Without it a rule that refused every update
-		// with a grandfathered key would satisfy that assertion just as well, and this is exactly
-		// the update the exemption exists to let through.
-		snapshot := func() *workercore.KVCacheBackendLeaderHighAvailability {
-			return &workercore.KVCacheBackendLeaderHighAvailability{
-				Snapshot: &workercore.KVCacheBackendLeaderSnapshot{PersistentVolumeClaimName: "snapshots"},
-			}
-		}
-		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		grandfathered := []string{"-enable_snapshot_restore=false"}
-		oldKvcb.Spec.Connection.Managed.Leader.HighAvailability = snapshot()
-		oldKvcb.Spec.Connection.Managed.Leader.ExtraArgs = grandfathered
-		newKvcb.Spec.Connection.Managed.Leader.HighAvailability = snapshot()
-		newKvcb.Spec.Connection.Managed.Leader.ExtraArgs = slices.Clone(grandfathered)
-		newKvcb.Spec.Image = "example.com/mooncake:v1"
-
-		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
-		require.NoError(t, err)
-	})
-
 	t.Run("an unrelated update still leaves that same list alone", func(t *testing.T) {
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
 		grandfathered := []string{"-enable_ha=false"}
@@ -1091,140 +1020,41 @@ func TestKVCacheBackendWebhook_AGrandfatheredExtraArgIsNotRefusedOnEveryUpdate(t
 		require.NoError(t, err)
 	})
 
-	// THE ENVIRONMENT HATCH CARRIES THE SAME COUPLING, and the pair below is what says so. The
-	// snapshot path variable is reserved unconditionally and EMITTED only under a snapshot
-	// declaration, so the update that adds the declaration is the one where a grandfathered value
-	// starts overriding the mount path -- the renderer appends the hatch after the derived
-	// variables. A rule comparing only whether the list moved exempts exactly that update.
-	t.Run("declaring a snapshot re-reads an env list it did not touch", func(t *testing.T) {
-		ha := func() *workercore.KVCacheBackendLeaderHighAvailability {
-			return &workercore.KVCacheBackendLeaderHighAvailability{}
-		}
+	// THE ENVIRONMENT HATCH CARRIES THE SAME COUPLING, and the pair below is what says so. The Pod's
+	// identity and IP variables are reserved unconditionally and EMITTED only under high
+	// availability, so the update that turns it on is the one where a grandfathered value starts
+	// overriding the reference the argv arrives with -- the renderer appends the hatch after the
+	// derived variables. A rule comparing only whether the list moved exempts exactly that update.
+	t.Run("turning high availability on re-reads an env list it did not touch", func(t *testing.T) {
 		grandfathered := []workercore.InstanceEnvVar{
-			{Name: mooncake.LeaderSnapshotLocalPathEnv, Value: "/tmp/elsewhere"},
+			{Name: mooncake.LeaderPodIPEnv, Value: "10.0.0.1"},
 		}
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		oldKvcb.Spec.Connection.Managed.Leader.HighAvailability = ha()
 		oldKvcb.Spec.Connection.Managed.Leader.ExtraEnv = grandfathered
-		newKvcb.Spec.Connection.Managed.Leader.HighAvailability = ha()
-		newKvcb.Spec.Connection.Managed.Leader.HighAvailability.Snapshot = &workercore.KVCacheBackendLeaderSnapshot{PersistentVolumeClaimName: "snapshots"}
+		newKvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		newKvcb.Spec.Connection.Managed.Leader.ExtraEnv = slices.Clone(grandfathered)
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
-		require.Error(t, err, "the snapshot declaration moved, so the names it emits are read again")
+		require.Error(t, err, "high availability moved, so the names it emits are read again")
 		require.Contains(t, err.Error(), "this variable is rendered from this spec")
 	})
 
-	t.Run("an update leaving the snapshot alone still exempts the env list", func(t *testing.T) {
+	t.Run("an unrelated update still exempts the env list", func(t *testing.T) {
 		// The positive baseline. Without it a rule refusing every update carrying a grandfathered
 		// name would satisfy the case above, and this is the update the exemption exists for.
-		snapshot := func() *workercore.KVCacheBackendLeaderHighAvailability {
-			return &workercore.KVCacheBackendLeaderHighAvailability{
-				Snapshot: &workercore.KVCacheBackendLeaderSnapshot{PersistentVolumeClaimName: "snapshots"},
-			}
-		}
 		grandfathered := []workercore.InstanceEnvVar{
-			{Name: mooncake.LeaderSnapshotLocalPathEnv, Value: "/tmp/elsewhere"},
+			{Name: mooncake.LeaderPodIPEnv, Value: "10.0.0.1"},
 		}
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		oldKvcb.Spec.Connection.Managed.Leader.HighAvailability = snapshot()
+		oldKvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		oldKvcb.Spec.Connection.Managed.Leader.ExtraEnv = grandfathered
-		newKvcb.Spec.Connection.Managed.Leader.HighAvailability = snapshot()
+		newKvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		newKvcb.Spec.Connection.Managed.Leader.ExtraEnv = slices.Clone(grandfathered)
 		newKvcb.Spec.Image = "example.com/mooncake:v1"
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 		require.NoError(t, err)
 	})
-}
-
-// TestKVCacheBackendWebhook_LeaderSnapshotIsRefused pins the refusal of the snapshot block and the
-// updates it is scoped to.
-//
-// A refusal is matched by the field it is reported on AND by its reason, because the snapshot's
-// claim rule reports on a path under this one: a match on the path alone would pass on that rule.
-// The accepted rows are the positive baseline, and two of them are the updates the scoping exists
-// for: an object admitted before the refusal must still take an unrelated edit and the removal of
-// its own finalizer, or it could never be deleted.
-func TestKVCacheBackendWebhook_LeaderSnapshotIsRefused(t *testing.T) {
-	const (
-		wantPath   = "spec.connection.managed.leader.highAvailability.snapshot: Forbidden"
-		wantReason = "can serve another key's bytes instead of a miss"
-	)
-	withLeader := func(replicas int32, snapshot bool) func(*workercore.KVCacheBackend) {
-		return func(k *workercore.KVCacheBackend) {
-			k.Spec.Connection.Managed.Leader.Replicas = ptr.To(replicas)
-			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
-			if snapshot {
-				k.Spec.Connection.Managed.Leader.HighAvailability.Snapshot = &workercore.KVCacheBackendLeaderSnapshot{
-					PersistentVolumeClaimName: "mooncake-snapshots",
-				}
-			}
-		}
-	}
-	then := func(fs ...func(*workercore.KVCacheBackend)) func(*workercore.KVCacheBackend) {
-		return func(k *workercore.KVCacheBackend) {
-			for _, f := range fs {
-				f(k)
-			}
-		}
-	}
-
-	cases := []struct {
-		name string
-		// old nil means the call is a create.
-		old     func(*workercore.KVCacheBackend)
-		new     func(*workercore.KVCacheBackend)
-		refused bool
-	}{
-		{"create: a snapshot under one replica", nil, withLeader(1, true), true},
-		{"create: a snapshot under three replicas", nil, withLeader(3, true), true},
-		{"create: one replica with high availability and no snapshot", nil, withLeader(1, false), false},
-		{"create: three replicas with high availability and no snapshot", nil, withLeader(3, false), false},
-
-		{"update: a snapshot added under one replica", withLeader(1, false), withLeader(1, true), true},
-		{"update: a snapshot added under three replicas", withLeader(3, false), withLeader(3, true), true},
-		{"update: replicas raised from one to three under a snapshot", withLeader(1, true), withLeader(3, true), true},
-		{"update: the snapshot's interval changed", withLeader(1, true), then(withLeader(1, true),
-			func(k *workercore.KVCacheBackend) {
-				k.Spec.Connection.Managed.Leader.HighAvailability.Snapshot.IntervalSeconds = ptr.To[int32](30)
-			}), true},
-
-		{"update: an unrelated edit to an object admitted with a snapshot", withLeader(3, true), then(withLeader(3, true),
-			func(k *workercore.KVCacheBackend) { k.Spec.Image = "example.com/mooncake:v1" }), false},
-		{"update: the finalizer removed from an object admitted with a snapshot", then(withLeader(3, true),
-			func(k *workercore.KVCacheBackend) {
-				k.Finalizers = []string{"example.com/in-use"}
-				k.DeletionTimestamp = ptr.To(meta.Now())
-			}), then(withLeader(3, true),
-			func(k *workercore.KVCacheBackend) { k.DeletionTimestamp = ptr.To(meta.Now()) }), false},
-		{"update: the snapshot removed", withLeader(3, true), withLeader(3, false), false},
-	}
-
-	wh := &KVCacheBackendWebhook{}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			newKvcb := newKVCacheBackend()
-			c.new(newKvcb)
-
-			var err error
-			if c.old == nil {
-				_, err = wh.ValidateCreate(context.Background(), newKvcb)
-			} else {
-				oldKvcb := newKVCacheBackend()
-				c.old(oldKvcb)
-				_, err = wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
-			}
-
-			if !c.refused {
-				require.NoError(t, err)
-				return
-			}
-			require.Error(t, err)
-			require.Contains(t, err.Error(), wantPath)
-			require.Contains(t, err.Error(), wantReason)
-		})
-	}
 }
 
 // TestKVCacheBackendWebhook_ValidateUpdate pins what is frozen under a running backend and, just as
@@ -1638,14 +1468,11 @@ func TestKVCacheBackendWebhook_ExtraEnv(t *testing.T) {
 		{"the address every member connects to", withMemberEnvs(
 			workercore.InstanceEnvVar{Name: "MOONCAKE_MASTER", Value: "elsewhere:50051"},
 		), "rendered from this spec"},
-		// The leader's own names, refused with the message the member's are — including the two
-		// nothing renders on a plain backend, which are reserved so the field that turns their
-		// rendering on can be edited after the object exists.
+		// The leader's own names, refused with the message the member's are — though nothing renders
+		// them on a plain backend, they are reserved so the field that turns their rendering on can be
+		// edited after the object exists.
 		{"the leader's pod name", withLeaderEnvs(
 			workercore.InstanceEnvVar{Name: "KUBERNETES_POD_NAME", Value: "impostor"},
-		), "rendered from this spec"},
-		{"the leader's snapshot path, unrendered though the backend is", withLeaderEnvs(
-			workercore.InstanceEnvVar{Name: "MOONCAKE_SNAPSHOT_LOCAL_PATH", Value: "/elsewhere"},
 		), "rendered from this spec"},
 		// A name the strict rule refuses. Checked before the derived list, because a malformed name
 		// cannot collide with one while still reaching the container.

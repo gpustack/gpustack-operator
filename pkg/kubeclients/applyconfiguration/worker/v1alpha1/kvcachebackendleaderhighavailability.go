@@ -12,22 +12,12 @@ package v1alpha1
 // An `enabled: false` beside `replicas: 3` would be a third state that admission would have to
 // adjudicate and every reader would have to remember, while presence has no such state. Lease
 // tuning — duration, renew deadline — can also be added here later without a breaking change.
+//
+// A standby REPLICATES NOTHING. The store's operation log is the only way to feed one, and it runs
+// on a leadership backend this operator's image cannot carry, so a failover or a restart starts
+// from an empty cache. The store's snapshot is not offered either: restoring one can make the cache
+// serve another key's bytes instead of a miss, which is why its flags are refused in extraArgs.
 type KVCacheBackendLeaderHighAvailabilityApplyConfiguration struct {
-	// Snapshot is REFUSED AT ADMISSION, at any replica count. It would write the leader's metadata
-	// to a claim for a restarted leader, or a standby taking over, to restore, and that restore can
-	// make the cache serve another key's bytes instead of a miss: the snapshot records where each key
-	// sits in member memory, and nothing checks that the memory still holds that key when the index
-	// is read back. A forced remove, which is how an engine resets its cache, frees it for the next
-	// write, and a standby loads the snapshot once at its own start, before another leader reuses it.
-	//
-	// Without it a standby REPLICATES NOTHING. The store's operation log is the only other way to
-	// feed one, and it runs on a leadership backend this operator's image cannot carry, so a
-	// failover or a restart starts from an empty cache.
-	//
-	// The field is kept so that an object admitted before the refusal keeps rendering as it did: its
-	// flags arrive as soon as the field is set, unlike the election's. An update to such an object
-	// is judged only when it moves this field or Replicas.
-	Snapshot *KVCacheBackendLeaderSnapshotApplyConfiguration `json:"snapshot,omitempty"`
 	// MemberAddressing selects how a member is told to find the master once an election runs. Both
 	// forms reach the leader that is serving, by different routes, and they are rendered into the
 	// same one variable — so changing this rolls every member group.
@@ -51,14 +41,6 @@ type KVCacheBackendLeaderHighAvailabilityApplyConfiguration struct {
 // apply.
 func KVCacheBackendLeaderHighAvailability() *KVCacheBackendLeaderHighAvailabilityApplyConfiguration {
 	return &KVCacheBackendLeaderHighAvailabilityApplyConfiguration{}
-}
-
-// WithSnapshot sets the Snapshot field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Snapshot field is set to the value of the last call.
-func (b *KVCacheBackendLeaderHighAvailabilityApplyConfiguration) WithSnapshot(value *KVCacheBackendLeaderSnapshotApplyConfiguration) *KVCacheBackendLeaderHighAvailabilityApplyConfiguration {
-	b.Snapshot = value
-	return b
 }
 
 // WithMemberAddressing sets the MemberAddressing field in the declarative configuration to the given value

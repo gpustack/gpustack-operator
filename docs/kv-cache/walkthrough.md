@@ -214,10 +214,9 @@ held in member memory and rebuilds from member remounts alone; a single leader t
 same. High availability shortens the outage, and every one of those objects misses afterwards. Plan
 for a cold cache after every failover and every leader restart.
 
-⛔ **`leader.highAvailability.snapshot` is refused at admission, at any replica count**, because
+⛔ **The store's snapshot is not offered, and its flags are refused in `leader.extraArgs`**, because
 restoring a snapshot can make the cache serve another key's bytes instead of a miss.
-[High availability](leader.md#high-availability) says why, and what happens to an object admitted
-with it.
+[High availability](leader.md#high-availability) says why.
 
 ## The three things that go wrong
 
@@ -235,7 +234,7 @@ reading on this page most likely to be escalated as an outage.
 ---
 
 **See also** — [KV Cache Backend](backend.md) (every field of the store, and what status reports) ·
-[KV Cache Leader](leader.md) (the election, the snapshot and the member addressing choice in full) ·
+[KV Cache Leader](leader.md) (the election, why there is no snapshot, and the member addressing choice in full) ·
 [KV Cache Pool](pool.md) (quota, domains and what a full quota does) ·
 [Model Deployment Reference](../reference/model-deployment.md) (roles, prefill/decode, rollout) ·
 [Model Deployment Prefill and Decode Reference](../reference/model-deployment-prefill-decode.md) (router, transfer) ·

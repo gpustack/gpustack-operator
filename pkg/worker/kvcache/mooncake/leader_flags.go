@@ -139,37 +139,6 @@ func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 			"-cluster_id="+LeaderObjectName(kvcb))
 	}
 
-	// The snapshot group, and it is NOT gated on the election. Admission refuses the field; this
-	// renders it for an object admitted before that, exactly as it rendered then, at any replica
-	// count -- see the API type for why the field is refused.
-	//
-	// -snapshot_object_store_type is not a field either, for the reason -ha_backend_type is not one:
-	// the artifact's other value is S3, which needs an endpoint, a bucket and a credential this
-	// spec does not carry, so there is one value to render.
-	//
-	// REQUIRED: the local object store resolves its root from an ENVIRONMENT variable with no
-	// default, not from any flag here. Without it the master refuses to start, which is why the
-	// variable and the mounted claim are rendered in the same breath as these flags -- see the
-	// leader's workload.
-	//
-	// The interval and the retention count render only when asked for, like every other flag here:
-	// the artifact has its own defaults for both, and restating one would move the command line of
-	// every backend that never chose it.
-	if snapshot := LeaderSnapshot(leader); snapshot != nil {
-		flags = append(flags,
-			"-enable_snapshot=true",
-			"-enable_snapshot_restore=true",
-			"-snapshot_object_store_type=local")
-		if snapshot.IntervalSeconds != nil {
-			flags = append(flags,
-				fmt.Sprintf("-snapshot_interval_seconds=%d", *snapshot.IntervalSeconds))
-		}
-		if snapshot.RetentionCount != nil {
-			flags = append(flags,
-				fmt.Sprintf("-snapshot_retention_count=%d", *snapshot.RetentionCount))
-		}
-	}
-
 	// An unset strategy renders nothing rather than a guess: the CRD schema defaults this field, so
 	// an empty value means the object never went through admission.
 	if mapped, ok := leaderAllocationStrategies[leader.AllocationStrategy]; ok {

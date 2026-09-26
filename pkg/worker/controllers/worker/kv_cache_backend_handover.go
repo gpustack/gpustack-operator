@@ -183,7 +183,8 @@ func (r *KVCacheBackendReconciler) reportElectionObserved(
 	if managed == nil || mooncake.LeaderReplicas(managed.Leader) <= 1 {
 		// Below two replicas there is nothing to elect between, so there is no lease to be the
 		// artifact of anything. Dropped rather than left, because the status this pass builds starts
-		// as a copy of the observed one -- see the snapshot condition for the same reasoning.
+		// as a copy of the observed one: a backend scaled back to one leader would otherwise go on
+		// publishing the last verdict, with a transition time that makes it look current.
 		holder.Status.Conditions = slices.DeleteFunc(holder.Status.Conditions,
 			func(c gpustack.Condition) bool {
 				return c.Type == string(KVCacheBackendConditionElectionObserved)

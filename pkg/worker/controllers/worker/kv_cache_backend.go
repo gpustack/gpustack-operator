@@ -91,10 +91,6 @@ const (
 	// own data is indistinguishable from what it found. reportKVCacheBackendTierReuse carries why
 	// the alternatives were worse.
 	KVCacheBackendConditionTierWasEmpty kubeapistatus.ConditionType = "TierWasEmpty"
-	// KVCacheBackendConditionSnapshotStorageShared answers whether more than one leader replica can
-	// read the claim the snapshot is kept on. It is ABSENT on a backend that asks for no snapshot,
-	// rather than True, because there is no storage for it to be a verdict about.
-	KVCacheBackendConditionSnapshotStorageShared kubeapistatus.ConditionType = "SnapshotStorageShared"
 	// KVCacheBackendConditionElectionObserved answers whether an election has actually taken place
 	// on a backend that asked for one. It is ABSENT below two replicas, where there is nothing to
 	// elect between and therefore no lease to be the artifact of anything.
@@ -459,9 +455,6 @@ func (r *KVCacheBackendReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Decided once and carried on the object, because a member restarting under an established
 	// backend surveys this backend's own data and cannot be told apart from a fresh reuse.
 	r.reportKVCacheBackendTierReuse(ctx, kvcb, holder)
-	// Independent of everything above: it reads a claim rather than the store, and it is true or
-	// false whether or not the leader is answering.
-	r.reportSnapshotStorage(ctx, kvcb, holder)
 	// One read for the two reporters below: they judge the SAME lease and a Get in each would be a
 	// duplicate round-trip on this path. The error travels with it because a missing lease means
 	// something different to each of them.
