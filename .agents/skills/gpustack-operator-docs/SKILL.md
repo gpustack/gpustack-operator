@@ -41,6 +41,7 @@ one, not to widen the overview.
 | Standing a cache up end to end, or which object comes first: the pasteable four-object sequence | `docs/kv-cache/walkthrough.md` |
 | How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/reference/kv-cache-injection.md` |
 | A `ModelArtifact`: its sources, resolution and revalidation, the manifest digest, how a `ModelDeployment` or an `Instance` mounts or downloads it, claim placement, the weight identity in KV keys | `docs/reference/model-artifact.md` |
+| The `v1` views of `ModelArtifact` and `NodeModelStore`, the `progress` subresource and who may read it, the GPUStack server capability map | `docs/reference/model-artifact-views.md` |
 | A `NodeModelStore` or the `model-manager` plugin: a field and its writer, the status guard, mount authorization, materialization, a failure reason, collection, a metric | `docs/reference/node-model-store.md` |
 | Running node delivery: the chart values, where the node's configuration comes from, reading a node, the watermark cap, switching delivery, where replicas land and turning the preference off, upgrading, removing the cache | `docs/operation/model-store.md` |
 | A `ModelDeployment` metrics snapshot, which series each field reads per engine, role and router, cache-hit scope or Pod scrape annotation | `docs/reference/model-deployment-metrics.md` |
