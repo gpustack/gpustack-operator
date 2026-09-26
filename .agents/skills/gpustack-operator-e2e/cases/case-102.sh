@@ -97,7 +97,7 @@ SERVER="$(kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.
 kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d >"$SCRATCH/ca.crt"
 status_as() {
   local code
-  kubectl get nodemodelstores.worker.gpustack.ai "$2" -o json | python3 -c "
+  kubectl get nodemodelstores.v1alpha1.worker.gpustack.ai "$2" -o json | python3 -c "
 import json, sys
 o = json.load(sys.stdin)
 o.setdefault('status', {}).setdefault('capacity', {})['usedPercent'] = 95
@@ -128,7 +128,7 @@ for row in "$BOUND|$W2|the plugin writes only the status of the node its Pod run
   if [ -n "$token" ]; then
     status_as "$token" "$node" >"$SCRATCH/out" 2>&1
   else
-    kubectl patch nodemodelstores.worker.gpustack.ai "$node" --subresource=status --type=merge -p "$patch" >"$SCRATCH/out" 2>&1
+    kubectl patch nodemodelstores.v1alpha1.worker.gpustack.ai "$node" --subresource=status --type=merge -p "$patch" >"$SCRATCH/out" 2>&1
   fi
   rc=$?
   if [ "$rc" != 0 ] && grep -q -F "$rule" "$SCRATCH/out"; then
@@ -149,7 +149,7 @@ if [ -n "$(wait_resolved "$NS" "${P}-guard" 120)" ]; then
 else
   record FAIL "the worker's own status writes are admitted" "${NS}/${P}-guard"
 fi
-kubectl -n "$NS" patch modelartifacts.worker.gpustack.ai "${P}-guard" --subresource=status --type=merge \
+kubectl -n "$NS" patch modelartifacts.v1alpha1.worker.gpustack.ai "${P}-guard" --subresource=status --type=merge \
   -p '{"status":{"resolved":{"manifestDigest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}}}' >"$SCRATCH/ma" 2>&1
 rc=$?
 if [ "$rc" != 0 ] && grep -q -F "only the worker writes a ModelArtifact's status" "$SCRATCH/ma"; then
