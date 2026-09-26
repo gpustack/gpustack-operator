@@ -25,7 +25,16 @@ the operator brings up the rest.
 
 **Prerequisites.**
 
-- Kubernetes `>= 1.23` (required by the bundled Kueue), Helm `3.8+`, cluster-admin.
+- Kubernetes `>= 1.29` for the full product, Helm `3.8+`, cluster-admin. Two floors apply, and the
+  versions between them are a window of their own:
+  - **`1.23` installs the chart.** `Chart.yaml` declares `>=1.23.0-0` on purpose, and CI installs the
+    chart on kind images from `1.23` to `1.35`.
+  - **`1.29` runs the Kueue scheduling chain**, because the bundled Kueue v0.18 requires it; node
+    delivery of model weights needs the same.
+  - **From `1.23` to `1.28`** the default install still deploys the bundled Kueue, and CI checks only that
+    the install succeeds. Kueue does not support these versions, so the intended use there is simple
+    allocation by the default scheduler with the device manager's allocator. No test verifies what
+    works there.
 - On accelerator nodes: the manufacturer driver is always yours to install — the operator brings the
   device plugin, not the driver. A container toolkit is required for a named subset of manufacturers.
   A vendor GPU Operator usually stays alongside GPUStack with some of its components turned off —

@@ -842,6 +842,16 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		clear(createOrdinals)
 	}
 
+	// The placement preference is read once for every member this pass creates, and not at all by a
+	// pass that creates none.
+	var preference *core.PreferredSchedulingTerm
+	for _, ordinals := range createOrdinals {
+		if len(ordinals) > 0 {
+			preference = weights.placementPreference(ctx, r.Client)
+			break
+		}
+	}
+
 	// A FAILED CREATE DOES NOT END THE PASS EITHER, and that is what makes the incomplete group a
 	// REPORTED state rather than a silent one. Returning here would skip the status write below, so
 	// the one pass that knows the group is short of its total would be the one pass that says
@@ -867,9 +877,15 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				pod := want.DeepCopy()
 				// Added at creation rather than rendered, so a replica created before its claim
 				// bound -- which then carries no affinity -- is not rolled once the claim has one.
+				// The placement preference follows the same rule for a stronger reason: which nodes
+				// hold the weights changes with every download and collection, and a fingerprint
+				// covering it would recreate every replica each time. It was read once for the pass,
+				// so every member of a replica carries the same term, which Kueue needs because it
+				// builds the replica's PodSet from one member's spec.
 				if weights != nil {
 					injectModelArtifactAffinity(pod, weights.Affinity)
 				}
+				injectModelPlacementPreference(pod, preference)
 				if err = r.Client.Create(ctx, pod); err != nil {
 					logger.Error(err, "create replica member",
 						"role", role.Name, "ordinal", ordinal,

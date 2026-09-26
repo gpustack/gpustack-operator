@@ -1,0 +1,26 @@
+# A kind cluster of one control plane and four workers, two per zone, with the region and zone
+# labels a cloud provider would set. It is the smallest shape case 87 accepts (no zone holds three
+# counted Nodes, one zone holds two) and gives case 107 four eligible workers. kubelet may set these
+# two labels on its own Node, so they are applied at join time. The control plane carries the same
+# API server settings as the chart workflow's cluster.
+#
+#   kind create cluster --name <name> --kubeconfig <file> --image kindest/node:<version> \
+#     --config .agents/skills/gpustack-operator-e2e/references/kind-two-zones.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            enable-aggregator-routing: "true"
+  - role: worker
+    labels: {topology.kubernetes.io/region: e2e-region, topology.kubernetes.io/zone: e2e-zone-a}
+  - role: worker
+    labels: {topology.kubernetes.io/region: e2e-region, topology.kubernetes.io/zone: e2e-zone-a}
+  - role: worker
+    labels: {topology.kubernetes.io/region: e2e-region, topology.kubernetes.io/zone: e2e-zone-b}
+  - role: worker
+    labels: {topology.kubernetes.io/region: e2e-region, topology.kubernetes.io/zone: e2e-zone-b}

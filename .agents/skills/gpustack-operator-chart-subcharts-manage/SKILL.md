@@ -236,6 +236,9 @@ strip CRs. Regenerate it with the commands above.
   feature gates. Add a required TAS gate to the configuration YAML alongside the existing gates; do not add a
   competing CLI gate. On a disposable install, read the rendered ConfigMap and manager arguments, then wait
   for the Kueue controller rollout before testing scheduling behavior.
+- **An alpha gate can vanish in a Kueue bump.** Before bumping Kueue, find `TASRespectNodeAffinityPreferred`
+  in the new version's `pkg/features/kube_features.go`: the chart turns it on, and a Kueue that does not
+  know a gate named in its configuration refuses to start.
 - **A parent helper is an install-time dependency, not a Helm dependency declaration.** A vendored subchart
   template patched to `include` a parent helper can render only through the parent chart. Test it with the
   parent chart's `helm template` and install path; a standalone render of the subchart is not a valid

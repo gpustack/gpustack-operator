@@ -590,6 +590,12 @@ kueue:
         AssignQueueLabelsForPods: false
         TopologyAwareScheduling: true
         TASBalancedPlacement: true
+        # Lets TAS rank feasible nodes by a Pod's preferred node affinity, which is how a
+        # node-delivered model's Pods prefer the nodes already holding its weights (alpha in
+        # Kueue 0.18). It also honors any other author's preferred node affinity in a TAS
+        # queue, so setting it to false turns both off. A Kueue that does not know a gate
+        # refuses to start: check this one before bumping the bundled Kueue.
+        TASRespectNodeAffinityPreferred: true
         # Enables resources.quotaCheckStrategy below (alpha in Kueue 0.18). The bundled
         # controller image is always 0.18, so the gate is always available.
         QuotaCheckStrategy: true

@@ -189,6 +189,10 @@ for that ordered level set. Kueue TAS chooses a domain for the complete PodSet; 
 quota-conservation, and request path is in [Topology-Aware
 Scheduling](topology-aware-scheduling.md).
 
+TAS also ranks the domains that fit by a Pod's preferred node affinity, which is how a node-delivered
+model's Pods [prefer the nodes holding its
+weights](topology-aware-scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
+
 ## Naming and grouping
 
 The **`ResourceFlavor` is the finest grain and setting-independent**: always the CPU key, plus the

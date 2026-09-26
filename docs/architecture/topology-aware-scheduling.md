@@ -3,7 +3,7 @@
 > **Purpose** — how topology inventory becomes Kueue topology-aware admission for each
 > `ModelDeployment` replica group.
 > **Audience** operators, contributors · **Prerequisites** [Scheduling
-> Chain](scheduling-chain.md) · **Read time** ~10 min
+> Chain](scheduling-chain.md) · **Read time** ~11 min
 
 Topology is a capacity boundary, not a placement hint. GPUStack first establishes an ordered,
 validated hierarchy for each Node, then makes every generated queue topology-aware so Kueue admits
@@ -16,6 +16,7 @@ the complete PodSet only when one requested domain has enough capacity.
 - [One hierarchy becomes one profile](#one-hierarchy-becomes-one-profile)
 - [Profiles enter the Kueue chain](#profiles-enter-the-kueue-chain)
 - [A ModelDeployment request is per replica](#a-modeldeployment-request-is-per-replica)
+- [A node-delivered model prefers the nodes holding it](#a-node-delivered-model-prefers-the-nodes-holding-it)
 - [Capacity and lifecycle limits](#capacity-and-lifecycle-limits)
 - [Failure surfaces](#failure-surfaces)
 
@@ -142,6 +143,35 @@ so the domain it holds stays idle. When no role fits, no Workload of the set res
 Omitting `requiredLevel` adds no explicit topology request. The queue is still topology-aware, and
 Kueue may choose any compatible hierarchy. The [field contract](../reference/model-deployment.md#topology-placement)
 defines the implicit hostname level.
+
+## A node-delivered model prefers the nodes holding it
+
+When the worker creates a Pod whose Hugging Face weights the node delivers, a `ModelDeployment`
+replica under `Node` delivery or an `Instance`, it adds one preferred node-affinity term per digest.
+The term names, by `kubernetes.io/hostname`, the nodes whose
+[`NodeModelStore`](../reference/node-model-store.md) lists that digest `Ready`.
+
+Kueue copies the Pod's affinity into the PodSet. With `TASRespectNodeAffinityPreferred` on, the
+chart's default, TAS ranks the nodes with room by that score before its usual packing order: hot
+nodes take as many of the PodSet's Pods as fit, and the rest go where capacity allows. A full hot
+node is skipped, and nothing waits for one. kube-scheduler gets the Pod with a hostname already
+selected, so it has nothing left to score.
+
+A node counts while its store lists the digest `Ready`, the store's `Ready` condition is `True`, and
+its `CSINode` lists `model.csi.gpustack.ai` now; a store the plugin left keeps a stale `Ready`. A term
+names at most 16 nodes, keeping those that mount the digest now, then the most recently used, then
+by name. A digest no node holds adds no term.
+
+> **Why at creation, not in the render** — the render feeds a replica's spec hash, so a preference
+> inside it would recreate every replica each time a download finished. Added at creation, it stays
+> as it was for the Pod's life, and a change in which nodes hold the weights rolls nothing. Every
+> member of a replica created in one pass carries the same term, since Kueue builds the PodSet from
+> one member's spec.
+
+A Pod carrying `kueue.x-k8s.io/podset-preferred-topology` gets no term: with `TASBalancedPlacement`
+on, as the chart has it, such a PodSet loses its affinity score. No Pod GPUStack renders carries it.
+`Engine` delivery and claim artifacts get no term either. Reading placements and turning the
+preference off are in [Model Store Operations](../operation/model-store.md#where-replicas-land).
 
 ## Capacity and lifecycle limits
 
