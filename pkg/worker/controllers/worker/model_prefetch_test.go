@@ -11,6 +11,7 @@ import (
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -378,4 +379,17 @@ func TestModelPrefetchFailedPodOnWaitingNodeRetries(t *testing.T) {
 	require.NoError(t, cli.List(context.Background(), pods, ctrlcli.InNamespace("team-a")))
 	require.Len(t, pods.Items, 1, "the dead attempt is replaced")
 	assert.NotEqual(t, donePod.UID, pods.Items[0].UID, "the replacement is a fresh pod")
+}
+
+func TestWarmupDigestLabelPassesValidation(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	pod := warmupPod(testPrefetch("warm", nil), testResolvedArtifact("model"), "python:3.12-alpine", "node-1", digest)
+
+	value := pod.Labels["worker.gpustack.ai/model-prefetch-digest"]
+	if errs := validation.IsValidLabelValue(value); len(errs) > 0 {
+		t.Fatalf("the digest label value is rejected by the API server: %v", errs)
+	}
+	if value != strings.Repeat("a", 32) {
+		t.Fatalf("the label value should carry the first half of the digest hex, got %q", value)
+	}
 }

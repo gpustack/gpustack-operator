@@ -591,7 +591,7 @@ func warmupPod(pf *workercore.ModelPrefetch, artifact *workercore.ModelArtifact,
 			Namespace: pf.Namespace,
 			Labels: map[string]string{
 				"worker.gpustack.ai/model-prefetch":        pf.Name,
-				"worker.gpustack.ai/model-prefetch-digest": strings.ReplaceAll(digest, "sha256:", ""),
+				"worker.gpustack.ai/model-prefetch-digest": warmDigestLabel(digest),
 			},
 		},
 		Spec: core.PodSpec{
@@ -644,6 +644,18 @@ func podWarmDigest(pod *core.Pod) string {
 	}
 
 	return ""
+}
+
+// warmDigestLabel folds a digest into a label value the API server accepts: label values stop at
+// 63 characters and a full digest is 64 hex, so the first half carries the identity here. The
+// authoritative digest match is the volume attribute, which keeps the whole value.
+func warmDigestLabel(digest string) string {
+	hexPart := strings.TrimPrefix(digest, "sha256:")
+	if len(hexPart) > 32 {
+		hexPart = hexPart[:32]
+	}
+
+	return hexPart
 }
 
 // prefetchPodName names the warm-up Pod after its prefetch and its node. A combined name that
