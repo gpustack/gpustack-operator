@@ -118,11 +118,15 @@ had a reason to run. See [Preflight operations](../operation/preflight.md).
 
 ## The three node labels, and what a label can carry
 
-| label | value | in a flavor selector? |
+| label | value | selectable? |
 |---|---|---|
-| `feature.gpustack.ai/rdma.capable` | `true` | **yes** — the one key the link gate needs |
+| `feature.gpustack.ai/rdma.capable` | `true` | **yes** — the link gate, for a nodeSelector or affinity you write |
 | `feature.gpustack.ai/rdma.distance` | the closest bus distance any accelerator has to an RDMA-capable interface | no — informational |
 | `feature.gpustack.ai/rdma.numa` | the NUMA nodes carrying one, joined with `_` | no — informational |
+
+No operator-generated ResourceFlavor pins any of the three: a flavor selects on accelerator and pool
+labels only, so withholding `rdma.capable` removes a node from the workloads that select on it, not
+from a queue.
 
 Only the gate key is unconditional. **`rdma.distance` is omitted on a node with no accelerator**,
 because a distance is a statement about a pair and there is none to measure — not an unknown one.
@@ -410,12 +414,12 @@ kubectl get devices <node> -o json |
 kubectl get node <node> -o json |
   jq '.status.allocatable | with_entries(select(.key | contains("gpustack.ai/rdma")))'
 
-# which nodes a flavor pinning the gate would select
+# which nodes a selector on the gate would pick
 kubectl get nodes -l feature.gpustack.ai/rdma.capable=true
 ```
 
 A node whose link is broken carries the state in `Devices` and **not** the label, which is the pair
-to check when a flavor stops selecting a node that still has the hardware.
+to check when a selector on the gate stops picking a node that still has the hardware.
 
 ---
 

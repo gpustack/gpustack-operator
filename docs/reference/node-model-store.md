@@ -285,8 +285,10 @@ between the status thresholds.
 - **kubelet's configz**, served while its debugging handlers are enabled (the default). Without it
   a node has no `spec.kubelet` and its cap assumes kubelet's defaults, which the `Ready` message
   says.
-- **No placement preference.** Node delivery schedules Pods as before; a node without the digest
-  downloads it.
+- **A preference, not a filter.** A Pod prefers the nodes holding its digest while they have room;
+  one placed on a node without it downloads it there —
+  [a node-delivered model prefers the nodes holding
+  it](../architecture/topology-aware-scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
 - **Every download comes from the Hub**, directly or through the proxy; nodes do not fetch from each
   other.
 

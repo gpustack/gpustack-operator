@@ -137,14 +137,18 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: "8"                      # eight whole accelerators
-          device.gpustack.ai/rdma.shared: "8"      # one endpoint per accelerator, same container
+          device.gpustack.ai/rdma: "8"             # eight distinct endpoints, same container
 ```
 
 Four things this shape is doing, each load-bearing:
 
 - **Both requests in one container.** The kubelet aligns per container by default, so a request
   split across two containers is aligned by nothing at all.
-- **One endpoint per accelerator**, for the reasons above.
+- **One endpoint per accelerator**, for the reasons above, on the **exclusive** key. A shared-key
+  quantity above one does not promise distinct endpoints: the RDMA plugin offers no preferred
+  allocation, so kubelet may hand one container several shared tokens of the same endpoint, and
+  Allocate collapses them into that one endpoint — `rdma.shared: "8"` can report satisfied with
+  fewer than eight `uverbs` devices. The shared key is right for a container that needs one.
 - **A nodeSelector on a label you set yourself.** Nothing this operator publishes asserts "one
   adapter per accelerator, evenly split across NUMA nodes" — `rdma.capable` says only that at least
   one endpoint on the node is usable. Label the node pools whose shape you have verified, and select
