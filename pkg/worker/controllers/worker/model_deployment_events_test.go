@@ -23,6 +23,9 @@ func TestModelDeploymentEvents_Departures(t *testing.T) {
 		name       string
 		mutate     func(*core.Pod)
 		wantReason string
+		// wantContains pins message content beyond the shared assertions: the kubelet's own words,
+		// when the departure carries them.
+		wantContains []string
 	}{
 		{
 			name:       "a healthy replica has not left",
@@ -34,6 +37,17 @@ func TestModelDeploymentEvents_Departures(t *testing.T) {
 				pod.Status.Reason = _PodReasonEvicted
 			},
 			wantReason: modelDeploymentEventReplicaEvicted,
+		},
+		{
+			// The kubelet's message is the only record of why the eviction happened: the evicted
+			// container's logs are gone with the eviction.
+			name: "evicted, carrying the kubelet's why",
+			mutate: func(pod *core.Pod) {
+				pod.Status.Reason = _PodReasonEvicted
+				pod.Status.Message = `Usage of EmptyDir volume "weights" exceeds the limit "500Mi".`
+			},
+			wantReason:   modelDeploymentEventReplicaEvicted,
+			wantContains: []string{`Usage of EmptyDir volume "weights" exceeds the limit "500Mi".`},
 		},
 		{
 			// Kueue preemption arrives as an ordinary deletion rather than as an eviction, so the
@@ -100,6 +114,9 @@ func TestModelDeploymentEvents_Departures(t *testing.T) {
 				"and the lease window, which is how long the failures outlive the replica")
 			assert.Contains(t, departures[0].message, "kv_lease_duration",
 				"named so a reader can find the knob the number comes from")
+			for _, want := range tc.wantContains {
+				assert.Contains(t, departures[0].message, want)
+			}
 		})
 	}
 }

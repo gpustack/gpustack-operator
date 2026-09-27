@@ -135,6 +135,40 @@ func TestGetResourceRequirements(t *testing.T) {
 			},
 		},
 		{
+			// A CPU limit below the 800m base must not produce a request above
+			// the limit — the API server would reject such a Pod outright.
+			name: "general only, overcommit on, non-acceleratable — sub-base CPU clamps to limit",
+			cpu:  "100m", ram: "16Gi", storage: "32Gi",
+			withGeneral: true, withGeneralOvercommit: true,
+			wantLimits: core.ResourceList{
+				core.ResourceCPU:              qty("100m"),
+				core.ResourceMemory:           qty("16Gi"),
+				core.ResourceEphemeralStorage: qty("32Gi"),
+			},
+			wantRequests: core.ResourceList{
+				core.ResourceCPU:              qty("100m"), // clamped: 800m × 1 would exceed the limit
+				core.ResourceMemory:           qty("2Gi"),
+				core.ResourceEphemeralStorage: qty("4Gi"),
+			},
+		},
+		{
+			// The fractional core part of the limit rounds up via Value(); the
+			// rounded request must still be clamped at the limit.
+			name: "general only, overcommit on, non-acceleratable — fractional CPU clamps to limit",
+			cpu:  "1500m", ram: "16Gi", storage: "32Gi",
+			withGeneral: true, withGeneralOvercommit: true,
+			wantLimits: core.ResourceList{
+				core.ResourceCPU:              qty("1500m"),
+				core.ResourceMemory:           qty("16Gi"),
+				core.ResourceEphemeralStorage: qty("32Gi"),
+			},
+			wantRequests: core.ResourceList{
+				core.ResourceCPU:              qty("1500m"), // clamped: 800m × 2 would exceed the limit
+				core.ResourceMemory:           qty("2Gi"),
+				core.ResourceEphemeralStorage: qty("4Gi"),
+			},
+		},
+		{
 			name: "general only, overcommit on, acceleratable — CPU uses 100m base",
 			cpu:  "16", ram: "64Gi", storage: "128Gi", acc: ptr.To("2"),
 			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA,
