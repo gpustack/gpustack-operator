@@ -263,8 +263,10 @@ func deploymentInstanceTypes(deps []workercore.ModelDeployment, artifactName str
 	return out
 }
 
-// deliver ensures at most one warm-up Pod per target node, in bounded batches, and removes the
-// ones whose node left the target set or whose work is done.
+// deliver keeps one live warm-up Pod per target node, in bounded batches, and removes the ones
+// whose node left the target set or whose work is done. A replacement is rendered under a fresh
+// generated name while its deleted predecessor is still terminating, so a node's live attempt and
+// a terminating dead one can coexist for the grace period.
 //
 // The node's own entry state decides what a finished pod's removal means. A node still reading
 // Downloading, or with no entry at all, is where a pod does work: its pod is (re)created. A node
@@ -307,6 +309,7 @@ func (r *ModelPrefetchReconciler) deliver(ctx context.Context, pf *workercore.Mo
 
 	created := 0
 	requeue := ctrl.Result{}
+	removed := map[string]bool{}
 	for _, pod := range pods.Items {
 		_, onTarget := want[pod.Spec.NodeName]
 		// A pod mounting a digest the artifact no longer resolves to is stale the moment it is
@@ -315,37 +318,42 @@ func (r *ModelPrefetchReconciler) deliver(ctx context.Context, pf *workercore.Mo
 		done := pod.Status.Phase == core.PodSucceeded || pod.Status.Phase == core.PodFailed
 		settled := readySet[pod.Spec.NodeName] || failed[pod.Spec.NodeName] || expired[pod.Spec.NodeName]
 		// A done pod on a settled node is evidence whose work ended; a done pod on a node still
-		// reading waiting is a dead attempt blocking the retry by its name, and goes.
+		// reading waiting is a dead attempt, and its replacement goes up beside it.
 		if !onTarget || stale || (done && (settled || waiting[pod.Spec.NodeName])) {
 			if err := r.Client.Delete(ctx, &pod); ctrlcli.IgnoreNotFound(err) != nil {
 				return ctrl.Result{}, err
 			}
+			removed[pod.Name] = true
+		}
+	}
+
+	// A deleted pod lingers as Terminating for its grace period, so this pass's own list is what
+	// says whether a node runs an attempt: every listed pod not just deleted is live. Keying the
+	// check on the list instead of the pod's name keeps a terminating dead attempt from blocking
+	// its replacement until the next reconcile.
+	live := map[string]bool{}
+	for i := range pods.Items {
+		if !removed[pods.Items[i].Name] {
+			live[pods.Items[i].Spec.NodeName] = true
 		}
 	}
 
 	for _, node := range targets {
-		if !waiting[node] {
+		if !waiting[node] || live[node] {
 			continue
 		}
-		name := prefetchPodName(pf.Name, node)
-		existing := new(core.Pod)
-		switch err := r.Client.Get(ctx, ctrlcli.ObjectKey{Namespace: pf.Namespace, Name: name}, existing); {
-		case kerrors.IsNotFound(err):
-			if created >= modelPrefetchPodsPerPass {
-				// The rest wait for the next pass, which the batch already ran asks for.
-				requeue = ctrl.Result{RequeueAfter: 5 * time.Second}
+		if created >= modelPrefetchPodsPerPass {
+			// The rest wait for the next pass, which the batch already ran asks for.
+			requeue = ctrl.Result{RequeueAfter: 5 * time.Second}
 
-				return requeue, nil
-			}
-			pod := warmupPod(pf, artifact, image, node, digest)
-			kubemeta.ControlOn(pod, pf, workercore.SchemeGroupVersion.WithKind("ModelPrefetch"))
-			if err := r.Client.Create(ctx, pod); err != nil {
-				return ctrl.Result{}, err
-			}
-			created++
-		case err != nil:
+			return requeue, nil
+		}
+		pod := warmupPod(pf, artifact, image, node, digest)
+		kubemeta.ControlOn(pod, pf, workercore.SchemeGroupVersion.WithKind("ModelPrefetch"))
+		if err := r.Client.Create(ctx, pod); err != nil {
 			return ctrl.Result{}, err
 		}
+		created++
 	}
 
 	return requeue, nil
@@ -583,12 +591,14 @@ func (r *ModelPrefetchReconciler) warmupImage(ctx context.Context) (string, erro
 
 // warmupPod is the delivery operation rendered as a Pod: the artifact's own volume, the node
 // pinned, nothing privileged, and a read-back that exits. It carries no queue-name label, so
-// neither Kueue nor this operator's Pod webhook has anything to say about it.
+// neither Kueue nor this operator's Pod webhook has anything to say about it. Each attempt is
+// rendered under a fresh generated name, so a replacement never collides with its terminating
+// predecessor.
 func warmupPod(pf *workercore.ModelPrefetch, artifact *workercore.ModelArtifact, image, nodeName, digest string) *core.Pod {
 	return &core.Pod{
 		ObjectMeta: meta.ObjectMeta{
-			Name:      prefetchPodName(pf.Name, nodeName),
-			Namespace: pf.Namespace,
+			GenerateName: prefetchPodName(pf.Name, nodeName) + "-",
+			Namespace:    pf.Namespace,
 			Labels: map[string]string{
 				"worker.gpustack.ai/model-prefetch":        pf.Name,
 				"worker.gpustack.ai/model-prefetch-digest": warmDigestLabel(digest),
@@ -658,17 +668,19 @@ func warmDigestLabel(digest string) string {
 	return hexPart
 }
 
-// prefetchPodName names the warm-up Pod after its prefetch and its node. A combined name that
-// fits stays readable; one that does not is settled by a digest of the pair, which neither panics
-// on a long prefix nor collides the way two truncated node names sharing one would.
+// prefetchPodName is the warm-up Pod's generateName prefix, named after its prefetch and its
+// node. A combined name that fits stays readable; one that does not is settled by a digest of the
+// pair, which neither panics on a long prefix nor collides the way two truncated node names
+// sharing one would. The cap leaves room for the separator and the random suffix the API server
+// appends to a generated name: 253 - 1 - 5.
 func prefetchPodName(pf, node string) string {
 	name := pf + "-warmup-" + node
-	if len(name) <= 253 {
+	if len(name) <= 247 {
 		return name
 	}
 	sum := sha256.Sum256([]byte(pf + "/" + node))
 	tag := hex.EncodeToString(sum[:])[:8]
-	room := 253 - len(tag) - 1
+	room := 247 - len(tag) - 1
 	base := (pf + "-warmup-" + node)[:room]
 
 	return base + "-" + tag

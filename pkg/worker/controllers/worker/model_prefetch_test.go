@@ -99,8 +99,12 @@ func TestModelPrefetchRendersTheWarmupShape(t *testing.T) {
 	)
 	reconcileModelPrefetch(t, r, "team-a", "warm")
 
-	pod := new(core.Pod)
-	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: "team-a", Name: "warm-warmup-node-1"}, pod))
+	pods := new(core.PodList)
+	require.NoError(t, cli.List(context.Background(), pods, ctrlcli.InNamespace("team-a")))
+	require.Len(t, pods.Items, 1, "one warm-up Pod is rendered for the one target node")
+	pod := &pods.Items[0]
+	assert.True(t, strings.HasPrefix(pod.Name, "warm-warmup-node-1-"),
+		"the generated name carries the prefetch and its node, got %q", pod.Name)
 
 	assert.Equal(t, "node-1", pod.Spec.NodeName, "the warm-up Pod is pinned to its target")
 	assert.Equal(t, core.RestartPolicyNever, pod.Spec.RestartPolicy)
@@ -313,8 +317,8 @@ func TestPrefetchPodNameStaysBoundedAndDistinct(t *testing.T) {
 
 	a := prefetchPodName(longA, longNode)
 	b := prefetchPodName(longB, longNode)
-	assert.LessOrEqual(t, len(a), 253, "the name never passes what a pod name accepts")
-	assert.LessOrEqual(t, len(b), 253, "the name never passes what a pod name accepts")
+	assert.LessOrEqual(t, len(a), 247, "the generated name never passes what a pod name accepts once the server appends its suffix")
+	assert.LessOrEqual(t, len(b), 247, "the generated name never passes what a pod name accepts once the server appends its suffix")
 	assert.NotEqual(t, a, b, "two prefetches on one long node never collide")
 	assert.NotContains(t, a, "\x00")
 
@@ -379,6 +383,83 @@ func TestModelPrefetchFailedPodOnWaitingNodeRetries(t *testing.T) {
 	require.NoError(t, cli.List(context.Background(), pods, ctrlcli.InNamespace("team-a")))
 	require.Len(t, pods.Items, 1, "the dead attempt is replaced")
 	assert.NotEqual(t, donePod.UID, pods.Items[0].UID, "the replacement is a fresh pod")
+}
+
+// warmupAttemptPod is a warm-up pod as the controller renders it for node-1: the prefetch's own
+// label and the artifact's digest on the volume, so the pass reads it as a current attempt.
+func warmupAttemptPod(name string, uid types.UID, phase core.PodPhase) *core.Pod {
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name: name, Namespace: "team-a", UID: uid,
+			Labels: map[string]string{"worker.gpustack.ai/model-prefetch": "warm"},
+		},
+		Spec: core.PodSpec{
+			NodeName: "node-1",
+			Volumes: []core.Volume{{
+				Name: "model",
+				VolumeSource: core.VolumeSource{
+					CSI: &core.CSIVolumeSource{
+						Driver:           modelstore.DriverName,
+						VolumeAttributes: map[string]string{modelstore.VolumeAttrManifestDigest: testDigest},
+					},
+				},
+			}},
+		},
+		Status: core.PodStatus{Phase: phase},
+	}
+}
+
+func TestModelPrefetchReplacesATerminatingAttemptInTheSamePass(t *testing.T) {
+	// The dead attempt carries a finalizer, so deleting it leaves it Terminating the way a real
+	// cluster does for the grace period. The node still reads Downloading: the replacement must
+	// not wait for the old pod to leave the API.
+	deadPod := warmupAttemptPod("warm-warmup-node-1", types.UID("dead-attempt"), core.PodFailed)
+	deadPod.Finalizers = []string{"test/holds-the-pod"}
+	r, cli := newTestModelPrefetchEnv(t,
+		testModelNodeLabeled("node-1", map[string]string{"pool": "h100"}),
+		testResolvedArtifact("model"),
+		testNodeModelStoreEntry("node-1", "Downloading", nil),
+		deadPod,
+		testPrefetch("warm", nil),
+	)
+	reconcileModelPrefetch(t, r, "team-a", "warm")
+
+	pods := new(core.PodList)
+	require.NoError(t, cli.List(context.Background(), pods, ctrlcli.InNamespace("team-a")))
+	require.Len(t, pods.Items, 2, "the replacement is created while the dead attempt still terminates")
+
+	byUID := map[types.UID]core.Pod{}
+	for _, p := range pods.Items {
+		byUID[p.UID] = p
+	}
+	old, ok := byUID[types.UID("dead-attempt")]
+	require.True(t, ok, "the deleted attempt lingers until its grace period ends")
+	assert.NotNil(t, old.DeletionTimestamp, "the dead attempt is terminating")
+
+	fresh := pods.Items[0]
+	if fresh.UID == old.UID {
+		fresh = pods.Items[1]
+	}
+	assert.Nil(t, fresh.DeletionTimestamp, "the fresh attempt is not the terminating one")
+	assert.Equal(t, "node-1", fresh.Spec.NodeName)
+}
+
+func TestModelPrefetchKeepsTheRunningAttempt(t *testing.T) {
+	// A live attempt on a waiting node is the node's delivery: the pass renders no second pod
+	// beside it.
+	r, cli := newTestModelPrefetchEnv(t,
+		testModelNodeLabeled("node-1", map[string]string{"pool": "h100"}),
+		testResolvedArtifact("model"),
+		testNodeModelStoreEntry("node-1", "Downloading", nil),
+		warmupAttemptPod("warm-warmup-node-1", types.UID("running-attempt"), core.PodRunning),
+		testPrefetch("warm", nil),
+	)
+	reconcileModelPrefetch(t, r, "team-a", "warm")
+
+	pods := new(core.PodList)
+	require.NoError(t, cli.List(context.Background(), pods, ctrlcli.InNamespace("team-a")))
+	require.Len(t, pods.Items, 1, "a running attempt is not duplicated")
+	assert.Equal(t, types.UID("running-attempt"), pods.Items[0].UID)
 }
 
 func TestWarmupDigestLabelPassesValidation(t *testing.T) {
