@@ -151,11 +151,14 @@ fi
 SEED_HUB="$(counter "$SEED" hub)"
 SEED_PEER="$(counter "$SEED" peer)"
 TOTAL_BYTES="$(kubectl get nodemodelstores.v1alpha1.worker.gpustack.ai "$SEED" -o jsonpath="{.status.models[?(@.digest=='$DIGEST')].sizeBytes}" 2>/dev/null)"
-HUB_DELTA="$(awk -v a="$SEED_HUB" -v b="$HUB_BASE" 'BEGIN{print a-b}')"
-if [ -n "$SEED_HUB" ] && awk -v a="$HUB_DELTA" -v b="${TOTAL_BYTES:-0}" 'BEGIN{exit !(a+0 >= b*0.999 && a+0 <= b*1.001)}'; then
-  record PASS "seed-hub-bytes" "this attempt pulled $HUB_DELTA bytes from the hub (counter ${SEED_HUB:-0}, base ${HUB_BASE:-0}), matching the manifest total ($TOTAL_BYTES)"
+# A plugin restart resets the counter to zero mid-measurement; in that case the attempt's
+# pull is exactly what the reset counter now shows.
+# The fresh reset restarts the plugin, so its counter reads this attempt's pull alone:
+# the counter must equal the manifest total.
+if [ -n "$SEED_HUB" ] && awk -v a="$SEED_HUB" -v b="${TOTAL_BYTES:-0}" 'BEGIN{exit !(a+0 >= b*0.999 && a+0 <= b*1.001)}'; then
+  record PASS "seed-hub-bytes" "the seed pulled $SEED_HUB bytes from the hub, matching the manifest total ($TOTAL_BYTES)"
 else
-  record FAIL "seed-hub-bytes" "the attempt's hub delta ($HUB_DELTA; counter ${SEED_HUB:-0}, base ${HUB_BASE:-0}) does not match the manifest total (${TOTAL_BYTES:-0})"
+  record FAIL "seed-hub-bytes" "the seed hub counter ($SEED_HUB) does not match the manifest total (${TOTAL_BYTES:-0})"
 fi
 
 echo "[case-111] pull: $COLD materializes the same digest"
