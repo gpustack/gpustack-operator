@@ -1818,14 +1818,14 @@ func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts cont
 		Watches(
 			// The plugin's CSIDriver decides whether a node-delivered artifact can be delivered.
 			&storage.CSIDriver{},
-			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentDelivery),
+			enqueueDeliveryChange(r.mapModelDeploymentDelivery, 0),
 			ctrlbuilder.WithPredicates(namePredicate(modelstore.DriverName)),
 		).
 		Watches(
 			// The delivery Setting decides how a hub artifact is delivered; its value is read through
 			// the Settings cache, so the deployments are looked at once that cache has expired.
 			&core.Secret{},
-			enqueueAfterSettingsRead(r.mapModelDeploymentDelivery),
+			enqueueDeliveryChange(r.mapModelDeploymentDelivery, settingsReadDelay),
 			ctrlbuilder.WithPredicates(ctrlpredicate.NewPredicateFuncs(func(o ctrlcli.Object) bool {
 				return o.GetNamespace() == setting.DelegatedSecretNamespace && o.GetName() == setting.DelegatedSecretName
 			})),
