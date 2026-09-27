@@ -321,8 +321,10 @@ the CSIDriver does not exist the Instance creates no Pod and says so in its phas
   local, so it logs one 404 warning and routes by text; with Engine delivery it would fetch `main`
   without a token (not measured).
 - **vLLM 0.29.0 needs `--enforce-eager` for InternLM2** with `trust_remote_code`, an engine defect.
-- **Node delivery downloads from the Hub on every cold node.** It does not prefer nodes that hold
-  the weights.
+- **Node delivery downloads from the Hub on every cold node.** A Pod prefers the nodes already
+  holding the digest, but only while they have room; placed anywhere else, its node downloads —
+  [a node-delivered model prefers the nodes holding
+  it](../architecture/topology-aware-scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
 - Settings: [Settings & Environment Variables](../settings.md#online-adjustable-settings) carries the
   endpoint, proxy, no-proxy, CA bundle, revalidation interval, delivery mode and the node cache's
   watermarks and download limits.
