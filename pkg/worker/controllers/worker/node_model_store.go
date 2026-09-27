@@ -98,7 +98,7 @@ func (r *NodeModelStoreReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	spec, err := r.effectiveSpec(ctx)
+	spec, err := r.effectiveSpec(ctx, nd)
 	if err != nil {
 		logger.Error(err, "the node model cache's configuration fails its check; the node's spec is left as it is")
 		return ctrl.Result{RequeueAfter: nodeModelStoreInvalidRetry}, nil
@@ -118,6 +118,11 @@ func (r *NodeModelStoreReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	kubemeta.ControlOnWithoutBlock(eNms, nd, core.SchemeGroupVersion.WithKind("Node"))
 	alignFn := func(aNms *workercore.NodeModelStore) (_ *workercore.NodeModelStore, skip bool, err error) {
 		skip = true
+		// spec.pinned belongs to the prefetch controller: carry the stored value into the desired
+		// spec, so a configuration write never drops it and a pinned-only change never shows up in
+		// this diff. A pinned write racing this one lands on a stale resourceVersion, fails, and is
+		// retried.
+		eNms.Spec.Pinned = aNms.Spec.Pinned
 		if !kubemeta.DeepEqual(aNms.Spec, eNms.Spec) {
 			aNms.Spec = eNms.Spec
 			skip = false
@@ -172,10 +177,13 @@ func csiNodeListsModelDriver(csiNode *storage.CSINode) bool {
 	})
 }
 
-// effectiveSpec merges the configuration layers into a node's spec and checks it. The one layer so
-// far is the cluster's Settings, read from the Settings store this controller watches rather than
-// through the Settings package's read cache, so a change reaches every node on its own event.
-func (r *NodeModelStoreReconciler) effectiveSpec(ctx context.Context) (workercore.NodeModelStoreSpec, error) {
+// effectiveSpec merges the configuration layers into a node's spec and checks it. The base layer
+// is the cluster's Settings, read from the Settings store this controller watches rather than
+// through the Settings package's read cache, so a change reaches every node on its own event; the
+// pool layer is the alphabetically first ModelStore whose selector matches the node, overriding
+// only the fields it states. The winner's name rides along in the spec, and an overlap is the
+// stores' status business, not a spec error.
+func (r *NodeModelStoreReconciler) effectiveSpec(ctx context.Context, nd *core.Node) (workercore.NodeModelStoreSpec, error) {
 	sec := new(core.Secret)
 	key := ctrlcli.ObjectKey{Namespace: setting.DelegatedSecretNamespace, Name: setting.DelegatedSecretName}
 	if err := r.Client.Get(ctx, key, sec); ctrlcli.IgnoreNotFound(err) != nil {
@@ -192,7 +200,24 @@ func (r *NodeModelStoreReconciler) effectiveSpec(ctx context.Context) (workercor
 	if err != nil {
 		return workercore.NodeModelStoreSpec{}, err
 	}
-	spec := modelstore.Merge(cluster)
+
+	stores := new(workercore.ModelStoreList)
+	if err := r.Client.List(ctx, stores); err != nil {
+		return workercore.NodeModelStoreSpec{}, err
+	}
+	matched, err := selectModelStore(stores.Items, nd)
+	if err != nil {
+		return workercore.NodeModelStoreSpec{}, err
+	}
+
+	layers := []modelstore.Layer{cluster}
+	if len(matched) > 0 {
+		layers = append(layers, modelStoreLayer(matched[0]))
+	}
+	spec := modelstore.Merge(layers...)
+	if len(matched) > 0 {
+		spec.Store = matched[0].Name
+	}
 
 	return spec, modelstore.Validate(spec)
 }
@@ -227,6 +252,16 @@ func (r *NodeModelStoreReconciler) SetupController(_ context.Context, opts contr
 			ctrlbuilder.WithPredicates(ctrlpredicate.NewPredicateFuncs(func(o ctrlcli.Object) bool {
 				return o.GetNamespace() == setting.DelegatedSecretNamespace && o.GetName() == setting.DelegatedSecretName
 			})),
+		).
+		Watches(
+			&workercore.ModelStore{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueEveryNode),
+			ctrlbuilder.WithPredicates(ctrlpredicate.GenerationChangedPredicate{}),
+		).
+		Watches(
+			&core.Node{},
+			&ctrlhandler.EnqueueRequestForObject{},
+			ctrlbuilder.WithPredicates(nodeLabelsChanged),
 		).
 		Complete(r)
 }
