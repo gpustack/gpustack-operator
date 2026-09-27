@@ -964,6 +964,10 @@ const (
 	// ModelDeploymentModelDeliveryNode has the node's model-manager plugin materialize a hub
 	// artifact's verified files into the node's cache and mount them read-only.
 	ModelDeploymentModelDeliveryNode ModelDeploymentModelDelivery = "Node"
+	// ModelDeploymentModelDeliveryImage mounts an image artifact's OCI image read-only through a
+	// Kubernetes image volume: kubelet pulls the pinned image on the node that needs it, and the
+	// node's plugin cache plays no part.
+	ModelDeploymentModelDeliveryImage ModelDeploymentModelDelivery = "Image"
 )
 
 // ModelDeploymentRoleStatus is one role's observed readiness.

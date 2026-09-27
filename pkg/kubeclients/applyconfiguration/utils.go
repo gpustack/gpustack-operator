@@ -1450,6 +1450,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelArtifactApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactHubSource"):
 		return &applyconfigurationworkerv1alpha1.ModelArtifactHubSourceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactImageSource"):
+		return &applyconfigurationworkerv1alpha1.ModelArtifactImageSourceApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactNodes"):
 		return &applyconfigurationworkerv1alpha1.ModelArtifactNodesApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelArtifactPersistentVolumeClaimSource"):

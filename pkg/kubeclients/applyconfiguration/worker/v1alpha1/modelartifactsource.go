@@ -19,6 +19,17 @@ type ModelArtifactSourceApplyConfiguration struct {
 	// reads the claim's content, so the artifact has no revision and no digest, and what the
 	// directory holds, and any change to it, is the user's.
 	PersistentVolumeClaim *ModelArtifactPersistentVolumeClaimSourceApplyConfiguration `json:"persistentVolumeClaim,omitempty"`
+	// Image is an OCI image reference holding the weights. The reference must pin a digest:
+	// "registry/repository@sha256:<64 hex>". A tag is mutable, so one artifact could deliver
+	// different weights on different pulls, and admission refuses it.
+	//
+	// The digest pins the image's bytes; it is not the manifest digest a hub source resolves to.
+	// The operator never reads the registry, so it verifies nothing about what the image holds:
+	// weights live at the image's root, and putting them there is the build's contract. Delivery
+	// mounts the image root read-only through a Kubernetes image volume, which needs an apiserver
+	// and kubelet at 1.35 or above and containerd at 2.1 or above; admission refuses the source
+	// on an older apiserver.
+	Image *ModelArtifactImageSourceApplyConfiguration `json:"image,omitempty"`
 }
 
 // ModelArtifactSourceApplyConfiguration constructs a declarative configuration of the ModelArtifactSource type for use with
@@ -48,5 +59,13 @@ func (b *ModelArtifactSourceApplyConfiguration) WithModelScope(value *ModelArtif
 // If called multiple times, the PersistentVolumeClaim field is set to the value of the last call.
 func (b *ModelArtifactSourceApplyConfiguration) WithPersistentVolumeClaim(value *ModelArtifactPersistentVolumeClaimSourceApplyConfiguration) *ModelArtifactSourceApplyConfiguration {
 	b.PersistentVolumeClaim = value
+	return b
+}
+
+// WithImage sets the Image field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Image field is set to the value of the last call.
+func (b *ModelArtifactSourceApplyConfiguration) WithImage(value *ModelArtifactImageSourceApplyConfiguration) *ModelArtifactSourceApplyConfiguration {
+	b.Image = value
 	return b
 }

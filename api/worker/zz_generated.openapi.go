@@ -156,6 +156,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCachePoolUsage{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1alpha1_KVCachePoolUsage(ref),
 		v1alpha1.ModelArtifact{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1alpha1_ModelArtifact(ref),
 		v1alpha1.ModelArtifactHubSource{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_ModelArtifactHubSource(ref),
+		v1alpha1.ModelArtifactImageSource{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_ModelArtifactImageSource(ref),
 		v1alpha1.ModelArtifactList{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelArtifactList(ref),
 		v1alpha1.ModelArtifactNodes{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_ModelArtifactNodes(ref),
 		v1alpha1.ModelArtifactPersistentVolumeClaimSource{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_ModelArtifactPersistentVolumeClaimSource(ref),
@@ -8164,6 +8165,30 @@ func schema_gpustack_api_worker_v1alpha1_ModelArtifactHubSource(ref common.Refer
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelArtifactImageSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelArtifactImageSource is an OCI image reference holding the weights at its root.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"reference": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Reference is the image reference, pinned to a digest: \"registry/repository@sha256:<64 lowercase hex>\". The digest is the artifact's whole identity; status.resolved stays empty for an image source, as for a claim, and the reference in this immutable spec is the only record of what the artifact delivers.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](1024),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"reference"},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelArtifactList(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -8376,11 +8401,17 @@ func schema_gpustack_api_worker_v1alpha1_ModelArtifactSource(ref common.Referenc
 							Ref:         ref(v1alpha1.ModelArtifactPersistentVolumeClaimSource{}.OpenAPIModelName()),
 						},
 					},
+					"image": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Image is an OCI image reference holding the weights. The reference must pin a digest: \"registry/repository@sha256:<64 hex>\". A tag is mutable, so one artifact could deliver different weights on different pulls, and admission refuses it.\n\nThe digest pins the image's bytes; it is not the manifest digest a hub source resolves to. The operator never reads the registry, so it verifies nothing about what the image holds: weights live at the image's root, and putting them there is the build's contract. Delivery mounts the image root read-only through a Kubernetes image volume, which needs an apiserver and kubelet at 1.35 or above and containerd at 2.1 or above; admission refuses the source on an older apiserver.",
+							Ref:         ref(v1alpha1.ModelArtifactImageSource{}.OpenAPIModelName()),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelArtifactHubSource{}.OpenAPIModelName(), v1alpha1.ModelArtifactPersistentVolumeClaimSource{}.OpenAPIModelName()},
+			v1alpha1.ModelArtifactHubSource{}.OpenAPIModelName(), v1alpha1.ModelArtifactImageSource{}.OpenAPIModelName(), v1alpha1.ModelArtifactPersistentVolumeClaimSource{}.OpenAPIModelName()},
 	}
 }
 
@@ -8915,11 +8946,11 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelStatus(ref common.R
 					},
 					"delivery": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Delivery is how the weights reach the engine: \"Pvc\", the claim mounted read-only at a fixed path; \"Engine\", the engine downloading the pinned commit itself; or \"Node\", the node's model-manager plugin materializing the verified files and mounting them read-only at the same fixed path.\n\n\nPossible enum values:\n - `\"Engine\"` has the engine download a hub artifact's resolved commit into a size-limited cache volume, with the artifact's token from its Secret.\n - `\"Node\"` has the node's model-manager plugin materialize a hub artifact's verified files into the node's cache and mount them read-only.\n - `\"Pvc\"` mounts a claim artifact read-only at a fixed path.",
+							Description: "Delivery is how the weights reach the engine: \"Pvc\", the claim mounted read-only at a fixed path; \"Engine\", the engine downloading the pinned commit itself; or \"Node\", the node's model-manager plugin materializing the verified files and mounting them read-only at the same fixed path.\n\n\nPossible enum values:\n - `\"Engine\"` has the engine download a hub artifact's resolved commit into a size-limited cache volume, with the artifact's token from its Secret.\n - `\"Image\"` mounts an image artifact's OCI image read-only through a Kubernetes image volume: kubelet pulls the pinned image on the node that needs it, and the node's plugin cache plays no part.\n - `\"Node\"` has the node's model-manager plugin materialize a hub artifact's verified files into the node's cache and mount them read-only.\n - `\"Pvc\"` mounts a claim artifact read-only at a fixed path.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Engine", "Node", "Pvc"},
+							Enum:        []interface{}{"Engine", "Image", "Node", "Pvc"},
 						},
 					},
 				},

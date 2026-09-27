@@ -184,6 +184,8 @@ func (*ModelArtifact) ProtoMessage() {}
 
 func (*ModelArtifactHubSource) ProtoMessage() {}
 
+func (*ModelArtifactImageSource) ProtoMessage() {}
+
 func (*ModelArtifactList) ProtoMessage() {}
 
 func (*ModelArtifactNodes) ProtoMessage() {}
