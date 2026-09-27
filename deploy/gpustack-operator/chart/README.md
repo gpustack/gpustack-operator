@@ -173,6 +173,12 @@ Kubernetes: `>=1.23.0-0`
 | modelManager.rootPath | string | `"/var/lib/gpustack/models"` | The node's model cache directory, a hostPath. Mount a dedicated filesystem here: on one shared with kubelet the plugin caps its high watermark below kubelet's eviction and image collection thresholds. Changing it points the plugin at an empty cache; nothing is migrated or removed from the old path. |
 | modelManager.kubeletDir | string | `"/var/lib/kubelet"` | kubelet's root directory, the convention the bundled CSI drivers follow. It is mounted with Bidirectional propagation so a bind mount the plugin makes reaches the Pod. |
 | modelManager.securePort | int | `32444` | Secure serving port of the model-manager container: metrics, readiness and liveness. |
+| modelManager.port | int | `0` | TCP port the node's published trees are served to the other nodes' plugins on, for node-to-node sync; `0` is off. When on, plugins authenticate each other with the projected ServiceAccount token (audience `gpustack-model-peer`), and the networkPolicy below keeps tenant Pods off the port. |
+| modelManager.peerSync.maxServingStreams | int | `8` | How many peer file answers a node serves at once. |
+| modelManager.peerSync.streamsPerSource | int | `4` | How many requests a node opens to one peer at once. |
+| modelManager.networkPolicy.enabled | bool | `true` | Deploy the NetworkPolicy that keeps tenant Pods off the peer port (and the secure port, except from the worker). It only takes effect on a CNI that enforces NetworkPolicy. |
+| modelManager.networkPolicy.scrapers | list | `[]` | Whoever scrapes /metrics. |
+| modelManager.networkPolicy.extraIngress | list | `[]` | Additional ingress rules, verbatim. |
 | modelManager.image | object | `{}` | Per-model-manager image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall back to the chart-level `image`. |
 | modelManager.registrar.image | object | `{"repository":"docker.io/gpustack/mirrored-csi-node-driver-registrar","tag":"v2.17.0"}` | The node-driver-registrar sidecar's image: the mirror the bundled NFS and S3 CSI drivers pin, rewritten by the `global` image settings like every other image. |
 | modelManager.resources | object | `{"limits":{"cpu":"4","memory":"2Gi"},"requests":{"cpu":"100m","memory":"128Mi"}}` | Resource requests and limits for each model-manager container. |
