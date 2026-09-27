@@ -82,6 +82,18 @@ download starts.
 kubectl -n gpustack-system patch setting model-store-download-bandwidth --type merge -p '{"spec":{"value":"200Mi"}}'
 ```
 
+### The pool layer
+
+A [`ModelStore`](../reference/model-prefetch.md) is a fourth layer above the cluster Settings: a
+cluster-scoped object whose `nodeSelector` picks a pool and whose watermarks and download limits
+override the matched nodes field by field. A field the store leaves out keeps the cluster default,
+and an explicit `bytesPerSecond: 0` means "unlimited on this pool". The winner's name lands in the
+node's `spec.store`; nodes no store matches keep the cluster defaults.
+
+Two stores whose selectors match one node never merge silently: both report `SelectorOverlap`, and
+the alphabetically first name wins the shared nodes. Fix the selectors rather than relying on the
+order — it is a tie-break, not a policy.
+
 ## Read a node
 
 ```bash

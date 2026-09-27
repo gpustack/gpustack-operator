@@ -314,3 +314,5 @@ supersession is recorded that way because it has no new spec to be recorded in. 
 `**Corrected after shipping.**`. A spec naming another spec by file name is the case that forces one:
 when that file leaves the tree the name resolves to nothing, and leaving it alone preserves a pointer
 rather than a record.
+
+- `docs/reference/model-prefetch.md` owns the prefetch family: `ModelStore` (pool policy, selector overlap), `ModelStoreBinding` (budget grant, allowPinned, immutability), `ModelPrefetch` (placement, warm-up pod shape, the queue-name-label fact, budget projection and accounting, pin union, TTL). It must not absorb the node plugin's field reference (node-model-store.md), the artifact sources (model-artifact.md), or the pool layer's operational knobs (operation/model-store.md).

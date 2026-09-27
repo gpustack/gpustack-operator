@@ -247,8 +247,14 @@ five minutes. It removes, oldest `lastUsedTime` first and down to the low waterm
   after the last failure, so `status.models` stops listing them.
 
 It never removes a referenced tree or a partial being written, and it reads references from the
-node's own mounts, never from the API. How the watermarks are capped when the cache shares kubelet's
-filesystem is under [the capacity rule](../operation/model-store.md#the-capacity-rule).
+node's own mounts, never from the API.
+
+A digest listed in `spec.pinned` is never a candidate at all — the pins arrive from
+[`ModelPrefetch`](model-prefetch.md) retention and survive collection until the pin is withdrawn —
+though it still counts toward the usage the watermarks read.
+
+How the watermarks are capped when the cache shares kubelet's filesystem is under [the capacity
+rule](../operation/model-store.md#the-capacity-rule).
 
 When the references cannot be read, no configuration has been applied yet, or the node's `spec`
 fails its check, a collection removes nothing, a stale partial included, and the `Ready` message
