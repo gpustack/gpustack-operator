@@ -27,11 +27,9 @@ every field is in the [Node Model Store Reference](node-model-store.md).
 
 ## The three objects
 
-A `ModelStore` selects its pool with `spec.nodeSelector` and states overrides field by field: a
-field left out keeps the cluster default, and an explicit `bytesPerSecond: 0` is "unlimited on this
-pool", not an omission. Two stores whose selectors match one node are a reported misconfiguration,
-not a silent merge — [the pool layer](../operation/model-store.md#the-pool-layer) defines the
-overlap condition and the tie-break.
+A `ModelStore` selects its pool with `spec.nodeSelector` and states watermarks and download
+limits as overrides field by field — the [pool layer](../operation/model-store.md#the-pool-layer)
+defines the override semantics, the overlap condition and the tie-break.
 
 A `ModelStoreBinding` is the provisioning point: creating one in a namespace is what grants that
 namespace a `quota.bytes` budget and, with `allowPinned`, the right to pin. The grant is explicit —
@@ -69,8 +67,6 @@ artifact's own CSI volume — the same volume a consumer mounts, with the same a
 digest attributes — under a restricted pod security context, reads every file back, and exits. The
 node cache downloads, verifies and publishes exactly once per node; the pod is the delivery
 operation, and there is no separate job state machine.
-
-A warm-up pod never carries a `kueue.x-k8s.io/queue-name` label.
 
 A warm-up pod never carries a `kueue.x-k8s.io/queue-name` label: a labeled pod is held by Kueue's
 admission and topology gates and never scheduled, and this operator's own pod webhook ignores
