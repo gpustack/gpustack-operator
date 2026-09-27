@@ -441,6 +441,11 @@ func (in ModelArtifactHubSource) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelArtifactImageSource) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelArtifactImageSource"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelArtifactList) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelArtifactList"
 }

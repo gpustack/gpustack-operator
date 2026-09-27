@@ -206,6 +206,8 @@ func (m *ModelArtifact) Reset() { *m = ModelArtifact{} }
 
 func (m *ModelArtifactHubSource) Reset() { *m = ModelArtifactHubSource{} }
 
+func (m *ModelArtifactImageSource) Reset() { *m = ModelArtifactImageSource{} }
+
 func (m *ModelArtifactList) Reset() { *m = ModelArtifactList{} }
 
 func (m *ModelArtifactNodes) Reset() { *m = ModelArtifactNodes{} }
@@ -5178,6 +5180,34 @@ func (m *ModelArtifactHubSource) MarshalToSizedBuffer(dAtA []byte) (int, error) 
 	return len(dAtA) - i, nil
 }
 
+func (m *ModelArtifactImageSource) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ModelArtifactImageSource) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ModelArtifactImageSource) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	i -= len(m.Reference)
+	copy(dAtA[i:], m.Reference)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Reference)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
 func (m *ModelArtifactList) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -5376,6 +5406,18 @@ func (m *ModelArtifactSource) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.Image != nil {
+		{
+			size, err := m.Image.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x22
+	}
 	if m.PersistentVolumeClaim != nil {
 		{
 			size, err := m.PersistentVolumeClaim.MarshalToSizedBuffer(dAtA[:i])
@@ -10462,6 +10504,17 @@ func (m *ModelArtifactHubSource) Size() (n int) {
 	return n
 }
 
+func (m *ModelArtifactImageSource) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Reference)
+	n += 1 + l + sovGenerated(uint64(l))
+	return n
+}
+
 func (m *ModelArtifactList) Size() (n int) {
 	if m == nil {
 		return 0
@@ -10544,6 +10597,10 @@ func (m *ModelArtifactSource) Size() (n int) {
 	}
 	if m.PersistentVolumeClaim != nil {
 		l = m.PersistentVolumeClaim.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
+	if m.Image != nil {
+		l = m.Image.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
 	return n
@@ -13129,6 +13186,16 @@ func (this *ModelArtifactHubSource) String() string {
 	}, "")
 	return s
 }
+func (this *ModelArtifactImageSource) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ModelArtifactImageSource{`,
+		`Reference:` + fmt.Sprintf("%v", this.Reference) + `,`,
+		`}`,
+	}, "")
+	return s
+}
 func (this *ModelArtifactList) String() string {
 	if this == nil {
 		return "nil"
@@ -13192,6 +13259,7 @@ func (this *ModelArtifactSource) String() string {
 		`HuggingFace:` + strings.Replace(this.HuggingFace.String(), "ModelArtifactHubSource", "ModelArtifactHubSource", 1) + `,`,
 		`ModelScope:` + strings.Replace(this.ModelScope.String(), "ModelArtifactHubSource", "ModelArtifactHubSource", 1) + `,`,
 		`PersistentVolumeClaim:` + strings.Replace(this.PersistentVolumeClaim.String(), "ModelArtifactPersistentVolumeClaimSource", "ModelArtifactPersistentVolumeClaimSource", 1) + `,`,
+		`Image:` + strings.Replace(this.Image.String(), "ModelArtifactImageSource", "ModelArtifactImageSource", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -29647,6 +29715,88 @@ func (m *ModelArtifactHubSource) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
+func (m *ModelArtifactImageSource) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ModelArtifactImageSource: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ModelArtifactImageSource: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Reference", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Reference = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 func (m *ModelArtifactList) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -30360,6 +30510,42 @@ func (m *ModelArtifactSource) Unmarshal(dAtA []byte) error {
 				m.PersistentVolumeClaim = &ModelArtifactPersistentVolumeClaimSource{}
 			}
 			if err := m.PersistentVolumeClaim.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Image", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Image == nil {
+				m.Image = &ModelArtifactImageSource{}
+			}
+			if err := m.Image.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

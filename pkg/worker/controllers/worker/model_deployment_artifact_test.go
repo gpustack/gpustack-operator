@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,6 +35,55 @@ func testNodeArtifactRender() *ModelDeploymentArtifactRender {
 		Delivery: workercore.ModelDeploymentModelDeliveryNode, ArtifactName: "qwen", ArtifactUID: "uid-qwen",
 		ManifestDigest: testArtifactDigest, Repository: "Qwen/Qwen2.5-72B-Instruct", Revision: testArtifactRevision,
 		SecretName: "hf-token", SizeBytes: 100 << 30,
+	}
+}
+
+func testImageArtifactRender() *ModelDeploymentArtifactRender {
+	return &ModelDeploymentArtifactRender{
+		Delivery:       workercore.ModelDeploymentModelDeliveryImage,
+		ImageReference: "registry.example.com/team/qwen@sha256:" + strings.Repeat("a", 64),
+	}
+}
+
+// TestRenderModelDeploymentArtifactImageVolume renders an image artifact's delivery: one image
+// volume, the digest-pinned reference, the model path read-only and whole, and none of the engine
+// download's machinery — no cache volume, no download environment, no revision argument.
+func TestRenderModelDeploymentArtifactImageVolume(t *testing.T) {
+	render := testImageArtifactRender()
+	cases := []struct {
+		name     string
+		takeOver bool
+	}{
+		{name: "an image artifact is mounted whole and read-only"},
+		{name: "a take-over role still gets the image"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				if c.takeOver {
+					md.Spec.Roles[0].Command = []string{"sh", "-c", "serve"}
+				}
+			})
+			pod := renderWithArtifact(t, md, render)
+			main := &pod.Spec.Containers[0]
+
+			vol, mount := findVolume(pod, modelDeploymentModelVolumeName), findMount(main, modelDeploymentModelVolumeName)
+			require.NotNil(t, vol)
+			require.NotNil(t, mount)
+			require.NotNil(t, vol.Image, "the weights volume is an image volume")
+			assert.Equal(t, render.ImageReference, vol.Image.Reference)
+			assert.Empty(t, vol.Image.PullPolicy, "a digest-pinned reference keeps the default policy")
+			assert.Equal(t, ModelDeploymentModelMountPath, mount.MountPath)
+			assert.True(t, mount.ReadOnly)
+			assert.Empty(t, mount.SubPath, "the image root is mounted whole")
+			assert.Nil(t, findVolume(pod, modelDeploymentModelCacheVolumeName),
+				"kubelet's image store is the whole delivery, so there is no cache to size")
+			for _, env := range main.Env {
+				assert.NotEqual(t, modelDeploymentHFHomeEnv, env.Name, "no download environment")
+				assert.NotEqual(t, modelDeploymentHFTokenEnv, env.Name)
+			}
+			assert.NotContains(t, main.Command, modelDeploymentRevisionArg)
+		})
 	}
 }
 

@@ -39,6 +39,8 @@ spec:                                    # immutable after creation
     # persistentVolumeClaim:
     #   claimName: models                # this namespace
     #   path: qwen                       # directory inside the volume; empty is the root
+    # image:
+    #   reference: registry.example.com/team/qwen@sha256:669ed7b1...48   # digest-pinned
   allowPatterns: ["*.safetensors", "*.json", "tokenizer*"]   # optional; Hugging Face only
   ignorePatterns: ["original/"]                              # optional; wins over allowPatterns
 status:
@@ -64,10 +66,15 @@ status:
 - **A `modelScope` member exists and is refused.** Opening it needs branch resolution checked
   against git, a listing that recovers from the API's silent truncation at 3000 entries, and a vLLM
   runner whose ModelScope SDK accepts a commit (1.39.1 or later).
+- **An `image` member delivers weights already in a registry.** A digest-pinned reference is the
+  artifact's whole identity; kubelet pulls and mounts it through an image volume, outside the node
+  cache. The digest contract, the build, the floors and the costs are on the
+  [Model Image Source Reference](model-image-source.md).
 - **Patterns select the files.** They follow Python's `fnmatch.fnmatchcase`: case-sensitive, `*`
   and `?` cross `/`, a trailing `/` means everything under it, an empty allow list keeps every file,
   and an ignored file is dropped even when allowed. At most 32 per list, 1 to 256 characters each,
-  refused on a claim source. A filter that keeps no file is `Resolved=False`, `EmptyManifest`. A
+  refused on claim and image sources. A filter that keeps no file is `Resolved=False`,
+  `EmptyManifest`. A
   filtered artifact needs [Node delivery](#referencing-it-from-a-modeldeployment).
 - **`status.nodes` counts the content, not the artifact.** Nodes whose `NodeModelStore` lists the
   digest `Ready`, `Downloading` or `Failed`; artifacts with the same digest see the same nodes, and
@@ -159,12 +166,15 @@ A claim source is always mounted directly. A Hugging Face source takes the deliv
 the node plugin ([switching it](../operation/model-store.md#switch-delivery) rolls each such
 deployment once):
 
-| | Claim source (`Pvc`) | Hugging Face, `Engine` | Hugging Face, `Node` |
-| --- | --- | --- | --- |
-| Weights | the claim, read-only, at `/var/lib/gpustack/model`, `subPath` = `path` | downloaded by the engine into `/var/lib/gpustack/model-cache` | the node's verified copy, read-only, at `/var/lib/gpustack/model` |
-| vLLM | `vllm serve /var/lib/gpustack/model` | `vllm serve <repository> --revision <commit>` | as a claim |
-| SGLang | `--model-path /var/lib/gpustack/model` | `--model-path <repository> --revision <commit>` | as a claim |
-| Both | `--served-model-name <spec.model.name>`, unless the role states it | same | same |
+| | Claim source (`Pvc`) | Hugging Face, `Engine` | Hugging Face, `Node` | Image source (`Image`) |
+| --- | --- | --- | --- | --- |
+| Weights | the claim, read-only, at `/var/lib/gpustack/model`, `subPath` = `path` | downloaded by the engine into `/var/lib/gpustack/model-cache` | the node's verified copy, read-only, at `/var/lib/gpustack/model` | the image, read-only, at `/var/lib/gpustack/model` |
+| vLLM | `vllm serve /var/lib/gpustack/model` | `vllm serve <repository> --revision <commit>` | as a claim | as a claim |
+| SGLang | `--model-path /var/lib/gpustack/model` | `--model-path <repository> --revision <commit>` | as a claim | as a claim |
+| Both | `--served-model-name <spec.model.name>`, unless the role states it | same | same | same |
+
+An image source takes `Image` whatever the Setting says, and kubelet pulls the pinned image on the
+node that needs it — [Model Image Source Reference](model-image-source.md).
 
 `--revision` pins the weights and the tokenizer together on both engines. A take-over role (one
 with `command`) gets the claim or node mount and nothing else, and nothing at all under `Engine`.
@@ -276,7 +286,8 @@ hexadecimal digits of the manifest digest, or of the SHA-256 of the artifact's U
 ## Status
 
 `status.model` echoes the artifact, its `revision` and `manifestDigest`, and the `delivery`, `Pvc`,
-`Engine` or `Node`. `WeightsReady` says whether every engine role's weights are there:
+`Engine`, `Node` or `Image` — an image source echoes neither a revision nor a digest, its reference
+being the identity. `WeightsReady` says whether every engine role's weights are there:
 
 | Status | Reason | Meaning |
 | --- | --- | --- |
@@ -287,7 +298,7 @@ hexadecimal digits of the manifest digest, or of the SHA-256 of the artifact's U
 | False | `FilterNeedsNodeDelivery` | an artifact with patterns under `Engine` delivery, which cannot honor them; no new Pod is created |
 | False | `Materializing` | a node Pod is not mounted yet and its node lists the digest `Downloading` |
 | False | `MaterializationFailed` | the same, and the node lists it `Failed`; the message carries the node's reason and retry time |
-| False | `WeightsNotMounted` | a claim or node Pod's `PodReadyToStartContainers` is not True yet |
+| False | `WeightsNotMounted` | a claim, node or image Pod's `PodReadyToStartContainers` is not True yet; for an image Pod the Pod's events carry the pull error |
 | False | `Downloading` | an engine Pod is not Ready yet; the engine reports no progress of its own |
 | True | `Mounted`, `Downloaded` | every Pod has its weights |
 
@@ -312,11 +323,18 @@ the claim placement rules above apply. A Hugging Face artifact is mounted throug
 whatever `model-artifact-delivery-mode` says, since an Instance has no engine to download it; while
 the CSIDriver does not exist the Instance creates no Pod and says so in its phase message.
 
+An image artifact mounts through an image volume, needing no plugin. An Instance pinned to a node
+waits instead when that node cannot run one, naming the node and the floor
+([Model Image Source Reference](model-image-source.md#delivery)).
+
 ## Requirements and limits
 
 - **Kubernetes 1.29**, the floor the bundled Kueue already sets. `PodReadyToStartContainers` (beta,
   on by default since 1.29) feeds `WeightsReady`; with it off, a claim deployment's `WeightsReady`
   stays `WeightsNotMounted` while its replicas run.
+- **Image sources need image volumes** and floors above Kubernetes's own; creation is refused
+  below them. The full line is on the
+  [Model Image Source Reference](model-image-source.md#versions-and-prerequisites).
 - **`sglang-gateway` fetches a tokenizer by the worker's `model_path`.** With a claim that path is
   local, so it logs one 404 warning and routes by text; with Engine delivery it would fetch `main`
   without a token (not measured).

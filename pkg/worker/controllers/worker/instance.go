@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	utilversion "k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
@@ -29,6 +30,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/kubediscovery"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
@@ -773,6 +775,9 @@ func convertAdditionalVolumes(
 			case w.Render.Delivery == workercore.ModelDeploymentModelDeliveryNode:
 				vs = w.Render.nodeVolumeSource()
 				readOnly, subPath = true, ""
+			case w.Render.Delivery == workercore.ModelDeploymentModelDeliveryImage:
+				vs.Image = &core.ImageVolumeSource{Reference: w.Render.ImageReference}
+				readOnly, subPath = true, ""
 			default:
 				continue
 			}
@@ -830,10 +835,51 @@ func (r *InstanceReconciler) resolveInstanceModelVolumes(
 		if w.Blocked {
 			return nil, w.Message, nil
 		}
+		// An image volume runs on kubelet and containerd, so a pinned Instance checks its node
+		// before rendering: a Pod whose volume the node cannot run would fail late, in a kubelet
+		// event the Instance status never surfaces. An Instance pinned to no node cannot know, and
+		// waits for the Pod's own fate like a ModelDeployment does.
+		if w.Render.Delivery == workercore.ModelDeploymentModelDeliveryImage && inst.Spec.NodeName != "" {
+			nd := new(core.Node)
+			if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: inst.Spec.NodeName}, nd, ctrlclix.WithoutQuorum); err != nil {
+				if kerrors.IsNotFound(err) {
+					return nil, fmt.Sprintf("the node %q this Instance pins does not exist", inst.Spec.NodeName), nil
+				}
+				return nil, "", fmt.Errorf("read node %q: %w", inst.Spec.NodeName, err)
+			}
+			if unsupported := modelImageRuntimeUnsupported(
+				nd.Status.NodeInfo.KubeletVersion, nd.Status.NodeInfo.ContainerRuntimeVersion); unsupported != "" {
+				return nil, fmt.Sprintf("ModelArtifact %q is delivered as an image volume, and node %q cannot run one: "+
+					"%s; pin another node or upgrade it", av.Model.ArtifactRef.Name, inst.Spec.NodeName, unsupported), nil
+			}
+		}
 		models[i] = w
 	}
 
 	return models, "", nil
+}
+
+// instanceModelImageContainerdFloor is the containerd version that mounts image volumes from.
+var instanceModelImageContainerdFloor = utilversion.MustParseGeneric("2.1")
+
+// modelImageRuntimeUnsupported reports the first floor a node misses for an image volume, or ""
+// when it meets them both: kubelet runs the ImageVolume feature, on by default from 1.35, and
+// containerd mounts image volumes from 2.1. An unreadable version reports unsupported — the same
+// fail-closed answer the apiserver's gate gives.
+func modelImageRuntimeUnsupported(kubeletVersion, containerRuntimeVersion string) string {
+	if !kubediscovery.SupportsFeature(&kubediscovery.Version{GitVersion: kubeletVersion}, kubediscovery.FeatureImageVolume) {
+		return fmt.Sprintf("kubelet %q is below the 1.35 the ImageVolume feature turns on at", kubeletVersion)
+	}
+	runtime, runtimeVersion, found := strings.Cut(containerRuntimeVersion, "://")
+	if !found || runtime != "containerd" {
+		return fmt.Sprintf("the container runtime %q is not containerd, which is what mounts image volumes",
+			containerRuntimeVersion)
+	}
+	if v, err := utilversion.ParseGeneric(runtimeVersion); err != nil || v.LessThan(instanceModelImageContainerdFloor) {
+		return fmt.Sprintf("containerd %q is below the 2.1 that mounts image volumes from", runtimeVersion)
+	}
+
+	return ""
 }
 
 // additionalVolumeName is the Pod volume name of the additional volume at the given index.

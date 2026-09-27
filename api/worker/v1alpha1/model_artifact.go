@@ -94,6 +94,33 @@ type ModelArtifactSource struct {
 	//
 	// +optional
 	PersistentVolumeClaim *ModelArtifactPersistentVolumeClaimSource `json:"persistentVolumeClaim,omitempty" protobuf:"bytes,3,opt,name=persistentVolumeClaim"` // nolint: lll
+
+	// Image is an OCI image reference holding the weights. The reference must pin a digest:
+	// "registry/repository@sha256:<64 hex>". A tag is mutable, so one artifact could deliver
+	// different weights on different pulls, and admission refuses it.
+	//
+	// The digest pins the image's bytes; it is not the manifest digest a hub source resolves to.
+	// The operator never reads the registry, so it verifies nothing about what the image holds:
+	// weights live at the image's root, and putting them there is the build's contract. Delivery
+	// mounts the image root read-only through a Kubernetes image volume, which needs an apiserver
+	// and kubelet at 1.35 or above and containerd at 2.1 or above; admission refuses the source
+	// on an older apiserver.
+	//
+	// +optional
+	Image *ModelArtifactImageSource `json:"image,omitempty" protobuf:"bytes,4,opt,name=image"`
+}
+
+// ModelArtifactImageSource is an OCI image reference holding the weights at its root.
+type ModelArtifactImageSource struct {
+	// Reference is the image reference, pinned to a digest:
+	// "registry/repository@sha256:<64 lowercase hex>". The digest is the artifact's whole
+	// identity; status.resolved stays empty for an image source, as for a claim, and the
+	// reference in this immutable spec is the only record of what the artifact delivers.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=1024
+	Reference string `json:"reference" protobuf:"bytes,1,name=reference"`
 }
 
 // ModelArtifactHubSource is one repository on a model hub at one revision.

@@ -12,6 +12,7 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubediscovery"
 )
 
 func newTestHubArtifact(repository, revision string) *workercore.ModelArtifact {
@@ -30,6 +31,96 @@ func newTestClaimArtifact(claim, path string) *workercore.ModelArtifact {
 			PersistentVolumeClaim: &workercore.ModelArtifactPersistentVolumeClaimSource{ClaimName: claim, Path: path},
 		}},
 	}
+}
+
+func newTestImageArtifact(reference string) *workercore.ModelArtifact {
+	return &workercore.ModelArtifact{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen"},
+		Spec: workercore.ModelArtifactSpec{Source: workercore.ModelArtifactSource{
+			Image: &workercore.ModelArtifactImageSource{Reference: reference},
+		}},
+	}
+}
+
+// TestModelArtifactWebhookImageSource covers the image member's shape rules and its capability
+// gate, both directions, through the swappable version seam: the snapshot's Configure ignores
+// later calls, so a test cannot re-point the snapshot itself.
+func TestModelArtifactWebhookImageSource(t *testing.T) {
+	defaultVersion := modelArtifactClusterVersion
+	t.Cleanup(func() { modelArtifactClusterVersion = defaultVersion })
+	supported := func() kubediscovery.Version { return kubediscovery.Version{GitVersion: "v1.35.5"} }
+	unsupported := func() kubediscovery.Version { return kubediscovery.Version{GitVersion: "v1.32.9"} }
+
+	cases := []struct {
+		name      string
+		in        *workercore.ModelArtifact
+		reference string
+		version   func() kubediscovery.Version
+		wantField string
+	}{
+		{name: "a digest-pinned reference", reference: "registry.example.com/team/qwen@sha256:" + strings.Repeat("a", 64), version: supported},
+		{name: "a host and a port", reference: "localhost:5500/qwen@sha256:" + strings.Repeat("a", 64), version: supported},
+		{name: "a bare repository", reference: "qwen@sha256:" + strings.Repeat("a", 64), version: supported},
+		{
+			name: "an image source beside a hub source", version: supported, wantField: "spec.source",
+			reference: "",
+			in: func() *workercore.ModelArtifact {
+				ma := newTestImageArtifact("registry/qwen@sha256:" + strings.Repeat("a", 64))
+				ma.Spec.Source.HuggingFace = &workercore.ModelArtifactHubSource{Repository: "owner/repo", Revision: "main"}
+				return ma
+			}(),
+		},
+		{name: "the image volume gate off", reference: "registry/qwen@sha256:" + strings.Repeat("a", 64), version: unsupported, wantField: "spec.source.image"},
+		{
+			name: "an unreadable cluster version", reference: "registry/qwen@sha256:" + strings.Repeat("a", 64),
+			version:   func() kubediscovery.Version { return kubediscovery.Version{GitVersion: ""} },
+			wantField: "spec.source.image",
+		},
+		{name: "a tag instead of a digest", reference: "registry.example.com/team/qwen:v1", version: supported, wantField: "spec.source.image.reference"},
+		{name: "no digest at all", reference: "registry.example.com/team/qwen", version: supported, wantField: "spec.source.image.reference"},
+		{name: "an uppercase digest", reference: "registry/qwen@sha256:" + strings.Repeat("A", 64), version: supported, wantField: "spec.source.image.reference"},
+		{name: "a short digest", reference: "registry/qwen@sha256:" + strings.Repeat("a", 63), version: supported, wantField: "spec.source.image.reference"},
+		{name: "the wrong algorithm", reference: "registry/qwen@sha512:" + strings.Repeat("a", 128), version: supported, wantField: "spec.source.image.reference"},
+		{name: "an empty reference", reference: "", version: supported, wantField: "spec.source.image.reference"},
+		{name: "only a digest", reference: "@sha256:" + strings.Repeat("a", 64), version: supported, wantField: "spec.source.image.reference"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			modelArtifactClusterVersion = c.version
+			in := c.in
+			if in == nil {
+				in = newTestImageArtifact(c.reference)
+			}
+
+			_, err := new(ModelArtifactWebhook).ValidateCreate(context.Background(), in)
+			if c.wantField == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assertInvalidField(t, err, c.wantField)
+		})
+	}
+
+	t.Run("patterns are refused on an image source", func(t *testing.T) {
+		modelArtifactClusterVersion = supported
+		_, err := new(ModelArtifactWebhook).ValidateCreate(context.Background(),
+			withPatterns(newTestImageArtifact("registry/qwen@sha256:"+strings.Repeat("a", 64)), []string{"*.json"}, nil))
+		require.Error(t, err)
+		assertInvalidField(t, err, "spec.allowPatterns")
+	})
+
+	t.Run("the gate refusal names the cluster's version and what is missing", func(t *testing.T) {
+		modelArtifactClusterVersion = unsupported
+		_, err := new(ModelArtifactWebhook).ValidateCreate(context.Background(),
+			newTestImageArtifact("registry/qwen@sha256:"+strings.Repeat("a", 64)))
+		require.Error(t, err)
+		status, ok := err.(kerrors.APIStatus)
+		require.True(t, ok)
+		message := status.Status().Details.Causes[0].Message
+		assert.Contains(t, message, "does not serve image volumes")
+		assert.Contains(t, message, "v1.32.9")
+	})
 }
 
 func TestModelArtifactWebhookDefault(t *testing.T) {

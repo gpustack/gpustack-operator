@@ -4220,6 +4220,22 @@ func crd_gpustack_api_worker_v1alpha1_ModelArtifact() *v1.CustomResourceDefiniti
 													},
 													Nullable: true,
 												},
+												"image": {
+													Description: "Image is an OCI image reference holding the weights. The reference must pin a digest:\n\"registry/repository@sha256:<64 hex>\". A tag is mutable, so one artifact could deliver\ndifferent weights on different pulls, and admission refuses it.\nThe digest pins the image's bytes; it is not the manifest digest a hub source resolves to.\nThe operator never reads the registry, so it verifies nothing about what the image holds:\nweights live at the image's root, and putting them there is the build's contract. Delivery\nmounts the image root read-only through a Kubernetes image volume, which needs an apiserver\nand kubelet at 1.35 or above and containerd at 2.1 or above; admission refuses the source\non an older apiserver.",
+													Type:        "object",
+													Required: []string{
+														"reference",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"reference": {
+															Description: "Reference is the image reference, pinned to a digest:\n\"registry/repository@sha256:<64 lowercase hex>\". The digest is the artifact's whole\nidentity; status.resolved stays empty for an image source, as for a claim, and the\nreference in this immutable spec is the only record of what the artifact delivers.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															MinLength:   ptr.To[int64](1),
+														},
+													},
+													Nullable: true,
+												},
 												"modelScope": {
 													Description: "ModelScope is RESERVED AND REFUSED by admission in this version. Its shape is fixed so that\nopening it is a webhook change rather than a schema change, and the refusal names what opening\nit needs: branch resolution cross-checked against git, a listing that re-lists per directory at\nthe API's silent truncation point, errors classified by the envelope code, and an engine runner\nwhose ModelScope SDK accepts a commit as the revision.",
 													Type:        "object",

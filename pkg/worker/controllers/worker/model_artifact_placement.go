@@ -111,6 +111,15 @@ func resolveModelArtifactWeights(
 			ClaimName: source.PersistentVolumeClaim.ClaimName,
 			Path:      source.PersistentVolumeClaim.Path,
 		}
+	case source.Image != nil:
+		// The image is delivered whole by kubelet, wherever the Pod lands: no node affinity, no
+		// plugin, no filter, and nothing to size. The reference in the immutable spec is the only
+		// content identity, so the resolved status is claim-shaped and the KV identity falls back
+		// to the artifact's UID.
+		w.Render = &ModelDeploymentArtifactRender{
+			Delivery:       workercore.ModelDeploymentModelDeliveryImage,
+			ImageReference: source.Image.Reference,
+		}
 	case source.HuggingFace != nil && (nodeOnly || modelArtifactDeliveryMode(ctx) == settings.ModelArtifactDeliveryNode):
 		w.Render = &ModelDeploymentArtifactRender{
 			Delivery:       workercore.ModelDeploymentModelDeliveryNode,

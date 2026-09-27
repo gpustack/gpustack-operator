@@ -109,6 +109,11 @@ func (r *ModelPrefetchWebhook) validateModelPrefetch(ctx context.Context, pf *wo
 		return field.ErrorList{field.InternalError(field.NewPath("spec", "artifactRef", "name"),
 			fmt.Errorf("get model artifact %q: %w", pf.Spec.ArtifactRef.Name, err))}
 	}
+	if artifact.Spec.Source.Image != nil {
+		return field.ErrorList{field.Forbidden(field.NewPath("spec", "artifactRef"),
+			"an image artifact delivers on demand through kubelet and never enters the node cache: "+
+				"there is nothing to warm, no budget to count against, and no pinning to grant")}
+	}
 
 	binding := new(workercore.ModelStoreBinding)
 	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{Namespace: pf.Namespace, Name: pf.Spec.BindingRef.Name}, binding); err != nil {
