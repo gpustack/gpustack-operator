@@ -62,5 +62,6 @@ func (c *Config) Apply(ctx context.Context) (*Manager, error) {
 		NodeName:   c.NodeName,
 		KubeletDir: c.KubeletDir,
 		CSISocket:  c.CSISocket,
+		PeerSync:   c.PeerSync,
 	}, nil
 }

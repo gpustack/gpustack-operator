@@ -118,10 +118,11 @@ func TestNodeModelStoreAppliesTheStoreLayer(t *testing.T) {
 				}),
 			},
 			wantSpec: workercore.NodeModelStoreSpec{
-				Watermarks: workercore.NodeModelStoreWatermarks{HighPercent: 85, LowPercent: 75},
-				Download:   workercore.NodeModelStoreDownload{Concurrency: 16},
-				Hub:        workercore.NodeModelStoreHub{HuggingFaceEndpoint: "https://huggingface.co"},
-				Store:      "h100",
+				Watermarks:      workercore.NodeModelStoreWatermarks{HighPercent: 85, LowPercent: 75},
+				Download:        workercore.NodeModelStoreDownload{Concurrency: 16},
+				Hub:             workercore.NodeModelStoreHub{HuggingFaceEndpoint: "https://huggingface.co"},
+				Store:           "h100",
+				PeerSyncEnabled: peerSyncTrue(),
 			},
 		},
 		{
@@ -139,10 +140,11 @@ func TestNodeModelStoreAppliesTheStoreLayer(t *testing.T) {
 				}),
 			},
 			wantSpec: workercore.NodeModelStoreSpec{
-				Watermarks: workercore.NodeModelStoreWatermarks{HighPercent: 84, LowPercent: 74},
-				Download:   workercore.NodeModelStoreDownload{Concurrency: 8},
-				Hub:        workercore.NodeModelStoreHub{HuggingFaceEndpoint: "https://huggingface.co"},
-				Store:      "alpha",
+				Watermarks:      workercore.NodeModelStoreWatermarks{HighPercent: 84, LowPercent: 74},
+				Download:        workercore.NodeModelStoreDownload{Concurrency: 8},
+				Hub:             workercore.NodeModelStoreHub{HuggingFaceEndpoint: "https://huggingface.co"},
+				Store:           "alpha",
+				PeerSyncEnabled: peerSyncTrue(),
 			},
 		},
 		{
@@ -315,4 +317,10 @@ func TestModelStoreOverlapIsVisibleOnBothStores(t *testing.T) {
 		require.NotNil(t, overlap, "%s carries no overlap condition", name)
 		assert.Equal(t, meta.ConditionTrue, overlap.Status, "%s must see the overlap", name)
 	}
+}
+
+// peerSyncTrue is the Setting default's value in a spec: peer pulling starts enabled.
+func peerSyncTrue() *bool {
+	v := true
+	return &v
 }

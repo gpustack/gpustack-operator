@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,7 @@ import (
 	"gpustack.ai/gpustack/pkg/modelartifact"
 	"gpustack.ai/gpustack/pkg/modelmanager/download"
 	"gpustack.ai/gpustack/pkg/modelmanager/driver"
+	"gpustack.ai/gpustack/pkg/modelmanager/peer"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
 )
 
@@ -225,6 +227,12 @@ func TestEnsureMaterializesAndPublishes(t *testing.T) {
 	assert.Equal(t, int64(2), m.FileCount)
 	assert.Equal(t, modelartifact.ManifestHeader, m.ManifestFormat)
 	assert.Equal(t, store.SourceHub, m.Source, "the tree records where its bytes came from")
+	stored, err := os.ReadFile(env.store.PublishedManifestPath(req.Hex))
+	require.NoError(t, err, "the stored manifest is what a peer's listing serves")
+	var l peer.Listing
+	require.NoError(t, json.Unmarshal(stored, &l))
+	assert.Equal(t, "sha256:"+req.Hex, l.Digest)
+	assert.NotEmpty(t, l.Entries)
 
 	assert.True(t, env.m.Ensure(context.Background(), req).Published)
 	for _, r := range env.hub.recorded() {

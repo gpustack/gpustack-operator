@@ -28,6 +28,7 @@ import (
 	authentication "k8s.io/api/authentication/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"gpustack.ai/gpustack/pkg/modelartifact"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
 )
 
@@ -56,33 +57,36 @@ func publishTree(t *testing.T, s *store.Store, files map[string]string) string {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	hexInput := ""
-	for _, name := range names {
-		hexInput += name + "\x00" + files[name] + "\x00"
-	}
 	t.Cleanup(writableAgain(s.Root()))
-	sum := sha256.Sum256([]byte(hexInput))
-	treeHex := hex.EncodeToString(sum[:])
-	a, err := s.NewAttempt(treeHex)
-	require.NoError(t, err)
-	var size int64
-	entries := make([]manifestFile, 0, len(files))
+	entries := make([]modelartifact.ManifestEntry, 0, len(files))
 	for _, name := range names {
 		body := files[name]
-		dest, err := a.FilePath(name)
-		require.NoError(t, err)
-		require.NoError(t, os.MkdirAll(filepath.Dir(dest), 0o755))
-		require.NoError(t, os.WriteFile(dest, []byte(body), 0o644))
 		fileSum := sha256.Sum256([]byte(body))
-		entries = append(entries, manifestFile{
+		entries = append(entries, modelartifact.ManifestEntry{
 			Path: name, Size: int64(len(body)), Digest: "sha256:" + hex.EncodeToString(fileSum[:]),
 		})
-		size += int64(len(body))
 	}
-	require.NoError(t, a.Publish(store.Marker{Digest: "sha256:" + treeHex, SizeBytes: size, FileCount: int64(len(files))}))
-	manifest, err := json.Marshal(listing{Digest: "sha256:" + treeHex, Entries: entries})
+	manifest, err := modelartifact.NewManifest(entries)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(s.PublishedManifestPath(treeHex), manifest, 0o644))
+	treeHex := strings.TrimPrefix(manifest.Digest, "sha256:")
+	a, err := s.NewAttempt(treeHex)
+	require.NoError(t, err)
+	for _, e := range manifest.Entries {
+		dest, err := a.FilePath(e.Path)
+		require.NoError(t, err)
+		require.NoError(t, os.MkdirAll(filepath.Dir(dest), 0o755))
+		require.NoError(t, os.WriteFile(dest, []byte(files[e.Path]), 0o644))
+	}
+	require.NoError(t, a.Publish(store.Marker{
+		Digest: manifest.Digest, SizeBytes: manifest.SizeBytes, FileCount: manifest.FileCount,
+	}))
+	full := listing{Digest: manifest.Digest}
+	for _, e := range manifest.Entries {
+		full.Entries = append(full.Entries, ManifestFile{Path: e.Path, Size: e.Size, Digest: e.Digest})
+	}
+	stored, err := json.Marshal(full)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(s.PublishedManifestPath(treeHex), stored, 0o644))
 
 	return treeHex
 }

@@ -196,6 +196,15 @@ func (r *Reporter) Environment(context.Context) (materialize.Hub, *download.Down
 	return &modelartifact.HuggingFace{Endpoint: r.spec.Hub.HuggingFaceEndpoint, Client: listingClient(r.client)}, r.Downloader, nil
 }
 
+// PeerSyncEnabled says whether the node's configuration allows pulling content from the other
+// nodes' plugins; a node whose configuration has not arrived pulls from the hub only.
+func (r *Reporter) PeerSyncEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.spec != nil && (r.spec.PeerSyncEnabled == nil || *r.spec.PeerSyncEnabled)
+}
+
 func httpClient(hub workercore.NodeModelStoreHub, caBundle []byte) (*http.Client, error) {
 	client, err := modelartifact.NewHTTPClient(modelartifact.HTTPClientOptions{
 		HTTPSProxy: hub.HTTPSProxy, NoProxy: hub.NoProxy, CABundle: caBundle,

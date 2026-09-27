@@ -52,9 +52,10 @@ func testSettingsSecret(values map[string]string) *core.Secret {
 // defaultNodeModelStoreSpec is the spec the Settings' shipped defaults produce.
 func defaultNodeModelStoreSpec() workercore.NodeModelStoreSpec {
 	return workercore.NodeModelStoreSpec{
-		Watermarks: workercore.NodeModelStoreWatermarks{HighPercent: 80, LowPercent: 70},
-		Download:   workercore.NodeModelStoreDownload{Concurrency: 8},
-		Hub:        workercore.NodeModelStoreHub{HuggingFaceEndpoint: "https://huggingface.co"},
+		Watermarks:      workercore.NodeModelStoreWatermarks{HighPercent: 80, LowPercent: 70},
+		Download:        workercore.NodeModelStoreDownload{Concurrency: 8},
+		PeerSyncEnabled: peerSyncTrue(),
+		Hub:             workercore.NodeModelStoreHub{HuggingFaceEndpoint: "https://huggingface.co"},
 	}
 }
 
@@ -109,8 +110,9 @@ func TestNodeModelStoreReconcile(t *testing.T) {
 			},
 			wantExists: true,
 			wantSpec: workercore.NodeModelStoreSpec{
-				Watermarks: workercore.NodeModelStoreWatermarks{HighPercent: 85, LowPercent: 70},
-				Download:   workercore.NodeModelStoreDownload{Concurrency: 8, BytesPerSecond: 100 << 20},
+				Watermarks:      workercore.NodeModelStoreWatermarks{HighPercent: 85, LowPercent: 70},
+				Download:        workercore.NodeModelStoreDownload{Concurrency: 8, BytesPerSecond: 100 << 20},
+				PeerSyncEnabled: peerSyncTrue(),
 				Hub: workercore.NodeModelStoreHub{
 					HuggingFaceEndpoint: "http://hub.local", HTTPSProxy: "http://proxy:3128",
 				},

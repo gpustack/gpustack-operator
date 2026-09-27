@@ -4786,11 +4786,12 @@ message NodeModelStoreModel {
   // +k8s:validation:minimum=0
   optional int64 downloadedBytes = 9;
 
-  // Source is where the content's bytes come from: Hub, the model hub. It names no repository or
-  // endpoint. Content published before the field existed has none.
+  // Source is where the content's bytes come from: Hub, the model hub, or Peer, the plugins of
+  // other nodes. It names no repository or endpoint. Content published before the field existed
+  // has none.
   //
   // +optional
-  // +k8s:validation:enum=["Hub"]
+  // +k8s:validation:enum=["Hub","Peer"]
   optional string source = 10;
 
   // Referenced says some Pod mounts the content. Which Pod is never recorded.
@@ -4831,6 +4832,12 @@ message NodeModelStoreModel {
 // connects could make it request any address. The plugin checks it again before using it, since a
 // hand edit bypasses the worker's checks.
 message NodeModelStoreSpec {
+  // PeerSync, when nil, defaults to enabled: the node's plugin may pull content the other
+  // nodes' plugins hold published.
+  //
+  // +optional
+  optional bool peerSyncEnabled = 7;
+
   // Watermarks bound the cache filesystem's usage.
   //
   // +required

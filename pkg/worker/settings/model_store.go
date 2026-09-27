@@ -67,6 +67,16 @@ var (
 		admitWatermarkAgainst(modelStoreHighWatermarkName, false),
 	)
 
+	// ModelStorePeerSync is whether a node's plugin may pull content the other nodes' plugins
+	// hold published, instead of the hub.
+	ModelStorePeerSync = settings.NewEditable(
+		"model-store-peer-sync",
+		"Indicates whether a node's plugin may pull a model's content from the plugins of other "+
+			"nodes that hold it published, instead of the hub.",
+		setting.InitializeFromEnv("true"),
+		setting.AllowBool(),
+	)
+
 	// ModelStoreDownloadConcurrency is how many HTTP requests a node runs at once across its
 	// downloads. A large file is fetched as ranges that share this budget.
 	ModelStoreDownloadConcurrency = settings.NewEditable(
@@ -192,10 +202,24 @@ func ModelStoreLayer(value func(setting.Setting) string) (modelstore.Layer, erro
 		return &v
 	}
 
+	peerSync := func(s setting.Setting) *bool {
+		raw := value(s)
+		if raw == "" {
+			return nil
+		}
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("setting %s: %w", s.Name(), err))
+			return nil
+		}
+		return &v
+	}
+
 	l := modelstore.Layer{
 		HighWatermarkPercent: parse32(ModelStoreHighWatermark),
 		LowWatermarkPercent:  parse32(ModelStoreLowWatermark),
 		DownloadConcurrency:  parse32(ModelStoreDownloadConcurrency),
+		PeerSyncEnabled:      peerSync(ModelStorePeerSync),
 		HuggingFaceEndpoint:  str(ModelArtifactHuggingFaceEndpoint),
 		HTTPSProxy:           str(ModelArtifactHTTPSProxy),
 		NoProxy:              str(ModelArtifactNoProxy),

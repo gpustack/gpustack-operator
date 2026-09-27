@@ -47,6 +47,7 @@ type Layer struct {
 	LowWatermarkPercent    *int32
 	DownloadConcurrency    *int32
 	DownloadBytesPerSecond *int64
+	PeerSyncEnabled        *bool
 	HuggingFaceEndpoint    *string
 	HTTPSProxy             *string
 	NoProxy                *string
@@ -61,6 +62,9 @@ func Merge(layers ...Layer) workercore.NodeModelStoreSpec {
 		overlay(&spec.Watermarks.LowPercent, l.LowWatermarkPercent)
 		overlay(&spec.Download.Concurrency, l.DownloadConcurrency)
 		overlay(&spec.Download.BytesPerSecond, l.DownloadBytesPerSecond)
+		if l.PeerSyncEnabled != nil {
+			spec.PeerSyncEnabled = l.PeerSyncEnabled
+		}
 		overlay(&spec.Hub.HuggingFaceEndpoint, l.HuggingFaceEndpoint)
 		overlay(&spec.Hub.HTTPSProxy, l.HTTPSProxy)
 		overlay(&spec.Hub.NoProxy, l.NoProxy)

@@ -98,6 +98,13 @@ func (m *Manager) Start(ctx context.Context) error {
 	collector.Watermarks = reporter.Watermarks
 	collector.Pinned = reporter.Pinned
 	materializer.Environment = reporter.Environment
+	if m.PeerSync != nil {
+		puller, err := m.newPeerPuller(reporter)
+		if err != nil {
+			return err
+		}
+		materializer.Peers = puller
+	}
 	materializer.Reserve = collector.Reserve
 	materializer.Changed = reporter.Trigger
 
@@ -241,6 +248,37 @@ func (m *Manager) kubeletCap() (func(*workercore.NodeModelStoreKubelet, uint64) 
 	return func(k *workercore.NodeModelStoreKubelet, total uint64) *gc.Cap {
 		c := gc.KubeletCap(k, total)
 		return &c
+	}, nil
+}
+
+// newPeerPuller builds what the materializer pulls with: discovery over the API reader, whose
+// NodeModelStores say which nodes hold a digest, and a fetcher whose per-source bytes are
+// counted apart from the hub's. The Setting's switch is read per attempt, off the reporter's
+// current spec.
+func (m *Manager) newPeerPuller(reporter *report.Reporter) (*peer.Puller, error) {
+	client, err := peer.NewClient(m.PeerSync.Auth)
+	if err != nil {
+		return nil, err
+	}
+
+	return &peer.Puller{
+		Discover: func(ctx context.Context, digest string) ([]*peer.Source, error) {
+			if !reporter.PeerSyncEnabled() {
+				return nil, nil
+			}
+
+			return peer.Discover(ctx, m.Manager.CtrlManager.GetAPIReader(), peer.DiscoverOptions{
+				Namespace:        systemname.NamespaceName,
+				SelfNode:         m.NodeName,
+				Port:             m.PeerSync.Port,
+				StreamsPerSource: m.PeerSync.StreamsPerSource,
+				Client:           client,
+			}, digest)
+		},
+		StreamsPerSource: m.PeerSync.StreamsPerSource,
+		Received: func(node string, n int64) {
+			metrics.DownloadBytes.WithLabelValues("peer").Add(float64(n))
+		},
 	}, nil
 }
 

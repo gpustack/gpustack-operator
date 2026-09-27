@@ -53,16 +53,22 @@ type Server struct {
 // listing is the answer at TreePath: a published tree's files, as the publish recorded them.
 // The per-file digests are what lets a pulling side reassemble and re-bind the manifest to the
 // artifact's resolved root digest before it trusts a byte.
-type listing struct {
-	Digest  string         `json:"digest"`
-	Entries []manifestFile `json:"entries"`
-}
-
-type manifestFile struct {
+// ManifestFile is one file of a stored manifest, as a listing names it.
+type ManifestFile struct {
 	Path   string `json:"path"`
 	Size   int64  `json:"size"`
 	Digest string `json:"digest"`
 }
+
+// Listing is a stored manifest: the tree's digest and its files. The materializer stores it at
+// publish, and the peer server answers a listing with it.
+type Listing struct {
+	Digest  string         `json:"digest"`
+	Entries []ManifestFile `json:"entries"`
+}
+
+// listing is the served form of a stored manifest.
+type listing = Listing
 
 // Handler returns the peer endpoints. The authentication travels in the handler rather than the
 // TLS layer alone, so a refused credential is an answer rather than a failed handshake.
@@ -101,7 +107,7 @@ func (s *Server) serveTree(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
-	var l listing
+	var l Listing
 	if err := json.Unmarshal(b, &l); err != nil || l.Digest != m.Digest {
 		klog.ErrorS(err, "a stored manifest does not parse or disagrees with its marker", "digest", m.Digest)
 		httpxRefused(w, http.StatusInternalServerError, "the stored manifest is unreadable")

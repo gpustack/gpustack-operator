@@ -8092,6 +8092,16 @@ func (m *NodeModelStoreSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.PeerSyncEnabled != nil {
+		i--
+		if *m.PeerSyncEnabled {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x38
+	}
 	if len(m.Pinned) > 0 {
 		for iNdEx := len(m.Pinned) - 1; iNdEx >= 0; iNdEx-- {
 			i -= len(m.Pinned[iNdEx])
@@ -11543,6 +11553,9 @@ func (m *NodeModelStoreSpec) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
+	if m.PeerSyncEnabled != nil {
+		n += 2
+	}
 	return n
 }
 
@@ -13952,6 +13965,7 @@ func (this *NodeModelStoreSpec) String() string {
 		`Kubelet:` + strings.Replace(this.Kubelet.String(), "NodeModelStoreKubelet", "NodeModelStoreKubelet", 1) + `,`,
 		`Store:` + fmt.Sprintf("%v", this.Store) + `,`,
 		`Pinned:` + fmt.Sprintf("%v", this.Pinned) + `,`,
+		`PeerSyncEnabled:` + valueToStringGenerated(this.PeerSyncEnabled) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -38910,6 +38924,27 @@ func (m *NodeModelStoreSpec) Unmarshal(dAtA []byte) error {
 			}
 			m.Pinned = append(m.Pinned, string(dAtA[iNdEx:postIndex]))
 			iNdEx = postIndex
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PeerSyncEnabled", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			b := bool(v != 0)
+			m.PeerSyncEnabled = &b
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

@@ -49,6 +49,19 @@ type Source struct {
 	streams chan struct{}
 }
 
+// take admits one request to the source and returns the release to call when it is done.
+func (s *Source) take(ctx context.Context) (func(), error) {
+	if s.streams == nil {
+		return func() {}, nil
+	}
+	select {
+	case s.streams <- struct{}{}:
+		return func() { <-s.streams }, nil
+	case <-ctx.Done():
+		return nil, context.Cause(ctx)
+	}
+}
+
 // DiscoverOptions is what discovery reads.
 type DiscoverOptions struct {
 	// Namespace is where the plugin's Pods run.
