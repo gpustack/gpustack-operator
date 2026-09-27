@@ -29,9 +29,9 @@ every field is in the [Node Model Store Reference](node-model-store.md).
 
 A `ModelStore` selects its pool with `spec.nodeSelector` and states overrides field by field: a
 field left out keeps the cluster default, and an explicit `bytesPerSecond: 0` is "unlimited on this
-pool", not an omission. Two stores whose selectors match one node are a reported misconfiguration —
-both get `SelectorOverlap`, and the alphabetically first name wins the shared nodes
-(`model_store.go`).
+pool", not an omission. Two stores whose selectors match one node are a reported misconfiguration,
+not a silent merge — [the pool layer](../operation/model-store.md#the-pool-layer) defines the
+overlap condition and the tie-break.
 
 A `ModelStoreBinding` is the provisioning point: creating one in a namespace is what grants that
 namespace a `quota.bytes` budget and, with `allowPinned`, the right to pin. The grant is explicit —
@@ -72,11 +72,9 @@ operation, and there is no separate job state machine.
 
 A warm-up pod never carries a `kueue.x-k8s.io/queue-name` label.
 
-> **Why** — measured on kind 1.29 with Kueue 0.18: an unlabeled pod is invisible to Kueue (no
-> workload, no gates, no quota) and to this operator's own pod webhook, whose object selector
-> requires that label. The same pod labeled is held by Kueue's `admission` and `topology` gates and
-> its workload fails flavor assignment outright — a plain cpu/mem pod set gets no TAS flavor. The
-> label-free shape is what keeps warming outside every scheduler's way.
+A warm-up pod never carries a `kueue.x-k8s.io/queue-name` label: a labeled pod is held by Kueue's
+admission and topology gates and never scheduled, and this operator's own pod webhook ignores
+unlabeled pods. The label-free shape is what keeps warming outside every scheduler's way.
 
 The image is a [Setting](../settings.md): the pod needs only a shell,
 `find` and `sha256sum`, and the one thing the default cannot guarantee is that a given cluster's
@@ -108,8 +106,9 @@ is never a collection candidate, though it still counts toward usage, so a cache
 content reports its saturation exactly as a cache full of references does (`gc.Collector.Pinned`).
 
 Pinning requires the grant. The nodes' pin lists are written as one union by the prefetch
-controller — the field's single writer — so two namespaces pinning one node keep both digests, and
-a deleted, lapsed or retargeted prefetch releases its pin without dropping another's.
+controller — the field's single writer — so two namespaces pinning one node keep both digests; how
+a pinned digest behaves under collection is the [node model store
+reference](node-model-store.md#references-restart-and-collection)'s fact.
 
 `spec.retention.ttlAfterLastUse` unpins a node's copy once nothing mounted it for that long. It is
 enforced at the hour granularity the node already reports in `lastUsedTime`.
