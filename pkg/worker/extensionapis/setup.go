@@ -24,6 +24,7 @@ var setups = []extensionapi.Setup{
 	new(worker.InstanceHandler),
 	new(worker.ModelDeploymentHandler),
 	new(worker.ModelArtifactHandler),
+	new(worker.ModelPrefetchHandler),
 	new(worker.NodeModelStoreHandler),
 	new(worker.InstanceImagePullSecretHandler),
 	new(worker.InstancePersistentVolumeHandler),
