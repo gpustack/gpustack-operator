@@ -332,9 +332,8 @@ waits instead when that node cannot run one, naming the node and the floor
 - **Kubernetes 1.29**, the floor the bundled Kueue already sets. `PodReadyToStartContainers` (beta,
   on by default since 1.29) feeds `WeightsReady`; with it off, a claim deployment's `WeightsReady`
   stays `WeightsNotMounted` while its replicas run.
-- **Image sources need image volumes**: an apiserver and kubelet at 1.35 (1.33/1.34 would need the
-  feature gate opened by an administrator, which this version does not opt into) and containerd at
-  2.1. Creation is refused below the apiserver floor. The full line is on the
+- **Image sources need image volumes** and floors above Kubernetes's own; creation is refused
+  below them. The full line is on the
   [Model Image Source Reference](model-image-source.md#versions-and-prerequisites).
 - **`sglang-gateway` fetches a tokenizer by the worker's `model_path`.** With a claim that path is
   local, so it logs one 404 warning and routes by text; with Engine delivery it would fetch `main`
