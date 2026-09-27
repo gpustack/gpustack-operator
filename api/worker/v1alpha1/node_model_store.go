@@ -74,6 +74,24 @@ type NodeModelStoreSpec struct {
 	//
 	// +optional
 	Kubelet *NodeModelStoreKubelet `json:"kubelet,omitempty" protobuf:"bytes,4,opt,name=kubelet"`
+
+	// Store names the ModelStore whose per-pool policy this node's effective configuration carries:
+	// the alphabetically first store whose selector matches the node when two match, and empty when
+	// none does, so the cluster defaults apply. The worker writes it; nothing else does.
+	//
+	// +optional
+	Store string `json:"store,omitempty" protobuf:"bytes,5,opt,name=store"`
+
+	// Pinned lists the manifest digests the node must retain: the union of the prefetches whose
+	// retention pins them and whose target set holds this node. A pinned digest is never a
+	// collection candidate, though it still counts toward usage. The prefetch controller writes
+	// the field and the configuration reconciler carries it over untouched, so the two never
+	// overwrite each other's work on the same object.
+	//
+	// +optional
+	// +listType=set
+	// +k8s:validation:maxItems=256
+	Pinned []string `json:"pinned,omitempty" protobuf:"bytes,6,rep,name=pinned"`
 }
 
 // NodeModelStoreKubelet is the part of a node's effective kubelet configuration that bounds a cache

@@ -57,6 +57,10 @@ func (c *FakeWorkerV1) ModelDeployments(namespace string) v1.ModelDeploymentInte
 	return newFakeModelDeployments(c, namespace)
 }
 
+func (c *FakeWorkerV1) ModelPrefetches(namespace string) v1.ModelPrefetchInterface {
+	return newFakeModelPrefetches(c, namespace)
+}
+
 func (c *FakeWorkerV1) NodeModelStores() v1.NodeModelStoreInterface {
 	return newFakeNodeModelStores(c)
 }

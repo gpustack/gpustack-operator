@@ -159,6 +159,25 @@ func (r *Reporter) Watermarks() (int32, int32, string) {
 	return r.high, r.low, ""
 }
 
+// Pinned is the set of digests the node's configuration says to retain: never collection
+// candidates, though they still count toward the filesystem's usage. Nil until a configuration
+// applies.
+func (r *Reporter) Pinned() map[string]bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.spec == nil || len(r.spec.Pinned) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(r.spec.Pinned))
+	for _, digest := range r.spec.Pinned {
+		if hex := store.HexOf(digest); hex != "" {
+			out[hex] = true
+		}
+	}
+
+	return out
+}
+
 // Environment returns the hub and the downloader built from the node's current configuration, or an
 // InvalidRequest error while that configuration is missing or fails its check.
 func (r *Reporter) Environment(context.Context) (materialize.Hub, *download.Downloader, error) {

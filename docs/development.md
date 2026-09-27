@@ -41,6 +41,13 @@ clone. The verdict on committed `.agents` shell comes from `agents-shell.yml` an
 > after linting. `api.yml` and `chart.yml` both fail when the committed artifacts do not match a
 > fresh regeneration, which is what catches it when nobody remembers.
 
+> **The image build lints with its own golangci-lint**, and it can be stricter than the one on your
+> host: the packaged build runs `make lint` inside the image, where the pinned `.golangci.yaml`
+> applies against the image's golangci-lint release, and a rule your host binary does not enable —
+> `predeclared`, which refuses parameter names like `new` — fails there while the tree passed
+> locally minutes earlier. When the packaged build fails a rule your host never reported, fix the
+> name rather than the config: the image's verdict is the one CI ships.
+
 ### Helm chart
 
 `generate`, `lint` and `test` take a `chart` argument, operating on `deploy/gpustack-operator/chart` via

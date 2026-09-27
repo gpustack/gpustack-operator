@@ -805,6 +805,33 @@ message ModelDeploymentMetrics {
   repeated ModelDeploymentMetricWindow transfer = 10;
 }
 
+// ModelPrefetch is the v1 view of a namespace's model residency: what is being warmed where, and
+// how far it has got.
+//
+// It proxies the v1alpha1 resource for every verb. It is status-only by design: per-node facts
+// already live in the node's report, so the view serves the aggregates and adds no subresource of
+// its own.
+//
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
+message ModelPrefetch {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelPrefetchSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelPrefetchStatus status = 3;
+}
+
+// ModelPrefetchList holds the list of ModelPrefetches.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelPrefetchList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelPrefetch items = 2;
+}
+
 // NFSInstancePersistentVolumeSource defines the source of NFS.
 message NFSInstancePersistentVolumeSource {
   // Server is the hostname or IP address of the NFS server.

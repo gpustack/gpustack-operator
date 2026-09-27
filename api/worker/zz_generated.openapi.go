@@ -63,6 +63,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.ModelDeploymentMetricMissing{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1_ModelDeploymentMetricMissing(ref),
 		v1.ModelDeploymentMetricWindow{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_ModelDeploymentMetricWindow(ref),
 		v1.ModelDeploymentMetrics{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_ModelDeploymentMetrics(ref),
+		v1.ModelPrefetch{}.OpenAPIModelName():                                        schema_gpustack_api_worker_v1_ModelPrefetch(ref),
+		v1.ModelPrefetchList{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1_ModelPrefetchList(ref),
 		v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref),
 		v1.NodeModelStore{}.OpenAPIModelName():                                       schema_gpustack_api_worker_v1_NodeModelStore(ref),
 		v1.NodeModelStoreList{}.OpenAPIModelName():                                   schema_gpustack_api_worker_v1_NodeModelStoreList(ref),
@@ -184,6 +186,26 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterStatus(ref),
 		v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref),
 		v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref),
+		v1alpha1.ModelPrefetch{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1alpha1_ModelPrefetch(ref),
+		v1alpha1.ModelPrefetchArtifactReference{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_ModelPrefetchArtifactReference(ref),
+		v1alpha1.ModelPrefetchBindingReference{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelPrefetchBindingReference(ref),
+		v1alpha1.ModelPrefetchList{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelPrefetchList(ref),
+		v1alpha1.ModelPrefetchPlacement{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_ModelPrefetchPlacement(ref),
+		v1alpha1.ModelPrefetchRetention{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_ModelPrefetchRetention(ref),
+		v1alpha1.ModelPrefetchSpec{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelPrefetchSpec(ref),
+		v1alpha1.ModelPrefetchStatus{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelPrefetchStatus(ref),
+		v1alpha1.ModelStore{}.OpenAPIModelName():                                     schema_gpustack_api_worker_v1alpha1_ModelStore(ref),
+		v1alpha1.ModelStoreBinding{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelStoreBinding(ref),
+		v1alpha1.ModelStoreBindingList{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelStoreBindingList(ref),
+		v1alpha1.ModelStoreBindingQuota{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_ModelStoreBindingQuota(ref),
+		v1alpha1.ModelStoreBindingSpec{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelStoreBindingSpec(ref),
+		v1alpha1.ModelStoreBindingStatus{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_ModelStoreBindingStatus(ref),
+		v1alpha1.ModelStoreBindingStoreReference{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelStoreBindingStoreReference(ref),
+		v1alpha1.ModelStoreCapacity{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_ModelStoreCapacity(ref),
+		v1alpha1.ModelStoreDownload{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_ModelStoreDownload(ref),
+		v1alpha1.ModelStoreList{}.OpenAPIModelName():                                 schema_gpustack_api_worker_v1alpha1_ModelStoreList(ref),
+		v1alpha1.ModelStoreSpec{}.OpenAPIModelName():                                 schema_gpustack_api_worker_v1alpha1_ModelStoreSpec(ref),
+		v1alpha1.ModelStoreStatus{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1alpha1_ModelStoreStatus(ref),
 		v1alpha1.NodeModelStore{}.OpenAPIModelName():                                 schema_gpustack_api_worker_v1alpha1_NodeModelStore(ref),
 		v1alpha1.NodeModelStoreCapacity{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_NodeModelStoreCapacity(ref),
 		v1alpha1.NodeModelStoreDownload{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_NodeModelStoreDownload(ref),
@@ -2751,6 +2773,103 @@ func schema_gpustack_api_worker_v1_ModelDeploymentMetrics(ref common.ReferenceCa
 		},
 		Dependencies: []string{
 			v1.ModelDeploymentCacheHit{}.OpenAPIModelName(), v1.ModelDeploymentMetricGauge{}.OpenAPIModelName(), v1.ModelDeploymentMetricMissing{}.OpenAPIModelName(), v1.ModelDeploymentMetricWindow{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelPrefetch(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetch is the v1 view of a namespace's model residency: what is being warmed where, and how far it has got.\n\nIt proxies the v1alpha1 resource for every verb. It is status-only by design: per-node facts already live in the node's report, so the view serves the aggregates and adds no subresource of its own.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelPrefetchSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelPrefetchStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelPrefetchSpec{}.OpenAPIModelName(), v1alpha1.ModelPrefetchStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelPrefetchList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchList holds the list of ModelPrefetches.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelPrefetch{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.ModelPrefetch{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -9731,6 +9850,820 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetch(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetch is the schema for worker.gpustack.ai.\n\nIt is a tenant's RESIDENCY INTENT for one model artifact: keep the artifact's weights on a set of nodes ahead of any Pod that mounts them. The worker delivers it the same way it delivers a cold mount — one warm-up Pod per target node, the artifact's own CSI volume, no accelerator request — so the bytes land through the node cache's ordinary path, once per node, verified, and Pod exits once the tree is readable. The Pod IS the delivery operation; there is no separate job state.\n\nPlacement narrows the target set: the InstanceTypes of a node pool, or a nodeSelector for named nodes, or — when both are left out — the InstanceTypes of the namespace's own deployments that reference the artifact. Retention decides what happens after: whether the content is pinned against collection (an admin-granted capability) and how long a node keeps it after its last use.\n\nDeleting the object revokes the intent: the warm-up Pods go, the nodes' pins drop, and the bytes are reclaimed by the node cache's own collection once they are unreferenced and past its grace. Nothing is torn out from under a Pod still reading the tree.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelPrefetchSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelPrefetchStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelPrefetchSpec{}.OpenAPIModelName(), v1alpha1.ModelPrefetchStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetchArtifactReference(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchArtifactReference names an artifact in the prefetch's own namespace.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetchBindingReference(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchBindingReference names a binding in the prefetch's own namespace.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetchList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchList holds the list of ModelPrefetch.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelPrefetch{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelPrefetch{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetchPlacement(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchPlacement narrows the target set of nodes the artifact warms.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"instanceTypes": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "InstanceTypes names the node pools to warm, by the InstanceType objects the scheduling chain already publishes. The target set is every node carrying one of these types' flavors.",
+							MinItems:    ptr.To[int64](1),
+							MaxItems:    ptr.To[int64](8),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"nodeSelector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodeSelector selects the target nodes directly, the \"download to these nodes\" form.",
+							Ref:         ref(metav1.LabelSelector{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			metav1.LabelSelector{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetchRetention(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchRetention decides what happens to the content after it has landed.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"pinned": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Pinned keeps the content on every target node against the node cache's collection: a pinned digest is never an eviction candidate, though it still counts toward usage. It requires the Binding to allow pinning, and admission refuses it otherwise.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"ttlAfterLastUse": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TTLAfterLastUse unpins a node's copy once nothing mounted it for this long. It is enforced at the hour granularity the node's report already carries: retention does not need finer precision, and finer recording would multiply the node's writes for a decision that cannot tell the difference.",
+							Ref:         ref(metav1.Duration{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			metav1.Duration{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetchSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchSpec is the residency intent.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"artifactRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ArtifactRef names the ModelArtifact in this namespace whose weights warm the target set. It must be resolved before any Pod is rendered: admission and delivery both read its digest.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelPrefetchArtifactReference{}.OpenAPIModelName()),
+						},
+					},
+					"bindingRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "BindingRef names the ModelStoreBinding in this namespace that pays for the bytes. It must grant a store covering the target set, and its budget bounds the prefetch at admission.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelPrefetchBindingReference{}.OpenAPIModelName()),
+						},
+					},
+					"placement": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Placement narrows the target set. InstanceTypes and NodeSelector are mutually exclusive; both set is refused, and both left out derives the target set from the namespace's own deployments that reference the artifact. The relational rules are webhook-enforced.",
+							Ref:         ref(v1alpha1.ModelPrefetchPlacement{}.OpenAPIModelName()),
+						},
+					},
+					"minReady": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MinReady is how many target nodes holding the content make the prefetch Available; 0 means all of them.",
+							Minimum:     ptr.To[float64](0),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"retention": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Retention decides what happens to the content after it has landed.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelPrefetchRetention{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"artifactRef", "bindingRef"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelPrefetchArtifactReference{}.OpenAPIModelName(), v1alpha1.ModelPrefetchBindingReference{}.OpenAPIModelName(), v1alpha1.ModelPrefetchPlacement{}.OpenAPIModelName(), v1alpha1.ModelPrefetchRetention{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelPrefetchStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelPrefetchStatus is the prefetch's own view of its delivery, aggregated from the target nodes' reports: which node holds the digest, which is fetching it, and whether enough do.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"desiredNodes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DesiredNodes is the size of the target set the current placement resolves to.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"readyNodes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReadyNodes is how many target nodes report the digest published and mountable.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"downloadingNodes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DownloadingNodes is how many target nodes are still fetching it.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Conditions: Progressing says delivery is under way; Available says ReadyNodes reached the MinReady bar; Degraded says a target node gave up, and the message says why.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelStore(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStore is the schema for worker.gpustack.ai.\n\nIt is ONE NODE POOL'S CACHE POLICY, the admin's per-pool layer above the cluster defaults: the watermarks and download limits of every node its selector matches, overriding only the fields it sets. Nodes no store matches keep the Settings' cluster defaults, so this object never has to restate them.\n\nThe cache's root path is deliberately absent: it is the plugin DaemonSet's hostPath, decided at deployment, and a per-pool path would need a per-pool DaemonSet rather than a field here.\n\nTWO STORES MUST NOT MATCH ONE NODE. The worker refuses to guess: it picks the alphabetically first name deterministically, records that choice in the node's NodeModelStore.spec.store, and sets SelectorOverlap on both stores so the misconfiguration is visible where it was made.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelStoreSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelStoreStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelStoreSpec{}.OpenAPIModelName(), v1alpha1.ModelStoreStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelStoreBinding(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreBinding is the schema for worker.gpustack.ai.\n\nIt is the PROVISIONING POINT for model prefetch: creating one in a namespace is what grants that namespace a byte budget on the named stores and the right to pin, so both are grants an admin can RBAC and audit rather than powers a tenant assumes. A namespace without a Binding cannot warm anything, and a Binding is the single place its consumption is reported back to it.\n\nTHE GRANT IS EXPLICIT. There is no default pool a Binding falls back to: the chart's default pool is deployment configuration, not an authorization basis, and a fallback would create a second source of truth for who may warm where.\n\nIt is NOT an enforcement boundary and must not be described as one. The budget gates prefetch admission and accounting; bytes a workload mounts through the ordinary delivery path are charged to the node's watermarks exactly as before, never to this object.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelStoreBindingSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelStoreBindingStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelStoreBindingSpec{}.OpenAPIModelName(), v1alpha1.ModelStoreBindingStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelStoreBindingList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreBindingList holds the list of ModelStoreBinding.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelStoreBinding{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelStoreBinding{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelStoreBindingQuota(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreBindingQuota is the namespace's byte budget, measured in filesystem usage.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"bytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Bytes is what the namespace's prefetches may occupy in total. The measure is the content's own size, per digest and per node holding it, so a tree two namespaces share counts fully against each of them — conservative, and impossible to game by warming what another tenant already warmed. An increase passes admission; a decrease is refused.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"bytes"},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelStoreBindingSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreBindingSpec is the grant. EVERY FIELD IS IMMUTABLE, webhook-enforced, except AllowPinned going false to true and Quota.Bytes growing: re-pointing the grant would strand the old accounting, and shrinking a budget under existing consumption would retroactively make an admitted prefetch over budget.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"storeRefs": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "StoreRefs names the ModelStores this namespace may prefetch into, at least one of them. Prefetch admission refuses a prefetch whose target set falls outside every granted store.",
+							MinItems:    ptr.To[int64](1),
+							MaxItems:    ptr.To[int64](8),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelStoreBindingStoreReference{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"quota": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Quota is the namespace's byte budget.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelStoreBindingQuota{}.OpenAPIModelName()),
+						},
+					},
+					"allowPinned": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AllowPinned is whether prefetches in this namespace may pin. It defaults to false, and it is the only path to pinning: pinning is an admin-granted capability, never a tenant default.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"storeRefs", "quota"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelStoreBindingQuota{}.OpenAPIModelName(), v1alpha1.ModelStoreBindingStoreReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelStoreBindingStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreBindingStatus is the namespace's own view of its grant: what it is using and whether it is over.\n\nEvery observed figure below is ABSENT rather than zero when it was not measured, and the two say different things: a figure reading zero was measured as zero, and a missing figure was not measured at all.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"phase": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Phase summarizes the conditions: Ready, OverQuota, Error.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"phaseMessage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhaseMessage carries the reason for the phase.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Conditions is the finer view, one condition per axis.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"usedBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "UsedBytes is what the namespace's prefetches occupy, the full size of every distinct digest any of them targets on any node holding it. It is absent while nothing has been measured, and zero is a measurement rather than the lack of one.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelStoreBindingStoreReference(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreBindingStoreReference names a cluster-scoped ModelStore this namespace is granted.\n\nIt carries no namespace, and that is the point: a store is cluster-scoped, so there is none to name, and no namespaced object here ever reads across a namespace boundary.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelStoreCapacity(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreCapacity is the pool's cache footprint, summed over the matched nodes.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"totalBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TotalBytes is the summed size of the matched nodes' cache filesystems.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"storedBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StoredBytes is what the matched nodes' published trees and partial downloads occupy.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+				Required: []string{"totalBytes", "storedBytes"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelStoreDownload(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreDownload is the pool's download policy, stated field by field: a field left out carries no opinion and keeps the cluster default, so a pool may raise the concurrency without also restating the bandwidth. Explicitly setting a field is a real override — bytesPerSecond 0 is \"unlimited on this pool\", not \"unspecified\".",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"concurrency": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Concurrency is how many HTTP requests the matched nodes run at once; left out, the cluster default applies.",
+							Minimum:     ptr.To[float64](1),
+							Maximum:     ptr.To[float64](64),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"bytesPerSecond": {
+						SchemaProps: spec.SchemaProps{
+							Description: "BytesPerSecond is the matched nodes' download rate limit; 0 is unlimited. Left out, the cluster default applies.",
+							Minimum:     ptr.To[float64](0),
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelStoreList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreList holds the list of ModelStore.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.ModelStore{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelStore{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelStoreSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreSpec is the pool's cache policy. Every field but the selector is optional: a nil field leaves the cluster default in place on the matched nodes.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"nodeSelector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodeSelector selects the pool's nodes. Two stores whose selectors match one node are a misconfiguration this API reports rather than resolves silently; see SelectorOverlap.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(metav1.LabelSelector{}.OpenAPIModelName()),
+						},
+					},
+					"watermarks": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Watermarks bounds the matched nodes' cache filesystem usage. Nil keeps the cluster defaults.",
+							Ref:         ref(v1alpha1.NodeModelStoreWatermarks{}.OpenAPIModelName()),
+						},
+					},
+					"download": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Download limits the matched nodes' downloads. Nil keeps the cluster defaults.",
+							Ref:         ref(v1alpha1.ModelStoreDownload{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"nodeSelector"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelStoreDownload{}.OpenAPIModelName(), v1alpha1.NodeModelStoreWatermarks{}.OpenAPIModelName(), metav1.LabelSelector{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelStoreStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreStatus is what the worker observes about the pool: how many nodes it matches, what those nodes' caches hold in total, and whether the selector overlaps another store's.\n\nConditions: Ready says the store's policy is applied on every matched node; SelectorOverlap says another store's selector also matches at least one of them.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"nodes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Nodes is the number of nodes the selector currently matches.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"capacity": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Capacity sums the matched nodes' NodeModelStore capacity readings. It is absent while no matched node has reported one.",
+							Ref:         ref(v1alpha1.ModelStoreCapacity{}.OpenAPIModelName()),
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelStoreCapacity{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_NodeModelStore(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -10099,6 +11032,34 @@ func schema_gpustack_api_worker_v1alpha1_NodeModelStoreSpec(ref common.Reference
 						SchemaProps: spec.SchemaProps{
 							Description: "Kubelet is the node's effective kubelet thresholds the cache's cap derives from, as the worker read them from kubelet's configz endpoint, which merges kubelet's flags, configuration file and drop-ins. It is absent while they could not be read, and the plugin then assumes kubelet's defaults and says so.\n\nThe worker writes it; nothing else does. It is an observed value held in the spec, not the status, because the plugin reads its whole configuration from its spec and owns the status, and reading configz needs the nodes/proxy permission, which the plugin never holds: it reaches every kubelet endpoint. Nothing reconciles toward it as a desired state: the worker refreshes the reading and writes what it read, so a hand edit holds only until the next reading.",
 							Ref:         ref(v1alpha1.NodeModelStoreKubelet{}.OpenAPIModelName()),
+						},
+					},
+					"store": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Store names the ModelStore whose per-pool policy this node's effective configuration carries: the alphabetically first store whose selector matches the node when two match, and empty when none does, so the cluster defaults apply. The worker writes it; nothing else does.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"pinned": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "set",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Pinned lists the manifest digests the node must retain: the union of the prefetches whose retention pins them and whose target set holds this node. A pinned digest is never a collection candidate, though it still counts toward usage. The prefetch controller writes the field and the configuration reconciler carries it over untouched, so the two never overwrite each other's work on the same object.",
+							MaxItems:    ptr.To[int64](256),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
 						},
 					},
 				},

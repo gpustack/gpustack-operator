@@ -244,6 +244,46 @@ func (*ModelDeploymentSpec) ProtoMessage() {}
 
 func (*ModelDeploymentStatus) ProtoMessage() {}
 
+func (*ModelPrefetch) ProtoMessage() {}
+
+func (*ModelPrefetchArtifactReference) ProtoMessage() {}
+
+func (*ModelPrefetchBindingReference) ProtoMessage() {}
+
+func (*ModelPrefetchList) ProtoMessage() {}
+
+func (*ModelPrefetchPlacement) ProtoMessage() {}
+
+func (*ModelPrefetchRetention) ProtoMessage() {}
+
+func (*ModelPrefetchSpec) ProtoMessage() {}
+
+func (*ModelPrefetchStatus) ProtoMessage() {}
+
+func (*ModelStore) ProtoMessage() {}
+
+func (*ModelStoreBinding) ProtoMessage() {}
+
+func (*ModelStoreBindingList) ProtoMessage() {}
+
+func (*ModelStoreBindingQuota) ProtoMessage() {}
+
+func (*ModelStoreBindingSpec) ProtoMessage() {}
+
+func (*ModelStoreBindingStatus) ProtoMessage() {}
+
+func (*ModelStoreBindingStoreReference) ProtoMessage() {}
+
+func (*ModelStoreCapacity) ProtoMessage() {}
+
+func (*ModelStoreDownload) ProtoMessage() {}
+
+func (*ModelStoreList) ProtoMessage() {}
+
+func (*ModelStoreSpec) ProtoMessage() {}
+
+func (*ModelStoreStatus) ProtoMessage() {}
+
 func (*NodeModelStore) ProtoMessage() {}
 
 func (*NodeModelStoreCapacity) ProtoMessage() {}

@@ -591,6 +591,106 @@ func (in ModelDeploymentStatus) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelPrefetch) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelPrefetch"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelPrefetchArtifactReference) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelPrefetchArtifactReference"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelPrefetchBindingReference) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelPrefetchBindingReference"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelPrefetchList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelPrefetchList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelPrefetchPlacement) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelPrefetchPlacement"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelPrefetchRetention) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelPrefetchRetention"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelPrefetchSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelPrefetchSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelPrefetchStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelPrefetchStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelStore) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelStore"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelStoreBinding) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelStoreBinding"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelStoreBindingList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelStoreBindingList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelStoreBindingQuota) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelStoreBindingQuota"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelStoreBindingSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelStoreBindingSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelStoreBindingStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelStoreBindingStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelStoreBindingStoreReference) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelStoreBindingStoreReference"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelStoreCapacity) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelStoreCapacity"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelStoreDownload) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelStoreDownload"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelStoreList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelStoreList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelStoreSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelStoreSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelStoreStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelStoreStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in NodeModelStore) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.NodeModelStore"
 }

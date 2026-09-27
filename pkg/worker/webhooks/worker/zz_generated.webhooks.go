@@ -37,6 +37,8 @@ func GetValidatingWebhookConfiguration(n string, c v1.WebhookClientConfig) *v1.V
 			vwh_pkg_worker_webhooks_worker_KVCachePoolWebhook(c),
 			vwh_pkg_worker_webhooks_worker_ModelArtifactWebhook(c),
 			vwh_pkg_worker_webhooks_worker_ModelDeploymentWebhook(c),
+			vwh_pkg_worker_webhooks_worker_ModelPrefetchWebhook(c),
+			vwh_pkg_worker_webhooks_worker_ModelStoreBindingWebhook(c),
 			vwh_pkg_worker_webhooks_worker_NodeModelStoreWebhook(c),
 			vwh_pkg_worker_webhooks_worker_PodKVCacheWebhook(c),
 			vwh_pkg_worker_webhooks_worker_PodWebhook(c),
@@ -565,6 +567,100 @@ func mwh_pkg_worker_webhooks_worker_ModelDeploymentWebhook(c v1.WebhookClientCon
 					},
 					Resources: []string{
 						"modeldeployments",
+					},
+					Scope: ptr.To[v1.ScopeType]("Namespaced"),
+				},
+				Operations: []v1.OperationType{
+					"CREATE",
+					"UPDATE",
+				},
+			},
+		},
+		FailurePolicy:  ptr.To[v1.FailurePolicyType]("Fail"),
+		MatchPolicy:    ptr.To[v1.MatchPolicyType]("Equivalent"),
+		SideEffects:    ptr.To[v1.SideEffectClass]("None"),
+		TimeoutSeconds: ptr.To[int32](10),
+		AdmissionReviewVersions: []string{
+			"v1",
+		},
+	}
+}
+
+func (*ModelPrefetchWebhook) ValidatePath() string {
+	return "/validate-worker-gpustack-ai-v1alpha1-modelprefetch"
+}
+
+func vwh_pkg_worker_webhooks_worker_ModelPrefetchWebhook(c v1.WebhookClientConfig) v1.ValidatingWebhook {
+	path := "/validate-worker-gpustack-ai-v1alpha1-modelprefetch"
+
+	cc := c.DeepCopy()
+	if cc.Service != nil {
+		cc.Service.Path = &path
+	} else if c.URL != nil {
+		cc.URL = ptr.To(*c.URL + path)
+	}
+
+	return v1.ValidatingWebhook{
+		Name:         "validate.worker.gpustack.ai.v1alpha1.modelprefetch",
+		ClientConfig: *cc,
+		Rules: []v1.RuleWithOperations{
+			{
+				Rule: v1.Rule{
+					APIGroups: []string{
+						"worker.gpustack.ai",
+					},
+					APIVersions: []string{
+						"v1alpha1",
+					},
+					Resources: []string{
+						"modelprefetches",
+					},
+					Scope: ptr.To[v1.ScopeType]("Namespaced"),
+				},
+				Operations: []v1.OperationType{
+					"CREATE",
+					"UPDATE",
+				},
+			},
+		},
+		FailurePolicy:  ptr.To[v1.FailurePolicyType]("Fail"),
+		MatchPolicy:    ptr.To[v1.MatchPolicyType]("Equivalent"),
+		SideEffects:    ptr.To[v1.SideEffectClass]("None"),
+		TimeoutSeconds: ptr.To[int32](10),
+		AdmissionReviewVersions: []string{
+			"v1",
+		},
+	}
+}
+
+func (*ModelStoreBindingWebhook) ValidatePath() string {
+	return "/validate-worker-gpustack-ai-v1alpha1-modelstorebinding"
+}
+
+func vwh_pkg_worker_webhooks_worker_ModelStoreBindingWebhook(c v1.WebhookClientConfig) v1.ValidatingWebhook {
+	path := "/validate-worker-gpustack-ai-v1alpha1-modelstorebinding"
+
+	cc := c.DeepCopy()
+	if cc.Service != nil {
+		cc.Service.Path = &path
+	} else if c.URL != nil {
+		cc.URL = ptr.To(*c.URL + path)
+	}
+
+	return v1.ValidatingWebhook{
+		Name:         "validate.worker.gpustack.ai.v1alpha1.modelstorebinding",
+		ClientConfig: *cc,
+		Rules: []v1.RuleWithOperations{
+			{
+				Rule: v1.Rule{
+					APIGroups: []string{
+						"worker.gpustack.ai",
+					},
+					APIVersions: []string{
+						"v1alpha1",
+					},
+					Resources: []string{
+						"modelstorebindings",
 					},
 					Scope: ptr.To[v1.ScopeType]("Namespaced"),
 				},

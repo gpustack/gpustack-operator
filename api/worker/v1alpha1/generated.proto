@@ -4247,6 +4247,391 @@ message ModelDeploymentStatus {
   optional ModelDeploymentModelStatus model = 9;
 }
 
+// ModelPrefetch is the schema for worker.gpustack.ai.
+//
+// It is a tenant's RESIDENCY INTENT for one model artifact: keep the artifact's weights on a set of
+// nodes ahead of any Pod that mounts them. The worker delivers it the same way it delivers a cold
+// mount — one warm-up Pod per target node, the artifact's own CSI volume, no accelerator request —
+// so the bytes land through the node cache's ordinary path, once per node, verified, and Pod exits
+// once the tree is readable. The Pod IS the delivery operation; there is no separate job state.
+//
+// Placement narrows the target set: the InstanceTypes of a node pool, or a nodeSelector for named
+// nodes, or — when both are left out — the InstanceTypes of the namespace's own deployments that
+// reference the artifact. Retention decides what happens after: whether the content is pinned
+// against collection (an admin-granted capability) and how long a node keeps it after its last use.
+//
+// Deleting the object revokes the intent: the warm-up Pods go, the nodes' pins drop, and the bytes
+// are reclaimed by the node cache's own collection once they are unreferenced and past its grace.
+// Nothing is torn out from under a Pod still reading the tree.
+//
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["mpf"],subResources=["status"]
+// +k8s:crd-gen:printcolumn:name="Artifact",type="string",jsonPath=".spec.artifactRef.name"
+// +k8s:crd-gen:printcolumn:name="Binding",type="string",jsonPath=".spec.bindingRef.name"
+// +k8s:crd-gen:printcolumn:name="Ready",type="integer",jsonPath=".status.readyNodes"
+// +k8s:crd-gen:printcolumn:name="Desired",type="integer",jsonPath=".status.desiredNodes"
+// +k8s:crd-gen:printcolumn:name="Pinned",type="boolean",jsonPath=".spec.retention.pinned"
+// +k8s:crd-gen:printcolumn:name="Age",type="date",jsonPath=".metadata.creationTimestamp"
+message ModelPrefetch {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional ModelPrefetchSpec spec = 2;
+
+  optional ModelPrefetchStatus status = 3;
+}
+
+// ModelPrefetchArtifactReference names an artifact in the prefetch's own namespace.
+message ModelPrefetchArtifactReference {
+  // +required
+  optional string name = 1;
+}
+
+// ModelPrefetchBindingReference names a binding in the prefetch's own namespace.
+message ModelPrefetchBindingReference {
+  // +required
+  optional string name = 1;
+}
+
+// ModelPrefetchList holds the list of ModelPrefetch.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelPrefetchList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelPrefetch items = 2;
+}
+
+// ModelPrefetchPlacement narrows the target set of nodes the artifact warms.
+message ModelPrefetchPlacement {
+  // InstanceTypes names the node pools to warm, by the InstanceType objects the scheduling chain
+  // already publishes. The target set is every node carrying one of these types' flavors.
+  //
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:minItems=1
+  // +k8s:validation:maxItems=8
+  repeated string instanceTypes = 1;
+
+  // NodeSelector selects the target nodes directly, the "download to these nodes" form.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector nodeSelector = 2;
+}
+
+// ModelPrefetchRetention decides what happens to the content after it has landed.
+message ModelPrefetchRetention {
+  // Pinned keeps the content on every target node against the node cache's collection: a pinned
+  // digest is never an eviction candidate, though it still counts toward usage. It requires the
+  // Binding to allow pinning, and admission refuses it otherwise.
+  //
+  // +optional
+  optional bool pinned = 1;
+
+  // TTLAfterLastUse unpins a node's copy once nothing mounted it for this long. It is enforced
+  // at the hour granularity the node's report already carries: retention does not need finer
+  // precision, and finer recording would multiply the node's writes for a decision that cannot
+  // tell the difference.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Duration ttlAfterLastUse = 2;
+}
+
+// ModelPrefetchSpec is the residency intent.
+message ModelPrefetchSpec {
+  // ArtifactRef names the ModelArtifact in this namespace whose weights warm the target set. It
+  // must be resolved before any Pod is rendered: admission and delivery both read its digest.
+  //
+  // +required
+  optional ModelPrefetchArtifactReference artifactRef = 1;
+
+  // BindingRef names the ModelStoreBinding in this namespace that pays for the bytes. It must
+  // grant a store covering the target set, and its budget bounds the prefetch at admission.
+  //
+  // +required
+  optional ModelPrefetchBindingReference bindingRef = 2;
+
+  // Placement narrows the target set. InstanceTypes and NodeSelector are mutually exclusive;
+  // both set is refused, and both left out derives the target set from the namespace's own
+  // deployments that reference the artifact. The relational rules are webhook-enforced.
+  //
+  // +optional
+  optional ModelPrefetchPlacement placement = 3;
+
+  // MinReady is how many target nodes holding the content make the prefetch Available; 0 means
+  // all of them.
+  //
+  // +optional
+  // +k8s:validation:default=0
+  // +k8s:validation:minimum=0
+  optional int32 minReady = 4;
+
+  // Retention decides what happens to the content after it has landed.
+  //
+  // +optional
+  optional ModelPrefetchRetention retention = 5;
+}
+
+// ModelPrefetchStatus is the prefetch's own view of its delivery, aggregated from the target
+// nodes' reports: which node holds the digest, which is fetching it, and whether enough do.
+message ModelPrefetchStatus {
+  // DesiredNodes is the size of the target set the current placement resolves to.
+  //
+  // +optional
+  optional int32 desiredNodes = 1;
+
+  // ReadyNodes is how many target nodes report the digest published and mountable.
+  //
+  // +optional
+  optional int32 readyNodes = 2;
+
+  // DownloadingNodes is how many target nodes are still fetching it.
+  //
+  // +optional
+  optional int32 downloadingNodes = 3;
+
+  // Conditions: Progressing says delivery is under way; Available says ReadyNodes reached the
+  // MinReady bar; Degraded says a target node gave up, and the message says why.
+  //
+  // +patchMergeKey=type
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=type
+  repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 4;
+}
+
+// ModelStore is the schema for worker.gpustack.ai.
+//
+// It is ONE NODE POOL'S CACHE POLICY, the admin's per-pool layer above the cluster defaults: the
+// watermarks and download limits of every node its selector matches, overriding only the fields it
+// sets. Nodes no store matches keep the Settings' cluster defaults, so this object never has to
+// restate them.
+//
+// The cache's root path is deliberately absent: it is the plugin DaemonSet's hostPath, decided at
+// deployment, and a per-pool path would need a per-pool DaemonSet rather than a field here.
+//
+// TWO STORES MUST NOT MATCH ONE NODE. The worker refuses to guess: it picks the alphabetically
+// first name deterministically, records that choice in the node's NodeModelStore.spec.store, and
+// sets SelectorOverlap on both stores so the misconfiguration is visible where it was made.
+//
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:crd-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["ms"],subResources=["status"]
+// +k8s:crd-gen:printcolumn:name="Nodes",type="integer",jsonPath=".status.nodes"
+// +k8s:crd-gen:printcolumn:name="High",type="integer",jsonPath=".spec.watermarks.highPercent"
+// +k8s:crd-gen:printcolumn:name="Low",type="integer",jsonPath=".spec.watermarks.lowPercent"
+// +k8s:crd-gen:printcolumn:name="Age",type="date",jsonPath=".metadata.creationTimestamp"
+message ModelStore {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional ModelStoreSpec spec = 2;
+
+  optional ModelStoreStatus status = 3;
+}
+
+// ModelStoreBinding is the schema for worker.gpustack.ai.
+//
+// It is the PROVISIONING POINT for model prefetch: creating one in a namespace is what grants that
+// namespace a byte budget on the named stores and the right to pin, so both are grants an admin can
+// RBAC and audit rather than powers a tenant assumes. A namespace without a Binding cannot warm
+// anything, and a Binding is the single place its consumption is reported back to it.
+//
+// THE GRANT IS EXPLICIT. There is no default pool a Binding falls back to: the chart's default
+// pool is deployment configuration, not an authorization basis, and a fallback would create a
+// second source of truth for who may warm where.
+//
+// It is NOT an enforcement boundary and must not be described as one. The budget gates prefetch
+// admission and accounting; bytes a workload mounts through the ordinary delivery path are charged
+// to the node's watermarks exactly as before, never to this object.
+//
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["msb"],subResources=["status"]
+// +k8s:crd-gen:printcolumn:name="Quota",type="string",jsonPath=".spec.quota.bytes"
+// +k8s:crd-gen:printcolumn:name="AllowPinned",type="boolean",jsonPath=".spec.allowPinned"
+// +k8s:crd-gen:printcolumn:name="Used",type="string",jsonPath=".status.usedBytes"
+// +k8s:crd-gen:printcolumn:name="Phase",type="string",jsonPath=".status.phase"
+// +k8s:crd-gen:printcolumn:name="Age",type="date",jsonPath=".metadata.creationTimestamp"
+message ModelStoreBinding {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional ModelStoreBindingSpec spec = 2;
+
+  optional ModelStoreBindingStatus status = 3;
+}
+
+// ModelStoreBindingList holds the list of ModelStoreBinding.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelStoreBindingList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelStoreBinding items = 2;
+}
+
+// ModelStoreBindingQuota is the namespace's byte budget, measured in filesystem usage.
+message ModelStoreBindingQuota {
+  // Bytes is what the namespace's prefetches may occupy in total. The measure is the content's
+  // own size, per digest and per node holding it, so a tree two namespaces share counts fully
+  // against each of them — conservative, and impossible to game by warming what another tenant
+  // already warmed. An increase passes admission; a decrease is refused.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity bytes = 1;
+}
+
+// ModelStoreBindingSpec is the grant. EVERY FIELD IS IMMUTABLE, webhook-enforced, except
+// AllowPinned going false to true and Quota.Bytes growing: re-pointing the grant would strand the
+// old accounting, and shrinking a budget under existing consumption would retroactively make an
+// admitted prefetch over budget.
+message ModelStoreBindingSpec {
+  // StoreRefs names the ModelStores this namespace may prefetch into, at least one of them.
+  // Prefetch admission refuses a prefetch whose target set falls outside every granted store.
+  //
+  // +required
+  // +listType=atomic
+  // +k8s:validation:minItems=1
+  // +k8s:validation:maxItems=8
+  repeated ModelStoreBindingStoreReference storeRefs = 1;
+
+  // Quota is the namespace's byte budget.
+  //
+  // +required
+  optional ModelStoreBindingQuota quota = 2;
+
+  // AllowPinned is whether prefetches in this namespace may pin. It defaults to false, and it is
+  // the only path to pinning: pinning is an admin-granted capability, never a tenant default.
+  //
+  // +optional
+  optional bool allowPinned = 3;
+}
+
+// ModelStoreBindingStatus is the namespace's own view of its grant: what it is using and whether
+// it is over.
+//
+// Every observed figure below is ABSENT rather than zero when it was not measured, and the two say
+// different things: a figure reading zero was measured as zero, and a missing figure was not
+// measured at all.
+message ModelStoreBindingStatus {
+  // Phase summarizes the conditions: Ready, OverQuota, Error.
+  optional string phase = 1;
+
+  // PhaseMessage carries the reason for the phase.
+  optional string phaseMessage = 2;
+
+  // Conditions is the finer view, one condition per axis.
+  //
+  // +patchMergeKey=type
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=type
+  repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 3;
+
+  // UsedBytes is what the namespace's prefetches occupy, the full size of every distinct digest
+  // any of them targets on any node holding it. It is absent while nothing has been measured,
+  // and zero is a measurement rather than the lack of one.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity usedBytes = 4;
+}
+
+// ModelStoreBindingStoreReference names a cluster-scoped ModelStore this namespace is granted.
+//
+// It carries no namespace, and that is the point: a store is cluster-scoped, so there is none to
+// name, and no namespaced object here ever reads across a namespace boundary.
+message ModelStoreBindingStoreReference {
+  // +required
+  optional string name = 1;
+}
+
+// ModelStoreCapacity is the pool's cache footprint, summed over the matched nodes.
+message ModelStoreCapacity {
+  // TotalBytes is the summed size of the matched nodes' cache filesystems.
+  //
+  // +required
+  optional int64 totalBytes = 1;
+
+  // StoredBytes is what the matched nodes' published trees and partial downloads occupy.
+  //
+  // +required
+  optional int64 storedBytes = 2;
+}
+
+// ModelStoreDownload is the pool's download policy, stated field by field: a field left out
+// carries no opinion and keeps the cluster default, so a pool may raise the concurrency without
+// also restating the bandwidth. Explicitly setting a field is a real override — bytesPerSecond 0
+// is "unlimited on this pool", not "unspecified".
+message ModelStoreDownload {
+  // Concurrency is how many HTTP requests the matched nodes run at once; left out, the cluster
+  // default applies.
+  //
+  // +optional
+  // +k8s:validation:minimum=1
+  // +k8s:validation:maximum=64
+  optional int32 concurrency = 1;
+
+  // BytesPerSecond is the matched nodes' download rate limit; 0 is unlimited. Left out, the
+  // cluster default applies.
+  //
+  // +optional
+  // +k8s:validation:minimum=0
+  optional int64 bytesPerSecond = 2;
+}
+
+// ModelStoreList holds the list of ModelStore.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelStoreList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelStore items = 2;
+}
+
+// ModelStoreSpec is the pool's cache policy. Every field but the selector is optional: a nil field
+// leaves the cluster default in place on the matched nodes.
+message ModelStoreSpec {
+  // NodeSelector selects the pool's nodes. Two stores whose selectors match one node are a
+  // misconfiguration this API reports rather than resolves silently; see SelectorOverlap.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector nodeSelector = 1;
+
+  // Watermarks bounds the matched nodes' cache filesystem usage. Nil keeps the cluster defaults.
+  //
+  // +optional
+  optional NodeModelStoreWatermarks watermarks = 2;
+
+  // Download limits the matched nodes' downloads. Nil keeps the cluster defaults.
+  //
+  // +optional
+  optional ModelStoreDownload download = 3;
+}
+
+// ModelStoreStatus is what the worker observes about the pool: how many nodes it matches, what
+// those nodes' caches hold in total, and whether the selector overlaps another store's.
+//
+// Conditions: Ready says the store's policy is applied on every matched node; SelectorOverlap says
+// another store's selector also matches at least one of them.
+message ModelStoreStatus {
+  // Nodes is the number of nodes the selector currently matches.
+  //
+  // +optional
+  optional int32 nodes = 1;
+
+  // Capacity sums the matched nodes' NodeModelStore capacity readings. It is absent while no
+  // matched node has reported one.
+  //
+  // +optional
+  optional ModelStoreCapacity capacity = 2;
+
+  // +patchMergeKey=type
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=type
+  repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 3;
+}
+
 // NodeModelStore is the schema for worker.gpustack.ai.
 //
 // It is ONE NODE'S MODEL CACHE, named after the Node and owned by it, and it carries both halves of
@@ -4475,6 +4860,24 @@ message NodeModelStoreSpec {
   //
   // +optional
   optional NodeModelStoreKubelet kubelet = 4;
+
+  // Store names the ModelStore whose per-pool policy this node's effective configuration carries:
+  // the alphabetically first store whose selector matches the node when two match, and empty when
+  // none does, so the cluster defaults apply. The worker writes it; nothing else does.
+  //
+  // +optional
+  optional string store = 5;
+
+  // Pinned lists the manifest digests the node must retain: the union of the prefetches whose
+  // retention pins them and whose target set holds this node. A pinned digest is never a
+  // collection candidate, though it still counts toward usage. The prefetch controller writes
+  // the field and the configuration reconciler carries it over untouched, so the two never
+  // overwrite each other's work on the same object.
+  //
+  // +optional
+  // +listType=set
+  // +k8s:validation:maxItems=256
+  repeated string pinned = 6;
 }
 
 // NodeModelStoreStatus is what the plugin reports about its node, rebuilt from the node's disk and

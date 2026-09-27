@@ -27,4 +27,6 @@ type ModelArtifactExpansion interface{}
 
 type ModelDeploymentExpansion interface{}
 
+type ModelPrefetchExpansion interface{}
+
 type NodeModelStoreExpansion interface{}

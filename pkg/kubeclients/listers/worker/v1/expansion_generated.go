@@ -71,6 +71,14 @@ type ModelDeploymentListerExpansion interface{}
 // ModelDeploymentNamespaceLister.
 type ModelDeploymentNamespaceListerExpansion interface{}
 
+// ModelPrefetchListerExpansion allows custom methods to be added to
+// ModelPrefetchLister.
+type ModelPrefetchListerExpansion interface{}
+
+// ModelPrefetchNamespaceListerExpansion allows custom methods to be added to
+// ModelPrefetchNamespaceLister.
+type ModelPrefetchNamespaceListerExpansion interface{}
+
 // NodeModelStoreListerExpansion allows custom methods to be added to
 // NodeModelStoreLister.
 type NodeModelStoreListerExpansion interface{}

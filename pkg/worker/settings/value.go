@@ -412,6 +412,22 @@ var (
 		setting.AllowDurationInRange(time.Minute, 365*24*time.Hour),
 	)
 
+	// Model prefetch.
+
+	// ModelPrefetchWarmupImage is the image a ModelPrefetch's warm-up Pod runs on each target
+	// node. The Pod mounts the artifact's volume, verifies every file reads back and exits, so
+	// the image needs only a shell, find and sha256sum — it never runs a model and links no
+	// accelerator runtime. It is a setting rather than a constant because the one thing it must
+	// guarantee is that the node can pull it, which only the cluster's own registry arrangement
+	// decides; an air-gapped cluster points it at its mirror. The default is a small stock image,
+	// the same shape the warm-up path was verified with.
+	ModelPrefetchWarmupImage = settings.NewEditable(
+		"model-prefetch-warmup-image",
+		"Indicates the image a ModelPrefetch's warm-up Pod runs on each target node.",
+		setting.InitializeFromEnv("python:3.12-alpine"),
+		setting.AllowContainerImageReference(),
+	)
+
 	// Workload.
 
 	// WorkloadFitAffinity indicates whether the Workload webhook pins a slice or shared request of

@@ -211,6 +211,16 @@ func (in ModelDeploymentMetrics) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelPrefetch) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelPrefetch"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelPrefetchList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.ModelPrefetchList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in NFSInstancePersistentVolumeSource) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.NFSInstancePersistentVolumeSource"
 }

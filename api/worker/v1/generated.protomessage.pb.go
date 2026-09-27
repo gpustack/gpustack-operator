@@ -92,6 +92,10 @@ func (*ModelDeploymentMetricWindow) ProtoMessage() {}
 
 func (*ModelDeploymentMetrics) ProtoMessage() {}
 
+func (*ModelPrefetch) ProtoMessage() {}
+
+func (*ModelPrefetchList) ProtoMessage() {}
+
 func (*NFSInstancePersistentVolumeSource) ProtoMessage() {}
 
 func (*NodeModelStore) ProtoMessage() {}
