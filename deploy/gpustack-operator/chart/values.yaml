@@ -449,6 +449,24 @@ modelManager:
   kubeletDir: /var/lib/kubelet
   # -- Secure serving port of the model-manager container: metrics, readiness and liveness.
   securePort: 32444
+  # -- TCP port the node's published trees are served to the other nodes' plugins on, for
+  # node-to-node sync; `0` is off. When on, plugins authenticate each other with the projected
+  # ServiceAccount token (audience `gpustack-model-peer`), and the networkPolicy below keeps
+  # tenant Pods off the port.
+  port: 0
+  peerSync:
+    # -- How many peer file answers a node serves at once.
+    maxServingStreams: 8
+    # -- How many requests a node opens to one peer at once.
+    streamsPerSource: 4
+  networkPolicy:
+    # -- Deploy the NetworkPolicy that keeps tenant Pods off the peer port (and the secure port,
+    # except from the worker). It only takes effect on a CNI that enforces NetworkPolicy.
+    enabled: true
+    # -- Whoever scrapes /metrics.
+    scrapers: []
+    # -- Additional ingress rules, verbatim.
+    extraIngress: []
   # -- Per-model-manager image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall back
   # to the chart-level `image`.
   image: {}

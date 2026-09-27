@@ -68,7 +68,7 @@
             },
             "replicas": {
               "default": 1,
-              "description": "Number of NFS controller (provisioner) replicas. Every sidecar runs with\n`--leader-election`, so extra replicas stand by. Losing the controller delays volume\nprovisioning, resizing and snapshotting; volumes already mounted keep working, because the\nmounting side is the node DaemonSet. This chart renders neither a PodDisruptionBudget nor\ntopology spread constraints for the controller, and it honours `controller.affinity` only\nwhen that affinity carries `nodeSelectorTerms` — a pod anti-affinity is silently dropped —\nso replicas may share a node.",
+              "description": "Number of NFS controller (provisioner) replicas. Every sidecar runs with\n`--leader-election`, so extra replicas stand by. Losing the controller delays volume\nprovisioning, resizing and snapshotting; volumes already mounted keep working, because the\nmounting side is the node DaemonSet. This chart renders neither a PodDisruptionBudget nor\ntopology spread constraints for the controller, and it honours `controller.affinity` only\nwhen that affinity carries `nodeSelectorTerms` \u2014 a pod anti-affinity is silently dropped \u2014\nso replicas may share a node.",
               "title": "replicas",
               "type": "integer"
             },
@@ -116,7 +116,7 @@
           "type": "boolean"
         },
         "image": {
-          "description": "Mirrored images. `baseRepo` is joined with each leading-slash `repository`. Every tag is\nstated rather than inherited from the chart, so what this release pulls is readable here and a\nsubchart bump cannot move an image without the diff showing it. These are the tags chart\n4.13.4 ships, the driver's included, and each one is mirrored — an unmirrored tag would put\nevery install in ImagePullBackOff. The three sidecars this driver shares with `csi-driver-s3`\n(`csiProvisioner`, `livenessProbe`, `nodeDriverRegistrar`) carry the same tag on both, so a\nrelease ships one image per component rather than two versions of each. The\n`externalSnapshotter` image is absent because that component is off, and turning it on would\nneed a mirror first.",
+          "description": "Mirrored images. `baseRepo` is joined with each leading-slash `repository`. Every tag is\nstated rather than inherited from the chart, so what this release pulls is readable here and a\nsubchart bump cannot move an image without the diff showing it. These are the tags chart\n4.13.4 ships, the driver's included, and each one is mirrored \u2014 an unmirrored tag would put\nevery install in ImagePullBackOff. The three sidecars this driver shares with `csi-driver-s3`\n(`csiProvisioner`, `livenessProbe`, `nodeDriverRegistrar`) carry the same tag on both, so a\nrelease ships one image per component rather than two versions of each. The\n`externalSnapshotter` image is absent because that component is off, and turning it on would\nneed a mirror first.",
           "properties": {
             "baseRepo": {
               "default": "docker.io",
@@ -350,7 +350,7 @@
             },
             "replicas": {
               "default": 1,
-              "description": "Number of S3 controller (provisioner) replicas. The provisioner sidecar runs with\n`--leader-election`, so extra replicas stand by. Losing the controller delays volume\nprovisioning; volumes already mounted keep working, because the mounting side is the node\nDaemonSet. Like the NFS chart, this one renders neither a PodDisruptionBudget nor topology\nspread constraints for the controller, and it honours `controller.affinity` only when that\naffinity carries `nodeSelectorTerms` — a pod anti-affinity is silently dropped — so replicas\nmay share a node.",
+              "description": "Number of S3 controller (provisioner) replicas. The provisioner sidecar runs with\n`--leader-election`, so extra replicas stand by. Losing the controller delays volume\nprovisioning; volumes already mounted keep working, because the mounting side is the node\nDaemonSet. Like the NFS chart, this one renders neither a PodDisruptionBudget nor topology\nspread constraints for the controller, and it honours `controller.affinity` only when that\naffinity carries `nodeSelectorTerms` \u2014 a pod anti-affinity is silently dropped \u2014 so replicas\nmay share a node.",
               "title": "replicas",
               "type": "integer"
             },
@@ -398,7 +398,7 @@
           "type": "boolean"
         },
         "images": {
-          "description": "Mirrored images. This chart stores whole `registry/namespace/name:tag` references with\nno separate tag key. The three sidecars are the same images, at the same tags, that\n`csi-driver-nfs` pulls: they are shared components, and shipping one tag per component keeps\na release from carrying two versions of each. Upstream pins all three lower than the NFS\nchart does, so they follow the NFS chart rather than this one — which is what the\n`feature-gates.patch` is for: provisioner v6.3.0 has no `HonorPVReclaimPolicy` gate left to\nset, and this chart's controller still passed it.",
+          "description": "Mirrored images. This chart stores whole `registry/namespace/name:tag` references with\nno separate tag key. The three sidecars are the same images, at the same tags, that\n`csi-driver-nfs` pulls: they are shared components, and shipping one tag per component keeps\na release from carrying two versions of each. Upstream pins all three lower than the NFS\nchart does, so they follow the NFS chart rather than this one \u2014 which is what the\n`feature-gates.patch` is for: provisioner v6.3.0 has no `HonorPVReclaimPolicy` gate left to\nset, and this chart's controller still passed it.",
           "properties": {
             "csiProvisioner": {
               "default": "docker.io/gpustack/mirrored-csi-provisioner:v6.3.0",
@@ -518,13 +518,13 @@
       "properties": {
         "containerdConfigDir": {
           "default": "/etc/containerd",
-          "description": "Directory holding the container engine's `config.toml`, mounted read-only into every\ndevice manager at that same path and named to them as `GPUSTACK_CONTAINERD_CONFIG_DIR`.\n\nA distribution that keeps it elsewhere is served by naming that directory here: k3s uses\n`/var/lib/rancher/k3s/agent/etc/containerd` and RKE2 `/var/lib/rancher/rke2/agent/etc/containerd`.\nSet it to the directory itself, never the tree above it — on those two distributions that tree\nalso holds the cluster's tokens and keys. An empty value mounts nothing and passes nothing.\n\nIt is read for one purpose: a device-injection strategy of `auto` needs to know whether the\ncontainer engine resolves CDI requests, and which runtime handler a Pod naming no\n`runtimeClassName` runs under. With the configuration unreadable, `auto` keeps the\nenvironment-variable channel. Nothing else depends on it.",
+          "description": "Directory holding the container engine's `config.toml`, mounted read-only into every\ndevice manager at that same path and named to them as `GPUSTACK_CONTAINERD_CONFIG_DIR`.\n\nA distribution that keeps it elsewhere is served by naming that directory here: k3s uses\n`/var/lib/rancher/k3s/agent/etc/containerd` and RKE2 `/var/lib/rancher/rke2/agent/etc/containerd`.\nSet it to the directory itself, never the tree above it \u2014 on those two distributions that tree\nalso holds the cluster's tokens and keys. An empty value mounts nothing and passes nothing.\n\nIt is read for one purpose: a device-injection strategy of `auto` needs to know whether the\ncontainer engine resolves CDI requests, and which runtime handler a Pod naming no\n`runtimeClassName` runs under. With the configuration unreadable, `auto` keeps the\nenvironment-variable channel. Nothing else depends on it.",
           "title": "containerdConfigDir",
           "type": "string"
         },
         "createRuntimeClasses": {
           "default": true,
-          "description": "Create a RuntimeClass for every manufacturer whose `global.manufacturers` row sets\n`runtimeInjectsDriver` or `runtimeInjectsDevices`, where the cluster does not already have\none. That is the set whose container runtime is certain to be installed, since without it\nthose accelerators cannot work at all — see the note on `global.manufacturers`.\nDisable when something else provides them (e.g. a vendor GPU operator).",
+          "description": "Create a RuntimeClass for every manufacturer whose `global.manufacturers` row sets\n`runtimeInjectsDriver` or `runtimeInjectsDevices`, where the cluster does not already have\none. That is the set whose container runtime is certain to be installed, since without it\nthose accelerators cannot work at all \u2014 see the note on `global.manufacturers`.\nDisable when something else provides them (e.g. a vendor GPU operator).",
           "title": "createRuntimeClasses",
           "type": "boolean"
         },
@@ -555,16 +555,16 @@
           "type": "object"
         },
         "networkPolicy": {
-          "description": "Restrict who may reach the device-manager's secure port.\n\nThat port serves `/metrics`, which lists every Instance running on the node — names,\nnamespaces, declared sizes, live usage and accelerator IDs — to anything that can reach it,\nand it is unauthenticated. Enabling this is recommended on a multi-tenant cluster.",
+          "description": "Restrict who may reach the device-manager's secure port.\n\nThat port serves `/metrics`, which lists every Instance running on the node \u2014 names,\nnamespaces, declared sizes, live usage and accelerator IDs \u2014 to anything that can reach it,\nand it is unauthenticated. Enabling this is recommended on a multi-tenant cluster.",
           "properties": {
             "enabled": {
               "default": false,
-              "description": "Deploy the NetworkPolicy.\n\nIt only takes effect on a CNI that enforces NetworkPolicy; on one that does not, the\nobject is inert rather than an error. On a CNI that enforces policy but does not exempt\nnode-local traffic it also cuts the kubelet's probes, which would take every\ndevice-manager NotReady — see `extraIngress`.",
+              "description": "Deploy the NetworkPolicy.\n\nIt only takes effect on a CNI that enforces NetworkPolicy; on one that does not, the\nobject is inert rather than an error. On a CNI that enforces policy but does not exempt\nnode-local traffic it also cuts the kubelet's probes, which would take every\ndevice-manager NotReady \u2014 see `extraIngress`.",
               "title": "enabled",
               "type": "boolean"
             },
             "extraIngress": {
-              "description": "Whole ingress rules appended verbatim, for what `scrapers` cannot express.\n\nNetworkPolicy has no peer meaning \"the node this pod runs on\", and the kubelet's probes\ncome from the node's host network namespace. Mainstream CNIs exempt that traffic, but\nupstream leaves it implementation-defined — so on a CNI that does not, admit the node's\naddress range here, e.g. `[{from: [{ipBlock: {cidr: 10.0.0.0/8}}]}]`.",
+              "description": "Whole ingress rules appended verbatim, for what `scrapers` cannot express.\n\nNetworkPolicy has no peer meaning \"the node this pod runs on\", and the kubelet's probes\ncome from the node's host network namespace. Mainstream CNIs exempt that traffic, but\nupstream leaves it implementation-defined \u2014 so on a CNI that does not, admit the node's\naddress range here, e.g. `[{from: [{ipBlock: {cidr: 10.0.0.0/8}}]}]`.",
               "items": {
                 "required": [],
                 "type": "object"
@@ -658,7 +658,7 @@
       "description": "Global values shared across the chart and its subcharts.",
       "properties": {
         "certmanager": {
-          "description": "Configure cert-manager integration for every serving certificate this release needs: the\nworker's webhook certificate and Kueue's. It lives under `global` because Kueue is a vendored\nsubchart and `global` is the only channel Helm gives a subchart to this chart's values. Each\ncomponent used to be switched on its own, so a cluster with cert-manager installed issued the\nworker's certificate through it while Kueue went on self-signing — two answers to one question,\nand the detection behind `auto` could never reach Kueue at all.",
+          "description": "Configure cert-manager integration for every serving certificate this release needs: the\nworker's webhook certificate and Kueue's. It lives under `global` because Kueue is a vendored\nsubchart and `global` is the only channel Helm gives a subchart to this chart's values. Each\ncomponent used to be switched on its own, so a cluster with cert-manager installed issued the\nworker's certificate through it while Kueue went on self-signing \u2014 two answers to one question,\nand the detection behind `auto` could never reach Kueue at all.",
           "properties": {
             "enabled": {
               "default": "auto",
@@ -739,12 +739,12 @@
         },
         "imageRegistry": {
           "default": "",
-          "description": "Image registry override applied to every image this chart renders, the subcharts'\nworkloads, sidecars and hook Jobs included (e.g. \"docker.io\"). When empty, `global.hub`\nis consulted next — an alias for umbrella charts that also carry Istio-derived subcharts,\nwhich read `hub` and will keep doing so upstream, so one value can mirror every image\ninstead of two that have to be kept equal. When both are empty, the registry each image\nreference already encodes is used as-is.",
+          "description": "Image registry override applied to every image this chart renders, the subcharts'\nworkloads, sidecars and hook Jobs included (e.g. \"docker.io\"). When empty, `global.hub`\nis consulted next \u2014 an alias for umbrella charts that also carry Istio-derived subcharts,\nwhich read `hub` and will keep doing so upstream, so one value can mirror every image\ninstead of two that have to be kept equal. When both are empty, the registry each image\nreference already encodes is used as-is.",
           "title": "imageRegistry",
           "type": "string"
         },
         "manufacturers": {
-          "description": "Accelerator manufacturers to manage, one row per manufacturer holding everything the\nrelease needs to know about it. `pciVendorID` is what NFD labels its devices with,\n`resourceName` what its device-plugin advertises to the kubelet, `runtimeName` the\nRuntimeClass its workloads run under, and `partitionKind` its own name for hardware\npartitioning (\"mig\" is NVIDIA's name for the concept, not the concept's). Each of those\nfour is also a `pkg/nodefeature` default overridable by a `GPUSTACK_\u003cMANUFACTURER\u003e_*`\nvariable, and this chart fans every stated one out as that variable to the worker and to\nthe device-managers — so a row here decides them rather than restating them, and a field\nleft out keeps the operator's own default. The two `runtimeInjects*` fields are the\nexception, deployment facts no Go code holds, and they answer different questions:\n\n  `runtimeInjectsDriver` marks a manufacturer whose user-space driver reaches a container\n  only through its container runtime, so that manufacturer's device-manager runs under the\n  RuntimeClass too. Every other vendor's device-manager reads its management library from a\n  hostPath mount the DaemonSet already makes.\n\n  `runtimeInjectsDevices` marks a manufacturer whose allocator contributes no device node of\n  its own, so its container runtime is the only thing that turns an allocation into `/dev`\n  entries inside the container. This is the WORKLOAD's need, not the device-manager's: such a\n  device-manager still reads its library from a hostPath and does not run under the class.\n  Ascend and Iluvatar are the cases in point: their allocators emit `ASCEND_VISIBLE_DEVICES` and\n  `IX_VISIBLE_DEVICES` and no device node, so without their runtime the container starts with the\n  variable set and no accelerator behind it — and no error anywhere. AMD used to be a third and\n  is not any more: its allocator injects `/dev/kfd` and the accelerator's DRM nodes itself.\n\nEither of the two — never `runtimeName` — is what decides which RuntimeClasses this chart\ncreates (`deviceManager.createRuntimeClasses`), because either one means the runtime's\npresence can be inferred: a vendor missing what it names cannot work at all unless its\ncontainer toolkit registered the handler. `runtimeName` alone is only the class the operator\nwill USE for a vendor. A vendor with neither field injects its own device nodes and needs no\nRuntimeClass, so the handler may well be absent while its accelerators work — and creating\none there would break them: the operator attaches a RuntimeClass to a workload whenever one\nexists, so the kubelet would reject every Pod of that vendor for a runtime nothing\nconfigured. A class the vendor's own operator created is still used; this chart just never\nconjures one.\n\nThe keys are the manufacturer list: they become the worker's `--manufacturer` flag (which\nis where the `gpustack-cpu-info` NodeFeatureRule's vendor IDs come from, since the worker\nrenders that rule itself), one device-manager DaemonSet each, and Kueue's credits mapping.\nEach DaemonSet only schedules on nodes NFD labelled with the matching PCI vendor, so\nadding a row is all it takes for a new vendor's devices to be labelled, detected and given\na device-manager, and a row no node in the cluster carries simply runs nothing.\n\nIt lives under `global` because the vendored Kueue subchart reads it too, and `global` is\nthe only channel Helm gives a subchart to this chart's values. The defaults are every\nmanufacturer `pkg/nodefeature` knows, which a Go test asserts. Narrow the list by setting a\nrow to `null` — an unwanted row is otherwise harmless (its DaemonSet schedules on no node),\nso this is about how much a release renders, not about what works.",
+          "description": "Accelerator manufacturers to manage, one row per manufacturer holding everything the\nrelease needs to know about it. `pciVendorID` is what NFD labels its devices with,\n`resourceName` what its device-plugin advertises to the kubelet, `runtimeName` the\nRuntimeClass its workloads run under, and `partitionKind` its own name for hardware\npartitioning (\"mig\" is NVIDIA's name for the concept, not the concept's). Each of those\nfour is also a `pkg/nodefeature` default overridable by a `GPUSTACK_<MANUFACTURER>_*`\nvariable, and this chart fans every stated one out as that variable to the worker and to\nthe device-managers \u2014 so a row here decides them rather than restating them, and a field\nleft out keeps the operator's own default. The two `runtimeInjects*` fields are the\nexception, deployment facts no Go code holds, and they answer different questions:\n\n  `runtimeInjectsDriver` marks a manufacturer whose user-space driver reaches a container\n  only through its container runtime, so that manufacturer's device-manager runs under the\n  RuntimeClass too. Every other vendor's device-manager reads its management library from a\n  hostPath mount the DaemonSet already makes.\n\n  `runtimeInjectsDevices` marks a manufacturer whose allocator contributes no device node of\n  its own, so its container runtime is the only thing that turns an allocation into `/dev`\n  entries inside the container. This is the WORKLOAD's need, not the device-manager's: such a\n  device-manager still reads its library from a hostPath and does not run under the class.\n  Ascend and Iluvatar are the cases in point: their allocators emit `ASCEND_VISIBLE_DEVICES` and\n  `IX_VISIBLE_DEVICES` and no device node, so without their runtime the container starts with the\n  variable set and no accelerator behind it \u2014 and no error anywhere. AMD used to be a third and\n  is not any more: its allocator injects `/dev/kfd` and the accelerator's DRM nodes itself.\n\nEither of the two \u2014 never `runtimeName` \u2014 is what decides which RuntimeClasses this chart\ncreates (`deviceManager.createRuntimeClasses`), because either one means the runtime's\npresence can be inferred: a vendor missing what it names cannot work at all unless its\ncontainer toolkit registered the handler. `runtimeName` alone is only the class the operator\nwill USE for a vendor. A vendor with neither field injects its own device nodes and needs no\nRuntimeClass, so the handler may well be absent while its accelerators work \u2014 and creating\none there would break them: the operator attaches a RuntimeClass to a workload whenever one\nexists, so the kubelet would reject every Pod of that vendor for a runtime nothing\nconfigured. A class the vendor's own operator created is still used; this chart just never\nconjures one.\n\nThe keys are the manufacturer list: they become the worker's `--manufacturer` flag (which\nis where the `gpustack-cpu-info` NodeFeatureRule's vendor IDs come from, since the worker\nrenders that rule itself), one device-manager DaemonSet each, and Kueue's credits mapping.\nEach DaemonSet only schedules on nodes NFD labelled with the matching PCI vendor, so\nadding a row is all it takes for a new vendor's devices to be labelled, detected and given\na device-manager, and a row no node in the cluster carries simply runs nothing.\n\nIt lives under `global` because the vendored Kueue subchart reads it too, and `global` is\nthe only channel Helm gives a subchart to this chart's values. The defaults are every\nmanufacturer `pkg/nodefeature` knows, which a Go test asserts. Narrow the list by setting a\nrow to `null` \u2014 an unwanted row is otherwise harmless (its DaemonSet schedules on no node),\nso this is about how much a release renders, not about what works.",
           "properties": {
             "amd": {
               "properties": {
@@ -970,7 +970,7 @@
           "type": "object"
         },
         "nodeSelector": {
-          "description": "Node selector applied to every long-running workload this release deploys, when the\ncomponent sets none of its own: the worker, the device managers, and the subcharts'\ncontrol planes — Kueue's manager and its optional KueueViz, NFD's master and gc, the CSI\ncontrollers. A component-level `nodeSelector`, when non-empty, REPLACES this value\nentirely (no merging); the device managers and the CSI controllers merge it instead,\nsince their own selectors state a requirement (a manufacturer's PCI vendor, an OS)\nrather than a placement.\n\nTwo sets of workloads are deliberately left out.\n\nThe ones that have to cover the nodes they serve: NFD's worker and topology updater, and\nthe CSI node plugins. Confining NFD's worker would leave every node outside the selector\nunlabelled — including the `feature.node.kubernetes.io/pci-*.present` labels the device\nmanagers and a GPUStack worker select on — so a selector meant to confine this release\nwould end up scheduling nothing at all.\n\nAnd the hook Jobs, which Helm runs outside the window where this release's workloads\nexist: before they are created, and after they are gone. A selector naming a label the\nrelease itself produces would leave the pre-install hook Pending with nothing able to\nsatisfy it, because the workload that applies the label is in the manifest that hook\ngates. An NFD label is the obvious way to write \"only GPU nodes\" and would deadlock a\nfresh install, so the hooks stay schedulable wherever the cluster will take them.",
+          "description": "Node selector applied to every long-running workload this release deploys, when the\ncomponent sets none of its own: the worker, the device managers, and the subcharts'\ncontrol planes \u2014 Kueue's manager and its optional KueueViz, NFD's master and gc, the CSI\ncontrollers. A component-level `nodeSelector`, when non-empty, REPLACES this value\nentirely (no merging); the device managers and the CSI controllers merge it instead,\nsince their own selectors state a requirement (a manufacturer's PCI vendor, an OS)\nrather than a placement.\n\nTwo sets of workloads are deliberately left out.\n\nThe ones that have to cover the nodes they serve: NFD's worker and topology updater, and\nthe CSI node plugins. Confining NFD's worker would leave every node outside the selector\nunlabelled \u2014 including the `feature.node.kubernetes.io/pci-*.present` labels the device\nmanagers and a GPUStack worker select on \u2014 so a selector meant to confine this release\nwould end up scheduling nothing at all.\n\nAnd the hook Jobs, which Helm runs outside the window where this release's workloads\nexist: before they are created, and after they are gone. A selector naming a label the\nrelease itself produces would leave the pre-install hook Pending with nothing able to\nsatisfy it, because the workload that applies the label is in the manifest that hook\ngates. An NFD label is the obvious way to write \"only GPU nodes\" and would deadlock a\nfresh install, so the hooks stay schedulable wherever the cluster will take them.",
           "required": [],
           "title": "nodeSelector",
           "type": "object"
@@ -1002,7 +1002,7 @@
         },
         "tag": {
           "default": "",
-          "description": "Operator image tag; defaults to \"v\u003c.Chart.AppVersion\u003e\" when empty.",
+          "description": "Operator image tag; defaults to \"v<.Chart.AppVersion>\" when empty.",
           "title": "tag",
           "type": "string"
         }
@@ -1133,7 +1133,7 @@
             },
             "replicas": {
               "default": 1,
-              "description": "Number of Kueue controller manager replicas. `managerConfig` below elects a leader, so\nextra replicas stand by — but every one of them serves the admission webhook, and that is\nwhat a highly available install buys: with a single replica, losing its node blocks Pod\ncreation in every namespace Kueue manages until it is rescheduled.",
+              "description": "Number of Kueue controller manager replicas. `managerConfig` below elects a leader, so\nextra replicas stand by \u2014 but every one of them serves the admission webhook, and that is\nwhat a highly available install buys: with a single replica, losing its node blocks Pod\ncreation in every namespace Kueue manages until it is rescheduled.",
               "title": "replicas",
               "type": "integer"
             },
@@ -1175,7 +1175,7 @@
         "managerConfig": {
           "properties": {
             "controllerManagerConfigYaml": {
-              "default": "apiVersion: config.kueue.x-k8s.io/v1beta2\nkind: Configuration\nfeatureGates:\n  AssignQueueLabelsForPods: false\n  TopologyAwareScheduling: true\n  TASBalancedPlacement: true\n  # Lets TAS rank feasible nodes by a Pod's preferred node affinity, which is how a\n  # node-delivered model's Pods prefer the nodes already holding its weights (alpha in\n  # Kueue 0.18). It also honors any other author's preferred node affinity in a TAS\n  # queue, so setting it to false turns both off. A Kueue that does not know a gate\n  # refuses to start: check this one before bumping the bundled Kueue.\n  TASRespectNodeAffinityPreferred: true\n  # Enables resources.quotaCheckStrategy below (alpha in Kueue 0.18). The bundled\n  # controller image is always 0.18, so the gate is always available.\n  QuotaCheckStrategy: true\nhealth:\n  healthProbeBindAddress: :8081\nmetrics:\n  bindAddress: :8443\n# enableClusterQueueResources: true\nwebhook:\n  port: 9443\nleaderElection:\n  leaderElect: true\n  resourceName: c1f6bfd2.kueue.x-k8s.io\ncontroller:\n  groupKindConcurrency:\n    Job.batch: 5\n    Pod: 5\n    Workload.kueue.x-k8s.io: 5\n    LocalQueue.kueue.x-k8s.io: 1\n    ClusterQueue.kueue.x-k8s.io: 1\n    ResourceFlavor.kueue.x-k8s.io: 1\nclientConnection:\n  qps: 50\n  burst: 100\n#pprofBindAddress: :8083\n#waitForPodsReady:\n#  timeout: 5m\n#  recoveryTimeout: 3m\n#  blockAdmission: false\n#  requeuingStrategy:\n#    timestamp: Eviction\n#    backoffLimitCount: null # null indicates infinite requeuing\n#    backoffBaseSeconds: 60\n#    backoffMaxSeconds: 3600\n#manageJobsWithoutQueueName: true\n# The namespaces Kueue manages jobs in. Deliberately unset: the chart renders the\n# default as every namespace but kube-system and this release's own, which is what\n# lets the release install into any namespace — Kueue refuses to start when this\n# selector matches the namespace it runs in, and a subchart value cannot be\n# templated. State it to take the default over, and own that rule.\n#managedJobsNamespaceSelector:\n#  matchExpressions:\n#    - key: kubernetes.io/metadata.name\n#      operator: NotIn\n#      values: [ kube-system, gpustack-system ]\nintegrations:\n  frameworks:\n  - \"batch/job\"\n  - \"kubeflow.org/mpijob\"\n  - \"ray.io/rayjob\"\n  - \"ray.io/raycluster\"\n  - \"jobset.x-k8s.io/jobset\"\n  - \"trainer.kubeflow.org/trainjob\"\n  - \"kubeflow.org/paddlejob\"\n  - \"kubeflow.org/pytorchjob\"\n  - \"kubeflow.org/tfjob\"\n  - \"kubeflow.org/xgboostjob\"\n  - \"kubeflow.org/jaxjob\"\n  - \"workload.codeflare.dev/appwrapper\"\n  - \"pod\"\n  - \"deployment\"\n  - \"statefulset\"\n  - \"leaderworkerset.x-k8s.io/leaderworkerset\"\n#  externalFrameworks:\n#  - \"Foo.v1.example.com\"\n#fairSharing:\n#  preemptionStrategies: [LessThanOrEqualToFinalShare, LessThanInitialShare]\n#admissionFairSharing:\n#  usageHalfLifeTime: \"168h\" # 7 days\n#  usageSamplingInterval: \"5m\"\n#  resourceWeights: # optional, defaults to 1 for all resources if not specified\n#    cpu: 0    # if you want to completely ignore cpu usage\n#    memory: 0 # ignore completely memory usage\n#    example.com/gpu: 100 # and you care only about GPUs usage\nresources:\n  # Kueue is not the authoritative ledger in this operator — the Devices CR\n  # is. A ClusterQueue advertises exactly one coarse admission dimension (cpu\n  # for general pools, the manufacturer credits for accelerated pools), while a\n  # Workload still carries the Pod resources the queue does not cover: memory\n  # and ephemeral-storage on every pool, cpu on accelerated pools, and the\n  # node-level .sliced.* counters the scheduler/kubelet read. Check only the\n  # covered dimension and ignore the rest, instead of refusing to assign a\n  # flavor for an uncovered resource (which would mark the Workload inadmissible).\n  quotaCheckStrategy: IgnoreUndeclared\n  # `resources.transformations` is absent here on purpose: the chart renders it from\n  # `global.manufacturers`, mapping every accelerator resource key onto that\n  # manufacturer's single credits resource so a queue can carry one credit budget. It\n  # is not stated in this string because a user copying the string to change one\n  # feature gate would silently drop the mapping the whole scheduling chain rests on.\n  # The `.sliced` multiplyBy leaks through unconsumed and the node-level `.sliced.*`\n  # counters pass straight through; `quotaCheckStrategy` above is what lets Kueue\n  # ignore them.\n#objectRetentionPolicies:\n#  workloads:\n#    afterFinished: null # null indicates infinite retention, 0s means no retention at all\n#    afterDeactivatedByKueue: null # null indicates infinite retention, 0s means no retention at all",
+              "default": "apiVersion: config.kueue.x-k8s.io/v1beta2\nkind: Configuration\nfeatureGates:\n  AssignQueueLabelsForPods: false\n  TopologyAwareScheduling: true\n  TASBalancedPlacement: true\n  # Lets TAS rank feasible nodes by a Pod's preferred node affinity, which is how a\n  # node-delivered model's Pods prefer the nodes already holding its weights (alpha in\n  # Kueue 0.18). It also honors any other author's preferred node affinity in a TAS\n  # queue, so setting it to false turns both off. A Kueue that does not know a gate\n  # refuses to start: check this one before bumping the bundled Kueue.\n  TASRespectNodeAffinityPreferred: true\n  # Enables resources.quotaCheckStrategy below (alpha in Kueue 0.18). The bundled\n  # controller image is always 0.18, so the gate is always available.\n  QuotaCheckStrategy: true\nhealth:\n  healthProbeBindAddress: :8081\nmetrics:\n  bindAddress: :8443\n# enableClusterQueueResources: true\nwebhook:\n  port: 9443\nleaderElection:\n  leaderElect: true\n  resourceName: c1f6bfd2.kueue.x-k8s.io\ncontroller:\n  groupKindConcurrency:\n    Job.batch: 5\n    Pod: 5\n    Workload.kueue.x-k8s.io: 5\n    LocalQueue.kueue.x-k8s.io: 1\n    ClusterQueue.kueue.x-k8s.io: 1\n    ResourceFlavor.kueue.x-k8s.io: 1\nclientConnection:\n  qps: 50\n  burst: 100\n#pprofBindAddress: :8083\n#waitForPodsReady:\n#  timeout: 5m\n#  recoveryTimeout: 3m\n#  blockAdmission: false\n#  requeuingStrategy:\n#    timestamp: Eviction\n#    backoffLimitCount: null # null indicates infinite requeuing\n#    backoffBaseSeconds: 60\n#    backoffMaxSeconds: 3600\n#manageJobsWithoutQueueName: true\n# The namespaces Kueue manages jobs in. Deliberately unset: the chart renders the\n# default as every namespace but kube-system and this release's own, which is what\n# lets the release install into any namespace \u2014 Kueue refuses to start when this\n# selector matches the namespace it runs in, and a subchart value cannot be\n# templated. State it to take the default over, and own that rule.\n#managedJobsNamespaceSelector:\n#  matchExpressions:\n#    - key: kubernetes.io/metadata.name\n#      operator: NotIn\n#      values: [ kube-system, gpustack-system ]\nintegrations:\n  frameworks:\n  - \"batch/job\"\n  - \"kubeflow.org/mpijob\"\n  - \"ray.io/rayjob\"\n  - \"ray.io/raycluster\"\n  - \"jobset.x-k8s.io/jobset\"\n  - \"trainer.kubeflow.org/trainjob\"\n  - \"kubeflow.org/paddlejob\"\n  - \"kubeflow.org/pytorchjob\"\n  - \"kubeflow.org/tfjob\"\n  - \"kubeflow.org/xgboostjob\"\n  - \"kubeflow.org/jaxjob\"\n  - \"workload.codeflare.dev/appwrapper\"\n  - \"pod\"\n  - \"deployment\"\n  - \"statefulset\"\n  - \"leaderworkerset.x-k8s.io/leaderworkerset\"\n#  externalFrameworks:\n#  - \"Foo.v1.example.com\"\n#fairSharing:\n#  preemptionStrategies: [LessThanOrEqualToFinalShare, LessThanInitialShare]\n#admissionFairSharing:\n#  usageHalfLifeTime: \"168h\" # 7 days\n#  usageSamplingInterval: \"5m\"\n#  resourceWeights: # optional, defaults to 1 for all resources if not specified\n#    cpu: 0    # if you want to completely ignore cpu usage\n#    memory: 0 # ignore completely memory usage\n#    example.com/gpu: 100 # and you care only about GPUs usage\nresources:\n  # Kueue is not the authoritative ledger in this operator \u2014 the Devices CR\n  # is. A ClusterQueue advertises exactly one coarse admission dimension (cpu\n  # for general pools, the manufacturer credits for accelerated pools), while a\n  # Workload still carries the Pod resources the queue does not cover: memory\n  # and ephemeral-storage on every pool, cpu on accelerated pools, and the\n  # node-level .sliced.* counters the scheduler/kubelet read. Check only the\n  # covered dimension and ignore the rest, instead of refusing to assign a\n  # flavor for an uncovered resource (which would mark the Workload inadmissible).\n  quotaCheckStrategy: IgnoreUndeclared\n  # `resources.transformations` is absent here on purpose: the chart renders it from\n  # `global.manufacturers`, mapping every accelerator resource key onto that\n  # manufacturer's single credits resource so a queue can carry one credit budget. It\n  # is not stated in this string because a user copying the string to change one\n  # feature gate would silently drop the mapping the whole scheduling chain rests on.\n  # The `.sliced` multiplyBy leaks through unconsumed and the node-level `.sliced.*`\n  # counters pass straight through; `quotaCheckStrategy` above is what lets Kueue\n  # ignore them.\n#objectRetentionPolicies:\n#  workloads:\n#    afterFinished: null # null indicates infinite retention, 0s means no retention at all\n#    afterDeactivatedByKueue: null # null indicates infinite retention, 0s means no retention at all",
               "description": "Kueue's controller_manager_config.yaml, delivered through the manager-config\nConfigMap. Two keys are absent on purpose and rendered by this chart instead, because\nHelm merges a subchart's values rather than templating them: `resources.transformations`,\nthe credits mapping derived from `global.manufacturers`, which a user copying this string\nmust not be able to drop silently; and `managedJobsNamespaceSelector`, whose default\nfollows the release namespace. Everything else is maintained here, and a selector stated\nhere still wins.",
               "title": "controllerManagerConfigYaml",
               "type": "string"
@@ -1200,7 +1200,7 @@
       "description": "Migration hook Jobs. A pre-install/pre-upgrade Job reaps a Kueue left stranded by an\ninterrupted teardown, and on an upgrade applies the vendored subcharts' CRDs, which Helm\nitself applies on install only. A post-upgrade Job retires the release records of the\nper-application releases these subcharts replaced and prunes what they left behind. Both run\nthe operator image, which bundles kubectl, helm and this chart; `helm upgrade --no-hooks`\nskips them.",
       "properties": {
         "image": {
-          "description": "Per-hook image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall back to the\nchart-level `image`. Overridable so an upgrade is never blocked by an operator tag that is\nnot mirrored yet — at the cost that the CRDs the hook applies are then the ones vendored by\nthe image it does run.",
+          "description": "Per-hook image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall back to the\nchart-level `image`. Overridable so an upgrade is never blocked by an operator tag that is\nnot mirrored yet \u2014 at the cost that the CRDs the hook applies are then the ones vendored by\nthe image it does run.",
           "required": [],
           "title": "image",
           "type": "object"
@@ -1238,11 +1238,59 @@
           "title": "kubeletDir",
           "type": "string"
         },
+        "networkPolicy": {
+          "description": "Restrict who may reach the model-manager's ports when the peer port is on.",
+          "properties": {
+            "scrapers": {
+              "description": "Whoever scrapes /metrics.",
+              "items": {
+                "type": "object"
+              },
+              "title": "scrapers",
+              "type": "array"
+            },
+            "extraIngress": {
+              "description": "Additional ingress rules, verbatim.",
+              "items": {
+                "type": "object"
+              },
+              "title": "extraIngress",
+              "type": "array"
+            }
+          },
+          "title": "networkPolicy",
+          "type": "object"
+        },
         "nodeSelector": {
           "description": "Node selector for the model-manager DaemonSet, merged over `global.nodeSelector`.",
           "required": [],
           "title": "nodeSelector",
           "type": "object"
+        },
+        "peerSync": {
+          "description": "Limits of the node-to-node sync, in effect when port is on.",
+          "properties": {
+            "maxServingStreams": {
+              "default": 8,
+              "description": "How many peer file answers a node serves at once.",
+              "title": "maxServingStreams",
+              "type": "integer"
+            },
+            "streamsPerSource": {
+              "default": 4,
+              "description": "How many requests a node opens to one peer at once.",
+              "title": "streamsPerSource",
+              "type": "integer"
+            }
+          },
+          "title": "peerSync",
+          "type": "object"
+        },
+        "port": {
+          "default": 0,
+          "description": "TCP port the node's published trees are served to the other nodes' plugins on, for node-to-node sync; 0 is off. When on, plugins authenticate each other with the projected ServiceAccount token (audience gpustack-model-peer), and the networkPolicy keeps tenant Pods off the port.",
+          "title": "port",
+          "type": "integer"
         },
         "registrar": {
           "properties": {
@@ -1448,7 +1496,7 @@
         "master": {
           "properties": {
             "affinity": {
-              "description": "Affinity for the NFD master, and the only way to spread its replicas across nodes: NFD\nrenders no topology spread constraints. Stated here because a spread knob a user cannot find\nin this file is a knob that does not exist, and because replacing it wholesale is what\nsetting it does.\n\nIt is NFD's own default — a preference for control-plane nodes — with one deliberate change:\nthe role label is matched with `Exists` rather than `In [\"\"]`. That label's value is a\nconvention, not an API: kubeadm and kind set it empty, k3s and RKE2 set it to \"true\", so a\nvalue test silently matches nothing on those and the preference quietly stops existing.\n`Exists` is also what every other control-plane matcher in this file uses, tolerations and\nboth CSI drivers included. Being stated pins the rest of the block: re-read NFD's default\nwhen bumping the subchart, as with every image tag here.",
+              "description": "Affinity for the NFD master, and the only way to spread its replicas across nodes: NFD\nrenders no topology spread constraints. Stated here because a spread knob a user cannot find\nin this file is a knob that does not exist, and because replacing it wholesale is what\nsetting it does.\n\nIt is NFD's own default \u2014 a preference for control-plane nodes \u2014 with one deliberate change:\nthe role label is matched with `Exists` rather than `In [\"\"]`. That label's value is a\nconvention, not an API: kubeadm and kind set it empty, k3s and RKE2 set it to \"true\", so a\nvalue test silently matches nothing on those and the preference quietly stops existing.\n`Exists` is also what every other control-plane matcher in this file uses, tolerations and\nboth CSI drivers included. Being stated pins the rest of the block: re-read NFD's default\nwhen bumping the subchart, as with every image tag here.",
               "properties": {
                 "nodeAffinity": {
                   "properties": {
@@ -1530,7 +1578,7 @@
             "config": {
               "properties": {
                 "restrictions": {
-                  "description": "What the NFD master is allowed to write. Every value here restates an NFD default,\nstated because the whole chain depends on it: labels, taints, annotations and extended\nresources all stay enabled, an existing label may be overwritten, and the labels a\nNodeFeature asks for are honoured — that last one is how a device-manager's detections\nreach its node.\n\n`nodeFeatureNamespaceSelector` is deliberately absent. Pinned to one namespace it makes\nthe master ignore every NodeFeature created anywhere else, which is exactly what taking\nover a cluster's existing NFD must not do: a vendor GPU operator keeps its NodeFeatures\nin its own namespace, and they are the features being adopted. Unset means every\nnamespace, so — together with the two permissive keys above — a NodeFeature anywhere can\ninfluence node labels; `denyNodeFeatureLabels` is the lever that tightens it.",
+                  "description": "What the NFD master is allowed to write. Every value here restates an NFD default,\nstated because the whole chain depends on it: labels, taints, annotations and extended\nresources all stay enabled, an existing label may be overwritten, and the labels a\nNodeFeature asks for are honoured \u2014 that last one is how a device-manager's detections\nreach its node.\n\n`nodeFeatureNamespaceSelector` is deliberately absent. Pinned to one namespace it makes\nthe master ignore every NodeFeature created anywhere else, which is exactly what taking\nover a cluster's existing NFD must not do: a vendor GPU operator keeps its NodeFeatures\nin its own namespace, and they are the features being adopted. Unset means every\nnamespace, so \u2014 together with the two permissive keys above \u2014 a NodeFeature anywhere can\ninfluence node labels; `denyNodeFeatureLabels` is the lever that tightens it.",
                   "properties": {
                     "allowOverwrite": {
                       "default": true,
@@ -1610,7 +1658,7 @@
             },
             "replicaCount": {
               "default": 1,
-              "description": "Number of NFD master replicas. The master is what turns a device-manager's detections into\nnode labels, so while it is down no node is ever (re)classified and the scheduling chain\nstalls for new or changed nodes. Above one, NFD's own chart adds `-enable-leader-election`\nfor you; the standbys watch without writing. NFD's templates render no topology spread\nconstraints, so spreading these replicas across nodes means setting `master.affinity` below —\nwhich replaces NFD's own preference for control-plane nodes rather than adding to it.",
+              "description": "Number of NFD master replicas. The master is what turns a device-manager's detections into\nnode labels, so while it is down no node is ever (re)classified and the scheduling chain\nstalls for new or changed nodes. Above one, NFD's own chart adds `-enable-leader-election`\nfor you; the standbys watch without writing. NFD's templates render no topology spread\nconstraints, so spreading these replicas across nodes means setting `master.affinity` below \u2014\nwhich replaces NFD's own preference for control-plane nodes rather than adding to it.",
               "title": "replicaCount",
               "type": "integer"
             },
@@ -1691,7 +1739,7 @@
                     },
                     "labelWhiteList": {
                       "default": "^(pci-|cpu-model\\.|system-os_release\\.|acceleratable)",
-                      "description": "Only the labels this chart consumes are published, so NFD does not cover the nodes\nin features nothing reads — `system-os_release.` excepted, which a vendor GPU operator\nreads.",
+                      "description": "Only the labels this chart consumes are published, so NFD does not cover the nodes\nin features nothing reads \u2014 `system-os_release.` excepted, which a vendor GPU operator\nreads.",
                       "title": "labelWhiteList",
                       "type": "string"
                     }
@@ -2027,7 +2075,7 @@
       "type": "object"
     },
     "worker": {
-      "description": "High availability. Every control-plane component this chart deploys elects a leader, so extra\nreplicas stand by instead of sharing the work: they buy failover, not throughput. A highly\navailable install raises the replica count of each one and enables the disruption budget that\ngoes with it — `worker`, `kueue.controllerManager`, `node-feature-discovery.master`, and the\n`controller` of both CSI drivers. Spreading those replicas across nodes is per-component and\neach key below says what its component supports; the cluster needs as many schedulable nodes as\nthe largest replica count for a hard spread to be satisfiable. Everything else here is a\nDaemonSet, one pod per node already. docs/operation/high-availability.md walks through it.",
+      "description": "High availability. Every control-plane component this chart deploys elects a leader, so extra\nreplicas stand by instead of sharing the work: they buy failover, not throughput. A highly\navailable install raises the replica count of each one and enables the disruption budget that\ngoes with it \u2014 `worker`, `kueue.controllerManager`, `node-feature-discovery.master`, and the\n`controller` of both CSI drivers. Spreading those replicas across nodes is per-component and\neach key below says what its component supports; the cluster needs as many schedulable nodes as\nthe largest replica count for a hard spread to be satisfiable. Everything else here is a\nDaemonSet, one pod per node already. docs/operation/high-availability.md walks through it.",
       "properties": {
         "affinity": {
           "description": "Affinity for the worker, replacing the default `preferred` pod anti-affinity that keeps\nreplicas off one node without ever making one unschedulable.",
@@ -2042,7 +2090,7 @@
           "type": "string"
         },
         "disableApplications": {
-          "description": "Applications the worker must not install at runtime, or `*` for all of them. This chart\ndeploys every one of them itself, so the default takes the worker out of that business\nentirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the\nlist makes the worker install a SECOND release of this same chart, whose render overlaps this\none's. Helm refuses an object another release owns, so that install fails and the worker's\nstartup with it. Handing a component back would mean disabling it here and in this chart's\nown switch for it, in step, through every upgrade — nothing checks that, which is why the\nsupported split is all or nothing. The worker installs applications only where no chart\ndeploys it, see\n[Installation Modes](https://github.com/gpustack/gpustack-operator/blob/main/docs/architecture/installation-modes.md).\nThe value is templated rather than appended through `extraArgs` because the flag accumulates across\noccurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,\n`node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`, `model-manager`.",
+          "description": "Applications the worker must not install at runtime, or `*` for all of them. This chart\ndeploys every one of them itself, so the default takes the worker out of that business\nentirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the\nlist makes the worker install a SECOND release of this same chart, whose render overlaps this\none's. Helm refuses an object another release owns, so that install fails and the worker's\nstartup with it. Handing a component back would mean disabling it here and in this chart's\nown switch for it, in step, through every upgrade \u2014 nothing checks that, which is why the\nsupported split is all or nothing. The worker installs applications only where no chart\ndeploys it, see\n[Installation Modes](https://github.com/gpustack/gpustack-operator/blob/main/docs/architecture/installation-modes.md).\nThe value is templated rather than appended through `extraArgs` because the flag accumulates across\noccurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,\n`node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`, `model-manager`.",
           "items": {
             "anyOf": [
               {
@@ -2165,7 +2213,7 @@
         },
         "strategyType": {
           "default": "Recreate",
-          "description": "Deployment strategy of the worker. The worker fronts the aggregated API and finishes its\nwhole install (`Prepare`) before it serves, so a `RollingUpdate` keeps the OLD replica\nanswering the old API until the new one turns Ready — which a failed install makes never.\nThe chart's `Recreate` takes the old replica down first: the API pauses during an upgrade\ninstead of serving a stale surface. `RollingUpdate` trades that pause for mixed-version\nserving — old and new replicas answer TOGETHER for the whole rollout, at any replica\ncount — so set it only where every upgrade pair you roll through is known to be\nAPI-compatible in both directions.",
+          "description": "Deployment strategy of the worker. The worker fronts the aggregated API and finishes its\nwhole install (`Prepare`) before it serves, so a `RollingUpdate` keeps the OLD replica\nanswering the old API until the new one turns Ready \u2014 which a failed install makes never.\nThe chart's `Recreate` takes the old replica down first: the API pauses during an upgrade\ninstead of serving a stale surface. `RollingUpdate` trades that pause for mixed-version\nserving \u2014 old and new replicas answer TOGETHER for the whole rollout, at any replica\ncount \u2014 so set it only where every upgrade pair you roll through is known to be\nAPI-compatible in both directions.",
           "enum": [
             "Recreate",
             "RollingUpdate"

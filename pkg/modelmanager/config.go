@@ -11,6 +11,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/manager"
+	"gpustack.ai/gpustack/pkg/modelmanager/peer"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/webserver"
@@ -25,6 +26,10 @@ type Config struct {
 	KubeletDir string
 	CacheRoot  string
 	CSISocket  string
+
+	// PeerSync, when not nil, serves this node's published trees to the other nodes' plugins and
+	// pulls from theirs.
+	PeerSync *peer.Sync
 }
 
 // Apply builds the plugin: its server, a controller manager whose cache watches only what the

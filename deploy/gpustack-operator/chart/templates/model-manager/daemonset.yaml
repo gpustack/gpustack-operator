@@ -8,6 +8,7 @@
 {{- $pluginDir := printf "%s/plugins/model.csi.gpustack.ai" $kubeletDir }}
 {{- $rootPath := .Values.modelManager.rootPath | trimSuffix "/" }}
 {{- $securePort := .Values.modelManager.securePort }}
+{{- $peerSync := and (kindIs "invalid" .Values.modelManager.port | not) (gt (.Values.modelManager.port | int) 0) }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -64,6 +65,17 @@ spec:
             - --kubelet-dir={{ $kubeletDir }}
             - --cache-root={{ $rootPath }}
             - --csi-socket={{ $pluginDir }}/csi.sock
+            {{- if $peerSync }}
+            {{- /* The other nodes' plugins pull this node's published trees over the peer port,
+              each other authenticated by the plugin's projected ServiceAccount token. */}}
+            - --peer-sync-port={{ .Values.modelManager.port }}
+            - --peer-sync-auth=token
+            - --peer-sync-service-account={{ $name }}
+            {{- with .Values.modelManager.peerSync }}
+            - --peer-sync-max-serving-streams={{ .maxServingStreams }}
+            - --peer-sync-streams-per-source={{ .streamsPerSource }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.modelManager.extraArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -92,6 +104,10 @@ spec:
           ports:
             - name: https
               containerPort: {{ $securePort }}
+            {{- if $peerSync }}
+            - name: peer-sync
+              containerPort: {{ .Values.modelManager.port }}
+            {{- end }}
           startupProbe:
             failureThreshold: 10
             periodSeconds: 5
@@ -127,6 +143,11 @@ spec:
               mountPath: {{ $rootPath }}
             - name: tmp-dir
               mountPath: /tmp
+            {{- if $peerSync }}
+            - name: peer-token
+              mountPath: /var/run/secrets/gpustack-model-peer
+              readOnly: true
+            {{- end }}
         - name: registrar
           image: {{ $registrarImage | quote }}
           imagePullPolicy: {{ $registrarPullPolicy }}
@@ -168,4 +189,14 @@ spec:
             type: Directory
         - name: tmp-dir
           emptyDir: {}
+        {{- if $peerSync }}
+        - name: peer-token
+          projected:
+            defaultMode: 420
+            sources:
+              - serviceAccountToken:
+                  audience: gpustack-model-peer
+                  expirationSeconds: 3600
+                  path: token
+        {{- end }}
 {{- end }}
