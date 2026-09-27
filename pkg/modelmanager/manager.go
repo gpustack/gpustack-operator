@@ -13,7 +13,9 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	core "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	toolscache "k8s.io/client-go/tools/cache"
 	klog "k8s.io/klog/v2"
 	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
@@ -21,15 +23,18 @@ import (
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
 	"gpustack.ai/gpustack/pkg/manager"
 	"gpustack.ai/gpustack/pkg/modelmanager/download"
 	"gpustack.ai/gpustack/pkg/modelmanager/driver"
 	"gpustack.ai/gpustack/pkg/modelmanager/gc"
 	"gpustack.ai/gpustack/pkg/modelmanager/materialize"
 	"gpustack.ai/gpustack/pkg/modelmanager/metrics"
+	"gpustack.ai/gpustack/pkg/modelmanager/peer"
 	"gpustack.ai/gpustack/pkg/modelmanager/report"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
 	"gpustack.ai/gpustack/pkg/modelstore"
+	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/utils/version"
@@ -44,6 +49,10 @@ type Manager struct {
 	NodeName   string
 	KubeletDir string
 	CSISocket  string
+
+	// PeerSync, when not nil, serves this node's published trees to the other nodes' plugins and
+	// lets the materializer pull from theirs.
+	PeerSync *peer.Sync
 
 	ready atomic.Bool
 }
@@ -89,6 +98,13 @@ func (m *Manager) Start(ctx context.Context) error {
 	collector.Watermarks = reporter.Watermarks
 	collector.Pinned = reporter.Pinned
 	materializer.Environment = reporter.Environment
+	if m.PeerSync != nil {
+		puller, err := m.newPeerPuller(reporter)
+		if err != nil {
+			return err
+		}
+		materializer.Peers = puller
+	}
 	materializer.Reserve = collector.Reserve
 	materializer.Changed = reporter.Trigger
 
@@ -112,6 +128,12 @@ func (m *Manager) Start(ctx context.Context) error {
 		klog.Info("starting controller manager")
 		return m.Manager.Start(ctx)
 	})
+
+	if m.PeerSync != nil {
+		gp.Go(func(ctx context.Context) error {
+			return m.servePeers(ctx)
+		})
+	}
 	gp.Go(func(ctx context.Context) error {
 		if err := m.Manager.WaitForReady(ctx); err != nil {
 			return fmt.Errorf("wait for manager ready: %w", err)
@@ -227,6 +249,66 @@ func (m *Manager) kubeletCap() (func(*workercore.NodeModelStoreKubelet, uint64) 
 		c := gc.KubeletCap(k, total)
 		return &c
 	}, nil
+}
+
+// newPeerPuller builds what the materializer pulls with: discovery over the API reader, whose
+// NodeModelStores say which nodes hold a digest, and a fetcher whose per-source bytes are
+// counted apart from the hub's. The Setting's switch is read per attempt, off the reporter's
+// current spec.
+func (m *Manager) newPeerPuller(reporter *report.Reporter) (*peer.Puller, error) {
+	client, err := peer.NewClient(m.PeerSync.Auth)
+	if err != nil {
+		return nil, err
+	}
+
+	return &peer.Puller{
+		Discover: func(ctx context.Context, digest string) ([]*peer.Source, error) {
+			if !reporter.PeerSyncEnabled() {
+				return nil, nil
+			}
+
+			return peer.Discover(ctx, m.Manager.CtrlManager.GetAPIReader(), peer.DiscoverOptions{
+				Namespace:        systemname.NamespaceName,
+				SelfNode:         m.NodeName,
+				Port:             m.PeerSync.Port,
+				StreamsPerSource: m.PeerSync.StreamsPerSource,
+				Client:           client,
+			}, digest)
+		},
+		StreamsPerSource: m.PeerSync.StreamsPerSource,
+		Received: func(node string, n int64) {
+			metrics.DownloadBytes.WithLabelValues("peer").Add(float64(n))
+		},
+	}, nil
+}
+
+// servePeers answers the other nodes' plugins on the peer port until ctx is done. The endpoints
+// go live only once the listener is up: until a tree is published this node has nothing to serve.
+func (m *Manager) servePeers(ctx context.Context) error {
+	lis, err := peer.Listen(m.PeerSync.Port, m.PeerSync.Auth)
+	if err != nil {
+		return err
+	}
+	admit, err := m.PeerSync.Auth.Admit(tokenReviews{cli: system.LoopbackKubeClient.Get()})
+	if err != nil {
+		return err
+	}
+	srv := &peer.Server{Store: m.Store, Admit: admit, MaxStreams: m.PeerSync.MaxServingStreams}
+	klog.InfoS("serving peers", "port", m.PeerSync.Port, "auth", m.PeerSync.Auth.Mode)
+
+	return srv.Serve(ctx, lis)
+}
+
+// tokenReviews reviews a peer request's bearer token with the API server, the way the worker's
+// status webhook learns who a token belongs to.
+type tokenReviews struct {
+	cli kubernetes.Interface
+}
+
+func (t tokenReviews) Create(
+	ctx context.Context, review *authenticationv1.TokenReview, opts meta.CreateOptions,
+) (*authenticationv1.TokenReview, error) {
+	return t.cli.AuthenticationV1().TokenReviews().Create(ctx, review, opts)
 }
 
 // serveCSI serves the Identity and Node services on socket until ctx is done.

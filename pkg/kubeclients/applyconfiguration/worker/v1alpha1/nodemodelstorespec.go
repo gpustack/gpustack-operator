@@ -11,6 +11,9 @@ package v1alpha1
 // connects could make it request any address. The plugin checks it again before using it, since a
 // hand edit bypasses the worker's checks.
 type NodeModelStoreSpecApplyConfiguration struct {
+	// PeerSync, when nil, defaults to enabled: the node's plugin may pull content the other
+	// nodes' plugins hold published.
+	PeerSyncEnabled *bool `json:"peerSyncEnabled,omitempty"`
 	// Watermarks bound the cache filesystem's usage.
 	Watermarks *NodeModelStoreWatermarksApplyConfiguration `json:"watermarks,omitempty"`
 	// Download limits the node's downloads.
@@ -45,6 +48,14 @@ type NodeModelStoreSpecApplyConfiguration struct {
 // apply.
 func NodeModelStoreSpec() *NodeModelStoreSpecApplyConfiguration {
 	return &NodeModelStoreSpecApplyConfiguration{}
+}
+
+// WithPeerSyncEnabled sets the PeerSyncEnabled field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PeerSyncEnabled field is set to the value of the last call.
+func (b *NodeModelStoreSpecApplyConfiguration) WithPeerSyncEnabled(value bool) *NodeModelStoreSpecApplyConfiguration {
+	b.PeerSyncEnabled = &value
+	return b
 }
 
 // WithWatermarks sets the Watermarks field in the declarative configuration to the given value

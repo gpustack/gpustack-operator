@@ -45,6 +45,12 @@ var _ runtime.Object = (*NodeModelStore)(nil)
 // connects could make it request any address. The plugin checks it again before using it, since a
 // hand edit bypasses the worker's checks.
 type NodeModelStoreSpec struct {
+	// PeerSync, when nil, defaults to enabled: the node's plugin may pull content the other
+	// nodes' plugins hold published.
+	//
+	// +optional
+	PeerSyncEnabled *bool `json:"peerSyncEnabled,omitempty" protobuf:"bytes,7,opt,name=peerSyncEnabled"`
+
 	// Watermarks bound the cache filesystem's usage.
 	//
 	// +required
@@ -262,11 +268,12 @@ type NodeModelStoreModel struct {
 	// +k8s:validation:minimum=0
 	DownloadedBytes int64 `json:"downloadedBytes,omitempty" protobuf:"varint,9,opt,name=downloadedBytes"`
 
-	// Source is where the content's bytes come from: Hub, the model hub. It names no repository or
-	// endpoint. Content published before the field existed has none.
+	// Source is where the content's bytes come from: Hub, the model hub, or Peer, the plugins of
+	// other nodes. It names no repository or endpoint. Content published before the field existed
+	// has none.
 	//
 	// +optional
-	// +k8s:validation:enum=["Hub"]
+	// +k8s:validation:enum=["Hub","Peer"]
 	Source NodeModelStoreModelSource `json:"source,omitempty" protobuf:"bytes,10,opt,name=source,casttype=NodeModelStoreModelSource"` // nolint: lll
 
 	// Referenced says some Pod mounts the content. Which Pod is never recorded.
@@ -307,6 +314,9 @@ type NodeModelStoreModelSource string
 
 // NodeModelStoreModelSourceHub is a download from the model hub.
 const NodeModelStoreModelSourceHub NodeModelStoreModelSource = "Hub"
+
+// NodeModelStoreModelSourcePeer is a download from the plugins of other nodes.
+const NodeModelStoreModelSourcePeer NodeModelStoreModelSource = "Peer"
 
 // NodeModelStoreModelState is where a digest is on a node.
 // +enum

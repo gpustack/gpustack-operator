@@ -18,6 +18,7 @@ stores nothing.
 - [Authorization](#authorization)
 - [Capability map for GPUStack server](#capability-map-for-gpustack-server)
 - [Requirements and limits](#requirements-and-limits)
+- [Table columns](#table-columns)
 
 ## The v1 views
 
@@ -146,3 +147,14 @@ By capability, not by field.
 the same way.
 
 **Next** → [Node Model Store Reference](node-model-store.md)
+
+## Table columns
+
+The `v1` views' printer columns are rendered by the aggregated API server's own
+`TableConvertor` (`NewJSONPathTemplateTableConvertor`, under `pkg/worker/extensionapis/worker/`),
+not by the CRDPrinterColumn machinery — so the columns the `v1alpha1` CRD lists for the same
+resources are a different, smaller set, and a client asking either version gets the columns
+documented above rather than the CRD's.
+
+**See also** — [Node-to-Node Sync Reference](node-peer-sync.md) for where a node's bytes come from,
+and [Node Model Store Reference](node-model-store.md) for the status the views project.

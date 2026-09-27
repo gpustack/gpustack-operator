@@ -10952,10 +10952,10 @@ func schema_gpustack_api_worker_v1alpha1_NodeModelStoreModel(ref common.Referenc
 					},
 					"source": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Source is where the content's bytes come from: Hub, the model hub. It names no repository or endpoint. Content published before the field existed has none.\n\n\nPossible enum values:\n - `\"Hub\"` is a download from the model hub.",
+							Description: "Source is where the content's bytes come from: Hub, the model hub, or Peer, the plugins of other nodes. It names no repository or endpoint. Content published before the field existed has none.\n\n\nPossible enum values:\n - `\"Hub\"` is a download from the model hub.\n - `\"Peer\"` is a download from the plugins of other nodes.",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Hub"},
+							Enum:        []interface{}{"Hub", "Peer"},
 						},
 					},
 					"referenced": {
@@ -11007,6 +11007,13 @@ func schema_gpustack_api_worker_v1alpha1_NodeModelStoreSpec(ref common.Reference
 				Description: "NodeModelStoreSpec is the node's effective configuration, the worker's merge of the Settings.\n\nNo tenant-writable object feeds it: a tenant who could choose where a privileged node process connects could make it request any address. The plugin checks it again before using it, since a hand edit bypasses the worker's checks.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
+					"peerSyncEnabled": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PeerSync, when nil, defaults to enabled: the node's plugin may pull content the other nodes' plugins hold published.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
 					"watermarks": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Watermarks bound the cache filesystem's usage.",

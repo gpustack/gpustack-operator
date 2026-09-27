@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"gpustack.ai/gpustack/pkg/modelmanager/download"
 	"gpustack.ai/gpustack/pkg/modelmanager/driver"
 	"gpustack.ai/gpustack/pkg/modelmanager/metrics"
+	"gpustack.ai/gpustack/pkg/modelmanager/peer"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
 )
 
@@ -65,7 +67,10 @@ type Materializer struct {
 	Reserve func(ctx context.Context, hex string, sizeBytes int64, written func() int64) (func(), error)
 	// Changed is told a digest's state changed, for status.
 	Changed func(hex string)
-	Now     func() time.Time
+	// Peers, when enabled, offers the content the other nodes' plugins hold published; a file
+	// they cannot deliver whole goes to the hub. Nil pulls from the hub only.
+	Peers *peer.Puller
+	Now   func() time.Time
 	// Base is the context every attempt derives from, so stopping the plugin stops its downloads;
 	// nil is context.Background.
 	Base context.Context
@@ -87,6 +92,7 @@ type job struct {
 	cancel   context.CancelCauseFunc
 	asked    atomic.Int64 // unix nanoseconds of the last mount that asked
 	received atomic.Int64
+	peer     atomic.Int64 // how much of what was received came from the other nodes
 	total    atomic.Int64
 
 	mu sync.Mutex
@@ -177,11 +183,21 @@ func (m *Materializer) Progress() map[string]DownloadProgress {
 	out := make(map[string]DownloadProgress, len(m.jobs))
 	for hex, j := range m.jobs {
 		out[hex] = DownloadProgress{
-			DownloadedBytes: j.received.Load(), SizeBytes: j.total.Load(), Source: workercore.NodeModelStoreModelSourceHub,
+			DownloadedBytes: j.received.Load(), SizeBytes: j.total.Load(), Source: j.source(),
 		}
 	}
 
 	return out
+}
+
+// source says where the attempt's bytes have mostly come from: the other nodes' plugins once
+// they delivered at least half, the hub before that and when they delivered nothing.
+func (j *job) source() workercore.NodeModelStoreModelSource {
+	if 2*j.peer.Load() > j.received.Load() {
+		return workercore.NodeModelStoreModelSourcePeer
+	}
+
+	return workercore.NodeModelStoreModelSourceHub
 }
 
 // Downloading returns the digests being materialized.
@@ -385,6 +401,7 @@ func (m *Materializer) fromSource(
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(fileParallelism)
+	manifestDigest := "sha256:" + j.hex
 	for i, e := range manifest.Entries {
 		f := download.File{
 			Path: e.Path, Size: e.Size, Digest: e.Digest,
@@ -398,6 +415,10 @@ func (m *Materializer) fromSource(
 			if err := os.MkdirAll(filepath.Dir(f.Dest), 0o755); err != nil {
 				return err
 			}
+			if m.pullFromPeers(gctx, j, manifestDigest, f) {
+				return nil
+			}
+
 			return dl.Fetch(gctx, f)
 		})
 	}
@@ -413,11 +434,48 @@ func (m *Materializer) fromSource(
 		return err
 	}
 
+	full := peer.Listing{Digest: manifest.Digest}
+	for _, e := range manifest.Entries {
+		full.Entries = append(full.Entries, peer.ManifestFile{Path: e.Path, Size: e.Size, Digest: e.Digest})
+	}
+	if b, err := json.Marshal(full); err == nil {
+		if err := os.WriteFile(filepath.Join(a.Dir(), "manifest.json"), b, 0o600); err != nil {
+			return fmt.Errorf("store the published manifest: %w", err)
+		}
+	}
+
 	return a.Publish(store.Marker{
 		Digest: manifest.Digest, ManifestFormat: modelartifact.ManifestHeader,
 		SizeBytes: manifest.SizeBytes, FileCount: manifest.FileCount, PublishedTime: m.now(),
-		Source: store.SourceHub,
+		Source: string(j.source()),
 	})
+}
+
+// pullFromPeers fills f from the other nodes that hold the digest, and says whether it
+// succeeded. A failed attempt's bytes are withdrawn from the count rather than left in it: the
+// hub fallback starts the file over, nothing on disk being hashed for them yet.
+func (m *Materializer) pullFromPeers(ctx context.Context, j *job, digest string, f download.File) bool {
+	if !m.Peers.Enabled() {
+		return false
+	}
+	var fromPeers atomic.Int64
+	withPeerCounting := f
+	withPeerCounting.Received = func(n int64) {
+		fromPeers.Add(n)
+		if f.Received != nil {
+			f.Received(n)
+		}
+	}
+	if err := m.Peers.FetchFile(ctx, digest, withPeerCounting); err != nil {
+		j.received.Add(-fromPeers.Load())
+		klog.V(1).InfoS("a file the peers could not deliver goes to the hub", "digest", digest,
+			"path", f.Path, "error", err.Error())
+
+		return false
+	}
+	j.peer.Add(fromPeers.Load())
+
+	return true
 }
 
 // record writes the attempt's outcome to the ledger: a success clears the failures, a failure backs

@@ -1,0 +1,51 @@
+{{- if and .Values.modelManager.enabled (gt (.Values.modelManager.port | int) 0) .Values.modelManager.networkPolicy.enabled }}
+{{- $name := include "gpustack-operator.modelManager.fullname" . }}
+{{- $peerPort := .Values.modelManager.port }}
+{{- $securePort := .Values.modelManager.securePort }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-peer
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.modelManager.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gpustack-operator.modelManager.selectorLabels" . | nindent 6 }}
+  # Ingress only: the policy is about who talks to the plugin, not what the plugin talks to.
+  policyTypes:
+    - Ingress
+  ingress:
+    # The plugins pull each other's published trees on the peer port.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gpustack-operator.modelManager.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ $peerPort }}
+    # The worker reads the running downloads on the secure port for the progress subresource.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gpustack-operator.worker.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ $securePort }}
+    {{- with .Values.modelManager.networkPolicy.scrapers }}
+    # Whoever scrapes /metrics.
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $securePort }}
+    {{- end }}
+    {{- with .Values.modelManager.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

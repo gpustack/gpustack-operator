@@ -375,9 +375,9 @@ func TestKubeletCap(t *testing.T) {
 		},
 		{name: "image collection is the lowest", kubelet: &workercore.NodeModelStoreKubelet{ImageGCHighThresholdPercent: ptr.To[int32](70)}, want: 65},
 		{
-			name:    "a quantity at or above the filesystem is not a share of it, so kubelet's default applies",
+			name:    "an unreachable quantity threshold can never fire, so the cap is floored",
 			kubelet: &workercore.NodeModelStoreKubelet{NodefsAvailable: "1000Gi", ImagefsAvailable: "2000Gi"},
-			want:    80, wantSource: "nodefs.available 1000Gi is not below the filesystem's",
+			want:    2, wantSource: "nodefs.available 1000Gi is not below the filesystem's 1073741824000 bytes and can never fire",
 		},
 		{
 			name:    "a threshold that cannot be read takes the default",

@@ -6484,6 +6484,11 @@ func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinit
 											},
 											Nullable: true,
 										},
+										"peerSyncEnabled": {
+											Description: "PeerSync, when nil, defaults to enabled: the node's plugin may pull content the other\nnodes' plugins hold published.",
+											Type:        "boolean",
+											Nullable:    true,
+										},
 										"pinned": {
 											Description: "Pinned lists the manifest digests the node must retain: the union of the prefetches whose\nretention pins them and whose target set holds this node. A pinned digest is never a\ncollection candidate, though it still counts toward usage. The prefetch controller writes\nthe field and the configuration reconciler carries it over untouched, so the two never\noverwrite each other's work on the same object.",
 											Type:        "array",
@@ -6672,11 +6677,14 @@ func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinit
 															Format:      "int64",
 														},
 														"source": {
-															Description: "Source is where the content's bytes come from: Hub, the model hub. It names no repository or\nendpoint. Content published before the field existed has none.",
+															Description: "Source is where the content's bytes come from: Hub, the model hub, or Peer, the plugins of\nother nodes. It names no repository or endpoint. Content published before the field existed\nhas none.",
 															Type:        "string",
 															Enum: []v1.JSON{
 																{
 																	Raw: []byte(`"Hub"`),
+																},
+																{
+																	Raw: []byte(`"Peer"`),
 																},
 															},
 														},

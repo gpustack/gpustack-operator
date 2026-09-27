@@ -122,6 +122,13 @@ func (s *Store) PublishedTree(hex string) string {
 	return filepath.Join(s.root, publishedDir, hex, treeDir)
 }
 
+// PublishedManifestPath is where a published tree's manifest file lives, beside the marker: the
+// record a peer's listing answers with, stored by the publish that created the tree. A tree
+// published before manifests were stored has none.
+func (s *Store) PublishedManifestPath(hex string) string {
+	return filepath.Join(s.root, publishedDir, hex, "manifest.json")
+}
+
 // Marker is a published tree's record.
 type Marker struct {
 	// Digest is the manifest digest the tree was verified against.
