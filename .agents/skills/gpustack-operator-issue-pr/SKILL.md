@@ -13,6 +13,10 @@ makes the PR title `main`'s commit subject, and `ci.yml`'s changelog parses exac
 **Nothing enforces this.** No hook refuses a non-compliant filing and no workflow rejects a title, so
 this page is the whole of the convention — read it before you file, not after.
 
+**File in English.** Titles, bodies and release notes are English, whatever language the surrounding
+conversation ran in. The repository's history, docs and review threads are English; a filing in
+another language cannot ride the changelog or be reviewed by the maintainers.
+
 ## The mechanism you must know
 
 The prefix, label and type in an issue template's frontmatter are applied by GitHub's **web**
