@@ -22,9 +22,10 @@ const (
 	// is honest, where naming a number this operator did not read would not be.
 	modelDeploymentKVLeaseWindow = "30s"
 
-	// _PodReasonEvicted is the Pod status reason the kubelet sets when it evicts a Pod under node
-	// pressure. Kueue preemption arrives as an ordinary deletion instead, so both paths are covered
-	// by watching what the Pod says about itself.
+	// _PodReasonEvicted is the Pod status reason the kubelet sets when it evicts a Pod, whether
+	// under node pressure or for a local-storage limit the Pod exceeded. Kueue preemption arrives
+	// as an ordinary deletion instead, so both paths are covered by watching what the Pod says
+	// about itself.
 	_PodReasonEvicted = "Evicted"
 )
 
@@ -89,14 +90,20 @@ func modelDeploymentReplicaDepartures(pods []core.Pod) []modelDeploymentReplicaD
 
 		switch {
 		case pod.Status.Reason == _PodReasonEvicted:
+			// The kubelet's message is the only record of why the eviction happened: the evicted
+			// container's logs are gone with the eviction.
+			why := ""
+			if pod.Status.Message != "" {
+				why = " (" + pod.Status.Message + ")"
+			}
 			departures = append(departures, modelDeploymentReplicaDeparture{
 				pod:    pod.Name,
 				reason: modelDeploymentEventReplicaEvicted,
 				message: fmt.Sprintf(
-					"%s was evicted; its cached blocks are lost to its siblings, and any KV "+
+					"%s was evicted%s; its cached blocks are lost to its siblings, and any KV "+
 						"lease it holds lapses after the %s kv_lease_duration window, failing the "+
 						"requests still waiting on them",
-					modelDeploymentPodDescription(pod), modelDeploymentKVLeaseWindow),
+					modelDeploymentPodDescription(pod), why, modelDeploymentKVLeaseWindow),
 			})
 		case pod.DeletionTimestamp != nil:
 			departures = append(departures, modelDeploymentReplicaDeparture{
