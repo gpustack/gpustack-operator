@@ -41,6 +41,7 @@ CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${CASES_DIR}/_model-hub-lib.sh"
 
 NS="${1:?usage: case-111.sh <NS>}"
+P=c111
 PEER_PORT=32446
 FAILS=0
 ROWS=()
@@ -70,10 +71,11 @@ if [ "$(setting_get model-store-peer-sync)" != "true" ]; then
 fi
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-counter() { # counter <pod> <source> — the plugin's byte counter for one source, empty when 0.
-  kubectl -n "$NS" exec "$1" -c main -- curl -sk "https://127.0.0.1:${PEER_PORT}/" >/dev/null 2>&1 || true
-  kubectl -n "$NS" exec "$1" -c main -- curl -sk "https://127.0.0.1:32444/metrics" 2>/dev/null |
-    grep "download_bytes_total{source=\"$2\"}" | awk '{print $2}' | head -1
+counter() { # counter <node> <source> — the byte counter of the plugin pod ON that node.
+  local node="$1" source="$2" pod
+  pod="$(kubectl -n "$NS" get pods -l app.kubernetes.io/component=model-manager --field-selector "spec.nodeName=$node" -o jsonpath='{.items[0].metadata.name}')"
+  kubectl -n "$NS" exec "$pod" -c main -- curl -sk "https://127.0.0.1:32444/metrics" 2>/dev/null |
+    grep "download_bytes_total{source=\"$source\"}" | awk '{print $2}' | head -1
 }
 wait_ready() { # wait_ready <node> <artifact> — until the node lists the artifact's digest Ready.
   local digest="$1" node="$2" i=0 state=""
@@ -113,37 +115,56 @@ spec:
 EOF
 }
 
-start_model_hub "$NS" "e2e.gpustack.ai/model-hub=true"
-start_repo "$NS" "peer-e2e/repo" 1200
-kubectl -n "$NS" apply -f - >/dev/null <<EOF
-apiVersion: worker.gpustack.ai/v1alpha1
-kind: ModelArtifact
-metadata:
-  name: c111-weights
-  labels: {e2e.gpustack.ai/case: "111"}
-spec:
-  huggingFace:
-    repository: peer-e2e/repo
-EOF
-for i in $(seq 1 30); do
-  [ -n "$(kubectl -n "$NS" get modelartifacts.v1alpha1.worker.gpustack.ai c111-weights -o jsonpath='{.status.resolved.manifestDigest}' 2>/dev/null)" ] && break
-  sleep 3
-done
+REPOS="$(python3 -c "
+import json
+mib = 1 << 20
+print(json.dumps({
+  'peer-e2e/repo': {'files': {'config.json': {'size': 300}, 'tokenizer.json': {'size': 3000},
+                              'model.safetensors': {'size': 5 * mib, 'lfs': True}}}}))")"
+HUB_URL="$(mh_deploy "$NS" "${P}-hub" "$REPOS")"
+setting_set model-artifact-huggingface-endpoint "$HUB_URL"
+settings_settle
+artifact "$NS" "${P}-weights" peer-e2e/repo "" 111
 
 echo "[case-111] seed: $SEED pulls from the hub"
-mount_pod "$SEED" c111-weights
-SEED_POD="$(kubectl -n "$NS" get pods -l e2e.gpustack.ai/case=111 --field-selector "spec.nodeName=$SEED" -o jsonpath='{.items[0].metadata.name}')"
-DIGEST="$(kubectl -n "$NS" get modelartifacts.v1alpha1.worker.gpustack.ai c111-weights -o jsonpath='{.status.resolved.manifestDigest}')"
+HUB_BASE="$(counter "$SEED" hub)"; HUB_BASE="${HUB_BASE:-0}"
+kubectl -n "$NS" delete pod "c111-mount-$SEED" --ignore-not-found --wait=true --timeout=120s >/dev/null 2>&1
+SEED_PLUGIN="$(kubectl -n "$NS" get pods -l app.kubernetes.io/component=model-manager --field-selector "spec.nodeName=$SEED" -o jsonpath='{.items[0].metadata.name}')"
+HEX="$(kubectl -n "$NS" get modelartifacts.v1alpha1.worker.gpustack.ai ${P}-weights -o jsonpath='{.status.resolved.manifestDigest}' | sed 's/^sha256://')"
+if ! kubectl -n "$NS" exec "$SEED_PLUGIN" -c main -- rm -rf "/var/lib/gpustack/models/published/$HEX"; then
+  echo "[case-111] could not clear the seed's published tree; NOTHING WAS VERIFIED"
+  exit 2
+fi
+kubectl -n "$NS" delete pod "$SEED_PLUGIN" >/dev/null 2>&1
+for i in $(seq 1 30); do
+  SEED_PLUGIN="$(kubectl -n "$NS" get pods -l app.kubernetes.io/component=model-manager --field-selector "spec.nodeName=$SEED" -o jsonpath='{.items[0].metadata.name}')"
+  kubectl -n "$NS" get pod "$SEED_PLUGIN" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null | grep -q true && break
+  sleep 5
+done
+mount_pod "$SEED" "${P}-weights"
+DIGEST="$(kubectl -n "$NS" get modelartifacts.v1alpha1.worker.gpustack.ai ${P}-weights -o jsonpath='{.status.resolved.manifestDigest}')"
 if wait_ready "$DIGEST" "$SEED"; then
   record PASS "seed" "the seed node pulled from the hub and is Ready"
 else
   record FAIL "seed" "the seed node never reached Ready"
 fi
-SEED_HUB="$(counter "$SEED_POD" hub)"
-SEED_PEER="$(counter "$SEED_POD" peer)"
+SEED_HUB="$(counter "$SEED" hub)"
+SEED_PEER="$(counter "$SEED" peer)"
+TOTAL_BYTES="$(kubectl get nodemodelstores.v1alpha1.worker.gpustack.ai "$SEED" -o jsonpath="{.status.models[?(@.digest=='$DIGEST')].sizeBytes}" 2>/dev/null)"
+# A plugin restart resets the counter to zero mid-measurement; in that case the attempt's
+# pull is exactly what the reset counter now shows.
+# The fresh reset restarts the plugin, so its counter reads this attempt's pull alone:
+# the counter must equal the manifest total.
+if [ -n "$SEED_HUB" ] && awk -v a="$SEED_HUB" -v b="${TOTAL_BYTES:-0}" 'BEGIN{exit !(a+0 >= b*0.999 && a+0 <= b*1.001)}'; then
+  record PASS "seed-hub-bytes" "the seed pulled $SEED_HUB bytes from the hub, matching the manifest total ($TOTAL_BYTES)"
+else
+  record FAIL "seed-hub-bytes" "the seed hub counter ($SEED_HUB) does not match the manifest total (${TOTAL_BYTES:-0})"
+fi
 
 echo "[case-111] pull: $COLD materializes the same digest"
-mount_pod "$COLD" c111-weights
+PEER_BASE="$(counter "$COLD" peer)"; PEER_BASE="${PEER_BASE:-0}"
+HUB_BASE="$(counter "$COLD" hub)"; HUB_BASE="${HUB_BASE:-0}"
+mount_pod "$COLD" "${P}-weights"
 COLD_POD="$(kubectl -n "$NS" get pods -l e2e.gpustack.ai/case=111 --field-selector "spec.nodeName=$COLD" -o jsonpath='{.items[0].metadata.name}')"
 if wait_ready "$DIGEST" "$COLD"; then
   record PASS "pull" "the cold node reached Ready"
@@ -156,13 +177,20 @@ if [ "$COLD_STATE" = "Peer" ]; then
 else
   record FAIL "source" "the cold node's entry says $COLD_STATE, want Peer"
 fi
-COLD_HUB="$(counter "$COLD_POD" hub)"
-if [ -z "$COLD_HUB" ]; then
-  record PASS "hub-bytes" "the cold node's hub counter stayed at zero"
+COLD_PEER="$(counter "$COLD" peer)"
+COLD_HUB="$(counter "$COLD" hub)"
+PEER_DELTA="$(awk -v a="$COLD_PEER" -v b="$PEER_BASE" 'BEGIN{print a-b}')"
+HUB_DELTA="$(awk -v a="$COLD_HUB" -v b="$HUB_BASE" 'BEGIN{print a-b}')"
+if [ -n "$COLD_PEER" ] && awk -v a="$PEER_DELTA" -v b="${TOTAL_BYTES:-0}" 'BEGIN{exit !(a+0 >= b*0.999 && a+0 <= b*1.001)}'; then
+  record PASS "peer-bytes" "this attempt pulled $PEER_DELTA bytes from the peers (counter ${COLD_PEER:-0}, base ${PEER_BASE:-0}), matching the manifest total ($TOTAL_BYTES)"
 else
-  record FAIL "hub-bytes" "the cold node pulled $COLD_HUB bytes from the hub"
+  record FAIL "peer-bytes" "the attempt's peer delta ($PEER_DELTA; counter ${COLD_PEER:-0}, base ${PEER_BASE:-0}) does not match the manifest total (${TOTAL_BYTES:-0})"
 fi
-COLD_PEER="$(counter "$COLD_POD" peer)"
+if awk -v a="$HUB_DELTA" 'BEGIN{exit !(a+0 == 0)}'; then
+  record PASS "hub-bytes" "the cold node's hub counter delta stayed at zero ($HUB_DELTA)"
+else
+  record FAIL "hub-bytes" "the cold node pulled $HUB_DELTA bytes from the hub"
+fi
 
 echo "[case-111] tenant isolation: a tenant pod cannot reach the peer port"
 HOTIP="$(kubectl -n "$NS" get pod "$COLD_POD" -o jsonpath='{.status.podIP}')"
