@@ -689,3 +689,30 @@ func TestModelDeploymentDeliveryWaitClears(t *testing.T) {
 		})
 	}
 }
+
+// TestModelDeploymentArtifactImageDelivery reconciles a deployment against a resolved image
+// artifact: the replicas mount the image volume, the weights read as not mounted yet, and the
+// status names the Image delivery.
+func TestModelDeploymentArtifactImageDelivery(t *testing.T) {
+	imageArtifact := artifactFixture("models", true, true)
+	imageArtifact.Spec.Source = workercore.ModelArtifactSource{
+		Image: &workercore.ModelArtifactImageSource{Reference: testImageReference},
+	}
+
+	cli := newModelDeploymentClient(artifactDeploymentFixture(1), newRenderInstanceType(), imageArtifact)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	pods := listReplicas(t, cli)
+	require.Len(t, pods, 1)
+	vol := findVolume(&pods[0], modelDeploymentModelVolumeName)
+	require.NotNil(t, vol)
+	require.NotNil(t, vol.Image, "the weights are an image volume")
+	assert.Equal(t, testImageReference, vol.Image.Reference)
+	assert.Nil(t, findVolume(&pods[0], modelDeploymentModelCacheVolumeName))
+
+	md := getModelDeployment(t, cli)
+	assert.Equal(t, "WeightsNotMounted", ModelDeploymentConditionWeightsReady.GetReason(md))
+	require.NotNil(t, md.Status.Model)
+	assert.Equal(t, workercore.ModelDeploymentModelDeliveryImage, md.Status.Model.Delivery)
+}

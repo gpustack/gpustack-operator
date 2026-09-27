@@ -25,6 +25,14 @@ func TestModelDeploymentKVIdentity(t *testing.T) {
 		ma.UID = types.UID(uid)
 		return ma
 	}
+	image := func(uid string) *workercore.ModelArtifact {
+		ma := artifactFixture("models", true, true)
+		ma.Spec.Source = workercore.ModelArtifactSource{Image: &workercore.ModelArtifactImageSource{
+			Reference: testImageReference,
+		}}
+		ma.UID = types.UID(uid)
+		return ma
+	}
 	cases := []struct {
 		name string
 		a, b *workercore.ModelArtifact
@@ -34,6 +42,8 @@ func TestModelDeploymentKVIdentity(t *testing.T) {
 		{name: "two digests are two", a: hub(testArtifactDigest), b: hub("sha256:" + strings.Repeat("2", 64))},
 		{name: "one claim artifact is one identity", a: claim("uid-a"), b: claim("uid-a"), same: true},
 		{name: "two claim artifacts are two, even on one claim", a: claim("uid-a"), b: claim("uid-b")},
+		{name: "one image artifact is one identity", a: image("uid-a"), b: image("uid-a"), same: true},
+		{name: "two image artifacts naming one image are two, the UID stands in for no digest", a: image("uid-a"), b: image("uid-b")},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

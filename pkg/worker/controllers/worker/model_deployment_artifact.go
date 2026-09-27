@@ -41,7 +41,7 @@ const (
 // A nil one is a deployment that names no artifact, which renders exactly what it rendered before
 // the field existed.
 type ModelDeploymentArtifactRender struct {
-	// Delivery is Pvc, Engine or Node.
+	// Delivery is Pvc, Engine, Node or Image.
 	Delivery workercore.ModelDeploymentModelDelivery
 
 	// ArtifactName, ArtifactUID and ManifestDigest are what a node-delivered volume names, as hints
@@ -53,6 +53,10 @@ type ModelDeploymentArtifactRender struct {
 	// ClaimName and Path are a claim artifact's claim and the directory inside it.
 	ClaimName string
 	Path      string
+
+	// ImageReference is an image artifact's digest-pinned reference, rendered as a Kubernetes image
+	// volume that kubelet pulls and mounts read-only.
+	ImageReference string
 
 	// Repository and Revision are a hub artifact's repository and resolved commit, SecretName the
 	// Secret holding its token or "", and SizeBytes its manifest's total size.
@@ -106,6 +110,18 @@ func (a *ModelDeploymentArtifactRender) volumes(takeOver bool) ([]core.Volume, [
 			}}, []core.VolumeMount{{
 				Name: modelDeploymentModelVolumeName, MountPath: ModelDeploymentModelMountPath,
 				SubPath: a.Path, ReadOnly: true,
+			}}
+	case a.Delivery == workercore.ModelDeploymentModelDeliveryImage:
+		// The pull policy is left at its default: a digest-pinned reference defaults to
+		// IfNotPresent, so a node that already holds the image does not fetch it again. No cache
+		// volume, no download environment: kubelet's own image store is the whole delivery.
+		return []core.Volume{{
+				Name: modelDeploymentModelVolumeName,
+				VolumeSource: core.VolumeSource{Image: &core.ImageVolumeSource{
+					Reference: a.ImageReference,
+				}},
+			}}, []core.VolumeMount{{
+				Name: modelDeploymentModelVolumeName, MountPath: ModelDeploymentModelMountPath, ReadOnly: true,
 			}}
 	case takeOver:
 		return nil, nil
