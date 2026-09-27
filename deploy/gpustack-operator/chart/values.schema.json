@@ -435,7 +435,7 @@
             },
             "dnsPolicy": {
               "default": "ClusterFirstWithHostNet",
-              "description": "DNS policy of the S3 node pods. `ClusterFirstWithHostNet` is what lets an in-cluster\nobject store endpoint resolve from a host-networked mount.",
+              "description": "DNS policy of the S3 node pods. It governs the node pod's own containers only: the default\nmounter (geesefs) runs as a systemd unit on the host and resolves the volume's endpoint with\nthe host resolver, so an in-cluster object store endpoint must be written as a ClusterIP (or\na name the host resolves) unless the mount runs in-container with `--no-systemd`.",
               "enum": [
                 "Default",
                 "ClusterFirst",
