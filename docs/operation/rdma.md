@@ -169,8 +169,24 @@ Two fields, in the kubelet's own `KubeletConfiguration`:
 
 | Field | Default | What to set |
 |---|---|---|
-| `topologyManagerPolicy` | `none` — the hint is discarded | `single-numa-node` or `restricted`, the two that gate admission on the hint; [what each of the four does](preflight.md#reading-the-result) |
-| `topologyManagerScope` | `container` — each container is aligned on its own | leave it, unless the Pod's containers must be aligned as one unit (`pod`) |
+| `topologyManagerPolicy` | `none` — the hint is discarded | **`restricted`**; [what each of the four does](preflight.md#reading-the-result) |
+| `topologyManagerScope` | `container` — each container is aligned on its own | leave it: the accelerator and the adapter already share a container |
+
+**Why `restricted` and not `single-numa-node`.** Both gate admission on the hint; they differ on a
+container too wide for one NUMA node:
+
+- `single-numa-node` admits only an allocation inside one NUMA node. On a two-socket host with four
+  accelerators per socket it refuses every container asking for eight, with `TopologyAffinityError`
+  — and a Pod the kubelet refuses is not rescheduled.
+- `restricted` admits the allocation spanning the fewest NUMA nodes that fit. The eight-accelerator
+  container lands on both sockets, while a one-accelerator, one-adapter container is still held to a
+  single NUMA node.
+
+Reach for `single-numa-node` only where every container fits in one NUMA node.
+
+`pod` scope merges every container's requests into one alignment, which only makes admission
+harder: a ModelDeployment renders the accelerator and the adapter into the same main container, so
+per-container alignment already covers the pair.
 
 Where those fields go depends on the distribution, and there are three shapes:
 

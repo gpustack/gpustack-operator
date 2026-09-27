@@ -121,6 +121,8 @@ spec:
   nodeLabels: {}
 ```
 
+`levels` takes 1 to 16 entries, each a label key named once: admission refuses a key listed twice,
+since a repeated level would describe one Node label as two tiers of the hierarchy.
 `kubernetes.io/hostname` is always appended and must not appear in `levels`. A Node may omit a fine
 suffix and receive a shorter profile, but it may not carry a child level without every declared
 parent.
