@@ -131,6 +131,8 @@ func (r *ModelArtifactReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		result, check = r.reconcileHuggingFace(ctx, ma)
 	case ma.Spec.Source.PersistentVolumeClaim != nil:
 		result = r.reconcileClaim(ctx, ma)
+	case ma.Spec.Source.Image != nil:
+		r.reconcileImage(ma)
 	default:
 		// Admission refuses every other shape, ModelScope included; one stored before a rule
 		// existed stays unresolved and says why.
@@ -278,6 +280,18 @@ func (r *ModelArtifactReconciler) reconcileClaim(ctx context.Context, ma *worker
 	ModelArtifactConditionDegraded.False(ma, modelArtifactReasonHealthy, "")
 
 	return ctrl.Result{}
+}
+
+// reconcileImage resolves an image source: admission pinned the reference, so the resolution is
+// the spec being stored. No registry is read, no revalidation is scheduled, and no node ever
+// aggregates — the image's bytes are the user's, delivered by kubelet wherever a pod lands.
+func (r *ModelArtifactReconciler) reconcileImage(ma *workercore.ModelArtifact) {
+	if ma.Status.Resolved == nil {
+		ma.Status.Resolved = &workercore.ModelArtifactResolved{ResolvedTime: meta.NewTime(r.now())}
+	}
+	ModelArtifactConditionResolved.True(ma, modelArtifactReasonResolved,
+		"the image is the user's; the operator does not read it")
+	ModelArtifactConditionDegraded.False(ma, modelArtifactReasonHealthy, "")
 }
 
 // modelArtifactCheck is one artifact's pacing entry.

@@ -701,3 +701,36 @@ func TestEarliestResult(t *testing.T) {
 
 // ctrlclientWithWatch is the fake client's own interface, which the interceptor wraps.
 type ctrlclientWithWatch = ctrlcli.WithWatch
+
+// TestModelArtifactReconcileImage walks the image source's resolution: the first pass resolves
+// with a claim-shaped status, no network ask, and no nodes aggregation, and the artifact never
+// requeues.
+func TestModelArtifactReconcileImage(t *testing.T) {
+	ma := testHubArtifact("")
+	ma.Spec.Source = workercore.ModelArtifactSource{Image: &workercore.ModelArtifactImageSource{
+		Reference: testImageReference,
+	}}
+	env := newTestArtifactEnv(t, ma)
+
+	// The first pass only writes the Resolving placeholder; the second answers.
+	_, err := env.r.Reconcile(context.Background(),
+		ctrl.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}})
+	require.NoError(t, err)
+	result, err := env.r.Reconcile(context.Background(),
+		ctrl.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}})
+	require.NoError(t, err)
+	assert.False(t, result.Requeue)
+	assert.Zero(t, result.RequeueAfter, "there is nothing to ask again: no registry, no revalidation")
+
+	got := new(workercore.ModelArtifact)
+	require.NoError(t, env.cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}, got))
+	require.NotNil(t, got.Status.Resolved)
+	assert.NotNil(t, got.Status.Resolved.ResolvedTime)
+	assert.Empty(t, got.Status.Resolved.Revision, "an image source has no commit")
+	assert.Empty(t, got.Status.Resolved.ManifestDigest, "the reference is the whole identity")
+	assert.Nil(t, got.Status.Nodes, "no node ever aggregates an image")
+	assert.Equal(t, "True", ModelArtifactConditionResolved.GetStatus(got))
+	assert.Equal(t, "Resolved", ModelArtifactConditionResolved.GetReason(got))
+	assert.Equal(t, "False", ModelArtifactConditionDegraded.GetStatus(got))
+}
