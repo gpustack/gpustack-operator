@@ -41,6 +41,7 @@ CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${CASES_DIR}/_model-hub-lib.sh"
 
 NS="${1:?usage: case-111.sh <NS>}"
+P=c111
 PEER_PORT=32446
 FAILS=0
 ROWS=()
@@ -113,27 +114,21 @@ spec:
 EOF
 }
 
-start_model_hub "$NS" "e2e.gpustack.ai/model-hub=true"
-start_repo "$NS" "peer-e2e/repo" 1200
-kubectl -n "$NS" apply -f - >/dev/null <<EOF
-apiVersion: worker.gpustack.ai/v1alpha1
-kind: ModelArtifact
-metadata:
-  name: c111-weights
-  labels: {e2e.gpustack.ai/case: "111"}
-spec:
-  huggingFace:
-    repository: peer-e2e/repo
-EOF
-for i in $(seq 1 30); do
-  [ -n "$(kubectl -n "$NS" get modelartifacts.v1alpha1.worker.gpustack.ai c111-weights -o jsonpath='{.status.resolved.manifestDigest}' 2>/dev/null)" ] && break
-  sleep 3
-done
+REPOS="$(python3 -c "
+import json
+mib = 1 << 20
+print(json.dumps({
+  'peer-e2e/repo': {'files': {'config.json': {'size': 300}, 'tokenizer.json': {'size': 3000},
+                              'model.safetensors': {'size': 5 * mib, 'lfs': True}}}}))")"
+HUB_URL="$(mh_deploy "$NS" "${P}-hub" "$REPOS")"
+setting_set model-artifact-huggingface-endpoint "$HUB_URL"
+settings_settle
+artifact "$NS" "${P}-weights" peer-e2e/repo "" 111
 
 echo "[case-111] seed: $SEED pulls from the hub"
-mount_pod "$SEED" c111-weights
+mount_pod "$SEED" "${P}-weights"
 SEED_POD="$(kubectl -n "$NS" get pods -l e2e.gpustack.ai/case=111 --field-selector "spec.nodeName=$SEED" -o jsonpath='{.items[0].metadata.name}')"
-DIGEST="$(kubectl -n "$NS" get modelartifacts.v1alpha1.worker.gpustack.ai c111-weights -o jsonpath='{.status.resolved.manifestDigest}')"
+DIGEST="$(kubectl -n "$NS" get modelartifacts.v1alpha1.worker.gpustack.ai ${P}-weights -o jsonpath='{.status.resolved.manifestDigest}')"
 if wait_ready "$DIGEST" "$SEED"; then
   record PASS "seed" "the seed node pulled from the hub and is Ready"
 else
@@ -143,7 +138,7 @@ SEED_HUB="$(counter "$SEED_POD" hub)"
 SEED_PEER="$(counter "$SEED_POD" peer)"
 
 echo "[case-111] pull: $COLD materializes the same digest"
-mount_pod "$COLD" c111-weights
+mount_pod "$COLD" "${P}-weights"
 COLD_POD="$(kubectl -n "$NS" get pods -l e2e.gpustack.ai/case=111 --field-selector "spec.nodeName=$COLD" -o jsonpath='{.items[0].metadata.name}')"
 if wait_ready "$DIGEST" "$COLD"; then
   record PASS "pull" "the cold node reached Ready"
