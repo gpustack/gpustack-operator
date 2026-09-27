@@ -20,10 +20,9 @@ const (
 	// NodeRDMACapableLabelKey says this node has at least one RDMA interface whose link was not
 	// found broken.
 	//
-	// It is the ONE key of this set that a ResourceFlavor selector can afford. That selector is
-	// equality-matched and capped at eight entries, of which the pool discriminators already claim
-	// up to five and the flavor's own accelerator count one more — so this feature's budget is
-	// about two keys, and only a key a selector can pin is worth spending one on.
+	// It is the ONE key of this set a selector can pin; the other two are informational. No
+	// operator-generated ResourceFlavor pins it: a workload that needs a usable link selects on it
+	// through its own nodeSelector or affinity.
 	//
 	// Node-level, so it loses information on purpose. "Some interface on this node has a working
 	// link" is not "the accelerators this workload gets are near a working link", and for a sliced

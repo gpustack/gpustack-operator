@@ -119,8 +119,9 @@ including a **mixed** one advertising both families;
 ### RDMA feature labels
 
 A node with a usable RDMA link additionally carries `feature.gpustack.ai/rdma.capable=true`, and
-conditionally two informational keys. Only `rdma.capable` can enter a flavor's `nodeLabels`, and
-withholding it is how a node with no usable link stops being selected.
+conditionally two informational keys. No operator-generated flavor pins any of them; `rdma.capable`
+is the one meant for a workload's own nodeSelector, and withholding it is how a node with no usable
+link stops being selected by one.
 
 See [Network Topology](network-topology.md#the-three-node-labels-and-what-a-label-can-carry) for
 which link states count as usable, when each informational key is present, and why the accelerator
