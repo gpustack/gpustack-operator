@@ -262,7 +262,11 @@ class; page caches dropped before every read):
 Both S3 and the boot disk sat at the network disk's ceiling, so the S3 CSI driver's own ceiling was
 not reached; performance is not a reason to avoid an S3 claim. Every restart on the same node reads
 object storage again. That disk class's throughput grows with its size, so any figure you quote
-needs the disk's type and size. Point an S3 PV's endpoint at a ClusterIP, not an in-cluster DNS name.
+needs the disk's type and size.
+
+Point an S3 PV's endpoint at a ClusterIP, not an in-cluster DNS name: the default geesefs mount
+runs as a systemd unit on the host and resolves with the host's resolver, which does not know
+`*.svc.cluster.local`.
 
 ## The KV reuse domain
 

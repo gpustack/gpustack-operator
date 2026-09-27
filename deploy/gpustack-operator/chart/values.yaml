@@ -1107,8 +1107,10 @@ csi-driver-s3:
     # @schema
     # enum: [Default, ClusterFirst, ClusterFirstWithHostNet]
     # @schema
-    # -- DNS policy of the S3 node pods. `ClusterFirstWithHostNet` is what lets an in-cluster
-    # object store endpoint resolve from a host-networked mount.
+    # -- DNS policy of the S3 node pods. It governs the node pod's own containers only: the default
+    # mounter (geesefs) runs as a systemd unit on the host and resolves the volume's endpoint with
+    # the host resolver, so an in-cluster object store endpoint must be written as a ClusterIP (or
+    # a name the host resolves) unless the mount runs in-container with `--no-systemd`.
     dnsPolicy: ClusterFirstWithHostNet
     # -- Affinity of the S3 node pods. Rendered as given, unlike the controller's.
     affinity: {}
