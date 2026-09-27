@@ -58,6 +58,10 @@ spec:
       tolerations:
 {{ toYaml . | indent 8 }}
 {{- end }}
+{{- with .Values.controller.topologySpreadConstraints }}
+      topologySpreadConstraints:
+{{ toYaml . | indent 8 }}
+{{- end }}
       containers:
         - name: csi-provisioner
           image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.csiProvisioner) }}"

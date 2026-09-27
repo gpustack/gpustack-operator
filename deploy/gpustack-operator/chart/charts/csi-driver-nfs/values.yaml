@@ -68,6 +68,9 @@ controller:
   defaultOnDeletePolicy: delete  # available values: delete, retain
   affinity: {}
   nodeSelector: {}
+  # Above one replica, spread the controller across nodes: its pods run on the host
+  # network and bind healthPort on it, so two pods on one node crash-loop the second.
+  topologySpreadConstraints: []
   priorityClassName: system-cluster-critical
   tolerations:
     - key: "node-role.kubernetes.io/master"

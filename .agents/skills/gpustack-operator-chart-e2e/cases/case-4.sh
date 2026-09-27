@@ -97,8 +97,10 @@ trap restore EXIT
 
 # The same knobs the HA guide documents, at the replica count this run asked for. Kueue's chart
 # renders no spread of its own and carries no affinity key, so its labelSelector has to be spelled
-# out; the worker's is defaulted from its own pod labels when omitted. NFD renders no spread at all
-# and both CSI controllers render neither a budget nor a spread — so neither is asked for here.
+# out; the worker's is defaulted from its own pod labels when omitted. NFD renders no spread at
+# all. The NFS controller's spread is load-bearing, not just placement: its pods run on the host
+# network and bind the liveness health port there, so two pods on one node leave the second one
+# crash-looping on the bind. The S3 controller runs on the pod network and has no such knob.
 cat > "$HA" <<EOF
 worker:
   replicas: ${REPLICAS}
@@ -133,6 +135,13 @@ csi-driver-nfs:
   controller:
     replicas: ${REPLICAS}
     strategyType: RollingUpdate
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: csi-nfs-controller
 csi-driver-s3:
   controller:
     replicas: ${REPLICAS}
@@ -147,8 +156,9 @@ if ! "$HELM" upgrade "$RELEASE" "$CHART" -n "$NS" --reset-then-reuse-values -f "
 fi
 record PASS "ha upgrade" "${REPLICAS} replicas requested per component"
 
-# Every component reaches the replica count. The CSI controllers are included: they get no budget
-# and no spread, but they do honour the count.
+# Every component reaches the replica count. The CSI controllers are included: they get no
+# budget, but they do honour the count — and the NFS one's hard spread is what keeps its
+# replicas on separate nodes, which a host-networked pod's fixed health port depends on.
 for obj in \
   deploy/gpustack-operator-worker \
   deploy/kueue-controller-manager \
