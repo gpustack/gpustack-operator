@@ -270,7 +270,9 @@ picks and how to switch its policy (`model-deployment-routing.md`), what a `Mode
 and its engine's exit (`model-deployment-shutdown.md`), and the `ModelArtifact` contract — sources,
 resolution and revalidation, the manifest digest and its patterns, how a deployment or an Instance
 consumes it under each delivery, claim placement and the weight identity in KV keys
-(`model-artifact.md`), and the `NodeModelStore` resource with the node plugin behind it — its
+(`model-artifact.md`), the `image` source's own page — the digest contract, building weights into
+an image, image-volume delivery, the version floors, double storage, kubelet image GC and registry
+mirrors (`model-image-source.md`), and the `NodeModelStore` resource with the node plugin behind it — its
 writers and status guard, mount authorization, materialization, failure reasons, collection and
 metrics (`node-model-store.md`).
 
