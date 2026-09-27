@@ -1241,13 +1241,11 @@
         "networkPolicy": {
           "description": "Restrict who may reach the model-manager's ports when the peer port is on.",
           "properties": {
-            "scrapers": {
-              "description": "Whoever scrapes /metrics.",
-              "items": {
-                "type": "object"
-              },
-              "title": "scrapers",
-              "type": "array"
+            "enabled": {
+              "default": true,
+              "description": "Deploy the NetworkPolicy that keeps tenant Pods off the peer port and limits the secure port to the worker and the scrapers.",
+              "title": "enabled",
+              "type": "boolean"
             },
             "extraIngress": {
               "description": "Additional ingress rules, verbatim.",
@@ -1255,6 +1253,14 @@
                 "type": "object"
               },
               "title": "extraIngress",
+              "type": "array"
+            },
+            "scrapers": {
+              "description": "Whoever scrapes /metrics.",
+              "items": {
+                "type": "object"
+              },
+              "title": "scrapers",
               "type": "array"
             }
           },

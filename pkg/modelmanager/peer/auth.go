@@ -44,11 +44,11 @@ const (
 // verification is the API server's job in the TokenReview; the expiry only bounds how long this
 // token's review may be cached. A token without a readable expiry has none.
 func tokenExpiry(token string) (time.Time, bool) {
-	payload, rest, ok := strings.Cut(token, ".")
+	_, rest, ok := strings.Cut(token, ".")
 	if !ok || rest == "" {
 		return time.Time{}, false
 	}
-	payload, _, _ = strings.Cut(payload, ".")
+	payload, _, _ := strings.Cut(rest, ".")
 	claims, err := base64.RawURLEncoding.DecodeString(payload)
 	if err != nil {
 		return time.Time{}, false
@@ -113,10 +113,11 @@ type tokenTransport struct {
 
 func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	b, err := readFileLimited(tokenFile)
-	if err == nil && len(b) > 0 {
-		req = req.Clone(req.Context())
-		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(b)))
+	if err != nil {
+		return nil, fmt.Errorf("read the projected peer token: %w", err)
 	}
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(b)))
 
 	return t.base.RoundTrip(req)
 }
@@ -153,6 +154,11 @@ func (a AuthOptions) reviewer(cli tokenClient) reviewToken {
 		}
 		mu.Lock()
 		cached[token] = reviewed{username: username, validUntil: validUntil}
+		for k, r := range cached {
+			if r.validUntil.Before(time.Now()) {
+				delete(cached, k)
+			}
+		}
 		mu.Unlock()
 
 		return username, nil

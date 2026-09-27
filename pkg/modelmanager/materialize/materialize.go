@@ -458,15 +458,22 @@ func (m *Materializer) pullFromPeers(ctx context.Context, j *job, digest string,
 	if !m.Peers.Enabled() {
 		return false
 	}
-	before := j.received.Load()
-	if err := m.Peers.FetchFile(ctx, digest, f); err != nil {
-		j.received.Add(before - j.received.Load())
+	var fromPeers atomic.Int64
+	withPeerCounting := f
+	withPeerCounting.Received = func(n int64) {
+		fromPeers.Add(n)
+		if f.Received != nil {
+			f.Received(n)
+		}
+	}
+	if err := m.Peers.FetchFile(ctx, digest, withPeerCounting); err != nil {
+		j.received.Add(-fromPeers.Load())
 		klog.V(1).InfoS("a file the peers could not deliver goes to the hub", "digest", digest,
 			"path", f.Path, "error", err.Error())
 
 		return false
 	}
-	j.peer.Add(j.received.Load() - before)
+	j.peer.Add(fromPeers.Load())
 
 	return true
 }
