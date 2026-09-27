@@ -145,6 +145,11 @@ func (r *ModelPrefetchWebhook) validateModelPrefetch(ctx context.Context, pf *wo
 		return err
 	}
 
+	if int32(len(targets)) < pf.Spec.MinReady {
+		return field.ErrorList{field.Invalid(field.NewPath("spec", "minReady"), pf.Spec.MinReady,
+			fmt.Sprintf("asks for more ready nodes than the placement resolves to (%d); a bar above the target set would hold the prefetch unavailable forever", len(targets)))}
+	}
+
 	return r.validateModelPrefetchBudget(ctx, pf, binding, artifact, len(targets))
 }
 

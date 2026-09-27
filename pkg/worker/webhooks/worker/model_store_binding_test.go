@@ -22,7 +22,7 @@ func newModelStoreBindingWebhook(objs ...ctrlcli.Object) *ModelStoreBindingWebho
 		WithObjects(objs...).
 		Build()
 
-	return &ModelStoreBindingWebhook{Client: cli}
+	return &ModelStoreBindingWebhook{Client: cli, APIReader: cli}
 }
 
 func testModelStore(name string) *workercore.ModelStore {

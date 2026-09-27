@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	core "k8s.io/api/core/v1"
@@ -318,11 +319,14 @@ func (r *ModelPrefetchReconciler) deliver(ctx context.Context, pf *workercore.Mo
 	requeue := ctrl.Result{}
 	for _, pod := range pods.Items {
 		_, onTarget := want[pod.Spec.NodeName]
+		// A pod mounting a digest the artifact no longer resolves to is stale the moment it is
+		// seen: keeping it would hold the node on the old weights for as long as it lives.
+		stale := podWarmDigest(&pod) != digest
 		done := pod.Status.Phase == core.PodSucceeded || pod.Status.Phase == core.PodFailed
 		settled := readySet[pod.Spec.NodeName] || failed[pod.Spec.NodeName] || expired[pod.Spec.NodeName]
 		// A done pod on a settled node is evidence whose work ended; a done pod on a node still
 		// reading waiting is a dead attempt blocking the retry by its name, and goes.
-		if !onTarget || (done && (settled || waiting[pod.Spec.NodeName])) {
+		if !onTarget || stale || (done && (settled || waiting[pod.Spec.NodeName])) {
 			if err := r.Client.Delete(ctx, &pod); ctrlcli.IgnoreNotFound(err) != nil {
 				return ctrl.Result{}, err
 			}
@@ -380,9 +384,37 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 	if err := r.Client.List(ctx, stores); err != nil {
 		return err
 	}
+	// depsByNS keeps the derived-placement expansion inside the prefetch's own namespace: a
+	// same-named artifact in another namespace must never widen this one's target set.
 	deps := new(workercore.ModelDeploymentList)
 	if err := r.Client.List(ctx, deps); err != nil {
 		return err
+	}
+	depsByNS := map[string][]workercore.ModelDeployment{}
+	for i := range deps.Items {
+		ns := deps.Items[i].Namespace
+		depsByNS[ns] = append(depsByNS[ns], deps.Items[i])
+	}
+
+	// Bindings and artifacts are read once each: a Get per prefetch turns the pass into 2P
+	// round-trips for a map the whole loop can share.
+	bindings := new(workercore.ModelStoreBindingList)
+	if err := r.Client.List(ctx, bindings); err != nil {
+		return err
+	}
+	bindingByKey := map[string]*workercore.ModelStoreBinding{}
+	for i := range bindings.Items {
+		b := &bindings.Items[i]
+		bindingByKey[b.Namespace+"/"+b.Name] = b
+	}
+	artifacts := new(workercore.ModelArtifactList)
+	if err := r.Client.List(ctx, artifacts); err != nil {
+		return err
+	}
+	artifactByKey := map[string]*workercore.ModelArtifact{}
+	for i := range artifacts.Items {
+		a := &artifacts.Items[i]
+		artifactByKey[a.Namespace+"/"+a.Name] = a
 	}
 
 	// desired[node] = the digests to pin there, from every prefetch whose retention still holds.
@@ -392,23 +424,23 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 		if pf.DeletionTimestamp != nil || !pf.Spec.Retention.Pinned {
 			continue
 		}
-		binding := new(workercore.ModelStoreBinding)
-		if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Namespace: pf.Namespace, Name: pf.Spec.BindingRef.Name}, binding); err != nil {
-			if kerrors.IsNotFound(err) {
-				continue // the grant is gone; nothing is pinned on its say-so
-			}
-
-			return err
+		binding := bindingByKey[pf.Namespace+"/"+pf.Spec.BindingRef.Name]
+		if binding == nil {
+			continue // the grant is gone; nothing is pinned on its say-so
 		}
 		if !bindingAllowsPinned(binding) {
 			continue
 		}
 
-		digest := r.resolvedDigest(ctx, pf)
+		artifact := artifactByKey[pf.Namespace+"/"+pf.Spec.ArtifactRef.Name]
+		if artifact == nil || artifact.Status.Resolved == nil {
+			continue
+		}
+		digest := artifact.Status.Resolved.ManifestDigest
 		if digest == "" {
 			continue
 		}
-		targets, err := prefetchTargetNodes(pf, nodes.Items, deps.Items)
+		targets, err := prefetchTargetNodes(pf, nodes.Items, depsByNS[pf.Namespace])
 		if err != nil {
 			continue // the placement is broken; the prefetch's own status carries it
 		}
@@ -561,7 +593,10 @@ func warmupPod(pf *workercore.ModelPrefetch, artifact *workercore.ModelArtifact,
 		ObjectMeta: meta.ObjectMeta{
 			Name:      prefetchPodName(pf.Name, nodeName),
 			Namespace: pf.Namespace,
-			Labels:    map[string]string{"worker.gpustack.ai/model-prefetch": pf.Name},
+			Labels: map[string]string{
+				"worker.gpustack.ai/model-prefetch":        pf.Name,
+				"worker.gpustack.ai/model-prefetch-digest": strings.ReplaceAll(digest, "sha256:", ""),
+			},
 		},
 		Spec: core.PodSpec{
 			NodeName:                      nodeName,
@@ -601,6 +636,18 @@ func warmupPod(pf *workercore.ModelPrefetch, artifact *workercore.ModelArtifact,
 			}},
 		},
 	}
+}
+
+// podWarmDigest reads the digest the pod's warm-up volume was rendered for, empty when the pod
+// predates the attribute or carries none.
+func podWarmDigest(pod *core.Pod) string {
+	for _, v := range pod.Spec.Volumes {
+		if v.CSI != nil && v.CSI.Driver == modelstore.DriverName {
+			return v.CSI.VolumeAttributes[modelstore.VolumeAttrManifestDigest]
+		}
+	}
+
+	return ""
 }
 
 // prefetchPodName names the warm-up Pod after its prefetch and its node. A combined name that
@@ -720,6 +767,7 @@ func (r *ModelPrefetchReconciler) SetupController(_ context.Context, opts contro
 		Watches(
 			&workercore.ModelArtifact{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueuePrefetchesInNamespace),
+			ctrlbuilder.WithPredicates(artifactResolutionChanged),
 		).
 		Watches(
 			&workercore.ModelDeployment{},

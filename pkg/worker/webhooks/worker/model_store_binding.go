@@ -26,13 +26,15 @@ import (
 // +k8s:webhook-gen:validating:group="worker.gpustack.ai",version="v1alpha1",resource="modelstorebindings",scope="Namespaced"
 // +k8s:webhook-gen:validating:operations=["CREATE","UPDATE"],failurePolicy="Fail",sideEffects="None",matchPolicy="Equivalent",timeoutSeconds=10
 type ModelStoreBindingWebhook struct {
-	Client ctrlcli.Client
+	Client    ctrlcli.Client
+	APIReader ctrlcli.Reader
 }
 
 func (r *ModelStoreBindingWebhook) SetupWebhook(
 	_ context.Context, opts webhook.SetupOptions,
 ) (runtime.Object, error) {
 	r.Client = opts.Manager.GetClient()
+	r.APIReader = opts.Manager.GetAPIReader()
 
 	return &workercore.ModelStoreBinding{}, nil
 }
@@ -170,6 +172,12 @@ func (r *ModelStoreBindingWebhook) validateModelStoreRefsExist(
 			continue // already reported by the shape check
 		}
 		err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: ref.Name}, new(workercore.ModelStore))
+		if kerrors.IsNotFound(err) {
+			// storeRefs is immutable and the check is failurePolicy=Fail, so a cache a beat behind
+			// would permanently reject a grant over a store that exists. Re-read uncached before
+			// refusing.
+			err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: ref.Name}, new(workercore.ModelStore))
+		}
 		switch {
 		case err == nil:
 		case kerrors.IsNotFound(err):

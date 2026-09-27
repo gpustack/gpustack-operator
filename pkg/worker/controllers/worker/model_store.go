@@ -123,7 +123,13 @@ func (r *ModelStoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	nodes := new(core.NodeList)
-	if err := r.Client.List(ctx, nodes); err != nil {
+	listOpts := []ctrlcli.ListOption{}
+	if m := store.Spec.NodeSelector.MatchLabels; len(m) > 0 && len(store.Spec.NodeSelector.MatchExpressions) == 0 {
+		// A pure matchLabels selector filters in the cache: the cluster's nodes never all need to
+		// cross the wire for a pool that names three labels.
+		listOpts = append(listOpts, ctrlcli.MatchingLabels(m))
+	}
+	if err := r.Client.List(ctx, nodes, listOpts...); err != nil {
 		return ctrl.Result{}, err
 	}
 	stores := new(workercore.ModelStoreList)
@@ -138,6 +144,15 @@ func (r *ModelStoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
+	reports := new(workercore.NodeModelStoreList)
+	if err := r.Client.List(ctx, reports); err != nil {
+		return ctrl.Result{}, err
+	}
+	reportByName := map[string]*workercore.NodeModelStore{}
+	for i := range reports.Items {
+		reportByName[reports.Items[i].Name] = &reports.Items[i]
+	}
+
 	obs := modelStoreObservation{}
 	for i := range nodes.Items {
 		nd := &nodes.Items[i]
@@ -146,27 +161,29 @@ func (r *ModelStoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		obs.nodes++
 
-		othersOnNode, err := selectModelStore(others, nd)
-		if err != nil {
-			return ctrl.Result{}, err
+		for j := range others {
+			other, err := meta.LabelSelectorAsSelector(&others[j].Spec.NodeSelector)
+			if err != nil {
+				continue
+			}
+			if other.Matches(labels.Set(nd.Labels)) {
+				obs.overlap = true
+				break
+			}
 		}
-		obs.overlap = obs.overlap || len(othersOnNode) > 0
 
-		nms := new(workercore.NodeModelStore)
-		switch err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: nd.Name}, nms); {
-		case kerrors.IsNotFound(err):
+		nms, ok := reportByName[nd.Name]
+		if !ok {
 			// The node has no plugin object yet, so nothing of this store's is applied on it.
-		case err != nil:
-			return ctrl.Result{}, err
-		default:
-			if nms.Spec.Store == store.Name {
-				obs.applied++
-			}
-			if c := nms.Status.Capacity; c != nil {
-				obs.capacity = true
-				obs.capacityTotal += c.TotalBytes
-				obs.capacityStored += c.StoredBytes
-			}
+			continue
+		}
+		if nms.Spec.Store == store.Name {
+			obs.applied++
+		}
+		if c := nms.Status.Capacity; c != nil {
+			obs.capacity = true
+			obs.capacityTotal += c.TotalBytes
+			obs.capacityStored += c.StoredBytes
 		}
 	}
 
