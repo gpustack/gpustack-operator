@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -73,6 +74,12 @@ func TestInstanceModelVolumeAdmitsEveryArtifactSource(t *testing.T) {
 		}
 		return ma
 	}
+	imageArtifact := &workercore.ModelArtifact{
+		ObjectMeta: meta.ObjectMeta{Name: "qwen"},
+		Spec: workercore.ModelArtifactSpec{Source: workercore.ModelArtifactSource{
+			Image: &workercore.ModelArtifactImageSource{Reference: "registry.example.com/team/qwen@sha256:" + strings.Repeat("a", 64)},
+		}},
+	}
 	cases := []struct {
 		name    string
 		objs    []ctrlcli.Object
@@ -81,6 +88,7 @@ func TestInstanceModelVolumeAdmitsEveryArtifactSource(t *testing.T) {
 	}{
 		{name: "a claim artifact", objs: []ctrlcli.Object{artifact(true)}},
 		{name: "a hub artifact", objs: []ctrlcli.Object{artifact(false)}},
+		{name: "an image artifact", objs: []ctrlcli.Object{imageArtifact}},
 		{name: "an artifact that does not exist yet"},
 		{name: "a hub artifact with a sub path", objs: []ctrlcli.Object{artifact(false)}, subPath: "x", wantErr: true},
 	}

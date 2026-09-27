@@ -90,6 +90,15 @@ func TestModelPrefetchAdmission(t *testing.T) {
 		assert.Contains(t, err.Error(), "Not found")
 	})
 
+	t.Run("a prefetch of an image artifact is refused", func(t *testing.T) {
+		objs := newModelPrefetchFixture(true, "10Gi", 5<<30)
+		objs[2].(*workercore.ModelArtifact).Spec.Source.Image = &workercore.ModelArtifactImageSource{Reference: "registry/qwen@sha256:" + strings.Repeat("a", 64)}
+		r := newModelPrefetchWebhook(objs...)
+		_, err := r.ValidateCreate(context.Background(), newModelPrefetch())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "never enters the node cache")
+	})
+
 	t.Run("a prefetch naming a missing grant is refused", func(t *testing.T) {
 		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 5<<30)...)
 		pf := newModelPrefetch()

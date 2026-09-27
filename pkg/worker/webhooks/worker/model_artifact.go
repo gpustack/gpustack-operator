@@ -14,7 +14,9 @@ import (
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubediscovery"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/webhook"
 )
 
@@ -135,9 +137,12 @@ func validateModelArtifact(ma, old *workercore.ModelArtifact) field.ErrorList {
 	if source.PersistentVolumeClaim != nil {
 		members = append(members, "persistentVolumeClaim")
 	}
+	if source.Image != nil {
+		members = append(members, "image")
+	}
 	if len(members) != 1 {
 		return field.ErrorList{field.Invalid(sourcePath, members,
-			"exactly one of huggingFace or persistentVolumeClaim is required")}
+			"exactly one of huggingFace, persistentVolumeClaim or image is required")}
 	}
 
 	var errs field.ErrorList
@@ -146,11 +151,14 @@ func validateModelArtifact(ma, old *workercore.ModelArtifact) field.ErrorList {
 		return field.ErrorList{field.Forbidden(sourcePath.Child("modelScope"), modelArtifactModelScopeMessage)}
 	case source.HuggingFace != nil:
 		errs = validateModelArtifactHuggingFace(source.HuggingFace, sourcePath.Child("huggingFace"))
+	case source.Image != nil:
+		errs = validateModelArtifactImage(source.Image, sourcePath.Child("image"))
+		errs = append(errs, validateModelArtifactImageVolume(sourcePath.Child("image"))...)
 	default:
 		errs = validateModelArtifactClaim(source.PersistentVolumeClaim, sourcePath.Child("persistentVolumeClaim"))
 	}
 
-	return append(errs, validateModelArtifactPatterns(&ma.Spec, specPath, source.HuggingFace != nil)...)
+	return append(errs, validateModelArtifactPatterns(&ma.Spec, specPath, source.HuggingFace != nil, source.Image != nil)...)
 }
 
 // modelArtifactMaxPatterns and modelArtifactMaxPatternLength bound a list of patterns and each of
@@ -160,9 +168,14 @@ const (
 	modelArtifactMaxPatternLength = 256
 )
 
-// validateModelArtifactPatterns accepts allow and ignore patterns on a hub source only: a claim's
-// content is the user's and is mounted whole.
-func validateModelArtifactPatterns(spec *workercore.ModelArtifactSpec, specPath *field.Path, hub bool) field.ErrorList {
+// validateModelArtifactPatterns accepts allow and ignore patterns on a hub source only: every
+// other source's content is the user's and is mounted whole.
+func validateModelArtifactPatterns(spec *workercore.ModelArtifactSpec, specPath *field.Path, hub, image bool) field.ErrorList {
+	// whole is what the refusal says is mounted whole instead of being selected from.
+	whole := "a claim's directory is mounted whole"
+	if image {
+		whole = "an image is mounted whole"
+	}
 	var errs field.ErrorList
 	for _, list := range []struct {
 		name     string
@@ -177,7 +190,7 @@ func validateModelArtifactPatterns(spec *workercore.ModelArtifactSpec, specPath 
 			continue
 		case !hub:
 			errs = append(errs, field.Forbidden(path,
-				"patterns select files of a hub source; a claim's directory is mounted whole"))
+				"patterns select files of a hub source; "+whole))
 			continue
 		case len(list.patterns) > modelArtifactMaxPatterns:
 			errs = append(errs, field.TooMany(path, len(list.patterns), modelArtifactMaxPatterns))
@@ -231,6 +244,58 @@ func validateModelArtifactClaim(claim *workercore.ModelArtifactPersistentVolumeC
 	if strings.HasPrefix(claim.Path, "/") || slices.Contains(strings.Split(claim.Path, "/"), "..") {
 		errs = append(errs, field.Invalid(path.Child("path"), claim.Path,
 			`must be relative to the volume's root and must not contain a ".." element`))
+	}
+
+	return errs
+}
+
+// modelArtifactClusterVersion is the Kubernetes version the capability rules read. It is a
+// variable so a test can choose a version without a cluster: the snapshot's Configure ignores
+// later calls, so a test cannot re-point the snapshot itself.
+var modelArtifactClusterVersion = func() kubediscovery.Version {
+	return system.LoopbackKubeVersion.Get()
+}
+
+// validateModelArtifactImageVolume refuses an image source where the cluster cannot serve image
+// volumes. The ImageVolume feature is on by default from Kubernetes 1.35; an apiserver that does
+// not know the volumes[].image field drops it without an error, so the weights would be silently
+// absent. It reads the startup version snapshot, and a version it cannot read refuses: a version
+// nobody can read must not unlock the capability.
+func validateModelArtifactImageVolume(path *field.Path) field.ErrorList {
+	version := modelArtifactClusterVersion()
+	if kubediscovery.SupportsFeature(&version, kubediscovery.FeatureImageVolume) {
+		return nil
+	}
+
+	return field.ErrorList{field.Forbidden(path, fmt.Sprintf(
+		"this cluster's Kubernetes version %q does not serve image volumes: the ImageVolume feature is "+
+			"on by default from 1.35, and 1.33 or 1.34 would need the gate opened on the apiserver, which "+
+			"this version does not offer; deliver the weights from a hub or a PersistentVolumeClaim, or "+
+			"upgrade the cluster", version.GitVersion))}
+}
+
+// modelArtifactDigestPattern is the digest half of a pinned image reference: "sha256:" and 64
+// lowercase hex.
+var modelArtifactDigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+
+// validateModelArtifactImage refuses a reference that does not pin a digest. A tag is mutable, so
+// one artifact could deliver different weights on different pulls, and the identity a frozen
+// reference pins would be nothing.
+func validateModelArtifactImage(image *workercore.ModelArtifactImageSource, path *field.Path) field.ErrorList {
+	var errs field.ErrorList
+	reference := image.Reference
+	ref, digest, pinned := strings.Cut(reference, "@")
+	switch {
+	case !pinned:
+		errs = append(errs, field.Invalid(path.Child("reference"), reference,
+			"must pin the image to its digest: registry/repository@sha256:<64 hex>; a tag is mutable, "+
+				"so one artifact could deliver different weights on different pulls"))
+	case !modelArtifactDigestPattern.MatchString(digest):
+		errs = append(errs, field.Invalid(path.Child("reference"), reference,
+			`must pin the digest as "sha256:" and 64 lowercase hex`))
+	case ref == "" || strings.ContainsAny(ref, "@ \t\n\r"):
+		errs = append(errs, field.Invalid(path.Child("reference"), reference,
+			"must be one image reference without whitespace, followed by @ and the digest"))
 	}
 
 	return errs
