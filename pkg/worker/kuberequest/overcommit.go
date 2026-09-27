@@ -34,8 +34,8 @@ var (
 // Formulas (val.Value() rounds up to the nearest integer; division is integer
 // division so sub-unit remainders are lost):
 //
-//	CPU,  acceleratable=false: req = 800m  × val.Value()
-//	CPU,  acceleratable=true:  req = 100m  × val.Value()
+//	CPU,  acceleratable=false: req = min(800m  × val.Value(), val)
+//	CPU,  acceleratable=true:  req = min(100m  × val.Value(), val)
 //	RAM:                       req = 128Mi × (val.Value() / Gi)
 //	Storage:                   req = 128Mi × (val.Value() / Gi)
 //	other resource names:      val (pass-through, unchanged)
@@ -49,8 +49,11 @@ var (
 //   - RAM/Storage under 1 Gi truncate to a 0 request. From the scheduler's
 //     perspective such a pod consumes no memory/storage on the node.
 //   - RAM/Storage are quantized to whole Gi — 1.5 Gi behaves like 1 Gi.
-//   - CPU is quantized to whole cores via the ceiling in Value() — 500m
-//     behaves like 1 core, 1500m like 2 cores.
+//   - CPU is quantized to whole cores via the ceiling in Value(), then
+//     clamped at val so the request never exceeds the limit — a pod whose
+//     request exceeds its limit is rejected by the API server. A limit below
+//     the base (e.g., 100m), or whose fractional core part falls below it
+//     (e.g., 1500m), therefore requests exactly the limit.
 func ScaleToOvercommit(
 	resName core.ResourceName,
 	val resource.Quantity,
@@ -58,10 +61,15 @@ func ScaleToOvercommit(
 ) resource.Quantity {
 	switch resName {
 	case core.ResourceCPU:
+		base := _CPUOvercommitBaseQuantity
 		if acceleratable {
-			return quantityx.Multiply(_CPUOvercommitBaseQuantityForAcceleratable, val.Value())
+			base = _CPUOvercommitBaseQuantityForAcceleratable
 		}
-		return quantityx.Multiply(_CPUOvercommitBaseQuantity, val.Value())
+		req := quantityx.Multiply(base, val.Value())
+		if req.Cmp(val) > 0 {
+			return val
+		}
+		return req
 	case core.ResourceMemory:
 		return quantityx.Multiply(_RAMOvercommitBaseQuantity, val.Value()/quantityx.Gi)
 	case core.ResourceEphemeralStorage:
@@ -92,7 +100,11 @@ func ScaleToOvercommit(
 // val being the limit-shaped quantity of the same resName (which is the
 // contract upheld by getResourceRequirements). Any sub-unit information that
 // the forward direction quantized away — sub-Gi RAM/Storage truncating to 0,
-// fractional CPU rounding up via Value() — cannot be recovered here.
+// fractional CPU rounding up via Value() — cannot be recovered here. A CPU
+// request that ScaleToOvercommit clamped to a sub-base limit is not a base
+// multiple either, so the integer division truncates it to 0 cores — the same
+// accepted loss as sub-Gi RAM/Storage collapsing to 0 in the forward
+// direction.
 func ScaleBackOvercommit(
 	resName core.ResourceName,
 	val resource.Quantity,

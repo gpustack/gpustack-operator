@@ -32,9 +32,12 @@ func TestScaleToOvercommit(t *testing.T) {
 		{"CPU non-acc, 2 cores", core.ResourceCPU, qty("2"), false, qty("1600m")},
 		{"CPU non-acc, 4 cores", core.ResourceCPU, qty("4"), false, qty("3200m")},
 		{"CPU non-acc, 8 cores", core.ResourceCPU, qty("8"), false, qty("6400m")},
-		// Value() rounds up: 500m -> 1, 1500m -> 2.
-		{"CPU non-acc, 500m rounds up to 1 core", core.ResourceCPU, qty("500m"), false, qty("800m")},
-		{"CPU non-acc, 1500m rounds up to 2 cores", core.ResourceCPU, qty("1500m"), false, qty("1600m")},
+		// Value() rounds up: 500m -> 1, 1500m -> 2, but the request is then
+		// clamped at the limit so it can never exceed it.
+		{"CPU non-acc, 500m clamps to limit", core.ResourceCPU, qty("500m"), false, qty("500m")},
+		{"CPU non-acc, 1500m clamps to limit", core.ResourceCPU, qty("1500m"), false, qty("1500m")},
+		{"CPU non-acc, 100m clamps to limit", core.ResourceCPU, qty("100m"), false, qty("100m")},
+		{"CPU non-acc, 800m equals base, no clamp", core.ResourceCPU, qty("800m"), false, qty("800m")},
 
 		// CPU, acceleratable: req = 100m × val.Value().
 		{"CPU acc, zero", core.ResourceCPU, qty("0"), true, qty("0")},
@@ -42,6 +45,7 @@ func TestScaleToOvercommit(t *testing.T) {
 		{"CPU acc, 2 cores", core.ResourceCPU, qty("2"), true, qty("200m")},
 		{"CPU acc, 16 cores", core.ResourceCPU, qty("16"), true, qty("1600m")},
 		{"CPU acc, 500m rounds up to 1 core", core.ResourceCPU, qty("500m"), true, qty("100m")},
+		{"CPU acc, 50m clamps to limit", core.ResourceCPU, qty("50m"), true, qty("50m")},
 
 		// Memory: req = 128Mi × (val.Value() / Gi).
 		{"RAM, zero", core.ResourceMemory, qty("0"), false, qty("0")},
@@ -154,6 +158,13 @@ func TestRoundTrip(t *testing.T) {
 		{"CPU acc, 1 core", core.ResourceCPU, qty("1"), true, qty("1")},
 		{"CPU acc, 16 cores", core.ResourceCPU, qty("16"), true, qty("16")},
 		{"CPU acc, 64 cores", core.ResourceCPU, qty("64"), true, qty("64")},
+
+		// CPU limits below the overcommit base are clamped to the limit by
+		// ScaleToOvercommit, and the clamped request is not a base multiple,
+		// so the inverse truncates it to 0 — the same accepted loss as
+		// sub-Gi memory collapsing to 0.
+		{"CPU non-acc, 100m clamps and recovers as 0", core.ResourceCPU, qty("100m"), false, qty("0")},
+		{"CPU acc, 50m clamps and recovers as 0", core.ResourceCPU, qty("50m"), true, qty("0")},
 
 		// Memory: exact for whole-Gi inputs.
 		{"RAM, 0", core.ResourceMemory, qty("0"), false, qty("0")},
