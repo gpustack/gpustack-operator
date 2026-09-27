@@ -328,7 +328,55 @@ func (r *ModelStoreReconciler) SetupController(_ context.Context, opts controlle
 				GenericFunc: func(ctrlevent.GenericEvent) bool { return false },
 			}),
 		).
+		Watches(
+			&workercore.ModelStore{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueSiblingStores),
+			ctrlbuilder.WithPredicates(modelStoreSelectorChanged),
+		).
 		Complete(r)
+}
+
+// modelStoreSelectorChanged wakes the sibling stores only when a store's overlap-relevant shape
+// changed: a create or a delete always can move another store's overlap view, an update only when
+// the nodeSelector moved. Status writes and policy churn decide nothing about which nodes a store
+// shares, and never wake anyone — which is what keeps the watch from feeding on its own reconciles.
+var modelStoreSelectorChanged = ctrlpredicate.Funcs{
+	CreateFunc: func(ctrlevent.CreateEvent) bool { return true },
+	DeleteFunc: func(ctrlevent.DeleteEvent) bool { return true },
+	UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+		o, ok := e.ObjectOld.(*workercore.ModelStore)
+		if !ok {
+			return false
+		}
+		n, ok := e.ObjectNew.(*workercore.ModelStore)
+		if !ok {
+			return false
+		}
+
+		return !kubemeta.DeepEqual(o.Spec.NodeSelector, n.Spec.NodeSelector)
+	},
+	GenericFunc: func(ctrlevent.GenericEvent) bool { return false },
+}
+
+// enqueueSiblingStores enqueues every store but the changed one, which its own For event already
+// reconciles: a selector moving into or out of another store's nodes changes that store's overlap
+// view. Stores are few, so the map is deliberately coarse — the narrow part is the predicate.
+func (r *ModelStoreReconciler) enqueueSiblingStores(ctx context.Context, obj ctrlcli.Object) []ctrlreconcile.Request {
+	stores := new(workercore.ModelStoreList)
+	if err := r.Client.List(ctx, stores); err != nil {
+		ctrllog.FromContext(ctx).Error(err, "list model stores")
+		return nil
+	}
+
+	reqs := make([]ctrlreconcile.Request, 0, len(stores.Items))
+	for i := range stores.Items {
+		if stores.Items[i].Name == obj.GetName() {
+			continue
+		}
+		reqs = append(reqs, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: stores.Items[i].Name}})
+	}
+
+	return reqs
 }
 
 // enqueueAllStores re-enqueues every store: a node's labels decide which stores match it, and a
