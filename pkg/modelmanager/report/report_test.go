@@ -368,10 +368,10 @@ func TestReportFollowsTheKubeletThresholdsInTheSpec(t *testing.T) {
 	assert.NotContains(t, findCondition(env.nms(t).Status.Conditions, ConditionReady).Message, "could not be read")
 }
 
-// TestReportSaysAThresholdWasSetAside pins the #634 message: a quantity threshold the filesystem
-// cannot hold is set aside for kubelet's default, and Ready says so even when the resulting cap does
-// not lower the watermark, the default Setting's case.
-func TestReportSaysAThresholdWasSetAside(t *testing.T) {
+// TestReportFloorsTheCapWhenAThresholdCanNeverFire pins the #655 behavior on top of #634's: a
+// quantity threshold the filesystem cannot hold can never fire, so kubelet will never reclaim on
+// that signal and the cap is floored, with the Ready message saying so.
+func TestReportFloorsTheCapWhenAThresholdCanNeverFire(t *testing.T) {
 	spec := validSpec()
 	spec.Kubelet = &workercore.NodeModelStoreKubelet{NodefsAvailable: "2000"} // bytes, on a 1000-byte filesystem
 	env := newTestEnv(t, spec)
@@ -382,9 +382,9 @@ func TestReportSaysAThresholdWasSetAside(t *testing.T) {
 
 	require.NoError(t, env.r.Report(context.Background()))
 	high, _, _ := env.r.Watermarks()
-	assert.Equal(t, int32(80), high, "the default cap, not the 2% floor")
+	assert.Equal(t, int32(2), high, "the floor: kubelet can never reclaim on an unreachable threshold")
 	assert.Contains(t, findCondition(env.nms(t).Status.Conditions, ConditionReady).Message,
-		"nodefs.available 2000 is not below the filesystem's 1000 bytes")
+		"nodefs.available 2000 is not below the filesystem's 1000 bytes and can never fire")
 }
 
 func TestReportKeepsTheKubeletCapWhenUsageCannotBeRead(t *testing.T) {
