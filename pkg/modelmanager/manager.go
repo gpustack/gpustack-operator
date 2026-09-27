@@ -90,11 +90,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	reporter := &report.Reporter{
-		Reader: cm.GetCache(), Client: cm.GetClient(), NodeName: m.NodeName, Namespace: systemname.NamespaceName,
-		Store: m.Store, Collector: collector, Downloading: materializer.Downloading, Progress: materializer.Progress, Downloader: downloader,
-		KubeletCap: kubeletCap, Now: time.Now,
-	}
+	reporter := m.newReporter(cm, collector, materializer, downloader, kubeletCap)
 	collector.Watermarks = reporter.Watermarks
 	collector.Pinned = reporter.Pinned
 	materializer.Environment = reporter.Environment
@@ -182,6 +178,20 @@ func (m *Manager) Start(ctx context.Context) error {
 	})
 
 	return gp.Wait()
+}
+
+// newReporter builds the reporter over the node's own object. Its reads go to the API reader rather
+// than the cache: a report is what converges the plugin's applied configuration, and a stalled
+// informer would otherwise freeze it at the last delivered spec whatever triggered the report.
+func (m *Manager) newReporter(
+	cm manager.CtrlManager, collector *gc.Collector, materializer *materialize.Materializer,
+	downloader *download.Downloader, kubeletCap func(*workercore.NodeModelStoreKubelet, uint64) *gc.Cap,
+) *report.Reporter {
+	return &report.Reporter{
+		Reader: cm.GetAPIReader(), Client: cm.GetClient(), NodeName: m.NodeName, Namespace: systemname.NamespaceName,
+		Store: m.Store, Collector: collector, Downloading: materializer.Downloading, Progress: materializer.Progress, Downloader: downloader,
+		KubeletCap: kubeletCap, Now: time.Now,
+	}
 }
 
 // rebuild reconstructs the references from the node's mounts and the ledger, and removes what an

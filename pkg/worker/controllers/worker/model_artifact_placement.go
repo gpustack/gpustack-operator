@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	core "k8s.io/api/core/v1"
@@ -73,8 +74,12 @@ func blockedModelArtifactWeights(reason, message string) *modelArtifactWeights {
 
 // modelArtifactDeliveryMode is the delivery Setting as a ModelDeployment's reconcile reads it. It is
 // a variable so a test can choose a delivery without a Settings store.
+//
+// The read goes to the API server rather than the informer cache: this value is the way out for a
+// deployment the delivery holds, and a stalled informer would otherwise freeze that way out — every
+// periodic recheck would re-read the same frozen value.
 var modelArtifactDeliveryMode = func(ctx context.Context) string {
-	return settings.ModelArtifactDeliveryMode.ShouldValue(ctx)
+	return settings.ModelArtifactDeliveryMode.ShouldValueFromRemote(ctx)
 }
 
 // resolveModelArtifactWeights reads the artifact a consumer references and, for a claim, where
@@ -559,11 +564,17 @@ func modelsWithoutProgress(nms *workercore.NodeModelStore) []workercore.NodeMode
 // CSIDriver, and neither changes any deployment's own object: without this a deployment waiting on
 // NodeDeliveryUnavailable or FilterNeedsNodeDelivery stays waiting after the fix, and a switch of
 // delivery rolls nothing until something unrelated wakes each deployment.
-func (r *ModelDeploymentReconciler) mapModelDeploymentDelivery(ctx context.Context, _ ctrlcli.Object) []ctrlreconcile.Request {
+//
+// The error is returned rather than logged away: the wake-up this mapping produces is the only
+// signal a held deployment gets, so a failed list must reach a caller that retries it.
+//
+// The list reads through the API reader rather than the cache, for the same reason the delivery
+// value itself is read from the API server: a stalled informer serves a frozen list with no error,
+// which no retry can tell from "nothing to wake".
+func (r *ModelDeploymentReconciler) mapModelDeploymentDelivery(ctx context.Context, _ ctrlcli.Object) ([]ctrlreconcile.Request, error) {
 	mds := new(workercore.ModelDeploymentList)
-	if err := r.Client.List(ctx, mds); err != nil {
-		ctrllog.FromContext(ctx).Error(err, "list model deployments for a delivery change")
-		return nil
+	if err := r.APIReader.List(ctx, mds); err != nil {
+		return nil, fmt.Errorf("list model deployments for a delivery change: %w", err)
 	}
 	var reqs []ctrlreconcile.Request
 	for i := range mds.Items {
@@ -572,7 +583,7 @@ func (r *ModelDeploymentReconciler) mapModelDeploymentDelivery(ctx context.Conte
 		}
 	}
 
-	return reqs
+	return reqs, nil
 }
 
 // modelDeploymentDeliveryRecheck is how often a deployment held by the delivery is looked at again
@@ -583,26 +594,81 @@ const modelDeploymentDeliveryRecheck = time.Minute
 // Settings read cache, so the pass reads the new value rather than the cached one.
 const settingsReadDelay = setting.ReadCacheTTL + 5*time.Second
 
-// enqueueAfterSettingsRead enqueues what mapFn returns for a Settings change once settingsReadDelay
-// has passed.
-func enqueueAfterSettingsRead(mapFn ctrlhandler.MapFunc) ctrlhandler.EventHandler {
-	add := func(ctx context.Context, obj ctrlcli.Object, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
-		for _, req := range mapFn(ctx, obj) {
-			q.AddAfter(req, settingsReadDelay)
-		}
-	}
+// deliveryChangeRetryDelay is how long after a failed delivery mapping the mapping runs again: a
+// failed list must not drop the wake-up, and the wait keeps a persistent failure from spinning.
+const deliveryChangeRetryDelay = 10 * time.Second
 
-	return ctrlhandler.Funcs{
-		CreateFunc: func(ctx context.Context, e ctrlevent.CreateEvent, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
-			add(ctx, e.Object, q)
-		},
-		UpdateFunc: func(ctx context.Context, e ctrlevent.UpdateEvent, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
-			add(ctx, e.ObjectNew, q)
-		},
-		DeleteFunc: func(ctx context.Context, e ctrlevent.DeleteEvent, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
-			add(ctx, e.Object, q)
-		},
+// deliveryChangeMapFunc maps a delivery change — the delivery Setting or the plugin's CSIDriver —
+// to the deployments it may unblock.
+type deliveryChangeMapFunc func(context.Context, ctrlcli.Object) ([]ctrlreconcile.Request, error)
+
+// deliveryChangeHandler enqueues what the mapping returns once the handler's delay has passed. A
+// mapping that fails is retried rather than dropped: the wake-up is the only signal a held
+// deployment gets.
+type deliveryChangeHandler struct {
+	mapFn deliveryChangeMapFunc
+	delay time.Duration
+	// retrying coalesces the retries of concurrent failures: the mapping covers every deployment
+	// whatever its source object, so one pending retry speaks for all of them.
+	retrying atomic.Bool
+}
+
+// enqueueDeliveryChange enqueues what mapFn returns for a delivery change once delay has passed.
+func enqueueDeliveryChange(mapFn deliveryChangeMapFunc, delay time.Duration) ctrlhandler.EventHandler {
+	return &deliveryChangeHandler{mapFn: mapFn, delay: delay}
+}
+
+func (h *deliveryChangeHandler) add(ctx context.Context, obj ctrlcli.Object, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
+	reqs, err := h.mapFn(ctx, obj)
+	if err != nil {
+		ctrllog.FromContext(ctx).Error(err, "map a delivery change")
+		h.retryLater(ctx, obj, q)
+		return
 	}
+	for _, req := range reqs {
+		q.AddAfter(req, h.delay)
+	}
+}
+
+// retryLater re-runs the mapping after a wait and enqueues the result at once, the delay having been
+// spent on the wait.
+func (h *deliveryChangeHandler) retryLater(ctx context.Context, obj ctrlcli.Object, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
+	if !h.retrying.CompareAndSwap(false, true) {
+		return
+	}
+	time.AfterFunc(max(h.delay, deliveryChangeRetryDelay), func() {
+		h.retrying.Store(false)
+		if ctx.Err() != nil {
+			return
+		}
+		reqs, err := h.mapFn(ctx, obj)
+		if err != nil {
+			ctrllog.FromContext(ctx).Error(err, "map a delivery change")
+			h.retryLater(ctx, obj, q)
+			return
+		}
+		for _, req := range reqs {
+			q.Add(req)
+		}
+	})
+}
+
+func (h *deliveryChangeHandler) Create(ctx context.Context, e ctrlevent.CreateEvent, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
+	h.add(ctx, e.Object, q)
+}
+
+func (h *deliveryChangeHandler) Update(ctx context.Context, e ctrlevent.UpdateEvent, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
+	h.add(ctx, e.ObjectNew, q)
+}
+
+func (h *deliveryChangeHandler) Delete(ctx context.Context, e ctrlevent.DeleteEvent, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]) {
+	h.add(ctx, e.Object, q)
+}
+
+func (h *deliveryChangeHandler) Generic(
+	ctx context.Context, e ctrlevent.GenericEvent, q workqueue.TypedRateLimitingInterface[ctrlreconcile.Request],
+) {
+	h.add(ctx, e.Object, q)
 }
 
 func (r *ModelDeploymentReconciler) modelDeploymentsReferencing(

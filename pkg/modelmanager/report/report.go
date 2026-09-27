@@ -64,14 +64,15 @@ const (
 )
 
 // conflictRetry is how long a report that lost a write to a newer object waits before it reads the
-// object again, so the informer has caught up rather than serving the same stale copy.
+// object again, so the retry reconciles against the winning write rather than the same losing copy.
 const conflictRetry = time.Second
 
 // Reporter keeps the plugin configured from its NodeModelStore's spec, collects the cache and
 // reports into its status. It is the driver's Events, and the materializer's Changed.
 type Reporter struct {
-	// Reader reads the node's NodeModelStore and the CA ConfigMap from the cache; Client writes
-	// the status.
+	// Reader reads the node's NodeModelStore and the CA ConfigMap. It is the API reader rather than
+	// the cache: a report is what converges the applied configuration, and a cache read freezes on a
+	// stalled informer. Client writes the status.
 	Reader    ctrlcli.Reader
 	Client    ctrlcli.Client
 	NodeName  string

@@ -2,7 +2,9 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,14 +12,22 @@ import (
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/setting"
+	"gpustack.ai/gpustack/pkg/setting/settingtest"
+	"gpustack.ai/gpustack/pkg/system"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 const testArtifactDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -605,13 +615,26 @@ func TestNodeModelStoreModelsChanged(t *testing.T) {
 	}
 }
 
-// delayRecorder is a work queue that records what is added after a delay; nothing else is called.
+// delayRecorder is a work queue that records what is added, immediately or after a delay; nothing
+// else is called. The mutex covers the adds a retried mapping issues from its timer goroutine.
 type delayRecorder struct {
 	workqueue.TypedRateLimitingInterface[ctrlreconcile.Request]
+	mu    sync.Mutex
 	added map[ctrlreconcile.Request]time.Duration
+	adds  []ctrlreconcile.Request
 }
 
-func (q *delayRecorder) AddAfter(req ctrlreconcile.Request, d time.Duration) { q.added[req] = d }
+func (q *delayRecorder) Add(req ctrlreconcile.Request) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.adds = append(q.adds, req)
+}
+
+func (q *delayRecorder) AddAfter(req ctrlreconcile.Request, d time.Duration) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.added[req] = d
+}
 
 // TestModelDeploymentDeliveryWaitClears pins that a deployment held by the delivery wakes up when
 // what holds it changes, though its own object does not: the plugin's CSIDriver appearing, and the
@@ -656,7 +679,7 @@ func TestModelDeploymentDeliveryWaitClears(t *testing.T) {
 			}
 			other := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Name = "no-artifact"; md.Spec.KVCache = nil })
 			cli := newModelDeploymentClient(append(objs, other)...)
-			r := &ModelDeploymentReconciler{Client: cli}
+			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
 			res, err := reconcileModelDeployment(t, cli)
 			require.NoError(t, err)
@@ -668,11 +691,13 @@ func TestModelDeploymentDeliveryWaitClears(t *testing.T) {
 			var reqs []ctrlreconcile.Request
 			if c.fixDriver {
 				require.NoError(t, cli.Create(context.Background(), driver.DeepCopy()))
-				reqs = r.mapModelDeploymentDelivery(context.Background(), driver)
+				var merr error
+				reqs, merr = r.mapModelDeploymentDelivery(context.Background(), driver)
+				require.NoError(t, merr)
 			}
 			if c.viaSettings {
 				q := &delayRecorder{added: map[ctrlreconcile.Request]time.Duration{}}
-				enqueueAfterSettingsRead(r.mapModelDeploymentDelivery).Update(context.Background(),
+				enqueueDeliveryChange(r.mapModelDeploymentDelivery, settingsReadDelay).Update(context.Background(),
 					ctrlevent.UpdateEvent{ObjectOld: settingsSecret, ObjectNew: settingsSecret}, q)
 				for req, d := range q.added {
 					assert.Greater(t, d, 30*time.Second, "enqueued after the Settings read cache expires")
@@ -688,6 +713,146 @@ func TestModelDeploymentDeliveryWaitClears(t *testing.T) {
 			assert.Len(t, listReplicas(t, cli), 1)
 		})
 	}
+}
+
+// TestModelDeploymentDeliveryUnblocksPastAStalledInformer holds a deployment with
+// FilterNeedsNodeDelivery, then switches the delivery to Node on the API server alone: the
+// informer's copy keeps serving Engine, as it does while its watch is stalled. The recheck a held
+// deployment is requeued for must read past the stall and create the replicas.
+func TestModelDeploymentDeliveryUnblocksPastAStalledInformer(t *testing.T) {
+	key := settings.ModelArtifactDeliveryMode.Name()
+
+	// Both sides serve Engine at first; the informer side then never moves again.
+	t.Cleanup(setting.InvalidateCache)
+	settingtest.MergeDelegatedSettings(t, map[string]string{key: settings.ModelArtifactDeliveryEngine})
+	mergeRemoteSettings(t, map[string]string{key: settings.ModelArtifactDeliveryEngine})
+
+	artifact := artifactFixture("", true, true)
+	artifact.Spec.IgnorePatterns = []string{"original/"}
+	driver := &storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: "model.csi.gpustack.ai"}}
+	cli := newModelDeploymentClient(artifactDeploymentFixture(1), newRenderInstanceType(), artifact, driver)
+
+	res, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	md := getModelDeployment(t, cli)
+	require.Equal(t, modelWeightsReasonFilterNeedsNode, ModelDeploymentConditionWeightsReady.GetReason(md))
+	require.Empty(t, listReplicas(t, cli))
+	assert.Equal(t, modelDeploymentDeliveryRecheck, res.RequeueAfter, "a held deployment is looked at again without an event")
+
+	// The API server moves to Node; the informer's copy does not. The recheck is the only way out a
+	// stalled informer leaves the deployment.
+	mergeRemoteSettings(t, map[string]string{key: settings.ModelArtifactDeliveryNode})
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	md = getModelDeployment(t, cli)
+	require.NotNil(t, md.Status.Model)
+	assert.Equal(t, workercore.ModelDeploymentModelDeliveryNode, md.Status.Model.Delivery)
+	assert.Equal(t, modelWeightsReasonNotMounted, ModelDeploymentConditionWeightsReady.GetReason(md))
+	assert.Len(t, listReplicas(t, cli), 1)
+}
+
+// mergeRemoteSettings merges keys into the delegated settings Secret read through the loopback
+// Kubernetes client — the API-server side of a Settings read — creating the Secret when absent and
+// restoring the previous values on cleanup. It mirrors settingtest.MergeDelegatedSettings for the
+// side that bypasses the informer.
+func mergeRemoteSettings(t *testing.T, kvs map[string]string) {
+	t.Helper()
+
+	ctx := context.Background()
+	cli := system.LoopbackKubeClient.Get().CoreV1().Secrets(setting.DelegatedSecretNamespace)
+
+	sec, err := cli.Get(ctx, setting.DelegatedSecretName, meta.GetOptions{})
+	if kerrors.IsNotFound(err) {
+		sec, err = cli.Create(ctx, &core.Secret{
+			ObjectMeta: meta.ObjectMeta{Namespace: setting.DelegatedSecretNamespace, Name: setting.DelegatedSecretName},
+		}, meta.CreateOptions{})
+	}
+	require.NoError(t, err)
+
+	prev := map[string][]byte{}
+	if sec.Data == nil {
+		sec.Data = map[string][]byte{}
+	}
+	for k, v := range kvs {
+		prev[k] = sec.Data[k]
+		sec.Data[k] = []byte(v)
+	}
+	_, err = cli.Update(ctx, sec, meta.UpdateOptions{})
+	require.NoError(t, err)
+	setting.InvalidateCache()
+
+	t.Cleanup(func() {
+		sec, err := cli.Get(ctx, setting.DelegatedSecretName, meta.GetOptions{})
+		if err == nil {
+			for k := range kvs {
+				if p, ok := prev[k]; ok {
+					sec.Data[k] = p
+				} else {
+					delete(sec.Data, k)
+				}
+			}
+			_, _ = cli.Update(ctx, sec, meta.UpdateOptions{})
+		}
+		setting.InvalidateCache()
+	})
+}
+
+// TestModelDeploymentDeliveryChangeRetried pins that a delivery change whose mapping fails is not
+// dropped: the mapping runs again after the retry delay and enqueues what it finds.
+func TestModelDeploymentDeliveryChangeRetried(t *testing.T) {
+	ctx := context.Background()
+
+	failures := 2
+	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+		WithObjects(artifactDeploymentFixture(1)).
+		WithInterceptorFuncs(ctrlinterceptor.Funcs{
+			List: func(ctx context.Context, c ctrlcli.WithWatch, list ctrlcli.ObjectList, opts ...ctrlcli.ListOption) error {
+				if _, ok := list.(*workercore.ModelDeploymentList); ok && failures > 0 {
+					failures--
+					return errors.New("the list failed")
+				}
+				return c.List(ctx, list, opts...)
+			},
+		}).Build()
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+
+	q := &delayRecorder{added: map[ctrlreconcile.Request]time.Duration{}}
+	h := enqueueDeliveryChange(r.mapModelDeploymentDelivery, 0)
+	h.Update(ctx, ctrlevent.UpdateEvent{}, q)
+
+	// Nothing is enqueued while the mapping fails; the retry is armed instead.
+	q.mu.Lock()
+	assert.Empty(t, q.added)
+	assert.Empty(t, q.adds)
+	q.mu.Unlock()
+
+	want := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}}
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		q.mu.Lock()
+		defer q.mu.Unlock()
+		assert.Contains(c, q.adds, want)
+	}, 2*deliveryChangeRetryDelay+5*time.Second, 100*time.Millisecond,
+		"a failed mapping retries until the wake-up is enqueued")
+	q.mu.Lock()
+	assert.Zero(t, failures, "the retry mapped until the list succeeded")
+	q.mu.Unlock()
+}
+
+// TestModelDeploymentDeliveryListsPastAStalledInformer pins that the wake-up's candidate list is not
+// read from the informer cache: with the cache frozen empty and the API reader holding the
+// deployment, the mapping still enqueues it.
+func TestModelDeploymentDeliveryListsPastAStalledInformer(t *testing.T) {
+	stale := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+	live := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+		WithObjects(artifactDeploymentFixture(1)).Build()
+	r := &ModelDeploymentReconciler{Client: stale, APIReader: live}
+
+	reqs, err := r.mapModelDeploymentDelivery(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, []ctrlreconcile.Request{
+		{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}},
+	}, reqs, "the candidate list is read past the stalled cache")
 }
 
 // TestModelDeploymentArtifactImageDelivery reconciles a deployment against a resolved image
