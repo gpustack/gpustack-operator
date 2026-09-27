@@ -50,9 +50,14 @@ type Collector struct {
 	// are an error, never an empty set: an empty set would make every mounted tree removable.
 	Referenced  func() (map[string]bool, error)
 	Downloading func() map[string]bool
-	Now         func() time.Time
-	Grace       time.Duration
-	PartialTTL  time.Duration
+	// Pinned are the digests the node's configuration says to retain: never collection candidates,
+	// though they still count toward the filesystem's usage and so keep the saturated state honest.
+	// Nil means nothing is pinned.
+	Pinned func() map[string]bool
+	Now    func() time.Time
+	Grace  time.Duration
+	// PartialTTL is how long an attempt's files nobody asks for stay for a resume.
+	PartialTTL time.Duration
 
 	mu sync.Mutex
 	// reservations are the running downloads' reservations, by their token.
@@ -292,17 +297,22 @@ type candidate struct {
 	lastUsed time.Time
 }
 
-// candidates are the published trees no Pod references, past their grace, oldest use first.
+// candidates are the published trees no Pod references, not pinned, past their grace, oldest use
+// first.
 func (c *Collector) candidates(now time.Time, referenced map[string]bool) ([]candidate, error) {
 	markers, err := c.Store.Published()
 	if err != nil {
 		return nil, err
 	}
 	downloading := c.Downloading()
+	var pinned map[string]bool
+	if c.Pinned != nil {
+		pinned = c.Pinned()
+	}
 	var out []candidate
 	for _, m := range markers {
 		hex := store.HexOf(m.Digest)
-		if hex == "" || referenced[hex] || downloading[hex] {
+		if hex == "" || referenced[hex] || downloading[hex] || pinned[hex] {
 			continue
 		}
 		rec, err := c.Store.ReadDigest(hex)

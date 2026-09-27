@@ -81,13 +81,19 @@ func (c *testCache) publish(t *testing.T, hex string, size int64, lastUsed time.
 	require.NoError(t, c.store.WriteDigest(hex, rec))
 }
 
-func (c *testCache) collector(referenced, downloading map[string]bool) *Collector {
+func (c *testCache) collector(referenced, downloading map[string]bool, pinned ...map[string]bool) *Collector {
+	var pins map[string]bool
+	if len(pinned) > 0 {
+		pins = pinned[0]
+	}
+
 	return &Collector{
 		Store:       c.store,
 		Usage:       c.usage,
 		Watermarks:  func() (int32, int32, string) { return 80, 70, "" },
 		Referenced:  func() (map[string]bool, error) { return referenced, nil },
 		Downloading: func() map[string]bool { return downloading },
+		Pinned:      func() map[string]bool { return pins },
 		Now:         func() time.Time { return testNow },
 	}
 }
@@ -119,6 +125,7 @@ func TestCollect(t *testing.T) {
 		trees       map[string]time.Time // hex -> last use, each 100 bytes
 		referenced  map[string]bool
 		downloading map[string]bool
+		pinned      map[string]bool
 		// claimed are mounted after the collector read the references, so only the store knows.
 		claimed      []string
 		refsErr      bool
@@ -175,6 +182,19 @@ func TestCollect(t *testing.T) {
 			// 850 used: a is claimed, b (750) and c (650) go.
 			wantKept: []string{hexOf('a'), hexOf('d')},
 		},
+		{
+			name: "a pinned tree is never removed, however old",
+			base: 450, trees: map[string]time.Time{hexOf('a'): oldest, hexOf('b'): oldest, hexOf('c'): older, hexOf('d'): old},
+			pinned: map[string]bool{hexOf('a'): true},
+			// 850 used: a is pinned, b (750) and c (650) go.
+			wantKept: []string{hexOf('a'), hexOf('d')},
+		},
+		{
+			name: "only pinned content leaves capacity low all the same",
+			base: 700, trees: map[string]time.Time{hexOf('a'): old, hexOf('b'): old},
+			pinned:   map[string]bool{hexOf('a'): true, hexOf('b'): true},
+			wantKept: []string{hexOf('a'), hexOf('b')}, wantLow: true,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -186,7 +206,7 @@ func TestCollect(t *testing.T) {
 			for _, hex := range c.claimed {
 				cache.claim(t, hex)
 			}
-			col := cache.collector(c.referenced, c.downloading)
+			col := cache.collector(c.referenced, c.downloading, c.pinned)
 			if c.refsErr {
 				col.Referenced = func() (map[string]bool, error) { return nil, errors.New("unreadable reference") }
 			}

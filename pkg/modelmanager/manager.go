@@ -87,6 +87,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		KubeletCap: kubeletCap, Now: time.Now,
 	}
 	collector.Watermarks = reporter.Watermarks
+	collector.Pinned = reporter.Pinned
 	materializer.Environment = reporter.Environment
 	materializer.Reserve = collector.Reserve
 	materializer.Changed = reporter.Trigger
