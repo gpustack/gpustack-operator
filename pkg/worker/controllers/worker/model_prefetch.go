@@ -113,7 +113,8 @@ func (r *ModelPrefetchReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	artifact := new(workercore.ModelArtifact)
-	artifactErr := r.Client.Get(ctx, ctrlcli.ObjectKey{Namespace: pf.Namespace, Name: pf.Spec.ArtifactRef.Name}, artifact)
+	artifactErr := r.Client.Get(ctx,
+		ctrlcli.ObjectKey{Namespace: pf.Namespace, Name: pf.Spec.ArtifactRef.Name}, artifact)
 	artifactMissing := kerrors.IsNotFound(artifactErr)
 	if artifactErr != nil && !artifactMissing {
 		return ctrl.Result{}, artifactErr
@@ -192,23 +193,12 @@ type prefetchProgress struct {
 	failed      int32
 }
 
-// resolvedDigest returns the artifact's resolved manifest digest, empty while it has none.
-func (r *ModelPrefetchReconciler) resolvedDigest(ctx context.Context, pf *workercore.ModelPrefetch) string {
-	artifact := new(workercore.ModelArtifact)
-	if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Namespace: pf.Namespace, Name: pf.Spec.ArtifactRef.Name}, artifact); err != nil {
-		return ""
-	}
-	if artifact.Status.Resolved == nil {
-		return ""
-	}
-
-	return artifact.Status.Resolved.ManifestDigest
-}
-
 // prefetchTargetNodes resolves the placement into sorted node names: the named InstanceTypes'
 // nodes, or the selector's matches, or — with no placement at all — the InstanceTypes of the
 // namespace's deployments that reference the artifact.
-func prefetchTargetNodes(pf *workercore.ModelPrefetch, nodes []core.Node, deps []workercore.ModelDeployment) ([]string, error) {
+func prefetchTargetNodes(
+	pf *workercore.ModelPrefetch, nodes []core.Node, deps []workercore.ModelDeployment,
+) ([]string, error) {
 	placement := pf.Spec.Placement
 	var typeNames []string
 	switch {
@@ -446,7 +436,9 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 		}
 		entries := modelstore.NodeEntries(stores.Items, digest)
 		for _, node := range targets {
-			if entry, ok := entries[node]; !ok || entry.State != workercore.NodeModelStoreModelStateReady || r.ttlExpired(pf, entry) {
+			entry, ok := entries[node]
+			entryReady := ok && entry.State == workercore.NodeModelStoreModelStateReady && !r.ttlExpired(pf, entry)
+			if !entryReady {
 				continue
 			}
 			if desired[node] == nil {
@@ -494,7 +486,9 @@ func (r *ModelPrefetchReconciler) ttlExpired(pf *workercore.ModelPrefetch, entry
 // writeStatus fills the status from the progress. Available wants readyNodes to reach MinReady,
 // where 0 means all of them; Degraded waits for a target node to give up — or for the artifact the
 // prefetch names to disappear, which stops the delivery rather than leaving it fetching forever.
-func (r *ModelPrefetchReconciler) writeStatus(pf *workercore.ModelPrefetch, progress prefetchProgress, broken error, artifactMissing bool) {
+func (r *ModelPrefetchReconciler) writeStatus(
+	pf *workercore.ModelPrefetch, progress prefetchProgress, broken error, artifactMissing bool,
+) {
 	pf.Status.DesiredNodes = progress.desired
 	pf.Status.ReadyNodes = int32(len(progress.ready))
 	pf.Status.DownloadingNodes = progress.downloading
@@ -552,7 +546,9 @@ func (r *ModelPrefetchReconciler) writeStatus(pf *workercore.ModelPrefetch, prog
 		[]gpustack.Condition{progressing, available, degraded}, r.now())
 }
 
-func (r *ModelPrefetchReconciler) commitStatus(ctx context.Context, pf *workercore.ModelPrefetch, before *workercore.ModelPrefetchStatus) error {
+func (r *ModelPrefetchReconciler) commitStatus(
+	ctx context.Context, pf *workercore.ModelPrefetch, before *workercore.ModelPrefetchStatus,
+) error {
 	if kubemeta.DeepEqual(before, &pf.Status) {
 		return nil
 	}
