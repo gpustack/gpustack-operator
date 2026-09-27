@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -10,9 +11,13 @@ import (
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
+	ctrlhandler "sigs.k8s.io/controller-runtime/pkg/handler"
+	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	gpustack "gpustack.ai/gpustack/api/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -323,4 +328,95 @@ func TestModelStoreOverlapIsVisibleOnBothStores(t *testing.T) {
 func peerSyncTrue() *bool {
 	v := true
 	return &v
+}
+
+// TestModelStoreSiblingWatch_EnqueuesTheSiblings drives the sibling watch's predicate and handler
+// together, the way the controller composes them: only a selector-relevant change on one store
+// wakes the others, whose overlap view it can move, and the changed store is not enqueued by its
+// own event — the For watch already runs that reconcile.
+func TestModelStoreSiblingWatch_EnqueuesTheSiblings(t *testing.T) {
+	type eventKind int
+	const (
+		created eventKind = iota
+		updated
+		deleted
+	)
+
+	cases := []struct {
+		name   string
+		kind   eventKind
+		mutate func(*workercore.ModelStore)
+		want   []string
+	}{
+		{name: "a_store_appearing", kind: created, want: []string{"alpha", "gamma"}},
+		{name: "a_store_being_deleted", kind: deleted, want: []string{"alpha", "gamma"}},
+		{
+			name: "a_selector_moving",
+			kind: updated,
+			mutate: func(s *workercore.ModelStore) {
+				s.Spec.NodeSelector.MatchLabels = map[string]string{"pool": "h100"}
+			},
+			want: []string{"alpha", "gamma"},
+		},
+		{
+			name: "a_policy_change_the_siblings_do_not_read",
+			kind: updated,
+			mutate: func(s *workercore.ModelStore) {
+				s.Spec.Watermarks = &workercore.NodeModelStoreWatermarks{HighPercent: 90, LowPercent: 80}
+			},
+			want: []string{},
+		},
+		{
+			name: "a_status_write_the_siblings_do_not_read",
+			kind: updated,
+			mutate: func(s *workercore.ModelStore) {
+				s.Status.Nodes = 3
+			},
+			want: []string{},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newTestModelStoreEnv(t,
+				testModelStore("alpha", map[string]string{"pool": "h100"}, nil),
+				testModelStore("beta", map[string]string{"pool": "mi300"}, nil),
+				testModelStore("gamma", map[string]string{"pool": "mi300"}, nil),
+			)
+			handler := ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueSiblingStores)
+			queue := workqueue.NewTypedRateLimitingQueue(
+				workqueue.DefaultTypedControllerRateLimiter[ctrlreconcile.Request]())
+			defer queue.ShutDown()
+
+			ctx := context.Background()
+			beta := testModelStore("beta", map[string]string{"pool": "mi300"}, nil)
+			switch tc.kind {
+			case created:
+				e := ctrlevent.CreateEvent{Object: beta}
+				if modelStoreSelectorChanged.Create(e) {
+					handler.Create(ctx, e, queue)
+				}
+			case deleted:
+				e := ctrlevent.DeleteEvent{Object: beta}
+				if modelStoreSelectorChanged.Delete(e) {
+					handler.Delete(ctx, e, queue)
+				}
+			case updated:
+				next := beta.DeepCopy()
+				tc.mutate(next)
+				e := ctrlevent.UpdateEvent{ObjectOld: beta, ObjectNew: next}
+				if modelStoreSelectorChanged.Update(e) {
+					handler.Update(ctx, e, queue)
+				}
+			}
+
+			got := make([]string, 0)
+			for queue.Len() > 0 {
+				req, _ := queue.Get()
+				got = append(got, req.Name)
+				queue.Done(req)
+			}
+			slices.Sort(got)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
