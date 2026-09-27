@@ -679,7 +679,7 @@ func TestModelDeploymentDeliveryWaitClears(t *testing.T) {
 			}
 			other := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Name = "no-artifact"; md.Spec.KVCache = nil })
 			cli := newModelDeploymentClient(append(objs, other)...)
-			r := &ModelDeploymentReconciler{Client: cli}
+			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
 			res, err := reconcileModelDeployment(t, cli)
 			require.NoError(t, err)
@@ -815,7 +815,7 @@ func TestModelDeploymentDeliveryChangeRetried(t *testing.T) {
 				return c.List(ctx, list, opts...)
 			},
 		}).Build()
-	r := &ModelDeploymentReconciler{Client: cli}
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
 	q := &delayRecorder{added: map[ctrlreconcile.Request]time.Duration{}}
 	h := enqueueDeliveryChange(r.mapModelDeploymentDelivery, 0)
@@ -837,6 +837,22 @@ func TestModelDeploymentDeliveryChangeRetried(t *testing.T) {
 	q.mu.Lock()
 	assert.Zero(t, failures, "the retry mapped until the list succeeded")
 	q.mu.Unlock()
+}
+
+// TestModelDeploymentDeliveryListsPastAStalledInformer pins that the wake-up's candidate list is not
+// read from the informer cache: with the cache frozen empty and the API reader holding the
+// deployment, the mapping still enqueues it.
+func TestModelDeploymentDeliveryListsPastAStalledInformer(t *testing.T) {
+	stale := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+	live := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+		WithObjects(artifactDeploymentFixture(1)).Build()
+	r := &ModelDeploymentReconciler{Client: stale, APIReader: live}
+
+	reqs, err := r.mapModelDeploymentDelivery(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, []ctrlreconcile.Request{
+		{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}},
+	}, reqs, "the candidate list is read past the stalled cache")
 }
 
 // TestModelDeploymentArtifactImageDelivery reconciles a deployment against a resolved image

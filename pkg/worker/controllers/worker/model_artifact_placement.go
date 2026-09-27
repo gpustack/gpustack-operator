@@ -567,9 +567,13 @@ func modelsWithoutProgress(nms *workercore.NodeModelStore) []workercore.NodeMode
 //
 // The error is returned rather than logged away: the wake-up this mapping produces is the only
 // signal a held deployment gets, so a failed list must reach a caller that retries it.
+//
+// The list reads through the API reader rather than the cache, for the same reason the delivery
+// value itself is read from the API server: a stalled informer serves a frozen list with no error,
+// which no retry can tell from "nothing to wake".
 func (r *ModelDeploymentReconciler) mapModelDeploymentDelivery(ctx context.Context, _ ctrlcli.Object) ([]ctrlreconcile.Request, error) {
 	mds := new(workercore.ModelDeploymentList)
-	if err := r.Client.List(ctx, mds); err != nil {
+	if err := r.APIReader.List(ctx, mds); err != nil {
 		return nil, fmt.Errorf("list model deployments for a delivery change: %w", err)
 	}
 	var reqs []ctrlreconcile.Request
