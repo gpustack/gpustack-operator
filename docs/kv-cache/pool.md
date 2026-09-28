@@ -88,6 +88,10 @@ The one thing a tenant id must be is *registered*: a multi-tenant master refuses
 its ledger, and a Binding is what puts one there (see the next section). That constrains which names
 **exist**, never who may use one.
 
+A managed backend keeps a ledger unless it declares `leader.multiTenancy: false`, which a store image
+older than Mooncake 0.3.12 has to — see [KV Cache Backend](backend.md#the-projects-own-build-variants).
+An external backend keeps one only if its master was started with multi-tenancy on.
+
 A backend running without multi-tenancy has no ledger and makes no such check. A `KVCachePool` over a
 *managed* backend in that state is admitted with a **warning** that no per-tenant quota is in force;
 an external backend is not inspected at admission. Once the pool reports the missing ledger, its
@@ -106,9 +110,10 @@ somebody else registered is a separate question, answered in
 [What a Binding does not do](#what-a-binding-does-not-do).
 
 - **Leaving `name` out registers `default`.** The API server stores an omitted `spec.domain.name`
-  as `default`, the store's own tenant for a writer that names none. On a master without
-  multi-tenancy no tenant is forwarded anyway, so the name only records the registration and can be
-  left out. It is claimed like any other name, so two Bindings that both leave it out collide on a
+  as `default`, the store's own tenant for a writer that names none. On a multi-tenant master, the
+  default for a managed backend, `default` is the tenant the engines are handed, so name each domain
+  once a second Binding shares the master. On a master without multi-tenancy no tenant is forwarded,
+  so the name only records the registration. It is claimed like any other name, so two Bindings that both leave it out collide on a
   shared master.
 - **A domain name is claimed per master.** A second Binding naming a domain another Binding already
   holds is **rejected at admission** when one backend serves both Bindings' pools — anywhere in the
@@ -318,8 +323,9 @@ to a cache that refuses every byte, which is the reading this whole status exist
 The same shape covers a policy file the store cannot rewrite: it cannot receive ceilings, and that
 surfaces as a False condition and a non-Ready pool rather than as a pool that quietly grants nothing.
 
-A store started without multi-tenancy is the exception. It has no per-tenant ledger at all, which is
-a declared single-tenant topology rather than a fault: `QuotaLedgerAvailable` reads False with reason
+A store started without multi-tenancy is the exception: a managed backend that declares
+`leader.multiTenancy: false`, or an external master started without it. It has no per-tenant ledger
+at all, which is a declared single-tenant topology rather than a fault: `QuotaLedgerAvailable` reads False with reason
 `MultiTenancyDisabled`, and the pool stays `Ready` with a message saying it serves one reuse domain.
 
 ## Operating notes
@@ -338,7 +344,7 @@ They are separate because the action differs: removing workloads, draining a dom
 an unanswering master are three different operations.
 
 **A master that holds no tenant ledger releases the Binding rather than holding it.** With
-multi-tenancy off there is no ledger for a quota entry to be in, so the deletion strands nothing and
+multi-tenancy declared off there is no ledger for a quota entry to be in, so the deletion strands nothing and
 completes — the same answer the pool's own teardown takes. Every other failed ledger request leaves
 whether the entry is gone unknown and holds, because a Binding released over an entry still on the
 master leaves capacity nothing can reclaim: the ledger records no owner.
@@ -347,7 +353,7 @@ master leaves capacity nothing can reclaim: the ledger records no owner.
 Each layer names what to remove in its own condition message.
 
 **A pool's deletion needs its master only when that master can hold a ledger.** A managed backend
-declared without multi-tenancy holds none, so its pools are released without asking the master, and a
+declaring `leader.multiTenancy: false` holds none, so its pools are released without asking the master, and a
 leader that never started does not hold them. On any other backend the pool may still have entries on
 the master; while the master does not answer, the pool stays `Deleting` with `Releasable=False`,
 reason `LedgerNotReleased`, and the pass is retried every 30 seconds.
@@ -370,7 +376,8 @@ last pool. Its deleting Bindings are released once it is gone, and its claim no 
 this side is a pool's own exit: releasing a pool means releasing every quota it registered.
 
 **Read the grant, not the ceiling, when diagnosing.** `kubectl get kvcpb` prints both. The output
-below is from a backend with `leader.multiTenancy: true`; without it there is no ledger, and
+below is from a multi-tenant backend, a managed one's default; on one declaring
+`leader.multiTenancy: false` there is no ledger, and
 `EFFECTIVE` and `USAGE` stay empty:
 
 ```
