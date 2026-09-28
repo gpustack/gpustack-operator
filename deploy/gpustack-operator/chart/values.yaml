@@ -444,8 +444,8 @@ modelManager:
   # collection thresholds. Changing it points the plugin at an empty cache; nothing is migrated or
   # removed from the old path.
   rootPath: /var/lib/gpustack/models
-  # -- kubelet's root directory, the convention the bundled CSI drivers follow. It is mounted with
-  # Bidirectional propagation so a bind mount the plugin makes reaches the Pod.
+  # -- kubelet's root directory, the convention the bundled CSI drivers follow. The plugin mounts
+  # its pods directory with Bidirectional propagation so its bind mounts reach the Pods.
   kubeletDir: /var/lib/kubelet
   # -- Secure serving port of the model-manager container: metrics, readiness and liveness.
   securePort: 32444

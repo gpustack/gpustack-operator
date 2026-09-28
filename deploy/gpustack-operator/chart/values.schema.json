@@ -1243,7 +1243,7 @@
         },
         "kubeletDir": {
           "default": "/var/lib/kubelet",
-          "description": "kubelet's root directory, the convention the bundled CSI drivers follow. It is mounted with\nBidirectional propagation so a bind mount the plugin makes reaches the Pod.",
+          "description": "kubelet's root directory, the convention the bundled CSI drivers follow. The plugin mounts\nits pods directory with Bidirectional propagation so its bind mounts reach the Pods.",
           "title": "kubeletDir",
           "type": "string"
         },
