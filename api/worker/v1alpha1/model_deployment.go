@@ -942,12 +942,12 @@ type ModelDeploymentModelStatus struct {
 	ManifestDigest string `json:"manifestDigest,omitempty" protobuf:"bytes,3,opt,name=manifestDigest"`
 
 	// Delivery is how the weights reach the engine: "Pvc", the claim mounted read-only at a fixed
-	// path; "Engine", the engine downloading the pinned commit itself; or "Node", the node's
+	// path; "Engine", the engine downloading the pinned commit itself; "Node", the node's
 	// model-manager plugin materializing the verified files and mounting them read-only at the same
-	// fixed path.
+	// fixed path; or "Image", kubelet pulling the pinned OCI image into a read-only image volume.
 	//
 	// +required
-	// +k8s:validation:enum=["Pvc","Engine","Node"]
+	// +k8s:validation:enum=["Pvc","Engine","Node","Image"]
 	Delivery ModelDeploymentModelDelivery `json:"delivery" protobuf:"bytes,4,name=delivery,casttype=ModelDeploymentModelDelivery"`
 }
 

@@ -21,9 +21,9 @@ type ModelDeploymentModelStatusApplyConfiguration struct {
 	// ManifestDigest is a hub artifact's content address. Absent for a claim.
 	ManifestDigest *string `json:"manifestDigest,omitempty"`
 	// Delivery is how the weights reach the engine: "Pvc", the claim mounted read-only at a fixed
-	// path; "Engine", the engine downloading the pinned commit itself; or "Node", the node's
+	// path; "Engine", the engine downloading the pinned commit itself; "Node", the node's
 	// model-manager plugin materializing the verified files and mounting them read-only at the same
-	// fixed path.
+	// fixed path; or "Image", kubelet pulling the pinned OCI image into a read-only image volume.
 	Delivery *workerv1alpha1.ModelDeploymentModelDelivery `json:"delivery,omitempty"`
 }
 
