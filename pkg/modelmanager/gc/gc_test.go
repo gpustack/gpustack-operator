@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -244,6 +245,88 @@ func TestCollectCountsWhatItRemovedWhenItFailsLater(t *testing.T) {
 	assert.InDelta(t, 100, testutil.ToFloat64(metrics.GCRemovedBytes)-before, 0, "the removal before the failure is counted")
 }
 
+func TestCollectAllowsReservationAndClaimDuringDeletion(t *testing.T) {
+	cache := newTestCache(t, 450)
+	for i, hex := range []string{hexOf('a'), hexOf('b'), hexOf('c'), hexOf('d')} {
+		cache.publish(t, hex, 100, testNow.Add(-time.Duration(4-i)*time.Hour))
+	}
+	col := cache.collector(nil, nil)
+	var usageCalls atomic.Int32
+	deleting := make(chan struct{})
+	continueDeleting := make(chan struct{})
+	col.Usage = func() (Usage, error) {
+		if usageCalls.Add(1) == 2 {
+			close(deleting)
+			<-continueDeleting
+		}
+		return cache.usage()
+	}
+	type collection struct {
+		result Result
+		err    error
+	}
+	collected := make(chan collection, 1)
+	go func() {
+		result, err := col.Collect(context.Background())
+		collected <- collection{result: result, err: err}
+	}()
+	select {
+	case <-deleting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("collection did not reach the deletion phase")
+	}
+
+	reserved := make(chan error, 1)
+	go func() {
+		release, err := col.Reserve(context.Background(), hexOf('z'), 25, nothingWritten)
+		if err == nil {
+			release()
+		}
+		reserved <- err
+	}()
+	reservationCompleted := false
+	var reservationErr error
+	select {
+	case err := <-reserved:
+		reservationErr = err
+		reservationCompleted = true
+	case <-time.After(time.Second):
+	}
+	cache.claim(t, hexOf('b'))
+	close(continueDeleting)
+	res := <-collected
+	require.NoError(t, res.err)
+	assert.True(t, reservationCompleted, "a reservation that fits must finish during deletion")
+	if reservationCompleted {
+		require.NoError(t, reservationErr)
+	}
+	assert.ElementsMatch(t, []string{hexOf('b'), hexOf('d')}, cache.published(t))
+}
+
+func TestCollectKeepsTreeReusedAfterCandidateSnapshot(t *testing.T) {
+	cache := newTestCache(t, 700)
+	for i, hex := range []string{hexOf('a'), hexOf('b')} {
+		cache.publish(t, hex, 100, testNow.Add(-time.Duration(4-i)*time.Hour))
+	}
+	col := cache.collector(nil, nil)
+	usageCalls := 0
+	col.Usage = func() (Usage, error) {
+		usageCalls++
+		if usageCalls == 2 {
+			cache.claim(t, hexOf('b'))
+			require.NoError(t, cache.store.RemoveRef("csi-"+hexOf('b')[:8]))
+			require.NoError(t, cache.store.UpdateDigest(hexOf('b'), func(rec *store.DigestRecord) {
+				rec.LastUsedTime = testNow
+			}))
+		}
+		return cache.usage()
+	}
+
+	_, err := col.Collect(context.Background())
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{hexOf('b')}, cache.published(t))
+}
+
 func TestCollectPartials(t *testing.T) {
 	cache := newTestCache(t, 0)
 	for _, hex := range []string{hexOf('a'), hexOf('b'), hexOf('c')} {
@@ -346,6 +429,60 @@ func TestReserveCountsWhatIsInFlight(t *testing.T) {
 			assert.Equal(t, download.ReasonInsufficientCapacity, download.ReasonOf(err))
 		})
 	}
+}
+
+func TestReserveRechecksCapacityAfterConcurrentReservation(t *testing.T) {
+	cache := newTestCache(t, 450)
+	for i, hex := range []string{hexOf('a'), hexOf('b'), hexOf('c'), hexOf('d')} {
+		cache.publish(t, hex, 100, testNow.Add(-time.Duration(4-i)*time.Hour))
+	}
+	col := cache.collector(nil, nil)
+	var paused atomic.Bool
+	deleting := make(chan struct{})
+	continueDeleting := make(chan struct{})
+	col.Usage = func() (Usage, error) {
+		u, err := cache.usage()
+		if err == nil && u.Used == 550 && paused.CompareAndSwap(false, true) {
+			close(deleting)
+			<-continueDeleting
+		}
+		return u, err
+	}
+	first := make(chan error, 1)
+	go func() {
+		_, err := col.Reserve(context.Background(), hexOf('x'), 100, nothingWritten)
+		first <- err
+	}()
+	select {
+	case <-deleting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reservation did not reach the deletion phase")
+	}
+
+	type admission struct {
+		release func()
+		err     error
+	}
+	second := make(chan admission, 1)
+	go func() {
+		release, err := col.Reserve(context.Background(), hexOf('y'), 250, nothingWritten)
+		second <- admission{release: release, err: err}
+	}()
+	var next admission
+	completed := false
+	select {
+	case next = <-second:
+		completed = true
+	case <-time.After(time.Second):
+	}
+	close(continueDeleting)
+	firstErr := <-first
+	assert.True(t, completed, "a fitting reservation must finish during deletion")
+	if completed {
+		require.NoError(t, next.err)
+		next.release()
+	}
+	assert.Equal(t, download.ReasonInsufficientCapacity, download.ReasonOf(firstErr))
 }
 
 func TestKubeletCap(t *testing.T) {
