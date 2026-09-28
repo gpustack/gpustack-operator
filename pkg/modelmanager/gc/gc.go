@@ -59,7 +59,9 @@ type Collector struct {
 	// PartialTTL is how long an attempt's files nobody asks for stay for a resume.
 	PartialTTL time.Duration
 
-	mu sync.Mutex
+	// mu protects reservations. collectMu keeps collection passes from overlapping.
+	mu        sync.Mutex
+	collectMu sync.Mutex
 	// reservations are the running downloads' reservations, by their token.
 	reservations map[*reservation]struct{}
 }
@@ -85,10 +87,14 @@ type Result struct {
 // grace, oldest use first, until usage is at or below the low watermark. It never removes a
 // referenced tree or the files of a running attempt.
 func (c *Collector) Collect(ctx context.Context) (Result, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.collectMu.Lock()
+	defer c.collectMu.Unlock()
 
-	return c.collect(ctx, c.inFlight())
+	c.mu.Lock()
+	incoming := c.inFlight()
+	c.mu.Unlock()
+
+	return c.collect(ctx, incoming)
 }
 
 // Reserve makes room for a download of sizeBytes whose attempt holds written() of them on disk so
@@ -98,36 +104,80 @@ func (c *Collector) Collect(ctx context.Context) (Result, error) {
 // collects, and if they still would not, it refuses with InsufficientCapacity.
 func (c *Collector) Reserve(ctx context.Context, hex string, sizeBytes int64, written func() int64) (func(), error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	high, _, unavailable := c.Watermarks()
 	if unavailable != "" {
+		c.mu.Unlock()
 		return nil, &download.Error{Reason: download.ReasonInvalidRequest, Message: unavailable, Detail: unavailable}
 	}
 	bytes := max(sizeBytes-written(), 0)
 	incoming := bytes + c.inFlight()
 	u, err := c.Usage()
 	if err != nil {
+		c.mu.Unlock()
+		return nil, err
+	}
+	if fits(u, incoming, high) {
+		release := c.addReservation(sizeBytes, written)
+		c.mu.Unlock()
+		return release, nil
+	}
+	c.mu.Unlock()
+
+	c.collectMu.Lock()
+	defer c.collectMu.Unlock()
+	c.mu.Lock()
+	high, _, unavailable = c.Watermarks()
+	if unavailable != "" {
+		c.mu.Unlock()
+		return nil, &download.Error{Reason: download.ReasonInvalidRequest, Message: unavailable, Detail: unavailable}
+	}
+	bytes = max(sizeBytes-written(), 0)
+	incoming = bytes + c.inFlight()
+	u, err = c.Usage()
+	if err != nil {
+		c.mu.Unlock()
+		return nil, err
+	}
+	if fits(u, incoming, high) {
+		release := c.addReservation(sizeBytes, written)
+		c.mu.Unlock()
+		return release, nil
+	}
+	c.mu.Unlock()
+	res, err := c.collect(ctx, incoming)
+	if err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	high, _, unavailable = c.Watermarks()
+	if unavailable != "" {
+		return nil, &download.Error{Reason: download.ReasonInvalidRequest, Message: unavailable, Detail: unavailable}
+	}
+	bytes = max(sizeBytes-written(), 0)
+	incoming = bytes + c.inFlight()
+	u, err = c.Usage()
+	if err != nil {
 		return nil, err
 	}
 	if !fits(u, incoming, high) {
-		res, err := c.collect(ctx, incoming)
-		if err != nil {
-			return nil, err
-		}
 		// The node's own numbers name no tenant, so the whole message is the detail.
 		if res.Skipped != "" {
 			return nil, nodeCapacityError(fmt.Sprintf("%d bytes of sha256:%s do not fit under the high watermark of %d%%, "+
 				"and collection was skipped: %s", bytes, hex[:12], high, res.Skipped))
 		}
-		if !fits(res.Usage, incoming, high) {
-			return nil, nodeCapacityError(fmt.Sprintf("%d bytes of sha256:%s do not fit under the high watermark of %d%%: "+
-				"the cache's filesystem is %.1f%% used of %d bytes with %d more reserved by running downloads, "+
-				"and nothing unreferenced is left to remove",
-				bytes, hex[:12], high, res.Usage.Percent(), res.Usage.Total, incoming-bytes))
-		}
+		return nil, nodeCapacityError(fmt.Sprintf("%d bytes of sha256:%s do not fit under the high watermark of %d%%: "+
+			"the cache's filesystem is %.1f%% used of %d bytes with %d more reserved by running downloads, "+
+			"and nothing unreferenced is left to remove",
+			bytes, hex[:12], high, u.Percent(), u.Total, incoming-bytes))
 	}
 
+	return c.addReservation(sizeBytes, written), nil
+}
+
+// addReservation records a claim while c.mu is held.
+func (c *Collector) addReservation(sizeBytes int64, written func() int64) func() {
 	r := &reservation{size: sizeBytes, written: written}
 	if c.reservations == nil {
 		c.reservations = map[*reservation]struct{}{}
@@ -138,7 +188,7 @@ func (c *Collector) Reserve(ctx context.Context, hex string, sizeBytes int64, wr
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		delete(c.reservations, r)
-	}, nil
+	}
 }
 
 // inFlight is what the running reservations have yet to write. The caller holds c.mu.
@@ -225,7 +275,21 @@ func (c *Collector) collect(ctx context.Context, incoming int64) (Result, error)
 		if fits(res.Usage, incoming, low) {
 			break
 		}
-		// Removed only while no reference names it, under the lock a mount claims its tree with.
+		if c.Downloading()[cand.hex] || (c.Pinned != nil && c.Pinned()[cand.hex]) {
+			continue
+		}
+		rec, err := c.Store.ReadDigest(cand.hex)
+		if err != nil {
+			return res, err
+		}
+		lastUsed := rec.LastUsedTime
+		if lastUsed.IsZero() {
+			lastUsed = cand.lastUsed
+		}
+		if c.Now().Sub(lastUsed) < c.grace() {
+			continue
+		}
+		// The store checks live references under the lock a mount claims its tree with.
 		removed, refErr := c.Store.RemoveUnreferenced(cand.hex)
 		if res.Skipped = unreadableReferences(refErr); res.Skipped != "" {
 			break
