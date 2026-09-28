@@ -73,6 +73,14 @@ type reservation struct {
 	written func() int64
 }
 
+type reserveCheck struct {
+	release  func()
+	bytes    int64
+	incoming int64
+	usage    Usage
+	high     int32
+}
+
 // Result is what a collection did.
 type Result struct {
 	RemovedBytes int64
@@ -103,77 +111,60 @@ func (c *Collector) Collect(ctx context.Context) (Result, error) {
 // reservations that each fit and together do not are never all admitted. If they would not fit it
 // collects, and if they still would not, it refuses with InsufficientCapacity.
 func (c *Collector) Reserve(ctx context.Context, hex string, sizeBytes int64, written func() int64) (func(), error) {
-	c.mu.Lock()
-	high, _, unavailable := c.Watermarks()
-	if unavailable != "" {
-		c.mu.Unlock()
-		return nil, &download.Error{Reason: download.ReasonInvalidRequest, Message: unavailable, Detail: unavailable}
+	check, err := c.tryReserve(sizeBytes, written)
+	if err != nil || check.release != nil {
+		return check.release, err
 	}
-	bytes := max(sizeBytes-written(), 0)
-	incoming := bytes + c.inFlight()
-	u, err := c.Usage()
-	if err != nil {
-		c.mu.Unlock()
-		return nil, err
-	}
-	if fits(u, incoming, high) {
-		release := c.addReservation(sizeBytes, written)
-		c.mu.Unlock()
-		return release, nil
-	}
-	c.mu.Unlock()
 
 	c.collectMu.Lock()
 	defer c.collectMu.Unlock()
-	c.mu.Lock()
-	high, _, unavailable = c.Watermarks()
-	if unavailable != "" {
-		c.mu.Unlock()
-		return nil, &download.Error{Reason: download.ReasonInvalidRequest, Message: unavailable, Detail: unavailable}
+	check, err = c.tryReserve(sizeBytes, written)
+	if err != nil || check.release != nil {
+		return check.release, err
 	}
-	bytes = max(sizeBytes-written(), 0)
-	incoming = bytes + c.inFlight()
-	u, err = c.Usage()
-	if err != nil {
-		c.mu.Unlock()
-		return nil, err
-	}
-	if fits(u, incoming, high) {
-		release := c.addReservation(sizeBytes, written)
-		c.mu.Unlock()
-		return release, nil
-	}
-	c.mu.Unlock()
-	res, err := c.collect(ctx, incoming)
+	res, err := c.collect(ctx, check.incoming)
 	if err != nil {
 		return nil, err
 	}
 
+	check, err = c.tryReserve(sizeBytes, written)
+	if err != nil || check.release != nil {
+		return check.release, err
+	}
+	// The node's own numbers name no tenant, so the whole message is the detail.
+	if res.Skipped != "" {
+		return nil, nodeCapacityError(fmt.Sprintf("%d bytes of sha256:%s do not fit under the high watermark of %d%%, "+
+			"and collection was skipped: %s", check.bytes, hex[:12], check.high, res.Skipped))
+	}
+	return nil, nodeCapacityError(fmt.Sprintf("%d bytes of sha256:%s do not fit under the high watermark of %d%%: "+
+		"the cache's filesystem is %.1f%% used of %d bytes with %d more reserved by running downloads, "+
+		"and nothing unreferenced is left to remove",
+		check.bytes, hex[:12], check.high, check.usage.Percent(), check.usage.Total, check.incoming-check.bytes))
+}
+
+// tryReserve checks capacity and records a fitting reservation while holding c.mu.
+func (c *Collector) tryReserve(sizeBytes int64, written func() int64) (reserveCheck, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	high, _, unavailable = c.Watermarks()
+
+	var check reserveCheck
+	var unavailable string
+	check.high, _, unavailable = c.Watermarks()
 	if unavailable != "" {
-		return nil, &download.Error{Reason: download.ReasonInvalidRequest, Message: unavailable, Detail: unavailable}
+		return check, &download.Error{Reason: download.ReasonInvalidRequest, Message: unavailable, Detail: unavailable}
 	}
-	bytes = max(sizeBytes-written(), 0)
-	incoming = bytes + c.inFlight()
-	u, err = c.Usage()
+	check.bytes = max(sizeBytes-written(), 0)
+	check.incoming = check.bytes + c.inFlight()
+	var err error
+	check.usage, err = c.Usage()
 	if err != nil {
-		return nil, err
+		return check, err
 	}
-	if !fits(u, incoming, high) {
-		// The node's own numbers name no tenant, so the whole message is the detail.
-		if res.Skipped != "" {
-			return nil, nodeCapacityError(fmt.Sprintf("%d bytes of sha256:%s do not fit under the high watermark of %d%%, "+
-				"and collection was skipped: %s", bytes, hex[:12], high, res.Skipped))
-		}
-		return nil, nodeCapacityError(fmt.Sprintf("%d bytes of sha256:%s do not fit under the high watermark of %d%%: "+
-			"the cache's filesystem is %.1f%% used of %d bytes with %d more reserved by running downloads, "+
-			"and nothing unreferenced is left to remove",
-			bytes, hex[:12], high, u.Percent(), u.Total, incoming-bytes))
+	if fits(check.usage, check.incoming, check.high) {
+		check.release = c.addReservation(sizeBytes, written)
 	}
 
-	return c.addReservation(sizeBytes, written), nil
+	return check, nil
 }
 
 // addReservation records a claim while c.mu is held.
