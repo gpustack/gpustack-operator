@@ -104,8 +104,8 @@ content reports its saturation exactly as a cache full of references does (`gc.C
 
 Pinning requires the grant. The nodes' pin lists are written as one union by the prefetch
 controller — the field's single writer — so two namespaces pinning one node keep both digests; how
-a pinned digest behaves under collection is the [node model store
-reference](node-store.md#references-restart-and-collection)'s fact.
+a pinned digest behaves under collection is the [Node Model
+Store](node-store.md#references-restart-and-collection)'s fact.
 
 `spec.retention.ttlAfterLastUse` unpins a node's copy once nothing mounted it for that long. It is
 enforced at the hour granularity the node already reports in `lastUsedTime`.
