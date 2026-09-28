@@ -1,7 +1,6 @@
 # Spec: Closure verification for the model artifact line
 
-Status: Planned
-Blocked on: the five verification rows each carrying evidence or a written narrowing reason, and every issue listed below reaching its recorded disposition
+Status: Shipped
 Type: Bug fix
 
 ## Summary
@@ -122,9 +121,10 @@ main.
 
 ## Open Questions
 
+All questions were decided during execution; the records are kept here.
+
 - #661: when a prefetch's TTL expires, the prefetch stops counting toward `MinReady` and its pins
-  are released, which today leaves the object indistinguishable from one that never ran. The
-  default, applied if no decision arrives before execution: add a `Lapsed` condition so expiry is
-  observable, and do not add re-warming — a pin means "until used", and silent re-warming would
-  turn expiry into a refresh. The alternative is a `Lapsed` condition plus an opt-in re-warm
-  field.
+  are released, which today leaves the object indistinguishable from one that never ran. Decided
+  2026-09-28 (user): the default landed — the `Lapsed` condition shipped in #680, with no
+  re-warming and no object deletion; a pin means "until used", and silent re-warming would have
+  turned expiry into a refresh.
