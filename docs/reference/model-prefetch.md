@@ -115,10 +115,16 @@ enforced at the hour granularity the node already reports in `lastUsedTime`.
 ## Status and views
 
 The prefetch's status aggregates the target nodes' own reports — `desiredNodes`, `readyNodes`,
-`downloadingNodes`, and `Progressing` / `Available` / `Degraded`, where `Available` means
-`readyNodes` reached `minReady` (0 = all of them). The [v1 view](model-artifact-views.md) proxies
-every verb and adds no subresource: the per-node facts already live on the nodes' reports, and the
-table prints who warms what and how far.
+`downloadingNodes`, and `Progressing` / `Available` / `Degraded` / `Lapsed`, where `Available`
+means `readyNodes` reached `minReady` (0 = all of them).
+
+`Lapsed` turns True when a shortfall below that bar is the retention TTL's doing: the copies that
+would close the gap lapsed past `ttlAfterLastUse`, were unpinned and are not re-warmed, and the
+message says how many. It stays False while the shortfall has any other cause, so a lapse never
+masks a warm-up still running or a delivery that failed.
+
+The [v1 view](model-artifact-views.md) proxies every verb and adds no subresource: the per-node
+facts already live on the nodes' reports, and the table prints who warms what and how far.
 
 ---
 

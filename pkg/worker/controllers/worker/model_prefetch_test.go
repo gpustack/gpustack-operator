@@ -235,6 +235,174 @@ func TestModelPrefetchTTLExpiresAndUnpins(t *testing.T) {
 	assert.Equal(t, []string{testDigest}, nms2.Spec.Pinned, "the fresh node stays pinned")
 }
 
+func TestModelPrefetchLapseExplainsTheShortfall(t *testing.T) {
+	// Two targets, one copy past the TTL: the gap below minReady is exactly the lapsed copy, and
+	// the Lapsed condition says so — the pin is released, nothing re-warms, and Available stays
+	// False for a reason a reader can now see.
+	stale := hourAgo(3)
+	fresh := hourAgo(1)
+	pf := testPrefetch("warm", func(p *workercore.ModelPrefetch) {
+		p.Spec.Retention.Pinned = true
+		ttl := meta.Duration{Duration: 2 * time.Hour}
+		p.Spec.Retention.TTLAfterLastUse = &ttl
+	})
+	r, cli := newTestModelPrefetchEnv(t,
+		testModelNodeLabeled("node-1", map[string]string{"pool": "h100"}),
+		testModelNodeLabeled("node-2", map[string]string{"pool": "h100"}),
+		testResolvedArtifact("model"),
+		testNodeModelStoreEntry("node-1", "Ready", stale, []string{testDigest}),
+		testNodeModelStoreEntry("node-2", "Ready", fresh),
+		testPinnedBinding(),
+		pf,
+	)
+	reconcileModelPrefetch(t, r, "team-a", "warm")
+
+	got := new(workercore.ModelPrefetch)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: "team-a", Name: "warm"}, got))
+	assert.Equal(t, int32(1), got.Status.ReadyNodes, "the lapsed copy stopped counting as ready")
+
+	available := testCondition(got.Status.Conditions, ModelPrefetchConditionAvailable)
+	require.NotNil(t, available)
+	assert.Equal(t, meta.ConditionFalse, available.Status, "one lapsed copy of two leaves the prefetch short")
+
+	lapsed := testCondition(got.Status.Conditions, ModelPrefetchConditionLapsed)
+	require.NotNil(t, lapsed, "the lapse is surfaced, not left to read out of the counters")
+	assert.Equal(t, meta.ConditionTrue, lapsed.Status)
+	assert.Equal(t, "RetentionTTLExpired", lapsed.Reason)
+	assert.Contains(t, lapsed.Message, "1 of 2 target node copies lapsed")
+	assert.Contains(t, lapsed.Message, "retention.ttlAfterLastUse")
+	assert.Contains(t, lapsed.Message, "pins were released", "a pinned prefetch's lapse releases the pins")
+
+	degraded := testCondition(got.Status.Conditions, ModelPrefetchConditionDegraded)
+	require.NotNil(t, degraded)
+	assert.Equal(t, meta.ConditionFalse, degraded.Status, "a lapse is not a failure")
+}
+
+func TestModelPrefetchLapseStaysFalseWhileWarming(t *testing.T) {
+	// One target still downloading, one ready: the shortfall is the warm-up, not a lapse, and the
+	// condition says no copy has lapsed.
+	fresh := hourAgo(1)
+	pf := testPrefetch("warm", func(p *workercore.ModelPrefetch) {
+		ttl := meta.Duration{Duration: 2 * time.Hour}
+		p.Spec.Retention.TTLAfterLastUse = &ttl
+	})
+	r, cli := newTestModelPrefetchEnv(t,
+		testModelNodeLabeled("node-1", map[string]string{"pool": "h100"}),
+		testModelNodeLabeled("node-2", map[string]string{"pool": "h100"}),
+		testResolvedArtifact("model"),
+		testNodeModelStoreEntry("node-1", "Downloading", nil),
+		testNodeModelStoreEntry("node-2", "Ready", fresh),
+		pf,
+	)
+	reconcileModelPrefetch(t, r, "team-a", "warm")
+
+	got := new(workercore.ModelPrefetch)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: "team-a", Name: "warm"}, got))
+	lapsed := testCondition(got.Status.Conditions, ModelPrefetchConditionLapsed)
+	require.NotNil(t, lapsed)
+	assert.Equal(t, meta.ConditionFalse, lapsed.Status, "a shortfall the warm-up explains is not a lapse")
+	assert.Equal(t, "NoLapsedCopies", lapsed.Reason)
+}
+
+func TestModelPrefetchLapseNeverMasksAFailure(t *testing.T) {
+	// One target failed, one ready: Degraded carries the failure and Lapsed stays False — the
+	// condition exists to explain a lapse, never to hide a genuine failure behind one.
+	fresh := hourAgo(1)
+	pf := testPrefetch("warm", func(p *workercore.ModelPrefetch) {
+		ttl := meta.Duration{Duration: 2 * time.Hour}
+		p.Spec.Retention.TTLAfterLastUse = &ttl
+	})
+	r, cli := newTestModelPrefetchEnv(t,
+		testModelNodeLabeled("node-1", map[string]string{"pool": "h100"}),
+		testModelNodeLabeled("node-2", map[string]string{"pool": "h100"}),
+		testResolvedArtifact("model"),
+		testNodeModelStoreEntry("node-1", "Failed", nil),
+		testNodeModelStoreEntry("node-2", "Ready", fresh),
+		pf,
+	)
+	reconcileModelPrefetch(t, r, "team-a", "warm")
+
+	got := new(workercore.ModelPrefetch)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: "team-a", Name: "warm"}, got))
+	lapsed := testCondition(got.Status.Conditions, ModelPrefetchConditionLapsed)
+	require.NotNil(t, lapsed)
+	assert.Equal(t, meta.ConditionFalse, lapsed.Status, "a failure is not a lapse")
+	assert.Equal(t, "NoLapsedCopies", lapsed.Reason)
+
+	degraded := testCondition(got.Status.Conditions, ModelPrefetchConditionDegraded)
+	require.NotNil(t, degraded)
+	assert.Equal(t, meta.ConditionTrue, degraded.Status, "the failure keeps its own voice")
+}
+
+func TestModelPrefetchShortfallWiderThanTheLapse(t *testing.T) {
+	// Three targets: one lapsed, one failed, one ready. The lapse alone cannot close the gap, so
+	// Lapsed stays False and names the lapse it did see — while Degraded carries the failure.
+	stale := hourAgo(3)
+	fresh := hourAgo(1)
+	pf := testPrefetch("warm", func(p *workercore.ModelPrefetch) {
+		ttl := meta.Duration{Duration: 2 * time.Hour}
+		p.Spec.Retention.TTLAfterLastUse = &ttl
+	})
+	r, cli := newTestModelPrefetchEnv(t,
+		testModelNodeLabeled("node-1", map[string]string{"pool": "h100"}),
+		testModelNodeLabeled("node-2", map[string]string{"pool": "h100"}),
+		testModelNodeLabeled("node-3", map[string]string{"pool": "h100"}),
+		testResolvedArtifact("model"),
+		testNodeModelStoreEntry("node-1", "Ready", stale),
+		testNodeModelStoreEntry("node-2", "Failed", nil),
+		testNodeModelStoreEntry("node-3", "Ready", fresh),
+		pf,
+	)
+	reconcileModelPrefetch(t, r, "team-a", "warm")
+
+	got := new(workercore.ModelPrefetch)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: "team-a", Name: "warm"}, got))
+	assert.Equal(t, int32(1), got.Status.ReadyNodes)
+	lapsed := testCondition(got.Status.Conditions, ModelPrefetchConditionLapsed)
+	require.NotNil(t, lapsed)
+	assert.Equal(t, meta.ConditionFalse, lapsed.Status,
+		"the lapse explains one copy of a two-copy gap; the rest is a genuine failure")
+	assert.Equal(t, "ShortfallBeyondLapse", lapsed.Reason)
+	assert.Contains(t, lapsed.Message, "1 of 3 target node copies lapsed")
+
+	degraded := testCondition(got.Status.Conditions, ModelPrefetchConditionDegraded)
+	require.NotNil(t, degraded)
+	assert.Equal(t, meta.ConditionTrue, degraded.Status)
+}
+
+func TestModelPrefetchLapseBelowMinReadyStaysAvailable(t *testing.T) {
+	// MinReady 1 of 2: one copy lapsed, the other still holds the bar — Available stays True and
+	// Lapsed stays False, reporting the lapse it saw as harmless.
+	stale := hourAgo(3)
+	fresh := hourAgo(1)
+	pf := testPrefetch("warm", func(p *workercore.ModelPrefetch) {
+		p.Spec.MinReady = 1
+		ttl := meta.Duration{Duration: 2 * time.Hour}
+		p.Spec.Retention.TTLAfterLastUse = &ttl
+	})
+	r, cli := newTestModelPrefetchEnv(t,
+		testModelNodeLabeled("node-1", map[string]string{"pool": "h100"}),
+		testModelNodeLabeled("node-2", map[string]string{"pool": "h100"}),
+		testResolvedArtifact("model"),
+		testNodeModelStoreEntry("node-1", "Ready", stale),
+		testNodeModelStoreEntry("node-2", "Ready", fresh),
+		pf,
+	)
+	reconcileModelPrefetch(t, r, "team-a", "warm")
+
+	got := new(workercore.ModelPrefetch)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: "team-a", Name: "warm"}, got))
+	available := testCondition(got.Status.Conditions, ModelPrefetchConditionAvailable)
+	require.NotNil(t, available)
+	assert.Equal(t, meta.ConditionTrue, available.Status, "minReady 1 is met by the surviving copy")
+
+	lapsed := testCondition(got.Status.Conditions, ModelPrefetchConditionLapsed)
+	require.NotNil(t, lapsed)
+	assert.Equal(t, meta.ConditionFalse, lapsed.Status, "no shortfall, so the lapse explains nothing")
+	assert.Equal(t, "NoShortfall", lapsed.Reason)
+	assert.Contains(t, lapsed.Message, "1 of 2 target node copies lapsed")
+}
+
 func TestModelPrefetchPinnedUnionKeepsSharedDigests(t *testing.T) {
 	// Two prefetches pin the same node for two different digests: the union writes both, where a
 	// per-prefetch writer would let whichever ran last drop the other's pin.
