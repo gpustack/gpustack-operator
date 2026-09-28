@@ -295,15 +295,16 @@ between the status thresholds.
   one placed on a node without it downloads it there —
   [a node-delivered model prefers the nodes holding
   it](../architecture/topology-aware-scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
-- **Every download comes from the Hub**, directly or through the proxy; nodes do not fetch from each
-  other.
+- **A download comes from the Hub**, directly or through the proxy — or, when
+  [node-to-node sync](node-peer-sync.md) is on, from a peer node that already holds
+  the tree.
 
 ---
 
 **See also** — [Model Artifact Reference](model-artifact.md) for the artifact and its other
 deliveries · [Model Artifact Views Reference](model-artifact-views.md) for the `v1` views and
-`progress` · [Model Store Operations](../operation/model-store.md) for enabling, configuring and
-upgrading · [Settings](../settings.md#online-adjustable-settings) for the Settings `spec` is built
-from.
+`progress` · [Node-to-Node Sync Reference](node-peer-sync.md) for where a node's bytes come from ·
+[Model Store Operations](../operation/model-store.md) for enabling, configuring and upgrading ·
+[Settings](../settings.md#online-adjustable-settings) for the Settings `spec` is built from.
 
 **Next** → [Model Store Operations](../operation/model-store.md)
