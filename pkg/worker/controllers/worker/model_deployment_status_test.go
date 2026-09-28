@@ -243,7 +243,9 @@ func TestRenderModelDeploymentRouterStatus_RoleSetIsExact(t *testing.T) {
 	got := make([]string, 0, len(objects.Contract.Roles))
 	for i := range objects.Contract.Roles {
 		got = append(got, objects.Contract.Roles[i].Name)
-		assert.Equal(t, string(objects.Contract.Roles[i].Kind),
+		upstream, ok := ModelDeploymentRoleUpstreamKind(objects.Contract.Roles[i].Kind)
+		require.True(t, ok)
+		assert.Equal(t, upstream,
 			objects.Contract.Roles[i].Selector[modelDeploymentLabelKeyRoleKind])
 	}
 	assert.ElementsMatch(t, want, got)
@@ -2170,7 +2172,7 @@ func TestObserveModelDeploymentRoleKinds(t *testing.T) {
 			},
 			wantStatus:  "False",
 			wantReason:  modelDeploymentReasonKindsNotReady,
-			wantMessage: "no replica is ready for role kinds prefill",
+			wantMessage: "no replica is ready for role kinds Prefill",
 		},
 		{
 			// The single-kind shape, where this condition is deliberately quiet: the degradation is
@@ -2300,7 +2302,7 @@ func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhatWasLost(t *testing.T
 			// itself; the deployment is degraded and the phase is what carries that.
 			name:      "a_disaggregated_deployment_that_lost_a_whole_kind_says_which_role",
 			kinds:     true,
-			wantIn:    []string{"no admitted replica of role kind decode", "loss of that role rather than of capacity"},
+			wantIn:    []string{"no admitted replica of role kind Decode", "loss of that role rather than of capacity"},
 			wantNotIn: []string{"cannot serve", "still serves"},
 		},
 		{
@@ -2311,7 +2313,7 @@ func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhatWasLost(t *testing.T
 			name:          "a_kind_that_never_had_an_admitted_group_is_not_described_as_having_lost_one",
 			kinds:         true,
 			neverAdmitted: true,
-			wantIn:        []string{"no admitted replica of role kind decode at all"},
+			wantIn:        []string{"no admitted replica of role kind Decode at all"},
 			wantNotIn:     []string{"any more", "still serves", "cannot serve"},
 		},
 	}

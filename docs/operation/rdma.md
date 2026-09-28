@@ -265,7 +265,7 @@ not supported`, and never starts: the Pod restarts in a loop. Without the grant 
 and says nothing.
 
 **Both legs read the engine's build.** A store group on `EFA` hands the engines it serves the
-protocol `efa`, and `kvTransfer.protocol: efa` renders `efa` into both ends of a direct pair, so
+protocol `EFA`, and `kvTransfer.protocol: EFA` renders `efa` into both ends of a direct pair, so
 every engine Pod on either leg needs the EFA build. The store members do not: the
 [default member image](../kv-cache/backend.md#the-image) already carries EFA.
 
@@ -361,7 +361,7 @@ verbs path fails creating its completion queue, as above.
 | Symptom | What it means | What to check |
 |---|---|---|
 | no node advertises the key at all | the node has no RDMA-capable interface, or that family is switched off on the Device Manager | the allocatable read above; the `--no-shared` and `--no-partitioned` switches |
-| the key is advertised, every token unhealthy | the node judged every endpoint's link `failed`, which withholds nothing but marks the tokens | [reading it yourself](../architecture/network-topology.md#reading-it-yourself) |
+| the key is advertised, every token unhealthy | the node judged every endpoint's link `Failed`, which withholds nothing but marks the tokens | [reading it yourself](../architecture/network-topology.md#reading-it-yourself) |
 | the Workload is admitted and its Pod stays `Pending` | over-subscription: nothing meters these keys | [the section above](#kueue-does-not-meter-the-rdma-keys) |
 | the Pod is scheduled, then refused on the node and not rescheduled | the node's totals sufficed but its devices sit on two NUMA nodes | the node's policy, and that both requests sit in one container |
 | the container starts with fewer devices than expected | one `rdma_cm` is correct — count the `uverbs` entries | [what one grant hands the container](#what-one-grant-hands-the-container) |

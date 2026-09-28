@@ -133,7 +133,7 @@ role() {
 }
 
 apply_md() {
-  local name="$1" router="$2" roles="$3" engine="${4:-vllm}"
+  local name="$1" router="$2" roles="$3" engine="${4:-vLLM}"
   {
     cat <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -200,8 +200,8 @@ router_objects_valid() {
   done
 }
 
-pair="$(role prefill prefill yes)
-$(role decode decode yes)"
+pair="$(role prefill Prefill yes)
+$(role decode Decode yes)"
 
 # Begin unrouted: this is both one direction of the transition and NoRouter.
 apply_md "$LIFECYCLE" no "$pair" >/dev/null
@@ -254,7 +254,7 @@ fi
 
 # PublisherDisabled is a rendered-configuration state. SGLang has router metrics but no KV event
 # publisher integration, so this fixture reaches the state without tying it to Pod liveness.
-apply_md "$DISABLED" yes "$(role server server yes)" sglang >/dev/null
+apply_md "$DISABLED" yes "$(role server Server yes)" SGLang >/dev/null
 assert_condition "$DISABLED" False PublisherDisabled "a routed engine without event publishing reports publisher disabled"
 
 k -n "$NS" patch modeldeployment "$LIFECYCLE" --type=json \
@@ -273,14 +273,14 @@ else
   record FAIL "re-adding spec.router restores all six objects" "one or more router objects absent"
 fi
 
-apply_md "$SERVER" no "$(role server server no)" >/dev/null
+apply_md "$SERVER" no "$(role server Server no)" >/dev/null
 assert_condition "$SERVER" True NotApplicable "an unrouted server-only deployment is not applicable"
 
-apply_md "$UNMANAGED" yes "$(role prefill prefill no)
-$(role decode decode no)" >/dev/null
+apply_md "$UNMANAGED" yes "$(role prefill Prefill no)
+$(role decode Decode no)" >/dev/null
 assert_condition "$UNMANAGED" Unknown RoleUnmanaged "a producer-owned command is unmanaged"
 
-apply_md "$ROUTED_SERVER" yes "$(role server server yes)" >/dev/null
+apply_md "$ROUTED_SERVER" yes "$(role server Server yes)" >/dev/null
 assert_condition "$ROUTED_SERVER" True Publishing "a routed server does not report not applicable"
 
 # This delete is an assertion, not cleanup: only a live API server's garbage collector can prove it.

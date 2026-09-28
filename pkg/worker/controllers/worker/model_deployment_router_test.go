@@ -816,6 +816,13 @@ func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSpli
 			objects, err := renderModelDeploymentRouterObjects(
 				context.Background(), tc.md, tc.manufacturers)
 			require.NoError(t, err)
+			for i := range objects.Contract.Roles {
+				kind := ModelDeploymentEffectiveRoleKind(&tc.md.Spec.Roles[i])
+				assert.Equal(t, kind, objects.Contract.Roles[i].Kind)
+				upstream, ok := ModelDeploymentRoleUpstreamKind(kind)
+				require.True(t, ok)
+				objects.Contract.Roles[i].Kind = workercore.ModelDeploymentRoleKind(upstream)
+			}
 
 			encoded, err := json.Marshal(objects)
 			require.NoError(t, err)

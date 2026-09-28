@@ -1,12 +1,12 @@
 # Model Deployment Prefill and Decode Reference
 
-> **Purpose** — what pairs a `prefill` role with a `decode` role: the connector each engine and
+> **Purpose** — what pairs a `Prefill` role with a `Decode` role: the connector each engine and
 > router renders, the router block and its fields, the direct transfer and its transport, roles on
 > different hardware, and a role's own address.
 > **Audience** users, operators, contributors · **Prerequisites** [Model Deployment
 > Reference](model-deployment.md) · **Read time** ~4 min
 
-A deployment declaring a `prefill` and a `decode` role is admitted as one set; the role fields and
+A deployment declaring a `Prefill` and a `Decode` role is admitted as one set; the role fields and
 that admission are under [Prefill and decode](model-deployment.md#prefill-and-decode). This page is
 what the operator renders between the two halves once both run.
 
@@ -101,20 +101,20 @@ metadata:
 spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct
-  engine:                                # vllm | sglang; this example walks the vLLM pair
-    name: vllm
+  engine:                                # vLLM | SGLang; this example walks the vLLM pair
+    name: vLLM
     version: "0.29.0"
   router:
     name: llm-d-router                 # required to pair the roles; takes either engine
   roles:
     - name: prefill
-      kind: prefill
+      kind: Prefill
       replicas: 2
       instanceType: gpustack-nvidia-h20-linux-amd64
       resources:
         accelerator: 2
     - name: decode
-      kind: decode
+      kind: Decode
       replicas: 2
       instanceType: gpustack-nvidia-h20-linux-amd64
       resources:
@@ -137,10 +137,10 @@ a departure touches no other replica's admission.
 > excess, and Kueue's answer to the excess is to delete the newcomer.
 
 ⭐ **The replica is what bounds the blast radius, and no knob is needed to get that.** A loss or an
-edit inside one replica's group does not reach another replica's group — one `prefill` replica turning
-over leaves its siblings and all of `decode` serving. The groups are still admitted together — an
-`AdmissionCheck` holds them until the whole set has reserved quota, so `prefill` still never starts
-without `decode`.
+edit inside one replica's group does not reach another replica's group — one `Prefill` replica turning
+over leaves its siblings and all of `Decode` serving. The groups are still admitted together — an
+`AdmissionCheck` holds them until the whole set has reserved quota, so `Prefill` still never starts
+without `Decode`.
 
 Splitting `instanceType`s now buys different hardware, and nothing else: the isolation it used to
 buy, every replica has by default.
@@ -158,7 +158,7 @@ spec:
 ## The router block
 
 **`spec.router` is what pairs the roles, and `spec.kvCache` is not a substitute for it.** A
-deployment declaring `prefill` and `decode` with no router is admitted and renders two roles that
+deployment declaring `Prefill` and `Decode` with no router is admitted and renders two roles that
 nothing routes between: each gets the shared-store connector with its role discriminator, and no
 request is ever split across them. Attaching a pool does not change that.
 
@@ -186,9 +186,9 @@ A router is also **engine-matched**, and a pair outside this table is refused na
 
 | `spec.router.name` | Engines it fronts | Shape it renders | Routing policy |
 | --- | --- | --- | --- |
-| `llm-d-router` | `vllm`, `sglang` | An endpoint picker behind a proxy, configured by a mounted document | [A fixed scoring profile](model-deployment-routing.md#llm-d-router-takes-no-policy-flag) |
-| `vllm-router` | `vllm` | One process, configured entirely by its command line | [`cache_aware` unless `extraArgs` names another](model-deployment-routing.md#switching-to-round-robin) |
-| `sglang-gateway` | `sglang` | One process, configured entirely by its command line | [`cache_aware` unless `extraArgs` names another](model-deployment-routing.md#switching-to-round-robin) |
+| `llm-d-router` | `vLLM`, `SGLang` | An endpoint picker behind a proxy, configured by a mounted document | [A fixed scoring profile](model-deployment-routing.md#llm-d-router-takes-no-policy-flag) |
+| `vllm-router` | `vLLM` | One process, configured entirely by its command line | [`cache_aware` unless `extraArgs` names another](model-deployment-routing.md#switching-to-round-robin) |
+| `sglang-gateway` | `SGLang` | One process, configured entirely by its command line | [`cache_aware` unless `extraArgs` names another](model-deployment-routing.md#switching-to-round-robin) |
 
 `llm-d-router` takes both engines because upstream carries a handshake connector and a metrics
 configuration for each. The other two are each one project's router for that project's own engine,
@@ -233,22 +233,25 @@ there is no field for either, and neither is reachable through `extraArgs`.
 
 ## The direct transfer's transport
 
-The point-to-point leg renders `tcp` unless the deployment says otherwise:
+The point-to-point leg renders Mooncake's `tcp` when the API field is unset:
 
 ```yaml
 spec:
   kvTransfer:
-    protocol: rdma                     # unset renders "tcp"
+    protocol: RDMA                     # unset renders "tcp"
 ```
 
 The value is a property of **one link**, so it is deployment-wide: a per-role field could only
 express two ends naming different protocols for one connection, which fails at transfer time rather
 than at admission.
 
-It is **declared, not discovered, and not gated**. The set an engine accepts belongs to the mooncake
-build inside the engine's own image — a HIP-compiled build makes `hip` a working transport — so vLLM
-gets the value verbatim, and a value the build rejects fails that container at startup. SGLang maps
-it: `tcp` renders `--disaggregation-transfer-backend mooncake_tcp`, anything else `mooncake`.
+It is declared, not discovered. The API accepts `Auto`, `TCP`, `RDMA`, `EFA`, `CANN` and `ROCM`,
+using the same Mooncake mapping as `KVCacheBackend`: `Auto` and `TCP` render `tcp`, `CANN`
+renders `ascend`, and `ROCM` renders `hip`. `MUSA` and `MACA` are excluded because they are
+same-node IPC transports and the two roles may run on different nodes.
+
+The engine image must still carry a build for its transport. SGLang maps `tcp` to
+`--disaggregation-transfer-backend mooncake_tcp` and every other mapped value to `mooncake`.
 Which value works on which engine is [the transport matrix](engine-versions.md#which-transport-each-engine-can-use).
 
 **`tcp` is enforced, not only requested**: the transfer engine picks its transport from the host,
@@ -258,7 +261,7 @@ are process-wide, so neither renders beside a store on another transport, and ev
 its engine's [supported minimum](engine-versions.md) honors them.
 
 It is read on the direct-transfer leg, which every **admitted router-and-engine pair** renders on its
-`prefill` and `decode` roles — a prefiller that cannot hand a decoder its blocks is not
+`Prefill` and `Decode` roles — a prefiller that cannot hand a decoder its blocks is not
 disaggregated under any router. On every other shape the field is accepted and renders nothing.
 
 What differs per pair is the handshake, not whether there is a leg: Mooncake's bootstrap server

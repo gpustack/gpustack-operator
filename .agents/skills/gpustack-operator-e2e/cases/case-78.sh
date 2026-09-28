@@ -304,7 +304,7 @@ metadata:
   namespace: ${NS}
 spec:
   engine:
-    name: vllm
+    name: vLLM
     version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
@@ -313,7 +313,7 @@ spec:
       name: ${BINDING}
   roles:
   - name: server
-    kind: server
+    kind: Server
     instanceType: ${IT}
     replicas: 2
     image: ${IMAGE}

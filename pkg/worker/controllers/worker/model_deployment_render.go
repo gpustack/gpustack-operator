@@ -975,7 +975,8 @@ func modelDeploymentPodLabels(
 ) map[string]string {
 	labels := modelDeploymentSelectorLabels(md, role)
 	labels[kueuectrlconst.QueueLabel] = entrance
-	labels[modelDeploymentLabelKeyRoleKind] = string(ModelDeploymentEffectiveRoleKind(role))
+	kind, _ := ModelDeploymentRoleUpstreamKind(ModelDeploymentEffectiveRoleKind(role))
+	labels[modelDeploymentLabelKeyRoleKind] = kind
 	labels["app.kubernetes.io/part-of"] = "gpustack-operator-worker"
 
 	return labels

@@ -885,8 +885,11 @@ func isShellCommandFlag(arg string) bool {
 // vLLM-Ascend is a plugin that vLLM's own parser launches, so it reads vLLM's spellings.
 func containerFlag(ctr *core.Container, engine inject.Engine, flag string) (string, bool) {
 	parser := string(engine)
-	if engine == inject.EngineVLLMAscend {
+	switch engine {
+	case inject.EngineVLLM, inject.EngineVLLMAscend:
 		parser = workercore.ModelDeploymentEngineVLLM
+	case inject.EngineSGLang:
+		parser = workercore.ModelDeploymentEngineSGLang
 	}
 
 	for _, arg := range slices.Concat(ctr.Args, ctr.Command) {

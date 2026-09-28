@@ -38,13 +38,13 @@
 #              - a node where neither an interface nor a virtual function reports an RDMA device
 #                carries NO `rdma.*` label at all;
 #              - where RDMA is present: every bound interface and every bound virtual function
-#                carries one of the three link states; a `failed` one carries a reason and a
+#                carries one of the three link states; a `Failed` one carries a reason and a
 #                first-seen time; and `rdma.capable` is present whenever AT LEAST ONE ENDPOINT is
 #                still usable. The reduction is over endpoints, not over bound interfaces: an
-#                endpoint is usable when its verdict is anything but `failed`, falling back to the
+#                endpoint is usable when its verdict is anything but `Failed`, falling back to the
 #                bound flag only when there is no verdict — so an unreadable-tree record, which is
-#                `rdma: false` with a synthesized `unverified` verdict, counts as usable, while a
-#                bound device whose verdict is `failed` does not. The aggregation is existential, so
+#                `rdma: false` with a synthesized `Unverified` verdict, counts as usable, while a
+#                bound device whose verdict is `Failed` does not. The aggregation is existential, so
 #                a broken NIC beside a working one keeps the node selectable, and only a node with
 #                NO usable endpoint loses the key. On a node where that does not happen the
 #                withholding half of the gate cannot run, and the case says so as a SKIP rather
@@ -326,7 +326,7 @@ EOF
   rdma_count=$(printf '%s\n' "$before" | awk -F'\t' '$7 == "true" {c++} END {print c+0}')
   vf_rdma=$(printf '%s\n' "$vf_before" | awk -F'\t' '$2 == "true" {c++} END {print c+0}')
   # An explicit verdict outranks the flag, so a record with `rdma: false` carrying a synthesized
-  # `unverified` link -- the unreadable-tree case -- is RDMA this node has, and production emits
+  # `Unverified` link -- the unreadable-tree case -- is RDMA this node has, and production emits
   # `rdma.capable` on its account. Counted alongside the bound ones so this branch does not read
   # such a node as a node with no RDMA at all and then fail a correct implementation, which is the
   # same mistake the VF blindness below made from the other direction.
@@ -355,12 +355,12 @@ EOF
   #    — a pass about nothing, on the one node shape where every RDMA device the node has is a VF.
   bound=$((rdma_count + vf_rdma))
   unstated=$(printf '%s\n' "$before" \
-    | awk -F'\t' '$7 == "true" && $9 != "ok" && $9 != "unverified" && $9 != "failed" {c++} END {print c+0}')
+    | awk -F'\t' '$7 == "true" && $9 != "OK" && $9 != "Unverified" && $9 != "Failed" {c++} END {print c+0}')
   vf_unstated=$(printf '%s\n' "$vf_before" \
-    | awk -F'\t' '$2 == "true" && $3 != "ok" && $3 != "unverified" && $3 != "failed" {c++} END {print c+0}')
+    | awk -F'\t' '$2 == "true" && $3 != "OK" && $3 != "Unverified" && $3 != "Failed" {c++} END {print c+0}')
   if [ "$bound" -eq 0 ]; then
     # Nothing is bound, so the states this row asserts are the ones a bound device must carry and
-    # there is no bound device. Reached on a node whose only RDMA record is the unbound `unverified`
+    # there is no bound device. Reached on a node whose only RDMA record is the unbound `Unverified`
     # one, which already has a state by construction. A PASS here would read "every RDMA interface
     # carries a link state, 0 interface(s)" -- the shape this row exists to catch, printed by the
     # row itself.
@@ -374,13 +374,13 @@ EOF
       "$((unstated + vf_unstated)) of ${bound} report no state, which reads as a pass"
   fi
 
-  failed_count=$(printf '%s\n' "$before" | awk -F'\t' '$9 == "failed" {c++} END {print c+0}')
-  vf_failed=$(printf '%s\n' "$vf_before" | awk -F'\t' '$3 == "failed" {c++} END {print c+0}')
+  failed_count=$(printf '%s\n' "$before" | awk -F'\t' '$9 == "Failed" {c++} END {print c+0}')
+  vf_failed=$(printf '%s\n' "$vf_before" | awk -F'\t' '$3 == "Failed" {c++} END {print c+0}')
   if [ "$((failed_count + vf_failed))" -gt 0 ]; then
     incomplete=$(printf '%s\n' "$before" \
-      | awk -F'\t' '$9 == "failed" && ($10 == "" || $11 == "") {c++} END {print c+0}')
+      | awk -F'\t' '$9 == "Failed" && ($10 == "" || $11 == "") {c++} END {print c+0}')
     vf_incomplete=$(printf '%s\n' "$vf_before" \
-      | awk -F'\t' '$3 == "failed" && ($4 == "" || $5 == "") {c++} END {print c+0}')
+      | awk -F'\t' '$3 == "Failed" && ($4 == "" || $5 == "") {c++} END {print c+0}')
     if [ "$((incomplete + vf_incomplete))" -eq 0 ]; then
       record PASS "${node} a failed link carries a reason and a first-seen time" \
         "${failed_count} interface(s) and ${vf_failed} virtual function(s)"
@@ -392,8 +392,8 @@ EOF
     record SKIP "${node} a failed link carries a reason and a first-seen time" "no link reports failed"
   fi
 
-  # 7. The gate, in both directions. `unverified` must NOT withhold the key — that is the whole
-  #    reason the state exists — so the condition is on `failed` alone.
+  # 7. The gate, in both directions. `Unverified` must NOT withhold the key — that is the whole
+  #    reason the state exists — so the condition is on `Failed` alone.
   #
   #    The aggregation across interfaces is EXISTENTIAL: the label says at least one interface is
   #    usable, not that every one is. A node with a broken NIC beside a working one keeps the
@@ -402,14 +402,14 @@ EOF
   #    revision of this case asserted the opposite (`failed_count > 0` withholds), which would have
   #    failed a correct implementation on any mixed node.
   # The predicate MIRRORS rdmaUsable rather than approximating it, over interfaces and virtual
-  # functions alike: an endpoint is usable when its verdict is anything but `failed`, falling back to
-  # the bound flag only when there is no verdict at all. Counting `rdma == true && state != failed`
+  # functions alike: an endpoint is usable when its verdict is anything but `Failed`, falling back to
+  # the bound flag only when there is no verdict at all. Counting `rdma == true && state != Failed`
   # instead misses the unreadable-tree record on one side and every SR-IOV endpoint on the other,
   # and this row would then assert the opposite of the implementation on both node shapes.
   capable_count=$(printf '%s\n' "$before" \
-    | awk -F'\t' '($9 != "" && $9 != "failed") || ($9 == "" && $7 == "true") {c++} END {print c+0}')
+    | awk -F'\t' '($9 != "" && $9 != "Failed") || ($9 == "" && $7 == "true") {c++} END {print c+0}')
   vf_capable=$(printf '%s\n' "$vf_before" \
-    | awk -F'\t' '($3 != "" && $3 != "failed") || ($3 == "" && $2 == "true") {c++} END {print c+0}')
+    | awk -F'\t' '($3 != "" && $3 != "Failed") || ($3 == "" && $2 == "true") {c++} END {print c+0}')
   usable=$((capable_count + vf_capable))
   all_failed=$((failed_count + vf_failed))
   has_capable=$(printf '%s\n' "$labels" | grep -c 'rdma\.capable$')

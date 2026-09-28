@@ -195,7 +195,7 @@ metadata:
   name: ${MD}
 spec:
   engine:
-    name: vllm
+    name: vLLM
     version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct

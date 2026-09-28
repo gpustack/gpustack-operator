@@ -112,7 +112,7 @@ func resolveModelArtifactWeights(
 	switch source := ma.Spec.Source; {
 	case source.PersistentVolumeClaim != nil:
 		w.Render = &ModelDeploymentArtifactRender{
-			Delivery:  workercore.ModelDeploymentModelDeliveryPvc,
+			Delivery:  workercore.ModelDeploymentModelDeliveryPVC,
 			ClaimName: source.PersistentVolumeClaim.ClaimName,
 			Path:      source.PersistentVolumeClaim.Path,
 		}
@@ -171,7 +171,7 @@ func resolveModelArtifactWeights(
 	}
 
 	switch w.Render.Delivery {
-	case workercore.ModelDeploymentModelDeliveryPvc:
+	case workercore.ModelDeploymentModelDeliveryPVC:
 		if err := placeModelArtifactClaim(ctx, cli, namespace, w.Render.ClaimName, pods, w); err != nil {
 			return nil, err
 		}

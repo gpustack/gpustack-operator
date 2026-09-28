@@ -67,7 +67,7 @@ func kvCachePod() *core.Pod {
 			Labels:    map[string]string{KVCacheInjectLabelKey: KVCacheInjectLabelValue},
 			Annotations: map[string]string{
 				KVCacheBindingAnnotationKey: "chat",
-				KVCacheEngineAnnotationKey:  "vllm",
+				KVCacheEngineAnnotationKey:  "vLLM",
 			},
 		},
 		Spec: core.PodSpec{Containers: []core.Container{{
@@ -80,7 +80,7 @@ func kvCachePod() *core.Pod {
 
 func kvCachePodForEngine(engine string) *core.Pod {
 	pod := kvCachePod()
-	if engine != "sglang" {
+	if engine != "SGLang" {
 		return pod
 	}
 	pod.Annotations[KVCacheEngineAnnotationKey] = engine

@@ -169,7 +169,7 @@ metadata:
   namespace: ${NS}
 spec:
   engine:
-    name: vllm
+    name: vLLM
     version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
@@ -257,8 +257,8 @@ wait_workload() {
 
 # --- deployment 1: prefill and decode ---
 
-apply_md case49-pd "$(role_block prefill prefill 2)
-$(role_block decode decode 2)"
+apply_md case49-pd "$(role_block prefill Prefill 2)
+$(role_block decode Decode 2)"
 
 if wait_pods case49-pd 4; then
   record PASS "the group's four replicas are all created" \

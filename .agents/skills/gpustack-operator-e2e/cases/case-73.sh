@@ -285,14 +285,14 @@ spec:
   model:
     name: ${MODEL}
   engine:
-    name: vllm
+    name: vLLM
     version: "${ENGINE_VERSION}"
   kvCache:
     poolRef:
       name: ${BINDING}
   roles:
     - name: server-a
-      kind: server
+      kind: Server
       replicas: 1
       instanceType: ${INSTANCE_TYPE}
       resources: {accelerator: 1}
@@ -303,7 +303,7 @@ spec:
         - {name: HF_HOME, value: /weights}
         - {name: HF_HUB_OFFLINE, value: "1"}
     - name: server-b
-      kind: server
+      kind: Server
       replicas: 1
       instanceType: ${INSTANCE_TYPE}
       resources: {accelerator: 1}

@@ -361,27 +361,40 @@ func TestSynthesizeModelDeploymentConnector_SGLangPureTransfer(t *testing.T) {
 	assert.True(t, got.KVTransfer)
 }
 
-// TestSynthesizeModelDeploymentConnector_KVTransferProtocol pins the thread from the
-// deployment's declaration to the rendered leg: the value passes through unchanged, and the
-// unset case -- the renderer's default -- is pinned by the test above.
+// TestSynthesizeModelDeploymentConnector_KVTransferProtocol pins the API-to-Mooncake mapping
+// in the rendered direct leg, including the unset default.
 func TestSynthesizeModelDeploymentConnector_KVTransferProtocol(t *testing.T) {
-	in := connectorInputForKind(
-		workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
-		workercore.ModelDeploymentRoleKindDecode)
-	in.KVTransfer = true
-	in.KVTransferProtocol = "rdma"
+	for _, tc := range []struct {
+		name, protocol, want string
+	}{
+		{"unset", "", "tcp"},
+		{"Auto", "Auto", "tcp"},
+		{"TCP", "TCP", "tcp"},
+		{"RDMA", "RDMA", "rdma"},
+		{"EFA", "EFA", "efa"},
+		{"CANN", "CANN", "ascend"},
+		{"ROCM", "ROCM", "hip"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := connectorInputForKind(
+				workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
+				workercore.ModelDeploymentRoleKindDecode)
+			in.KVTransfer = true
+			in.KVTransferProtocol = tc.protocol
 
-	got, err := SynthesizeModelDeploymentConnector(in)
-	require.NoError(t, err)
-	require.Len(t, got.Args, 2)
-	assert.JSONEq(t, `{
+			got, err := SynthesizeModelDeploymentConnector(in)
+			require.NoError(t, err)
+			require.Len(t, got.Args, 2)
+			assert.JSONEq(t, strings.ReplaceAll(`{
 		"kv_connector":"MultiConnector","kv_role":"kv_consumer",
 		"kv_connector_extra_config":{"connectors":[
 			{"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
-			 "kv_connector_extra_config":{"mooncake_protocol":"rdma"}},
+			 "kv_connector_extra_config":{"mooncake_protocol":"<protocol>"}},
 			{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}
 		]}
-	}`, got.Args[1])
+		}`, "<protocol>", tc.want), got.Args[1])
+		})
+	}
 }
 
 // TestSynthesizeModelDeploymentConnector_ForcesTheTCPLeg pins the TCP pin through synthesis: it
@@ -417,7 +430,7 @@ func TestSynthesizeModelDeploymentConnector_ForcesTheTCPLeg(t *testing.T) {
 		},
 		{
 			name: "decode declaring rdma", kind: workercore.ModelDeploymentRoleKindDecode,
-			direct: "rdma", transfer: true, want: []core.EnvVar{metrics},
+			direct: "RDMA", transfer: true, want: []core.EnvVar{metrics},
 		},
 		{
 			name: "server with a store", kind: workercore.ModelDeploymentRoleKindServer,
@@ -874,7 +887,7 @@ func TestModelDeploymentConnector_RoutedPairWithoutKVCacheUsesKVTransferOnly(t *
 func TestModelDeploymentConnector_PureDirectEFARequestsDevice(t *testing.T) {
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.KVCache = nil
-		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "efa"}
+		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
 		for i := range md.Spec.Roles {
 			md.Spec.Roles[i].Resources = &workercore.ModelDeploymentRoleResources{
 				Interface: ptr.To(resource.MustParse("1")),
@@ -1801,9 +1814,9 @@ func TestModelDeploymentConnectorEnumHasOneValue(t *testing.T) {
 
 	require.NotNil(t, schema, "spec.kvCache.connector must be in the served schema")
 	require.Len(t, schema.Enum, 1, "the enum reserves the discriminator; widening it is a piece of work")
-	assert.JSONEq(t, `"mooncake"`, string(schema.Enum[0].Raw))
+	assert.JSONEq(t, `"Mooncake"`, string(schema.Enum[0].Raw))
 	require.NotNil(t, schema.Default)
-	assert.JSONEq(t, `"mooncake"`, string(schema.Default.Raw))
+	assert.JSONEq(t, `"Mooncake"`, string(schema.Default.Raw))
 }
 
 // TestModelDeploymentConnectorFieldIsInert renders one deployment twice, with the field unset and

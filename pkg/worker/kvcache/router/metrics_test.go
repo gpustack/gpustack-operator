@@ -30,8 +30,15 @@ func TestMetricsForEngine_CoversEveryAPIEngine(t *testing.T) {
 	}
 	require.NotEmpty(t, engines, "the served ModelDeployment engine enum must be readable")
 
+	upstream := map[string]string{
+		workercore.ModelDeploymentEngineVLLM:   "vllm",
+		workercore.ModelDeploymentEngineSGLang: "sglang",
+	}
+	require.Len(t, engines, len(upstream))
 	for _, engine := range engines {
-		metrics, err := MetricsForEngine(engine)
+		name, ok := upstream[engine]
+		require.True(t, ok, engine)
+		metrics, err := MetricsForEngine(name)
 		require.NoError(t, err, engine)
 		assert.Positive(t, metrics.Port, engine)
 		assert.NotEmpty(t, metrics.QueuedRequests, engine)

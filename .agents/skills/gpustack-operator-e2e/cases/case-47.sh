@@ -164,7 +164,7 @@ metadata:
   namespace: ${TEST_NS}
 spec:
   engine:
-    name: sglang
+    name: SGLang
     version: "0.5.18"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct

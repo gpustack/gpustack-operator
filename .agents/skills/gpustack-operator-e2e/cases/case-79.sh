@@ -253,7 +253,7 @@ metadata:
   namespace: ${NS}
 spec:
   engine:
-    name: vllm
+    name: vLLM
     version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
@@ -262,7 +262,7 @@ spec:
       name: ${BINDING}
   roles:
   - name: ${ROLE}
-    kind: server
+    kind: Server
     instanceType: ${IT}
     replicas: 1
     size: ${SIZE}
@@ -422,7 +422,7 @@ fi
 
 BEFORE_UIDS="$(member_uids)"
 SCALE_OUT="$(k -n "$NS" patch modeldeployments.worker.gpustack.ai "$MD" --type=merge \
-  -p '{"spec":{"roles":[{"name":"'"$ROLE"'","kind":"server","instanceType":"'"$IT"'","replicas":2,"size":'"$SIZE"',"image":"'"$IMAGE"'","command":["sh","-c","sleep 100000"]}]}}' \
+  -p '{"spec":{"roles":[{"name":"'"$ROLE"'","kind":"Server","instanceType":"'"$IT"'","replicas":2,"size":'"$SIZE"',"image":"'"$IMAGE"'","command":["sh","-c","sleep 100000"]}]}}' \
   2>&1)"
 
 if wait_settled 2; then

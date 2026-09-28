@@ -36,15 +36,15 @@ characters, so everything of unbounded length is an annotation.
 |---|---|---|---|
 | label | `kvcache.gpustack.ai/inject` | `"true"` | yes — the trigger |
 | annotation | `kvcache.gpustack.ai/binding` | a `KVCachePoolBinding` name, in this Pod's namespace | yes |
-| annotation | `kvcache.gpustack.ai/engine` | `vllm` \| `sglang` | yes |
-| annotation | `kvcache.gpustack.ai/manufacturer` | `ascend` | no — only with `engine: vllm`; selects the vLLM-Ascend runtime |
-| annotation | `kvcache.gpustack.ai/role` | `prefill` \| `decode`; omitted for a plain server | no — **read by the vLLM family only**; an SGLang Pod carrying one is admitted and injected exactly as without it |
+| annotation | `kvcache.gpustack.ai/engine` | `vLLM` \| `SGLang` | yes |
+| annotation | `kvcache.gpustack.ai/manufacturer` | `ascend` | no — only with `engine: vLLM`; selects the vLLM-Ascend runtime |
+| annotation | `kvcache.gpustack.ai/role` | `Prefill` \| `Decode`; omitted for a plain server | no — **read by the vLLM family only**; an SGLang Pod carrying one is admitted and injected exactly as without it |
 | annotation | `kvcache.gpustack.ai/container` | a container name | only when the Pod has more than one container |
 | annotation | `kvcache.gpustack.ai/launch-args-forwarded` | `"true"` | no — only when an unrecognised launcher, script, or image ENTRYPOINT forwards appended arguments to the declared engine |
 
 For a plain server, one that is not half of a prefill/decode split, LEAVE THE ROLE ANNOTATION OFF.
-`server` is not in its value domain and a Pod carrying it is refused, while the same arrangement is
-spelled `server` on `ModelDeployment.spec.roles[].kind`, which even defaults to it. The value that
+`Server` is not in its value domain and a Pod carrying it is refused, while the same arrangement is
+spelled `Server` on `ModelDeployment.spec.roles[].kind`, which even defaults to it. The value that
 is correct there turns a Pod away here. An absent annotation renders the read-and-write
 configuration a shared cache wants.
 
@@ -64,7 +64,7 @@ spec:
         kvcache.gpustack.ai/inject: "true"
       annotations:
         kvcache.gpustack.ai/binding: chat
-        kvcache.gpustack.ai/engine: vllm
+        kvcache.gpustack.ai/engine: vLLM
     spec:
       containers:
         - name: server
@@ -86,8 +86,8 @@ metadata:
     kvcache.gpustack.ai/inject: "true"          # the opt-in; a LABEL, not an annotation
   annotations:
     kvcache.gpustack.ai/binding: team-a         # a KVCachePoolBinding in this namespace
-    kvcache.gpustack.ai/engine: vllm
-    kvcache.gpustack.ai/role: decode            # optional: prefill or decode
+    kvcache.gpustack.ai/engine: vLLM
+    kvcache.gpustack.ai/role: Decode            # optional: Prefill or Decode
     kvcache.gpustack.ai/container: server       # required with more than one container
 spec:
   containers:
@@ -122,9 +122,9 @@ kubelet resolves at container start.
 
 | Engine | Vehicle | What lands on the container |
 |---|---|---|
-| `vllm` | a projected file | arg `--kv-transfer-config` selecting `MooncakeStoreConnector` and the role; env `MOONCAKE_CONFIG_PATH`; a read-only volume and mount at `/etc/gpustack/kvcache` |
+| `vLLM` | a projected file | arg `--kv-transfer-config` selecting `MooncakeStoreConnector` and the role; env `MOONCAKE_CONFIG_PATH`; a read-only volume and mount at `/etc/gpustack/kvcache` |
 | `vllm-ascend` | a projected file | the same, except the connector is `AscendStoreConnector` — the two engines share the vehicle and the file's keys, but not a connector registry |
-| `sglang` | environment variables | arg `--hicache-storage-backend mooncake` and [`--enable-hierarchical-cache`](#sglangs-host-memory-tier); the `MOONCAKE_*` variables below; **no** volume and **no** mount |
+| `SGLang` | environment variables | arg `--hicache-storage-backend mooncake` and [`--enable-hierarchical-cache`](#sglangs-host-memory-tier); the `MOONCAKE_*` variables below; **no** volume and **no** mount |
 
 Every engine is also given `--kv-cache-dtype` with the Binding's `dtype`, verbatim — why, and which
 spellings each engine accepts, is under
@@ -227,7 +227,7 @@ container that starts normally and does not use the cache — a result invisible
 | a Binding that does not exist, and the namespace | without it there is nothing to resolve the provisioned domain and endpoint from | create the Binding, or fix the name |
 | a pool or backend that does not exist | the Binding points at something missing | fix the `poolRef`, or create the pool |
 | the pool and `QuotaLedgerAvailable`, with the controller's own reason | the pool has not reported the condition, reports it `Unknown`, or reports it `False` for a reason other than `MultiTenancyDisabled` — `LedgerUnreachable`, for one, means a request to the master failed, which is an outage rather than a setting. `False` with `MultiTenancyDisabled` is **not** refused: it is a declared single-tenant store, and the Pod is injected with no tenant id — see [What a Binding does not do](../kv-cache/pool.md#what-a-binding-does-not-do) | restore the master, or wait if the condition is not reported yet or is `Unknown` |
-| the `engine` or `manufacturer` annotation | the engine is required and never guessed from an image; `manufacturer` selects the Ascend vLLM runtime | set `vllm` or `sglang`; for vLLM-Ascend, set `engine: vllm` and `manufacturer: ascend` |
+| the `engine` or `manufacturer` annotation | the engine is required and never guessed from an image; `manufacturer` selects the Ascend vLLM runtime | set `vLLM` or `SGLang`; for vLLM-Ascend, set `engine: vLLM` and `manufacturer: ascend` |
 | the container count and their names | several containers and none named; the first is never chosen | set `kvcache.gpustack.ai/container` |
 | a named container that is an init container | it finishes before the workload starts, so configuring it caches nothing | name an app container |
 | a key **this Pod's own engine** would be given — `MOONCAKE_CONFIG_PATH` or `--kv-transfer-config` on the vLLM family, `--hicache-storage-backend` on SGLang | the container already has a KV cache configured, and two sources for one setting is undiagnosable | remove yours, or drop the inject label |
@@ -401,8 +401,8 @@ cross-vendor *sharing* then works is a property of the engine's cache key, not o
 
 | Engine | Cross-vendor sharing | Why |
 |---|---|---|
-| `sglang` | possible in principle | its Mooncake key is vendor-neutral — no vendor, dtype, device or engine id in the key, and no platform branch in the `mooncake` backend |
-| `vllm` | not applicable | the key embeds `model`, `tp_rank`, `pcp`, `dcp` and `pp_rank`, so the key itself is heterogeneous across two vendors |
+| `SGLang` | possible in principle | its Mooncake key is vendor-neutral — no vendor, dtype, device or engine id in the key, and no platform branch in the `mooncake` backend |
+| `vLLM` | not applicable | the key embeds `model`, `tp_rank`, `pcp`, `dcp` and `pp_rank`, so the key itself is heterogeneous across two vendors |
 
 "Cross-vendor sharing is meaningless" is a statement about vLLM only. For SGLang the one remaining
 precondition is that both sides lay a block's payload bytes out identically, and that has NEVER been

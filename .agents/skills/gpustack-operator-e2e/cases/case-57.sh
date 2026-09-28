@@ -77,7 +77,7 @@ pod_without() {
     echo '    kvcache.gpustack.ai/inject: "true"'
     echo "  annotations:"
     [ "$drop" != binding ] && echo "    kvcache.gpustack.ai/binding: ${BINDING}"
-    [ "$drop" != engine ] && echo "    kvcache.gpustack.ai/engine: vllm"
+    [ "$drop" != engine ] && echo "    kvcache.gpustack.ai/engine: vLLM"
     [ -n "$extra" ] && echo "$extra"
     echo "spec:"
     echo "  restartPolicy: Never"
@@ -92,7 +92,7 @@ kvi_refused "the engine annotation is required" \
   "kvcache.gpustack.ai/engine" "$(pod_without r-noengine engine)"
 
 kvi_refused "an unknown engine names the accepted values" \
-  "vllm" "$(pod_without r-badengine engine '    kvcache.gpustack.ai/engine: tensorrt')"
+  "vLLM" "$(pod_without r-badengine engine '    kvcache.gpustack.ai/engine: tensorrt')"
 
 kvi_refused "the binding annotation is required" \
   "kvcache.gpustack.ai/binding" "$(pod_without r-nobinding binding)"
@@ -125,7 +125,7 @@ metadata:
     kvcache.gpustack.ai/inject: "true"
   annotations:
     kvcache.gpustack.ai/binding: ${BINDING}
-    kvcache.gpustack.ai/engine: vllm
+    kvcache.gpustack.ai/engine: vLLM
 spec:
   restartPolicy: Never
   containers:
@@ -152,7 +152,7 @@ metadata:
     kvcache.gpustack.ai/inject: "true"
   annotations:
     kvcache.gpustack.ai/binding: ${BINDING}
-    kvcache.gpustack.ai/engine: vllm
+    kvcache.gpustack.ai/engine: vLLM
 spec:
   restartPolicy: Never
   containers:
@@ -173,7 +173,7 @@ metadata:
     kvcache.gpustack.ai/inject: "true"
   annotations:
     kvcache.gpustack.ai/binding: ${BINDING}
-    kvcache.gpustack.ai/engine: vllm
+    kvcache.gpustack.ai/engine: vLLM
 spec:
   restartPolicy: Never
   containers:
@@ -207,7 +207,7 @@ metadata:
     kvcache.gpustack.ai/inject: "true"
   annotations:
     kvcache.gpustack.ai/binding: ${BINDING}
-    kvcache.gpustack.ai/engine: vllm
+    kvcache.gpustack.ai/engine: vLLM
 spec:
   restartPolicy: Never
   containers:
@@ -225,7 +225,7 @@ done
 # fixture's launch line silently stopped matching when that line changed, and the Pod then carried no
 # such variable at all - which the check below reported as "the value was changed", naming a mutation
 # nobody had made.
-kvi_pod_manifest ok-tenant vllm | \
+kvi_pod_manifest ok-tenant vLLM | \
   sed 's|^      image: .*|&\n      env:\n        - name: MOONCAKE_TENANT_ID\n          value: mine|' | \
   kubectl apply -f - >/dev/null 2>&1
 if kvi_wait_for pods ok-tenant '{.metadata.name}' ok-tenant 60 "$TEST_NS" >/dev/null; then
@@ -308,7 +308,7 @@ else
 never reached; the hold finalizer did not take"
   else
     kvi_refused "a Binding that is being deleted is refused" "which is being deleted" \
-      "$(KVI_BINDING="$TERM_BINDING" kvi_pod_manifest term-probe vllm)"
+      "$(KVI_BINDING="$TERM_BINDING" kvi_pod_manifest term-probe vLLM)"
   fi
   # Release it whatever happened above, and before the teardown runs: a held Binding blocks the
   # namespace, and this one is held by a finalizer only this file knows about.

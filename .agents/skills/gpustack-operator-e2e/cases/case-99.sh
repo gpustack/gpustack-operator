@@ -128,7 +128,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${P}-vllm, namespace: ${NS}, labels: {e2e.gpustack.ai/case: "99"}}
 spec:
-  engine: {name: vllm, version: "0.29.0"}
+  engine: {name: vLLM, version: "0.29.0"}
   model: {name: e2e/c99-claim, artifactRef: {name: ${P}-claim}}
   router: {name: llm-d-router}
   roles:
@@ -169,7 +169,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${P}-sglang, namespace: ${NS}, labels: {e2e.gpustack.ai/case: "99"}}
 spec:
-  engine: {name: sglang, version: "0.5.18"}
+  engine: {name: SGLang, version: "0.5.18"}
   model: {name: e2e/c99-gated, artifactRef: {name: ${P}-gated}}
   roles:
     - {name: server, instanceType: "${IT}", replicas: 1, resources: {accelerator: 1}, extraArgs: ["--mem-fraction-static", "0.4"]}

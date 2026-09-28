@@ -301,7 +301,7 @@ for" is what `phase` answers, by summing every role's counts before judging.
 | `Unknown` | `NoRoleStatuses` | the pass accounted for no role at all, so there is nothing to judge |
 
 A deployment whose roles all share one kind — the shape you get when no role names a `kind`, since it
-defaults to `server` — reports `True` as soon as any replica is ready. That is not a blind spot. The
+defaults to `Server` — reports `True` as soon as any replica is ready. That is not a blind spot. The
 degradation is real and `phase` reports it as `Degraded`; this condition answers a different question
 and is silent on that shape by design.
 
@@ -327,7 +327,7 @@ crashes remains `True`.
 | Value | Reason | Meaning |
 |---|---|---|
 | `True` | `Publishing` | every producing role is configured to publish |
-| `True` | `NotApplicable` | an unrouted deployment declares only `server` roles |
+| `True` | `NotApplicable` | an unrouted deployment declares only `Server` roles |
 | `False` | `PublisherDisabled` | a producing role's rendered Pods do not enable publishing |
 | `False` | `NoRouter` | a prefill/decode pair has no router to consume events |
 | `Unknown` | `RoleUnmanaged` | a producing role replaced its command line, so the operator cannot inspect what it does |

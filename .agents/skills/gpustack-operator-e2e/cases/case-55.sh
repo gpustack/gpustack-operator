@@ -79,7 +79,7 @@ CASE_ID=55
 trap kvi_teardown EXIT
 kvi_setup || { kvi_results "$CASE_ID"; exit 1; }
 
-kvi_pod_manifest stamped vllm | kubectl apply -f - >/dev/null 2>&1
+kvi_pod_manifest stamped vLLM | kubectl apply -f - >/dev/null 2>&1
 if ! kvi_wait_for pods stamped '{.metadata.name}' stamped 60 "$TEST_NS" >/dev/null; then
   record FAIL "a domain-carrying Binding is injected, not refused" \
     "the Pod never appeared - if the webhook refused it, the isolation gap has become a denial of \
@@ -148,7 +148,7 @@ else
 fi
 
 # The paired half, on its own Pod because the engine is fixed per Pod.
-kvi_pod_manifest sg-stamped sglang | kubectl apply -f - >/dev/null 2>&1
+kvi_pod_manifest sg-stamped SGLang | kubectl apply -f - >/dev/null 2>&1
 if ! kvi_wait_for pods sg-stamped '{.metadata.name}' sg-stamped 60 "$TEST_NS" >/dev/null; then
   record FAIL "the reuse domain reaches an SGLang container as its tenant" \
     "the Pod was never stored, so the paired half did not run and the vLLM half above is unpaired: \
@@ -176,14 +176,15 @@ checked=0
 skipped=0
 seen_config=0
 seen_env=0
-for engine in vllm vllm-ascend sglang; do
+for engine in vLLM vllm-ascend SGLang; do
   pod="ctl-${engine//-/}"
+  pod="${pod,,}"
   # vLLM-Ascend is not reachable from this fixture, and TWO refusals stand in front of it - neither
   # of them about the launch:
   #
   #  1. The engine annotation does not take the value. `vllm_ascend` was ruled the package the
   #     runner installs when the accelerator backend is CANN rather than an engine anybody names, so
-  #     ParseEngine refuses it and names `engine: vllm` + `manufacturer: ascend` as the spelling.
+  #     ParseEngine refuses it and names `engine: vLLM` + `manufacturer: ascend` as the spelling.
   #  2. Spelled that way it is refused one layer down: that runtime accepts only the `ascend`
   #     transport, and this family's pool is built on a TCP backend.
   #
@@ -224,7 +225,7 @@ whether the row is reachable was never established and it was neither run nor sk
   fi
   # The vehicle this engine reads the tenant from; the other one must stay empty.
   case "$engine" in
-    sglang) want="config= env=${DOMAIN}" ;;
+    SGLang) want="config= env=${DOMAIN}" ;;
     *)      want="config=${DOMAIN} env=" ;;
   esac
   kvi_pod_manifest "$pod" "$engine" | kubectl apply -f - >/dev/null 2>&1
@@ -252,7 +253,7 @@ whether the row is reachable was never established and it was neither run nor sk
     continue
   fi
   case "$engine" in
-    sglang) seen_env=1 ;;
+    SGLang) seen_env=1 ;;
     *)      seen_config=1 ;;
   esac
 done

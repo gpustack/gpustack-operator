@@ -346,7 +346,7 @@ kvi_pod_manifest() {
   # names the accepted set, instead of being second-guessed here.
   local program=vllm
   local launch="[\"${LAUNCH_DIR}/vllm\", \"serve\"]"
-  if [ "$engine" = sglang ]; then
+  if [ "$engine" = SGLang ]; then
     program=python3
     launch="[\"${LAUNCH_DIR}/python3\", \"-m\", \"sglang.launch_server\"]"
   fi

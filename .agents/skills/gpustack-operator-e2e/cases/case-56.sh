@@ -109,7 +109,7 @@ metadata:
 ${label_line}
   annotations:
     kvcache.gpustack.ai/binding: ${BINDING}
-    kvcache.gpustack.ai/engine: vllm
+    kvcache.gpustack.ai/engine: vLLM
 spec:
   restartPolicy: Never
   volumes:

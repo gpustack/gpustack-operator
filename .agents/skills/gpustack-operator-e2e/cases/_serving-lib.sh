@@ -58,7 +58,7 @@ serving_profile() {
   SP_SENT_LOG="" SP_RECEIVED_LOG="" SP_TRANSFER_SOURCE=""
   SP_PIN=none SP_PIN_ARG="" SP_PIN_LOG="" SP_ROUTERS="" SP_SERVED=""
   case "$1/$2" in
-    nvidia/vllm)
+    nvidia/vLLM)
       SP_TRANSFER="prom"
       SP_SENT_COUNT=vllm:mooncake_bytes_transferred_count
       SP_SENT_SUM=vllm:mooncake_bytes_transferred_sum
@@ -73,7 +73,7 @@ serving_profile() {
       SP_ROUTERS="llm-d-router vllm-router"
       SP_SERVED=vllm:request_success_total
       ;;
-    nvidia/sglang)
+    nvidia/SGLang)
       SP_TRANSFER="prom"
       SP_SENT_COUNT=sglang:kv_transfer_total_mb_count
       SP_SENT_SUM=sglang:kv_transfer_total_mb_sum
@@ -89,7 +89,7 @@ serving_profile() {
       SP_ROUTERS="llm-d-router sglang-gateway"
       SP_SERVED=sglang:num_requests_total
       ;;
-    ascend/vllm)
+    ascend/vLLM)
       # vLLM-Ascend's connector reports each transfer in the log, one line per request id on each
       # half; no Prometheus series for it has been read. Its leg hardcodes its transport, so there
       # is no TCP pin to look for, and only llm-d-router relays the handshake it waits for.

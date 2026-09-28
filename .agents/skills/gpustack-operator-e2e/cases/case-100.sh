@@ -143,7 +143,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: $1, namespace: ${NS}, labels: {e2e.gpustack.ai/case: "100"}}
 spec:
-  engine: {name: vllm, version: "0.29.0"}
+  engine: {name: vLLM, version: "0.29.0"}
   model: {name: ${SERVED}, artifactRef: {name: $2}}
   kvCache: {poolRef: {name: ${P}-shared}}
   roles:

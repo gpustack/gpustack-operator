@@ -369,7 +369,7 @@ func TestModelDeploymentArtifactPlacement(t *testing.T) {
 
 	status := getModelDeployment(t, cli).Status.Model
 	require.NotNil(t, status)
-	assert.Equal(t, workercore.ModelDeploymentModelDeliveryPvc, status.Delivery)
+	assert.Equal(t, workercore.ModelDeploymentModelDeliveryPVC, status.Delivery)
 	assert.Equal(t, "qwen", status.Artifact)
 }
 

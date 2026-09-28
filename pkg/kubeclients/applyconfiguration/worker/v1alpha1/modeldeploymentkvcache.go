@@ -24,7 +24,7 @@ type ModelDeploymentKVCacheApplyConfiguration struct {
 	// rather than merely rejected.
 	PoolRef *v1.LocalObjectReferenceApplyConfiguration `json:"poolRef,omitempty"`
 	// Connector names the connector implementation this deployment is configured for. The value is
-	// an identity the deployment carries, not a setting the operator derives: "mooncake" says which
+	// an identity the deployment carries, not a setting the operator derives: "Mooncake" says which
 	// connector this is, and nothing reads the field to produce the configuration. There is no
 	// "none" — synthesizing nothing is reachable through a full command replacement, which also
 	// marks the role unmanaged and moves CacheAttached to Unknown.

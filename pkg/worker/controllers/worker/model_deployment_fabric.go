@@ -33,9 +33,9 @@ func ModelDeploymentDirectInterfaceProtocol(
 		return ""
 	}
 	if md.Spec.KVTransfer != nil && md.Spec.KVTransfer.Protocol != "" {
-		return md.Spec.KVTransfer.Protocol
+		return mooncake.TransportProtocol(md.Spec.KVTransfer.Protocol)
 	}
-	return "tcp"
+	return mooncake.TransportProtocol("")
 }
 
 // ModelDeploymentInterfaceResource selects one device-plugin key for a positive role interface

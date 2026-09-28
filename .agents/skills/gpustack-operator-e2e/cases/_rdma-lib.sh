@@ -213,7 +213,7 @@ RDMA_SHARED_POOL_SIZE="${E2E_RDMA_SHARED_POOL_SIZE:-64}"
 #     only, its virtual functions being its endpoints; every other interface serves the whole-
 #     function families, itself the one endpoint. Reading the virtual-function count alone, or the
 #     SR-IOV flag alone, puts one real host shape in the wrong branch;
-#   - an endpoint is USABLE when its link verdict is anything but `failed`, falling back to the
+#   - an endpoint is USABLE when its link verdict is anything but `Failed`, falling back to the
 #     bound flag only when there is no verdict at all. Testing the flag first reads "this port could
 #     not be interrogated" as "this node has no RDMA".
 rdma_facts() {
@@ -263,13 +263,13 @@ for i in spec.get("interfaces", []) or []:
                               ((i.get("link") or {}).get("state") or "")))
 
 def usable(e):
-    return e[5] != "failed"
+    return e[5] != "Failed"
 
 whole = [e for e in endpoints if e[0] == "whole"]
 vf = [e for e in endpoints if e[0] == "vf"]
 ok_whole = [e for e in whole if usable(e)]
 ok_vf = [e for e in vf if usable(e)]
-failed = [e for e in endpoints if e[5] == "failed"]
+failed = [e for e in endpoints if e[5] == "Failed"]
 ep_numa = sorted({e[4] for e in endpoints if usable(e) and e[4]})
 
 accelerators = []       # (group id, manufacturer, accelerator id, numa, partitioned?)
@@ -414,7 +414,7 @@ rdma_requirement_text() {
     echo "not because the count was derived correctly."
     echo "read: Devices.spec.interfaces[].sriov and the length of .virtualFunctions" ;;
   failed-link)
-    echo "at least one endpoint whose link verdict is ALREADY 'failed'."
+    echo "at least one endpoint whose link verdict is ALREADY 'Failed'."
     echo "why: the case never induces one. Driving a link down is a host mutation with no reliable"
     echo "restore, and an endpoint simply ABSENT from the inventory is a detector outcome rather"
     echo "than the gate this reading is about."

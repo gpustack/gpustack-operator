@@ -1581,8 +1581,8 @@ fi
 # --- the fitting half: both roles admitted jointly ---
 
 tas_md_apply "${PREFIX}-md" "$NS" "$BINDING" \
-"$(tas_md_role_block prefill prefill "$IT" 1 "$IMAGE")
-$(tas_md_role_block decode decode "$IT" 1 "$IMAGE")"
+"$(tas_md_role_block prefill Prefill "$IT" 1 "$IMAGE")
+$(tas_md_role_block decode Decode "$IT" 1 "$IMAGE")"
 
 MD_WLS=""
 if tas_md_wait_pods "$NS" "${PREFIX}-md" 2 && tas_md_wait_workloads "$NS" "${PREFIX}-md" 2; then
@@ -1718,8 +1718,8 @@ fi
 
 if [ "$MD_NEG" = yes ]; then
   tas_md_apply "${PREFIX}-starved" "$NS" "$BINDING" \
-"$(tas_md_role_block prefill prefill "$IT" 1 "$IMAGE")
-$(tas_md_role_block decode decode "$IT" 1 "$IMAGE")"
+"$(tas_md_role_block prefill Prefill "$IT" 1 "$IMAGE")
+$(tas_md_role_block decode Decode "$IT" 1 "$IMAGE")"
 
   STARVED_WLS=""
   if tas_md_wait_pods "$NS" "${PREFIX}-starved" 2 && tas_md_wait_workloads "$NS" "${PREFIX}-starved" 2; then

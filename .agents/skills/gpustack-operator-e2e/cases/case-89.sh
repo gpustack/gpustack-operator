@@ -70,7 +70,7 @@ fi
 
 if [ "${E2E_EXPECT_PURE_PD:-0}" = 1 ]; then
   if jq -e '(.spec.kvCache == null) and
-    ([.spec.roles[].kind] | index("prefill") != null and index("decode") != null)' <<<"$md_json" >/dev/null; then
+    ([.spec.roles[].kind] | index("Prefill") != null and index("Decode") != null)' <<<"$md_json" >/dev/null; then
     record PASS "pure P/D fixture" "$MD"
   else
     record FAIL "pure P/D fixture" "$MD"

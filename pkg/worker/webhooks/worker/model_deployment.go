@@ -1016,7 +1016,11 @@ func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorLi
 	// rather than from the object, so a call left unconditional tells a user who asked for one
 	// router that some other router requires a metric.
 	if md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD {
-		if _, err := router.MetricsForEngine(md.Spec.Engine.Name); err != nil {
+		engine := md.Spec.Engine.Name
+		if mapped, ok := workerctrl.ModelDeploymentEngineUpstreamName(engine); ok {
+			engine = mapped
+		}
+		if _, err := router.MetricsForEngine(engine); err != nil {
 			errs = append(errs, field.Invalid(field.NewPath("spec", "engine"), md.Spec.Engine.Name, err.Error()))
 		}
 	}

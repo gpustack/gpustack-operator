@@ -260,14 +260,15 @@ func TestParseEngine(t *testing.T) {
 		want  Engine
 		valid bool
 	}{
-		{name: "vllm", input: "vllm", want: EngineVLLM, valid: true},
+		{name: "vLLM", input: "vLLM", want: EngineVLLM, valid: true},
 		// Renderable but NOT nameable: the operator derives it from the pool's accelerator, and
 		// ModelDeployment.spec.engine already refuses the same value for the same reason.
 		{name: "vllm-ascend", input: "vllm-ascend", valid: false},
-		{name: "sglang", input: "sglang", want: EngineSGLang, valid: true},
+		{name: "SGLang", input: "SGLang", want: EngineSGLang, valid: true},
 		{name: "unknown value", input: "tensorrt", valid: false},
 		{name: "empty", input: "", valid: false},
-		{name: "case is significant", input: "vLLM", valid: false},
+		{name: "old vllm", input: "vllm", valid: false},
+		{name: "old sglang", input: "sglang", valid: false},
 	}
 
 	for _, tc := range testCases {
@@ -292,7 +293,7 @@ func TestParseEngine(t *testing.T) {
 func TestParseEngine_AscendIsRefusedByName(t *testing.T) {
 	_, err := ParseEngine(string(EngineVLLMAscend))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), string(EngineVLLM),
+	assert.Contains(t, err.Error(), "vLLM",
 		"the refusal must name the engine to set instead")
 	assert.NotContains(t, err.Error(), "set one of",
 		"and it must not fall through to the generic list, which would offer no reason")
@@ -302,8 +303,8 @@ func TestParseEngine_AscendIsRefusedByName(t *testing.T) {
 // what a user may name here is what the other API's enum publishes. The two surfaces described one
 // concept with different value sets, and one of them had already ruled the mixed value wrong.
 func TestSelectableEngines_MatchesTheModelDeploymentEnum(t *testing.T) {
-	assert.Equal(t, []Engine{EngineVLLM, EngineSGLang}, SelectableEngines(),
-		"ModelDeployment.spec.engine publishes exactly vllm and sglang")
+	assert.Equal(t, []string{"vLLM", "SGLang"}, SelectableEngines(),
+		"ModelDeployment.spec.engine publishes exactly vLLM and SGLang")
 	assert.Contains(t, Engines(), EngineVLLMAscend,
 		"while the renderer keeps it, because the operator still derives and renders it")
 }
@@ -316,8 +317,10 @@ func TestParseRole(t *testing.T) {
 		want  Role
 		valid bool
 	}{
-		{name: "prefill", input: "prefill", want: RolePrefill, valid: true},
-		{name: "decode", input: "decode", want: RoleDecode, valid: true},
+		{name: "Prefill", input: "Prefill", want: RolePrefill, valid: true},
+		{name: "Decode", input: "Decode", want: RoleDecode, valid: true},
+		{name: "old prefill", input: "prefill", valid: false},
+		{name: "old decode", input: "decode", valid: false},
 		{name: "unset means no role", input: "", want: RoleNone, valid: true},
 		{name: "unknown value", input: "both", valid: false},
 	}

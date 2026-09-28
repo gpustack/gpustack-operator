@@ -149,7 +149,7 @@ func TestPodWebhooks_AreOrderIndependent(t *testing.T) {
 		pod.Labels[KVCacheInjectLabelKey] = KVCacheInjectLabelValue
 		pod.Annotations = map[string]string{
 			KVCacheBindingAnnotationKey: "chat",
-			KVCacheEngineAnnotationKey:  "vllm",
+			KVCacheEngineAnnotationKey:  "vLLM",
 		}
 		return pod
 	}

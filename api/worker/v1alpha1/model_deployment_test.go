@@ -59,6 +59,55 @@ func enumValues(t *testing.T, schema extension.JSONSchemaProps, field string) []
 	return values
 }
 
+func TestModelDeploymentEnumSpellings(t *testing.T) {
+	crd := GetCustomResourceDefinitions()["ModelDeployment"]
+	require.NotNil(t, crd)
+	require.Len(t, crd.Spec.Versions, 1)
+
+	cases := []struct {
+		name         string
+		path         []string
+		want         []string
+		old          []string
+		defaultValue string
+	}{
+		{"spec role kind", []string{"spec", "roles", "[]", "kind"}, []string{`"Server"`, `"Prefill"`, `"Decode"`}, []string{`"server"`, `"prefill"`, `"decode"`}, `"Server"`},
+		{"status role kind", []string{"status", "roles", "[]", "kind"}, []string{`"Server"`, `"Prefill"`, `"Decode"`}, []string{`"server"`, `"prefill"`, `"decode"`}, ""},
+		{"engine name", []string{"spec", "engine", "name"}, []string{`"vLLM"`, `"SGLang"`}, []string{`"vllm"`, `"sglang"`}, ""},
+		{"cache connector", []string{"spec", "kvCache", "connector"}, []string{`"Mooncake"`}, []string{`"mooncake"`}, `"Mooncake"`},
+		{"direct protocol", []string{"spec", "kvTransfer", "protocol"}, []string{`"Auto"`, `"TCP"`, `"RDMA"`, `"EFA"`, `"CANN"`, `"ROCM"`}, []string{`"auto"`, `"tcp"`, `"rdma"`, `"efa"`, `"cann"`, `"rocm"`, `"MUSA"`, `"MACA"`}, ""},
+		{"model delivery", []string{"status", "model", "delivery"}, []string{`"PVC"`, `"Engine"`, `"Node"`, `"Image"`}, []string{`"Pvc"`}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := crd.Spec.Versions[0].Schema.OpenAPIV3Schema
+			for _, part := range tc.path {
+				if part == "[]" {
+					require.NotNil(t, schema.Items)
+					require.NotNil(t, schema.Items.Schema)
+					schema = schema.Items.Schema
+					continue
+				}
+				child, ok := schema.Properties[part]
+				require.True(t, ok, "missing %s", part)
+				schema = &child
+			}
+			values := make([]string, 0, len(schema.Enum))
+			for _, value := range schema.Enum {
+				values = append(values, string(value.Raw))
+			}
+			assert.ElementsMatch(t, tc.want, values)
+			for _, old := range tc.old {
+				assert.NotContains(t, values, old)
+			}
+			if tc.defaultValue != "" {
+				require.NotNil(t, schema.Default)
+				assert.Equal(t, tc.defaultValue, string(schema.Default.Raw))
+			}
+		})
+	}
+}
+
 // TestModelDeploymentStatusRoleKindIsConstrained pins that the status kind carries an enum at all.
 //
 // Without one the field is a plain string, and the controller's own resolution of the unset spec
@@ -114,7 +163,7 @@ func TestModelDeploymentStatusDeliveryAdmitsEveryDelivery(t *testing.T) {
 
 	deliveries := make([]string, 0, 4)
 	for _, d := range []ModelDeploymentModelDelivery{
-		ModelDeploymentModelDeliveryPvc,
+		ModelDeploymentModelDeliveryPVC,
 		ModelDeploymentModelDeliveryEngine,
 		ModelDeploymentModelDeliveryNode,
 		ModelDeploymentModelDeliveryImage,

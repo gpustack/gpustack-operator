@@ -16,10 +16,10 @@
 #                  compares a value with itself and passes on a node whose inventory names nothing
 #                  real. A non-empty interface list is NOT the reading;
 #                - the per-mode counts the node advertises are the endpoint counts times the mode's
-#                  token size, with endpoints whose link verdict is `failed` excluded. Presence of
+#                  token size, with endpoints whose link verdict is `Failed` excluded. Presence of
 #                  the keys is not the reading either: a key at zero on a node that has endpoints is
 #                  a failure, not a pass;
-#                - a `failed` endpoint's tokens are ADVERTISED AND UNHEALTHY — still in capacity,
+#                - a `Failed` endpoint's tokens are ADVERTISED AND UNHEALTHY — still in capacity,
 #                  out of allocatable. Advertised-and-unhealthy and never-advertised are
 #                  indistinguishable in allocatable alone, so both sides are read;
 #                - where the host has SR-IOV virtual functions configured, the partitioned key
@@ -29,7 +29,7 @@
 #              lacked. Individual checks skip with their own reason: the whole-function counts on a
 #              node whose every interface is a partitioned physical function, the virtual-function
 #              count on a node with none configured, and the unhealthy-token check on a node where
-#              no link reports `failed` — this case never induces one, because driving a link down
+#              no link reports `Failed` — this case never induces one, because driving a link down
 #              is a host mutation with no reliable restore.
 #              The probe Pod mounts the host's /sys read-only, which a `restricted` PodSecurity
 #              namespace refuses. There the case does NOT skip whole: the count checks need no host
@@ -41,16 +41,16 @@
 # Expected:    - every device the host's RDMA subsystem lists is some interface's or virtual
 #                function's rdmaDevice;
 #              - allocatable of the whole-function key equals the number of whole-function endpoints
-#                whose link verdict is not `failed`;
+#                whose link verdict is not `Failed`;
 #              - allocatable of the shared key equals that number times the shared pool size;
 #              - allocatable of the partitioned key equals the number of virtual-function endpoints
-#                whose link verdict is not `failed`, and with virtual functions configured the host's
+#                whose link verdict is not `Failed`, and with virtual functions configured the host's
 #                sriov_numvfs total equals the ledger's virtual functions under partitioned functions;
 #              - the retired sliced key is either absent or zero — an extended resource that has
 #                entered a node's status is not removed when the plugin stops serving it, so a node
 #                that once ran the older build keeps the key forever, and only a NON-ZERO value is a
 #                finding;
-#              - with a `failed` endpoint present, capacity counts it and allocatable does not;
+#              - with a `Failed` endpoint present, capacity counts it and allocatable does not;
 #              - with virtual functions configured, the physical function contributes nothing to the
 #                whole-function keys.
 # Cleanup:     Trap deletes the probe Pod. Nothing else was created and no baseline was changed, so
@@ -114,7 +114,7 @@ fi
 #    `absent` and `0` are different answers throughout and are never folded: a key at zero is a
 #    plugin serving nothing, a key that is not there is a plugin that never served it. The counts
 #    below read allocatable, which is healthy tokens only — so the endpoint population they are
-#    compared against is the usable one, and a node carrying one `failed` verdict makes the
+#    compared against is the usable one, and a node carrying one `Failed` verdict makes the
 #    unconditioned formula wrong.
 # ---------------------------------------------------------------------------------------------------
 WANT_WHOLE="$F_EP_WHOLE_OK"
