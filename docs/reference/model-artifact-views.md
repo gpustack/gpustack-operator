@@ -122,11 +122,11 @@ By capability, not by field.
 | `resolved_paths` on the worker | the fixed mount path in the consumer's container; host paths are never exposed | by design |
 | `local_dir` | none: the plugin owns the cache layout | by design |
 | Listing a worker's model files | `v1` NodeModelStore get, list, watch | none |
-| Download to a worker ahead of use | a prefetch object naming nodes | a later spec |
-| Delete with `cleanup_on_delete` | delete the prefetch; collection after the last reference and its grace | a later spec; today only the watermark collects |
+| Download to a worker ahead of use | a [ModelPrefetch](model-prefetch.md) naming nodes | none |
+| Delete with `cleanup_on_delete` | delete the prefetch; collection after the last reference and its grace | none |
 | `reset` (retry now) | automatic backoff to `retryTime` | not planned |
 | One row per source per worker | one entry per digest per node, shared by artifacts with the same content | none |
-| Prefer workers holding the files | placement preference, compute first | a later spec |
+| Prefer workers holding the files | [placement preference](../architecture/topology-aware-scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it), compute first | none |
 | LoRA and draft-model files | not in this batch | later |
 | Tenant scope | the artifact's namespace; the node store names no tenant | none |
 
