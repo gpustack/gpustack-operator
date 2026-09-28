@@ -170,6 +170,33 @@ func TestNodeModelStoreReconcile(t *testing.T) {
 	}
 }
 
+func TestNodeModelStoreRegistrationLabelFollowsCSINode(t *testing.T) {
+	nd := testModelNode("node-1")
+	nd.Labels = map[string]string{"site": "west", "model.csi.gpustack.ai/registered": "true"}
+	cn := testCSINode("node-1")
+	r, cli := newTestNodeModelStoreEnv(t, testModelCSIDriver(), nd, cn)
+	ctx := context.Background()
+	check := func(want string) {
+		t.Helper()
+		reconcileNodeModelStore(t, r, nd.Name)
+		got := new(core.Node)
+		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: nd.Name}, got))
+		assert.Equal(t, want, got.Labels["model.csi.gpustack.ai/registered"])
+		assert.Equal(t, "west", got.Labels["site"])
+	}
+
+	check("")
+	cn.Spec.Drivers = testCSINode("node-1", modelstore.DriverName).Spec.Drivers
+	require.NoError(t, cli.Update(ctx, cn))
+	check("true")
+	cn.Spec.Drivers = nil
+	require.NoError(t, cli.Update(ctx, cn))
+	check("")
+	stored := new(workercore.NodeModelStore)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: nd.Name}, stored),
+		"the store stays for a plugin restart even while the scheduling label is absent")
+}
+
 func TestNodeModelStoreReconcileFollowsTheSettings(t *testing.T) {
 	sec := testSettingsSecret(map[string]string{"model-store-download-concurrency": "4"})
 	r, cli := newTestNodeModelStoreEnv(t,

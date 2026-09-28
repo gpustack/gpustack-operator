@@ -32,8 +32,12 @@ import (
 // looked at again. Admission refuses such values, so it takes two racing writes to reach here.
 const nodeModelStoreInvalidRetry = time.Minute
 
+// ModelManagerRegisteredLabel is present on a Node while kubelet lists the model-manager CSI driver.
+const ModelManagerRegisteredLabel = "model.csi.gpustack.ai/registered"
+
 // NodeModelStoreReconciler keeps one NodeModelStore per node the model-manager plugin registered on,
-// and keeps its spec equal to the node's effective configuration.
+// keeps its spec equal to the node's effective configuration, and labels registered nodes for
+// scheduling.
 //
 // THE OBJECT'S LIFETIME IS THE NODE'S, NOT THE PLUGIN REGISTRATION'S. It is created once the node's
 // CSINode lists the plugin's driver, kubelet's own record that the plugin runs there, and it is not
@@ -65,6 +69,14 @@ func (r *NodeModelStoreReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 	if !installed {
+		nd := new(core.Node)
+		if err := r.Client.Get(ctx, req.NamespacedName, nd); ctrlcli.IgnoreNotFound(err) != nil {
+			return ctrl.Result{}, err
+		} else if err == nil {
+			if err := r.syncRegistrationLabel(ctx, nd, false); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		nms := &workercore.NodeModelStore{ObjectMeta: meta.ObjectMeta{Name: req.Name}}
 		if err := r.Client.Delete(ctx, nms); ctrlcli.IgnoreNotFound(err) != nil {
 			return ctrl.Result{}, err
@@ -86,6 +98,9 @@ func (r *NodeModelStoreReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	registered, err := r.driverRegistered(ctx, nd.Name)
 	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.syncRegistrationLabel(ctx, nd, registered); err != nil {
 		return ctrl.Result{}, err
 	}
 	existing := new(workercore.NodeModelStore)
@@ -177,6 +192,24 @@ func csiNodeListsModelDriver(csiNode *storage.CSINode) bool {
 	})
 }
 
+// syncRegistrationLabel keeps scheduling in step with kubelet's plugin registration.
+func (r *NodeModelStoreReconciler) syncRegistrationLabel(ctx context.Context, nd *core.Node, registered bool) error {
+	value := nd.Labels[ModelManagerRegisteredLabel]
+	if registered && value == "true" || !registered && value == "" {
+		return nil
+	}
+	before := nd.DeepCopy()
+	if registered {
+		if nd.Labels == nil {
+			nd.Labels = map[string]string{}
+		}
+		nd.Labels[ModelManagerRegisteredLabel] = "true"
+	} else {
+		delete(nd.Labels, ModelManagerRegisteredLabel)
+	}
+	return r.Client.Patch(ctx, nd, ctrlcli.MergeFrom(before))
+}
+
 // effectiveSpec merges the configuration layers into a node's spec and checks it. The base layer
 // is the cluster's Settings, read from the Settings store this controller watches rather than
 // through the Settings package's read cache, so a change reaches every node on its own event; the
@@ -233,6 +266,19 @@ func (r *NodeModelStoreReconciler) SetupController(_ context.Context, opts contr
 				UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 					return csiNodeListsModelDriver(e.ObjectOld.(*storage.CSINode)) !=
 						csiNodeListsModelDriver(e.ObjectNew.(*storage.CSINode))
+				},
+			}),
+		).
+		Watches(
+			&core.Node{},
+			&ctrlhandler.EnqueueRequestForObject{},
+			ctrlbuilder.WithPredicates(ctrlpredicate.Funcs{
+				CreateFunc: func(e ctrlevent.CreateEvent) bool {
+					return e.Object.GetLabels()[ModelManagerRegisteredLabel] != ""
+				},
+				UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+					return e.ObjectOld.GetLabels()[ModelManagerRegisteredLabel] !=
+						e.ObjectNew.GetLabels()[ModelManagerRegisteredLabel]
 				},
 			}),
 		).
