@@ -1,0 +1,25 @@
+--- a/templates/csi-nfs-controller.yaml
++++ b/templates/csi-nfs-controller.yaml
+@@ -58,6 +58,10 @@
+       tolerations:
+ {{ toYaml . | indent 8 }}
+ {{- end }}
++{{- with .Values.controller.topologySpreadConstraints }}
++      topologySpreadConstraints:
++{{ toYaml . | indent 8 }}
++{{- end }}
+       containers:
+         - name: csi-provisioner
+           image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.csiProvisioner) }}"
+--- a/values.yaml
++++ b/values.yaml
+@@ -68,6 +68,9 @@
+   defaultOnDeletePolicy: delete  # available values: delete, retain
+   affinity: {}
+   nodeSelector: {}
++  # Above one replica, spread the controller across nodes: its pods run on the host
++  # network and bind healthPort on it, so two pods on one node crash-loop the second.
++  topologySpreadConstraints: []
+   priorityClassName: system-cluster-critical
+   tolerations:
+     - key: "node-role.kubernetes.io/master"

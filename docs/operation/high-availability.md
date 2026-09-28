@@ -43,7 +43,7 @@ an install that relied on that must set their three lists before upgrading. Upgr
 | Worker (control plane) | `worker.replicas` | `worker.podDisruptionBudget.enabled` + `.minAvailable` | `worker.topologySpreadConstraints`, or `worker.affinity` |
 | Kueue controller manager | `kueue.controllerManager.replicas` | `kueue.controllerManager.podDisruptionBudget.enabled` + `.minAvailable` | `kueue.controllerManager.topologySpreadConstraints` |
 | NFD master | `node-feature-discovery.master.replicaCount` | `node-feature-discovery.master.podDisruptionBudget.enable` + `.minAvailable` | `node-feature-discovery.master.affinity` only |
-| NFS CSI controller | `csi-driver-nfs.controller.replicas` | — none — | — none — |
+| NFS CSI controller | `csi-driver-nfs.controller.replicas` | — none — | `csi-driver-nfs.controller.topologySpreadConstraints` (vendored patch) |
 | S3 CSI controller | `csi-driver-s3.controller.replicas` | — none — | — none — |
 
 Those "none"/"only" cells are upstream chart limitations, not oversights: each changes what "three
@@ -88,6 +88,13 @@ csi-driver-nfs:
   controller:
     replicas: 2
     strategyType: RollingUpdate
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: csi-nfs-controller
 
 csi-driver-s3:
   controller:
@@ -146,10 +153,16 @@ Losing a CSI controller delays volume provisioning, resizing and snapshotting; *
 keep working**: the mounting side is the node DaemonSet. The least urgent of the four, with the weakest
 chart support.
 
-Both charts render **neither a PodDisruptionBudget nor topology spread constraints**, and honour
-`controller.affinity` **only when it carries `nodeSelectorTerms`** — a pod anti-affinity is schema-valid,
-then silently dropped. Two replicas may land on one node, a drain taking both: raise the count for
-process-level failover, not node-level redundancy.
+Both charts render **no PodDisruptionBudget**, and honour `controller.affinity` **only when it carries
+`nodeSelectorTerms`** — a pod anti-affinity is schema-valid, then silently dropped.
+
+The S3 chart renders no topology spread at all: two replicas may land on one node, a drain taking both —
+raise its count for process-level failover, not node-level redundancy.
+
+The NFS chart renders `controller.topologySpreadConstraints` through a vendored patch, and above one
+replica the spread is **required, not just prudent**: its pods run on the host network and bind the
+liveness health port there, so two pods on one node leave the second crash-looping on the bind, the
+Deployment never fully ready. The example's `labelSelector` must be spelled out, as Kueue's must.
 
 Also set `strategyType: RollingUpdate`: both default to `Recreate`, taking every replica down before the
 new one starts — giving up at every upgrade the failover the replica was added for.

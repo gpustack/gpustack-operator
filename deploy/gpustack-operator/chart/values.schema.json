@@ -68,7 +68,7 @@
             },
             "replicas": {
               "default": 1,
-              "description": "Number of NFS controller (provisioner) replicas. Every sidecar runs with\n`--leader-election`, so extra replicas stand by. Losing the controller delays volume\nprovisioning, resizing and snapshotting; volumes already mounted keep working, because the\nmounting side is the node DaemonSet. This chart renders neither a PodDisruptionBudget nor\ntopology spread constraints for the controller, and it honours `controller.affinity` only\nwhen that affinity carries `nodeSelectorTerms` — a pod anti-affinity is silently dropped —\nso replicas may share a node.",
+              "description": "Number of NFS controller (provisioner) replicas. Every sidecar runs with\n`--leader-election`, so extra replicas stand by. Losing the controller delays volume\nprovisioning, resizing and snapshotting; volumes already mounted keep working, because the\nmounting side is the node DaemonSet. This chart renders no PodDisruptionBudget for the\ncontroller, and it honours `controller.affinity` only when that affinity carries\n`nodeSelectorTerms` — a pod anti-affinity is silently dropped — so without the spread\nbelow, replicas may share a node. Sharing one is not just weaker redundancy here: the pods\nrun on the host network and bind the liveness health port on it, so the second pod on a\nnode crash-loops on the bind and the Deployment never reaches full readiness.",
               "title": "replicas",
               "type": "integer"
             },
@@ -89,6 +89,15 @@
                 "type": "object"
               },
               "title": "tolerations",
+              "type": "array"
+            },
+            "topologySpreadConstraints": {
+              "description": "Topology spread constraints of the NFS controller pods, rendered by a vendored patch the\nupstream chart does not carry. Above one replica a `DoNotSchedule` spread over\n`kubernetes.io/hostname` is required, not just prudent — see `replicas` above. The\nconstraint needs its `labelSelector` spelled out: `{matchLabels: {app: csi-nfs-controller}}`.",
+              "items": {
+                "required": [],
+                "type": "object"
+              },
+              "title": "topologySpreadConstraints",
               "type": "array"
             }
           },
@@ -350,7 +359,7 @@
             },
             "replicas": {
               "default": 1,
-              "description": "Number of S3 controller (provisioner) replicas. The provisioner sidecar runs with\n`--leader-election`, so extra replicas stand by. Losing the controller delays volume\nprovisioning; volumes already mounted keep working, because the mounting side is the node\nDaemonSet. Like the NFS chart, this one renders neither a PodDisruptionBudget nor topology\nspread constraints for the controller, and it honours `controller.affinity` only when that\naffinity carries `nodeSelectorTerms` — a pod anti-affinity is silently dropped — so replicas\nmay share a node.",
+              "description": "Number of S3 controller (provisioner) replicas. The provisioner sidecar runs with\n`--leader-election`, so extra replicas stand by. Losing the controller delays volume\nprovisioning; volumes already mounted keep working, because the mounting side is the node\nDaemonSet. This chart renders neither a PodDisruptionBudget nor topology spread constraints\nfor the controller, and it honours `controller.affinity` only when that affinity carries\n`nodeSelectorTerms` — a pod anti-affinity is silently dropped — so replicas may share a node.\nSharing one costs node-level redundancy but not readiness: unlike the NFS controller, these\npods run on the pod network, so no host port collides.",
               "title": "replicas",
               "type": "integer"
             },

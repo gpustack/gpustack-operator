@@ -949,10 +949,12 @@ csi-driver-nfs:
     # -- Number of NFS controller (provisioner) replicas. Every sidecar runs with
     # `--leader-election`, so extra replicas stand by. Losing the controller delays volume
     # provisioning, resizing and snapshotting; volumes already mounted keep working, because the
-    # mounting side is the node DaemonSet. This chart renders neither a PodDisruptionBudget nor
-    # topology spread constraints for the controller, and it honours `controller.affinity` only
-    # when that affinity carries `nodeSelectorTerms` — a pod anti-affinity is silently dropped —
-    # so replicas may share a node.
+    # mounting side is the node DaemonSet. This chart renders no PodDisruptionBudget for the
+    # controller, and it honours `controller.affinity` only when that affinity carries
+    # `nodeSelectorTerms` — a pod anti-affinity is silently dropped — so without the spread
+    # below, replicas may share a node. Sharing one is not just weaker redundancy here: the pods
+    # run on the host network and bind the liveness health port on it, so the second pod on a
+    # node crash-loops on the bind and the Deployment never reaches full readiness.
     replicas: 1
     # @schema
     # enum: [Recreate, RollingUpdate]
@@ -973,6 +975,16 @@ csi-driver-nfs:
     affinity: {}
     # -- Node selector of the NFS controller pods.
     nodeSelector: {}
+    # @schema
+    # type: array
+    # items:
+    #   type: object
+    # @schema
+    # -- Topology spread constraints of the NFS controller pods, rendered by a vendored patch the
+    # upstream chart does not carry. Above one replica a `DoNotSchedule` spread over
+    # `kubernetes.io/hostname` is required, not just prudent — see `replicas` above. The
+    # constraint needs its `labelSelector` spelled out: `{matchLabels: {app: csi-nfs-controller}}`.
+    topologySpreadConstraints: []
     # -- Priority class of the NFS controller pods. `system-cluster-critical` keeps provisioning
     # working while a node is under pressure.
     priorityClassName: system-cluster-critical
@@ -1057,10 +1069,11 @@ csi-driver-s3:
     # -- Number of S3 controller (provisioner) replicas. The provisioner sidecar runs with
     # `--leader-election`, so extra replicas stand by. Losing the controller delays volume
     # provisioning; volumes already mounted keep working, because the mounting side is the node
-    # DaemonSet. Like the NFS chart, this one renders neither a PodDisruptionBudget nor topology
-    # spread constraints for the controller, and it honours `controller.affinity` only when that
-    # affinity carries `nodeSelectorTerms` — a pod anti-affinity is silently dropped — so replicas
-    # may share a node.
+    # DaemonSet. This chart renders neither a PodDisruptionBudget nor topology spread constraints
+    # for the controller, and it honours `controller.affinity` only when that affinity carries
+    # `nodeSelectorTerms` — a pod anti-affinity is silently dropped — so replicas may share a node.
+    # Sharing one costs node-level redundancy but not readiness: unlike the NFS controller, these
+    # pods run on the pod network, so no host port collides.
     replicas: 1
     # @schema
     # enum: [Recreate, RollingUpdate]
