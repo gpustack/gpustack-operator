@@ -44,6 +44,20 @@ func podPreference(pod *core.Pod) []core.PreferredSchedulingTerm {
 	return pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
 }
 
+func TestModelDeploymentNodeDeliveryLeavesPodRegistrationUnpinned(t *testing.T) {
+	cli := placementDeploymentClient(t)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	pods := listReplicas(t, cli)
+	require.Len(t, pods, 2)
+	for i := range pods {
+		if pods[i].Spec.Affinity != nil && pods[i].Spec.Affinity.NodeAffinity != nil {
+			assert.Nil(t, pods[i].Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+		}
+	}
+}
+
 func TestModelDeploymentPlacementPreferenceMembersShareOneTerm(t *testing.T) {
 	cli := placementDeploymentClient(t, append(hotNode("n1"), hotNode("n2")...)...)
 

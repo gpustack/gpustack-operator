@@ -24,6 +24,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/systemmeta"
@@ -105,6 +106,45 @@ func requiredTerms(ps kueue.PodSet) []core.NodeSelectorTerm {
 
 func gt(key, v string) core.NodeSelectorRequirement {
 	return core.NodeSelectorRequirement{Key: key, Operator: core.NodeSelectorOpGt, Values: []string{v}}
+}
+
+func TestWorkloadWebhook_NodeDeliveryRequiresRegisteredPlugin(t *testing.T) {
+	seedFitAffinity(t, "false")
+	volume := func(driver string) core.Volume {
+		return core.Volume{Name: "model", VolumeSource: core.VolumeSource{
+			CSI: &core.CSIVolumeSource{Driver: driver},
+		}}
+	}
+	cases := []struct {
+		name    string
+		queue   string
+		volumes []core.Volume
+		want    []core.NodeSelectorTerm
+	}{
+		{
+			name: "node-delivered weights require plugin registration", queue: _fitQueue,
+			volumes: []core.Volume{volume(modelstore.DriverName)},
+			want: []core.NodeSelectorTerm{{MatchExpressions: []core.NodeSelectorRequirement{{
+				Key: "model.csi.gpustack.ai/registered", Operator: core.NodeSelectorOpIn, Values: []string{"true"},
+			}}}},
+		},
+		{name: "another CSI driver is unchanged", queue: _fitQueue, volumes: []core.Volume{volume("other.csi.example")}},
+		{name: "engine delivery is unchanged", queue: _fitQueue},
+		{name: "a foreign queue is unchanged", queue: "other", volumes: []core.Volume{volume(modelstore.DriverName)}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ps := fitPodSet("main", nil)
+			ps.Template.Spec.Volumes = c.volumes
+			wl := fitWorkload(c.queue, ps)
+			r := newWorkloadWebhook(fitChain()...)
+			require.NoError(t, r.Default(context.Background(), wl))
+			assert.Equal(t, c.want, requiredTerms(wl.Spec.PodSets[0]))
+			again := wl.DeepCopy()
+			require.NoError(t, r.Default(context.Background(), again))
+			assert.Equal(t, wl, again)
+		})
+	}
 }
 
 func TestWorkloadWebhook_Default(t *testing.T) {

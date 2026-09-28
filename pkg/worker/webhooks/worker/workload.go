@@ -17,15 +17,17 @@ import (
 	kueueworkload "sigs.k8s.io/kueue/pkg/workload"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
-// WorkloadWebhook pins a Kueue Workload that this operator's InstanceType chain admits to nodes
-// whose fit labels show that one card can still host it, so Kueue's topology-aware scheduling skips
-// a node whose free room is spread over cards none of which fits.
+// WorkloadWebhook pins node-delivered weights to nodes with a registered model-manager plugin. It
+// also pins an accelerator request to nodes whose fit labels show that one card can still host it,
+// so Kueue's topology-aware scheduling skips a node whose free room is spread over cards none of
+// which fits.
 //
 // Per PodSet, a logical slice of U units per card requires the sliced-max-free-units label to be
 // greater than U-1, and a shared request of N >= 2 cards requires the shared-free-cards label to be
@@ -35,14 +37,18 @@ import (
 // onto them. That matters: the kubelet re-admits a running Pod against current node labels when it
 // restarts, and a fit label always falls below the threshold once the Pod holds its card.
 //
-// Kueue may serve other tenants, so a Workload is this operator's only when its LocalQueue points
+// The plugin pin applies to a PodSet with the model-manager CSI volume, independently of the
+// workload-fit-affinity setting. A plugin that unregisters after placement can still leave the Pod
+// waiting for a mount; the deployment's WeightsReady condition reports that wait.
+//
+// Kueue may serve other tenants, so a fit pin applies only when its LocalQueue points
 // at a ClusterQueue carrying the operator's InstanceType mark and a same-named InstanceType names
-// an accelerator group. Anything else, and any read that fails, leaves the Workload untouched: the
-// webhook never denies, and without the pin the node-devices check still holds a request placed on
-// a node that cannot host it.
+// an accelerator group. A missing link or failed read leaves that fit pin out; it does not affect
+// the plugin pin. The webhook never denies, and without the fit pin the node-devices check still
+// holds a request placed on a node that cannot host it.
 //
 // An UPDATE is acted on only while the old Workload holds no quota reservation. Kueue rebuilds a
-// suspended job's Workload spec in place, which would drop the pin, and it lets PodSets change only
+// suspended job's Workload spec in place, which would drop the pins, and it lets PodSets change only
 // under that same condition.
 //
 // nolint: lll
@@ -77,16 +83,20 @@ func (r *WorkloadWebhook) Default(ctx context.Context, obj runtime.Object) error
 		return nil
 	}
 	pins := fitPinsOf(wl)
-	if len(pins) == 0 {
-		return nil
-	}
-	if !settings.WorkloadFitAffinity.ShouldValueBool(ctx) {
+	nodeDelivery := nodeDeliveryPodSets(wl)
+	if len(pins) == 0 && len(nodeDelivery) == 0 {
 		return nil
 	}
 	if reserved, err := oldWorkloadHoldsQuota(ctx); err != nil || reserved {
 		if err != nil {
 			logger.Error(err, "decode old workload, leaving it unpinned")
 		}
+		return nil
+	}
+	for _, i := range nodeDelivery {
+		requireNodeValue(&wl.Spec.PodSets[i].Template.Spec, workerctrl.ModelManagerRegisteredLabel, "true")
+	}
+	if len(pins) == 0 || !settings.WorkloadFitAffinity.ShouldValueBool(ctx) {
 		return nil
 	}
 
@@ -116,6 +126,20 @@ func (r *WorkloadWebhook) Default(ctx context.Context, obj runtime.Object) error
 		}
 	}
 	return nil
+}
+
+// nodeDeliveryPodSets returns the PodSets whose inline CSI volume needs the model-manager plugin.
+func nodeDeliveryPodSets(wl *kueue.Workload) []int {
+	var indexes []int
+	for i := range wl.Spec.PodSets {
+		for _, volume := range wl.Spec.PodSets[i].Template.Spec.Volumes {
+			if volume.CSI != nil && volume.CSI.Driver == modelstore.DriverName {
+				indexes = append(indexes, i)
+				break
+			}
+		}
+	}
+	return indexes
 }
 
 // fitPinsOf returns the PodSets of a Workload that ask for a fit pin, with their per-Pod demand.
@@ -184,12 +208,20 @@ func (r *WorkloadWebhook) acceleratorGroup(ctx context.Context, wl *kueue.Worklo
 // matches no node, and adding the expression would make it match some. An expression already present, the same key, operator and value, is not added twice, and any
 // other expression is kept, so a stricter requirement someone wrote on the same key still holds.
 func requireNodeExpression(spec *core.PodSpec, key string, need int32) {
-	pin := core.NodeSelectorRequirement{
+	requireNodeRequirement(spec, core.NodeSelectorRequirement{
 		Key:      key,
 		Operator: core.NodeSelectorOpGt,
 		Values:   []string{strconv.FormatInt(int64(need)-1, 10)},
-	}
+	})
+}
 
+func requireNodeValue(spec *core.PodSpec, key, value string) {
+	requireNodeRequirement(spec, core.NodeSelectorRequirement{
+		Key: key, Operator: core.NodeSelectorOpIn, Values: []string{value},
+	})
+}
+
+func requireNodeRequirement(spec *core.PodSpec, pin core.NodeSelectorRequirement) {
 	if spec.Affinity == nil {
 		spec.Affinity = &core.Affinity{}
 	}
