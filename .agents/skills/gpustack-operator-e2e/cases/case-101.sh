@@ -40,7 +40,7 @@
 #                machine's own download of it at the resolved commit;
 #              - the token is in no log, event, status or metric, after a planted copy is found.
 # Cleanup:     Trap deletes the Pods, artifacts, Secrets, the second namespace and the hub, and puts
-#              back the Settings it changed.
+#              back the Settings and namespace PSA labels it changed.
 set -uo pipefail
 
 E2E_SHIM_DIR="$(cd "$(dirname "$0")/../../_e2e-lib/scripts/kubectl-shim" 2>/dev/null && pwd)"
@@ -52,17 +52,23 @@ CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${CASES_DIR}/_model-hub-lib.sh"
 
 NS="${1:?usage: case-101.sh <NS>}"
+if [ "$NS" = "$SYSTEM_NS" ]; then
+  echo "[case-101] refusing system namespace ${SYSTEM_NS}; usage: case-101.sh <consumer-NS>" >&2
+  exit 2
+fi
 NSB="${NS}-b"
 P=c101
 FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+PSA_SNAPSHOT=0
 SCRATCH="$(mktemp -d)"
 TOKEN="hf_$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
 ORIG_ENDPOINT="$(setting_get model-artifact-huggingface-endpoint)"
 ORIG_DELIVERY="$(setting_get model-artifact-delivery-mode)"
 
 cleanup() {
+  local labels
   echo
   echo "[case-101] cleanup"
   for ns in "$NS" "$NSB"; do
@@ -77,6 +83,15 @@ cleanup() {
   if [ -n "$ORIG_ENDPOINT" ]; then setting_set model-artifact-huggingface-endpoint "$ORIG_ENDPOINT"; else setting_unset model-artifact-huggingface-endpoint; fi
   if [ -n "$ORIG_DELIVERY" ]; then setting_set model-artifact-delivery-mode "$ORIG_DELIVERY"; else setting_unset model-artifact-delivery-mode; fi
   rm -rf "$SCRATCH"
+  if [ "$PSA_SNAPSHOT" = 1 ]; then
+    labels=(pod-security.kubernetes.io/enforce- pod-security.kubernetes.io/enforce-version-)
+    [ -n "$ORIG_ENFORCE" ] && labels[0]="pod-security.kubernetes.io/enforce=${ORIG_ENFORCE}"
+    [ -n "$ORIG_ENFORCE_VERSION" ] && labels[1]="pod-security.kubernetes.io/enforce-version=${ORIG_ENFORCE_VERSION}"
+    kubectl label namespace "$NS" --overwrite "${labels[@]}" >/dev/null || {
+      echo "[case-101] failed to restore PSA labels on namespace ${NS}" >&2
+      exit 1
+    }
+  fi
 }
 trap cleanup EXIT
 
@@ -111,7 +126,12 @@ if ! kubectl get csidriver model.csi.gpustack.ai >/dev/null 2>&1; then
 fi
 
 for ns in "$NS" "$NSB"; do
-  kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null || exit 1
+  if [ "$ns" = "$NS" ]; then
+    ORIG_ENFORCE="$(kubectl get namespace "$NS" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')" || exit 1
+    ORIG_ENFORCE_VERSION="$(kubectl get namespace "$NS" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce-version}')" || exit 1
+    PSA_SNAPSHOT=1
+  fi
   kubectl label namespace "$ns" --overwrite pod-security.kubernetes.io/enforce=restricted \
     pod-security.kubernetes.io/enforce-version=latest >/dev/null
 done
