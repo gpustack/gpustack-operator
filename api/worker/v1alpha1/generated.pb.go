@@ -3456,14 +3456,16 @@ func (m *KVCacheBackendLeader) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 			dAtA[i] = 0x2a
 		}
 	}
-	i--
-	if m.MultiTenancy {
-		dAtA[i] = 1
-	} else {
-		dAtA[i] = 0
+	if m.MultiTenancy != nil {
+		i--
+		if *m.MultiTenancy {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x20
 	}
-	i--
-	dAtA[i] = 0x20
 	i -= len(m.AllocationStrategy)
 	copy(dAtA[i:], m.AllocationStrategy)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.AllocationStrategy)))
@@ -9871,7 +9873,9 @@ func (m *KVCacheBackendLeader) Size() (n int) {
 	}
 	l = len(m.AllocationStrategy)
 	n += 1 + l + sovGenerated(uint64(l))
-	n += 2
+	if m.MultiTenancy != nil {
+		n += 2
+	}
 	if len(m.ExtraArgs) > 0 {
 		for _, s := range m.ExtraArgs {
 			l = len(s)
@@ -12684,7 +12688,7 @@ func (this *KVCacheBackendLeader) String() string {
 		`Replicas:` + valueToStringGenerated(this.Replicas) + `,`,
 		`HighAvailability:` + strings.Replace(this.HighAvailability.String(), "KVCacheBackendLeaderHighAvailability", "KVCacheBackendLeaderHighAvailability", 1) + `,`,
 		`AllocationStrategy:` + fmt.Sprintf("%v", this.AllocationStrategy) + `,`,
-		`MultiTenancy:` + fmt.Sprintf("%v", this.MultiTenancy) + `,`,
+		`MultiTenancy:` + valueToStringGenerated(this.MultiTenancy) + `,`,
 		`ExtraArgs:` + fmt.Sprintf("%v", this.ExtraArgs) + `,`,
 		`ExtraEnv:` + repeatedStringForExtraEnv + `,`,
 		`}`,
@@ -24400,7 +24404,8 @@ func (m *KVCacheBackendLeader) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-			m.MultiTenancy = bool(v != 0)
+			b := bool(v != 0)
+			m.MultiTenancy = &b
 		case 5:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field ExtraArgs", wireType)

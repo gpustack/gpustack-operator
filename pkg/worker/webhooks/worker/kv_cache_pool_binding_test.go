@@ -547,7 +547,7 @@ func TestKVCachePoolBindingWebhook_ASecondDistinctDomainNeedsAMasterThatSeparate
 		{
 			name: "a managed master with no ledger refuses the second domain",
 			objs: []ctrlcli.Object{
-				newKVCachePool(), newKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"),
+				newKVCachePool(), newSingleTenantKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"),
 			},
 			wantMsg: "that backend holds no tenant ledger",
 		},
@@ -555,7 +555,7 @@ func TestKVCachePoolBindingWebhook_ASecondDistinctDomainNeedsAMasterThatSeparate
 			// The word SECOND is load-bearing: one domain on a ledger-less master is what such a master
 			// serves correctly, so nothing is refused and nothing is warned about.
 			name:    "a ledger-less master takes the first domain",
-			objs:    []ctrlcli.Object{newKVCachePool(), newKVCacheBackend()},
+			objs:    []ctrlcli.Object{newKVCachePool(), newSingleTenantKVCacheBackend()},
 			wantMsg: "",
 		},
 		{
@@ -595,7 +595,7 @@ func TestKVCachePoolBindingWebhook_ASecondDistinctDomainNeedsAMasterThatSeparate
 				otherPool.Spec.Backends = []string{"mooncake-other"}
 				holder := otherKVCachePoolBinding("team-b-batch")
 				holder.Spec.PoolRef.Name = "other-pool"
-				return []ctrlcli.Object{newKVCachePool(), newKVCacheBackend(), otherPool, holder}
+				return []ctrlcli.Object{newKVCachePool(), newSingleTenantKVCacheBackend(), otherPool, holder}
 			}(),
 			wantMsg: "",
 		},
@@ -707,7 +707,7 @@ func TestKVCachePoolBindingWebhook_EverySharedMasterIsAsked(t *testing.T) {
 	badHolder.Namespace, badHolder.Name = "team-c", "zzz-rag"
 	badHolder.Spec.PoolRef.Name = badPool.Name
 
-	ledgerless := newKVCacheBackend()
+	ledgerless := newSingleTenantKVCacheBackend()
 	ledgerless.Name = "mooncake-second"
 
 	wh := newKVCachePoolBindingWebhook(
@@ -777,7 +777,7 @@ func TestKVCachePoolBindingWebhook_TheWarningClaimsNoSeparationItDidNotEstablish
 // what can be changed here; a message naming only the collision leaves the reader with no next step.
 func TestKVCachePoolBindingWebhook_TheSeparationRefusalSaysWhatToDo(t *testing.T) {
 	wh := newKVCachePoolBindingWebhook(
-		newKVCachePool(), newKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"))
+		newKVCachePool(), newSingleTenantKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"))
 
 	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())
 	require.Error(t, err)
@@ -806,7 +806,7 @@ func TestKVCachePoolBindingWebhook_TheSeparationRefusalSaysWhatToDo(t *testing.T
 // removes a finalizer, which would leave the Binding undeletable.
 func TestKVCachePoolBindingWebhook_SeparationIsNotRejudgedOnUpdate(t *testing.T) {
 	wh := newKVCachePoolBindingWebhook(
-		newKVCachePool(), newKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"))
+		newKVCachePool(), newSingleTenantKVCacheBackend(), otherKVCachePoolBinding("team-b-batch"))
 
 	// The collision is real: the same cluster state refuses this object at CREATE.
 	_, err := wh.ValidateCreate(context.Background(), newKVCachePoolBinding())

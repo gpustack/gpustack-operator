@@ -1292,6 +1292,11 @@ func (in *KVCacheBackendLeader) DeepCopyInto(out *KVCacheBackendLeader) {
 		*out = new(KVCacheBackendLeaderHighAvailability)
 		**out = **in
 	}
+	if in.MultiTenancy != nil {
+		in, out := &in.MultiTenancy, &out.MultiTenancy
+		*out = new(bool)
+		**out = **in
+	}
 	if in.ExtraArgs != nil {
 		in, out := &in.ExtraArgs, &out.ExtraArgs
 		*out = make([]string, len(*in))

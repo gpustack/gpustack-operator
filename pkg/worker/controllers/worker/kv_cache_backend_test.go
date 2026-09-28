@@ -569,8 +569,10 @@ func TestKVCacheBackendReconciler_AHeldTeardownStillConvergesItsWorkloads(t *tes
 	claim := workercore.KVCacheObjectReference{Kind: KVCachePoolKind, Name: "team-a-pool"}
 
 	// Multi-tenancy is OFF to begin with, which is the state an operator reaches this path in: the
-	// flag was withdrawn while a pool held the backend, and putting it back is the remedy.
+	// flag was withdrawn while a pool held the backend, and putting it back is the remedy. Off is
+	// said out loud: an unset field defaults on, so only the explicit false renders no switch.
 	kvcb := newKVCacheBackendObject(claim)
+	kvcb.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(false)
 	cli := newKVCacheBackendClient(append([]ctrlcli.Object{kvcb}, kvCachePoolsNamedBy(claim)...)...)
 
 	leaderArgs := func(t *testing.T) []string {
@@ -593,7 +595,7 @@ func TestKVCacheBackendReconciler_AHeldTeardownStillConvergesItsWorkloads(t *tes
 	require.NotNil(t, live.DeletionTimestamp, "the finalizer must have held it")
 
 	// The remedy, applied to an object that is already Deleting.
-	live.Spec.Connection.Managed.Leader.MultiTenancy = true
+	live.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(true)
 	require.NoError(t, cli.Update(ctx, live))
 
 	held := reconcileKVCacheBackend(t, cli, kvcb.Name)
@@ -1215,7 +1217,10 @@ func TestKVCacheBackendReconciler_ConvergesAnEFASwitch(t *testing.T) {
 // already moves, and a pass that moved one without the other would be refused by the API server on
 // every reconcile — while this object went on reporting Ready.
 func TestKVCacheBackendReconciler_ConvergesAMultiTenancySwitch(t *testing.T) {
+	// Off to begin with, and said out loud for the same reason: an unset field defaults on, so the
+	// starting render this test asserts has to be asked for.
 	kvcb := newKVCacheBackendObject()
+	kvcb.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(false)
 	cli := newKVCacheBackendClient(kvcb)
 	ctx := context.Background()
 
@@ -1224,7 +1229,7 @@ func TestKVCacheBackendReconciler_ConvergesAMultiTenancySwitch(t *testing.T) {
 	setMultiTenancy := func(on bool) {
 		got := new(workercore.KVCacheBackend)
 		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
-		got.Spec.Connection.Managed.Leader.MultiTenancy = on
+		got.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(on)
 		require.NoError(t, cli.Update(ctx, got))
 		require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
 	}

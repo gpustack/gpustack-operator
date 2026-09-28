@@ -180,7 +180,7 @@ func (r *KVCachePoolWebhook) validateKVCachePoolBackend(
 	// process was started is answered where it can be — by the reconciler reading the master's own
 	// 409, and by the Pod webhook refusing injection until the pool reports it.
 	managed := kvcb.Spec.Connection.Managed
-	if managed == nil || managed.Leader.MultiTenancy {
+	if managed == nil || managed.Leader.MultiTenancyEnabled() {
 		return nil, nil
 	}
 

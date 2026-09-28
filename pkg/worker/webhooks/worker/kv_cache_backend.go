@@ -1319,7 +1319,7 @@ func validateKVCacheBackendMultiTenancyWithdrawal(
 	if oldManaged == nil || newManaged == nil {
 		return nil
 	}
-	if !oldManaged.Leader.MultiTenancy || newManaged.Leader.MultiTenancy {
+	if !oldManaged.Leader.MultiTenancyEnabled() || newManaged.Leader.MultiTenancyEnabled() {
 		return nil
 	}
 	if len(oldKvcb.Status.UsedBy) == 0 {

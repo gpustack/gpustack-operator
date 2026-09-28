@@ -383,7 +383,7 @@ func RenderLeaderDeployment(kvcb *workercore.KVCacheBackend, image string) *apps
 	}
 
 	podSpec := &deploy.Spec.Template.Spec
-	if leader.MultiTenancy {
+	if leader.MultiTenancyEnabled() {
 		podSpec.Volumes = append(podSpec.Volumes, quotaPolicyVolumes(kvcb)...)
 		podSpec.InitContainers = []core.Container{
 			quotaPolicySeedContainer(image, kvcache.EffectivePullPolicy(kvcb, image)),
@@ -412,7 +412,7 @@ func leaderContainerSpec(
 	leader := kvcb.Spec.Connection.Managed.Leader
 
 	var volumeMounts []core.VolumeMount
-	if leader.MultiTenancy {
+	if leader.MultiTenancyEnabled() {
 		// Not read-only, and that is the point: the master writes a temp file into this directory
 		// and renames it over the policy on every admin-API change.
 		//

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -39,7 +40,15 @@ func newKVCachePool() *workercore.KVCachePool {
 // the ledger F5 requires.
 func newMultiTenantKVCacheBackend() *workercore.KVCacheBackend {
 	kvcb := newKVCacheBackend()
-	kvcb.Spec.Connection.Managed.Leader.MultiTenancy = true
+	kvcb.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(true)
+	return kvcb
+}
+
+// newSingleTenantKVCacheBackend is the fixture backend declared WITHOUT the ledger. The false is
+// explicit because the field defaults on: only an object that says false runs no ledger.
+func newSingleTenantKVCacheBackend() *workercore.KVCacheBackend {
+	kvcb := newKVCacheBackend()
+	kvcb.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(false)
 	return kvcb
 }
 
@@ -163,7 +172,7 @@ func TestKVCachePoolWebhook_ValidateCreate(t *testing.T) {
 // store is a topology rather than a broken one — and the admission says what the shape costs, because
 // "no per-tenant quota is in force" is not something the object itself can say.
 func TestKVCachePoolWebhook_ValidateCreate_SingleTenantBackendWarns(t *testing.T) {
-	wh := newKVCachePoolWebhook(newKVCacheBackend())
+	wh := newKVCachePoolWebhook(newSingleTenantKVCacheBackend())
 
 	warnings, err := wh.ValidateCreate(context.Background(), newKVCachePool())
 

@@ -419,7 +419,9 @@ func TestLeaderWorkload_PodIdentityEnv(t *testing.T) {
 // is the side that needs those, and a leader that acquired them would be a privilege nobody asked
 // for.
 func TestLeaderWorkload_ClaimsNoHost(t *testing.T) {
-	deploy := RenderLeaderDeployment(testBackend(), "mooncake:v0.3.13")
+	// Single-tenant, because the ledger is the one thing that mounts a volume pair here, and it has
+	// its own tests below.
+	deploy := RenderLeaderDeployment(singleTenantBackend(), "mooncake:v0.3.13")
 	podSpec := deploy.Spec.Template.Spec
 
 	assert.False(t, podSpec.HostNetwork, "the leader is not hostNetwork")
@@ -433,11 +435,21 @@ func TestLeaderWorkload_ClaimsNoHost(t *testing.T) {
 	}
 }
 
-// multiTenantBackend is the canonical backend with the quota ledger turned on — the one shape that
-// makes the leader mount anything at all.
+// multiTenantBackend is the canonical backend with the quota ledger turned on — said out loud,
+// though the field defaults on, so the cases below read as what they are about rather than as what
+// an unset field happens to mean.
 func multiTenantBackend() *workercore.KVCacheBackend {
 	return testBackend(func(k *workercore.KVCacheBackend) {
-		k.Spec.Connection.Managed.Leader.MultiTenancy = true
+		k.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(true)
+	})
+}
+
+// singleTenantBackend is the canonical backend with the quota ledger declined. The false is
+// explicit for the same reason: an unset field defaults on, so only saying false renders without
+// the policy volume pair.
+func singleTenantBackend() *workercore.KVCacheBackend {
+	return testBackend(func(k *workercore.KVCacheBackend) {
+		k.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(false)
 	})
 }
 
@@ -524,7 +536,7 @@ func TestLeaderWorkload_QuotaPolicySeedFallsBackToTheEmptyPolicy(t *testing.T) {
 // TestLeaderWorkload_QuotaPolicyVolumeIsGatedOnMultiTenancy is the negative half, asserted field by
 // field rather than as one shape comparison, so the switch cannot half-apply.
 func TestLeaderWorkload_QuotaPolicyVolumeIsGatedOnMultiTenancy(t *testing.T) {
-	deploy := RenderLeaderDeployment(testBackend(), "mooncake:v0.3.13")
+	deploy := RenderLeaderDeployment(singleTenantBackend(), "mooncake:v0.3.13")
 	podSpec := deploy.Spec.Template.Spec
 
 	assert.Empty(t, podSpec.Volumes)

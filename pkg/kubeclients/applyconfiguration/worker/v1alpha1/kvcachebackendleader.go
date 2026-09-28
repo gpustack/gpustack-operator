@@ -62,7 +62,16 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// domain that belongs to whoever typed it. The store's global -quota_bytes flag stays in
 	// extraArgs for the converse reason: no other API needs to interpret it.
 	//
-	// Unset and false both mean no ledger, and unset renders NO flag rather than an explicit false.
+	// IT DEFAULTS TO TRUE, because the ledger is what makes the rest of this API mean what it says:
+	// without it a KVCachePoolBinding's ceiling is recorded but not enforced, and a master serves one
+	// reuse domain only, so a second Binding on it is refused. Mooncake has taken the switch since
+	// 0.3.12, and the default store image is on 0.3.13.post1.
+	//
+	// OMITTING THIS KEY AND WRITING `multiTenancy: false` ARE DIFFERENT — the first takes the
+	// default, the second declines the ledger: only the explicit false renders no switch. A store
+	// image older than Mooncake 0.3.12 does not recognize the switch and its master exits at
+	// startup, so a backend on such an image, including the 0.3.10.post2 variants this project
+	// also publishes, sets false here. Read it through KVCacheBackendLeader.MultiTenancyEnabled.
 	MultiTenancy *bool `json:"multiTenancy,omitempty"`
 	// ExtraArgs passes flags this API does not enumerate straight through to the leader, after
 	// the derived ones. Each entry is one flag token of its own, "-flag" or "-flag=value", and the

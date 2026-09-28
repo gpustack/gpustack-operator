@@ -39,7 +39,7 @@ spec:
   image: docker.io/kvcacheai/mooncake:0.3.13
   connection:
     managed:                         # or external: — exactly one
-      leader: {}                     # replicas and allocationStrategy default
+      leader: {}                     # replicas, allocationStrategy and multiTenancy default
       members:
         - nodeSelector: {kubernetes.io/os: linux}
           medium: DRAM               # what this group's SEGMENT is made of: DRAM or VRAM
@@ -192,6 +192,12 @@ Each variant is built on `0.3.13.post1`, the line vLLM's supported clients are o
 minimum](../model-deployment/engine-versions.md). SGLang's clients are on the 0.3.12 line, which this
 project does not build. Which line a backend needs is that table's question.
 
+**A `0.3.10.post2` variant also needs `leader.multiTenancy: false` written out.** The tenant ledger
+hangs on the master's `-enable_multi_tenants` switch, which Mooncake took in 0.3.12, and the field
+defaults on — so on an older image the default renders a flag the master does not recognize, and it
+exits at startup. The explicit false renders no flag, which is the command line such an image has
+always run.
+
 **A VRAM group needs a build with VRAM segments compiled in (`USE_VRAM_SEGMENT=ON`), and the stock
 `-cpu` default is not one.** VRAM segments exist only on the `0.3.13` line — the `0.3.10.post2`
 variants carry the vendor transfer engine without them — so a VRAM group always names a
@@ -235,8 +241,8 @@ write then fails at transfer time with `RPC_FAIL (-900)`.
 
 Two posts of one minor line share their RPC signatures and interoperate. The 0.3.12 and 0.3.13
 lines do not: the method names are unchanged, so the client reaches the handler and mis-decodes the
-arguments. Multi-tenancy moves neither: with it off — the master's own default — every request
-resolves to the default tenant.
+arguments. Multi-tenancy moves neither: with it off — a declared `multiTenancy: false`, the field
+defaulting on — every request resolves to the default tenant.
 
 **The client's version is a property of the engine image, not of anything on this CR.** Which
 client each supported engine's runner image carries, and so which line its store runs, is in the
