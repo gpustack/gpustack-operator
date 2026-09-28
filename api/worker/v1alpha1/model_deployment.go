@@ -270,6 +270,7 @@ type ModelDeploymentKVTransfer struct {
 	//   - THE VALUE IS DECLARED, NOT DISCOVERED. The enum names supported transport families;
 	//     the engine image must still carry the matching Mooncake build. CANN renders as
 	//     "ascend" and ROCM as "hip", using the same mapping as KVCacheBackend members.
+	//   - Auto selects TCP and renders "tcp"; it does not inspect the worker's fabric.
 	//   - UNSET RENDERS "tcp", the transport every Mooncake build carries. The default lives in
 	//     the renderer rather than in this schema, so the stored object holds exactly what was
 	//     asked.
