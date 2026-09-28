@@ -1,14 +1,14 @@
-# Model Artifact Views Reference
+# Model Artifact Views
 
 > **Purpose** — the `v1` views of `ModelArtifact` and `NodeModelStore`, the `progress` subresource
 > that says where an artifact's content is, who may read it, and how GPUStack server's model-file
 > handling maps onto this API.
-> **Audience** users, operators, console developers · **Prerequisites** [Model Artifact
-> Reference](model-artifact.md) · **Read time** ~8 min
+> **Audience** users, operators, console developers · **Prerequisites** [Model
+> Artifact](artifact.md) · **Read time** ~8 min
 
 The aggregated API serves `worker.gpustack.ai/v1` beside the `v1alpha1` resources: the read surface
 GPUStack server and consoles use. A node's download progress [is stored on
-thresholds](node-model-store.md#the-resource); `progress` answers between them, on request, and
+thresholds](node-store.md#the-resource); `progress` answers between them, on request, and
 stores nothing.
 
 ## Contents
@@ -47,8 +47,8 @@ is written back: an object read through `v1` carries `apiVersion: worker.gpustac
   which watches the group's preferred version and collects only what that version can delete;
   without it no NodeModelStore went with its Node on Kubernetes 1.36. The worker creates a deleted
   object again while its node runs the plugin.
-- Both views carry the same fields as `v1alpha1`: the [artifact](model-artifact.md#the-resource) and
-  the [node store](node-model-store.md#the-resource).
+- Both views carry the same fields as `v1alpha1`: the [artifact](artifact.md#the-resource) and
+  the [node store](node-store.md#the-resource).
 
 ## The progress subresource
 
@@ -122,7 +122,7 @@ By capability, not by field.
 | `resolved_paths` on the worker | the fixed mount path in the consumer's container; host paths are never exposed | by design |
 | `local_dir` | none: the plugin owns the cache layout | by design |
 | Listing a worker's model files | `v1` NodeModelStore get, list, watch | none |
-| Download to a worker ahead of use | a [ModelPrefetch](model-prefetch.md) naming nodes | none |
+| Download to a worker ahead of use | a [ModelPrefetch](prefetch.md) naming nodes | none |
 | Delete with `cleanup_on_delete` | delete the prefetch; collection after the last reference and its grace | none |
 | `reset` (retry now) | automatic backoff to `retryTime` | not planned |
 | One row per source per worker | one entry per digest per node, shared by artifacts with the same content | none |
@@ -141,12 +141,12 @@ By capability, not by field.
 
 ---
 
-**See also** — [Model Artifact Reference](model-artifact.md) for the artifact itself ·
-[Node Model Store Reference](node-model-store.md) for each node's entries and the progress write rule ·
-[Model Deployment Metrics Reference](model-deployment-metrics.md) for the other subresource built
+**See also** — [Model Artifact](artifact.md) for the artifact itself ·
+[Node Model Store](node-store.md) for each node's entries and the progress write rule ·
+[Model Deployment Metrics](../model-deployment/metrics.md) for the other subresource built
 the same way.
 
-**Next** → [Node Model Store Reference](node-model-store.md)
+**Next** → [Node Model Store](node-store.md)
 
 ## Table columns
 
@@ -156,5 +156,5 @@ not by the CRDPrinterColumn machinery — so the columns the `v1alpha1` CRD list
 resources are a different, smaller set, and a client asking either version gets the columns
 documented above rather than the CRD's.
 
-**See also** — [Node-to-Node Sync Reference](node-peer-sync.md) for where a node's bytes come from,
-and [Node Model Store Reference](node-model-store.md) for the status the views project.
+**See also** — [Node-to-Node Sync](peer-sync.md) for where a node's bytes come from,
+and [Node Model Store](node-store.md) for the status the views project.

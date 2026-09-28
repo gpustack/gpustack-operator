@@ -1,9 +1,9 @@
-# Model Deployment Routing Reference
+# Model Deployment Routing
 
 > **Purpose** — which replica each managed router sends a request to by default, how to change
 > that choice through `spec.router.extraArgs`, and the router series that show where requests went.
-> **Audience** users, operators · **Prerequisites** [Model Deployment
-> Reference](model-deployment.md) · **Read time** ~5 min
+> **Audience** users, operators · **Prerequisites** [Model Deployment](deployment.md)
+> **Read time** ~5 min
 
 A router only chooses when a role has more than one replica. Every routing choice measured here ran
 on a server role; on a prefill/decode pair, where each half is chosen separately, none has been run.
@@ -69,7 +69,7 @@ spec:
       - round_robin
 ```
 
-`--policy` is in neither router's [refused list](model-deployment-prefill-decode.md#the-router-block), so admission
+`--policy` is in neither router's [refused list](prefill-decode.md#the-router-block), so admission
 passes it and the operator appends it to the command line it renders. The router then logs
 `Starting router … | policy: RoundRobin`.
 
@@ -78,7 +78,7 @@ under each router, 120 requests with none failing, 60 on each replica. `vllm-rou
 in `vllm_router_policy_decisions_total{policy="round_robin"}`, 60 per replica, and `sglang-gateway`
 in `smg_worker_selection_total{policy="round_robin"}`, 120 in all.
 
-`router.extraArgs` is [editable](model-deployment.md#which-fields-are-the-deployments-identity), so a
+`router.extraArgs` is [editable](deployment.md#which-fields-are-the-deployments-identity), so a
 running deployment can switch as well. The router Pod is then replaced, and the new one starts with
 no record of earlier prefixes. Only a flag set at creation has been run.
 
@@ -102,7 +102,7 @@ router at another one, is refused there. No field sets them either.
 
 ## Seeing where requests went
 
-The deployment's [metrics snapshot](model-deployment-metrics.md) does not say which replica served a
+The deployment's [metrics snapshot](metrics.md) does not say which replica served a
 request. Each router's own `/metrics` does, for the series below, all seen exported in runs. A
 `worker` label is the worker's URL, which carries its Pod address.
 
@@ -121,8 +121,8 @@ the engine Pods' own counts instead, such as each Pod's TTFT histogram `_count`.
 
 ---
 
-**See also** — [Model Deployment Prefill and Decode Reference](model-deployment-prefill-decode.md)
-for `spec.router` and the flags each router refuses · [Model Deployment Metrics Reference](model-deployment-metrics.md) for the router
+**See also** — [Model Deployment Prefill and Decode](prefill-decode.md)
+for `spec.router` and the flags each router refuses · [Model Deployment Metrics](metrics.md) for the router
 counters a deployment's snapshot reads.
 
-**Next** → [Model Deployment Status Reference](model-deployment-status.md)
+**Next** → [Model Deployment Status](status.md)

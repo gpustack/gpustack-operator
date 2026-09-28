@@ -56,7 +56,7 @@ token count's. Taking a whole adapter exclusively removes it from every other te
 buys nothing the hardware was not already doing.
 
 For a managed `ModelDeployment`, set `spec.roles[].resources.interface` instead of naming the key
-in a Pod template. [Model Deployment Reference](../reference/model-deployment.md) states which key a
+in a Pod template. [Model Deployment](../model-deployment/deployment.md) states which key a
 count selects, and the mixed-fabric refusal. The field allocates a device to each rendered engine
 Pod and does not assert that the engine has transferred bytes.
 
@@ -255,7 +255,7 @@ Three things to do instead of a quota:
 ## What an EFA leg needs from the engine image
 
 Which engine can use EFA on which leg, beside every other transport, is [the transport
-matrix](../reference/engine-versions.md#which-transport-each-engine-can-use). This section is what
+matrix](../model-deployment/engine-versions.md#which-transport-each-engine-can-use). This section is what
 the cells marked "own image" there ask of you.
 
 REQUIRED: **an EFA build of Mooncake in the engine image, and no runner image carries one.** The
@@ -318,7 +318,7 @@ The image is yours from then on, and nothing in the operator tracks it:
 - **The base.** Rebuild whenever the deployment moves to another runner image or engine version; the
   operator keeps rendering the image you named, not the one it would assemble.
 - **The Mooncake version.** Install the EFA build of the version the base carries — which client
-  each runner image carries is [its table](../reference/engine-versions.md#the-minimum-per-shape) —
+  each runner image carries is [its table](../model-deployment/engine-versions.md#the-minimum-per-shape) —
   and keep the store on that client's minor line: [the store version must match the engine's
   client](../kv-cache/backend.md#the-store-version-must-match-the-engines-client).
 - **libfabric**, from the EFA installer, whose version the recipe pins.

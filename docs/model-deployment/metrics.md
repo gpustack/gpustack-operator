@@ -1,9 +1,9 @@
-# Model Deployment Metrics Reference
+# Model Deployment Metrics
 
 > **Purpose** — the structured `ModelDeployment` metrics snapshot and the managed Pods' raw
 > Prometheus scrape endpoints.
-> **Audience** users, operators, console developers · **Prerequisites** [Model Deployment
-> Reference](model-deployment.md) · **Read time** ~7 min
+> **Audience** users, operators, console developers · **Prerequisites** [Model
+> Deployment](deployment.md) · **Read time** ~7 min
 
 The aggregated API combines selected current gauges from a deployment's engine and router Pods.
 Each managed Pod also exposes its own native `/metrics` output for Prometheus users.
@@ -111,7 +111,7 @@ exported, so what each counts has not been checked against a failed request. Why
 in [Latency, traffic, and transfer](#latency-traffic-and-transfer).
 
 Where a router sent each request is not in the snapshot; its own per-replica series say, listed in
-[Seeing where requests went](model-deployment-routing.md#seeing-where-requests-went).
+[Seeing where requests went](routing.md#seeing-where-requests-went).
 
 ## Windowed cache hits
 
@@ -233,7 +233,7 @@ annotation. The operator installs no `PodMonitor` or `ServiceMonitor`.
 
 ---
 
-**See also** — [Model Deployment Reference](model-deployment.md) for role configuration ·
-[Instance Metrics Reference](instance-metrics.md) for the separate Instance utilization API.
+**See also** — [Model Deployment](deployment.md) for role configuration ·
+[Instance Metrics Reference](../reference/instance-metrics.md) for the separate Instance utilization API.
 
-**Next** → [Model Deployment Status Reference](model-deployment-status.md)
+**Next** → [Model Deployment Status](status.md)

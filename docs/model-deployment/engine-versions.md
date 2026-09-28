@@ -1,10 +1,10 @@
-# Engine Versions Reference
+# Engine Versions
 
 > **Purpose** — the lowest vLLM, vLLM-Ascend and SGLang release each deployment shape has been run
 > with on this operator, with the Mooncake client it carries and the store it needs, and which
 > transport each engine can use on each leg.
-> **Audience** users, operators · **Prerequisites** [Model Deployment
-> Reference](model-deployment.md) · **Read time** reference — look up your engine
+> **Audience** users, operators · **Prerequisites** [Model Deployment](deployment.md)
+> **Read time** reference — look up your engine
 
 **An engine below its minimum here is not supported.** Older releases fail in ways that belong to
 those releases, and this documentation does not track them; upgrading is the fix for each of them.
@@ -38,7 +38,7 @@ vLLM-Ascend rows ran on the runner's `cann9.1-910b-vllm0.23.0-router` tag, named
 ## Reading the table
 
 **`engine.version` has no default.** The operator assembles the runner image from it — see [The
-runner image is a formula](model-deployment.md#the-runner-image-is-a-formula) — so the minimum is a
+runner image is a formula](deployment.md#the-runner-image-is-a-formula) — so the minimum is a
 value you write, and nothing refuses a lower one.
 
 **The client comes with the image, not with the version.** The column above is read off the
@@ -51,7 +51,7 @@ suggestion — see [The store version must match the engine's
 client](../kv-cache/backend.md#the-store-version-must-match-the-engines-client).
 
 **vLLM-Ascend's direct transfer has no `tcp` shape**, and one router renders it — see [How a pair is
-wired](model-deployment-prefill-decode.md#how-a-pair-is-wired).
+wired](prefill-decode.md#how-a-pair-is-wired).
 
 **The shapes above move KV over `tcp`, or over `ascend` on vLLM-Ascend.** Which other transport
 each engine can use is [the matrix below](#which-transport-each-engine-can-use).
@@ -109,7 +109,7 @@ On AWS the `RDMA` rows do not apply — [choose `EFA` or
 
 - **SGLang with a store** holds a pinned host pool and needs the node's available memory above a
   fixed reserve plus that pool — see [SGLang's host-memory
-  tier](kv-cache-injection.md#sglangs-host-memory-tier).
+  tier](../reference/kv-cache-injection.md#sglangs-host-memory-tier).
 - **SGLang prefill/decode over `TCP` runs out of local ports under sustained load, with or without
   a store.** The prefill half opens a new connection for every transfer, to the decode half and to
   each store member, all from the same ephemeral ports of its container. Connections left in
@@ -142,8 +142,8 @@ On AWS the `RDMA` rows do not apply — [choose `EFA` or
 
 ---
 
-**See also** — [Model Deployment Reference](model-deployment.md) (the fields these versions go into) ·
+**See also** — [Model Deployment](deployment.md) (the fields these versions go into) ·
 [KV Cache Backend](../kv-cache/backend.md) (the store a client needs) ·
 [RDMA Operations](../operation/rdma.md) (fabric devices and the engine image they need)
 
-**Next** → [Model Deployment Status Reference](model-deployment-status.md)
+**Next** → [Model Deployment Status](status.md)

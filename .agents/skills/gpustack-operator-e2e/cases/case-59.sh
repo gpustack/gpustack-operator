@@ -81,7 +81,7 @@
 #
 #                E2E_VLLM_IMAGE=gpustack/runner:cuda12.9-vllm0.29.0
 #                  0.29.0 because that is the version engine.go's facts table was READ at, and the
-#                  lowest vLLM docs/reference/engine-versions.md supports. This case
+#                  lowest vLLM docs/model-deployment/engine-versions.md supports. This case
 #                  proves an engine accepts what we render, and what we render was decided from that
 #                  version's source; testing a different one silently changes the question. There is
 #                  also a hard FLOOR of 0.21.1: vLLM's Mooncake store connector - the module holding

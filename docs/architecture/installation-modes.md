@@ -73,7 +73,7 @@ Because they change what a mode installs:
   cluster has no device managers (useful for control-plane-only). Before chart mode covered them, this
   switch was how the worker came to install them.
 - **`modelManager.enabled=false`** — no model-manager DaemonSet and no CSIDriver, and the worker
-  then seeds no `Node` delivery; see [Model Store Operations](../operation/model-store.md#enable-it).
+  then seeds no `Node` delivery; see [Model Store Operations](../model-store/operations.md#enable-it).
 - **`worker.enabled=false`** — the chart deploys only the applications, what image mode's overlay sets.
 
 ## The chart deploys workloads; the worker applies the custom resources

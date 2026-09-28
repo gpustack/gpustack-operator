@@ -1,10 +1,10 @@
-# Node Model Store Reference
+# Node Model Store
 
 > **Purpose** — the `NodeModelStore` resource and the `model-manager` node plugin behind it: what
 > each field means and who writes it, when a mount is allowed, how content is downloaded, verified
 > and published, why an attempt fails, and what the plugin measures.
-> **Audience** operators, contributors · **Prerequisites** [Model Artifact
-> Reference](model-artifact.md) · **Read time** ~12 min
+> **Audience** operators, contributors · **Prerequisites** [Model Artifact](artifact.md)
+> **Read time** ~12 min
 
 Node delivery replaces an engine's own download with a node-local cache. The `model-manager` plugin
 runs on every node as a CSI node plugin serving inline ephemeral volumes of the driver
@@ -12,7 +12,7 @@ runs on every node as a CSI node plugin serving inline ephemeral volumes of the 
 every byte, publishes the tree in one step and bind-mounts it read-only; every later mount of that
 digest on that node is one `stat` and a bind mount.
 
-Enabling it and operating it are on [Model Store Operations](../operation/model-store.md).
+Enabling it and operating it are on [Model Store Operations](operations.md).
 
 ## Contents
 
@@ -107,7 +107,7 @@ status:                                      # the plugin on that node: its fact
 | `status` | the plugin on that node | admitted only through the status webhook below |
 
 With `kubectl`, a write to the object names `v1alpha1` (`nodemodelstores.v1alpha1.worker.gpustack.ai`):
-the group's preferred version is the [`v1` view](model-artifact-views.md#the-v1-views), which serves
+the group's preferred version is the [`v1` view](views.md#the-v1-views), which serves
 reads and `delete` only. A deleted object is created again by the worker while its node runs the
 plugin.
 
@@ -250,11 +250,11 @@ It never removes a referenced tree or a partial being written, and it reads refe
 node's own mounts, never from the API.
 
 A digest listed in `spec.pinned` is never a candidate at all — the pins arrive from
-[`ModelPrefetch`](model-prefetch.md) retention and survive collection until the pin is withdrawn —
+[`ModelPrefetch`](prefetch.md) retention and survive collection until the pin is withdrawn —
 though it still counts toward the usage the watermarks read.
 
 How the watermarks are capped when the cache shares kubelet's filesystem is under [the capacity
-rule](../operation/model-store.md#the-capacity-rule).
+rule](operations.md#the-capacity-rule).
 
 When the references cannot be read, no configuration has been applied yet, or the node's `spec`
 fails its check, a collection removes nothing, a stale partial included, and the `Ready` message
@@ -278,7 +278,7 @@ No label carries a namespace, an artifact, a repository or a Pod.
 
 The same port serves `GET /model/downloads`: the running downloads, each a `digest`,
 `downloadedBytes`, `sizeBytes` and `source`. The ModelArtifact
-[progress](model-artifact-views.md#the-progress-subresource) subresource reads it for live bytes
+[progress](views.md#the-progress-subresource) subresource reads it for live bytes
 between the status thresholds.
 
 ## Requirements and limits
@@ -296,15 +296,15 @@ between the status thresholds.
   [a node-delivered model prefers the nodes holding
   it](../architecture/topology-aware-scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
 - **A download comes from the Hub**, directly or through the proxy — or, when
-  [node-to-node sync](node-peer-sync.md) is on, from a peer node that already holds
+  [node-to-node sync](peer-sync.md) is on, from a peer node that already holds
   the tree.
 
 ---
 
-**See also** — [Model Artifact Reference](model-artifact.md) for the artifact and its other
-deliveries · [Model Artifact Views Reference](model-artifact-views.md) for the `v1` views and
-`progress` · [Node-to-Node Sync Reference](node-peer-sync.md) for where a node's bytes come from ·
-[Model Store Operations](../operation/model-store.md) for enabling, configuring and upgrading ·
+**See also** — [Model Artifact](artifact.md) for the artifact and its other
+deliveries · [Model Artifact Views](views.md) for the `v1` views and
+`progress` · [Node-to-Node Sync](peer-sync.md) for where a node's bytes come from ·
+[Model Store Operations](operations.md) for enabling, configuring and upgrading ·
 [Settings](../settings.md#online-adjustable-settings) for the Settings `spec` is built from.
 
-**Next** → [Model Store Operations](../operation/model-store.md)
+**Next** → [Model Store Operations](operations.md)

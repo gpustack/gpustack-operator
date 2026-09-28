@@ -1,9 +1,9 @@
-# Model Deployment Status Reference
+# Model Deployment Status
 
 > **Purpose** — what each `ModelDeployment` status condition and published field means, and how to
 > read them when a deployment misbehaves.
-> **Audience** users, operators · **Prerequisites** [Model Deployment
-> Reference](model-deployment.md) · **Read time** ~8 min
+> **Audience** users, operators · **Prerequisites** [Model Deployment](deployment.md)
+> **Read time** ~8 min
 
 ## Contents
 
@@ -37,7 +37,7 @@ the effective kind, selector, direct endpoint and any dialable KV-event endpoint
 are absent when the corresponding rendered Pods do not carry publisher configuration.
 
 This router contract names metrics sources for routing; it is not a live utilization sample.
-The separate [Model Deployment Metrics](model-deployment-metrics.md) subresource reads the current
+The separate [Model Deployment Metrics](metrics.md) subresource reads the current
 router and engine Pod endpoints and reports partial coverage explicitly.
 
 > **Why** — either flag alone is enough, and the rest of the `--ssl-*` family is not enough. Both
@@ -139,7 +139,7 @@ would be worse than none.
 
 Eight conditions carry the axes a single phase cannot. They are independent: "quota reserved but
 cache not attached" is a real and actionable state. Seven are described below; `WeightsReady` is
-described with the artifact it reports on, in [Model Artifact Reference](model-artifact.md#status).
+described with the artifact it reports on, in [Model Artifact](../model-store/artifact.md#status).
 
 **`DomainRegistered`** — whether the referenced Binding resolved and its domain was read.
 
@@ -347,8 +347,8 @@ cause.
 
 ---
 
-**See also** — [Model Deployment Reference](model-deployment.md) for the contract this status
+**See also** — [Model Deployment](deployment.md) for the contract this status
 reports on · [KV Cache Leader](../kv-cache/leader.md) for the leader process the conditions
 distinguish from the operator's own.
 
-**Next** → [Model Deployment Reference](model-deployment.md)
+**Next** → [Model Deployment](deployment.md)

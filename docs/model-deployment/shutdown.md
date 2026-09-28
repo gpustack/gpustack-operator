@@ -1,9 +1,9 @@
-# Model Deployment Shutdown Reference
+# Model Deployment Shutdown
 
 > **Purpose** — what a `ModelDeployment` replica does between its Pod's delete and its engine's exit,
 > and which requests that window does not save.
-> **Audience** users, operators · **Prerequisites** [Model Deployment
-> Reference](model-deployment.md) · **Read time** ~4 min
+> **Audience** users, operators · **Prerequisites** [Model Deployment](deployment.md)
+> **Read time** ~4 min
 
 ## Contents
 
@@ -57,7 +57,7 @@ for that scheduler before killing it.
 > either way. The replica is idle by then, so the kill at 30 s cuts no request.
 
 The hook sums these gauges from the listener the Pod's
-[scrape annotations](model-deployment-metrics.md#scraping-the-pods) name. On a direct decoder that is
+[scrape annotations](metrics.md#scraping-the-pods) name. On a direct decoder that is
 the engine behind the routing proxy, not the port the Service fronts.
 
 | Engine | Gauges summed |
@@ -71,7 +71,7 @@ sample the hook cannot parse.
 
 Adding the hook and the grace changed every replica's Pod spec, so upgrading to the release that
 carries them turns each existing replica over once; see
-[Rollout is a rolling replacement](model-deployment.md#rollout-is-a-rolling-replacement).
+[Rollout is a rolling replacement](deployment.md#rollout-is-a-rolling-replacement).
 
 Changing a role's `terminationGracePeriodSeconds` turns its replicas over the same way, and each
 replica that leaves in that rollout leaves with the grace it was created with. Writing 30 onto a
@@ -100,8 +100,8 @@ role that set none renders the same Pods, so it turns nothing over.
 
 ---
 
-**See also** — [Model Deployment Reference](model-deployment.md) for what turns a replica over ·
-[Model Deployment Metrics Reference](model-deployment-metrics.md) for the scrape endpoints the hook
+**See also** — [Model Deployment](deployment.md) for what turns a replica over ·
+[Model Deployment Metrics](metrics.md) for the scrape endpoints the hook
 reads.
 
-**Next** → [Model Deployment Status Reference](model-deployment-status.md)
+**Next** → [Model Deployment Status](status.md)

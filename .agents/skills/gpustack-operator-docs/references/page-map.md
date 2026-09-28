@@ -71,7 +71,7 @@ profiles, generated Kueue Topologies, TAS flavor and queue semantics, per-replic
 64-flavor limit, and the fresh-queue and live-profile lifecycle boundaries.
 
 **Never** — the commands and manifests an operator follows (`operation/topology-aware-scheduling.md`)
-or the full `ModelDeployment` field contract (`reference/model-deployment.md`). Link both.
+or the full `ModelDeployment` field contract (`model-deployment/deployment.md`). Link both.
 
 ## `docs/architecture/admission.md`
 
@@ -176,6 +176,126 @@ owns it; a second account of `quota.ceiling` or of the snapshot's access modes i
 apart. If a paragraph here grows past a clause, it belongs on `backend.md`, `leader.md` or `pool.md`
 and this page should link to it instead.
 
+## `docs/model-store/artifact.md`
+
+**Owns** — the `ModelArtifact` contract: sources, resolution and revalidation, the manifest digest and
+its patterns, how a `ModelDeployment` or an `Instance` consumes it under each delivery, claim
+placement, and the weight identity in KV keys.
+
+**Never** — anything about the deployment that mounts the artifact (that is
+`model-deployment/deployment.md`, which keeps one pointer here and states nothing about the artifact
+itself), or the node plugin's internals (`node-store.md`).
+
+## `docs/model-store/image-source.md`
+
+**Owns** — the `image` source of a `ModelArtifact`: the digest contract and what it does and does not
+promise, building weights into an image, image-volume delivery to a `ModelDeployment` or an
+`Instance`, the version floors, double storage, kubelet image GC, and registry mirrors.
+
+**Never** — the other sources or the delivery modes they share (`artifact.md` owns those); this page
+is the deep dive on one source.
+
+## `docs/model-store/prefetch.md`
+
+**Owns** — the prefetch family: `ModelStore` (pool policy, selector overlap), `ModelStoreBinding`
+(budget grant, allowPinned, immutability), `ModelPrefetch` (placement, warm-up pod shape, the
+queue-name-label fact, budget projection and accounting, pin union, TTL).
+
+**Never** — the node plugin's field reference (`node-store.md`), the artifact sources
+(`artifact.md`), or the pool layer's operational knobs (`operations.md`).
+
+## `docs/model-store/node-store.md`
+
+**Owns** — the `NodeModelStore` resource and the `model-manager` plugin behind it: every field and its
+writer, the status guard, mount authorization, materialization, failure reasons, collection and
+metrics.
+
+**Never** — the administrator's procedure (values, Settings, watermarks, switching delivery,
+upgrading, removing). That is `operations.md`, which links back.
+
+## `docs/model-store/peer-sync.md`
+
+**Owns** — the peer port a node's published trees are served on, the token authentication and
+NetworkPolicy that bound it, how a cold node pulls with in-stream checkpoints, and the `source` field
+and metrics that tell peer bytes from hub bytes.
+
+**Never** — how a tree is materialized or verified in the first place (`node-store.md`); this page
+owns the node-to-node leg only.
+
+## `docs/model-store/views.md`
+
+**Owns** — the `v1` views of `ModelArtifact` and `NodeModelStore`, the `progress` subresource
+(aggregate, live, authorized, naming no node), the tenant Role, and the GPUStack server capability
+map.
+
+**Never** — what the underlying fields mean. A view's semantics live on `artifact.md` and
+`node-store.md`; this page says how they are read and by whom.
+
+## `docs/model-store/operations.md`
+
+**Owns** — the administrator's procedure for node delivery: enabling the plugin, its configuration
+layers, reading a node, the watermark cap against kubelet's thresholds, switching delivery, where
+replicas land and turning the placement preference off, the upgrade notes, and removing the cache.
+
+**Rule** — a page with a `## Verify` block states the expected output of every command in it. Unlike
+`docs/operation/*`, this runbook is not line-cap exempt — split it if it grows past the cap.
+
+## `docs/model-deployment/deployment.md`
+
+**Owns** — the `ModelDeployment` contract: the inherited reuse domain, the three override tiers, the
+owned-key table, the runner-image formula, prefill/decode pairing, the topology-placement field
+contract, and what turns a replica over.
+
+**Never** — the artifact it mounts (one pointer to `artifact.md`), the drain window
+(`shutdown.md`), the router's own behavior (`routing.md`), or the status views
+(`status.md`). Link each.
+
+## `docs/model-deployment/prefill-decode.md`
+
+**Owns** — what pairs a prefill role with a decode role: the connector each engine and router
+renders, the router block and its fields, the direct transfer's transport, roles on different
+hardware, and a role's own Service.
+
+**Never** — the deployment-level contract around the pair (`deployment.md`) or the KV cache leg's
+transport (`../kv-cache/backend.md`); this page owns the P/D leg.
+
+## `docs/model-deployment/routing.md`
+
+**Owns** — which replica each managed router picks and how to switch its policy.
+
+**Pinned** — its defaults and `--policy` values are read from each router's source at the version
+`pack/llm-router/Dockerfile` pins, so bumping one of those `ARG`s is a re-read of that page.
+
+## `docs/model-deployment/metrics.md`
+
+**Owns** — the structured metrics subresource: which series each field reads per engine, role and
+router, windowed cache hits, and the Pod scrape annotations.
+
+**Never** — the exporter's own gauges (`../reference/instance-metrics.md` owns the exporter side).
+
+## `docs/model-deployment/status.md`
+
+**Owns** — what each `ModelDeployment` status condition and published field means, and how to read
+them when a deployment misbehaves.
+
+**Never** — the lifecycle rules the conditions report (`deployment.md` owns those).
+
+## `docs/model-deployment/shutdown.md`
+
+**Owns** — the drain window and what a replica does between its Pod's delete and its engine's exit,
+including what it does not cover.
+
+**Never** — what turns a replica over in the first place. That stays on `deployment.md`, which links
+here.
+
+## `docs/model-deployment/engine-versions.md`
+
+**Owns** — the lowest engine release each deployment shape has been run with, the Mooncake client its
+runner image carries, the store line it needs, and which transport each engine can use on each leg.
+
+**Rule** — the one place an engine's minimum is stated. A paragraph elsewhere that explains why a
+release below it fails is collapsed into a link to it, not kept beside it.
+
 ## `docs/accelerator-requests.md`
 
 **Owns** — the normative contract: the two families, every resource key, a worked example per family,
@@ -241,10 +361,8 @@ manage — the NVIDIA MIG runbook, and `thead-mig.md` — MIG is T-Head's own wo
 partitioning, as `hgml.GetMigMode()` and the `alibabacloud.com/ppu.partitioned.mig-<profile>` key both
 show, so the page is named for it too. And `rdma.md`, which is a how-to on both sides of one
 workflow: the request a workload writes, and the kubelet policy an administrator sets so that
-request aligns — split apart, each half reads as a guarantee the other half withholds. And
-`model-store.md`: enabling the model-manager plugin, its configuration layers, reading a node, the
-watermark cap against kubelet's thresholds, switching delivery, and the upgrade notes of node
-delivery.
+request aligns — split apart, each half reads as a guarantee the other half withholds. The model
+cache's runbook lives with its domain, at `model-store/operations.md`.
 
 **Rule** — a page with a `## Verify` block states the expected output of every command in it. These
 pages are exempt from the line cap: a runbook is as long as the hardware makes it.
@@ -260,47 +378,25 @@ transition, so do not "modernize" its version numbers.
 ## `docs/reference/*.md`
 
 **Owns** — lookup tables with provenance. Today: the per-product unit-resources presets
-(`instance-type-unit-resources.md`), every command the binary offers with its flags and exit codes
-(`commands.md`), and the KV cache injection contract — opt-in keys, what each engine receives, every
-refusal with its fix (`kv-cache-injection.md`), and the lowest engine release each deployment
-shape has been run with, with its runner image's Mooncake client and store line
-(`engine-versions.md`), what pairs a prefill role with a decode role — the router block, the direct transfer's transport,
-roles on different hardware (`model-deployment-prefill-decode.md`), which replica each managed router
-picks and how to switch its policy (`model-deployment-routing.md`), what a `ModelDeployment` replica does between its Pod's delete
-and its engine's exit (`model-deployment-shutdown.md`), and the `ModelArtifact` contract — sources,
-resolution and revalidation, the manifest digest and its patterns, how a deployment or an Instance
-consumes it under each delivery, claim placement and the weight identity in KV keys
-(`model-artifact.md`), the `image` source's own page — the digest contract, building weights into
-an image, image-volume delivery, the version floors, double storage, kubelet image GC and registry
-mirrors (`model-image-source.md`), and the `NodeModelStore` resource with the node plugin behind it — its
-writers and status guard, mount authorization, materialization, failure reasons, collection and
-metrics (`node-model-store.md`).
+(`instance-type-unit-resources.md`), the `instances/<name>/metrics` subresource and the Device
+Manager's Prometheus exporter behind it (`instance-metrics.md`), every command the binary offers with
+its flags and exit codes (`commands.md`), and the KV cache injection contract — opt-in keys, what
+each engine receives, every refusal with its fix (`kv-cache-injection.md`). The model store and model
+deployment domains have their own directories and their own sections above.
 
-**Not** — `model-deployment-shutdown.md` owns the drain window and what it does not cover; what turns
-a replica over in the first place stays on `model-deployment.md`, which links to it.
-`commands.md` states what a flag does, not when to reach for the command. The procedure a
+**Not** — `commands.md` states what a flag does, not when to reach for the command. The procedure a
 one-shot belongs to lives on its operator page (`docs/operation/preflight.md` for `device-manager
 preflight`), and the reference row links to it rather than restating it.
-
-`model-artifact.md` owns everything about weights delivery; `model-deployment.md` keeps one pointer to
-it from its minimal deployment and states nothing about the artifact itself. `node-model-store.md`
-owns what the node plugin does and reports; the administrator's procedure for it (values, Settings,
-watermarks, switching, upgrading, removing) is on `docs/operation/model-store.md`, which links back.
 
 **Pinned** — `kv-cache-injection.md` carries per-engine facts read from engine source at named
 versions. Those rows go stale silently when an engine ships a new build, so a change there is a
 re-read rather than an edit; the same facts are mirrored in `pkg/worker/kvcache/inject/engine.go`,
-which carries the line numbers to re-read from. `model-deployment-routing.md` is the same kind of
-page for the routers: its defaults and `--policy` values are read from each router's source at the
-version `pack/llm-router/Dockerfile` pins, so bumping one of those `ARG`s is a re-read of that page.
+which carries the line numbers to re-read from.
 
 `instance-type-unit-resources.md` is matched row-by-row by `TestUnitResourcesPresetDocs`,
 by path. Do not rename it or reshape its tables. `commands.md` has no test behind it: its flag tables
 are only as true as the last person who ran `--help`, so change a flag and change the row in the same
 commit.
-
-`engine-versions.md` is the one place an engine's minimum is stated. A paragraph elsewhere that
-explains why a release below it fails is collapsed into a link to it, not kept beside it.
 
 **Rule** — these pages are exempt from the ten-`##` cap: a lookup page is meant to be flat.
 
@@ -316,5 +412,3 @@ supersession is recorded that way because it has no new spec to be recorded in. 
 `**Corrected after shipping.**`. A spec naming another spec by file name is the case that forces one:
 when that file leaves the tree the name resolves to nothing, and leaving it alone preserves a pointer
 rather than a record.
-
-- `docs/reference/model-prefetch.md` owns the prefetch family: `ModelStore` (pool policy, selector overlap), `ModelStoreBinding` (budget grant, allowPinned, immutability), `ModelPrefetch` (placement, warm-up pod shape, the queue-name-label fact, budget projection and accounting, pin union, TTL). It must not absorb the node plugin's field reference (node-model-store.md), the artifact sources (model-artifact.md), or the pool layer's operational knobs (operation/model-store.md).

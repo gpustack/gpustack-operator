@@ -1,7 +1,8 @@
-# Model Prefetch Reference
+# Model Prefetch
 
 > **Purpose** — the three objects that warm a model onto nodes before any Pod asks, the budgets and pins that bound them, and what runs on the node.
-> **Audience** users, operators, contributors · **Prerequisites** [Model Artifact Reference](model-artifact.md) · **Read time** ~9 min
+> **Audience** users, operators, contributors · **Prerequisites** [Model Artifact](artifact.md) ·
+> **Read time** ~9 min
 
 Warming is declared, not performed: a tenant names an artifact and a target set, and the operator
 lands the weights through the node cache's ordinary delivery. Three objects divide the concerns —
@@ -13,8 +14,8 @@ lands the weights through the node cache's ordinary delivery. Three objects divi
 | `ModelPrefetch` | namespaced | tenant | one artifact's residency intent: a target set, how many nodes make it available, and its retention |
 
 The node's effective configuration is still `NodeModelStore` — the store layer merges above the
-cluster defaults under [Model Store Operations](../operation/model-store.md), and the plugin side of
-every field is in the [Node Model Store Reference](node-model-store.md).
+cluster defaults under [Model Store Operations](operations.md), and the plugin side of
+every field is in the [Node Model Store](node-store.md).
 
 ## Contents
 
@@ -28,7 +29,7 @@ every field is in the [Node Model Store Reference](node-model-store.md).
 ## The three objects
 
 A `ModelStore` selects its pool with `spec.nodeSelector` and states watermarks and download
-limits as overrides field by field — the [pool layer](../operation/model-store.md#the-pool-layer)
+limits as overrides field by field — the [pool layer](operations.md#the-pool-layer)
 defines the override semantics, the overlap condition and the tie-break.
 
 A `ModelStoreBinding` is the provisioning point: creating one in a namespace is what grants that
@@ -103,8 +104,8 @@ content reports its saturation exactly as a cache full of references does (`gc.C
 
 Pinning requires the grant. The nodes' pin lists are written as one union by the prefetch
 controller — the field's single writer — so two namespaces pinning one node keep both digests; how
-a pinned digest behaves under collection is the [node model store
-reference](node-model-store.md#references-restart-and-collection)'s fact.
+a pinned digest behaves under collection is the [Node Model
+Store](node-store.md#references-restart-and-collection)'s fact.
 
 `spec.retention.ttlAfterLastUse` unpins a node's copy once nothing mounted it for that long. It is
 enforced at the hour granularity the node already reports in `lastUsedTime`.
@@ -123,11 +124,11 @@ would close the gap lapsed past `ttlAfterLastUse`, were unpinned and are not re-
 message says how many. It stays False while the shortfall has any other cause, so a lapse never
 masks a warm-up still running or a delivery that failed.
 
-The [v1 view](model-artifact-views.md) proxies every verb and adds no subresource: the per-node
+The [v1 view](views.md) proxies every verb and adds no subresource: the per-node
 facts already live on the nodes' reports, and the table prints who warms what and how far.
 
 ---
 
-**See also** — [Model Artifact Reference](model-artifact.md) (what a prefetch warms) · [Node Model Store Reference](node-model-store.md) (the node side of every field named here) · [Model Store Operations](../operation/model-store.md) (the pool layer's knobs in operation)
+**See also** — [Model Artifact](artifact.md) (what a prefetch warms) · [Node Model Store](node-store.md) (the node side of every field named here) · [Model Store Operations](operations.md) (the pool layer's knobs in operation)
 
-**Next** → [Node Model Store Reference](node-model-store.md) — the node object the plugin serves.
+**Next** → [Node Model Store](node-store.md) — the node object the plugin serves.

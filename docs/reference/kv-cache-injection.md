@@ -168,7 +168,7 @@ renders an RDMA or EFA resource limit on its engine Pod according to the effecti
 The backend's member Pods configure their own host network and device access separately.
 
 The one exception is the Ascend prefill/decode leg, whose engine Pods mount a host driver
-tree read-only — see [How a pair is wired](model-deployment-prefill-decode.md#how-a-pair-is-wired).
+tree read-only — see [How a pair is wired](../model-deployment/prefill-decode.md#how-a-pair-is-wired).
 
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
 when the container has not spoken about them. A value you set yourself is left alone.
@@ -210,7 +210,7 @@ under [Refusals and their fixes](#refusals-and-their-fixes).
 
 A flag is refused in every spelling the engine's own parser reads as it — a unique prefix, and on
 the vLLM family an underscored or dotted form — by the rule under
-[What the operator owns](model-deployment.md#what-the-operator-owns).
+[What the operator owns](../model-deployment/deployment.md#what-the-operator-owns).
 
 This applies only to `env`: a value supplied through `envFrom` is invisible to the check and **will
 be overwritten with no symptom**, so declare Mooncake variables in `env`.

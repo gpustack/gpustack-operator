@@ -1,8 +1,8 @@
-# Model Image Source Reference
+# Model Image Source
 
 > **Purpose** — the `image` source of a `ModelArtifact`: the digest contract, how weights are built
 > into an image, how it is delivered, and what it costs in disk and re-pulls.
-> **Audience** users, operators · **Prerequisites** [Model Artifact Reference](model-artifact.md) ·
+> **Audience** users, operators · **Prerequisites** [Model Artifact](artifact.md) ·
 > **Read time** ~8 min
 
 ## Contents
@@ -144,9 +144,9 @@ layers overlapped pulled in 112 ms and added 11.8 MB where a cold node paid 2m10
 
 ---
 
-**See also** — [Model Artifact Reference](model-artifact.md) for the artifact contract the image
-source joins · [Node Model Store Reference](node-model-store.md) for the plugin chain an image
-source stays out of · [Model Prefetch Reference](model-prefetch.md) for why there is nothing to
+**See also** — [Model Artifact](artifact.md) for the artifact contract the image
+source joins · [Node Model Store](node-store.md) for the plugin chain an image
+source stays out of · [Model Prefetch](prefetch.md) for why there is nothing to
 warm.
 
-**Next** → [Model Prefetch Reference](model-prefetch.md)
+**Next** → [Model Prefetch](prefetch.md)
