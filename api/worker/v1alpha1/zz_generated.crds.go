@@ -5229,7 +5229,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													Type:        "string",
 												},
 												"delivery": {
-													Description: "Delivery is how the weights reach the engine: \"Pvc\", the claim mounted read-only at a fixed\npath; \"Engine\", the engine downloading the pinned commit itself; or \"Node\", the node's\nmodel-manager plugin materializing the verified files and mounting them read-only at the same\nfixed path.",
+													Description: "Delivery is how the weights reach the engine: \"Pvc\", the claim mounted read-only at a fixed\npath; \"Engine\", the engine downloading the pinned commit itself; \"Node\", the node's\nmodel-manager plugin materializing the verified files and mounting them read-only at the same\nfixed path; or \"Image\", kubelet pulling the pinned OCI image into a read-only image volume.",
 													Type:        "string",
 													Enum: []v1.JSON{
 														{
@@ -5240,6 +5240,9 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														},
 														{
 															Raw: []byte(`"Node"`),
+														},
+														{
+															Raw: []byte(`"Image"`),
 														},
 													},
 												},

@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -90,4 +91,37 @@ func TestModelDeploymentRoleKindEnumsCannotDiverge(t *testing.T) {
 	assert.ElementsMatch(t, spec, status,
 		"the status kind echoes the spec kind, so a value the spec admits and the status enum "+
 			"refuses is a status write the API server rejects for an object that was accepted")
+}
+
+// TestModelDeploymentStatusDeliveryAdmitsEveryDelivery pins the status model delivery enum to the
+// delivery constants.
+//
+// The role kind guard above can diff two annotations, because kind is declared on both spec and
+// status. Delivery is declared on the status side only — the controller computes it from the
+// artifact's source — so there is no second enum to diff against, and the constants stand in for
+// it. The comparison still forces the checkpoint that matters: a fifth delivery constant turns this
+// test red until the list here is updated, and updating the list is where an author notices whether
+// the enum annotation kept up. Without that checkpoint the failure is a status write the API server
+// rejects for an object it accepted, which is how the Image value was lost.
+func TestModelDeploymentStatusDeliveryAdmitsEveryDelivery(t *testing.T) {
+	crd := GetCustomResourceDefinitions()["ModelDeployment"]
+	require.NotNil(t, crd, "ModelDeployment is not registered")
+
+	status, ok := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["status"]
+	require.True(t, ok, "the schema has no status")
+	model, ok := status.Properties["model"]
+	require.True(t, ok, "the schema has no status.model")
+
+	deliveries := make([]string, 0, 4)
+	for _, d := range []ModelDeploymentModelDelivery{
+		ModelDeploymentModelDeliveryPvc,
+		ModelDeploymentModelDeliveryEngine,
+		ModelDeploymentModelDeliveryNode,
+		ModelDeploymentModelDeliveryImage,
+	} {
+		deliveries = append(deliveries, fmt.Sprintf("%q", d))
+	}
+
+	assert.ElementsMatch(t, deliveries, enumValues(t, model, "delivery"),
+		"every delivery the controller can write must be a value the status enum admits")
 }
