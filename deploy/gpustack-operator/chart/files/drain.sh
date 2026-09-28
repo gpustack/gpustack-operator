@@ -31,7 +31,7 @@ NS="${1:-${GPUSTACK_NAMESPACE:-gpustack-system}}"
 
 # The whole-run budget, not a per-kind one. A KVCacheBackend's tier cleanup is unbounded by nature -
 # it waits on a Pod per node, and a node that is unreachable holds the object until that node's own
-# deadline expires - so a per-kind timeout large enough for the slow case multiplies across six
+# deadline expires - so a per-kind timeout large enough for the slow case multiplies across
 # kinds into a wait no uninstall should take. One budget spent in order means the kinds that drain
 # in seconds leave the rest of it to the one that does not.
 #
@@ -80,6 +80,7 @@ kvcachepoolbindings.worker.gpustack.ai
 kvcachepools.worker.gpustack.ai
 kvcachebackends.worker.gpustack.ai
 instancetypes.worker.gpustack.ai
+nodemodelstores.worker.gpustack.ai
 "
 
 # Address every kind as plural.VERSION.group read off its own CRD, never as a bare plural.
@@ -100,7 +101,7 @@ resource_of() { # crd-name -> plural.VERSION.group, empty when the CRD is absent
 # Separated by "/", which neither a namespace nor a name may contain, and NOT by a space: a
 # cluster-scoped object has an empty namespace, so a space-separated line starts with a blank field
 # that `read` folds away, putting the NAME into the namespace variable and dropping the object.
-# KVCacheBackend, KVCachePool and InstanceType are all cluster-scoped, so that is three of the six.
+# KVCacheBackend, KVCachePool and InstanceType are all cluster-scoped.
 # Its EXIT STATUS is load-bearing and every caller checks it. A failed list prints nothing, and
 # nothing is also what a drained kind prints - so reading the output alone turns a transient API
 # error, an expired token or a mid-run RBAC change into the answer "this kind is empty", and the run
@@ -125,9 +126,10 @@ remaining_left() { # seconds left in the budget, never negative
 # on all of them at once, which is how they run anyway.
 #
 # The optional selector narrows only the WAIT, never the delete: every object of the kind is
-# deleted, and the kind counts as drained once nothing matching the selector is left.
-drain_kind() { # resource [wait-selector]
-  local res="$1" wait_sel="${2:-}" objects listing left refused=0 ns name
+# deleted, and the kind counts as drained once nothing matching the selector is left. The third
+# argument skips the wait after accepted deletes for a kind the running worker recreates.
+drain_kind() { # resource [wait-selector] [delete-once]
+  local res="$1" wait_sel="${2:-}" delete_once="${3:-}" objects listing left refused=0 ns name
   if ! objects="$(list_objects "${res}")"; then
     echo "[drain] INCOMPLETE: ${res} could not be listed, so whether it drained is unknown" >&2
     return 1
@@ -154,6 +156,11 @@ drain_kind() { # resource [wait-selector]
   done <<EOF
 ${objects}
 EOF
+
+  if [ -n "${delete_once}" ] && [ "${refused}" -eq 0 ]; then
+    echo "[drain] ${res} delete requested once; the worker may recreate it"
+    return 0
+  fi
 
   while :; do
     left="$(remaining_left)"
@@ -200,7 +207,13 @@ for crd in ${DRAIN_ORDER}; do
   if [ "${crd}" = "instancetypes.worker.gpustack.ai" ]; then
     wait_sel="schedule.gpustack.ai/derived-from-node!=true"
   fi
-  drain_kind "${res}" "${wait_sel}" || incomplete=yes
+  # A NodeModelStore has no finalizer, and the worker recreates it from CSINode while running.
+  # cleanup.sh removes its CRD after the worker stops, so waiting here can never see an empty kind.
+  delete_once=""
+  if [ "${crd}" = "nodemodelstores.worker.gpustack.ai" ]; then
+    delete_once=yes
+  fi
+  drain_kind "${res}" "${wait_sel}" "${delete_once}" || incomplete=yes
 done
 
 # Sweep whatever is left in the gpustack groups, in whatever order `kubectl get crd` returns.
