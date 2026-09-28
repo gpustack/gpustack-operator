@@ -6,6 +6,7 @@
 {{- $registrarPullPolicy := include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" .Values.modelManager.registrar.image) }}
 {{- $kubeletDir := .Values.modelManager.kubeletDir | trimSuffix "/" }}
 {{- $pluginDir := printf "%s/plugins/model.csi.gpustack.ai" $kubeletDir }}
+{{- $podsDir := printf "%s/pods" $kubeletDir }}
 {{- $rootPath := .Values.modelManager.rootPath | trimSuffix "/" }}
 {{- $securePort := .Values.modelManager.securePort }}
 {{- $peerSync := and (kindIs "invalid" .Values.modelManager.port | not) (gt (.Values.modelManager.port | int) 0) }}
@@ -132,12 +133,10 @@ spec:
               path: /livez
               scheme: HTTPS
           volumeMounts:
-            {{- /*
-              kubelet's whole directory at its own path: the pods directory holds the targets, the
-              plugins directory the socket, and config.yaml the thresholds the watermark cap reads.
-            */}}
-            - name: kubelet-dir
-              mountPath: {{ $kubeletDir }}
+            - name: plugin-dir
+              mountPath: {{ $pluginDir }}
+            - name: pods-dir
+              mountPath: {{ $podsDir }}
               mountPropagation: Bidirectional
             - name: cache-root
               mountPath: {{ $rootPath }}
@@ -171,9 +170,9 @@ spec:
             - name: registration-dir
               mountPath: /registration
       volumes:
-        - name: kubelet-dir
+        - name: pods-dir
           hostPath:
-            path: {{ $kubeletDir }}
+            path: {{ $podsDir }}
             type: Directory
         - name: cache-root
           hostPath:

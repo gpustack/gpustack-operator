@@ -239,7 +239,7 @@ func (m *Manager) referenced() (map[string]bool, error) {
 	return set, nil
 }
 
-// kubeletCap returns the high watermark's cap when the cache shares kubelet's filesystem, and nil
+// kubeletCap returns the high watermark's cap when the cache shares kubelet's pods filesystem, and nil
 // when the cache has a filesystem of its own, where the Setting applies as written. The thresholds
 // come from the node's spec; the plugin reads no kubelet file, since the path kubelet reads is its
 // --config flag and nothing on the node says what that is.
@@ -248,7 +248,7 @@ func (m *Manager) kubeletCap() (func(*workercore.NodeModelStoreKubelet, uint64) 
 	if err != nil {
 		return nil, err
 	}
-	kubelet, err := store.Device(m.KubeletDir)
+	kubelet, err := store.Device(filepath.Join(m.KubeletDir, "pods"))
 	if err != nil {
 		return nil, err
 	}

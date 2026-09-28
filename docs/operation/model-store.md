@@ -33,7 +33,7 @@ hands each mount its artifact's Secret.
 | Value | Default | Meaning |
 | --- | --- | --- |
 | `modelManager.rootPath` | `/var/lib/gpustack/models` | the node's cache directory, a hostPath; mount a dedicated filesystem here |
-| `modelManager.kubeletDir` | `/var/lib/kubelet` | kubelet's root directory, mounted with `Bidirectional` propagation |
+| `modelManager.kubeletDir` | `/var/lib/kubelet` | kubelet's root; the plugin mounts its `pods` directory with `Bidirectional` propagation and its own plugin directory separately |
 | `modelManager.securePort` | `32444` | metrics, readiness and liveness |
 | `modelManager.registrar.image` | `docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.17.0` | the sidecar that registers the plugin with kubelet |
 | `modelManager.nodeSelector`, `tolerations` | every node, every taint | where it runs; a node without it cannot mount node-delivered weights |
@@ -128,9 +128,9 @@ starts above the high one and removes unreferenced content down to the low one, 
 mounts; with nothing removable it sets `CapacityLow=True`.
 
 **Give the cache its own filesystem**, mounted at `modelManager.rootPath`. There the Settings apply
-as written. When the cache shares kubelet's filesystem (the two paths report the same device), a
-cache near the watermark would push kubelet into disk-pressure eviction or image collection, so the
-plugin caps the high watermark:
+as written. When the cache shares the filesystem holding kubelet's `pods` directory (the two paths
+report the same device), a cache near the watermark would push kubelet into disk-pressure eviction
+or image collection, so the plugin caps the high watermark:
 
 - It takes `evictionHard["nodefs.available"]`, `evictionHard["imagefs.available"]` and
   `imageGCHighThresholdPercent` from the node's `spec.kubelet`, which the worker reads from kubelet's
