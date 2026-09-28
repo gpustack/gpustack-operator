@@ -48,6 +48,11 @@ const (
 	ModelPrefetchConditionAvailable = "Available"
 	// ModelPrefetchConditionDegraded says a target node gave up; the message names the reasons.
 	ModelPrefetchConditionDegraded = "Degraded"
+	// ModelPrefetchConditionLapsed says the MinReady shortfall is the retention TTL's doing: the
+	// copies that would close the gap lapsed past TTLAfterLastUse, stopped counting as ready and
+	// were unpinned, and nothing re-warms them. It stays False while the shortfall has any other
+	// cause, so a lapse never masks a warm-up still running or a delivery that failed.
+	ModelPrefetchConditionLapsed = "Lapsed"
 )
 
 // ModelPrefetchReconciler turns a prefetch's residency intent into one warm-up Pod per target
@@ -144,6 +149,7 @@ func (r *ModelPrefetchReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		default: // Ready, unless its retention TTL ran out on this node.
 			if r.ttlExpired(pf, entry) {
 				expired[node] = true
+				progress.lapsed++
 				continue
 			}
 			progress.ready = append(progress.ready, node)
@@ -191,6 +197,9 @@ type prefetchProgress struct {
 	ready       []string
 	downloading int32
 	failed      int32
+	// lapsed counts the target nodes whose copy is Ready but past the retention TTL: they stopped
+	// counting as ready and their pins are released, and no warm-up Pod re-warms them.
+	lapsed int32
 }
 
 // prefetchTargetNodes resolves the placement into sorted node names: the named InstanceTypes'
@@ -494,6 +503,8 @@ func (r *ModelPrefetchReconciler) ttlExpired(pf *workercore.ModelPrefetch, entry
 // writeStatus fills the status from the progress. Available wants readyNodes to reach MinReady,
 // where 0 means all of them; Degraded waits for a target node to give up — or for the artifact the
 // prefetch names to disappear, which stops the delivery rather than leaving it fetching forever.
+// Lapsed says when a shortfall below MinReady is the retention TTL's doing: it turns True only
+// when the lapsed copies alone account for the gap, so a warm-up or a failure keeps its own voice.
 func (r *ModelPrefetchReconciler) writeStatus(
 	pf *workercore.ModelPrefetch, progress prefetchProgress, broken error, artifactMissing bool,
 ) {
@@ -501,7 +512,8 @@ func (r *ModelPrefetchReconciler) writeStatus(
 	pf.Status.ReadyNodes = int32(len(progress.ready))
 	pf.Status.DownloadingNodes = progress.downloading
 
-	delivered := int32(len(progress.ready)) >= requiredNodes(pf, progress.desired)
+	required := requiredNodes(pf, progress.desired)
+	delivered := int32(len(progress.ready)) >= required
 	progressing := gpustack.Condition{
 		Type:               ModelPrefetchConditionProgressing,
 		ObservedGeneration: pf.Generation,
@@ -519,6 +531,35 @@ func (r *ModelPrefetchReconciler) writeStatus(
 		Reason:             "NoFailures",
 		Message:            "no target node has given up",
 		ObservedGeneration: pf.Generation,
+	}
+	lapsed := gpustack.Condition{
+		Type:               ModelPrefetchConditionLapsed,
+		Status:             meta.ConditionFalse,
+		Reason:             "NoLapsedCopies",
+		Message:            "no target node's copy has lapsed past retention.ttlAfterLastUse",
+		ObservedGeneration: pf.Generation,
+	}
+
+	// The lapse explains the shortfall only when the lapsed copies alone account for the gap below
+	// the requirement: a gap they cannot close has other causes — a warm-up still running or a
+	// failure — that Lapsed must never paper over.
+	lead := fmt.Sprintf("%d of %d target node copies lapsed past retention.ttlAfterLastUse",
+		progress.lapsed, progress.desired)
+	switch gap := required - int32(len(progress.ready)); {
+	case progress.lapsed == 0:
+		// Nothing lapsed; the default stands.
+	case gap <= 0:
+		lapsed.Reason = "NoShortfall"
+		lapsed.Message = lead + ", but readyNodes still meets the requirement"
+	case progress.lapsed >= gap:
+		lapsed.Status, lapsed.Reason = meta.ConditionTrue, "RetentionTTLExpired"
+		lapsed.Message = lead + " and no longer count toward readyNodes"
+		if pf.Spec.Retention.Pinned {
+			lapsed.Message = lead + " and their pins were released; they no longer count toward readyNodes"
+		}
+	default:
+		lapsed.Reason = "ShortfallBeyondLapse"
+		lapsed.Message = lead + ", but the shortfall below minReady is wider than the lapse; the rest is still warming or has failed"
 	}
 
 	switch {
@@ -551,7 +592,7 @@ func (r *ModelPrefetchReconciler) writeStatus(
 	}
 
 	pf.Status.Conditions = carryConditionTransitions(pf.Status.Conditions,
-		[]gpustack.Condition{progressing, available, degraded}, r.now())
+		[]gpustack.Condition{progressing, available, degraded, lapsed}, r.now())
 }
 
 func (r *ModelPrefetchReconciler) commitStatus(
