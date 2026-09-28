@@ -503,10 +503,11 @@ message DeviceInterface {
 // interface" must not be published as "this worker has no RDMA".
 message DeviceInterfaceLink {
   // State is the verification outcome.
+  // +k8s:validation:enum=["OK","Unverified","Failed"]
   optional string state = 1;
 
   // Reason carries the checker's own words, verbatim — including the attribute values it
-  // read. A non-ok state without a reason leaves the operator's actual question ("why?")
+  // read. A state other than OK without a reason leaves the operator's question ("why?")
   // unanswerable from the record alone.
   optional string reason = 2;
 
@@ -515,8 +516,8 @@ message DeviceInterfaceLink {
   // anything else. Refreshing it every pass would make "how long has this been down?"
   // unanswerable, which is the question the field exists to answer.
   //
-  // Nil for both other states, `unverified` included: a state that reached no verdict has no
-  // outage for a clock to be the start of, so this is not "the current non-ok state" but
+  // Nil for both other states, Unverified included: a state that reached no verdict has no
+  // outage for a clock to be the start of, so this is not "the current non-OK state" but
   // specifically the failed one.
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time firstSeenTime = 3;
 }
@@ -3213,7 +3214,7 @@ message ModelDeploymentEngine {
   // reading otherwise would freeze the pair together.
   //
   // +required
-  // +k8s:validation:enum=["vllm","sglang"]
+  // +k8s:validation:enum=["vLLM","SGLang"]
   optional string name = 1;
 
   // Version is the engine's own version, e.g. "0.29.0" for vllm or "0.5.18" for sglang.
@@ -3265,7 +3266,7 @@ message ModelDeploymentKVCache {
   optional .k8s.io.api.core.v1.LocalObjectReference poolRef = 1;
 
   // Connector names the connector implementation this deployment is configured for. The value is
-  // an identity the deployment carries, not a setting the operator derives: "mooncake" says which
+  // an identity the deployment carries, not a setting the operator derives: "Mooncake" says which
   // connector this is, and nothing reads the field to produce the configuration. There is no
   // "none" — synthesizing nothing is reachable through a full command replacement, which also
   // marks the role unmanaged and moves CacheAttached to Unknown.
@@ -3291,8 +3292,8 @@ message ModelDeploymentKVCache {
   // than edited onto one. That is stated here because "widening the enum" otherwise reads as a
   // migration path for deployments that are already running.
   //
-  // +k8s:validation:default="mooncake"
-  // +k8s:validation:enum=["mooncake"]
+  // +k8s:validation:default="Mooncake"
+  // +k8s:validation:enum=["Mooncake"]
   optional string connector = 2;
 }
 
@@ -3343,25 +3344,23 @@ message ModelDeploymentKVCacheStatus {
 // one: both legs may be configured on one deployment, and the synthesized connector carries the
 // pair together.
 message ModelDeploymentKVTransfer {
-  // Protocol is the transport both ends of the leg are told to use, in the mooncake
-  // configuration's own spelling, e.g. "tcp" or "rdma".
+  // Protocol is the transport both ends of the direct leg are told to use. It uses the
+  // KVCacheBackend transport values and their Mooncake mapping, except MUSA and MACA:
+  // those are intra-node IPC transports, while prefill and decode may run on different nodes.
   //
   //   - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either
   //     end, so a per-role field could only express a contradiction -- two ends naming different
   //     values for one connection, which fails at transfer time rather than at admission.
-  //   - THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a
-  //     property of the mooncake build inside the engine's own image, which this operator
-  //     neither ships nor can inspect: a HIP-compiled build makes "hip" a working point-to-point
-  //     transport, and an enum here would hard-code one image's compile set onto another image's
-  //     connector. vLLM receives the value verbatim, and a value the engine build rejects
-  //     raises at engine startup, in the container that owns the fact.
-  //   - UNSET RENDERS "tcp", the transport every mooncake build carries. The default lives in
+  //   - THE VALUE IS DECLARED, NOT DISCOVERED. The enum names supported transport families;
+  //     the engine image must still carry the matching Mooncake build. CANN renders as
+  //     "ascend" and ROCM as "hip", using the same mapping as KVCacheBackend members.
+  //   - UNSET RENDERS "tcp", the transport every Mooncake build carries. The default lives in
   //     the renderer rather than in this schema, so the stored object holds exactly what was
   //     asked.
-  //   - "tcp" IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport
+  //   - TCP IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport
   //     from the host's hardware and does not read the requested one. On vLLM the leg also gets
   //     MC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's
-  //     transfer backend: "tcp" renders "mooncake_tcp", any other value renders "mooncake", and
+  //     transfer backend: TCP renders "mooncake_tcp", any other value renders "mooncake", and
   //     the value itself is not passed through. Neither pin renders while the deployment's store
   //     runs a transport other than tcp, because it is process-wide and would leave the store
   //     client without its fabric; the leg then keeps the engine's own selection.
@@ -3378,7 +3377,7 @@ message ModelDeploymentKVTransfer {
   //     engine version edit already opens.
   //
   // +optional
-  // +k8s:validation:maxLength=64
+  // +k8s:validation:enum=["Auto","TCP","RDMA","EFA","CANN","ROCM"]
   optional string protocol = 1;
 }
 
@@ -3449,13 +3448,13 @@ message ModelDeploymentModelStatus {
   // +optional
   optional string manifestDigest = 3;
 
-  // Delivery is how the weights reach the engine: "Pvc", the claim mounted read-only at a fixed
+  // Delivery is how the weights reach the engine: "PVC", the claim mounted read-only at a fixed
   // path; "Engine", the engine downloading the pinned commit itself; "Node", the node's
   // model-manager plugin materializing the verified files and mounting them read-only at the same
   // fixed path; or "Image", kubelet pulling the pinned OCI image into a read-only image volume.
   //
   // +required
-  // +k8s:validation:enum=["Pvc","Engine","Node","Image"]
+  // +k8s:validation:enum=["PVC","Engine","Node","Image"]
   optional string delivery = 4;
 }
 
@@ -3539,8 +3538,8 @@ message ModelDeploymentRole {
   // reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
   // so such a deployment renders exactly as it did.
   //
-  // +k8s:validation:default="server"
-  // +k8s:validation:enum=["server","prefill","decode"]
+  // +k8s:validation:default="Server"
+  // +k8s:validation:enum=["Server","Prefill","Decode"]
   optional string kind = 8;
 
   // Replicas is how many independent serving instances this role runs. The instances are
@@ -3830,7 +3829,7 @@ message ModelDeploymentRoleStatus {
   // figure down with the kind. The marker sits on the field because the type's own enum marker is a
   // Go-level one and does not become schema validation.
   //
-  // +k8s:validation:enum=["server","prefill","decode"]
+  // +k8s:validation:enum=["Server","Prefill","Decode"]
   optional string kind = 5;
 
   // AssignedFlavors is the set of ResourceFlavors Kueue assigned to this role's replicas for

@@ -76,8 +76,12 @@ func renderModelDeploymentRouterObjects(
 	roles := make([]router.Role, 0, len(md.Spec.Roles))
 	ports := make([]int32, 0, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
+		kind, ok := ModelDeploymentRoleUpstreamKind(ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i]))
+		if !ok {
+			return ModelDeploymentRouterObjects{}, fmt.Errorf("unsupported role kind %q", md.Spec.Roles[i].Kind)
+		}
 		roles = append(roles, router.Role{
-			Kind:         string(ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i])),
+			Kind:         kind,
 			RoleLabelKey: modelDeploymentLabelKeyRoleKind,
 		})
 		ports = append(ports, ModelDeploymentRoleServingPort(md, &md.Spec.Roles[i]))
@@ -102,7 +106,11 @@ func renderModelDeploymentRouterObjects(
 	var metrics router.Metrics
 	if md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD {
 		var err error
-		if metrics, err = router.MetricsForEngine(md.Spec.Engine.Name); err != nil {
+		engine, ok := ModelDeploymentEngineUpstreamName(md.Spec.Engine.Name)
+		if !ok {
+			return ModelDeploymentRouterObjects{}, fmt.Errorf("unsupported engine %q", md.Spec.Engine.Name)
+		}
+		if metrics, err = router.MetricsForEngine(engine); err != nil {
 			return ModelDeploymentRouterObjects{}, err
 		}
 		metrics.Port = ports[0]
@@ -121,7 +129,7 @@ func renderModelDeploymentRouterObjects(
 		// exists to remove. The leader term is what keeps the two selectors in one semantics; they
 		// differ in scope only, this one naming a role and that one the deployment.
 		selector := modelDeploymentSelectorLabels(md, role)
-		selector[modelDeploymentLabelKeyRoleKind] = string(kind)
+		selector[modelDeploymentLabelKeyRoleKind] = roles[i].Kind
 		selector[modelDeploymentMemberIndexLabel] = strconvx.Itoa(modelDeploymentLeaderMemberIndex)
 		// The renderer is handed the SAME map that is published, rather than one built beside it,
 		// because a router configured by argv discovers each role by these labels: two derivations
@@ -181,8 +189,9 @@ func renderModelDeploymentRouterObjects(
 		DisaggregationThreshold: md.Spec.Router.DisaggregationThresholdTokens,
 	}
 	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
+		engine, _ := ModelDeploymentEngineUpstreamName(md.Spec.Engine.Name)
 		routerInput.KVEvents = router.KVEvents{
-			Engine: md.Spec.Engine.Name, Port: inject.VLLMKVEventsPort,
+			Engine: engine, Port: inject.VLLMKVEventsPort,
 			ReplayPort: inject.VLLMKVEventsReplayPort, Topic: inject.VLLMKVEventsTopic,
 		}
 	}

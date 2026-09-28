@@ -206,9 +206,9 @@ func TestModelDeploymentWebhook_InterfaceProtocol(t *testing.T) {
 		wantErr    string
 	}{
 		{name: "cache RDMA", store: []string{"rdma"}},
-		{name: "pure direct EFA", direct: "efa", pureDirect: true},
+		{name: "pure direct EFA", direct: "EFA", pureDirect: true},
 		{name: "mixed cache groups", store: []string{"tcp", "rdma"}, wantErr: "conflicting protocols"},
-		{name: "mixed legs", store: []string{"rdma"}, direct: "efa", wantErr: "rdma and efa"},
+		{name: "mixed legs", store: []string{"rdma"}, direct: "EFA", wantErr: "rdma and efa"},
 		{name: "no fabric", store: []string{"tcp"}, wantErr: "no effective RDMA or EFA"},
 		{name: "custom command has no managed fabric", store: []string{"rdma"}, custom: true, wantErr: "no effective RDMA or EFA"},
 	}
@@ -276,13 +276,13 @@ func TestModelDeploymentWebhook_InterfaceCreate(t *testing.T) {
 		}),
 	)
 	md.Spec.KVCache = nil
-	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "efa"}
+	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
 	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
 	_, err := w.ValidateCreate(context.Background(), md)
 	require.NoError(t, err, "pure direct transfer needs no cache backend to select EFA")
 
-	md.Spec.KVTransfer.Protocol = "tcp"
+	md.Spec.KVTransfer.Protocol = "TCP"
 	_, err = w.ValidateCreate(context.Background(), md)
 	require.ErrorContains(t, err, "spec.roles[0].resources.interface")
 	require.ErrorContains(t, err, "no effective RDMA or EFA")
@@ -301,11 +301,11 @@ func TestModelDeploymentWebhook_InterfaceUpdateRejectsProtocolChange(t *testing.
 		}),
 	)
 	md.Spec.KVCache = nil
-	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "efa"}
+	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
 	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
 	old := md.DeepCopy()
-	md.Spec.KVTransfer.Protocol = "tcp"
+	md.Spec.KVTransfer.Protocol = "TCP"
 	_, err := w.ValidateUpdate(context.Background(), old, md)
 	require.ErrorContains(t, err, "spec.roles[0].resources.interface")
 	require.ErrorContains(t, err, "no effective RDMA or EFA")
@@ -328,7 +328,7 @@ func TestModelDeploymentWebhook_InterfaceUpdateRefusesACountChange(t *testing.T)
 		}),
 	)
 	md.Spec.KVCache = nil
-	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "efa"}
+	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
 	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
 	old := md.DeepCopy()
@@ -567,7 +567,7 @@ func TestValidateModelDeployment(t *testing.T) {
 					r.Name, r.Kind = "prefill-b", workercore.ModelDeploymentRoleKindPrefill
 				}),
 			),
-			wantMessage: `kind "prefill" is already declared by role "prefill-a"`,
+			wantMessage: `kind "Prefill" is already declared by role "prefill-a"`,
 		},
 		{
 			// The other non-server kind, so the rule is not a check spelled against prefill alone.
@@ -580,7 +580,7 @@ func TestValidateModelDeployment(t *testing.T) {
 					r.Name, r.Kind = "decode-b", workercore.ModelDeploymentRoleKindDecode
 				}),
 			),
-			wantMessage: `kind "decode" is already declared by role "decode-a"`,
+			wantMessage: `kind "Decode" is already declared by role "decode-a"`,
 		},
 		{
 			// THE CASE THE RULE EXISTS TO NOT CATCH, and the one the two above cannot stand without: a
@@ -3383,7 +3383,7 @@ func TestModelDeploymentWebhook_APairMayNotShareOneAccelerator(t *testing.T) {
 			r := newModelDeploymentWebhookWith(live)
 
 			md := modelDeployment(workercore.ModelDeploymentEngineVLLM, tc.roles...)
-			md.Spec.KVCache.Connector = "mooncake"
+			md.Spec.KVCache.Connector = "Mooncake"
 
 			_, err := r.ValidateCreate(context.Background(), md)
 			if !tc.refuse {
@@ -3615,7 +3615,7 @@ func TestValidateModelDeploymentRouter_EngineMatched(t *testing.T) {
 			name:        "the vllm router does not front another project's engine",
 			engine:      workercore.ModelDeploymentEngineSGLang,
 			router:      workercore.ModelDeploymentRouterVLLM,
-			wantMessage: `router "vllm-router" does not front engine "sglang"`,
+			wantMessage: `router "vllm-router" does not front engine "SGLang"`,
 		},
 		{
 			name:   "the gateway takes its own engine",
@@ -3628,7 +3628,7 @@ func TestValidateModelDeploymentRouter_EngineMatched(t *testing.T) {
 			name:        "the gateway does not front another project's engine",
 			engine:      workercore.ModelDeploymentEngineVLLM,
 			router:      workercore.ModelDeploymentRouterSGLang,
-			wantMessage: `router "sglang-gateway" does not front engine "vllm"`,
+			wantMessage: `router "sglang-gateway" does not front engine "vLLM"`,
 		},
 	}
 	for _, c := range cases {

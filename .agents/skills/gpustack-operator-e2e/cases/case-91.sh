@@ -49,8 +49,8 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_serving-lib.sh"
 
 md_json="$(kubectl -n "$NS" get modeldeployment "$MD" -o json)" || exit 2
-if ! jq -e '([.spec.roles[] | select(.kind == "prefill")] | length) == 1 and
-  ([.spec.roles[] | select(.kind == "decode")] | length) == 1 and
+if ! jq -e '([.spec.roles[] | select(.kind == "Prefill")] | length) == 1 and
+  ([.spec.roles[] | select(.kind == "Decode")] | length) == 1 and
   .spec.router.name != null' <<<"$md_json" >/dev/null; then
   echo "case 91 needs a prefill/decode ModelDeployment with a router" >&2
   exit 2
@@ -62,7 +62,7 @@ ROUTER="$(jq -r '.spec.router.name' <<<"$md_json")"
 [[ " $SP_ROUTERS " == *" $ROUTER "* ]] ||
   { echo "router $ROUTER renders no transfer leg for $ENGINE on $VENDOR (one of: $SP_ROUTERS)" >&2; exit 2; }
 STORE="$(jq -r '.spec.kvCache.poolRef.name // empty' <<<"$md_json")"
-if [ "$ENGINE" = vllm ] && [ "$SP_PIN" != none ]; then
+if [ "$ENGINE" = vLLM ] && [ "$SP_PIN" != none ]; then
   # The version is read off what each role runs: the engine version for a synthesized image, the
   # image reference for a role that names its own.
   if ! jq -e --arg v "$VERSION" '.spec.engine.version as $ev | all(.spec.roles[];
@@ -71,7 +71,7 @@ if [ "$ENGINE" = vllm ] && [ "$SP_PIN" != none ]; then
     exit 2
   fi
 fi
-if [ "$SP_PIN" != none ] && ! jq -e '(.spec.kvTransfer.protocol // "tcp") == "tcp"' <<<"$md_json" >/dev/null; then
+if [ "$SP_PIN" != none ] && ! jq -e '(.spec.kvTransfer.protocol // "TCP") == "TCP"' <<<"$md_json" >/dev/null; then
   echo "case 91 needs the direct leg on tcp" >&2
   exit 2
 fi
@@ -242,7 +242,7 @@ if [ -n "$store_url" ]; then
   # allocated bytes are printed beside it and stay positive from any earlier write.
   check "$(grew "$put_before" "$put_after")" \
     "the store master counted batch-put items ($put_before to $put_after, allocated $allocated bytes)"
-  if [ "$ENGINE" = sglang ]; then
+  if [ "$ENGINE" = SGLang ]; then
     decode_logs="$(kubectl -n "$NS" logs "$decode" -c main 2>/dev/null)"
     # 0.5.18 prints server_args as key='value' and 0.5.19 as a dict, 'key': 'value'.
     check "$([[ "$decode_logs" == *"disaggregation_decode_retraction_backup='cpu_tensor'"* ||

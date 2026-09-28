@@ -185,7 +185,7 @@ metadata:
   namespace: ${NS}
 spec:
   engine:
-    name: vllm
+    name: vLLM
     version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
@@ -316,8 +316,8 @@ wait_admitted() {
 
 # --- row 0: the baseline, on a free pool ---
 
-apply_md case50-subject "$(role_block prefill prefill 1)
-$(role_block decode decode 1)"
+apply_md case50-subject "$(role_block prefill Prefill 1)
+$(role_block decode Decode 1)"
 
 BASE="$(wait_admitted case50-subject 2)"
 if [ "$(echo "$BASE" | wc -w | tr -d ' ')" = 2 ]; then
@@ -466,8 +466,8 @@ fi
 # --- the headline: nothing starts, including the role that would have fit ---
 
 if [ "$FILL" -ge 1 ]; then
-  apply_md case50-subject "$(role_block prefill prefill 1)
-$(role_block decode decode 1)"
+  apply_md case50-subject "$(role_block prefill Prefill 1)
+$(role_block decode Decode 1)"
 
   # THE WIDTH IS READ OFF THE SUBJECT, not trusted from the probe. Each replica reserves on its own,
   # so a one-replica window shows as exactly one role holding quota and the other waiting for it. No

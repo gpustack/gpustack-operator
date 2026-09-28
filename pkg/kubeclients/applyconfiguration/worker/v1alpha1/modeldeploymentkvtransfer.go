@@ -10,25 +10,23 @@ package v1alpha1
 // one: both legs may be configured on one deployment, and the synthesized connector carries the
 // pair together.
 type ModelDeploymentKVTransferApplyConfiguration struct {
-	// Protocol is the transport both ends of the leg are told to use, in the mooncake
-	// configuration's own spelling, e.g. "tcp" or "rdma".
+	// Protocol is the transport both ends of the direct leg are told to use. It uses the
+	// KVCacheBackend transport values and their Mooncake mapping, except MUSA and MACA:
+	// those are intra-node IPC transports, while prefill and decode may run on different nodes.
 	//
 	// - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either
 	// end, so a per-role field could only express a contradiction -- two ends naming different
 	// values for one connection, which fails at transfer time rather than at admission.
-	// - THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a
-	// property of the mooncake build inside the engine's own image, which this operator
-	// neither ships nor can inspect: a HIP-compiled build makes "hip" a working point-to-point
-	// transport, and an enum here would hard-code one image's compile set onto another image's
-	// connector. vLLM receives the value verbatim, and a value the engine build rejects
-	// raises at engine startup, in the container that owns the fact.
-	// - UNSET RENDERS "tcp", the transport every mooncake build carries. The default lives in
+	// - THE VALUE IS DECLARED, NOT DISCOVERED. The enum names supported transport families;
+	// the engine image must still carry the matching Mooncake build. CANN renders as
+	// "ascend" and ROCM as "hip", using the same mapping as KVCacheBackend members.
+	// - UNSET RENDERS "tcp", the transport every Mooncake build carries. The default lives in
 	// the renderer rather than in this schema, so the stored object holds exactly what was
 	// asked.
-	// - "tcp" IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport
+	// - TCP IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport
 	// from the host's hardware and does not read the requested one. On vLLM the leg also gets
 	// MC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's
-	// transfer backend: "tcp" renders "mooncake_tcp", any other value renders "mooncake", and
+	// transfer backend: TCP renders "mooncake_tcp", any other value renders "mooncake", and
 	// the value itself is not passed through. Neither pin renders while the deployment's store
 	// runs a transport other than tcp, because it is process-wide and would leave the store
 	// client without its fabric; the leg then keeps the engine's own selection.

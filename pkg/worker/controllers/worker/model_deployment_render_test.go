@@ -609,25 +609,25 @@ func TestRenderModelDeploymentPod_RoleKindLabel(t *testing.T) {
 			name:     "an unset kind resolves to server rather than to the empty string",
 			roleName: "runner",
 			kind:     "",
-			want:     string(workercore.ModelDeploymentRoleKindServer),
+			want:     "server",
 		},
 		{
 			name:     "prefill",
 			roleName: "first-half",
 			kind:     workercore.ModelDeploymentRoleKindPrefill,
-			want:     string(workercore.ModelDeploymentRoleKindPrefill),
+			want:     "prefill",
 		},
 		{
 			name:     "decode",
 			roleName: "second-half",
 			kind:     workercore.ModelDeploymentRoleKindDecode,
-			want:     string(workercore.ModelDeploymentRoleKindDecode),
+			want:     "decode",
 		},
 		{
 			name:     "a role named decode whose kind is prefill is labelled prefill",
 			roleName: "decode",
 			kind:     workercore.ModelDeploymentRoleKindPrefill,
-			want:     string(workercore.ModelDeploymentRoleKindPrefill),
+			want:     "prefill",
 		},
 	}
 
@@ -697,8 +697,8 @@ func TestRenderModelDeploymentPod_RoleKindLabelSeparatesAPair(t *testing.T) {
 		return pod.Labels[modelDeploymentLabelKeyRoleKind]
 	}
 
-	assert.Equal(t, string(workercore.ModelDeploymentRoleKindPrefill), labelOf(0))
-	assert.Equal(t, string(workercore.ModelDeploymentRoleKindDecode), labelOf(1))
+	assert.Equal(t, "prefill", labelOf(0))
+	assert.Equal(t, "decode", labelOf(1))
 }
 
 // TestRenderModelDeploymentPod_Command covers the whole argv, which the operator owns end to end
@@ -1370,7 +1370,7 @@ func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Engine.Name = tc.engine
 				md.Spec.KVCache = nil
-				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "efa"}
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
 				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
 				md.Spec.Roles[0].Command = tc.command

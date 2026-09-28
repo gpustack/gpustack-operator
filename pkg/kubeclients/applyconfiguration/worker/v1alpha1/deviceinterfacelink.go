@@ -20,7 +20,7 @@ type DeviceInterfaceLinkApplyConfiguration struct {
 	// State is the verification outcome.
 	State *workerv1alpha1.DeviceInterfaceLinkState `json:"state,omitempty"`
 	// Reason carries the checker's own words, verbatim — including the attribute values it
-	// read. A non-ok state without a reason leaves the operator's actual question ("why?")
+	// read. A state other than OK without a reason leaves the operator's question ("why?")
 	// unanswerable from the record alone.
 	Reason *string `json:"reason,omitempty"`
 	// FirstSeenTime is when an ONGOING FAILED state was first observed. It is stable across
@@ -28,8 +28,8 @@ type DeviceInterfaceLinkApplyConfiguration struct {
 	// anything else. Refreshing it every pass would make "how long has this been down?"
 	// unanswerable, which is the question the field exists to answer.
 	//
-	// Nil for both other states, `unverified` included: a state that reached no verdict has no
-	// outage for a clock to be the start of, so this is not "the current non-ok state" but
+	// Nil for both other states, Unverified included: a state that reached no verdict has no
+	// outage for a clock to be the start of, so this is not "the current non-OK state" but
 	// specifically the failed one.
 	FirstSeenTime *v1.Time `json:"firstSeenTime,omitempty"`
 }

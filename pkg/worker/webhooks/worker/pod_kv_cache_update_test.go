@@ -172,7 +172,7 @@ func TestPodKVCacheValidateUpdate(t *testing.T) {
 			// nothing re-renders from it, so a later edit changes no behavior. The record an
 			// operator is told to read is the frozen one, and the reference page points there.
 			name:      "an input annotation edited after the fact",
-			mutateNew: func(pod *core.Pod) { pod.Annotations[KVCacheEngineAnnotationKey] = "sglang" },
+			mutateNew: func(pod *core.Pod) { pod.Annotations[KVCacheEngineAnnotationKey] = "SGLang" },
 		},
 		{
 			// Defense in depth for a widened objectSelector, matching the mutating half's own guard.

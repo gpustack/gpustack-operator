@@ -135,7 +135,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${P}-md, namespace: ${NS}, labels: {e2e.gpustack.ai/case: "104"}}
 spec:
-  engine: {name: vllm, version: "0.29.0"}
+  engine: {name: vLLM, version: "0.29.0"}
   model: {name: ${SERVED}, artifactRef: {name: ${P}-model}}
   roles:
     - {name: server, instanceType: "${IT}", replicas: 1, resources: {accelerator: 1}, extraArgs: ["--max-model-len", "4096", "--gpu-memory-utilization", "0.85"]}

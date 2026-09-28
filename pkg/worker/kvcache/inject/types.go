@@ -35,7 +35,7 @@ func Engines() []Engine {
 	return []Engine{EngineVLLM, EngineVLLMAscend, EngineSGLang}
 }
 
-// SelectableEngines returns the engines a user may NAME, in a stable order.
+// SelectableEngines returns the annotation values a user may name, in a stable order.
 //
 // EngineVLLMAscend is absent, and that is what keeps this annotation agreeing with
 // ModelDeployment.spec.engine, which closed the same question first: vllm_ascend is the package the
@@ -43,8 +43,8 @@ func Engines() []Engine {
 // here too -- the operator selects it from the pool's accelerator -- so it stays renderable while
 // ceasing to be nameable. Two API surfaces publishing different value sets for one concept is what
 // this split removes; it is not a second surface describing the difference.
-func SelectableEngines() []Engine {
-	return []Engine{EngineVLLM, EngineSGLang}
+func SelectableEngines() []string {
+	return []string{"vLLM", "SGLang"}
 }
 
 // ParseEngine converts the engine annotation's value, refusing anything a user may not name.
@@ -53,10 +53,11 @@ func SelectableEngines() []Engine {
 // each takes different flags, and injecting the wrong set produces a container that starts normally
 // and caches nothing.
 func ParseEngine(value string) (Engine, error) {
-	for _, engine := range SelectableEngines() {
-		if string(engine) == value {
-			return engine, nil
-		}
+	switch value {
+	case "vLLM":
+		return EngineVLLM, nil
+	case "SGLang":
+		return EngineSGLang, nil
 	}
 
 	// Refused HERE rather than by dropping the constant, because this is where the value arrives.
@@ -67,7 +68,7 @@ func ParseEngine(value string) (Engine, error) {
 			"engine %q is not one this annotation takes: it names the Python package vllm_ascend, "+
 				"which the runner installs when the accelerator backend is CANN, rather than an "+
 				"engine anybody picks. Set %q and declare the Ascend runtime with "+
-				"kvcache.gpustack.ai/manufacturer=%q", value, EngineVLLM, "ascend")
+				"kvcache.gpustack.ai/manufacturer=%q", value, "vLLM", "ascend")
 	}
 
 	return "", newRefusal(ReasonEngineUnknown,
@@ -88,13 +89,17 @@ const (
 // ParseRole converts the role annotation's value. An unset annotation is legal and means the caller
 // has no prefill/decode split, which is the ordinary case for a shared cache.
 func ParseRole(value string) (Role, error) {
-	switch Role(value) {
-	case RoleNone, RolePrefill, RoleDecode:
-		return Role(value), nil
+	switch value {
+	case "":
+		return RoleNone, nil
+	case "Prefill":
+		return RolePrefill, nil
+	case "Decode":
+		return RoleDecode, nil
 	default:
 		return "", newRefusal(ReasonRoleUnknown,
 			"role %q is not recognised; set %q, %q, or leave the annotation off",
-			value, RolePrefill, RoleDecode)
+			value, "Prefill", "Decode")
 	}
 }
 
@@ -247,13 +252,9 @@ type Input struct {
 	// its own. The two are orthogonal inputs, not alternatives: both may be on at once.
 	KVTransfer bool
 
-	// KVTransferProtocol is the transport the point-to-point leg is told to use, declared by
-	// the caller. Empty selects the renderer's default. It is not gated: the accepted set is a
-	// property of the mooncake build inside the engine's own image, which this operator neither
-	// ships nor can inspect, so gating it here would hard-code one image's compile set onto
-	// another image's connector. The vLLM family reads it only when KVTransfer is set; SGLang
-	// reads it on a disaggregated half, whose split follows the pair rather than the flag, and
-	// maps it onto its transfer backend rather than passing it through.
+	// KVTransferProtocol is the direct leg's transport in Mooncake's spelling, already mapped
+	// by the caller from the ModelDeployment API value. Empty renders tcp. SGLang selects its
+	// backend from this value rather than passing it through.
 	KVTransferProtocol string
 
 	// Parallelism is the pair's declared parallel shape, resolved by the caller off each
@@ -271,34 +272,13 @@ type Input struct {
 	KVEventsHost string
 }
 
-// defaultKVTransferProtocol is the transport the prefill-to-decode leg is told to use when the
-// caller declares none, and it is deliberately NOT resolved from the backend. Both engines'
-// renderers read it through directLegProtocol, so the default is defined once.
-//
-// KVCacheBackend.spec.transport defines the data plane the store MEMBERS run. This leg is engine
-// to engine and never traverses the store, so the two planes have no business sharing one value
-// -- yet they did: a pair with no store always rendered tcp even on fabric hardware, and a pair
-// with one inherited the members' transport, an RDMA pool telling engine Pods to run a fabric
-// this operator gives them no access to. The backend-level field is also set to become an
-// inherited default once member groups can override it, which would leave this leg reading a
-// value no group necessarily uses.
-//
-// No source can DISCOVER the right value: the accepted set is a property of the mooncake build
-// inside the engine's own image, which this operator neither ships nor can inspect. The value is
-// therefore DECLARED, and the declarer is the ModelDeployment's spec.kvTransfer.protocol. This
-// constant is the default when that field is unset: "tcp" is the one answer honest from here --
-// the transport every mooncake build carries, and what a store-less pair has always rendered. A
-// pair whose engines can speak a fabric protocol says so through the API; the vLLM renderer's
-// gating rule binds the declared value exactly as it binds this default.
 const defaultKVTransferProtocol = "tcp"
 
-// directLegProtocol is the transport the point-to-point leg is told to use: the declared value,
-// or the default when none was declared.
+// directLegProtocol returns the declared Mooncake transport, or tcp when none was declared.
 func directLegProtocol(in Input) string {
 	if in.KVTransferProtocol != "" {
 		return in.KVTransferProtocol
 	}
-
 	return defaultKVTransferProtocol
 }
 

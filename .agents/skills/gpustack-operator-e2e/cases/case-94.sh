@@ -55,7 +55,7 @@ ROUTER="$(jq -r '.spec.router.name // empty' <<<"$md_json")"
 ENGINE="$(jq -r '.spec.engine.name' <<<"$md_json")"
 VENDOR="$(serving_vendor "$md_json")" || { echo "cannot read the deployment's vendor" >&2; exit 2; }
 serving_profile "$VENDOR" "$ENGINE" || exit 2
-SPLIT="$(jq -r 'any(.spec.roles[]; .kind == "prefill")' <<<"$md_json")"
+SPLIT="$(jq -r 'any(.spec.roles[]; .kind == "Prefill")' <<<"$md_json")"
 if [ "$TARGET" = router ]; then
   [ "$(jq -r '.spec.router.replicas // 1' <<<"$md_json")" = 1 ] || { echo "the router does not run one replica" >&2; exit 2; }
   PATCH_PATH=/spec/router/replicas

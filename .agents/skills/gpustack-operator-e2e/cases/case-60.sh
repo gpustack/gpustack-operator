@@ -336,19 +336,20 @@ PY
 # the row is the unit this case is built from and its image variable is still the one to set when
 # the fixture can carry it; the skip is a statement about the fixture, not about the row.
 resolved_rows=0
-for row in "vllm:E2E_VLLM_IMAGE" "vllm-ascend:E2E_VLLM_ASCEND_IMAGE"; do
+for row in "vLLM:E2E_VLLM_IMAGE" "vllm-ascend:E2E_VLLM_ASCEND_IMAGE"; do
   engine="${row%%:*}"
   var="${row##*:}"
   image="$(eval "printf '%s' \"\${${var}:-}\"")"
   check="the ${engine} factory has the connector name we render in its registry"
   pod="conn-${engine//-/}"
+  pod="${pod,,}"
 
   # vLLM-Ascend is not reachable from this fixture, and the question is ASKED of admission rather
   # than answered here. Two refusals stand in front of the row:
   #
   #  1. `kvcache.gpustack.ai/engine: vllm-ascend` is refused outright. That value was ruled the
   #     package the runner installs when the accelerator backend is CANN rather than an engine
-  #     anybody names, so admission points at `engine: vllm` + `manufacturer: ascend` instead.
+  #     anybody names, so admission points at `engine: vLLM` + `manufacturer: ascend` instead.
   #  2. Spelled that way the Pod is refused one layer down: that runtime accepts only the `ascend`
   #     transport, and this family's pool is built on a TCP backend.
   #

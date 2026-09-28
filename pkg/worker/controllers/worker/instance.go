@@ -767,7 +767,7 @@ func convertAdditionalVolumes(
 			switch {
 			case w == nil || w.Render == nil:
 				continue
-			case w.Render.Delivery == workercore.ModelDeploymentModelDeliveryPvc:
+			case w.Render.Delivery == workercore.ModelDeploymentModelDeliveryPVC:
 				vs.PersistentVolumeClaim = &core.PersistentVolumeClaimVolumeSource{
 					ClaimName: w.Render.ClaimName, ReadOnly: true,
 				}

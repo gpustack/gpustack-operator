@@ -154,7 +154,7 @@ while IFS= read -r pod; do
 done <<<"$managed_pods"
 
 if [ -n "$router_name" ]; then
-  split="$(jq -r 'any(.spec.roles[]; .kind == "prefill")' <<<"$md_json")"
+  split="$(jq -r 'any(.spec.roles[]; .kind == "Prefill")' <<<"$md_json")"
   engine="$(jq -r '.spec.engine.name' <<<"$md_json")"
   # The sources a router does not provide for this shape are a decided contract, so a complete read
   # lists exactly those as unsupported on its router Pods: the vLLM router's P/D mode exports no
@@ -165,7 +165,7 @@ if [ -n "$router_name" ]; then
   got="$(jq -c --argjson routers "$router_pods" '[.missing[]? | select(.pod as $pod | $routers | index($pod) != null) |
     select(.reason | startswith("unsupported source:")) | .source] | unique' <<<"$second")"
   if [ "$got" = "$want" ] && jq -e '(.traffic // []) | length > 0' <<<"$second" >/dev/null &&
-     { [ "$engine/$split" != sglang/true ] || jq -e '(.transfer // []) | length > 0' <<<"$second" >/dev/null; }; then
+     { [ "$engine/$split" != SGLang/true ] || jq -e '(.transfer // []) | length > 0' <<<"$second" >/dev/null; }; then
     record PASS "router contract for this shape" "$router_name, unsupported $got"
   else
     record FAIL "router contract for this shape" "$router_name: unsupported $got, want $want; traffic $(jq -c '.traffic // [] | length' <<<"$second"), transfer $(jq -c '.transfer // [] | length' <<<"$second")"

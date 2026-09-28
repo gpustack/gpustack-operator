@@ -125,7 +125,7 @@ metadata:
   namespace: ${NS}
 spec:
   engine:
-    name: ${ENGINE:-vllm}
+    name: ${ENGINE:-vLLM}
     version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
@@ -145,13 +145,13 @@ YAML
 two_roles() {
   cat <<YAML
   - name: prefill
-    kind: prefill
+    kind: Prefill
     instanceType: ${IT}
     replicas: 1
     image: ${IMAGE}
     command: ["/pause"]
   - name: decode
-    kind: decode
+    kind: Decode
     instanceType: ${IT}
     replicas: 1
     image: ${IMAGE}
@@ -267,14 +267,14 @@ else
     "needs a second InstanceType a deployment can name, and this cluster has none besides ${IT}. NOT closed by a synthetic name, which is now refused for not existing; CASE 68 covers the same premise by CREATING its second type"
 fi
 
-refuses "kind: server beside another kind is refused" \
+refuses "kind: Server beside another kind is refused" \
   "cannot be combined with another kind" \
   "  - name: server
-    kind: server
+    kind: Server
     instanceType: ${IT}
     replicas: 1
   - name: prefill
-    kind: prefill
+    kind: Prefill
     instanceType: ${IT}
     replicas: 1"
 
@@ -283,7 +283,7 @@ refuses "kind: server beside another kind is refused" \
 # for an engine added to the renderer without a table entry, which an API-valid manifest cannot
 # name. SGLang prefill/decode is the pair that rule once refused, so its acceptance is the row that
 # reports the refusal coming back.
-ENGINE=sglang accepts "an sglang prefill/decode pair is ACCEPTED: every engine renders every kind" \
+ENGINE=SGLang accepts "an sglang prefill/decode pair is ACCEPTED: every engine renders every kind" \
   "$(two_roles)"
 
 # --- the schema's rules, which run BEFORE the webhook and must not be confused with it ---
@@ -403,7 +403,7 @@ TPL='"image":"'"$IMAGE"'","command":["/pause"]'
 # only moment it was available. Capturing it is what turned that symptom into the decoding error
 # above, which is the whole reason the brace was findable at all.
 SCALE_PATCH="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai "$REBUILD_MD" --type=merge \
-  -p '{"spec":{"roles":[{"name":"prefill","kind":"prefill","instanceType":"'"$IT"'","replicas":2,'"$TPL"'},{"name":"decode","kind":"decode","instanceType":"'"$IT"'","replicas":1,'"$TPL"'}]}}' \
+  -p '{"spec":{"roles":[{"name":"prefill","kind":"Prefill","instanceType":"'"$IT"'","replicas":2,'"$TPL"'},{"name":"decode","kind":"Decode","instanceType":"'"$IT"'","replicas":1,'"$TPL"'}]}}' \
   2>&1)"
 
 SCALED=no

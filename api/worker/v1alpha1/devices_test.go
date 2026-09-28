@@ -4,7 +4,41 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestDeviceInterfaceLinkStateEnum(t *testing.T) {
+	crd := GetCustomResourceDefinitions()["Devices"]
+	require.NotNil(t, crd)
+	require.Len(t, crd.Spec.Versions, 1)
+	for _, path := range [][]string{
+		{"spec", "interfaces", "[]", "link", "state"},
+		{"spec", "interfaces", "[]", "virtualFunctions", "[]", "link", "state"},
+	} {
+		t.Run(path[3], func(t *testing.T) {
+			schema := crd.Spec.Versions[0].Schema.OpenAPIV3Schema
+			for _, part := range path {
+				if part == "[]" {
+					require.NotNil(t, schema.Items)
+					require.NotNil(t, schema.Items.Schema)
+					schema = schema.Items.Schema
+					continue
+				}
+				child, ok := schema.Properties[part]
+				require.True(t, ok, "missing %s", part)
+				schema = &child
+			}
+			values := make([]string, 0, len(schema.Enum))
+			for _, value := range schema.Enum {
+				values = append(values, string(value.Raw))
+			}
+			assert.ElementsMatch(t, []string{`"OK"`, `"Unverified"`, `"Failed"`}, values)
+			for _, old := range []string{`"ok"`, `"unverified"`, `"failed"`} {
+				assert.NotContains(t, values, old)
+			}
+		})
+	}
+}
 
 // TestDeviceAllocationModeString pins the enum's wire values alongside their names. The mode is a
 // protobuf varint persisted in the Devices status and in each Pod's allocation annotation, so

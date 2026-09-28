@@ -84,7 +84,7 @@ injected_shape() {
 }
 
 # A bare Pod: no controller of any kind above it.
-kvi_pod_manifest bare vllm | kubectl apply -f - >/dev/null 2>&1
+kvi_pod_manifest bare vLLM | kubectl apply -f - >/dev/null 2>&1
 if ! kvi_wait_for pods bare '{.metadata.name}' bare 60 "$TEST_NS" >/dev/null; then
   record FAIL "a bare Pod is admitted" "the Pod never appeared; the webhook may have refused it"
   kvi_results "$CASE_ID"; exit 1
@@ -123,7 +123,7 @@ spec:
           kvcache.gpustack.ai/inject: "true"
         annotations:
           kvcache.gpustack.ai/binding: ${BINDING}
-          kvcache.gpustack.ai/engine: vllm
+          kvcache.gpustack.ai/engine: vLLM
       spec:
         volumes:
           - name: ${LAUNCH_VOLUME}

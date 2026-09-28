@@ -413,10 +413,11 @@ type (
 	// interface" must not be published as "this worker has no RDMA".
 	DeviceInterfaceLink struct {
 		// State is the verification outcome.
+		// +k8s:validation:enum=["OK","Unverified","Failed"]
 		State DeviceInterfaceLinkState `json:"state" yaml:"state" protobuf:"bytes,1,name=state,casttype=DeviceInterfaceLinkState"`
 
 		// Reason carries the checker's own words, verbatim — including the attribute values it
-		// read. A non-ok state without a reason leaves the operator's actual question ("why?")
+		// read. A state other than OK without a reason leaves the operator's question ("why?")
 		// unanswerable from the record alone.
 		Reason string `json:"reason,omitempty" yaml:"reason,omitempty" protobuf:"bytes,2,opt,name=reason"`
 
@@ -425,8 +426,8 @@ type (
 		// anything else. Refreshing it every pass would make "how long has this been down?"
 		// unanswerable, which is the question the field exists to answer.
 		//
-		// Nil for both other states, `unverified` included: a state that reached no verdict has no
-		// outage for a clock to be the start of, so this is not "the current non-ok state" but
+		// Nil for both other states, Unverified included: a state that reached no verdict has no
+		// outage for a clock to be the start of, so this is not "the current non-OK state" but
 		// specifically the failed one.
 		FirstSeenTime *meta.Time `json:"firstSeenTime,omitempty" yaml:"firstSeenTime,omitempty" protobuf:"bytes,3,opt,name=firstSeenTime"`
 	}
@@ -456,7 +457,7 @@ type DeviceInterfaceLinkState string
 
 const (
 	// DeviceInterfaceLinkStateOK indicates the link was checked and verified.
-	DeviceInterfaceLinkStateOK DeviceInterfaceLinkState = "ok"
+	DeviceInterfaceLinkStateOK DeviceInterfaceLinkState = "OK"
 	// DeviceInterfaceLinkStateUnverified indicates the check reached no verdict: an attribute it
 	// needs was unreadable, the port directory could not be listed, or the RDMA tree is present
 	// and could not be read at all. There is no per-manufacturer checker to be missing — the
@@ -464,11 +465,11 @@ const (
 	//
 	// It is REPORTED, and it does not withhold the node's RDMA label: a link we cannot interrogate
 	// must not silently exclude its worker from scheduling.
-	DeviceInterfaceLinkStateUnverified DeviceInterfaceLinkState = "unverified"
+	DeviceInterfaceLinkStateUnverified DeviceInterfaceLinkState = "Unverified"
 	// DeviceInterfaceLinkStateFailed indicates a check ran and the link is not usable. This is
 	// the only state that withholds the node's RDMA label, and it is never reached from a missing
 	// or unreadable file — an unreadable attribute is Unverified.
-	DeviceInterfaceLinkStateFailed DeviceInterfaceLinkState = "failed"
+	DeviceInterfaceLinkStateFailed DeviceInterfaceLinkState = "Failed"
 )
 
 // DeviceAllocationMode describes the allocation mode of the accelerator device.

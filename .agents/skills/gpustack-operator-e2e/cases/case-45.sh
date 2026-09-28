@@ -152,7 +152,7 @@ metadata:
   namespace: ${NS}
 spec:
   engine:
-    name: ${ENGINE:-vllm}
+    name: ${ENGINE:-vLLM}
     version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct

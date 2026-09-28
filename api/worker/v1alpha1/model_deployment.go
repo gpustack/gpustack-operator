@@ -124,8 +124,8 @@ type ModelDeploymentSpec struct {
 // installs when the accelerator backend is CANN, not an engine a user picks, and naming it here made
 // the connector look like a property of the engine, which it is not.
 const (
-	ModelDeploymentEngineVLLM   = "vllm"
-	ModelDeploymentEngineSGLang = "sglang"
+	ModelDeploymentEngineVLLM   = "vLLM"
+	ModelDeploymentEngineSGLang = "SGLang"
 )
 
 // ModelDeploymentModel names the model the engine serves and, optionally, the weights it serves.
@@ -181,7 +181,7 @@ type ModelDeploymentEngine struct {
 	// reading otherwise would freeze the pair together.
 	//
 	// +required
-	// +k8s:validation:enum=["vllm","sglang"]
+	// +k8s:validation:enum=["vLLM","SGLang"]
 	Name string `json:"name" protobuf:"bytes,1,name=name"`
 
 	// Version is the engine's own version, e.g. "0.29.0" for vllm or "0.5.18" for sglang.
@@ -224,7 +224,7 @@ type ModelDeploymentKVCache struct {
 	PoolRef core.LocalObjectReference `json:"poolRef" protobuf:"bytes,1,name=poolRef"`
 
 	// Connector names the connector implementation this deployment is configured for. The value is
-	// an identity the deployment carries, not a setting the operator derives: "mooncake" says which
+	// an identity the deployment carries, not a setting the operator derives: "Mooncake" says which
 	// connector this is, and nothing reads the field to produce the configuration. There is no
 	// "none" — synthesizing nothing is reachable through a full command replacement, which also
 	// marks the role unmanaged and moves CacheAttached to Unknown.
@@ -250,8 +250,8 @@ type ModelDeploymentKVCache struct {
 	// than edited onto one. That is stated here because "widening the enum" otherwise reads as a
 	// migration path for deployments that are already running.
 	//
-	// +k8s:validation:default="mooncake"
-	// +k8s:validation:enum=["mooncake"]
+	// +k8s:validation:default="Mooncake"
+	// +k8s:validation:enum=["Mooncake"]
 	Connector string `json:"connector,omitempty" protobuf:"bytes,2,opt,name=connector"`
 }
 
@@ -260,25 +260,23 @@ type ModelDeploymentKVCache struct {
 // one: both legs may be configured on one deployment, and the synthesized connector carries the
 // pair together.
 type ModelDeploymentKVTransfer struct {
-	// Protocol is the transport both ends of the leg are told to use, in the mooncake
-	// configuration's own spelling, e.g. "tcp" or "rdma".
+	// Protocol is the transport both ends of the direct leg are told to use. It uses the
+	// KVCacheBackend transport values and their Mooncake mapping, except MUSA and MACA:
+	// those are intra-node IPC transports, while prefill and decode may run on different nodes.
 	//
 	//   - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either
 	//     end, so a per-role field could only express a contradiction -- two ends naming different
 	//     values for one connection, which fails at transfer time rather than at admission.
-	//   - THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a
-	//     property of the mooncake build inside the engine's own image, which this operator
-	//     neither ships nor can inspect: a HIP-compiled build makes "hip" a working point-to-point
-	//     transport, and an enum here would hard-code one image's compile set onto another image's
-	//     connector. vLLM receives the value verbatim, and a value the engine build rejects
-	//     raises at engine startup, in the container that owns the fact.
-	//   - UNSET RENDERS "tcp", the transport every mooncake build carries. The default lives in
+	//   - THE VALUE IS DECLARED, NOT DISCOVERED. The enum names supported transport families;
+	//     the engine image must still carry the matching Mooncake build. CANN renders as
+	//     "ascend" and ROCM as "hip", using the same mapping as KVCacheBackend members.
+	//   - UNSET RENDERS "tcp", the transport every Mooncake build carries. The default lives in
 	//     the renderer rather than in this schema, so the stored object holds exactly what was
 	//     asked.
-	//   - "tcp" IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport
+	//   - TCP IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport
 	//     from the host's hardware and does not read the requested one. On vLLM the leg also gets
 	//     MC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's
-	//     transfer backend: "tcp" renders "mooncake_tcp", any other value renders "mooncake", and
+	//     transfer backend: TCP renders "mooncake_tcp", any other value renders "mooncake", and
 	//     the value itself is not passed through. Neither pin renders while the deployment's store
 	//     runs a transport other than tcp, because it is process-wide and would leave the store
 	//     client without its fabric; the leg then keeps the engine's own selection.
@@ -295,7 +293,7 @@ type ModelDeploymentKVTransfer struct {
 	//     engine version edit already opens.
 	//
 	// +optional
-	// +k8s:validation:maxLength=64
+	// +k8s:validation:enum=["Auto","TCP","RDMA","EFA","CANN","ROCM"]
 	Protocol string `json:"protocol,omitempty" protobuf:"bytes,1,opt,name=protocol"`
 }
 
@@ -355,8 +353,8 @@ type ModelDeploymentRole struct {
 	// reach. It defaults to Server, the shape a deployment written before disaggregation existed has,
 	// so such a deployment renders exactly as it did.
 	//
-	// +k8s:validation:default="server"
-	// +k8s:validation:enum=["server","prefill","decode"]
+	// +k8s:validation:default="Server"
+	// +k8s:validation:enum=["Server","Prefill","Decode"]
 	Kind ModelDeploymentRoleKind `json:"kind,omitempty" protobuf:"bytes,8,opt,name=kind,casttype=ModelDeploymentRoleKind"`
 
 	// Replicas is how many independent serving instances this role runs. The instances are
@@ -570,13 +568,13 @@ const (
 	// decode in one process. It is the default and the only kind a single-role deployment has, and
 	// it is refused alongside any other kind, because "one plain server plus a prefiller" is not a
 	// shape anything consumes.
-	ModelDeploymentRoleKindServer ModelDeploymentRoleKind = "server"
+	ModelDeploymentRoleKindServer ModelDeploymentRoleKind = "Server"
 	// ModelDeploymentRoleKindPrefill is a role that computes the prompt's KV blocks and hands them
 	// on rather than decoding them itself.
-	ModelDeploymentRoleKindPrefill ModelDeploymentRoleKind = "prefill"
+	ModelDeploymentRoleKindPrefill ModelDeploymentRoleKind = "Prefill"
 	// ModelDeploymentRoleKindDecode is a role that consumes KV blocks a prefiller produced and
 	// generates tokens from them.
-	ModelDeploymentRoleKindDecode ModelDeploymentRoleKind = "decode"
+	ModelDeploymentRoleKindDecode ModelDeploymentRoleKind = "Decode"
 )
 
 // ModelDeploymentPort defines one port a role's replica exposes beside the engine's own.
@@ -941,13 +939,13 @@ type ModelDeploymentModelStatus struct {
 	// +optional
 	ManifestDigest string `json:"manifestDigest,omitempty" protobuf:"bytes,3,opt,name=manifestDigest"`
 
-	// Delivery is how the weights reach the engine: "Pvc", the claim mounted read-only at a fixed
+	// Delivery is how the weights reach the engine: "PVC", the claim mounted read-only at a fixed
 	// path; "Engine", the engine downloading the pinned commit itself; "Node", the node's
 	// model-manager plugin materializing the verified files and mounting them read-only at the same
 	// fixed path; or "Image", kubelet pulling the pinned OCI image into a read-only image volume.
 	//
 	// +required
-	// +k8s:validation:enum=["Pvc","Engine","Node","Image"]
+	// +k8s:validation:enum=["PVC","Engine","Node","Image"]
 	Delivery ModelDeploymentModelDelivery `json:"delivery" protobuf:"bytes,4,name=delivery,casttype=ModelDeploymentModelDelivery"`
 }
 
@@ -956,8 +954,8 @@ type ModelDeploymentModelStatus struct {
 type ModelDeploymentModelDelivery string
 
 const (
-	// ModelDeploymentModelDeliveryPvc mounts a claim artifact read-only at a fixed path.
-	ModelDeploymentModelDeliveryPvc ModelDeploymentModelDelivery = "Pvc"
+	// ModelDeploymentModelDeliveryPVC mounts a claim artifact read-only at a fixed path.
+	ModelDeploymentModelDeliveryPVC ModelDeploymentModelDelivery = "PVC"
 	// ModelDeploymentModelDeliveryEngine has the engine download a hub artifact's resolved commit
 	// into a size-limited cache volume, with the artifact's token from its Secret.
 	ModelDeploymentModelDeliveryEngine ModelDeploymentModelDelivery = "Engine"
@@ -1014,7 +1012,7 @@ type ModelDeploymentRoleStatus struct {
 	// figure down with the kind. The marker sits on the field because the type's own enum marker is a
 	// Go-level one and does not become schema validation.
 	//
-	// +k8s:validation:enum=["server","prefill","decode"]
+	// +k8s:validation:enum=["Server","Prefill","Decode"]
 	Kind ModelDeploymentRoleKind `json:"kind" protobuf:"bytes,5,name=kind,casttype=ModelDeploymentRoleKind"`
 
 	// AssignedFlavors is the set of ResourceFlavors Kueue assigned to this role's replicas for

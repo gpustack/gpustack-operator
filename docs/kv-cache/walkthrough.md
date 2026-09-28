@@ -140,7 +140,7 @@ spec:
   model:
     name: Qwen/Qwen2.5-7B-Instruct
   engine:
-    name: vllm
+    name: vLLM
     version: "0.29.0"                    # on the same store line as Step 1's default image
   kvCache:
     poolRef:

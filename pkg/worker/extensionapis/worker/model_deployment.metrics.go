@@ -330,7 +330,11 @@ func (h *ModelDeploymentMetricsHandler) scrapeMetricsPod(
 		read.err = fmt.Errorf("metrics response exceeds %d bytes", modelDeploymentMetricsMaxBytes)
 		return read
 	}
-	engine, router := md.Spec.Engine.Name, ""
+	engine := md.Spec.Engine.Name
+	if mapped, ok := workerctrl.ModelDeploymentEngineUpstreamName(engine); ok {
+		engine = mapped
+	}
+	router := ""
 	if read.router {
 		engine, router = "", md.Spec.Router.Name
 	}
@@ -375,7 +379,7 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 			metricNames["router-running"] = "smg_worker_requests_active"
 			metricNames["router-backends"] = "smg_worker_pool_size"
 		}
-	case md.Spec.Engine.Name == "vllm":
+	case md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM:
 		metricNames["running"] = "vllm:num_requests_running"
 		metricNames["waiting"] = "vllm:num_requests_waiting"
 	default:
@@ -421,7 +425,7 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 	}
 	// The decode half of an SGLang pair receives its prompt's cache from the prefill half and
 	// never prefills, so its prefill token counters stay at zero and hold no hit ratio.
-	if md.Spec.Engine.Name == "sglang" && isModelDeploymentPD(md) &&
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang && isModelDeploymentPD(md) &&
 		modelDeploymentPodRoleKind(md, &read.pod) == workercore.ModelDeploymentRoleKindDecode {
 		return
 	}
@@ -432,14 +436,14 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 		return
 	}
 	var sglangHost, sglangStorage bool
-	if md.Spec.Engine.Name == "sglang" {
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang {
 		sglangHost, sglangStorage = modelDeploymentSGLangPodTiers(&read.pod)
 	}
 	for scope, current := range read.value.counters {
 		previous, ok := h.replaceCounter(md, &read.pod, scope, current, read.at)
 		// SGLang exports every tier's hit counter from start, and a tier the Pod does not build
 		// keeps its counter at zero, which would read as a measured miss rather than an absent tier.
-		if md.Spec.Engine.Name == "sglang" && (scope == "host-prefix" && !sglangHost ||
+		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang && (scope == "host-prefix" && !sglangHost ||
 			scope == "storage-prefix" && !sglangStorage) {
 			reason := modelDeploymentSGLangNoHostTier
 			if scope == "storage-prefix" {
@@ -499,7 +503,7 @@ func (h *ModelDeploymentMetricsHandler) mergeMetrics(
 		if scope == "external-store" {
 			source = "vllm:external_prefix_cache"
 		}
-		if md.Spec.Engine.Name == "sglang" {
+		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang {
 			source = "sglang:prefill_effective_tokens_total"
 		}
 		result.CacheHits = append(result.CacheHits, worker.ModelDeploymentCacheHit{
@@ -699,7 +703,7 @@ func modelDeploymentWindowDefinitions(md *workercore.ModelDeployment, router boo
 			}
 		}
 	}
-	if md.Spec.Engine.Name == "vllm" {
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM {
 		return []modelDeploymentWindowDefinition{
 			{"ttft", "vllm:time_to_first_token_seconds", "latency", "seconds", true, ""},
 			{"tpot", "vllm:request_time_per_output_token_seconds", "latency", "seconds", true, ""},
@@ -747,7 +751,7 @@ func (h *ModelDeploymentMetricsHandler) mergeWindowMetrics(
 			continue
 		}
 		// The same half hands the first token to decode, which is where SGLang records TTFT.
-		if definition.name == "ttft" && md.Spec.Engine.Name == "sglang" && isModelDeploymentPD(md) &&
+		if definition.name == "ttft" && md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang && isModelDeploymentPD(md) &&
 			modelDeploymentPodRoleKind(md, &read.pod) == workercore.ModelDeploymentRoleKindPrefill {
 			continue
 		}

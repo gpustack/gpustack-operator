@@ -41,7 +41,7 @@ const (
 // A nil one is a deployment that names no artifact, which renders exactly what it rendered before
 // the field existed.
 type ModelDeploymentArtifactRender struct {
-	// Delivery is Pvc, Engine, Node or Image.
+	// Delivery is PVC, Engine, Node or Image.
 	Delivery workercore.ModelDeploymentModelDelivery
 
 	// ArtifactName, ArtifactUID and ManifestDigest are what a node-delivered volume names, as hints
@@ -101,7 +101,7 @@ func (a *ModelDeploymentArtifactRender) volumes(takeOver bool) ([]core.Volume, [
 			}}, []core.VolumeMount{{
 				Name: modelDeploymentModelVolumeName, MountPath: ModelDeploymentModelMountPath, ReadOnly: true,
 			}}
-	case a.Delivery == workercore.ModelDeploymentModelDeliveryPvc:
+	case a.Delivery == workercore.ModelDeploymentModelDeliveryPVC:
 		return []core.Volume{{
 				Name: modelDeploymentModelVolumeName,
 				VolumeSource: core.VolumeSource{PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{

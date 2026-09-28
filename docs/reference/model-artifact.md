@@ -289,7 +289,7 @@ hexadecimal digits of the manifest digest, or of the SHA-256 of the artifact's U
 
 ## Status
 
-`status.model` echoes the artifact, its `revision` and `manifestDigest`, and the `delivery`, `Pvc`,
+`status.model` echoes the artifact, its `revision` and `manifestDigest`, and the `delivery`, `PVC`,
 `Engine`, `Node` or `Image` — an image source echoes neither a revision nor a digest, its reference
 being the identity. `WeightsReady` says whether every engine role's weights are there:
 

@@ -13,6 +13,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -627,6 +628,14 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		return ModelDeploymentConnectorRender{}, err
 	}
 
+	kvTransferProtocol := ""
+	if in.KVTransferProtocol != "" {
+		kvTransferProtocol = mooncake.TransportProtocol(in.KVTransferProtocol)
+		if kvTransferProtocol == "" {
+			return ModelDeploymentConnectorRender{}, fmt.Errorf("unsupported KV transfer protocol %q", in.KVTransferProtocol)
+		}
+	}
+
 	res, err := inject.Render(inject.Input{
 		Engine: engine,
 		Role:   role,
@@ -644,9 +653,8 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		PublishKVEvents: in.PublishKVEvents,
 		KVEventsHost:    in.KVEventsHost,
 		KVTransfer:      in.KVTransfer,
-		// The protocol is threaded rather than resolved here: the renderer owns the default, and
-		// a second default in this file would be two definitions of one fact.
-		KVTransferProtocol: in.KVTransferProtocol,
+		// The renderer owns the unset default; only a declared API value is mapped here.
+		KVTransferProtocol: kvTransferProtocol,
 		// The pair is threaded rather than resolved here for the same reason the role is: the
 		// resolution reads every role of the deployment, and synthesis sees one role's input.
 		Parallelism: in.Parallelism,
@@ -698,6 +706,33 @@ func ModelDeploymentInjectEngine(engine, manufacturer string) (inject.Engine, er
 		return inject.EngineSGLang, nil
 	default:
 		return "", fmt.Errorf("unsupported engine %q", engine)
+	}
+}
+
+// ModelDeploymentEngineUpstreamName returns the spelling used by runner tags, router metrics,
+// and upstream engine configuration. The API spelling is not an upstream artifact name.
+func ModelDeploymentEngineUpstreamName(engine string) (string, bool) {
+	switch engine {
+	case workercore.ModelDeploymentEngineVLLM:
+		return "vllm", true
+	case workercore.ModelDeploymentEngineSGLang:
+		return "sglang", true
+	default:
+		return "", false
+	}
+}
+
+// ModelDeploymentRoleUpstreamKind returns the spelling consumed by routers and Pod selectors.
+func ModelDeploymentRoleUpstreamKind(kind workercore.ModelDeploymentRoleKind) (string, bool) {
+	switch kind {
+	case workercore.ModelDeploymentRoleKindServer:
+		return "server", true
+	case workercore.ModelDeploymentRoleKindPrefill:
+		return "prefill", true
+	case workercore.ModelDeploymentRoleKindDecode:
+		return "decode", true
+	default:
+		return "", false
 	}
 }
 

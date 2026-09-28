@@ -193,7 +193,7 @@ func TestModelPlacementImagePreference(t *testing.T) {
 
 	t.Run("another delivery yields no term", func(t *testing.T) {
 		pvc := &modelArtifactWeights{Render: &ModelDeploymentArtifactRender{
-			Delivery: workercore.ModelDeploymentModelDeliveryPvc, ClaimName: "models",
+			Delivery: workercore.ModelDeploymentModelDeliveryPVC, ClaimName: "models",
 		}}
 		assert.Nil(t, pvc.placementPreference(context.Background(),
 			ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build()))

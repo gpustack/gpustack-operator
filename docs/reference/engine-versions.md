@@ -63,11 +63,12 @@ says it works.
 
 A **store** cell is the pool's `KVCacheBackend.spec.transport.protocol`, which a member group can
 override and the engine is handed. A **direct** cell is `spec.kvTransfer.protocol` on a
-prefill/decode pair. The first column gives both spellings; `Auto`, the store default, is `TCP`.
+prefill/decode pair. The first column gives the API and Mooncake spellings. `Auto` renders
+`tcp` on either leg; the direct leg also renders `tcp` when the field is unset.
 
-| Transport (store / direct) | Engine | Store leg | Direct leg |
+| Transport (API / Mooncake) | Engine | Store leg | Direct leg |
 |---|---|---|---|
-| `TCP` / `tcp` | vLLM | **Works**, default images; beside a direct leg it keeps its store connections open too and did not [run out of ports](#known-failures-at-the-minimum) where measured | **Works**, default images; it keeps its connections open and did not [run out of ports](#known-failures-at-the-minimum) where measured |
+| `Auto`, `TCP` / `tcp` | vLLM | **Works**, default images; beside a direct leg it keeps its store connections open too and did not [run out of ports](#known-failures-at-the-minimum) where measured | **Works**, default images; it keeps its connections open and did not [run out of ports](#known-failures-at-the-minimum) where measured |
 | `TCP` / `tcp` | SGLang | **Works**, with a published store image on [its client's line](#the-minimum-per-shape), named by hand; beside a direct leg, [it runs out of ports](#known-failures-at-the-minimum) unless [`model-deployment-tcp-tw-reuse`](../settings.md#letting-sglang-prefill-pods-reuse-time-wait-ports) is on | **Works**, default images; under sustained load [it runs out of ports](#known-failures-at-the-minimum), and [`model-deployment-tcp-tw-reuse`](../settings.md#letting-sglang-prefill-pods-reuse-time-wait-ports) is the remedy, run so far only beside a store |
 | `TCP` / `tcp` | vLLM-Ascend | **Not supported**: refused at admission, its store client accepts `CANN` only | **Not supported**: the value is ignored, the leg runs `ascend` |
 | `RDMA` / `rdma` | vLLM | **Not verified** | **Not verified** |
@@ -79,8 +80,9 @@ prefill/decode pair. The first column gives both spellings; `Auto`, the store de
 | `CANN` / `ascend` | vLLM | **Not supported**: the CUDA client has no Ascend transport | **Not supported**: the CUDA client has no Ascend transport |
 | `CANN` / `ascend` | SGLang | **Not verified** | **Not verified** |
 | `CANN` / `ascend` | vLLM-Ascend | **Not verified**; the members need [an image carrying CANN](../kv-cache/backend.md#the-image) | **Works**, a published `-router` runner tag named by hand, behind `llm-d-router` |
-| `ROCM`, `MUSA`, `MACA` / `hip`, `musa`, `maca` | vLLM, SGLang | **Not verified** | **Not verified** |
-| `ROCM`, `MUSA`, `MACA` / `hip`, `musa`, `maca` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` | **Not supported**: ignored, as for `tcp` |
+| `ROCM` / `hip` | vLLM, SGLang | **Not verified** | **Not verified** |
+| `ROCM` / `hip` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` | **Not supported**: ignored, as for `tcp` |
+| `MUSA`, `MACA` / `musa`, `maca` | vLLM, SGLang, vLLM-Ascend | **Not verified** | **Rejected by the direct-leg schema**: these are same-node IPC transports, while prefill and decode have no same-node placement guarantee |
 
 The vLLM and SGLang verdicts are read on their CUDA runner images. What each verdict means:
 

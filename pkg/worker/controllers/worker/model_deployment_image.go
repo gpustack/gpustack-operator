@@ -131,6 +131,10 @@ func SynthesizeModelDeploymentImage(
 	if detail.RuntimeVersion == "" {
 		return "", fmt.Errorf("the instance type has not observed a runtime version yet")
 	}
+	upstreamEngine, ok := ModelDeploymentEngineUpstreamName(engine)
+	if !ok {
+		return "", fmt.Errorf("unsupported engine %q", engine)
+	}
 
 	var tag strings.Builder
 	tag.WriteString(backend)
@@ -140,7 +144,7 @@ func SynthesizeModelDeploymentImage(
 		tag.WriteString(variant)
 	}
 	tag.WriteString("-")
-	tag.WriteString(engine)
+	tag.WriteString(upstreamEngine)
 	tag.WriteString(version)
 
 	return modelDeploymentRunnerRepository + ":" + tag.String(), nil

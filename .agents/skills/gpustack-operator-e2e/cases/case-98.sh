@@ -24,7 +24,7 @@
 #              E2E_MD_IMAGE.
 # Expected:    - a claim deployment: its Pod carries the PV's node affinity, runs on the PV's node,
 #                loads /var/lib/gpustack/model read-only under --served-model-name, and reports
-#                WeightsReady=True Mounted and status.model.delivery Pvc;
+#                WeightsReady=True Mounted and status.model.delivery PVC;
 #              - an Instance on the same claim: the same affinity and node, a read-only mount at the
 #                artifact's directory;
 #              - two replicas on a ReadWriteOnce claim: AccessModeConflict, no Pod;
@@ -108,7 +108,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: $1, namespace: ${NS}, labels: {e2e.gpustack.ai/case: "98"}}
 spec:
-  engine: {name: vllm, version: "0.29.0"}
+  engine: {name: vLLM, version: "0.29.0"}
   model: {name: e2e/c98, artifactRef: {name: $2}}
   roles:
     - name: server
@@ -220,7 +220,7 @@ case "$cmd" in
   *) record FAIL "the engine loads the read-only claim under the served name" "command=${cmd:-<none>}" ;;
 esac
 delivery="$(kubectl -n "$NS" get modeldeployments.worker.gpustack.ai "${P}-claim" -o jsonpath='{.status.model.delivery}')"
-if [ "$reading" = "True|Mounted" ] && [ "$delivery" = Pvc ]; then
+if [ "$reading" = "True|Mounted" ] && [ "$delivery" = PVC ]; then
   record PASS "WeightsReady reports the claim mounted" "${reading} delivery=${delivery}"
 else
   record FAIL "WeightsReady reports the claim mounted" "${reading:-<none>} delivery=${delivery:-<none>}"
@@ -358,7 +358,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${P}-refuse, namespace: ${NS}}
 spec:
-  engine: {name: vllm, version: "0.29.0"}
+  engine: {name: vLLM, version: "0.29.0"}
   model: {name: e2e/c98, artifactRef: {name: ${P}-later}}
   roles: [{name: server, instanceType: "${IT}", image: "${IMAGE}", extraArgs: ["--served-model-name", "other"]}]
 YAML
@@ -367,7 +367,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${P}-refuse, namespace: ${NS}}
 spec:
-  engine: {name: vllm, version: "0.29.0"}
+  engine: {name: vLLM, version: "0.29.0"}
   model: {name: e2e/c98, artifactRef: {name: ${P}-later}}
   roles: [{name: server, instanceType: "${IT}", image: "${IMAGE}", extraArgs: ["--revision", "v2"]}]
 YAML
@@ -376,7 +376,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${P}-refuse, namespace: ${NS}}
 spec:
-  engine: {name: vllm, version: "0.29.0"}
+  engine: {name: vLLM, version: "0.29.0"}
   model: {name: e2e/c98, artifactRef: {name: ${P}-later}}
   roles:
     - name: server

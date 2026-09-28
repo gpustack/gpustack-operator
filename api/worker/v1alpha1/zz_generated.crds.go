@@ -504,18 +504,29 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 															},
 															Properties: map[string]v1.JSONSchemaProps{
 																"firstSeenTime": {
-																	Description: "FirstSeenTime is when an ONGOING FAILED state was first observed. It is stable across\npasses for as long as the failure persists, and is cleared the moment the state is\nanything else. Refreshing it every pass would make \"how long has this been down?\"\nunanswerable, which is the question the field exists to answer.\nNil for both other states, `unverified` included: a state that reached no verdict has no\noutage for a clock to be the start of, so this is not \"the current non-ok state\" but\nspecifically the failed one.",
+																	Description: "FirstSeenTime is when an ONGOING FAILED state was first observed. It is stable across\npasses for as long as the failure persists, and is cleared the moment the state is\nanything else. Refreshing it every pass would make \"how long has this been down?\"\nunanswerable, which is the question the field exists to answer.\nNil for both other states, Unverified included: a state that reached no verdict has no\noutage for a clock to be the start of, so this is not \"the current non-OK state\" but\nspecifically the failed one.",
 																	Type:        "string",
 																	Format:      "date-time",
 																	Nullable:    true,
 																},
 																"reason": {
-																	Description: "Reason carries the checker's own words, verbatim — including the attribute values it\nread. A non-ok state without a reason leaves the operator's actual question (\"why?\")\nunanswerable from the record alone.",
+																	Description: "Reason carries the checker's own words, verbatim — including the attribute values it\nread. A state other than OK without a reason leaves the operator's question (\"why?\")\nunanswerable from the record alone.",
 																	Type:        "string",
 																},
 																"state": {
 																	Description: "State is the verification outcome.",
 																	Type:        "string",
+																	Enum: []v1.JSON{
+																		{
+																			Raw: []byte(`"OK"`),
+																		},
+																		{
+																			Raw: []byte(`"Unverified"`),
+																		},
+																		{
+																			Raw: []byte(`"Failed"`),
+																		},
+																	},
 																},
 															},
 															Nullable: true,
@@ -602,18 +613,29 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			},
 																			Properties: map[string]v1.JSONSchemaProps{
 																				"firstSeenTime": {
-																					Description: "FirstSeenTime is when an ONGOING FAILED state was first observed. It is stable across\npasses for as long as the failure persists, and is cleared the moment the state is\nanything else. Refreshing it every pass would make \"how long has this been down?\"\nunanswerable, which is the question the field exists to answer.\nNil for both other states, `unverified` included: a state that reached no verdict has no\noutage for a clock to be the start of, so this is not \"the current non-ok state\" but\nspecifically the failed one.",
+																					Description: "FirstSeenTime is when an ONGOING FAILED state was first observed. It is stable across\npasses for as long as the failure persists, and is cleared the moment the state is\nanything else. Refreshing it every pass would make \"how long has this been down?\"\nunanswerable, which is the question the field exists to answer.\nNil for both other states, Unverified included: a state that reached no verdict has no\noutage for a clock to be the start of, so this is not \"the current non-OK state\" but\nspecifically the failed one.",
 																					Type:        "string",
 																					Format:      "date-time",
 																					Nullable:    true,
 																				},
 																				"reason": {
-																					Description: "Reason carries the checker's own words, verbatim — including the attribute values it\nread. A non-ok state without a reason leaves the operator's actual question (\"why?\")\nunanswerable from the record alone.",
+																					Description: "Reason carries the checker's own words, verbatim — including the attribute values it\nread. A state other than OK without a reason leaves the operator's question (\"why?\")\nunanswerable from the record alone.",
 																					Type:        "string",
 																				},
 																				"state": {
 																					Description: "State is the verification outcome.",
 																					Type:        "string",
+																					Enum: []v1.JSON{
+																						{
+																							Raw: []byte(`"OK"`),
+																						},
+																						{
+																							Raw: []byte(`"Unverified"`),
+																						},
+																						{
+																							Raw: []byte(`"Failed"`),
+																						},
+																					},
 																				},
 																			},
 																			Nullable: true,
@@ -4567,10 +4589,10 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													Type:        "string",
 													Enum: []v1.JSON{
 														{
-															Raw: []byte(`"vllm"`),
+															Raw: []byte(`"vLLM"`),
 														},
 														{
-															Raw: []byte(`"sglang"`),
+															Raw: []byte(`"SGLang"`),
 														},
 													},
 												},
@@ -4590,14 +4612,14 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											},
 											Properties: map[string]v1.JSONSchemaProps{
 												"connector": {
-													Description: "Connector names the connector implementation this deployment is configured for. The value is\nan identity the deployment carries, not a setting the operator derives: \"mooncake\" says which\nconnector this is, and nothing reads the field to produce the configuration. There is no\n\"none\" — synthesizing nothing is reachable through a full command replacement, which also\nmarks the role unmanaged and moves CacheAttached to Unknown.\nTHE KV TRANSFER CONVERGES ON MOONCAKE, and that is why the enum has one value. Mooncake is the\nimplementation that supports heterogeneous prefill and decode, which is the shape this API\nexists to express. NIXL and ROCm NIXL stay reachable; nothing here has run them, and no claim\nthat they would work is made by this field's existence.\nTHE RESERVATION IS IN THE SCHEMA AND IN NOTHING ELSE. This field is read by no code: binding\nresolution passes a domain, an endpoint and a protocol; connector synthesis takes an engine, a\nkind, a manufacturer and that connection; and the renderer dispatches on the ENGINE. So the\ndiscriminator is reserved for an API that names a second one, and the seam it would dispatch\nthrough does not exist yet.\nWIDENING THE ENUM IS FOUR THINGS, NOT ONE: one sub-package under pkg/worker/kvcache, one entry\nhere, one renderer, AND the wiring that threads this value to a dispatch point. That last item\nis what the reservation does not already cover, and it is the reason a second implementation is\na piece of work rather than a constant.\nA WIDENED ENUM REACHES NEW DEPLOYMENTS ONLY. This field answers which deployment this is, so it\nis frozen after creation: an existing deployment is recreated onto a second connector rather\nthan edited onto one. That is stated here because \"widening the enum\" otherwise reads as a\nmigration path for deployments that are already running.",
+													Description: "Connector names the connector implementation this deployment is configured for. The value is\nan identity the deployment carries, not a setting the operator derives: \"Mooncake\" says which\nconnector this is, and nothing reads the field to produce the configuration. There is no\n\"none\" — synthesizing nothing is reachable through a full command replacement, which also\nmarks the role unmanaged and moves CacheAttached to Unknown.\nTHE KV TRANSFER CONVERGES ON MOONCAKE, and that is why the enum has one value. Mooncake is the\nimplementation that supports heterogeneous prefill and decode, which is the shape this API\nexists to express. NIXL and ROCm NIXL stay reachable; nothing here has run them, and no claim\nthat they would work is made by this field's existence.\nTHE RESERVATION IS IN THE SCHEMA AND IN NOTHING ELSE. This field is read by no code: binding\nresolution passes a domain, an endpoint and a protocol; connector synthesis takes an engine, a\nkind, a manufacturer and that connection; and the renderer dispatches on the ENGINE. So the\ndiscriminator is reserved for an API that names a second one, and the seam it would dispatch\nthrough does not exist yet.\nWIDENING THE ENUM IS FOUR THINGS, NOT ONE: one sub-package under pkg/worker/kvcache, one entry\nhere, one renderer, AND the wiring that threads this value to a dispatch point. That last item\nis what the reservation does not already cover, and it is the reason a second implementation is\na piece of work rather than a constant.\nA WIDENED ENUM REACHES NEW DEPLOYMENTS ONLY. This field answers which deployment this is, so it\nis frozen after creation: an existing deployment is recreated onto a second connector rather\nthan edited onto one. That is stated here because \"widening the enum\" otherwise reads as a\nmigration path for deployments that are already running.",
 													Type:        "string",
 													Default: &v1.JSON{
-														Raw: []byte(`"mooncake"`),
+														Raw: []byte(`"Mooncake"`),
 													},
 													Enum: []v1.JSON{
 														{
-															Raw: []byte(`"mooncake"`),
+															Raw: []byte(`"Mooncake"`),
 														},
 													},
 												},
@@ -4622,9 +4644,28 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"protocol": {
-													Description: "Protocol is the transport both ends of the leg are told to use, in the mooncake\nconfiguration's own spelling, e.g. \"tcp\" or \"rdma\".\n- IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\nend, so a per-role field could only express a contradiction -- two ends naming different\nvalues for one connection, which fails at transfer time rather than at admission.\n- THE VALUE IS DECLARED, NOT DISCOVERED, AND IT IS NOT GATED. The accepted set is a\nproperty of the mooncake build inside the engine's own image, which this operator\nneither ships nor can inspect: a HIP-compiled build makes \"hip\" a working point-to-point\ntransport, and an enum here would hard-code one image's compile set onto another image's\nconnector. vLLM receives the value verbatim, and a value the engine build rejects\nraises at engine startup, in the container that owns the fact.\n- UNSET RENDERS \"tcp\", the transport every mooncake build carries. The default lives in\nthe renderer rather than in this schema, so the stored object holds exactly what was\nasked.\n- \"tcp\" IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport\nfrom the host's hardware and does not read the requested one. On vLLM the leg also gets\nMC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's\ntransfer backend: \"tcp\" renders \"mooncake_tcp\", any other value renders \"mooncake\", and\nthe value itself is not passed through. Neither pin renders while the deployment's store\nruns a transport other than tcp, because it is process-wide and would leave the store\nclient without its fabric; the leg then keeps the engine's own selection.\n- IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted\nrouter-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind\n\"vllm-router\" -- the value is accepted and renders nothing. An Ascend pair behind\n\"llm-d-router\" renders the leg but not this value: that engine's transfer leg hardcodes\nits transport, so the declared protocol has no key to land in. Each silence is stated\nhere because an accepted field that quietly does nothing is a promise broken quietly.\n- IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\nargv, so a change rebuilds every Kueue pod group of the deployment. With roles split\nacross InstanceTypes the groups rebuild independently, and a mixed-protocol window\nbetween a prefiller and a decoder exists until both converge -- the same window an\nengine version edit already opens.",
+													Description: "Protocol is the transport both ends of the direct leg are told to use. It uses the\nKVCacheBackend transport values and their Mooncake mapping, except MUSA and MACA:\nthose are intra-node IPC transports, while prefill and decode may run on different nodes.\n- IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either\nend, so a per-role field could only express a contradiction -- two ends naming different\nvalues for one connection, which fails at transfer time rather than at admission.\n- THE VALUE IS DECLARED, NOT DISCOVERED. The enum names supported transport families;\nthe engine image must still carry the matching Mooncake build. CANN renders as\n\"ascend\" and ROCM as \"hip\", using the same mapping as KVCacheBackend members.\n- UNSET RENDERS \"tcp\", the transport every Mooncake build carries. The default lives in\nthe renderer rather than in this schema, so the stored object holds exactly what was\nasked.\n- TCP IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport\nfrom the host's hardware and does not read the requested one. On vLLM the leg also gets\nMC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's\ntransfer backend: TCP renders \"mooncake_tcp\", any other value renders \"mooncake\", and\nthe value itself is not passed through. Neither pin renders while the deployment's store\nruns a transport other than tcp, because it is process-wide and would leave the store\nclient without its fabric; the leg then keeps the engine's own selection.\n- IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted\nrouter-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind\n\"vllm-router\" -- the value is accepted and renders nothing. An Ascend pair behind\n\"llm-d-router\" renders the leg but not this value: that engine's transfer leg hardcodes\nits transport, so the declared protocol has no key to land in. Each silence is stated\nhere because an accepted field that quietly does nothing is a promise broken quietly.\n- IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'\nargv, so a change rebuilds every Kueue pod group of the deployment. With roles split\nacross InstanceTypes the groups rebuild independently, and a mixed-protocol window\nbetween a prefiller and a decoder exists until both converge -- the same window an\nengine version edit already opens.",
 													Type:        "string",
-													MaxLength:   ptr.To[int64](64),
+													Enum: []v1.JSON{
+														{
+															Raw: []byte(`"Auto"`),
+														},
+														{
+															Raw: []byte(`"TCP"`),
+														},
+														{
+															Raw: []byte(`"RDMA"`),
+														},
+														{
+															Raw: []byte(`"EFA"`),
+														},
+														{
+															Raw: []byte(`"CANN"`),
+														},
+														{
+															Raw: []byte(`"ROCM"`),
+														},
+													},
 												},
 											},
 											Nullable: true,
@@ -4839,17 +4880,17 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name\nis free-form and identifies the PodSet, while this selects behavior, and a semantic reachable\nby typing a string is one typo away from silently changing. Two roles may share a kind and\ndiffer in name ONLY where that kind is Server, because a pair of servers is a set of equals and\ntwo prefillers are not: nothing that consumes these roles expresses a second prefiller, so a\ndeployment declaring one would render a role no reader of the rendered configuration could\nreach. It defaults to Server, the shape a deployment written before disaggregation existed has,\nso such a deployment renders exactly as it did.",
 															Type:        "string",
 															Default: &v1.JSON{
-																Raw: []byte(`"server"`),
+																Raw: []byte(`"Server"`),
 															},
 															Enum: []v1.JSON{
 																{
-																	Raw: []byte(`"server"`),
+																	Raw: []byte(`"Server"`),
 																},
 																{
-																	Raw: []byte(`"prefill"`),
+																	Raw: []byte(`"Prefill"`),
 																},
 																{
-																	Raw: []byte(`"decode"`),
+																	Raw: []byte(`"Decode"`),
 																},
 															},
 														},
@@ -5229,11 +5270,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													Type:        "string",
 												},
 												"delivery": {
-													Description: "Delivery is how the weights reach the engine: \"Pvc\", the claim mounted read-only at a fixed\npath; \"Engine\", the engine downloading the pinned commit itself; \"Node\", the node's\nmodel-manager plugin materializing the verified files and mounting them read-only at the same\nfixed path; or \"Image\", kubelet pulling the pinned OCI image into a read-only image volume.",
+													Description: "Delivery is how the weights reach the engine: \"PVC\", the claim mounted read-only at a fixed\npath; \"Engine\", the engine downloading the pinned commit itself; \"Node\", the node's\nmodel-manager plugin materializing the verified files and mounting them read-only at the same\nfixed path; or \"Image\", kubelet pulling the pinned OCI image into a read-only image volume.",
 													Type:        "string",
 													Enum: []v1.JSON{
 														{
-															Raw: []byte(`"Pvc"`),
+															Raw: []byte(`"PVC"`),
 														},
 														{
 															Raw: []byte(`"Engine"`),
@@ -5305,13 +5346,13 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Type:        "string",
 															Enum: []v1.JSON{
 																{
-																	Raw: []byte(`"server"`),
+																	Raw: []byte(`"Server"`),
 																},
 																{
-																	Raw: []byte(`"prefill"`),
+																	Raw: []byte(`"Prefill"`),
 																},
 																{
-																	Raw: []byte(`"decode"`),
+																	Raw: []byte(`"Decode"`),
 																},
 															},
 														},

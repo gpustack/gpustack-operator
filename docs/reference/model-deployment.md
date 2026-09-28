@@ -36,13 +36,13 @@ metadata:
 spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct      # served, never provisioned
-  engine:                                # vllm | sglang
-    name: vllm
+  engine:                                # vLLM | SGLang
+    name: vLLM
     version: "0.29.0"                    # free-form; you guarantee alignment
   kvCache:                               # OPTIONAL; omit it and no shared pool is attached
     poolRef:
       name: team-a-dram                  # a KVCachePoolBinding IN THIS NAMESPACE
-    connector: mooncake                  # the only value; defaulted
+    connector: Mooncake                  # the only value; defaulted
   roles:
     - name: server
       replicas: 4
@@ -155,13 +155,13 @@ admission check this operator runs, which holds every group until the whole set 
 ```yaml
   roles:
     - name: prefill
-      kind: prefill                        # server (default) | prefill | decode
+      kind: Prefill                        # Server (default) | Prefill | Decode
       replicas: 2
       instanceType: gpustack-nvidia-h20-linux-amd64
       resources:
         accelerator: 2
     - name: decode
-      kind: decode
+      kind: Decode
       replicas: 2
       instanceType: gpustack-nvidia-h20-linux-amd64   # may differ; see the prefill and decode page
       resources:
@@ -178,7 +178,7 @@ admission check this operator runs, which holds every group until the whole set 
 They are separate because a semantic reachable by typing a free-form string is a semantic one typo away
 from silently changing.
 
-Two roles may share a `kind` and differ in `name` only where that `kind` is `server`: a pair of
+Two roles may share a `kind` and differ in `name` only where that `kind` is `Server`: a pair of
 servers is a set of equals, whereas nothing consuming these roles expresses a second prefiller, so a
 deployment declaring one would render a role nothing downstream can reach.
 
@@ -199,7 +199,7 @@ a role's own address.
 | annotation `kueue.x-k8s.io/pod-group-serving` | `"true"` | an inference deployment never finishes; without it Kueue reclaims the quota of a replica that exited |
 | label `kueue.x-k8s.io/queue-name` | the `status.entrance` **published by** the role's InstanceType | unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type rather than re-derived from its name, so this operator and the reconcile that creates the LocalQueue cannot disagree about the queue |
 | label `app.kubernetes.io/component` | the role's `name` | unchanged; what a `Service` selects on and what `status.roles[]` is attributed by |
-| label `modeldeployment.gpustack.ai/role-kind` | the role's **effective** `kind`, so `server` when the field is unset | what something in front of the replicas selects on to tell a prefiller from a decoder. It is the resolved value rather than the field, because a selector matching the empty string would miss every replica of the default shape. Rendered for every deployment, a lone `server` included, so "no prefiller is running" and "this deployment does not label its roles" are different answers |
+| label `modeldeployment.gpustack.ai/role-kind` | the role's effective kind mapped to the router's spelling, so `server` when the API field is unset | what something in front of the replicas selects on to tell a prefiller from a decoder. It is the resolved value rather than the field, because a selector matching the empty string would miss every replica of the default shape. Rendered for every deployment, a lone `server` included, so "no prefiller is running" and "this deployment does not label its roles" are different answers |
 | annotation `kueue.x-k8s.io/podset-required-topology` | `roles[].topology.requiredLevel`, when non-empty | asks Kueue to fit this replica's whole PodSet in one domain at the named hierarchy level |
 | `spec.nodeSelector` | no topology value is added | Kueue selects the concrete domain through the flavor's Topology and writes its assignment; the deployment requests a level, not a region, zone, rack, or host value |
 
@@ -331,11 +331,11 @@ Ownership is per **(engine, key)**: a key one engine owns is an ordinary user ar
 
 | Engine | Owned arguments | Owned environment |
 |---|---|---|
-| `vllm` | `--kv-transfer-config`, `--kv-events-config` — each also in every spelling vLLM reads as it: a unique prefix (`--kv-transfer-conf`), underscores (`--kv_transfer_config`), or a dotted member (`--kv-transfer-config.kv_role`), which vLLM merges into a whole document that replaces the operator's | `MOONCAKE_CONFIG_PATH`, `VLLM_MOONCAKE_BOOTSTRAP_PORT` |
-| `sglang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config`, `--disaggregation-mode`, `--disaggregation-transfer-backend`, `--disaggregation-bootstrap-port` — each also as a unique prefix (`--disaggregation-mo`) | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
+| `vLLM` | `--kv-transfer-config`, `--kv-events-config` — each also in every spelling vLLM reads as it: a unique prefix (`--kv-transfer-conf`), underscores (`--kv_transfer_config`), or a dotted member (`--kv-transfer-config.kv_role`), which vLLM merges into a whole document that replaces the operator's | `MOONCAKE_CONFIG_PATH`, `VLLM_MOONCAKE_BOOTSTRAP_PORT` |
+| `SGLang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config`, `--disaggregation-mode`, `--disaggregation-transfer-backend`, `--disaggregation-bootstrap-port` — each also as a unique prefix (`--disaggregation-mo`) | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
 
-One `vllm` row covers **both backends**. The owned keys follow the engine while only the connector
-name follows the accelerator backend, so an Ascend pool and an NVIDIA pool running `vllm` own exactly
+One `vLLM` row covers **both backends**. The owned keys follow the engine while only the connector
+name follows the accelerator backend, so an Ascend pool and an NVIDIA pool running `vLLM` own exactly
 the same keys and differ only in the connector the operator names.
 
 **Owned** means the operator refuses a user-supplied duplicate, because two values for one connector
@@ -618,13 +618,13 @@ depends on the `InstanceType` the role names.
 | a whole-accelerator count over the type's whole-accelerator capacity | the capacity itself, not only that the request was too large, so the next attempt is not a guess. The bound is the pool's total, not what is free, so a deployment submitted while every accelerator is held is admitted and waits in its queue; one above the largest node but within the total is admitted and stays queued — see [Accelerator Requests](../accelerator-requests.md#limitations) |
 | a negative or fractional `resources.interface`, or one with no effective RDMA/EFA leg | the role's interface field and the protocol that prevents allocation; mixed backend groups and mixed fabric legs are rejected |
 | an explicit `accelerator: 0` on an acceleratable `InstanceType` shared by another role | the accelerator field, the shared type, and two recommended remedies: request at least one accelerator or move the CPU-only role to a non-acceleratable type |
-| a `prefill` and a `decode` role both requesting a **logical slice** from types that draw on the same accelerator group | both roles and the slice field. Whole cards and partition profiles are accepted — including on one card, because partitions are isolated by the device |
+| a `Prefill` and a `Decode` role both requesting a **logical slice** from types that draw on the same accelerator group | both roles and the slice field. Whole cards and partition profiles are accepted — including on one card, because partitions are isolated by the device |
 | a role whose `<deployment>-<role>` is not a DNS-1035 label | the combined **Service** name, which is what the pair becomes; over 63 characters or carrying a dot from a subdomain-shaped deployment name. A role the object **already had** is exempt, so a rule added later cannot strand a stored object |
 | two roles whose Services would be named the same | the shared name and both claimants — a role named `x-r0` collides with a role `x` of several members, whose instance 0 is published behind `<deployment>-x-r0`. Checked on every edit, since `replicas` decides how many instance Services a role derives |
 | an invalid topology `requiredLevel` | the field path and the [topology placement](#topology-placement) field rule |
 | a `replicas` over 1024, or a `size` over 64 | the bound — refused by the **schema**. It limits how many Pods one pass renders before it writes any of them, so it is this operator's own ceiling rather than a Kubernetes one |
-| `kind: server` beside any other kind | that a server serves whole requests by itself, so the combination describes no arrangement |
-| a `kind` the engine has no rendering term for | the engine and the kind. No engine this API accepts is refused by this rule today: vLLM and SGLang both render `server`, `prefill` and `decode` |
+| `kind: Server` beside any other kind | that a server serves whole requests by itself, so the combination describes no arrangement |
+| a `kind` the engine has no rendering term for | the engine and the kind. No engine this API accepts is refused by this rule today: vLLM and SGLang both render `Server`, `Prefill` and `Decode` |
 | an owned key in `extraArgs` | the key, the engine, and `roles[].command` as the way to own it |
 | an owned name in `env` | the same three |
 | `--kv-cache-dtype` in `extraArgs` while `spec.kvCache` is set | that it carries the Binding's `dtype`, and a Binding declaring another dtype or `roles[].command` as the ways out — see [What the operator owns](#what-the-operator-owns) |

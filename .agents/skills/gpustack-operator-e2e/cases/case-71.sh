@@ -87,7 +87,7 @@ metadata:
   namespace: ${NS}
 spec:
   engine:
-    name: vllm
+    name: vLLM
     version: "0.11.0"
   model:
     name: Qwen/Qwen2.5-0.5B-Instruct
@@ -98,12 +98,12 @@ spec:
     name: llm-d-router
   roles:
   - name: prefill
-    kind: prefill
+    kind: Prefill
     instanceType: ${IT}
     replicas: 1
     image: ${IMAGE}
   - name: decode
-    kind: decode
+    kind: Decode
     instanceType: ${IT}
     replicas: 1
     image: ${IMAGE}

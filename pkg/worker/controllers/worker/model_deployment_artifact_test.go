@@ -18,7 +18,7 @@ const testArtifactRevision = "0123456789abcdef0123456789abcdef01234567"
 
 func testPvcArtifactRender() *ModelDeploymentArtifactRender {
 	return &ModelDeploymentArtifactRender{
-		Delivery: workercore.ModelDeploymentModelDeliveryPvc, ClaimName: "models", Path: "qwen/72b",
+		Delivery: workercore.ModelDeploymentModelDeliveryPVC, ClaimName: "models", Path: "qwen/72b",
 	}
 }
 

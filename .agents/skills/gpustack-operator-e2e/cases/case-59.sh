@@ -214,7 +214,7 @@ else
   LOG_V="/tmp/kvc-inject-59-vllm-${SFX}.log"
   # No `if !` around the call: the negation would be what $? then reports, collapsing run_in's three
   # outcomes into two and losing exactly the one that had to be told apart.
-  if run_in vllm-probe "$E2E_VLLM_IMAGE" vllm '
+  if run_in vllm-probe "$E2E_VLLM_IMAGE" vLLM '
 import json, os, sys
 # The import is a step this case OBSERVES, not a precondition it assumes. The dataclass shares a
 # worker-side module with transfer-thread and lookup-server scaffolding, so importing it can pull up
@@ -305,7 +305,7 @@ is the half where a wrong answer is silent: the file branch would return localho
 else
   LOG_S="/tmp/kvc-inject-59-sglang-${SFX}.log"
   # As above: no `if !`, so run_in's three outcomes survive into $?.
-  if run_in sglang-probe "$E2E_SGLANG_IMAGE" sglang '
+  if run_in sglang-probe "$E2E_SGLANG_IMAGE" SGLang '
 import io, logging, sys
 from sglang.srt.mem_cache.storage.mooncake_store.mooncake_store import MooncakeBaseStore
 from sglang.srt import environ as envs

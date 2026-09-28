@@ -288,7 +288,7 @@ spec:
   model:
     name: case68/model
   engine:
-    name: vllm
+    name: vLLM
     version: "0.29.0"
   kvCache:
     poolRef:
@@ -301,7 +301,7 @@ YAML
 one_role() {
   cat <<YAML
     - name: alpha
-      kind: server
+      kind: Server
       replicas: 1
       instanceType: $IT
       image: $IMAGE
@@ -312,13 +312,13 @@ YAML
 two_roles_one_type() {
   cat <<YAML
     - name: alpha
-      kind: server
+      kind: Server
       replicas: 1
       instanceType: $IT
       image: $IMAGE
       command: ["/pause"]
     - name: beta
-      kind: server
+      kind: Server
       replicas: 1
       instanceType: $IT
       image: $IMAGE
@@ -329,13 +329,13 @@ YAML
 two_roles_two_types() {
   cat <<YAML
     - name: alpha
-      kind: server
+      kind: Server
       replicas: 1
       instanceType: $IT
       image: $IMAGE
       command: ["/pause"]
     - name: beta
-      kind: server
+      kind: Server
       replicas: 1
       instanceType: $IT_HELD
       # NO resources block. The type is not acceleratable, so nothing defaults a card count here --

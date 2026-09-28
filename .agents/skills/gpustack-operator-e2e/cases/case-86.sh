@@ -198,13 +198,13 @@ metadata:
   namespace: ${NS}
 spec:
   engine:
-    name: vllm
+    name: vLLM
     version: "0.23.0"
   model:
     name: ${MODEL}
   roles:
   - name: prefill
-    kind: prefill
+    kind: Prefill
     instanceType: ${IT}
     replicas: 1
     size: 1
@@ -223,7 +223,7 @@ spec:
       mountPath: ${MODEL}
       readOnly: true
   - name: decode
-    kind: decode
+    kind: Decode
     instanceType: ${IT}
     replicas: 1
     size: 1

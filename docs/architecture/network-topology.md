@@ -67,9 +67,9 @@ Each RDMA device's ports are read for their transport state and their physical l
 
 | state | meaning | does this interface count as usable? |
 |---|---|---|
-| `ok` | some port is active with the physical link up | yes |
-| `unverified` | the check ran and could not establish an answer | yes, and the reason says why |
-| `failed` | every port was read and none carried the link | **no** |
+| `OK` | some port is active with the physical link up | yes |
+| `Unverified` | the check ran and could not establish an answer | yes, and the reason says why |
+| `Failed` | every port was read and none carried the link | **no** |
 
 A port's state is read as the whole enum name, not as a substring: `ACTIVE_DEFER` is a port that
 lost its link and is not carrying traffic, so accepting it as `ACTIVE` would publish the label over
@@ -79,13 +79,13 @@ a link nothing can use.
 usable, not when every one is.**
 
 An endpoint is every interface and every virtual function, and it is usable when its verdict is
-anything other than `failed` — falling back to whether a device is bound only when there is no
+anything other than `Failed` — falling back to whether a device is bound only when there is no
 verdict at all.
 
 So an explicit verdict outranks the `rdma` flag in both directions: an unreadable-tree record
-carries `rdma: false` with an `unverified` verdict and **is** usable, while a bound device whose
-verdict is `failed` is not. Only a node where every endpoint is unusable loses the key, which is
-stricter than "every bound interface reports `failed`".
+carries `rdma: false` with an `Unverified` verdict and **is** usable, while a bound device whose
+verdict is `Failed` is not. Only a node where every endpoint is unusable loses the key, which is
+stricter than "every bound interface reports `Failed`".
 
 A node with a broken NIC beside a working one keeps the label, because it can still serve an RDMA
 workload. Withholding there would let an unplugged second card take a working node out of
@@ -100,12 +100,12 @@ A VF is its own PCI function with its own address. What it shares with the paren
 bridge path**, which is what the distance is computed from — so inheriting the parent's `pciRootId`
 and `pciSwitches` claims nothing extra. Its NUMA node is its own, and is published as such.
 
-**`failed` is never reached from a file that could not be read.** One unreadable port beside several
-down ones leaves "all ports are down" unestablished, so that mixture is `unverified`. An inability
+**`Failed` is never reached from a file that could not be read.** One unreadable port beside several
+down ones leaves "all ports are down" unestablished, so that mixture is `Unverified`. An inability
 to ask must not read as an answer of no, because withholding the label removes the node from
 scheduling.
 
-A `failed` result carries the port values verbatim and **the time the failure was first seen**,
+A `Failed` result carries the port values verbatim and **the time the failure was first seen**,
 stable for as long as it persists so an operator can answer "how long has this been broken?". That
 time is merged from what is already recorded *before* the inventory is compared — taking the clock
 each pass would make the comparison never match and rewrite the object forever.
@@ -195,15 +195,15 @@ wrong branch.
 
 An endpoint with no bound RDMA device name is advertised in no mode at all: the name is what an
 allocation resolves to a character device, so an endpoint without one has nothing to hand over. A
-node whose RDMA tree exists but could not be read produces exactly that shape — an `unverified`
+node whose RDMA tree exists but could not be read produces exactly that shape — an `Unverified`
 record with no device — and advertises zero.
 
-The link verdict above gates health, not existence (`pkg/deviceplugin/rdma_server.go`): `ok`,
-`unverified` and no record at all advertise `Healthy`; `failed` advertises the endpoint's tokens
+The link verdict above gates health, not existence (`pkg/deviceplugin/rdma_server.go`): `OK`,
+`Unverified` and no record at all advertise `Healthy`; `Failed` advertises the endpoint's tokens
 `Unhealthy`. No verdict is not a verdict of failure — an endpoint reaches this gate only by carrying
-a bound device, so a missing link record is the `unverified` case arriving by a different route.
+a bound device, so a missing link record is the `Unverified` case arriving by a different route.
 
-**A `failed` endpoint keeps its tokens rather than dropping them.** The kubelet checkpoints the
+**A `Failed` endpoint keeps its tokens rather than dropping them.** The kubelet checkpoints the
 exact device IDs it offered a container, and withdrawing an advertised ID strands that checkpoint.
 The holder keeps its allocation while new Pods are granted none — and a container that restarts
 while the link is down cannot re-establish its allocation, because the checkpoint check requires

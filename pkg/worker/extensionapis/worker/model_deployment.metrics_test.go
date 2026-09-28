@@ -254,7 +254,7 @@ func metricsModelDeployment() *workercore.ModelDeployment {
 	return &workercore.ModelDeployment{
 		ObjectMeta: meta.ObjectMeta{Name: "chat", Namespace: "team", UID: types.UID("md-one")},
 		Spec: workercore.ModelDeploymentSpec{
-			Engine: workercore.ModelDeploymentEngine{Name: "vllm"},
+			Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM},
 			Roles:  []workercore.ModelDeploymentRole{{Name: "server"}},
 		},
 	}
@@ -639,7 +639,7 @@ func TestModelDeploymentMetricsHandler_PDTransferUsesKind(t *testing.T) {
 	host, port, err := net.SplitHostPort(u.Host)
 	require.NoError(t, err)
 	md := metricsModelDeployment()
-	md.Spec.Engine.Name = "sglang"
+	md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 	md.Spec.Roles = []workercore.ModelDeploymentRole{
 		{Name: "prompt", Kind: workercore.ModelDeploymentRoleKindPrefill},
 		{Name: "generation", Kind: workercore.ModelDeploymentRoleKindDecode},
@@ -881,7 +881,7 @@ func sglangPDHandler(t *testing.T) (*ModelDeploymentMetricsHandler, types.Namesp
 		return server
 	}
 	md := metricsModelDeployment()
-	md.Spec.Engine.Name = "sglang"
+	md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 	md.Spec.Roles = []workercore.ModelDeploymentRole{
 		{Name: "prompt", Kind: workercore.ModelDeploymentRoleKindPrefill},
 		{Name: "generation", Kind: workercore.ModelDeploymentRoleKindDecode},
@@ -950,7 +950,7 @@ func TestModelDeploymentMetricsHandler_SGLangTransferFailuresNeedTheirPair(t *te
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			md := metricsModelDeployment()
-			md.Spec.Engine.Name = "sglang"
+			md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 			md.Spec.Roles = []workercore.ModelDeploymentRole{
 				{Name: "prompt", Kind: workercore.ModelDeploymentRoleKindPrefill},
 				{Name: "generation", Kind: workercore.ModelDeploymentRoleKindDecode},
@@ -1117,7 +1117,7 @@ func TestModelDeploymentMetricsHandler_VLLMExternalStoreIsReadOnlyFromAStore(t *
 func metricsSGLangRoleWindow(t *testing.T, role string, args ...string) *worker.ModelDeploymentMetrics {
 	t.Helper()
 	md := metricsModelDeployment()
-	md.Spec.Engine.Name = "sglang"
+	md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 	if role != "server" {
 		md.Spec.Roles = []workercore.ModelDeploymentRole{
 			{Name: "prompt", Kind: workercore.ModelDeploymentRoleKindPrefill},
@@ -1444,7 +1444,9 @@ func TestModelDeploymentMetricsHandler_IdleServerHasNoNewSample(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			md := metricsModelDeployment()
-			md.Spec.Engine.Name = tc.engine
+			if tc.engine == "sglang" {
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+			}
 			first := metricsFixture(t, tc.fixture+"_first", tc.engine, "")
 			second := metricsFixture(t, tc.fixture+"_second", tc.engine, "")
 			if tc.change != nil {

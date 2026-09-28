@@ -324,6 +324,15 @@ var memberProtocols = map[string]string{
 	"MACA":             "maca",
 }
 
+// TransportProtocol maps a KVCacheBackend transport value to Mooncake's spelling. An empty
+// value resolves to Auto, which renders tcp; an unknown value returns empty.
+func TransportProtocol(protocol string) string {
+	if protocol == "" {
+		protocol = MemberProtocolAuto
+	}
+	return memberProtocols[protocol]
+}
+
 // memberProtocolIsHostFabric reports whether a RESOLVED protocol is one of the two that reach the
 // host's fabric: the ones that take hostNetwork, get the two capabilities and are granted a device.
 // It takes MemberProtocol's output, not the API's spelling.
@@ -395,17 +404,7 @@ func memberPodLabels(kvcb *workercore.KVCacheBackend, group int) map[string]stri
 // unrecognized value renders nothing rather than a guess: the schema enumerates this field, so an
 // empty result means the object never went through admission.
 func MemberProtocol(kvcb *workercore.KVCacheBackend) string {
-	protocol := kvcb.Spec.Transport.Protocol
-	if protocol == "" {
-		// The schema defaults this, so an object that came through an API server always names one.
-		// An object that did not — one a test builds, or one written before the containing object
-		// carried its own default — would otherwise render an EMPTY protocol, which is not a value
-		// the artifact knows: it looks its protocol up in a transport map, so an empty string
-		// reaches a lookup that finds nothing. Falling back to the same value the schema would have
-		// chosen keeps the two answers identical instead of nearly identical.
-		protocol = MemberProtocolAuto
-	}
-	return memberProtocols[protocol]
+	return TransportProtocol(kvcb.Spec.Transport.Protocol)
 }
 
 // MemberProtocolForGroup is the transport ONE member group resolves to, in the artifact's own
@@ -415,7 +414,7 @@ func MemberProtocol(kvcb *workercore.KVCacheBackend) string {
 // defaulting takes.
 func MemberProtocolForGroup(kvcb *workercore.KVCacheBackend, group workercore.KVCacheBackendMember) string {
 	if group.Transport != nil && group.Transport.Protocol != "" {
-		return memberProtocols[group.Transport.Protocol]
+		return TransportProtocol(group.Transport.Protocol)
 	}
 	return MemberProtocol(kvcb)
 }
