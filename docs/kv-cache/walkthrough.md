@@ -67,6 +67,11 @@ later. Naming a published upstream image here works until Step 4 and then does n
 `capacityPerMember` is charged to each member Pod's host memory request, so it is a claim on the node
 and not a hint. One member Pod runs per node the selector matches.
 
+`leader: {}` takes the field defaults, `multiTenancy` included, so this master keeps a per-tenant
+quota ledger and Steps 2 and 3 read against it. A backend pinned to a store image from before
+Mooncake 0.3.12 is the one exception and declares `multiTenancy: false` out loud — see
+[The project's own build variants](backend.md#the-projects-own-build-variants).
+
 Wait for it, and read what it actually says:
 
 ```console
@@ -111,18 +116,19 @@ workloads sharing a domain share cached blocks, so a domain that could be edited
 workload start reading blocks another tokenizer wrote. Pick it to match the model and engine
 settings the deployments in this namespace will run; a second, different model gets a second Binding.
 
-**`domain.name` is left out, so it is `default`.** The backend from Step 1 runs without
-multi-tenancy, so no tenant is forwarded to the engines and the name only records the registration.
-On a multi-tenant backend, name each domain; the name is the tenant id the engines are handed.
+**`domain.name` is left out, so it is `default`.** The backend from Step 1 runs with multi-tenancy
+— `leader.multiTenancy` defaults on — so `default` is the tenant id the engines are handed, the
+store's own tenant for a writer that names none. Name each domain once a second Binding shares the
+master; the name is what keeps the two apart.
 
-**A quota ceiling is not a reservation.** On a backend with `leader.multiTenancy: true` it is the
-most this namespace may hold at once, and going over it does not fail a write — see
+**A quota ceiling is not a reservation.** It is the most this namespace may hold at once, and going
+over it does not fail a write — see
 [What a full quota actually does](pool.md#what-a-full-quota-actually-does).
 
-**On the backend from Step 1 the ceiling is recorded but not enforced.** That leader runs without
-multi-tenancy, so the master holds no tenant ledger: the pool is admitted with a warning, the Binding
-reports `QuotaGranted=True` with reason `Unenforced` and no `EFFECTIVE` figure, and every write lands
-in the store's default tenant. Set `leader.multiTenancy: true` in Step 1 to have ceilings enforced.
+**The ceiling is enforced because the Step-1 leader carries its tenant ledger, which the default
+gave it.** A backend declared `leader.multiTenancy: false` holds no ledger instead: its pool is
+admitted with a warning, the Binding reports `QuotaGranted=True` with reason `Unenforced` and no
+`EFFECTIVE` figure, and every write lands in the store's default tenant.
 
 **A multi-tenant master refuses a tenant name absent from its ledger.** An engine that ignores the
 injected tenant then needs a second Binding whose domain is `default`, or that leaves `name` out — see

@@ -160,7 +160,7 @@ func KVCacheMasterSeparatesTenants(kvcb *workercore.KVCacheBackend, kvcp *worker
 		return false
 	}
 	if managed := kvcb.Spec.Connection.Managed; managed != nil {
-		return managed.Leader.MultiTenancy
+		return managed.Leader.MultiTenancyEnabled()
 	}
 	return true
 }
@@ -1086,7 +1086,7 @@ func (r *KVCachePoolReconciler) convergeTenantLedger(
 	// The declaration is exact for a managed backend — this operator renders the flag onto the
 	// leader's command line — so a managed master declared without multi-tenancy is never asked a
 	// question it can only refuse.
-	if managed := kvcb.Spec.Connection.Managed; managed != nil && !managed.Leader.MultiTenancy {
+	if managed := kvcb.Spec.Connection.Managed; managed != nil && !managed.Leader.MultiTenancyEnabled() {
 		r.reportTenantLedgerAbsent(holder)
 		metrics, scraped := r.observeAllocatableCapacity(ctx, admin, holder, true)
 		return kvCachePoolLedgerPass{converged: true, noLedger: true, metrics: metrics, scraped: scraped}
@@ -2035,7 +2035,7 @@ func (r *KVCachePoolReconciler) resolveKVCachePoolAdmin(
 	// rendered from the cluster alone, so asking would only make the pool's deletion depend on a
 	// leader that is running — and a leader that never came up would then hold the pool, which holds
 	// the backend, with nothing left able to move.
-	if managed := kvcb.Spec.Connection.Managed; managed != nil && !managed.Leader.MultiTenancy {
+	if managed := kvcb.Spec.Connection.Managed; managed != nil && !managed.Leader.MultiTenancyEnabled() {
 		logger.V(2).Info("tearing down a pool on a backend declared without a tenant ledger")
 		return nil, kvcb, false, nil
 	}

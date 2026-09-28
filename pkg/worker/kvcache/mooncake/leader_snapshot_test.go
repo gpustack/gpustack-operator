@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
@@ -27,7 +28,7 @@ func TestRenderLeader_RendersNoSnapshot(t *testing.T) {
 			kvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		})},
 		{"an elected leader under multi-tenancy", haBackend(func(kvcb *workercore.KVCacheBackend) {
-			kvcb.Spec.Connection.Managed.Leader.MultiTenancy = true
+			kvcb.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(true)
 		})},
 	}
 

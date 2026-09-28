@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -355,7 +356,7 @@ func newReconcileBackend(name, admin string) *workercore.KVCacheBackend {
 // backend whose leader this operator starts without the multi-tenancy flag.
 func newManagedSingleTenantReconcileBackend(name, admin string) *workercore.KVCacheBackend {
 	kvcb := newManagedReconcileBackend(name, admin)
-	kvcb.Spec.Connection.Managed.Leader.MultiTenancy = false
+	kvcb.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(false)
 	return kvcb
 }
 

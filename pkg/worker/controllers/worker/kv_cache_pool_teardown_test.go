@@ -1155,7 +1155,7 @@ func newManagedReconcileBackend(name, admin string) *workercore.KVCacheBackend {
 				Managed: &workercore.KVCacheBackendManaged{
 					Leader: workercore.KVCacheBackendLeader{
 						Replicas:     ptr.To[int32](1),
-						MultiTenancy: true,
+						MultiTenancy: ptr.To(true),
 					},
 					Members: []workercore.KVCacheBackendMember{{
 						NodeSelector:      map[string]string{"kvcache-dram": "true"},
@@ -1211,7 +1211,7 @@ func TestKVCachePoolTeardown_MultiTenancyWithdrawnMidFlightStillDeletesBothObjec
 	// written here is the object an operator ALREADY has — the state the refusal cannot reach back
 	// into — and the master answers its ledger accordingly.
 	live := readBackend(t, cli, "mooncake-dram")
-	live.Spec.Connection.Managed.Leader.MultiTenancy = false
+	live.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(false)
 	require.NoError(t, cli.Update(ctx, live))
 	master.refuse(409, `{"success":false,"error_code":-1011,"error_message":"UNAVAILABLE_IN_CURRENT_MODE"}`)
 

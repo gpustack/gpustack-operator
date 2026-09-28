@@ -154,7 +154,7 @@ func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 	// the switch alone is a process that does not start. -tenant_quota_connector_type stays absent
 	// under the rule above: "file" is already its default, and the workload provides no other kind
 	// of source.
-	if leader.MultiTenancy {
+	if leader.MultiTenancyEnabled() {
 		flags = append(flags,
 			"-enable_multi_tenants=true",
 			"-tenant_quota_connector_uri="+QuotaPolicyFilePath)

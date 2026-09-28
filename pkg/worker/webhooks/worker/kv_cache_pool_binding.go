@@ -468,7 +468,7 @@ func (r *KVCachePoolBindingWebhook) masterSeparatesDomains(
 		}
 	}
 	if managed := kvcb.Spec.Connection.Managed; managed != nil {
-		return managed.Leader.MultiTenancy, nil
+		return managed.Leader.MultiTenancyEnabled(), nil
 	}
 
 	return true, nil

@@ -25,7 +25,9 @@ func TestRenderLeaderFlags(t *testing.T) {
 		want   []string
 	}{
 		{
-			name: "the canonical leader, as admission leaves it",
+			// The field is unset here on purpose: the schema defaults it on, and an unset field
+			// renders as that default, so this is the case that pins nil to mean the ledger.
+			name: "an unset multi-tenancy renders the ledger the schema defaults on",
 			leader: workercore.KVCacheBackendLeader{
 				Replicas:           ptr.To[int32](1),
 				AllocationStrategy: "FreeRatioFirst",
@@ -35,12 +37,15 @@ func TestRenderLeaderFlags(t *testing.T) {
 				"-metrics_port=9003",
 				"-default_kv_lease_ttl=5m",
 				"-allocation_strategy=free_ratio_first",
+				"-enable_multi_tenants=true",
+				"-tenant_quota_connector_uri=/var/lib/mooncake/tenant-quota-policy.yaml",
 			},
 		},
 		{
 			name: "the other strategy maps to the artifact's own spelling",
 			leader: workercore.KVCacheBackendLeader{
 				AllocationStrategy: "Random",
+				MultiTenancy:       ptr.To(false),
 			},
 			want: []string{
 				"-rpc_port=50051",
@@ -51,7 +56,7 @@ func TestRenderLeaderFlags(t *testing.T) {
 		},
 		{
 			name:   "an unset strategy renders no flag rather than a guess",
-			leader: workercore.KVCacheBackendLeader{},
+			leader: workercore.KVCacheBackendLeader{MultiTenancy: ptr.To(false)},
 			want: []string{
 				"-rpc_port=50051",
 				"-metrics_port=9003",
@@ -67,7 +72,7 @@ func TestRenderLeaderFlags(t *testing.T) {
 			leader: workercore.KVCacheBackendLeader{
 				Replicas:           ptr.To[int32](1),
 				AllocationStrategy: "FreeRatioFirst",
-				MultiTenancy:       true,
+				MultiTenancy:       ptr.To(true),
 			},
 			want: []string{
 				"-rpc_port=50051",
@@ -79,13 +84,14 @@ func TestRenderLeaderFlags(t *testing.T) {
 			},
 		},
 		{
-			// Both flags are absent rather than rendered false and empty, so a backend nobody asked
-			// to be multi-tenant runs the command line it ran before this field existed.
+			// Both flags are absent rather than rendered false and empty, so a backend that asks for
+			// no ledger — the explicit false an older store image needs — runs the command line it
+			// ran before this field existed.
 			name: "multi-tenancy off renders nothing at all",
 			leader: workercore.KVCacheBackendLeader{
 				Replicas:           ptr.To[int32](1),
 				AllocationStrategy: "FreeRatioFirst",
-				MultiTenancy:       false,
+				MultiTenancy:       ptr.To(false),
 			},
 			want: []string{
 				"-rpc_port=50051",
@@ -104,6 +110,7 @@ func TestRenderLeaderFlags(t *testing.T) {
 			name: "extraArgs come last, in the order written",
 			leader: workercore.KVCacheBackendLeader{
 				AllocationStrategy: "FreeRatioFirst",
+				MultiTenancy:       ptr.To(false),
 				ExtraArgs: []string{
 					"-offload_cap_ratio=0.5",
 					"-client_ttl=30",
@@ -127,6 +134,7 @@ func TestRenderLeaderFlags(t *testing.T) {
 			name: "a one-token boolean entry renders as itself",
 			leader: workercore.KVCacheBackendLeader{
 				AllocationStrategy: "FreeRatioFirst",
+				MultiTenancy:       ptr.To(false),
 				ExtraArgs:          []string{"-client_verbose_logging"},
 			},
 			want: []string{
@@ -196,6 +204,7 @@ func TestRenderLeaderFlags_HighAvailability(t *testing.T) {
 	kvcb := leaderBackend(workercore.KVCacheBackendLeader{
 		Replicas:           ptr.To[int32](3),
 		AllocationStrategy: "FreeRatioFirst",
+		MultiTenancy:       ptr.To(false),
 		HighAvailability:   &workercore.KVCacheBackendLeaderHighAvailability{},
 	})
 

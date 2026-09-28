@@ -339,8 +339,19 @@ type KVCacheBackendLeader struct {
 	// domain that belongs to whoever typed it. The store's global -quota_bytes flag stays in
 	// extraArgs for the converse reason: no other API needs to interpret it.
 	//
-	// Unset and false both mean no ledger, and unset renders NO flag rather than an explicit false.
-	MultiTenancy bool `json:"multiTenancy,omitempty" protobuf:"varint,4,opt,name=multiTenancy"`
+	// IT DEFAULTS TO TRUE, because the ledger is what makes the rest of this API mean what it says:
+	// without it a KVCachePoolBinding's ceiling is recorded but not enforced, and a master serves one
+	// reuse domain only, so a second Binding on it is refused. Mooncake has taken the switch since
+	// 0.3.12, and the default store image is on 0.3.13.post1.
+	//
+	// OMITTING THIS KEY AND WRITING `multiTenancy: false` ARE DIFFERENT — the first takes the
+	// default, the second declines the ledger: only the explicit false renders no switch. A store
+	// image older than Mooncake 0.3.12 does not recognize the switch and its master exits at
+	// startup, so a backend on such an image, including the 0.3.10.post2 variants this project
+	// also publishes, sets false here. Read it through KVCacheBackendLeader.MultiTenancyEnabled.
+	//
+	// +k8s:validation:default=true
+	MultiTenancy *bool `json:"multiTenancy,omitempty" protobuf:"varint,4,opt,name=multiTenancy"`
 
 	// ExtraArgs passes flags this API does not enumerate straight through to the leader, after
 	// the derived ones. Each entry is one flag token of its own, "-flag" or "-flag=value", and the
@@ -373,6 +384,13 @@ type KVCacheBackendLeader struct {
 	// +listType=map
 	// +listMapKey=name
 	ExtraEnv []InstanceEnvVar `json:"extraEnv,omitempty" protobuf:"bytes,6,rep,name=extraEnv"`
+}
+
+// MultiTenancyEnabled reports whether the leader runs with its tenant ledger. An unset field reads
+// as the schema default, true, so an object that never passed the API server, such as one built
+// in a test or by a fake client, answers the same as one that did.
+func (in KVCacheBackendLeader) MultiTenancyEnabled() bool {
+	return in.MultiTenancy == nil || *in.MultiTenancy
 }
 
 // KVCacheBackendLeaderHighAvailability turns leader election on, and carries how members find the

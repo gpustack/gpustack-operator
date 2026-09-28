@@ -1194,8 +1194,8 @@ func TestKVCacheBackendWebhook_MultiTenancyCannotBeWithdrawnFromAClaimedBackend(
 			if tc.external {
 				oldKvcb.Spec, newKvcb.Spec = newExternalKVCacheBackendSpec(), newExternalKVCacheBackendSpec()
 			} else {
-				oldKvcb.Spec.Connection.Managed.Leader.MultiTenancy = tc.was
-				newKvcb.Spec.Connection.Managed.Leader.MultiTenancy = tc.now
+				oldKvcb.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(tc.was)
+				newKvcb.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(tc.now)
 			}
 			// On BOTH, because status is a subresource: an update to the spec carries whatever status
 			// the API server already holds, so a fixture that put the claim on only one of them would
