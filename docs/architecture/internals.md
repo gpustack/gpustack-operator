@@ -29,7 +29,7 @@
   accelerators, reports a `NodeFeature` + `Devices` CR, and runs the device-plugin allocator.
 - **`model-manager`** (alias `mm`) is a CSI node plugin on every node, not tied to a manufacturer:
   it materializes and mounts Hugging Face weights and writes only its own node's `NodeModelStore`
-  status ([Node Model Store Reference](../reference/node-model-store.md)).
+  status ([Node Model Store](../model-store/node-store.md)).
 
 ## Worker startup order matters
 

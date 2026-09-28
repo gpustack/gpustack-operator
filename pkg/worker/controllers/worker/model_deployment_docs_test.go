@@ -16,7 +16,7 @@ import (
 //
 // Relative to this package, and checked as a whole line rather than by heading, so moving the table
 // inside the page is free and moving the page is not.
-const _ModelDeploymentDocsPath = "../../../../docs/reference/model-deployment.md"
+const _ModelDeploymentDocsPath = "../../../../docs/model-deployment/deployment.md"
 
 // TestModelDeploymentOwnedKeysDocs pins the owned-key table on the reference page to the catalog the
 // code actually enforces.

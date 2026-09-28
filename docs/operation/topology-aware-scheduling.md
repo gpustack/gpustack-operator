@@ -234,7 +234,7 @@ spec:
 
 The value is a label key, not `region`, `zone`, or a concrete zone name. Valid examples include
 `topology.kubernetes.io/zone`, `topology.gpustack.ai/rack`, and a selected Topograph tier. Omit the
-field for unconstrained TAS placement; the [field contract](../reference/model-deployment.md#topology-placement)
+field for unconstrained TAS placement; the [field contract](../model-deployment/deployment.md#topology-placement)
 defines the implicit hostname level.
 
 Changing or removing the field participates in the existing render hash and replaces only affected
@@ -340,8 +340,8 @@ before leaving the cluster running. The test does not prove an upgrade of previo
 ---
 
 **See also** — [Topology-Aware Scheduling](../architecture/topology-aware-scheduling.md) (mechanism
-and boundaries) · [Model Deployment Reference](../reference/model-deployment.md) (field contract) ·
+and boundaries) · [Model Deployment](../model-deployment/deployment.md) (field contract) ·
 [Installation Modes](../architecture/installation-modes.md) (chart ownership)
 
-**Next** → [Model Deployment Reference](../reference/model-deployment.md) — configure the serving
+**Next** → [Model Deployment](../model-deployment/deployment.md) — configure the serving
 roles that consume topology-aware admission.

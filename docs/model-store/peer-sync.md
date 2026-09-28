@@ -1,7 +1,8 @@
-# Node-to-Node Sync Reference
+# Node-to-Node Sync
 
 > **Purpose** — how a node's plugin serves its published trees to the other nodes' plugins, how a cold node pulls from them, and what bounds and protects that path.
-> **Audience** users, operators · **Prerequisites** [Node Model Store Reference](node-model-store.md) · **Read time** ~6 min
+> **Audience** users, operators · **Prerequisites** [Node Model Store](node-store.md)
+> **Read time** ~6 min
 
 A fleet's nodes need the same weights far more often than they need different ones. When the
 hub serves every node separately, egress grows with node count and a hub outage stalls every
@@ -62,7 +63,7 @@ One source at a time; scheduling segments across several peers is a deliberate e
 `NodeModelStore.status.models[].source` names where the bytes came from (`Hub` or `Peer`, the
 majority kind), and the plugin's `download_bytes_total` metric splits `hub` from `peer`. On a
 shared filesystem, kubelet's eviction thresholds still cap the cache's high watermark as
-[Node Model Store Reference](node-model-store.md) describes; a threshold kubelet can never fire
+[Node Model Store](node-store.md) describes; a threshold kubelet can never fire
 floors that cap, because the cache's own collection is then the only space reclaimer.
 
 ## Cost model
@@ -72,5 +73,5 @@ node-to-node link is slower than each node's own hub path, all-hub finishes a si
 fan-out sooner. Serving costs CPU on the seed node (measured ≈ 0.25 vCPU per concurrent puller
 on 2-vCPU nodes, plus the link's bandwidth) — on GPU nodes this shares headroom with inference.
 
-**See also** — [Node Model Store Reference](node-model-store.md) for the cache the trees live in, and
-[Model Artifact Reference](model-artifact.md) for the manifest digest the listings are bound to.
+**See also** — [Node Model Store](node-store.md) for the cache the trees live in, and
+[Model Artifact](artifact.md) for the manifest digest the listings are bound to.

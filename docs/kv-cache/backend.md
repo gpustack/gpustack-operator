@@ -47,7 +47,7 @@ spec:
 ```
 
 ⚠️ The example's `0.3.13` line fits vLLM's clients and not SGLang's — pick `spec.image` from the
-[Engine Versions Reference](../reference/engine-versions.md) before copying it.
+[Engine Versions](../model-deployment/engine-versions.md) before copying it.
 
 `connection.managed` and `connection.external` are both optional pointers and **exactly one** must be
 set; neither and both are refused at admission with a message naming the two. Several member groups
@@ -189,7 +189,7 @@ toolchain version: `<mooncake-version>-<variant><toolchain>`, such as `0.3.13.po
 
 Each variant is built on `0.3.13.post1`, the line vLLM's supported clients are on, and on
 `0.3.10.post2`, which serves only engines below the [supported
-minimum](../reference/engine-versions.md). SGLang's clients are on the 0.3.12 line, which this
+minimum](../model-deployment/engine-versions.md). SGLang's clients are on the 0.3.12 line, which this
 project does not build. Which line a backend needs is that table's question.
 
 **A VRAM group needs a build with VRAM segments compiled in (`USE_VRAM_SEGMENT=ON`), and the stock
@@ -240,7 +240,7 @@ resolves to the default tenant.
 
 **The client's version is a property of the engine image, not of anything on this CR.** Which
 client each supported engine's runner image carries, and so which line its store runs, is in the
-[Engine Versions Reference](../reference/engine-versions.md); an engine below its minimum there is
+[Engine Versions](../model-deployment/engine-versions.md); an engine below its minimum there is
 not supported.
 
 For any other image, read the client off the image in hand rather than off an engine version. A
@@ -320,7 +320,7 @@ and defaults to `Auto` whether or not the `transport` block is written at all. *
 transports, not host fabrics, so they take none of the fabric privileges below.
 
 Which engine each value serves, and on which images, is [the transport
-matrix](../reference/engine-versions.md#which-transport-each-engine-can-use).
+matrix](../model-deployment/engine-versions.md#which-transport-each-engine-can-use).
 
 **`members[].transport.protocol` overrides that value for one group; left unset, the group inherits
 the backend's.** The override exists for the one thing two media do not agree on: a VRAM group
@@ -881,7 +881,7 @@ backend object**, so two Bindings reaching one leader through two objects are bo
    other's blocks.** The reuse identity an engine is handed is the domain **name alone** —
    each Binding hands its own [`dtype`](pool.md#the-dtype-is-handed-to-the-engine) to its own
    engines, and `blockSize` reaches no engine at all. So two differently-shaped caches land under
-   one identity, which is [the silent cache pollution](../reference/model-deployment.md#the-reuse-domain-is-inherited)
+   one identity, which is [the silent cache pollution](../model-deployment/deployment.md#the-reuse-domain-is-inherited)
    a wrong `blockSize` or `dtype` causes, reached here without either value being wrong.
 
 ⇒ If you point two objects at one leader, either keep their pools' Bindings on **different**

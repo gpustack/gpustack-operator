@@ -151,7 +151,7 @@ gpustack-operator device-manager serve --manufacturer=nvidia --no-partitioned
 The per-node model cache. A CSI node plugin serving inline ephemeral volumes of the driver
 `model.csi.gpustack.ai`: it authorizes each mount against the Pod's namespace, downloads and
 verifies a Hugging Face artifact's files once per node, and writes that node's `NodeModelStore`
-status. See [Node Model Store Reference](node-model-store.md).
+status. See [Node Model Store](../model-store/node-store.md).
 
 Runs as the Model Manager DaemonSet beside the `node-driver-registrar` sidecar. Its configuration
 comes from its node's `NodeModelStore.spec`, not from flags.

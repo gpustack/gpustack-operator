@@ -1,8 +1,9 @@
-# Model Deployment Reference
+# Model Deployment
 
 > **Purpose** — the `ModelDeployment` contract: what you declare, what the operator owns and will
 > refuse to merge, and how a role's runner image is assembled.
-> **Audience** users, operators, contributors · **Prerequisites** [KV Cache Pool](../kv-cache/pool.md) ·
+> **Audience** users, operators, contributors · **Prerequisites** [KV Cache
+> Pool](../kv-cache/pool.md) ·
 > **Read time** ~9 min
 
 A `ModelDeployment` is N replicas of one or more inference-engine roles. It can attach to a KV
@@ -53,7 +54,7 @@ spec:
 
 `model.name` is what the engine serves. The weights come from the engine's own hub client, a role's
 volumes, or a `ModelArtifact` named by `model.artifactRef` — see the
-[Model Artifact Reference](model-artifact.md).
+[Model Artifact](../model-store/artifact.md).
 
 `poolRef` is a `LocalObjectReference` on purpose: naming another namespace, the cluster-scoped
 `KVCachePool`, or a bare endpoint URL is unrepresentable rather than merely rejected. The Binding is
@@ -117,7 +118,7 @@ container spec and only the label value differs.
 `--tensor-parallel-size` or equivalent: the degrees do not decompose from `size` alone, and a
 formula missing an input is worse than no formula. Composing none is not seeing none — a degree
 the author declares on the role is read and validated, and [the transfer leg renders from
-it](model-deployment-prefill-decode.md#how-a-pair-is-wired).
+it](prefill-decode.md#how-a-pair-is-wired).
 
 A whole instance is the unit of replacement at every size. That is Kueue's constraint rather than a
 preference: a deleted member of an admitted group is held on the API server until the group's
@@ -182,8 +183,7 @@ Two roles may share a `kind` and differ in `name` only where that `kind` is `Ser
 servers is a set of equals, whereas nothing consuming these roles expresses a second prefiller, so a
 deployment declaring one would render a role nothing downstream can reach.
 
-What pairs the two roles is on [Model Deployment Prefill and Decode
-Reference](model-deployment-prefill-decode.md): the connector each engine and router renders, the
+What pairs the two roles is on [Model Deployment Prefill and Decode](prefill-decode.md): the connector each engine and router renders, the
 router block and its fields, the direct transfer and its transport, roles on different hardware, and
 a role's own address.
 
@@ -265,7 +265,7 @@ is not knowable at render time.
 
 Users who require tenant isolation must select a compatible engine image and verify it themselves;
 see
-[Tenant compatibility is the image owner's responsibility](kv-cache-injection.md#tenant-compatibility-is-the-image-owners-responsibility)
+[Tenant compatibility is the image owner's responsibility](../reference/kv-cache-injection.md#tenant-compatibility-is-the-image-owners-responsibility)
 for what the image must consume. The API states the requested boundary, while the engine enforces it
 — the same caveat [KV Cache Pool](../kv-cache/pool.md#what-a-binding-does-not-do) states for capacity.
 
@@ -358,8 +358,8 @@ not in the table because it is conditional:
 which the hit rate this design rests on cannot be measured at all. It is read by the transfer engine
 rather than by an engine's config class, so it does not depend on which keys that class accepts.
 
-So are `MC_FORCE_TCP` [on a `tcp` leg](model-deployment-prefill-decode.md#the-direct-transfers-transport) and
-[SGLang's two cache switches](kv-cache-injection.md#sglangs-host-memory-tier).
+So are `MC_FORCE_TCP` [on a `tcp` leg](prefill-decode.md#the-direct-transfers-transport) and
+[SGLang's two cache switches](../reference/kv-cache-injection.md#sglangs-host-memory-tier).
 
 Two of SGLang's owned keys are owned for what a user entry would **destroy** rather than duplicate,
 and the operator does not set either of them:
@@ -480,7 +480,7 @@ therefore turns a replica over only when every replica the role declares holds a
 on a full pool a rollout waits for capacity rather than shedding replicas it cannot re-reserve.
 
 The cost is real and worth stating, and it rides on the block lease described under
-[What a cache changes about a workload](kv-cache-injection.md#what-a-cache-changes-about-a-workload): a lease survives a long queue and does **not**
+[What a cache changes about a workload](../reference/kv-cache-injection.md#what-a-cache-changes-about-a-workload): a lease survives a long queue and does **not**
 survive an interrupted heartbeat, which is what a departing replica is.
 
 So a departing replica costs its siblings the blocks it held. The deployment records an event naming
@@ -490,7 +490,7 @@ away has the correlation written down rather than inferred.
 
 **An upgrade can trigger the same turnover without any spec edit.** The fingerprint covers a replica's
 labels, annotations and spec, so a release that changes what every replica renders turns each one over
-once: the `role-kind` label above did, and so did the [drain](model-deployment-shutdown.md). Nothing
+once: the `role-kind` label above did, and so did the [drain](shutdown.md). Nothing
 is required of you, but on a busy deployment the restart is worth scheduling.
 
 ### A replica that leaves is replaced
@@ -668,7 +668,7 @@ own message, because a pass that cannot build a replica aborts before writing an
 ## Operating notes
 
 **Two notes apply to every workload on a pool, replicas included, and are stated once under**
-[What a cache changes about a workload](kv-cache-injection.md#what-a-cache-changes-about-a-workload): the transfer engine binds ports nobody
+[What a cache changes about a workload](../reference/kv-cache-injection.md#what-a-cache-changes-about-a-workload): the transfer engine binds ports nobody
 configured, so a NetworkPolicy or port reservation has to be a range rather than a list; and the
 `transfer_metadata.cpp` "Local segment descriptor not found" line at startup is an `ERROR` that is
 benign on a client mounting no segment of its own — which is what every replica here is.
@@ -708,11 +708,11 @@ and therefore neither locates its window.
 ---
 
 **See also** — [KV Cache Pool](../kv-cache/pool.md) for the Binding that grants the quota and declares
-the domain · [Model Deployment Prefill and Decode Reference](model-deployment-prefill-decode.md) for
+the domain · [Model Deployment Prefill and Decode](prefill-decode.md) for
 what pairs a prefill role with a decode role · [Accelerator Requests](../accelerator-requests.md) for the request fields
 `roles[].resources` mirrors · [Admission](../architecture/admission.md) for the gates a replica passes
-as an ordinary Pod · [Model Deployment Status](model-deployment-status.md) for what each condition
-and published field means · [Model Deployment Metrics](model-deployment-metrics.md) for the
+as an ordinary Pod · [Model Deployment Status](status.md) for what each condition
+and published field means · [Model Deployment Metrics](metrics.md) for the
 structured snapshot and Pod scrape endpoints.
 
 **Next** → [Accelerator Requests](../accelerator-requests.md)

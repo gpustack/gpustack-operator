@@ -31,7 +31,7 @@ chart. Topograph is also vendored, but stays disabled until an administrator sel
 | `worker` (alias `w`) | `pkg/worker` | this chart, as a control-plane Deployment | aggregated extension API server + the scheduling-chain controllers |
 | `worker-gateway` | `pkg/workergateway` | not this chart; run it yourself, wherever the fleet view belongs | aggregates InstanceTypes and capacity across upstream clusters |
 | `device-manager` | `pkg/devicemanager` | this chart, as one DaemonSet per manufacturer | detects accelerators, maintains the `Devices` ledger, serves the device plugin |
-| `model-manager` (alias `mm`) | `pkg/modelmanager` | this chart, as one DaemonSet on every node | the CSI node plugin that mounts a Hugging Face `ModelArtifact` from the node's verified cache ([Node Model Store Reference](reference/node-model-store.md)) |
+| `model-manager` (alias `mm`) | `pkg/modelmanager` | this chart, as one DaemonSet on every node | the CSI node plugin that mounts a Hugging Face `ModelArtifact` from the node's verified cache ([Node Model Store](model-store/node-store.md)) |
 
 Details, and the startup ordering the worker must keep, are in [Internals](architecture/internals.md).
 
@@ -81,7 +81,7 @@ cannot:
 
 | Step | What happens | Detail |
 |---|---|---|
-| Submit | a Pod — plain, or rendered by a GPUStack `Instance` or by a [`ModelDeployment`](reference/model-deployment.md) replica — carries the pool's entrance label `kueue.x-k8s.io/queue-name: gpustack-fnv64-…` and requests `nvidia.com/gpu.sliced: 1` + `nvidia.com/gpu.sliced.memory-percentage: 50` | [Accelerator Requests](accelerator-requests.md) |
+| Submit | a Pod — plain, or rendered by a GPUStack `Instance` or by a [`ModelDeployment`](model-deployment/deployment.md) replica — carries the pool's entrance label `kueue.x-k8s.io/queue-name: gpustack-fnv64-…` and requests `nvidia.com/gpu.sliced: 1` + `nvidia.com/gpu.sliced.memory-percentage: 50` | [Accelerator Requests](accelerator-requests.md) |
 | Gate 1 — Pod webhook | validates the request rules and folds the memory budget into `nvidia.com/gpu.sliced.units`, the credit input | [Admission](architecture/admission.md#gate-1--the-pod-webhook) |
 | Gate 2 — Kueue | reserves against the pool ClusterQueue's `credits.gpustack.ai/nvidia` quota and fits the complete PodSet inside the selected topology domains | [Topology-Aware Scheduling](architecture/topology-aware-scheduling.md) |
 | Gate 3 — AdmissionCheck | asks the pool's `Devices` ledger whether one accelerator can really host the slice; holds the workload with `Retry` if not | [Admission](architecture/admission.md#gate-3--the-per-accelerator-admissioncheck) |

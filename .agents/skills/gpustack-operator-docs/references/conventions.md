@@ -65,9 +65,15 @@ shaped by the directory it lives in:
 | Directory | H1 form | Example |
 |---|---|---|
 | root, `architecture/` | `<Subject>` | `Installation Modes` |
+| a domain directory — `kv-cache/`, `model-store/`, `model-deployment/` | `<Domain> <Topic>` where the domain reads naturally; a subject that names itself (`Engine Versions`, `Node-to-Node Sync`) stands without it; the domain's runbook keeps the `Operations` suffix | `KV Cache Backend`, `Model Artifact`, `Engine Versions`, `Node-to-Node Sync`, `Model Store Operations` |
 | `operation/` | `<Subject> Operations` | `High Availability Operations` |
 | `migration/` | `Migrating <from\|to> <what>`; a recovery page is `<Subject> Troubleshooting` | `Migrating from v0.5.x`, `Migration Troubleshooting` |
 | `reference/` | `<Subject> Reference` | `Instance Metrics Reference` |
+
+A domain directory collects every page orbiting one CR family — the contracts, the field references,
+the views, the runbook — under short file names (`backend.md`, `artifact.md`, `deployment.md`) whose
+H1s name the domain where it reads naturally. It exists so `reference/` stays true lookup tables
+rather than becoming the dumping ground for whichever domain landed last.
 
 `##` and `###` headings are sentence case. GitHub lowercases anchors, so re-casing a heading keeps every
 inbound link; changing its *words* does not.
@@ -105,10 +111,10 @@ it as follows — when a page starts serving two modes at once, that is the mome
 
 | Mode | Reader is… | Our pages |
 |---|---|---|
-| Tutorial | learning by doing | `README.md` Quick Start, `docs/walkthrough.md`, the MIG walkthrough |
-| How-to | achieving a goal | `docs/operation/*`, `docs/migration/*`, `docs/development.md` |
+| Tutorial | learning by doing | `README.md` Quick Start, `docs/walkthrough.md`, the MIG walkthrough, `docs/kv-cache/walkthrough.md` |
+| How-to | achieving a goal | `docs/operation/*`, `docs/migration/*`, `docs/development.md`, a domain runbook (`docs/model-store/operations.md`) |
 | Reference | looking something up | `docs/accelerator-requests.md`, `docs/settings.md`, `docs/reference/*` |
-| Explanation | building understanding | `docs/architecture.md` and `docs/architecture/*` |
+| Explanation | building understanding | `docs/architecture.md`, `docs/architecture/*`, and the domain pages under `docs/kv-cache/`, `docs/model-store/` and `docs/model-deployment/` (a domain page serves the mode its reader arrives in — contract pages read as reference, mechanism pages as explanation) |
 
 Two consequences worth stating:
 
@@ -158,8 +164,9 @@ Two consequences worth stating:
 
 ## Adding a page
 
-1. Put it under the directory of the reader it serves (`architecture/`, `operation/`, `migration/`,
-   `reference/`).
+1. Put it under the directory that fits: the reader it serves (`architecture/`, `operation/`,
+   `migration/`, `reference/`), or the domain directory of the CR family it orbits
+   (`kv-cache/`, `model-store/`, `model-deployment/`) when the page joins a family that already has one.
 2. Copy the template above; fill the header block honestly — an inflated read time is worse than none.
 3. Add a row to the `docs/README.md` page table, and a step to any reading path it belongs on.
 4. Add it to the routing table in the skill's `SKILL.md` and to `references/page-map.md`, saying what it

@@ -3,12 +3,12 @@
 > **Purpose** — running node delivery: enabling the `model-manager` plugin, where its configuration
 > comes from, reading what a node applied and holds, keeping the cache away from kubelet's eviction,
 > switching delivery, where replicas land, upgrading, and removing it.
-> **Audience** operators · **Prerequisites** [Node Model Store
-> Reference](../reference/node-model-store.md) · **Read time** ~11 min
+> **Audience** operators · **Prerequisites** [Node Model Store](node-store.md) · **Read time** ~11
+> min
 
 The `model-manager` DaemonSet keeps one model cache per node and mounts a Hugging Face
 `ModelArtifact` from it, downloading a digest once per node. What it does on each mount is in the
-[reference](../reference/node-model-store.md); this page is what an administrator sets and reads.
+[reference](node-store.md); this page is what an administrator sets and reads.
 
 ## Contents
 
@@ -84,7 +84,7 @@ kubectl -n gpustack-system patch setting model-store-download-bandwidth --type m
 
 ### The pool layer
 
-A [`ModelStore`](../reference/model-prefetch.md) is a fourth layer above the cluster Settings: a
+A [`ModelStore`](prefetch.md) is a fourth layer above the cluster Settings: a
 cluster-scoped object whose `nodeSelector` picks a pool and whose watermarks and download limits
 override the matched nodes field by field. A field the store leaves out keeps the cluster default,
 and an explicit `bytesPerSecond: 0` means "unlimited on this pool". The winner's name lands in the
@@ -108,10 +108,10 @@ kubectl get nodemodelstores.v1.worker.gpustack.ai  # the v1 view: Ready, Used, M
   `generation` means the plugin applies it. The `Ready` message says when the high watermark was
   capped, and from what.
 - **`status.models`** lists each digest the node holds, is downloading or failed on, and whether a
-  Pod mounts it; a download's `downloadedBytes` [moves in steps](../reference/node-model-store.md#the-resource).
+  Pod mounts it; a download's `downloadedBytes` [moves in steps](node-store.md#the-resource).
   It names no tenant: find a deployment's digest in its `status.model.manifestDigest`, and an
   artifact's nodes in its `status.nodes` or its
-  [progress](../reference/model-artifact-views.md#the-progress-subresource).
+  [progress](views.md#the-progress-subresource).
 - **A `Failed` digest** carries its reason and `retryTime`. Mounts of it do not download again
   before then; fix the cause (the Secret, the proxy, the CA) and the next attempt after `retryTime`
   picks it up.
@@ -245,7 +245,7 @@ kubelet retries it, and it succeeds once the new Pod serves.
 ## A deployment waiting for its weights
 
 `WeightsReady` on the `ModelDeployment` says which side to look at; the full table is in the
-[Model Artifact Reference](../reference/model-artifact.md#status).
+[Model Artifact](artifact.md#status).
 
 | Reason | Look at |
 | --- | --- |
@@ -257,8 +257,8 @@ kubelet retries it, and it succeeds once the new Pod serves.
 
 ---
 
-**See also** — [Node Model Store Reference](../reference/node-model-store.md) for every field and
-reason · [Model Artifact Reference](../reference/model-artifact.md) for the artifact and its
+**See also** — [Node Model Store](node-store.md) for every field and
+reason · [Model Artifact](artifact.md) for the artifact and its
 patterns · [Settings](../settings.md#online-adjustable-settings) for every Setting.
 
-**Next** → [Model Artifact Reference](../reference/model-artifact.md)
+**Next** → [Model Artifact](artifact.md)

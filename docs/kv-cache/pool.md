@@ -170,7 +170,7 @@ without this two engines on one domain can write two element types under one key
   load, so it binds nothing. A Binding stored with it before the refusal stays usable and updatable.
 - **The engine is not free to disagree.** A role naming `--kv-cache-dtype` itself is refused; the
   rule and its exceptions are under
-  [What the operator owns](../reference/model-deployment.md#what-the-operator-owns).
+  [What the operator owns](../model-deployment/deployment.md#what-the-operator-owns).
 
 All of it follows the Setting `model-deployment-kv-cache-dtype-owned`, on by default; turning it
 off renders and refuses nothing, as before. See [Settings](../settings.md).
@@ -385,7 +385,7 @@ is the section above.
 
 **See also** — [KV Cache Backend](backend.md) (the store this pool publishes, and where eviction is
 configured) · [KV Cache Injection](../reference/kv-cache-injection.md) (how a Pod consumes the grant
-this page describes) · [Model Deployment](../reference/model-deployment.md) (the other half of the
+this page describes) · [Model Deployment](../model-deployment/deployment.md) (the other half of the
 worked pair: a rendered engine names this Binding through `spec.kvCache.poolRef`) ·
 [Admission](../architecture/admission.md) (the gates and the four-view status
 pattern) · [Settings & Environment Variables](../settings.md)

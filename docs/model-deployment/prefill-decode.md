@@ -1,13 +1,13 @@
-# Model Deployment Prefill and Decode Reference
+# Model Deployment Prefill and Decode
 
 > **Purpose** — what pairs a `Prefill` role with a `Decode` role: the connector each engine and
 > router renders, the router block and its fields, the direct transfer and its transport, roles on
 > different hardware, and a role's own address.
-> **Audience** users, operators, contributors · **Prerequisites** [Model Deployment
-> Reference](model-deployment.md) · **Read time** ~4 min
+> **Audience** users, operators, contributors · **Prerequisites** [Model Deployment](deployment.md)
+> · **Read time** ~4 min
 
 A deployment declaring a `Prefill` and a `Decode` role is admitted as one set; the role fields and
-that admission are under [Prefill and decode](model-deployment.md#prefill-and-decode). This page is
+that admission are under [Prefill and decode](deployment.md#prefill-and-decode). This page is
 what the operator renders between the two halves once both run.
 
 ## Contents
@@ -78,7 +78,7 @@ leg's quiet failure, one level down.
 
 Admission holds the visible side of the contract: a degree the books cannot be read for is
 refused, and so is a declared per-member width the role's card request cannot hold — see
-[What admission refuses](model-deployment.md#what-admission-refuses).
+[What admission refuses](deployment.md#what-admission-refuses).
 
 SGLang renders its halves through the engine's own disaggregation arguments rather than this
 connector path; the two engines' legs differ by [their handshake](#the-direct-transfers-transport)
@@ -186,9 +186,9 @@ A router is also **engine-matched**, and a pair outside this table is refused na
 
 | `spec.router.name` | Engines it fronts | Shape it renders | Routing policy |
 | --- | --- | --- | --- |
-| `llm-d-router` | `vLLM`, `SGLang` | An endpoint picker behind a proxy, configured by a mounted document | [A fixed scoring profile](model-deployment-routing.md#llm-d-router-takes-no-policy-flag) |
-| `vllm-router` | `vLLM` | One process, configured entirely by its command line | [`cache_aware` unless `extraArgs` names another](model-deployment-routing.md#switching-to-round-robin) |
-| `sglang-gateway` | `SGLang` | One process, configured entirely by its command line | [`cache_aware` unless `extraArgs` names another](model-deployment-routing.md#switching-to-round-robin) |
+| `llm-d-router` | `vLLM`, `SGLang` | An endpoint picker behind a proxy, configured by a mounted document | [A fixed scoring profile](routing.md#llm-d-router-takes-no-policy-flag) |
+| `vllm-router` | `vLLM` | One process, configured entirely by its command line | [`cache_aware` unless `extraArgs` names another](routing.md#switching-to-round-robin) |
+| `sglang-gateway` | `SGLang` | One process, configured entirely by its command line | [`cache_aware` unless `extraArgs` names another](routing.md#switching-to-round-robin) |
 
 `llm-d-router` takes both engines because upstream carries a handshake connector and a metrics
 configuration for each. The other two are each one project's router for that project's own engine,
@@ -256,7 +256,7 @@ Which value works on which engine is [the transport matrix](engine-versions.md#w
 
 **`tcp` is enforced, not only requested**: the transfer engine picks its transport from the host,
 and with no RDMA device a build with multi-node NVLink installs NVLink between hosts with no NVLink
-path. So native vLLM also gets the [defaulted](model-deployment.md#what-the-operator-owns) `MC_FORCE_TCP=1`. Both pins
+path. So native vLLM also gets the [defaulted](deployment.md#what-the-operator-owns) `MC_FORCE_TCP=1`. Both pins
 are process-wide, so neither renders beside a store on another transport, and every client at
 its engine's [supported minimum](engine-versions.md) honors them.
 
@@ -274,7 +274,7 @@ It is also **not** the pool's transport. `KVCacheBackend.spec.transport` feeds t
 client; this leg is engine to engine and never traverses the store, so the two declare separately —
 a deployment with no `kvCache` block still has this leg to configure.
 
-Editing it [turns over every role](model-deployment.md#rollout-is-a-rolling-replacement): the value renders into both
+Editing it [turns over every role](deployment.md#rollout-is-a-rolling-replacement): the value renders into both
 ends' arguments, so every role's replicas turn over one at a time. A prefiller and a decoder can
 disagree on the protocol until both converge — the same window an `engine.version` edit opens.
 
@@ -285,7 +285,7 @@ publishes as its `status.entrance`. Every replica is its own group regardless, s
 going to share a Workload — on two `instanceType`s or on one. The set is admitted together by an
 admission check rather than by Kueue's intra-group rule.
 
-See [One group per replica](model-deployment.md#one-group-per-replica) for what that costs an edit, and
+See [One group per replica](deployment.md#one-group-per-replica) for what that costs an edit, and
 [Authoring the InstanceType yourself](../settings.md#authoring-the-instancetype-yourself) for which
 queues carry the check.
 
@@ -301,7 +301,7 @@ between the halves:
 
 - **This operator's own refusal is the one an administrator meets.** On a pool left at its default
   transport, the renderer [refuses the vLLM-Ascend
-  half](kv-cache-injection.md#transport-compatibility-at-binding) — the rule and its
+  half](../reference/kv-cache-injection.md#transport-compatibility-at-binding) — the rule and its
   remediation are stated there. The check is one-sided — it fires for a single-manufacturer Ascend
   deployment just the same — and it is the only one of the three that produces a message;
   following its remediation clears only this refusal; the next two apply regardless.
@@ -336,14 +336,13 @@ debugging.
 
 With `spec.router`, the operator renders six objects named `<deployment>-router`: a Deployment,
 ConfigMap, Service, ServiceAccount, Role and RoleBinding. Removing `spec.router` prunes all six.
-What `status.endpoint` publishes in each shape is under [Status](model-deployment-status.md#status).
+What `status.endpoint` publishes in each shape is under [Status](status.md#status).
 
 ---
 
-**See also** — [Model Deployment Reference](model-deployment.md) for the role fields, the owned-key
-table and what admission refuses · [Model Deployment Routing
-Reference](model-deployment-routing.md) for which replica each router picks · [Engine Versions
-Reference](engine-versions.md) for which transport each engine can use on each leg · [Model
-Deployment Status Reference](model-deployment-status.md) for what `status.endpoint` publishes.
+**See also** — [Model Deployment](deployment.md) for the role fields, the owned-key
+table and what admission refuses · [Model Deployment Routing](routing.md) for which replica each
+router picks · [Engine Versions](engine-versions.md) for which transport each engine can use on
+each leg · [Model Deployment Status](status.md) for what `status.endpoint` publishes.
 
-**Next** → [Model Deployment Routing Reference](model-deployment-routing.md)
+**Next** → [Model Deployment Routing](routing.md)

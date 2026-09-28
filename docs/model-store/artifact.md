@@ -1,9 +1,9 @@
-# Model Artifact Reference
+# Model Artifact
 
 > **Purpose** — how a `ModelArtifact` names a model's weights, how the operator resolves and
 > revalidates it, and how a `ModelDeployment` or an `Instance` consumes it.
-> **Audience** users, operators · **Prerequisites** [Model Deployment
-> Reference](model-deployment.md) · **Read time** ~16 min
+> **Audience** users, operators · **Prerequisites** [Model
+> Deployment](../model-deployment/deployment.md) · **Read time** ~16 min
 
 A `ModelArtifact` is the one object that says where a model's weights come from and which credential
 reads them. A `ModelDeployment` names it with `spec.model.artifactRef`, an `Instance` with a `model`
@@ -69,7 +69,7 @@ status:
 - **An `image` member delivers weights already in a registry.** A digest-pinned reference is the
   artifact's whole identity; kubelet pulls and mounts it through an image volume, outside the node
   cache. The digest contract, the build, the floors and the costs are on the
-  [Model Image Source Reference](model-image-source.md).
+  [Model Image Source](image-source.md).
 - **Patterns select the files.** They follow Python's `fnmatch.fnmatchcase`: case-sensitive, `*`
   and `?` cross `/`, a trailing `/` means everything under it, an empty allow list keeps every file,
   and an ignored file is dropped even when allowed. At most 32 per list, 1 to 256 characters each,
@@ -79,8 +79,8 @@ status:
 - **`status.nodes` counts the content, not the artifact.** Nodes whose `NodeModelStore` lists the
   digest `Ready`, `Downloading` or `Failed`; artifacts with the same digest see the same nodes, and
   only numbers cross namespaces. The mean covers the downloading nodes only, each a whole copy. It
-  is written on the [thresholds](node-model-store.md#the-resource) the nodes store progress on. The
-  `v1` view's [progress](model-artifact-views.md#the-progress-subresource) answers the same at full
+  is written on the [thresholds](node-store.md#the-resource) the nodes store progress on. The
+  `v1` view's [progress](views.md#the-progress-subresource) answers the same at full
   precision.
 - **Deletion waits for the last reference.** The finalizer `worker.gpustack.ai/model-artifact-protection`
   holds a referenced artifact in `Terminating` until no `ModelDeployment` or `Instance` in the
@@ -163,7 +163,7 @@ creates no Pod until it resolves.
 
 A claim source is always mounted directly. A Hugging Face source takes the delivery the
 `model-artifact-delivery-mode` Setting names, `Engine` by default and `Node` where the chart deploys
-the node plugin ([switching it](../operation/model-store.md#switch-delivery) rolls each such
+the node plugin ([switching it](operations.md#switch-delivery) rolls each such
 deployment once):
 
 | | Claim source (`Pvc`) | Hugging Face, `Engine` | Hugging Face, `Node` | Image source (`Image`) |
@@ -174,7 +174,7 @@ deployment once):
 | Both | `--served-model-name <spec.model.name>`, unless the role states it | same | same | same |
 
 An image source takes `Image` whatever the Setting says, and kubelet pulls the pinned image on the
-node that needs it — [Model Image Source Reference](model-image-source.md).
+node that needs it — [Model Image Source](image-source.md).
 
 `--revision` pins the weights and the tokenizer together on both engines. A take-over role (one
 with `command`) gets the claim or node mount and nothing else, and nothing at all under `Engine`.
@@ -182,7 +182,7 @@ with `command`) gets the claim or node mount and nothing else, and nothing at al
 **Node delivery** mounts an inline CSI volume of the driver `model.csi.gpustack.ai`: the node's
 `model-manager` plugin downloads the digest once per node, verifies every byte against the manifest
 before anything is mounted, and mounts only for a resolved artifact in the Pod's own namespace. The
-plugin and its resource are on the [Node Model Store Reference](node-model-store.md).
+plugin and its resource are on the [Node Model Store](node-store.md).
 
 No Hub variable and no cache `emptyDir` is rendered under Node delivery, and the ephemeral-storage
 limit is not raised: the volume's bytes are not the Pod's.
@@ -329,7 +329,7 @@ the CSIDriver does not exist the Instance creates no Pod and says so in its phas
 
 An image artifact mounts through an image volume, needing no plugin. An Instance pinned to a node
 waits instead when that node cannot run one, naming the node and the floor
-([Model Image Source Reference](model-image-source.md#delivery)).
+([Model Image Source](image-source.md#delivery)).
 
 ## Requirements and limits
 
@@ -338,7 +338,7 @@ waits instead when that node cannot run one, naming the node and the floor
   stays `WeightsNotMounted` while its replicas run.
 - **Image sources need image volumes** and floors above Kubernetes's own; creation is refused
   below them. The full line is on the
-  [Model Image Source Reference](model-image-source.md#versions-and-prerequisites).
+  [Model Image Source](image-source.md#versions-and-prerequisites).
 - **`sglang-gateway` fetches a tokenizer by the worker's `model_path`.** With a claim that path is
   local, so it logs one 404 warning and routes by text; with Engine delivery it would fetch `main`
   without a token (not measured).
@@ -353,9 +353,9 @@ waits instead when that node cannot run one, naming the node and the floor
 
 ---
 
-**See also** — [Model Deployment Reference](model-deployment.md) for the rest of the deployment
-contract · [Node Model Store Reference](node-model-store.md) for Node delivery ·
-[Model Artifact Views Reference](model-artifact-views.md) for the `v1` view and `progress` · [KV Cache Injection Reference](kv-cache-injection.md) for the store connector this
-prefixes · [Model Deployment Status Reference](model-deployment-status.md) for the other conditions.
+**See also** — [Model Deployment](../model-deployment/deployment.md) for the rest of the deployment
+contract · [Node Model Store](node-store.md) for Node delivery ·
+[Model Artifact Views](views.md) for the `v1` view and `progress` · [KV Cache Injection Reference](../reference/kv-cache-injection.md) for the store connector this
+prefixes · [Model Deployment Status](../model-deployment/status.md) for the other conditions.
 
-**Next** → [Model Deployment Status Reference](model-deployment-status.md)
+**Next** → [Model Deployment Status](../model-deployment/status.md)
