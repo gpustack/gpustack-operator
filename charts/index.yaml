@@ -5,6 +5,59 @@ entries:
       artifacthub.io/license: Apache-2.0
       artifacthub.io/operator: "true"
     apiVersion: v2
+    appVersion: 0.9.0-rc1
+    created: "2026-09-29T10:59:38.757506389Z"
+    dependencies:
+    - condition: kueue.enabled
+      name: kueue
+      repository: ""
+      version: 0.18.9
+    - condition: node-feature-discovery.enabled
+      name: node-feature-discovery
+      repository: ""
+      version: 0.19.0
+    - condition: csi-driver-nfs.enabled
+      name: csi-driver-nfs
+      repository: ""
+      version: 4.13.4
+    - condition: csi-driver-s3.enabled
+      name: csi-driver-s3
+      repository: ""
+      version: 0.43.7
+    - condition: topograph.enabled
+      name: topograph
+      repository: ""
+      version: 1.0.0
+    description: A Kubernetes operator that turns raw node hardware into a Kueue-based
+      scheduling chain for accelerators (GPU/NPU/TPU), built on Node Feature Discovery
+      (NFD) and Kueue.
+    digest: c173e7eb167b561c44075245acbeb2dbc7ad50bdbb45c0b6938a4e43527eb50e
+    home: https://github.com/gpustack/gpustack-operator
+    icon: https://raw.githubusercontent.com/gpustack/gpustack/main/docs/assets/logo.png
+    keywords:
+    - gpustack-operator
+    - operator
+    - kueue
+    - node-feature-discovery
+    - gpu
+    - npu
+    - accelerator
+    kubeVersion: '>=1.23.0-0'
+    maintainers:
+    - name: GPUStack Authors
+      url: https://github.com/gpustack
+    name: gpustack-operator
+    sources:
+    - https://github.com/gpustack/gpustack
+    - https://github.com/gpustack/gpustack-operator
+    type: application
+    urls:
+    - https://gpustack.github.io/gpustack-operator/charts/gpustack-operator-0.9.0-rc1.tgz
+    version: 0.9.0-rc1
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/operator: "true"
+    apiVersion: v2
     appVersion: 0.8.6
     created: "2026-08-31T12:36:18.200822651Z"
     dependencies:
@@ -872,4 +925,4 @@ entries:
     urls:
     - https://gpustack.github.io/gpustack-operator/charts/gpustack-operator-0.5.1.tgz
     version: 0.5.1
-generated: "2026-08-31T12:36:18.185093705Z"
+generated: "2026-09-29T10:59:38.740809771Z"
