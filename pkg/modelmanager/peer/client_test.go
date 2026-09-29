@@ -137,6 +137,26 @@ func TestPullerFailsWithoutCandidates(t *testing.T) {
 	assert.Contains(t, err.Error(), "no candidate was usable")
 }
 
+func TestPullerFetchManifest(t *testing.T) {
+	ps := newPeerServer(t, strings.Repeat("abcdef", 100))
+	source := ps.source(t, "peer-1")
+	p := &Puller{Discover: func(context.Context, string) ([]*Source, error) {
+		return []*Source{source}, nil
+	}}
+	manifest, err := p.FetchManifest(context.Background(), "sha256:"+ps.hex)
+	require.NoError(t, err)
+	assert.Equal(t, "sha256:"+ps.hex, manifest.Digest, "the listing is bound to the tree's digest")
+	require.Len(t, manifest.Entries, 1)
+	assert.Equal(t, "weights.bin", manifest.Entries[0].Path)
+	assert.Equal(t, int64(len(ps.content)), manifest.Entries[0].Size)
+
+	dead := newPeerServer(t, strings.Repeat("abcdef", 100))
+	dead.Close()
+	p = &Puller{Discover: func(context.Context, string) ([]*Source, error) { return nil, nil }}
+	_, err = p.FetchManifest(context.Background(), "sha256:"+dead.hex)
+	require.Error(t, err, "no peer holding the tree is the loud no-source failure")
+}
+
 func TestPullerFailsWithoutADigest(t *testing.T) {
 	ps := newPeerServer(t, "0123456789")
 	p := &Puller{}

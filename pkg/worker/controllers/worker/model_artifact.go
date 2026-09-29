@@ -95,6 +95,7 @@ var _ ctrlreconcile.Reconciler = (*ModelArtifactReconciler)(nil)
 // staircase; only the endpoints and the reason classifier differ, and those live in the clients.
 type modelArtifactHub interface {
 	Resolve(ctx context.Context, repository, revision, token string, filter modelartifact.Filter) (modelartifact.Resolution, error)
+	ListManifest(ctx context.Context, repository, commit, token string, filter modelartifact.Filter) (modelartifact.Manifest, error)
 	Revalidate(ctx context.Context, repository, commit, token string) error
 	ValidToken(ctx context.Context, token string) (bool, error)
 }
@@ -358,7 +359,7 @@ func (r *ModelArtifactReconciler) reconcileHubSource(
 
 	var after time.Duration
 	if ma.Status.Resolved == nil {
-		after = r.resolveHubSource(ctx, ma, hub, source, token)
+		after = r.resolveHubSource(ctx, ma, hub, source, token, now)
 	} else {
 		after = r.revalidateHubSource(ctx, ma, hub, source, token, now, secretChanged)
 	}
@@ -369,29 +370,68 @@ func (r *ModelArtifactReconciler) reconcileHubSource(
 // resolveHubSource resolves the source once and reports when the source is to be asked next.
 func (r *ModelArtifactReconciler) resolveHubSource(
 	ctx context.Context, ma *workercore.ModelArtifact, hub modelArtifactHub, source *workercore.ModelArtifactHubSource,
-	token string,
+	token string, now time.Time,
 ) time.Duration {
 	resolution, err := hub.Resolve(ctx, source.Repository, source.Revision, token, modelartifact.Filter{
 		Allow: ma.Spec.AllowPatterns, Ignore: ma.Spec.IgnorePatterns,
 	})
 	if err != nil {
 		reason := modelartifact.ReasonOf(err)
+		// An anchor turns a confirmed unavailability into an identity: one blip is not a verdict,
+		// the same discipline a revocation follows, but a hub that could not be reached twice in a
+		// row never said no, so the anchor the user asserted becomes the resolution. A hub that
+		// answered — with content or with a refusal — is a hub whose answer decides.
+		if reason == modelartifact.ReasonSourceUnavailable && ma.Spec.ExpectedDigest != "" &&
+			ModelArtifactConditionDegraded.IsTrue(ma) && ModelArtifactConditionDegraded.GetReason(ma) == reason {
+			if wait := modelArtifactConditionSince(ma, ModelArtifactConditionDegraded).Add(modelArtifactConfirmDelay).Sub(now); wait > 0 {
+				return wait
+			}
+			ma.Status.Resolved = &workercore.ModelArtifactResolved{
+				ManifestDigest: ma.Spec.ExpectedDigest,
+				DigestSource:   workercore.ModelArtifactDigestSourceExpected,
+				ResolvedTime:   meta.NewTime(r.now()),
+			}
+			ModelArtifactConditionResolved.True(ma, modelArtifactReasonResolved,
+				fmt.Sprintf("resolved to the expected digest %s without the hub; the hub is not contacted again", ma.Spec.ExpectedDigest))
+			ModelArtifactConditionDegraded.False(ma, modelArtifactReasonHealthy, "")
+
+			return r.revalidateInterval(ctx)
+		}
 		ModelArtifactConditionResolved.False(ma, reason, err.Error())
 		ModelArtifactConditionDegraded.True(ma, reason, err.Error())
 		if reason == modelartifact.ReasonSourceUnavailable {
+			// Stamped with this pass's time, as the revalidation staircase does: the anchor's
+			// confirm cadence runs from the outage this pass saw, not from a condition another
+			// failure left behind.
+			ModelArtifactConditionDegraded.LastTransitionTime(ma, now.UTC().Format(time.RFC3339))
 			return modelArtifactUnavailableRetry
 		}
 		return modelArtifactRefusedRetry
 	}
 
-	now := meta.NewTime(r.now())
+	// The anchor is an assertion about this very answer: a hub that serves different content than
+	// the user pinned is refused, both digests named for the ticket.
+	if anchor := ma.Spec.ExpectedDigest; anchor != "" && resolution.Manifest.Digest != anchor {
+		err = &modelartifact.SourceError{
+			Reason: modelartifact.ReasonDigestMismatch,
+			Message: fmt.Sprintf("the artifact expects %s, the hub resolved %s@%s to %s",
+				anchor, source.Repository, source.Revision, resolution.Manifest.Digest),
+		}
+		ModelArtifactConditionResolved.False(ma, modelartifact.ReasonDigestMismatch, err.Error())
+		ModelArtifactConditionDegraded.True(ma, modelartifact.ReasonDigestMismatch, err.Error())
+
+		return modelArtifactRefusedRetry
+	}
+
+	resolvedAt := meta.NewTime(r.now())
 	ma.Status.Resolved = &workercore.ModelArtifactResolved{
 		Revision:          resolution.Commit,
 		ManifestDigest:    resolution.Manifest.Digest,
+		DigestSource:      workercore.ModelArtifactDigestSourceHub,
 		FileCount:         resolution.Manifest.FileCount,
 		SizeBytes:         resolution.Manifest.SizeBytes,
-		ResolvedTime:      now,
-		LastValidatedTime: &now,
+		ResolvedTime:      resolvedAt,
+		LastValidatedTime: &resolvedAt,
 	}
 	ModelArtifactConditionResolved.True(ma, modelArtifactReasonResolved,
 		fmt.Sprintf("%s@%s resolved to commit %s", source.Repository, source.Revision, resolution.Commit))
@@ -412,6 +452,11 @@ func (r *ModelArtifactReconciler) revalidateHubSource(
 	token string, now time.Time, secretChanged bool,
 ) time.Duration {
 	interval := r.revalidateInterval(ctx)
+	if ma.Status.Resolved.DigestSource == workercore.ModelArtifactDigestSourceExpected {
+		// An anchored identity has no commit to probe and no hub assumed to exist; the pacing
+		// entry alone keeps the reconciler from spinning.
+		return interval
+	}
 	if last := ma.Status.Resolved.LastValidatedTime; last != nil && ModelArtifactConditionResolved.IsTrue(ma) &&
 		!ModelArtifactConditionDegraded.IsTrue(ma) && now.Before(last.Add(interval)) {
 		// Nothing asks for a check yet: the pacing entry was lost, or the Secret changed back.
@@ -420,7 +465,26 @@ func (r *ModelArtifactReconciler) revalidateHubSource(
 		}
 	}
 
-	err := hub.Revalidate(ctx, source.Repository, ma.Status.Resolved.Revision, token)
+	// The anchor makes the periodic check an assertion: the tree is re-listed at the resolved
+	// commit and re-canonicalized, so a hub or a mirror that stops serving the pinned content
+	// fails the same way a resolution would. An unanchored artifact keeps the two-request probe.
+	var err error
+	if anchor := ma.Spec.ExpectedDigest; anchor != "" {
+		manifest, listErr := hub.ListManifest(ctx, source.Repository, ma.Status.Resolved.Revision, token,
+			modelartifact.Filter{Allow: ma.Spec.AllowPatterns, Ignore: ma.Spec.IgnorePatterns})
+		switch {
+		case listErr != nil:
+			err = listErr
+		case manifest.Digest != anchor:
+			err = &modelartifact.SourceError{
+				Reason: modelartifact.ReasonDigestMismatch,
+				Message: fmt.Sprintf("the artifact expects %s, the hub resolves %s@%s to %s",
+					anchor, source.Repository, ma.Status.Resolved.Revision, manifest.Digest),
+			}
+		}
+	} else {
+		err = hub.Revalidate(ctx, source.Repository, ma.Status.Resolved.Revision, token)
+	}
 	if err == nil {
 		validated := meta.NewTime(now)
 		ma.Status.Resolved.LastValidatedTime = &validated
@@ -459,9 +523,11 @@ func (r *ModelArtifactReconciler) revalidateHubSource(
 }
 
 // modelArtifactRevokingReason reports whether a failed access check can revoke: a refusal can, a
-// failure to reach the source cannot.
+// failure to reach the source cannot. A digest mismatch can, because the hub answered — its
+// answer is just not the content the artifact asserts.
 func modelArtifactRevokingReason(reason string) bool {
-	return reason == modelartifact.ReasonAccessDenied || reason == modelartifact.ReasonRevisionNotFound
+	return reason == modelartifact.ReasonAccessDenied || reason == modelartifact.ReasonRevisionNotFound ||
+		reason == modelartifact.ReasonDigestMismatch
 }
 
 func modelArtifactConditionSince(ma *workercore.ModelArtifact, c kubeapistatus.ConditionType) time.Time {

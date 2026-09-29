@@ -94,6 +94,41 @@ func (p *Puller) FetchFile(ctx context.Context, digest string, file download.Fil
 	return fmt.Errorf("%s: %w", file.Path, lastErr)
 }
 
+// FetchManifest returns the tree's manifest from a peer that holds it published, reassembled
+// into the canonical manifest and bound to the digest before it is trusted. A caller with no
+// other way to the manifest — an artifact anchored to its digest without a hub — asks this
+// first; a failure here is the loud no-source failure, not a hub error to dress up.
+func (p *Puller) FetchManifest(ctx context.Context, digest string) (modelartifact.Manifest, error) {
+	treeHex, ok := HexOf(digest)
+	if !ok {
+		return modelartifact.Manifest{}, fmt.Errorf("digest %q is not a manifest digest", digest)
+	}
+	sources, err := p.Discover(ctx, digest)
+	if err != nil {
+		return modelartifact.Manifest{}, err
+	}
+	var lastErr error
+	for _, src := range sources {
+		if p.sitsOut(src) {
+			continue
+		}
+		manifest, err := p.fetchListing(ctx, src, treeHex)
+		if err == nil {
+			return manifest, nil
+		}
+		if ctx.Err() != nil {
+			return modelartifact.Manifest{}, context.Cause(ctx)
+		}
+		p.setAside(src)
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no candidate was usable")
+	}
+
+	return modelartifact.Manifest{}, fmt.Errorf("no node holds %s: %w", digest, lastErr)
+}
+
 // fetchFrom pulls the whole file from one source: its listing is reassembled into a canonical
 // manifest and bound to the tree's digest before a byte is trusted, then the file's ranges are
 // fetched and hashed in byte order, checkpointing as they go.

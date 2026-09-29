@@ -5315,6 +5315,11 @@ func (m *ModelArtifactResolved) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.DigestSource)
+	copy(dAtA[i:], m.DigestSource)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.DigestSource)))
+	i--
+	dAtA[i] = 0x3a
 	if m.LastValidatedTime != nil {
 		{
 			size, err := m.LastValidatedTime.MarshalToSizedBuffer(dAtA[:i])
@@ -5447,6 +5452,11 @@ func (m *ModelArtifactSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.ExpectedDigest)
+	copy(dAtA[i:], m.ExpectedDigest)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.ExpectedDigest)))
+	i--
+	dAtA[i] = 0x22
 	if len(m.IgnorePatterns) > 0 {
 		for iNdEx := len(m.IgnorePatterns) - 1; iNdEx >= 0; iNdEx-- {
 			i -= len(m.IgnorePatterns[iNdEx])
@@ -10544,6 +10554,8 @@ func (m *ModelArtifactResolved) Size() (n int) {
 		l = m.LastValidatedTime.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	l = len(m.DigestSource)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -10592,6 +10604,8 @@ func (m *ModelArtifactSpec) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
+	l = len(m.ExpectedDigest)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -13206,6 +13220,7 @@ func (this *ModelArtifactResolved) String() string {
 		`SizeBytes:` + fmt.Sprintf("%v", this.SizeBytes) + `,`,
 		`ResolvedTime:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.ResolvedTime), "Time", "v1.Time", 1), `&`, ``, 1) + `,`,
 		`LastValidatedTime:` + strings.Replace(fmt.Sprintf("%v", this.LastValidatedTime), "Time", "v1.Time", 1) + `,`,
+		`DigestSource:` + fmt.Sprintf("%v", this.DigestSource) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -13231,6 +13246,7 @@ func (this *ModelArtifactSpec) String() string {
 		`Source:` + strings.Replace(strings.Replace(this.Source.String(), "ModelArtifactSource", "ModelArtifactSource", 1), `&`, ``, 1) + `,`,
 		`AllowPatterns:` + fmt.Sprintf("%v", this.AllowPatterns) + `,`,
 		`IgnorePatterns:` + fmt.Sprintf("%v", this.IgnorePatterns) + `,`,
+		`ExpectedDigest:` + fmt.Sprintf("%v", this.ExpectedDigest) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -30262,6 +30278,38 @@ func (m *ModelArtifactResolved) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field DigestSource", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.DigestSource = ModelArtifactDigestSource(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -30602,6 +30650,38 @@ func (m *ModelArtifactSpec) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.IgnorePatterns = append(m.IgnorePatterns, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ExpectedDigest", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ExpectedDigest = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

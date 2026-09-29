@@ -331,6 +331,96 @@ func TestModelArtifactWebhookUpdateRatchets(t *testing.T) {
 	})
 }
 
+// TestModelArtifactWebhookExpectedDigest covers the anchor's admission rules: accepted on a hub
+// source in the exact digest shape, refused on the sources whose identity does not come from a
+// manifest, and immutable with the spec.
+func TestModelArtifactWebhookExpectedDigest(t *testing.T) {
+	good := "sha256:" + strings.Repeat("a", 64)
+	// The image-volume gate would otherwise answer before the anchor rule does; the snapshot's
+	// Configure ignores later calls, so the seam is swapped here as the image test does.
+	defaultVersion := modelArtifactClusterVersion
+	t.Cleanup(func() { modelArtifactClusterVersion = defaultVersion })
+	modelArtifactClusterVersion = func() kubediscovery.Version {
+		return kubediscovery.Version{GitVersion: "v1.35.5"}
+	}
+
+	cases := []struct {
+		name      string
+		in        *workercore.ModelArtifact
+		wantField string
+	}{
+		{name: "a Hugging Face artifact with an anchor", in: withDigest(newTestHubArtifact("owner/repo", "main"), good)},
+		{name: "a ModelScope artifact with an anchor", in: withDigest(newTestModelScopeArtifact("qwen/Qwen2.5-7B-Instruct", "master"), good)},
+		{
+			name: "a claim source is refused the anchor", wantField: "spec.expectedDigest",
+			in: withDigest(newTestClaimArtifact("models", ""), good),
+		},
+		{
+			name: "an image source is refused the anchor", wantField: "spec.expectedDigest",
+			in: withDigest(newTestImageArtifact("registry/qwen@sha256:"+strings.Repeat("b", 64)), good),
+		},
+		{name: "an uppercase digest", wantField: "spec.expectedDigest", in: withDigest(newTestHubArtifact("owner/repo", "main"), "sha256:"+strings.Repeat("A", 64))},
+		{name: "a short digest", wantField: "spec.expectedDigest", in: withDigest(newTestHubArtifact("owner/repo", "main"), "sha256:"+strings.Repeat("a", 63))},
+		{name: "no algorithm prefix", wantField: "spec.expectedDigest", in: withDigest(newTestHubArtifact("owner/repo", "main"), strings.Repeat("a", 64))},
+		{name: "the wrong algorithm", wantField: "spec.expectedDigest", in: withDigest(newTestHubArtifact("owner/repo", "main"), "sha512:"+strings.Repeat("a", 128))},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := new(ModelArtifactWebhook).ValidateCreate(context.Background(), c.in)
+			if c.wantField == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assertInvalidField(t, err, c.wantField)
+		})
+	}
+
+	t.Run("the claim refusal says the anchor is a hub source's assertion", func(t *testing.T) {
+		_, err := new(ModelArtifactWebhook).ValidateCreate(context.Background(),
+			withDigest(newTestClaimArtifact("models", ""), good))
+		require.Error(t, err)
+		status, ok := err.(kerrors.APIStatus)
+		require.True(t, ok)
+		message := status.Status().Details.Causes[0].Message
+		assert.Contains(t, message, "mount time")
+		assert.Contains(t, message, "identity is the claim")
+	})
+
+	t.Run("the image refusal names the reference's digest as the identity", func(t *testing.T) {
+		_, err := new(ModelArtifactWebhook).ValidateCreate(context.Background(),
+			withDigest(newTestImageArtifact("registry/qwen@sha256:"+strings.Repeat("b", 64)), good))
+		require.Error(t, err)
+		status, ok := err.(kerrors.APIStatus)
+		require.True(t, ok)
+		message := status.Status().Details.Causes[0].Message
+		assert.Contains(t, message, "reference's digest")
+	})
+
+	t.Run("an update changing only the anchor is a spec edit", func(t *testing.T) {
+		old := newTestHubArtifact("owner/repo", "main")
+		updated := old.DeepCopy()
+		updated.Spec.ExpectedDigest = good
+
+		_, err := new(ModelArtifactWebhook).ValidateUpdate(context.Background(), old, updated)
+		require.Error(t, err)
+		assertInvalidField(t, err, "spec")
+	})
+	t.Run("an update keeping the anchor is metadata only", func(t *testing.T) {
+		old := withDigest(newTestHubArtifact("owner/repo", "main"), good)
+		updated := old.DeepCopy()
+		updated.Labels = map[string]string{"a": "b"}
+
+		_, err := new(ModelArtifactWebhook).ValidateUpdate(context.Background(), old, updated)
+		require.NoError(t, err)
+	})
+}
+
+func withDigest(ma *workercore.ModelArtifact, digest string) *workercore.ModelArtifact {
+	ma.Spec.ExpectedDigest = digest
+	return ma
+}
+
 func withPatterns(ma *workercore.ModelArtifact, allow, ignore []string) *workercore.ModelArtifact {
 	ma.Spec.AllowPatterns, ma.Spec.IgnorePatterns = allow, ignore
 	return ma

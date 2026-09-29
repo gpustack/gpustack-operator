@@ -4204,6 +4204,12 @@ func crd_gpustack_api_worker_v1alpha1_ModelArtifact() *v1.CustomResourceDefiniti
 											Nullable:  true,
 											XListType: ptr.To[string]("atomic"),
 										},
+										"expectedDigest": {
+											Description: "ExpectedDigest optionally asserts the manifest digest this artifact must resolve to:\n\"sha256:\" and 64 lowercase hex, the content address status.resolved.manifestDigest\ncarries. Admission accepts it on a hub source only: a claim's content is whatever the\nvolume holds at mount time — dynamically provisioned claims differ per provisioning —\nand its identity is the claim itself, which the user confirms; an image's identity is\nits reference's digest. A resolution whose digest differs is refused as DigestMismatch,\nand an artifact whose hub cannot be reached resolves to the anchor without the hub,\nrecorded as status.resolved.digestSource \"Expected\". Immutable with the whole spec.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](71),
+											Pattern:     `^sha256:[a-f0-9]{64}$`,
+										},
 										"ignorePatterns": {
 											Type:     "array",
 											MaxItems: ptr.To[int64](32),
@@ -4271,7 +4277,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelArtifact() *v1.CustomResourceDefiniti
 													Nullable: true,
 												},
 												"modelScope": {
-													Description: "ModelScope is RESERVED AND REFUSED by admission in this version. Its shape is fixed so that\nopening it is a webhook change rather than a schema change, and the refusal names what opening\nit needs: branch resolution cross-checked against git, a listing that re-lists per directory at\nthe API's silent truncation point, errors classified by the envelope code, and an engine runner\nwhose ModelScope SDK accepts a commit as the revision.",
+													Description: "ModelScope is a second hub. Its repository and revision rules are the Hugging Face ones,\nthe revision defaults to \"master\", and the patterns apply to it the same way. What\ndiffers is how it resolves: a full commit is taken as is, a branch or tag is resolved\nthrough the commits API and cross-checked against git, the file listing re-lists per\ndirectory at the API's silent truncation point, and the engine's runner needs a\nModelScope SDK that accepts a commit as the revision.",
 													Type:        "object",
 													Required: []string{
 														"repository",
@@ -4448,6 +4454,10 @@ func crd_gpustack_api_worker_v1alpha1_ModelArtifact() *v1.CustomResourceDefiniti
 												"resolvedTime",
 											},
 											Properties: map[string]v1.JSONSchemaProps{
+												"digestSource": {
+													Description: "DigestSource says where ManifestDigest came from: Hub, the hub's own listing, or Expected,\nthe spec's expectedDigest written after the hub's absence was confirmed. An Expected\nidentity carries no Revision, FileCount or SizeBytes and never contacts the hub again.",
+													Type:        "string",
+												},
 												"fileCount": {
 													Description: "FileCount and SizeBytes are the manifest's file count and total size. Absent for a claim.",
 													Type:        "integer",

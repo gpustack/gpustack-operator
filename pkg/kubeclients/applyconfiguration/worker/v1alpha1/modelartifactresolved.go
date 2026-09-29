@@ -3,6 +3,7 @@
 package v1alpha1
 
 import (
+	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -28,6 +29,10 @@ type ModelArtifactResolvedApplyConfiguration struct {
 	// LastValidatedTime is when access was last confirmed. Absent for a claim, which has no access
 	// check of its own.
 	LastValidatedTime *v1.Time `json:"lastValidatedTime,omitempty"`
+	// DigestSource says where ManifestDigest came from: Hub, the hub's own listing, or Expected,
+	// the spec's expectedDigest written after the hub's absence was confirmed. An Expected
+	// identity carries no Revision, FileCount or SizeBytes and never contacts the hub again.
+	DigestSource *workerv1alpha1.ModelArtifactDigestSource `json:"digestSource,omitempty"`
 }
 
 // ModelArtifactResolvedApplyConfiguration constructs a declarative configuration of the ModelArtifactResolved type for use with
@@ -81,5 +86,13 @@ func (b *ModelArtifactResolvedApplyConfiguration) WithResolvedTime(value v1.Time
 // If called multiple times, the LastValidatedTime field is set to the value of the last call.
 func (b *ModelArtifactResolvedApplyConfiguration) WithLastValidatedTime(value v1.Time) *ModelArtifactResolvedApplyConfiguration {
 	b.LastValidatedTime = &value
+	return b
+}
+
+// WithDigestSource sets the DigestSource field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DigestSource field is set to the value of the last call.
+func (b *ModelArtifactResolvedApplyConfiguration) WithDigestSource(value workerv1alpha1.ModelArtifactDigestSource) *ModelArtifactResolvedApplyConfiguration {
+	b.DigestSource = &value
 	return b
 }

@@ -183,7 +183,11 @@ call after publication mounts. After a download completes, a Pod starts at kubel
 to about two minutes later.
 
 1. **Manifest.** The tree at `status.resolved.revision` is listed with the mount's credential and
-   filtered by the artifact's patterns; its canonical digest must equal `manifestDigest`.
+   filtered by the artifact's patterns; its canonical digest must equal `manifestDigest`. An
+   artifact whose `digestSource` is `Expected` resolved to its anchor without the hub and has no
+   commit to list at: the manifest comes from a peer's published listing instead, reassembled and
+   bound to the digest before it is trusted, and the chain is peers only — there is no hub to fall
+   back to.
 2. **Capacity.** The rest of the manifest's size, together with what every other running download
    has yet to write, is reserved against the high watermark, collecting first when it does not fit;
    two downloads that each fit and together do not are never both admitted. The reservation is held
@@ -217,7 +221,7 @@ stay for a resume.
 | --- | --- | --- |
 | `InvalidRequest` | the configuration cannot be executed: an invalid endpoint, proxy or CA | waits for the configuration to change |
 | `AccessDenied` | the Hub refused the credential | backoff |
-| `SourceUnavailable` | the Hub is unreachable, answers 5xx or 429, or a file's ranges keep failing | backoff |
+| `SourceUnavailable` | the Hub is unreachable, answers 5xx or 429, a file's ranges keep failing, or no node holds an anchored artifact's digest | backoff |
 | `IntegrityMismatch` | a file's hash or size, or the manifest's digest, does not match | the file is discarded; backoff |
 | `InsufficientCapacity` | the reservation does not fit under the high watermark after collection | backoff |
 | `Canceled` | no mount asked for the digest for five minutes | resumes on the next mount |

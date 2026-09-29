@@ -118,8 +118,10 @@ func TestValidateModelDeploymentArtifactOwnedKeys(t *testing.T) {
 		{
 			name: "the ModelScope environment", engine: workercore.ModelDeploymentEngineVLLM,
 			env: []workercore.ModelDeploymentEnvVar{
-				{Name: "MODELSCOPE_API_TOKEN", Value: "x"}, {Name: "MODELSCOPE_DOMAIN", Value: "ms"},
-				{Name: "MODELSCOPE_CACHE", Value: "/c"}, {Name: "VLLM_USE_MODELSCOPE", Value: "true"},
+				{Name: "MODELSCOPE_API_TOKEN", Value: "x"},
+				{Name: "MODELSCOPE_DOMAIN", Value: "ms"},
+				{Name: "MODELSCOPE_CACHE", Value: "/c"},
+				{Name: "VLLM_USE_MODELSCOPE", Value: "true"},
 			},
 			wantField: []string{
 				"spec.roles[0].env[0]", "spec.roles[0].env[1]", "spec.roles[0].env[2]", "spec.roles[0].env[3]",

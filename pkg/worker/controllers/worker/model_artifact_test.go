@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -173,18 +175,21 @@ func testModelScopeArtifact(secret string) *workercore.ModelArtifact {
 
 // testModelScopeHub is a fake ModelScope client: every answer swappable, every ask recorded.
 type testModelScopeHub struct {
-	mu         sync.Mutex
-	resolution modelartifact.Resolution
-	resolveErr error
-	revalidate []error // one per Revalidate ask, the last repeating
-	tokenValid bool
-	tokenErr   error
-	asks       int
-	lastRepo   string
-	lastRev    string
-	lastToken  string
-	lastFilter modelartifact.Filter
-	lastCommit string
+	mu          sync.Mutex
+	resolution  modelartifact.Resolution
+	resolveErr  error
+	revalidate  []error                  // one per Revalidate ask, the last repeating
+	list        []modelartifact.Manifest // one per ListManifest ask, the last repeating
+	tokenValid  bool
+	tokenErr    error
+	asks        int // every hub ask, however it is answered
+	lists       int
+	revalidates int
+	lastRepo    string
+	lastRev     string
+	lastToken   string
+	lastFilter  modelartifact.Filter
+	lastCommit  string
 }
 
 func (h *testModelScopeHub) Resolve(_ context.Context, repository, revision, token string, filter modelartifact.Filter) (modelartifact.Resolution, error) {
@@ -203,6 +208,7 @@ func (h *testModelScopeHub) Revalidate(_ context.Context, repository, commit, to
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.asks++
+	h.revalidates++
 	h.lastRepo, h.lastCommit, h.lastToken = repository, commit, token
 	if len(h.revalidate) == 0 {
 		return nil
@@ -213,6 +219,23 @@ func (h *testModelScopeHub) Revalidate(_ context.Context, repository, commit, to
 	}
 
 	return err
+}
+
+func (h *testModelScopeHub) ListManifest(_ context.Context, repository, commit, token string, filter modelartifact.Filter) (modelartifact.Manifest, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.asks++
+	h.lists++
+	h.lastRepo, h.lastCommit, h.lastToken, h.lastFilter = repository, commit, token, filter
+	if len(h.list) == 0 {
+		return h.resolution.Manifest, nil
+	}
+	manifest := h.list[0]
+	if len(h.list) > 1 {
+		h.list = h.list[1:]
+	}
+
+	return manifest, nil
 }
 
 func (h *testModelScopeHub) ValidToken(_ context.Context, _ string) (bool, error) {
@@ -966,4 +989,185 @@ func TestModelArtifactReconcileImage(t *testing.T) {
 	assert.Equal(t, "True", ModelArtifactConditionResolved.GetStatus(got))
 	assert.Equal(t, "Resolved", ModelArtifactConditionResolved.GetReason(got))
 	assert.Equal(t, "False", ModelArtifactConditionDegraded.GetStatus(got))
+}
+
+// testAnchoredModelScopeArtifact is a ModelScope artifact carrying the anchor, with a Secret
+// reference when one is named.
+func testAnchoredModelScopeArtifact(digest, secret string) *workercore.ModelArtifact {
+	ma := testModelScopeArtifact(secret)
+	ma.Spec.ExpectedDigest = digest
+
+	return ma
+}
+
+func testManifest(path, hash string, size int64) (modelartifact.Manifest, error) {
+	return modelartifact.NewManifest([]modelartifact.ManifestEntry{
+		{Path: path, Size: size, Digest: modelartifact.DigestSHA256 + ":" + hash},
+	})
+}
+
+// TestModelArtifactReconcileAssertsTheExpectedDigest walks the anchor: a resolution whose digest
+// matches stands; one that does not is refused with both digests and revokes on the staircase; and
+// a confirmed outage writes the anchor as the identity, which asks the hub for nothing ever again.
+func TestModelArtifactReconcileAssertsTheExpectedDigest(t *testing.T) {
+	good, err := testManifest("README.md", strings.Repeat("a", 64), 3)
+	require.NoError(t, err)
+	drifted, err := testManifest("README.md", strings.Repeat("f", 64), 3)
+	require.NoError(t, err)
+
+	t.Run("a resolution matching the anchor stands", func(t *testing.T) {
+		hub := &testModelScopeHub{resolution: modelartifact.Resolution{Commit: testArtifactCommit, Manifest: good}}
+		env := newTestModelScopeEnv(t, hub, testAnchoredModelScopeArtifact(good.Digest, ""))
+
+		ma, _ := env.reconcile(t, "qwen")
+		assert.True(t, ModelArtifactConditionResolved.IsTrue(ma))
+		require.NotNil(t, ma.Status.Resolved)
+		assert.Equal(t, good.Digest, ma.Status.Resolved.ManifestDigest)
+		assert.Equal(t, testArtifactCommit, ma.Status.Resolved.Revision)
+		assert.Equal(t, workercore.ModelArtifactDigestSourceHub, ma.Status.Resolved.DigestSource)
+	})
+	t.Run("a resolution missing the anchor is refused with both digests", func(t *testing.T) {
+		hub := &testModelScopeHub{resolution: modelartifact.Resolution{Commit: testArtifactCommit, Manifest: good}}
+		env := newTestModelScopeEnv(t, hub, testAnchoredModelScopeArtifact(drifted.Digest, ""))
+
+		ma, _ := env.reconcile(t, "qwen")
+		assert.False(t, ModelArtifactConditionResolved.IsTrue(ma))
+		assert.Equal(t, modelartifact.ReasonDigestMismatch, ModelArtifactConditionResolved.GetReason(ma))
+		assert.Nil(t, ma.Status.Resolved, "a refused resolution writes no identity")
+		assert.True(t, ModelArtifactConditionDegraded.IsTrue(ma))
+		message := ModelArtifactConditionResolved.GetMessage(ma)
+		assert.Contains(t, message, drifted.Digest)
+		assert.Contains(t, message, good.Digest)
+	})
+	t.Run("a drift at the resolved commit walks the staircase", func(t *testing.T) {
+		hub := &testModelScopeHub{
+			resolution: modelartifact.Resolution{Commit: testArtifactCommit, Manifest: good},
+			list:       []modelartifact.Manifest{drifted, drifted},
+		}
+		env := newTestModelScopeEnv(t, hub, testAnchoredModelScopeArtifact(good.Digest, ""))
+		resolved, _ := env.reconcile(t, "qwen")
+		require.True(t, ModelArtifactConditionResolved.IsTrue(resolved))
+
+		day := 24 * time.Hour
+		env.clock.now = env.clock.now.Add(day)
+		first, _ := env.reconcile(t, "qwen")
+		assert.True(t, ModelArtifactConditionResolved.IsTrue(first), "the first mismatch degrades, not revokes")
+		assert.Equal(t, modelartifact.ReasonDigestMismatch, ModelArtifactConditionDegraded.GetReason(first))
+		hub.mu.Lock()
+		assert.Equal(t, testArtifactCommit, hub.lastCommit, "the revalidation lists at the resolved commit")
+		assert.Equal(t, 1, hub.lists, "the anchored revalidation is one listing")
+		assert.Equal(t, 0, hub.revalidates, "the anchored revalidation is not the HEAD probe")
+		hub.mu.Unlock()
+
+		env.clock.now = env.clock.now.Add(10 * time.Second)
+		env.reconcile(t, "qwen")
+		env.clock.now = env.clock.now.Add(time.Minute)
+		revoked, _ := env.reconcile(t, "qwen")
+		assert.False(t, ModelArtifactConditionResolved.IsTrue(revoked), "the confirmed mismatch revokes")
+		assert.Equal(t, modelartifact.ReasonDigestMismatch, ModelArtifactConditionResolved.GetReason(revoked))
+		require.NotNil(t, revoked.Status.Resolved)
+		assert.Equal(t, testArtifactCommit, revoked.Status.Resolved.Revision, "the identity stays for audit")
+	})
+	t.Run("a confirmed outage resolves to the anchor without the hub", func(t *testing.T) {
+		outage := &modelartifact.SourceError{Reason: modelartifact.ReasonSourceUnavailable, Message: "HTTP 503"}
+		hub := &testModelScopeHub{resolveErr: outage}
+		env := newTestModelScopeEnv(t, hub, testAnchoredModelScopeArtifact(good.Digest, ""))
+
+		env.reconcile(t, "qwen")
+		got := mustGet(t, env.cli)
+		assert.False(t, ModelArtifactConditionResolved.IsTrue(got), "one blip is not a verdict")
+		assert.Nil(t, got.Status.Resolved)
+
+		env.clock.now = env.clock.now.Add(2 * modelArtifactUnavailableRetry)
+		env.reconcile(t, "qwen")
+		got = mustGet(t, env.cli)
+		assert.True(t, ModelArtifactConditionResolved.IsTrue(got), "the confirmed outage anchors the identity")
+		require.NotNil(t, got.Status.Resolved)
+		assert.Equal(t, good.Digest, got.Status.Resolved.ManifestDigest)
+		assert.Equal(t, workercore.ModelArtifactDigestSourceExpected, got.Status.Resolved.DigestSource)
+		assert.Empty(t, got.Status.Resolved.Revision, "an Expected identity has no commit")
+		assert.Zero(t, got.Status.Resolved.FileCount)
+		assert.Zero(t, got.Status.Resolved.SizeBytes)
+
+		hub.mu.Lock()
+		asksBefore := hub.asks
+		hub.mu.Unlock()
+		env.clock.now = env.clock.now.Add(25 * time.Hour)
+		env.reconcile(t, "qwen")
+		hub.mu.Lock()
+		defer hub.mu.Unlock()
+		assert.Equal(t, asksBefore, hub.asks, "an Expected artifact asks the hub for nothing, ever")
+	})
+	t.Run("a hub that answered is never anchored around", func(t *testing.T) {
+		refused := &modelartifact.SourceError{Reason: modelartifact.ReasonAccessDenied, Message: "private"}
+		hub := &testModelScopeHub{resolveErr: refused}
+		env := newTestModelScopeEnv(t, hub, testAnchoredModelScopeArtifact(good.Digest, ""))
+
+		env.reconcile(t, "qwen")
+		env.clock.now = env.clock.now.Add(2 * modelArtifactUnavailableRetry)
+		env.reconcile(t, "qwen")
+
+		ma := new(workercore.ModelArtifact)
+		require.NoError(t, env.cli.Get(context.Background(),
+			ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}, ma))
+		assert.False(t, ModelArtifactConditionResolved.IsTrue(ma))
+		assert.Equal(t, modelartifact.ReasonAccessDenied, ModelArtifactConditionResolved.GetReason(ma))
+		assert.Nil(t, ma.Status.Resolved, "an answered hub's refusal is the verdict")
+	})
+	t.Run("a single blip does not freeze the identity", func(t *testing.T) {
+		outage := &modelartifact.SourceError{Reason: modelartifact.ReasonSourceUnavailable, Message: "HTTP 503"}
+		hub := &testModelScopeHub{resolveErr: outage}
+		env := newTestModelScopeEnv(t, hub, testAnchoredModelScopeArtifact(good.Digest, ""))
+
+		env.reconcile(t, "qwen")
+		hub.mu.Lock()
+		hub.resolveErr = nil
+		hub.resolution = modelartifact.Resolution{Commit: testArtifactCommit, Manifest: good}
+		hub.mu.Unlock()
+		env.clock.now = env.clock.now.Add(2 * modelArtifactUnavailableRetry)
+		ma, _ := env.reconcile(t, "qwen")
+
+		assert.True(t, ModelArtifactConditionResolved.IsTrue(ma))
+		require.NotNil(t, ma.Status.Resolved)
+		assert.Equal(t, testArtifactCommit, ma.Status.Resolved.Revision, "the hub answered, so the hub decides")
+		assert.Equal(t, workercore.ModelArtifactDigestSourceHub, ma.Status.Resolved.DigestSource)
+	})
+	t.Run("an unanchored artifact revalidates with the HEAD probe, not a listing", func(t *testing.T) {
+		hub := &testModelScopeHub{resolution: modelartifact.Resolution{Commit: testArtifactCommit, Manifest: good}}
+		env := newTestModelScopeEnv(t, hub, testModelScopeArtifact(""))
+		env.reconcile(t, "qwen")
+
+		env.clock.now = env.clock.now.Add(25 * time.Hour)
+		env.reconcile(t, "qwen")
+		assert.True(t, ModelArtifactConditionResolved.IsTrue(mustGet(t, env.cli)))
+	})
+}
+
+// TestModelArtifactKVIdentity pins the identity a KV store's keys carry: the manifest digest's
+// leading digits wherever the artifact resolved to one — an anchored artifact included, its
+// Expected identity being a digest like any other — and the UID's hash only where nothing did.
+func TestModelArtifactKVIdentity(t *testing.T) {
+	ma := artifactFixture("", true, true)
+	assert.Equal(t, "m-"+strings.Repeat("1", 32), modelArtifactKVIdentity(ma),
+		"a hub artifact's identity is its digest's leading digits")
+
+	ma.Spec.ExpectedDigest = testArtifactDigest
+	ma.Status.Resolved.Revision = ""
+	ma.Status.Resolved.DigestSource = workercore.ModelArtifactDigestSourceExpected
+	assert.Equal(t, "m-"+strings.Repeat("1", 32), modelArtifactKVIdentity(ma),
+		"an Expected identity keys on the digest it carries")
+
+	claim := artifactFixture("models", true, true)
+	sum := sha256.Sum256([]byte(claim.UID))
+	assert.Equal(t, "m-"+hex.EncodeToString(sum[:])[:32], modelArtifactKVIdentity(claim),
+		"a claim's identity is the artifact, not its content")
+}
+
+func mustGet(t *testing.T, cli ctrlcli.Client) *workercore.ModelArtifact {
+	t.Helper()
+	ma := new(workercore.ModelArtifact)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen"}, ma))
+
+	return ma
 }

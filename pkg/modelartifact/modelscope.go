@@ -245,7 +245,7 @@ func modelScopeManifestEntry(e modelScopeFileEntry) (ManifestEntry, bool, error)
 			"entry %q is of type %q, which is neither a blob nor a tree", e.Path, e.Type)
 	}
 	if len(e.Sha256) != 64 || strings.ContainsFunc(e.Sha256, func(r rune) bool {
-		return !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f')
+		return (r < '0' || r > '9') && (r < 'a' || r > 'f')
 	}) {
 		return ManifestEntry{}, false, sourceErrorf(ReasonInvalidManifest,
 			"entry %q names no usable Sha256, which every manifest line requires", e.Path)
@@ -363,10 +363,10 @@ func (m *ModelScope) ValidToken(ctx context.Context, token string) (bool, error)
 		return false, err
 	}
 	defer httpx.Close(resp)
-	switch {
-	case resp.StatusCode == http.StatusOK:
+	switch resp.StatusCode {
+	case http.StatusOK:
 		return true, nil
-	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden:
+	case http.StatusUnauthorized, http.StatusForbidden:
 		return false, nil
 	default:
 		return false, sourceErrorf(ReasonSourceUnavailable,
@@ -425,7 +425,7 @@ func (m *ModelScope) lsRemoteOverHTTP(ctx context.Context, gitURL, token string)
 
 	resp, err := m.Client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s %s: %v", http.MethodGet, target, unwrapURLError(err))
+		return nil, fmt.Errorf("%s %s: %w", http.MethodGet, target, unwrapURLError(err))
 	}
 	defer httpx.Close(resp)
 	switch {
