@@ -7890,6 +7890,11 @@ func (m *NodeModelStoreHub) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.ModelScopeEndpoint)
+	copy(dAtA[i:], m.ModelScopeEndpoint)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.ModelScopeEndpoint)))
+	i--
+	dAtA[i] = 0x2a
 	i -= len(m.CABundleConfigMap)
 	copy(dAtA[i:], m.CABundleConfigMap)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.CABundleConfigMap)))
@@ -11481,6 +11486,8 @@ func (m *NodeModelStoreHub) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.CABundleConfigMap)
 	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.ModelScopeEndpoint)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -13923,6 +13930,7 @@ func (this *NodeModelStoreHub) String() string {
 		`HTTPSProxy:` + fmt.Sprintf("%v", this.HTTPSProxy) + `,`,
 		`NoProxy:` + fmt.Sprintf("%v", this.NoProxy) + `,`,
 		`CABundleConfigMap:` + fmt.Sprintf("%v", this.CABundleConfigMap) + `,`,
+		`ModelScopeEndpoint:` + fmt.Sprintf("%v", this.ModelScopeEndpoint) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -38168,6 +38176,38 @@ func (m *NodeModelStoreHub) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.CABundleConfigMap = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ModelScopeEndpoint", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ModelScopeEndpoint = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

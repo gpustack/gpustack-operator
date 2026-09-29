@@ -49,6 +49,7 @@ type Layer struct {
 	DownloadBytesPerSecond *int64
 	PeerSyncEnabled        *bool
 	HuggingFaceEndpoint    *string
+	ModelScopeEndpoint     *string
 	HTTPSProxy             *string
 	NoProxy                *string
 	CABundleConfigMap      *string
@@ -66,6 +67,7 @@ func Merge(layers ...Layer) workercore.NodeModelStoreSpec {
 			spec.PeerSyncEnabled = l.PeerSyncEnabled
 		}
 		overlay(&spec.Hub.HuggingFaceEndpoint, l.HuggingFaceEndpoint)
+		overlay(&spec.Hub.ModelScopeEndpoint, l.ModelScopeEndpoint)
 		overlay(&spec.Hub.HTTPSProxy, l.HTTPSProxy)
 		overlay(&spec.Hub.NoProxy, l.NoProxy)
 		overlay(&spec.Hub.CABundleConfigMap, l.CABundleConfigMap)
@@ -105,6 +107,14 @@ func Validate(spec workercore.NodeModelStoreSpec) error {
 	h := spec.Hub
 	if err := ValidateEndpoint(h.HuggingFaceEndpoint); err != nil {
 		errs = append(errs, fmt.Errorf("hugging face endpoint: %w", err))
+	}
+	// The ModelScope endpoint is optional: a spec an older worker wrote names none, and a
+	// ModelScope artifact on such a node waits with that named rather than being resolved
+	// against another hub. A spec that names one must name a usable one.
+	if h.ModelScopeEndpoint != "" {
+		if err := ValidateEndpoint(h.ModelScopeEndpoint); err != nil {
+			errs = append(errs, fmt.Errorf("modelscope endpoint: %w", err))
+		}
 	}
 	if h.HTTPSProxy != "" {
 		if err := modelartifact.ValidateProxy(h.HTTPSProxy); err != nil {

@@ -221,6 +221,7 @@ func ModelStoreLayer(value func(setting.Setting) string) (modelstore.Layer, erro
 		DownloadConcurrency:  parse32(ModelStoreDownloadConcurrency),
 		PeerSyncEnabled:      peerSync(ModelStorePeerSync),
 		HuggingFaceEndpoint:  str(ModelArtifactHuggingFaceEndpoint),
+		ModelScopeEndpoint:   str(ModelArtifactModelScopeEndpoint),
 		HTTPSProxy:           str(ModelArtifactHTTPSProxy),
 		NoProxy:              str(ModelArtifactNoProxy),
 		CABundleConfigMap:    str(ModelArtifactCABundle),

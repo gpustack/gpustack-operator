@@ -101,7 +101,7 @@ func TestReporterReadsPastAStalledInformer(t *testing.T) {
 	collector.Pinned = reporter.Pinned
 
 	require.NoError(t, reporter.Report(ctx))
-	hub, _, err := reporter.Environment(ctx)
+	hub, _, err := reporter.Environment(ctx, materialize.HubHuggingFace)
 	require.NoError(t, err)
 	require.IsType(t, new(modelartifact.HuggingFace), hub)
 	assert.Equal(t, "https://new.hf.example.com", hub.(*modelartifact.HuggingFace).Endpoint,

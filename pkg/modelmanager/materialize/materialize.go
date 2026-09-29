@@ -53,9 +53,40 @@ type Hub interface {
 	FileURL(repository, commit, path string) string
 }
 
-// Environment returns the hub and the downloader built from the node's current effective
-// configuration, or an InvalidRequest error while that configuration is invalid.
-type Environment func(ctx context.Context) (Hub, *download.Downloader, error)
+// The hub kinds a source may name, which the environment builds a hub for.
+const (
+	HubHuggingFace = "huggingFace"
+	HubModelScope  = "modelscope"
+)
+
+// HubKindOf names the hub an artifact's source resolves against, or "" when it names none.
+func HubKindOf(ma *workercore.ModelArtifact) string {
+	switch {
+	case ma.Spec.Source.HuggingFace != nil:
+		return HubHuggingFace
+	case ma.Spec.Source.ModelScope != nil:
+		return HubModelScope
+	default:
+		return ""
+	}
+}
+
+// HubRepository is the repository id an artifact's source names, or "".
+func HubRepository(ma *workercore.ModelArtifact) string {
+	switch {
+	case ma.Spec.Source.HuggingFace != nil:
+		return ma.Spec.Source.HuggingFace.Repository
+	case ma.Spec.Source.ModelScope != nil:
+		return ma.Spec.Source.ModelScope.Repository
+	default:
+		return ""
+	}
+}
+
+// Environment returns the hub of the named kind and the downloader built from the node's current
+// effective configuration, or an InvalidRequest error while that configuration is invalid or does
+// not reach the hub the source names.
+type Environment func(ctx context.Context, kind string) (Hub, *download.Downloader, error)
 
 // Materializer implements driver.Materializer.
 type Materializer struct {
@@ -102,9 +133,11 @@ type job struct {
 	order   []string
 }
 
-// source is one artifact's way to the content: its repository at its commit, and the credential its
-// namespace's mount handed over. A credential is only ever sent for its own repository.
+// source is one artifact's way to the content: its hub's kind, its repository at its commit, and
+// the credential its namespace's mount handed over. A credential is only ever sent for its own
+// repository.
 type source struct {
+	kind       string
 	repository string
 	commit     string
 	filter     modelartifact.Filter
@@ -222,7 +255,8 @@ func (j *job) join(req driver.Request, now time.Time) {
 	s, ok := j.sources[uid]
 	if !ok {
 		s = &source{
-			repository: ma.Spec.Source.HuggingFace.Repository,
+			kind:       HubKindOf(ma),
+			repository: HubRepository(ma),
 			commit:     ma.Status.Resolved.Revision,
 			filter:     modelartifact.Filter{Allow: ma.Spec.AllowPatterns, Ignore: ma.Spec.IgnorePatterns},
 		}
@@ -320,10 +354,6 @@ func (m *Materializer) watchWaiters(ctx context.Context, j *job) func() {
 }
 
 func (m *Materializer) attempt(ctx context.Context, j *job) error {
-	hub, dl, err := m.Environment(ctx)
-	if err != nil {
-		return err
-	}
 	a, err := m.Store.NewAttempt(j.hex)
 	if err != nil {
 		return err
@@ -331,6 +361,13 @@ func (m *Materializer) attempt(ctx context.Context, j *job) error {
 
 	var lastErr error
 	for _, src := range j.snapshotSources() {
+		hub, dl, err := m.Environment(ctx, src.kind)
+		if err != nil {
+			// One kind's configuration failure says nothing about another kind's: try the
+			// remaining sources before reporting.
+			lastErr = err
+			continue
+		}
 		lastErr = m.fromSource(ctx, j, a, hub, dl, src)
 		// Only a refusal of this source's credential is worth another source: the content is the
 		// same wherever it is authorized, and any other failure would repeat.

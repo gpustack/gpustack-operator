@@ -116,6 +116,25 @@ func TestValidateModelDeploymentArtifactOwnedKeys(t *testing.T) {
 			wantField: []string{"spec.roles[0].env[0]", "spec.roles[0].env[2]"},
 		},
 		{
+			name: "the ModelScope environment", engine: workercore.ModelDeploymentEngineVLLM,
+			env: []workercore.ModelDeploymentEnvVar{
+				{Name: "MODELSCOPE_API_TOKEN", Value: "x"}, {Name: "MODELSCOPE_DOMAIN", Value: "ms"},
+				{Name: "MODELSCOPE_CACHE", Value: "/c"}, {Name: "VLLM_USE_MODELSCOPE", Value: "true"},
+			},
+			wantField: []string{
+				"spec.roles[0].env[0]", "spec.roles[0].env[1]", "spec.roles[0].env[2]", "spec.roles[0].env[3]",
+			},
+		},
+		{
+			name: "SGLang's own switch", engine: workercore.ModelDeploymentEngineSGLang,
+			env:       []workercore.ModelDeploymentEnvVar{{Name: "SGLANG_USE_MODELSCOPE", Value: "true"}},
+			wantField: []string{"spec.roles[0].env[0]"},
+		},
+		{
+			name: "vLLM ignores SGLang's switch", engine: workercore.ModelDeploymentEngineVLLM,
+			env: []workercore.ModelDeploymentEnvVar{{Name: "SGLANG_USE_MODELSCOPE", Value: "true"}},
+		},
+		{
 			name: "without an artifact a revision is the user's", engine: workercore.ModelDeploymentEngineVLLM, noRef: true,
 			args: []string{"--revision", "v2"}, env: []workercore.ModelDeploymentEnvVar{{Name: "HF_TOKEN", Value: "x"}},
 		},

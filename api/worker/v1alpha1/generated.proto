@@ -4735,6 +4735,13 @@ message NodeModelStoreHub {
   //
   // +optional
   optional string caBundleConfigMap = 4;
+
+  // ModelScopeEndpoint is the ModelScope hub's base URL. It is empty in a spec an older worker
+  // wrote, and a ModelScope artifact on such a node waits with that named rather than being
+  // resolved against another hub.
+  //
+  // +optional
+  optional string modelScopeEndpoint = 5;
 }
 
 // NodeModelStoreKubelet is the part of a node's effective kubelet configuration that bounds a cache

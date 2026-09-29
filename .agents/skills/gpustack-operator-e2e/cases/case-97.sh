@@ -22,8 +22,10 @@
 #              bigscience/bloom-560m (annotated tag gs555750); private E2E_C97_PRIVATE; gated
 #              E2E_C97_GATED (default XyX824/mam-d-gated-tiny). The token only ever reaches a Secret
 #              created from the environment; it is never written to a file or printed.
-# Expected:    - admission refuses ModelScope, two sources, no source, a three-part repository, a
-#                revision with whitespace, an absolute or dot-dot claim path, and a spec edit;
+# Expected:    - admission refuses two sources, no source, a three-part repository, a
+#                revision with whitespace, an absolute or dot-dot claim path, and a spec edit; a
+#                well-formed ModelScope source is admitted and a bad ModelScope repository is
+#                refused;
 #              - a tree of four pages resolves to the digest recorded for that commit;
 #              - the branch resolves to `git ls-remote`'s main, the tag to its peeled commit, and
 #                the digest equals testdata/manifest/canonical_manifest.py over the same tree;
@@ -145,12 +147,27 @@ refused() { # check manifest-on-stdin
   fi
 }
 
+admitted() { # check manifest-on-stdin
+  local out
+  if out="$(kubectl apply --dry-run=server -f - 2>&1)"; then
+    record PASS "$1" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)"
+  else
+    record FAIL "$1" "refused: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-160)"
+  fi
+}
+
 echo "== 1. admission =="
-refused "ModelScope is refused" <<YAML
+admitted "a well-formed ModelScope source is admitted" <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelArtifact
 metadata: {name: ${P}-ms, namespace: ${NS}}
 spec: {source: {modelScope: {repository: qwen/Qwen2.5-0.5B-Instruct, revision: master}}}
+YAML
+refused "a ModelScope three-part repository is refused" <<YAML
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelArtifact
+metadata: {name: ${P}-ms-bad, namespace: ${NS}}
+spec: {source: {modelScope: {repository: a/b/c, revision: master}}}
 YAML
 refused "two sources are refused" <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1

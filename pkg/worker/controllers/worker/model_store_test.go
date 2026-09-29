@@ -123,9 +123,12 @@ func TestNodeModelStoreAppliesTheStoreLayer(t *testing.T) {
 				}),
 			},
 			wantSpec: workercore.NodeModelStoreSpec{
-				Watermarks:      workercore.NodeModelStoreWatermarks{HighPercent: 85, LowPercent: 75},
-				Download:        workercore.NodeModelStoreDownload{Concurrency: 16},
-				Hub:             workercore.NodeModelStoreHub{HuggingFaceEndpoint: "https://huggingface.co"},
+				Watermarks: workercore.NodeModelStoreWatermarks{HighPercent: 85, LowPercent: 75},
+				Download:   workercore.NodeModelStoreDownload{Concurrency: 16},
+				Hub: workercore.NodeModelStoreHub{
+					HuggingFaceEndpoint: "https://huggingface.co",
+					ModelScopeEndpoint:  "https://www.modelscope.cn",
+				},
 				Store:           "h100",
 				PeerSyncEnabled: peerSyncTrue(),
 			},
@@ -145,9 +148,12 @@ func TestNodeModelStoreAppliesTheStoreLayer(t *testing.T) {
 				}),
 			},
 			wantSpec: workercore.NodeModelStoreSpec{
-				Watermarks:      workercore.NodeModelStoreWatermarks{HighPercent: 84, LowPercent: 74},
-				Download:        workercore.NodeModelStoreDownload{Concurrency: 8},
-				Hub:             workercore.NodeModelStoreHub{HuggingFaceEndpoint: "https://huggingface.co"},
+				Watermarks: workercore.NodeModelStoreWatermarks{HighPercent: 84, LowPercent: 74},
+				Download:   workercore.NodeModelStoreDownload{Concurrency: 8},
+				Hub: workercore.NodeModelStoreHub{
+					HuggingFaceEndpoint: "https://huggingface.co",
+					ModelScopeEndpoint:  "https://www.modelscope.cn",
+				},
 				Store:           "alpha",
 				PeerSyncEnabled: peerSyncTrue(),
 			},

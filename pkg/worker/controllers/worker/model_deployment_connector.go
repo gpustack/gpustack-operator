@@ -393,11 +393,17 @@ var modelDeploymentArtifactOwnedKeys = map[string]struct {
 }{
 	workercore.ModelDeploymentEngineVLLM: {
 		Args: []string{"--model", "--revision", "--tokenizer-revision", "--download-dir"},
-		Env:  []string{"HF_TOKEN", "HF_ENDPOINT", "HF_HOME"},
+		Env: []string{
+			"HF_TOKEN", "HF_ENDPOINT", "HF_HOME",
+			"MODELSCOPE_API_TOKEN", "MODELSCOPE_DOMAIN", "MODELSCOPE_CACHE", "VLLM_USE_MODELSCOPE",
+		},
 	},
 	workercore.ModelDeploymentEngineSGLang: {
 		Args: []string{"--model-path", "--revision", "--download-dir"},
-		Env:  []string{"HF_TOKEN", "HF_ENDPOINT", "HF_HOME"},
+		Env: []string{
+			"HF_TOKEN", "HF_ENDPOINT", "HF_HOME",
+			"MODELSCOPE_API_TOKEN", "MODELSCOPE_DOMAIN", "MODELSCOPE_CACHE", "SGLANG_USE_MODELSCOPE",
+		},
 	},
 }
 

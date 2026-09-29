@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -153,6 +154,238 @@ func testTokenSecret(token string) *core.Secret {
 		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "hf-token"},
 		Data:       map[string][]byte{"token": []byte(token)},
 	}
+}
+
+// testModelScopeArtifact is a ModelScope source, optionally with a Secret reference.
+func testModelScopeArtifact(secret string) *workercore.ModelArtifact {
+	ma := &workercore.ModelArtifact{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen", UID: "uid-qwen", Generation: 1},
+		Spec: workercore.ModelArtifactSpec{Source: workercore.ModelArtifactSource{
+			ModelScope: &workercore.ModelArtifactHubSource{Repository: "qwen/repo", Revision: "master"},
+		}},
+	}
+	if secret != "" {
+		ma.Spec.Source.ModelScope.SecretRef = &core.LocalObjectReference{Name: secret}
+	}
+
+	return ma
+}
+
+// testModelScopeHub is a fake ModelScope client: every answer swappable, every ask recorded.
+type testModelScopeHub struct {
+	mu         sync.Mutex
+	resolution modelartifact.Resolution
+	resolveErr error
+	revalidate []error // one per Revalidate ask, the last repeating
+	tokenValid bool
+	tokenErr   error
+	asks       int
+	lastRepo   string
+	lastRev    string
+	lastToken  string
+	lastFilter modelartifact.Filter
+	lastCommit string
+}
+
+func (h *testModelScopeHub) Resolve(_ context.Context, repository, revision, token string, filter modelartifact.Filter) (modelartifact.Resolution, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.asks++
+	h.lastRepo, h.lastRev, h.lastToken, h.lastFilter = repository, revision, token, filter
+	if h.resolveErr != nil {
+		return modelartifact.Resolution{}, h.resolveErr
+	}
+
+	return h.resolution, nil
+}
+
+func (h *testModelScopeHub) Revalidate(_ context.Context, repository, commit, token string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.asks++
+	h.lastRepo, h.lastCommit, h.lastToken = repository, commit, token
+	if len(h.revalidate) == 0 {
+		return nil
+	}
+	err := h.revalidate[0]
+	if len(h.revalidate) > 1 {
+		h.revalidate = h.revalidate[1:]
+	}
+
+	return err
+}
+
+func (h *testModelScopeHub) ValidToken(_ context.Context, _ string) (bool, error) {
+	return h.tokenValid, h.tokenErr
+}
+
+// newTestModelScopeEnv is the artifact environment with the ModelScope client swapped for fake.
+func newTestModelScopeEnv(t *testing.T, hub *testModelScopeHub, objs ...ctrlcli.Object) *testArtifactEnv {
+	t.Helper()
+	env := newTestArtifactEnv(t, objs...)
+	env.r.NewModelScope = func(context.Context) (modelArtifactHub, error) { return hub, nil }
+
+	return env
+}
+
+func TestModelArtifactReconcileResolvesModelScope(t *testing.T) {
+	digest, err := modelartifact.NewManifest([]modelartifact.ManifestEntry{
+		{Path: "README.md", Size: 3, Digest: modelartifact.DigestSHA256 + ":" + strings.Repeat("a", 64)},
+	})
+	require.NoError(t, err)
+	hub := &testModelScopeHub{resolution: modelartifact.Resolution{
+		Commit: testArtifactCommit, Manifest: digest,
+	}}
+	env := newTestModelScopeEnv(t, hub, testModelScopeArtifact(""))
+
+	ma, res := env.reconcile(t, "qwen")
+	assert.True(t, ModelArtifactConditionResolved.IsTrue(ma))
+	assert.Equal(t, testArtifactCommit, ma.Status.Resolved.Revision)
+	assert.Equal(t, digest.Digest, ma.Status.Resolved.ManifestDigest)
+	assert.Positive(t, ma.Status.Resolved.FileCount)
+	assert.Positive(t, res.RequeueAfter)
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	assert.Equal(t, "qwen/repo", hub.lastRepo)
+	assert.Equal(t, "master", hub.lastRev)
+	assert.Equal(t, "", hub.lastToken, "an artifact without a SecretRef sends no token")
+}
+
+func TestModelArtifactReconcileModelScopeSendsTheToken(t *testing.T) {
+	digest, err := modelartifact.NewManifest([]modelartifact.ManifestEntry{
+		{Path: "README.md", Size: 3, Digest: modelartifact.DigestSHA256 + ":" + strings.Repeat("a", 64)},
+	})
+	require.NoError(t, err)
+	hub := &testModelScopeHub{resolution: modelartifact.Resolution{Commit: testArtifactCommit, Manifest: digest}}
+	env := newTestModelScopeEnv(t, hub, testModelScopeArtifact("hf-token"), testTokenSecret(testArtifactToken))
+
+	env.reconcile(t, "qwen")
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	assert.Equal(t, testArtifactToken, hub.lastToken)
+}
+
+func TestModelArtifactReconcileModelScopeRefusals(t *testing.T) {
+	cases := []struct {
+		name       string
+		resolveErr error
+		wantReason string
+	}{
+		{
+			name:       "a missing revision",
+			resolveErr: &modelartifact.SourceError{Reason: modelartifact.ReasonRevisionNotFound, Message: "no such ref"},
+			wantReason: modelartifact.ReasonRevisionNotFound,
+		},
+		{
+			name:       "no access",
+			resolveErr: &modelartifact.SourceError{Reason: modelartifact.ReasonAccessDenied, Message: "does not exist or is not accessible"},
+			wantReason: modelartifact.ReasonAccessDenied,
+		},
+		{
+			name:       "an outage",
+			resolveErr: &modelartifact.SourceError{Reason: modelartifact.ReasonSourceUnavailable, Message: "HTTP 500"},
+			wantReason: modelartifact.ReasonSourceUnavailable,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			hub := &testModelScopeHub{resolveErr: c.resolveErr}
+			env := newTestModelScopeEnv(t, hub, testModelScopeArtifact(""))
+
+			ma, _ := env.reconcile(t, "qwen")
+			assert.False(t, ModelArtifactConditionResolved.IsTrue(ma))
+			assert.Equal(t, c.wantReason, ModelArtifactConditionResolved.GetReason(ma))
+			assert.Nil(t, ma.Status.Resolved)
+		})
+	}
+}
+
+func TestModelArtifactReconcileModelScopeRevokes(t *testing.T) {
+	digest, err := modelartifact.NewManifest([]modelartifact.ManifestEntry{
+		{Path: "README.md", Size: 3, Digest: modelartifact.DigestSHA256 + ":" + strings.Repeat("a", 64)},
+	})
+	require.NoError(t, err)
+	refused := &modelartifact.SourceError{Reason: modelartifact.ReasonAccessDenied, Message: "gone"}
+	hub := &testModelScopeHub{
+		resolution: modelartifact.Resolution{Commit: testArtifactCommit, Manifest: digest},
+		revalidate: []error{refused, refused, refused},
+	}
+	env := newTestModelScopeEnv(t, hub, testModelScopeArtifact(""))
+	resolved, _ := env.reconcile(t, "qwen")
+	require.True(t, ModelArtifactConditionResolved.IsTrue(resolved))
+
+	day := 24 * time.Hour
+	env.clock.now = env.clock.now.Add(day)
+	first, _ := env.reconcile(t, "qwen")
+	assert.True(t, ModelArtifactConditionResolved.IsTrue(first), "the first refusal degrades, not revokes")
+	assert.Equal(t, modelartifact.ReasonAccessDenied, ModelArtifactConditionDegraded.GetReason(first))
+
+	env.clock.now = env.clock.now.Add(10 * time.Second)
+	env.reconcile(t, "qwen")
+
+	env.clock.now = env.clock.now.Add(time.Minute)
+	revoked, _ := env.reconcile(t, "qwen")
+	assert.False(t, ModelArtifactConditionResolved.IsTrue(revoked), "the confirmed refusal revokes")
+	assert.Equal(t, modelartifact.ReasonAccessDenied, ModelArtifactConditionResolved.GetReason(revoked))
+	assert.Equal(t, testArtifactCommit, revoked.Status.Resolved.Revision, "the digest and commit stay for audit")
+}
+
+func TestModelArtifactReconcileModelScopeSecretMissing(t *testing.T) {
+	digest, err := modelartifact.NewManifest([]modelartifact.ManifestEntry{
+		{Path: "README.md", Size: 3, Digest: modelartifact.DigestSHA256 + ":" + strings.Repeat("a", 64)},
+	})
+	require.NoError(t, err)
+	hub := &testModelScopeHub{resolution: modelartifact.Resolution{Commit: testArtifactCommit, Manifest: digest}}
+	env := newTestModelScopeEnv(t, hub, testModelScopeArtifact("hf-token"), testTokenSecret(testArtifactToken))
+	env.reconcile(t, "qwen")
+
+	require.NoError(t, env.cli.Delete(context.Background(), testTokenSecret(testArtifactToken)))
+	env.clock.now = env.clock.now.Add(time.Minute)
+
+	ma, _ := env.reconcile(t, "qwen")
+	assert.False(t, ModelArtifactConditionResolved.IsTrue(ma))
+	assert.Equal(t, modelArtifactReasonSecretMissing, ModelArtifactConditionResolved.GetReason(ma))
+}
+
+func TestModelArtifactReconcileModelScopeWarnsOnARejectedToken(t *testing.T) {
+	digest, err := modelartifact.NewManifest([]modelartifact.ManifestEntry{
+		{Path: "README.md", Size: 3, Digest: modelartifact.DigestSHA256 + ":" + strings.Repeat("a", 64)},
+	})
+	require.NoError(t, err)
+	hub := &testModelScopeHub{
+		resolution: modelartifact.Resolution{Commit: testArtifactCommit, Manifest: digest},
+		tokenValid: false,
+	}
+	env := newTestModelScopeEnv(t, hub, testModelScopeArtifact("hf-token"), testTokenSecret("mistyped"))
+
+	env.reconcile(t, "qwen")
+	require.Len(t, env.recorder.Events, 1)
+	event := <-env.recorder.Events
+	assert.Contains(t, event, "Warning InvalidToken")
+	assert.Contains(t, event, "hf-token")
+	assert.NotContains(t, event, "mistyped")
+}
+
+func TestModelArtifactEnqueueModelScopesForSecret(t *testing.T) {
+	env := newTestArtifactEnv(t)
+	env.r.NewModelScope = func(context.Context) (modelArtifactHub, error) {
+		return &testModelScopeHub{}, nil
+	}
+	require.NoError(t, env.cli.Create(context.Background(), testModelScopeArtifact("hf-token")))
+
+	reqs := env.r.enqueueModelArtifactsForSecret(context.Background(), testTokenSecret(testArtifactToken))
+	require.Len(t, reqs, 1)
+	assert.Equal(t, types.NamespacedName{Namespace: "team-a", Name: "qwen"}, reqs[0].NamespacedName)
+}
+
+func TestModelArtifactReconcileUnsupportedSource(t *testing.T) {
+	env := newTestArtifactEnv(t, &workercore.ModelArtifact{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen", UID: "uid-qwen", Generation: 1},
+	})
+
+	ma, _ := env.reconcile(t, "qwen")
+	assert.False(t, ModelArtifactConditionResolved.IsTrue(ma))
+	assert.Equal(t, "UnsupportedSource", ModelArtifactConditionResolved.GetReason(ma))
 }
 
 func TestModelArtifactReconcileResolvesHuggingFace(t *testing.T) {

@@ -94,6 +94,7 @@ func TestModelStoreSettingsDefaults(t *testing.T) {
 		{ModelStoreLowWatermark, "model-store-low-watermark", "70"},
 		{ModelStoreDownloadConcurrency, "model-store-download-concurrency", "8"},
 		{ModelStoreDownloadBandwidth, "model-store-download-bandwidth", "0"},
+		{ModelArtifactModelScopeEndpoint, "model-artifact-modelscope-endpoint", "https://www.modelscope.cn"},
 	}
 	for _, c := range cases {
 		t.Run(c.wantName, func(t *testing.T) {
@@ -112,6 +113,7 @@ func TestModelStoreLayer(t *testing.T) {
 		ModelStoreDownloadConcurrency.Name():    "16",
 		ModelStoreDownloadBandwidth.Name():      "100Mi",
 		ModelArtifactHuggingFaceEndpoint.Name(): "http://hub.local",
+		ModelArtifactModelScopeEndpoint.Name():  "https://ms.example",
 		ModelArtifactHTTPSProxy.Name():          "http://proxy:3128",
 		ModelArtifactNoProxy.Name():             "internal",
 		ModelArtifactCABundle.Name():            "hub-ca",
@@ -125,6 +127,7 @@ func TestModelStoreLayer(t *testing.T) {
 	assert.Equal(t, int32(16), *l.DownloadConcurrency)
 	assert.Equal(t, int64(100<<20), *l.DownloadBytesPerSecond)
 	assert.Equal(t, "http://hub.local", *l.HuggingFaceEndpoint)
+	assert.Equal(t, "https://ms.example", *l.ModelScopeEndpoint)
 	assert.Equal(t, "http://proxy:3128", *l.HTTPSProxy)
 	assert.Equal(t, "internal", *l.NoProxy)
 	assert.Equal(t, "hub-ca", *l.CABundleConfigMap)
@@ -199,6 +202,8 @@ func TestAdmissionReadsTheStore(t *testing.T) {
 		},
 		{name: "an endpoint without a host is refused", setting: ModelArtifactHuggingFaceEndpoint, value: "https://", wantErr: "with a host"},
 		{name: "an endpoint with a host is admitted", setting: ModelArtifactHuggingFaceEndpoint, value: "https://hub.example"},
+		{name: "a modelscope endpoint without a host is refused", setting: ModelArtifactModelScopeEndpoint, value: "https://", wantErr: "with a host"},
+		{name: "a modelscope endpoint with a host is admitted", setting: ModelArtifactModelScopeEndpoint, value: "https://ms.example"},
 	}
 	_ = ModelStoreLowWatermark.ShouldValueFromRemote(ctx) // caches 60
 	store(modelStoreLowWatermarkName, "85")

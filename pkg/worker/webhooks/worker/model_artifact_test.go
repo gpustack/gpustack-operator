@@ -42,6 +42,15 @@ func newTestImageArtifact(reference string) *workercore.ModelArtifact {
 	}
 }
 
+func newTestModelScopeArtifact(repository, revision string) *workercore.ModelArtifact {
+	return &workercore.ModelArtifact{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "qwen"},
+		Spec: workercore.ModelArtifactSpec{Source: workercore.ModelArtifactSource{
+			ModelScope: &workercore.ModelArtifactHubSource{Repository: repository, Revision: revision},
+		}},
+	}
+}
+
 // TestModelArtifactWebhookImageSource covers the image member's shape rules and its capability
 // gate, both directions, through the swappable version seam: the snapshot's Configure ignores
 // later calls, so a test cannot re-point the snapshot itself.
@@ -131,11 +140,17 @@ func TestModelArtifactWebhookDefault(t *testing.T) {
 	}{
 		{name: "an unset revision becomes main", in: newTestHubArtifact("Qwen/Qwen2.5-7B-Instruct", ""), want: "main"},
 		{name: "a stated revision is kept", in: newTestHubArtifact("Qwen/Qwen2.5-7B-Instruct", "v1.0"), want: "v1.0"},
+		{name: "a ModelScope revision becomes master", in: newTestModelScopeArtifact("Qwen/Qwen2.5-7B-Instruct", ""), want: "master"},
+		{name: "a stated ModelScope revision is kept", in: newTestModelScopeArtifact("Qwen/Qwen2.5-7B-Instruct", "v1.0"), want: "v1.0"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			require.NoError(t, new(ModelArtifactWebhook).Default(context.Background(), c.in))
-			assert.Equal(t, c.want, c.in.Spec.Source.HuggingFace.Revision)
+			if c.in.Spec.Source.HuggingFace != nil {
+				assert.Equal(t, c.want, c.in.Spec.Source.HuggingFace.Revision)
+			} else {
+				assert.Equal(t, c.want, c.in.Spec.Source.ModelScope.Revision)
+			}
 		})
 	}
 }
@@ -150,6 +165,9 @@ func TestModelArtifactWebhookValidateCreate(t *testing.T) {
 		{name: "a bare canonical name", in: newTestHubArtifact("gpt2", "main")},
 		{name: "a commit", in: newTestHubArtifact("owner/repo", strings.Repeat("a", 40))},
 		{name: "a pull-request ref", in: newTestHubArtifact("owner/repo", "refs/pr/1")},
+		{name: "a ModelScope repository", in: newTestModelScopeArtifact("qwen/Qwen2.5-7B-Instruct", "master")},
+		{name: "a ModelScope bare name", in: newTestModelScopeArtifact("qwen", "master")},
+		{name: "a ModelScope commit", in: newTestModelScopeArtifact("qwen/Qwen2.5-7B-Instruct", strings.Repeat("a", 40))},
 		{name: "a claim at its root", in: newTestClaimArtifact("models", "")},
 		{name: "a claim directory", in: newTestClaimArtifact("models", "qwen/7b")},
 		{
@@ -167,11 +185,13 @@ func TestModelArtifactWebhookValidateCreate(t *testing.T) {
 			wantField: "spec.source",
 		},
 		{
-			name: "ModelScope",
-			in: &workercore.ModelArtifact{Spec: workercore.ModelArtifactSpec{Source: workercore.ModelArtifactSource{
-				ModelScope: &workercore.ModelArtifactHubSource{Repository: "qwen/Qwen2.5-7B-Instruct", Revision: "master"},
-			}}},
-			wantField: "spec.source.modelScope",
+			name: "a hub source beside a hub source",
+			in: func() *workercore.ModelArtifact {
+				ma := newTestHubArtifact("owner/repo", "main")
+				ma.Spec.Source.ModelScope = &workercore.ModelArtifactHubSource{Repository: "qwen/Qwen2.5-7B-Instruct", Revision: "master"}
+				return ma
+			}(),
+			wantField: "spec.source",
 		},
 		{name: "an empty repository", in: newTestHubArtifact("", "main"), wantField: "spec.source.huggingFace.repository"},
 		{name: "three parts", in: newTestHubArtifact("a/b/c", "main"), wantField: "spec.source.huggingFace.repository"},
@@ -186,11 +206,18 @@ func TestModelArtifactWebhookValidateCreate(t *testing.T) {
 		{name: "an empty revision", in: newTestHubArtifact("owner/repo", ""), wantField: "spec.source.huggingFace.revision"},
 		{name: "whitespace in the revision", in: newTestHubArtifact("owner/repo", "ma in"), wantField: "spec.source.huggingFace.revision"},
 		{name: "a control character in the revision", in: newTestHubArtifact("owner/repo", "ma\x00in"), wantField: "spec.source.huggingFace.revision"},
+		{name: "a ModelScope empty repository", in: newTestModelScopeArtifact("", "master"), wantField: "spec.source.modelScope.repository"},
+		{name: "a ModelScope three parts", in: newTestModelScopeArtifact("a/b/c", "master"), wantField: "spec.source.modelScope.repository"},
+		{name: "a ModelScope URL", in: newTestModelScopeArtifact("https://modelscope.cn/qwen", "master"), wantField: "spec.source.modelScope.repository"},
+		{name: "a ModelScope empty revision", in: newTestModelScopeArtifact("qwen/Qwen2.5-7B-Instruct", ""), wantField: "spec.source.modelScope.revision"},
+		{name: "a ModelScope whitespace revision", in: newTestModelScopeArtifact("qwen/Qwen2.5-7B-Instruct", "ma in"), wantField: "spec.source.modelScope.revision"},
 		{name: "an empty claim", in: newTestClaimArtifact("", ""), wantField: "spec.source.persistentVolumeClaim.claimName"},
 		{name: "an absolute path", in: newTestClaimArtifact("models", "/qwen"), wantField: "spec.source.persistentVolumeClaim.path"},
 		{name: "a dot-dot element", in: newTestClaimArtifact("models", "qwen/../other"), wantField: "spec.source.persistentVolumeClaim.path"},
 		{name: "patterns on a hub source", in: withPatterns(newTestHubArtifact("owner/repo", "main"),
 			[]string{"*.safetensors", "*.json"}, []string{"original/"})},
+		{name: "patterns on a ModelScope source", in: withPatterns(newTestModelScopeArtifact("qwen/Qwen2.5-7B-Instruct", "master"),
+			[]string{"*.safetensors"}, []string{"original/"})},
 		{
 			name: "allow patterns on a claim", in: withPatterns(newTestClaimArtifact("models", ""), []string{"*.json"}, nil),
 			wantField: "spec.allowPatterns",
@@ -221,6 +248,17 @@ func TestModelArtifactWebhookValidateCreate(t *testing.T) {
 			assertInvalidField(t, err, c.wantField)
 		})
 	}
+
+	t.Run("the union refusal names every accepted member", func(t *testing.T) {
+		ma := newTestHubArtifact("owner/repo", "main")
+		ma.Spec.Source.PersistentVolumeClaim = &workercore.ModelArtifactPersistentVolumeClaimSource{ClaimName: "c"}
+
+		_, err := new(ModelArtifactWebhook).ValidateCreate(context.Background(), ma)
+		require.Error(t, err)
+		status, ok := err.(kerrors.APIStatus)
+		require.True(t, ok)
+		assert.Contains(t, status.Status().Details.Causes[0].Message, "modelScope")
+	})
 }
 
 func TestModelArtifactWebhookValidateUpdate(t *testing.T) {

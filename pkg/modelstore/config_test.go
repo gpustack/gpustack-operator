@@ -76,6 +76,23 @@ func TestMerge(t *testing.T) {
 				return s
 			}(),
 		},
+		{
+			name: "a modelscope endpoint rides the layer and survives a layer that names none",
+			layers: []Layer{
+				func() Layer {
+					l := clusterLayer()
+					l.ModelScopeEndpoint = ptr.To("https://www.modelscope.cn")
+					return l
+				}(),
+				{HighWatermarkPercent: ptr.To[int32](85)},
+			},
+			want: func() workercore.NodeModelStoreSpec {
+				s := validSpec()
+				s.Hub.ModelScopeEndpoint = "https://www.modelscope.cn"
+				s.Watermarks.HighPercent = 85
+				return s
+			}(),
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -108,6 +125,11 @@ func TestValidate(t *testing.T) {
 		{name: "an endpoint without a scheme", mutate: func(s *workercore.NodeModelStoreSpec) { s.Hub.HuggingFaceEndpoint = "huggingface.co" }, wantErr: "endpoint"},
 		{name: "an ftp endpoint", mutate: func(s *workercore.NodeModelStoreSpec) { s.Hub.HuggingFaceEndpoint = "ftp://hub" }, wantErr: "endpoint"},
 		{name: "a blank endpoint", mutate: func(s *workercore.NodeModelStoreSpec) { s.Hub.HuggingFaceEndpoint = "" }, wantErr: "endpoint"},
+		{
+			name:   "a blank modelscope endpoint is a spec an older worker wrote",
+			mutate: func(s *workercore.NodeModelStoreSpec) { s.Hub.ModelScopeEndpoint = "" },
+		},
+		{name: "a bad modelscope endpoint", mutate: func(s *workercore.NodeModelStoreSpec) { s.Hub.ModelScopeEndpoint = "www.modelscope.cn" }, wantErr: "modelscope endpoint"},
 		{name: "a proxy with credentials", mutate: func(s *workercore.NodeModelStoreSpec) { s.Hub.HTTPSProxy = "http://u:p@proxy:3128" }, wantErr: "proxy"},
 		{
 			name: "kubelet thresholds as percentages and quantities are valid",

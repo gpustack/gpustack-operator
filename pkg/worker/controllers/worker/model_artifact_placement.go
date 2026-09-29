@@ -125,31 +125,40 @@ func resolveModelArtifactWeights(
 			Delivery:       workercore.ModelDeploymentModelDeliveryImage,
 			ImageReference: source.Image.Reference,
 		}
-	case source.HuggingFace != nil && (nodeOnly || modelArtifactDeliveryMode(ctx) == settings.ModelArtifactDeliveryNode):
-		w.Render = &ModelDeploymentArtifactRender{
-			Delivery:       workercore.ModelDeploymentModelDeliveryNode,
-			ArtifactName:   name,
-			ArtifactUID:    string(ma.UID),
-			ManifestDigest: resolved.ManifestDigest,
-			Repository:     source.HuggingFace.Repository,
-			Revision:       resolved.Revision,
-			SizeBytes:      resolved.SizeBytes,
+	case source.HuggingFace != nil, source.ModelScope != nil:
+		// The two hubs differ in the endpoints they are resolved against and the environment an
+		// engine download reads; delivery, placement and every digest-keyed behavior are shared.
+		hub, kind := source.HuggingFace, modelDeploymentHubHuggingFace
+		endpoint := settings.ModelArtifactHuggingFaceEndpoint.ShouldValue(ctx)
+		if hub == nil {
+			hub, kind = source.ModelScope, modelDeploymentHubModelScope
+			endpoint = settings.ModelArtifactModelScopeEndpoint.ShouldValue(ctx)
 		}
-		if source.HuggingFace.SecretRef != nil {
-			w.Render.SecretName = source.HuggingFace.SecretRef.Name
+		if nodeOnly || modelArtifactDeliveryMode(ctx) == settings.ModelArtifactDeliveryNode {
+			w.Render = &ModelDeploymentArtifactRender{
+				Delivery:       workercore.ModelDeploymentModelDeliveryNode,
+				Hub:            kind,
+				ArtifactName:   name,
+				ArtifactUID:    string(ma.UID),
+				ManifestDigest: resolved.ManifestDigest,
+				Repository:     hub.Repository,
+				Revision:       resolved.Revision,
+				SizeBytes:      resolved.SizeBytes,
+			}
+		} else {
+			w.Render = &ModelDeploymentArtifactRender{
+				Delivery:   workercore.ModelDeploymentModelDeliveryEngine,
+				Hub:        kind,
+				Repository: hub.Repository,
+				Revision:   resolved.Revision,
+				SizeBytes:  resolved.SizeBytes,
+				Endpoint:   endpoint,
+				HTTPSProxy: settings.ModelArtifactHTTPSProxy.ShouldValue(ctx),
+				NoProxy:    settings.ModelArtifactNoProxy.ShouldValue(ctx),
+			}
 		}
-	case source.HuggingFace != nil:
-		w.Render = &ModelDeploymentArtifactRender{
-			Delivery:   workercore.ModelDeploymentModelDeliveryEngine,
-			Repository: source.HuggingFace.Repository,
-			Revision:   resolved.Revision,
-			SizeBytes:  resolved.SizeBytes,
-			Endpoint:   settings.ModelArtifactHuggingFaceEndpoint.ShouldValue(ctx),
-			HTTPSProxy: settings.ModelArtifactHTTPSProxy.ShouldValue(ctx),
-			NoProxy:    settings.ModelArtifactNoProxy.ShouldValue(ctx),
-		}
-		if source.HuggingFace.SecretRef != nil {
-			w.Render.SecretName = source.HuggingFace.SecretRef.Name
+		if hub.SecretRef != nil {
+			w.Render.SecretName = hub.SecretRef.Name
 		}
 	default:
 		return blockedModelArtifactWeights(modelWeightsReasonArtifactUnready,

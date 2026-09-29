@@ -365,6 +365,21 @@ var (
 		func(_ context.Context, _, newVal string) error { return modelstore.ValidateEndpoint(newVal) },
 	)
 
+	// ModelArtifactModelScopeEndpoint is the ModelScope hub the ModelArtifact controller resolves
+	// and revalidates against and the node plugin downloads from. It is administrator
+	// configuration, admitted as the Hugging Face endpoint is, and it rides every node's
+	// configuration like the Hugging Face one does. Changing it does not re-resolve an artifact
+	// that already resolved.
+	ModelArtifactModelScopeEndpoint = settings.NewEditable(
+		"model-artifact-modelscope-endpoint",
+		"Indicates the ModelScope endpoint ModelArtifacts resolve against and the node plugin downloads from. "+
+			"Changing it does not re-resolve an artifact that already resolved.",
+		setting.InitializeFromEnv("https://www.modelscope.cn"),
+		setting.DisallowBlank(),
+		setting.AllowUrlWithSchema("https", "http"),
+		func(_ context.Context, _, newVal string) error { return modelstore.ValidateEndpoint(newVal) },
+	)
+
 	// ModelArtifactHTTPSProxy is the proxy the ModelArtifact controller reaches the Hub through, and
 	// the HTTPS_PROXY an engine downloading the weights itself is given, where a role's own value
 	// wins. Blank leaves the worker's own environment in effect and renders nothing. It carries no
@@ -424,7 +439,7 @@ var (
 	ModelPrefetchWarmupImage = settings.NewEditable(
 		"model-prefetch-warmup-image",
 		"Indicates the image a ModelPrefetch's warm-up Pod runs on each target node.",
-		setting.InitializeFromEnv("python:3.12-alpine"),
+		setting.InitializeFromEnv("gpustack/mirrored-python:3.12-alpine"),
 		setting.AllowContainerImageReference(),
 	)
 
