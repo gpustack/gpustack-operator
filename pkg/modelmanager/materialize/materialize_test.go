@@ -221,6 +221,34 @@ func TestEnsureExpectedIdentityIsPeersOnly(t *testing.T) {
 	assert.Contains(t, rec.Message, "peer pulling is not configured")
 }
 
+// TestEnsureExpectedIdentityPeersListingFailure pins the classification when peer discovery
+// itself fails: the ledger keeps the loud no-source with the digest, tenant-free, and the
+// underlying cause goes to the plugin's log — it never replaces the classified failure, and a
+// cancellation under the listing keeps its own canceled class (the same shape fetchTree's
+// wait uses).
+func TestEnsureExpectedIdentityPeersListingFailure(t *testing.T) {
+	env := newTestEnv(t, repoFiles())
+	digest := env.hub.manifest("owner/repo").Digest
+	ma := env.artifact("owner/repo", "uid-a", digest)
+	ma.Status.Resolved.Revision = ""
+	ma.Status.Resolved.DigestSource = workercore.ModelArtifactDigestSourceExpected
+	env.m.Peers = &peer.Puller{Discover: func(context.Context, string) ([]*peer.Source, error) {
+		return nil, fmt.Errorf("discovery refused")
+	}}
+	req := driver.Request{Hex: store.HexOf(digest), Artifact: ma}
+
+	env.m.Ensure(context.Background(), req)
+	env.waitIdle(t, req.Hex)
+
+	assert.Empty(t, env.hub.recorded(), "the hub is still never asked")
+	rec, err := env.store.ReadDigest(req.Hex)
+	require.NoError(t, err)
+	assert.Equal(t, download.ReasonSourceUnavailable, rec.Reason)
+	assert.Contains(t, rec.Message, "sha256:"+req.Hex)
+	assert.NotContains(t, rec.Message, "discovery refused",
+		"the public message stays tenant-free; the cause is the plugin log's")
+}
+
 // waitIdle waits until no attempt runs for hex.
 func (e *testEnv) waitIdle(t *testing.T, hex string) {
 	t.Helper()

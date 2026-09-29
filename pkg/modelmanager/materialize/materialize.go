@@ -411,6 +411,16 @@ func (m *Materializer) fromPeersOnly(ctx context.Context, j *job, a *store.Attem
 	}
 	manifest, err := m.Peers.FetchManifest(ctx, "sha256:"+j.hex)
 	if err != nil {
+		// A cancellation under us — the waiter window firing, the plugin stopping — is the
+		// outcome, not a source verdict: it must not consume the digest's backoff.
+		if cause := context.Cause(ctx); errors.Is(cause, errNoWaiters) {
+			const msg = "no mount asked for it within the waiter window"
+			return &download.Error{Reason: download.ReasonCanceled, Message: msg, Detail: msg}
+		}
+		// The classified failure stays the loud no-source; the underlying cause reaches the
+		// plugin's log, which is where the message points the diagnosing reader.
+		klog.V(1).InfoS("the peers-only listing found no source", "digest", "sha256:"+j.hex, "error", err.Error())
+
 		return errNoSourceForAnchored(j.hex)
 	}
 
