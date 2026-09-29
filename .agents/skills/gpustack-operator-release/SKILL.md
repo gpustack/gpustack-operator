@@ -93,8 +93,11 @@ git log --no-merges --pretty='%h %s (%an)' ${LAST:+"$LAST.."}"$SHA"
 Compose `$RPT/notes.md`:
 
 - **Don't start the body with a title/heading that repeats the tag** (e.g. `## vX.Y.Z`) — GitHub renders the release name as the page title, so a leading title shows up as a duplicate. Start with an optional one-line intro or the first section.
-- Sections **🚀 Features / 🐛 Fixes / ♻️ Refactor / 📚 Docs / Other**, concise bullets, imperative voice.
+- Use applicable sections in this order: **🚀 Features / 🐛 Fixes / ♻️ Refactor / 📚 Docs / ⚠️ Limitations / Other**; omit empty sections. Put limitations in their own **⚠️ Limitations** section before Other. Put release materials and artifact inventories in Appendix or Other. Keep bullets concise and in imperative voice.
 - Keep the **highlights**; fold or drop noisy `chore`/`ci`/`build`/`test`/`style` unless notable.
+- For **Refactor**, compare against `$LAST`, the previous stable release; RC tags do not reset that baseline. Omit internal renames or restructures of modules and APIs first introduced after `$LAST`: they are part of developing the new feature, not a change to previously released behavior. Include a refactor only when it changes something that already existed in `$LAST` and matters to release users.
+- Include an **Appendix** section in every release note with `Images:` and `Charts:` lists. Compare with `$LAST` to identify added or updated items, then list only the resulting references: one `repository:tag` or `name:version` per bullet. For a synthesized image without a fixed tag, list its reference template. Do not show old versions, `old -> new`, or status labels in the bullets. Include the operator image tag and root chart version for each new release; write `- None` if a list has no changes. A short note after the lists may distinguish images built by this tag's CI from referenced dependencies and identify optional components.
+- Build those lists from the tag's image/chart workflows, `deploy/gpustack-operator/chart/` metadata, values and templates (including disabled-by-default components), and image defaults and workload renderers in the controllers. Inspect the actual changes in each source; a default Helm render or a changed-file summary alone misses conditional workloads and vendored chart versions. Do not invent versions for configurable image overrides.
 - Link PRs/issues: parse `(#NNN)` from subjects; for squash/merge commits without one, recover via `gh pr list --search "<subject>"` / `gh pr view`.
 - End with **Full Changelog**: `https://github.com/gpustack/gpustack-operator/compare/$LAST...$VER`.
 - **Unsure which items to surface → list them and ask** (`AskUserQuestion`). Auto mode: skip the question, include the sensible default set.
@@ -161,7 +164,7 @@ git push origin --delete "$VER" && git tag -d "$VER"
 
 ### Phase 5 — Refine & attach notes (confirm → prompts)
 
-Once all runs are green, replace the CI baseline body with the curated notes.
+Once all runs are green, verify the Appendix image and chart lists against the image tags produced by CI and the published chart package (root and bundled `Chart.yaml` files), correcting the draft before replacing the CI baseline body with the curated notes. Do not describe a referenced image as published by this release unless the workflow produced it.
 
 ```bash
 gh release view "$VER"                               # inspect the CI-generated baseline first
@@ -225,7 +228,7 @@ Pick something that genuinely differs between the two commits — a file only on
 
 ### Phase 7 — Summary
 
-Report the tag, the release URL, the CI run URLs, and the final state; persist a short summary next to `$RPT/notes.md`.
+Report the tag, the release URL, the CI run URLs, the Appendix image and chart lists, and the final state; persist a short summary next to `$RPT/notes.md`.
 
 ```bash
 gh release view "$VER" --json tagName,isPrerelease,isDraft,url
