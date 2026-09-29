@@ -83,7 +83,7 @@ var (
 	// not name one itself.
 	//
 	// The default is this project's own build, pack/mirrored-mooncake. It is the only image that can
-	// run leader.highAvailability, because no published upstream image carries a leadership backend
+	// run leader.electionBackend: Kubernetes, because no published upstream image carries a leadership backend
 	// at all, and it is the build every cluster case in this repository exercises.
 	//
 	// WHAT THE DEFAULT DOES NOT FIT, because one value cannot be right for every backend at once:

@@ -19,7 +19,7 @@ const (
 	LeaderMetricsPort = 9003
 
 	// LeaderPodNameEnv and LeaderPodNamespaceEnv are the environment variables the rendered argv
-	// refers to under high availability. The workload that runs this argv has to define both from
+	// refers to under Kubernetes election. The workload that runs this argv has to define both from
 	// the downward API, which is what makes the reference resolve.
 	//
 	// They carry this repository's own names rather than the bare POD_NAME / POD_NAMESPACE the
@@ -28,7 +28,7 @@ const (
 	// component here already spells them this way.
 	LeaderPodNameEnv      = "KUBERNETES_POD_NAME"
 	LeaderPodNamespaceEnv = "KUBERNETES_POD_NAMESPACE"
-	// LeaderPodIPEnv is the third, and like the other two it is defined only under high availability
+	// LeaderPodIPEnv is the third, and like the other two it is defined only under Kubernetes election
 	// because only the election reads it. See the -rpc_address flag for what it decides.
 	LeaderPodIPEnv = "KUBERNETES_POD_IP"
 
@@ -104,15 +104,12 @@ func RenderLeaderFlags(kvcb *workercore.KVCacheBackend) []string {
 	// no inspection of extraArgs needed here.
 	flags = append(flags, "-default_kv_lease_ttl="+LeaderKVLeaseTTL)
 
-	// The election, rendered as one group or not at all, and only when one runs: highAvailability
-	// with a single replica has nothing to elect -- see leaderNeedsAPIAccess. Splitting the group
-	// is what a partial render would
-	// do, and each half alone is a specific failure: -enable_ha without a connection string exits at
+	// The election is rendered as one group whenever electionBackend is Kubernetes, including at
+	// one replica. Splitting the group is a partial render: -enable_ha without a connection string exits at
 	// startup, and a connection string without -enable_ha is accepted and ignored with a warning.
 	//
-	// -ha_backend_type is not a field. The image carries two leadership backends -- the Lease and
-	// Redis -- and only the Lease exists inside Kubernetes, so this operator has one value to render
-	// and a single-value enum in an API is a name, not a choice.
+	// ElectionBackend currently accepts Kubernetes or None. The Kubernetes value renders this
+	// backend type; future values need their own flag rendering.
 	//
 	// -ha_backend_connstring is "namespace/lease-name", and both halves are derived: a backend is
 	// cluster-scoped, its objects live in one shared namespace, and LeaderObjectName is already what

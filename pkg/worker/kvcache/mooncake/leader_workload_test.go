@@ -122,6 +122,7 @@ func testBackend(mutate ...func(*workercore.KVCacheBackend)) *workercore.KVCache
 				Managed: &workercore.KVCacheBackendManaged{
 					Leader: workercore.KVCacheBackendLeader{
 						Replicas:           ptr.To[int32](1),
+						ElectionBackend:    "None",
 						AllocationStrategy: "FreeRatioFirst",
 					},
 					Members: []workercore.KVCacheBackendMember{
@@ -206,8 +207,8 @@ func withLeaderReplicas(replicas int32) func(*workercore.KVCacheBackend) {
 // TestLeaderWorkload_UpdateStrategyInvertsWithStandbys asserts the two update shapes ARE opposites,
 // not variations, and each case names the failure the other one produces.
 //
-// One replica has no election, so a surging second master is a split brain. Several replicas have an
-// election, so the surge is safe -- and now the danger is the reverse: exactly one replica is ever
+// With one replica, Recreate avoids an unelected split brain and an elected rollout deadlock.
+// Several replicas have an election, so the surge is safe. Exactly one replica is ever
 // ready, because the standbys deliberately are not, so maxUnavailable has to be the replica count
 // itself. `[跑]` replicas-1 was measured to deadlock on a single-node cluster: the controller scales
 // an old Pod down only while availablePodCount exceeds replicas-maxUnavailable, which at replicas-1
@@ -281,7 +282,7 @@ func TestLeaderWorkload_UpdateStrategyInvertsWithStandbys(t *testing.T) {
 // TestLeaderWorkload_ReplicasAreClampedWithoutAnElection pins the renderer's own refusal to run
 // several masters, which is the only one left where the webhook is not installed.
 //
-// The schema caps `replicas` at five but cannot express the pairing with `highAvailability`, and it
+// The schema caps `replicas` at five but cannot express its pairing with `electionBackend`, and it
 // is documented as the authority in exactly that cluster -- so without this clamp such a cluster
 // admits `replicas: 3`, and three masters with nothing electing between them each serve, each
 // allocating against one pool. Both directions are asserted: the clamp must not also swallow the

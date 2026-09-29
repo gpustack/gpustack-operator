@@ -21,7 +21,7 @@
 #              ready" wait times out. That timeout is the signature of the wrong image, not a
 #              flake. Override with E2E_MOONCAKE_IMAGE; the default below carries the backend.
 #
-# Inputs:      All real, nothing mocked. One KVCacheBackend (replicas 3, highAvailability, one
+# Inputs:      All real, nothing mocked. One KVCacheBackend (replicas 3, Kubernetes election, one
 #              DRAM member group of 2Gi per node). The failure is injected with
 #              `kubectl delete pod --force --grace-period=0` on the Lease holder: the API object
 #              vanishes immediately and the container runtime SIGKILLs the process, so the
@@ -212,7 +212,6 @@ spec:
     managed:
       leader:
         replicas: 3
-        highAvailability: {}
       members:
         - nodeSelector: {kubernetes.io/os: linux}
           medium: DRAM

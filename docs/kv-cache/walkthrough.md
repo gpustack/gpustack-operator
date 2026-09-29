@@ -180,8 +180,8 @@ $ kubectl -n team-a get md qwen-chat -o jsonpath='{.status.conditions[?(@.type==
 
 ## Step 4: high availability
 
-Everything so far runs one leader process. An update or a node failure takes the store's metadata with
-it, and every member re-registers into an empty one. Electing between several replicas is one edit:
+Everything so far runs one leader process that already holds a Kubernetes Lease. An update or a node
+failure takes the store's metadata with it. Add standbys with one edit:
 
 ```yaml
 spec:
@@ -189,7 +189,6 @@ spec:
     managed:
       leader:
         replicas: 3
-        highAvailability: {}
 ```
 
 ⛔ **The healthy steady state now reads `3 desired / 1 ready`, and that is not a broken Deployment.**
@@ -197,16 +196,16 @@ Exactly one leader serves; the other two are standbys, deliberately not ready so
 endpoints never include a process that cannot serve. During a healthy failover `2` are briefly ready
 as the old leader steps down. Both readings are normal.
 
-⛔ **Crossing `replicas: 1` in either direction restarts the leader and rolls every member**, because
-the HA accounts and token mounts change. With an explicit `Lease` address, the member's master entry
-also changes shape. The store's cached contents do not survive the crossing, so make this edit before
-the cache is worth keeping — or accept a cold start.
+**Scaling from one to three keeps the first leader Pod and the member templates** because the Lease
+election and accounts were already present at one replica. See
+[the leader Deployment](leader.md#the-deployment-and-the-two-probes) for the
+cost of changing `leader.electionBackend`.
 
-**`leader.highAvailability.memberAddressing` chooses how members find the master**, and defaults to
+**`leader.memberAddressing` chooses how members find the master**, and defaults to
 `Service`. An explicit `Lease` value uses the member's API access to read the current holder. See
 [High availability](leader.md#high-availability) for the measured failover limits.
 
-Two conditions appear at this point that the phase deliberately does not summarize:
+These conditions apply at one replica too; the phase does not summarize them:
 
 | Condition | True means | False means |
 |---|---|---|

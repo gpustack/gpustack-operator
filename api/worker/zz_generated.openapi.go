@@ -124,7 +124,6 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCacheBackendEndpoint{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_KVCacheBackendEndpoint(ref),
 		v1alpha1.KVCacheBackendExternal{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_KVCacheBackendExternal(ref),
 		v1alpha1.KVCacheBackendLeader{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref),
-		v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderHighAvailability(ref),
 		v1alpha1.KVCacheBackendList{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_KVCacheBackendList(ref),
 		v1alpha1.KVCacheBackendManaged{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_KVCacheBackendManaged(ref),
 		v1alpha1.KVCacheBackendMember{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref),
@@ -6460,17 +6459,25 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 				Properties: map[string]spec.Schema{
 					"replicas": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Replicas is how many leader processes run, of which exactly one serves at a time. The rest are standbys: they hold no data, answer no request, and exist to take over.\n\n  - More than one REQUIRES HighAvailability. Electing a leader among several needs a leadership\n    record, and the webhook refuses the pair without one rather than silently running two\n    leaders against the same members.\n  - Raising this past one TURNS THE ELECTION ON, and the flip is re-evaluated on every\n    reconcile rather than decided at create. It restarts the leader and rolls every member —\n    the member's master entry changes shape with it — so the store's cached contents do not\n    survive the crossing. The same holds on the way back down to one.\n  - Raising this adds no capacity, which members do. The ceiling is here to catch the reading\n    that it does, and it is duplicated in the webhook on purpose: this one still holds when\n    the webhook is not installed, which is when a second leader would be rendered rather than\n    refused. Raise both together; widening a maximum is not a breaking change.",
+							Description: "Replicas is how many leader processes run, of which exactly one serves at a time. The rest are standbys: they hold no data, answer no request, and exist to take over.\n\n  - More than one REQUIRES ElectionBackend to be Kubernetes. The webhook refuses None with several\n    replicas, and the renderer clamps it to one if admission is unavailable.\n  - Changing the replica count does not change the election mode. The default Kubernetes mode\n    runs the election even at one replica, so scaling it up does not restart the first leader.\n  - Raising this adds no capacity, which members do. The ceiling is here to catch the reading\n    that it does, and it is duplicated in the webhook on purpose: this one still holds when\n    the webhook is not installed, which is when a second leader would be rendered rather than\n    refused. Raise both together; widening a maximum is not a breaking change.",
 							Minimum:     ptr.To[float64](1),
 							Maximum:     ptr.To[float64](5),
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
 					},
-					"highAvailability": {
+					"memberAddressing": {
 						SchemaProps: spec.SchemaProps{
-							Description: "HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas above 1. The election itself needs no settings: the Lease is named after this backend, so there is no connection target to supply, and the API access it needs is rendered beside the workload. What the block does carry is how members find the leader it elects.\n\n  - Unset, the leader runs as a single process exactly as before — no election flag, no extra\n    object, the command line it ran before this field existed.\n  - Set with Replicas at 1, the ELECTION is INERT: one process has nothing to elect between,\n    so no election flag, Lease or API token is rendered until Replicas rises above 1. That\n    makes an empty block safe to set up front on a store image built without the k8s-lease\n    backend, whose master fails at startup the moment the election flags appear — those flags\n    arrive only when there is something for them to elect. Snapshot is the exception and says\n    so on itself.\n  - With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile\n    interval. Each replica seeds its tenant quota policy at its own start, so a standby that\n    took over after a quota was raised applies the older, lower ceiling, and an over-quota\n    write in this store is not refused — it evicts that tenant's own older objects,\n    irreversibly and without moving any counter. The quota itself is not lost: the pool\n    reconciler is the authority and writes the difference back on its next pass.",
-							Ref:         ref(v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName()),
+							Description: "MemberAddressing selects how a member finds the master once an election runs. Both forms reach the serving leader by different routes. Changing this rolls every member group. With ElectionBackend None, members use the Service even when this field is Lease.\n\n  - Lease: the member reads the Lease's current holder itself. This needs API server access.\n  - Service: the member uses the leader Service, which publishes only ready endpoints. A\n    standby is not ready; client reconnect behavior across an election needs verification.\n\nService is the default. In one failover comparison the two forms differed by 0.13 seconds, within the noise of one run. Both first failed at 31.41 seconds and converged around 60.6 seconds, so leader election dominated that comparison. Recheck after changing election timing. The Service route's endpoint transition was inferred from the result, not observed directly.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"electionBackend": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ElectionBackend selects the leader election backend. Kubernetes uses a Lease even with one replica, so scaling up does not change the first leader's startup flags. None is for a single leader whose image cannot use Kubernetes election. More than one replica with None is refused. The enum can add other backends when they are supported.\n\nWith MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile interval. Each replica seeds its tenant quota policy at its own start, so a standby that took over after a quota was raised applies the older, lower ceiling. An over-quota write evicts that tenant's own older objects, irreversibly and without moving any counter. The quota itself is not lost: the pool reconciler writes the difference back on its next pass.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 					"allocationStrategy": {
@@ -6533,27 +6540,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderHighAvailability(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "KVCacheBackendLeaderHighAvailability turns leader election on, and carries how members find the leader it elects.\n\nDECLARING THE BLOCK IS THE SWITCH, and there is no key inside it to turn the feature back off. An `enabled: false` beside `replicas: 3` would be a third state that admission would have to adjudicate and every reader would have to remember, while presence has no such state. Lease tuning — duration, renew deadline — can also be added here later without a breaking change.\n\nA standby REPLICATES NOTHING. The store's operation log is the only way to feed one, and it runs on a leadership backend this operator's image cannot carry, so a failover or a restart starts from an empty cache. The store's snapshot is not offered either: restoring one can make the cache serve another key's bytes instead of a miss, which is why its flags are refused in extraArgs.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"memberAddressing": {
-						SchemaProps: spec.SchemaProps{
-							Description: "MemberAddressing selects how a member is told to find the master once an election runs. Both forms reach the leader that is serving, by different routes, and they are rendered into the same one variable — so changing this rolls every member group.\n\n  - Lease: the member is handed the Lease's coordinates and reads the current holder itself.\n    This needs the member to talk to the API server, which is why the member image has to\n    carry the leadership backend at all.\n  - Service: the member is handed the leader Service's address, exactly as it is without high\n    availability. The Service publishes only READY endpoints and a standby deliberately is not\n    ready, so the address resolves to the serving leader — the open part is whether the\n    client's reconnect follows that endpoint across an election, and how long it takes.\n\nService is the default. In one failover comparison the two forms differed by 0.13 seconds, within the noise of one run. Both first failed at 31.41 seconds and converged around 60.6 seconds, so leader election dominated that comparison. Recheck after changing election timing. The Service route's endpoint transition was inferred from the result, not observed directly.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-				},
-			},
-		},
+			v1alpha1.InstanceEnvVar{}.OpenAPIModelName()},
 	}
 }
 

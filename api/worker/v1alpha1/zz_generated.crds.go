@@ -2459,6 +2459,21 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																		},
 																	},
 																},
+																"electionBackend": {
+																	Description: "ElectionBackend selects the leader election backend. Kubernetes uses a Lease even with one replica,\nso scaling up does not change the first leader's startup flags. None is for a single leader\nwhose image cannot use Kubernetes election. More than one replica with None is refused.\nThe enum can add other backends when they are supported.\nWith MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile interval.\nEach replica seeds its tenant quota policy at its own start, so a standby that took over after\na quota was raised applies the older, lower ceiling. An over-quota write evicts that tenant's\nown older objects, irreversibly and without moving any counter. The quota itself is not lost:\nthe pool reconciler writes the difference back on its next pass.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`"Kubernetes"`),
+																	},
+																	Enum: []v1.JSON{
+																		{
+																			Raw: []byte(`"None"`),
+																		},
+																		{
+																			Raw: []byte(`"Kubernetes"`),
+																		},
+																	},
+																},
 																"extraArgs": {
 																	Description: "ExtraArgs passes flags this API does not enumerate straight through to the leader, after\nthe derived ones. Each entry is one flag token of its own, \"-flag\" or \"-flag=value\", and the\nentries render verbatim in the order written. An entry whose key — what precedes the first\n\"=\" once the leading dashes are off — collides with a flag rendered from a field above is\nrefused at admission, because two sources for one flag make the rendered command ambiguous.\nEVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then\nrendered into the leader container's argv, readable by anyone who can reach the Pod or the\nDeployment, for the life of the object. A credential does not belong here, and since this\noperator renders no flag that carries one, this field is the only way one arrives.",
 																	Type:        "array",
@@ -2498,27 +2513,20 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	},
 																	XListType: ptr.To[string]("map"),
 																},
-																"highAvailability": {
-																	Description: "HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas\nabove 1. The election itself needs no settings: the Lease is named after this backend, so\nthere is no connection target to supply, and the API access it needs is rendered beside the\nworkload. What the block does carry is how members find the leader it elects.\n- Unset, the leader runs as a single process exactly as before — no election flag, no extra\nobject, the command line it ran before this field existed.\n- Set with Replicas at 1, the ELECTION is INERT: one process has nothing to elect between,\nso no election flag, Lease or API token is rendered until Replicas rises above 1. That\nmakes an empty block safe to set up front on a store image built without the k8s-lease\nbackend, whose master fails at startup the moment the election flags appear — those flags\narrive only when there is something for them to elect. Snapshot is the exception and says\nso on itself.\n- With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile\ninterval. Each replica seeds its tenant quota policy at its own start, so a standby that\ntook over after a quota was raised applies the older, lower ceiling, and an over-quota\nwrite in this store is not refused — it evicts that tenant's own older objects,\nirreversibly and without moving any counter. The quota itself is not lost: the pool\nreconciler is the authority and writes the difference back on its next pass.",
-																	Type:        "object",
-																	Properties: map[string]v1.JSONSchemaProps{
-																		"memberAddressing": {
-																			Description: "MemberAddressing selects how a member is told to find the master once an election runs. Both\nforms reach the leader that is serving, by different routes, and they are rendered into the\nsame one variable — so changing this rolls every member group.\n- Lease: the member is handed the Lease's coordinates and reads the current holder itself.\nThis needs the member to talk to the API server, which is why the member image has to\ncarry the leadership backend at all.\n- Service: the member is handed the leader Service's address, exactly as it is without high\navailability. The Service publishes only READY endpoints and a standby deliberately is not\nready, so the address resolves to the serving leader — the open part is whether the\nclient's reconnect follows that endpoint across an election, and how long it takes.\nService is the default. In one failover comparison the two forms differed by 0.13 seconds,\nwithin the noise of one run. Both first failed at 31.41 seconds and converged around 60.6\nseconds, so leader election dominated that comparison. Recheck after changing election timing.\nThe Service route's endpoint transition was inferred from the result, not observed directly.",
-																			Type:        "string",
-																			Default: &v1.JSON{
-																				Raw: []byte(`"Service"`),
-																			},
-																			Enum: []v1.JSON{
-																				{
-																					Raw: []byte(`"Lease"`),
-																				},
-																				{
-																					Raw: []byte(`"Service"`),
-																				},
-																			},
+																"memberAddressing": {
+																	Description: "MemberAddressing selects how a member finds the master once an election runs. Both forms\nreach the serving leader by different routes. Changing this rolls every member group.\nWith ElectionBackend None, members use the Service even when this field is Lease.\n- Lease: the member reads the Lease's current holder itself. This needs API server access.\n- Service: the member uses the leader Service, which publishes only ready endpoints. A\nstandby is not ready; client reconnect behavior across an election needs verification.\nService is the default. In one failover comparison the two forms differed by 0.13 seconds,\nwithin the noise of one run. Both first failed at 31.41 seconds and converged around 60.6\nseconds, so leader election dominated that comparison. Recheck after changing election timing.\nThe Service route's endpoint transition was inferred from the result, not observed directly.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`"Service"`),
+																	},
+																	Enum: []v1.JSON{
+																		{
+																			Raw: []byte(`"Lease"`),
+																		},
+																		{
+																			Raw: []byte(`"Service"`),
 																		},
 																	},
-																	Nullable: true,
 																},
 																"multiTenancy": {
 																	Description: "MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index\nbehind it. Off, every request falls into one default tenant and the index degrades to a plain\nkey hash, so two callers using different tenant names read each other's cache.\nIt is a FIELD rather than an extraArgs entry because another API validates against it: a\nKVCachePool over a backend with no ledger to write quota into is admitted with a warning that\nno per-tenant quota is in force, withdrawing the flag from a backend a pool already holds is\nrefused, and a webhook reading an unschema'd \"true\", \"1\" or \"True\" would be judging a value\ndomain that belongs to whoever typed it. The store's global -quota_bytes flag stays in\nextraArgs for the converse reason: no other API needs to interpret it.\nIT DEFAULTS TO TRUE, because the ledger is what makes the rest of this API mean what it says:\nwithout it a KVCachePoolBinding's ceiling is recorded but not enforced, and a master serves one\nreuse domain only, so a second Binding on it is refused. Mooncake has taken the switch since\n0.3.12, and the default store image is on 0.3.13.post1.\nOMITTING THIS KEY AND WRITING `multiTenancy: false` ARE DIFFERENT — the first takes the\ndefault, the second declines the ledger: only the explicit false renders no switch. A store\nimage older than Mooncake 0.3.12 does not recognize the switch and its master exits at\nstartup, so a backend on such an image, including the 0.3.10.post2 variants this project\nalso publishes, sets false here. Read it through KVCacheBackendLeader.MultiTenancyEnabled.",
@@ -2529,7 +2537,7 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	Nullable: true,
 																},
 																"replicas": {
-																	Description: "Replicas is how many leader processes run, of which exactly one serves at a time. The rest are\nstandbys: they hold no data, answer no request, and exist to take over.\n- More than one REQUIRES HighAvailability. Electing a leader among several needs a leadership\nrecord, and the webhook refuses the pair without one rather than silently running two\nleaders against the same members.\n- Raising this past one TURNS THE ELECTION ON, and the flip is re-evaluated on every\nreconcile rather than decided at create. It restarts the leader and rolls every member —\nthe member's master entry changes shape with it — so the store's cached contents do not\nsurvive the crossing. The same holds on the way back down to one.\n- Raising this adds no capacity, which members do. The ceiling is here to catch the reading\nthat it does, and it is duplicated in the webhook on purpose: this one still holds when\nthe webhook is not installed, which is when a second leader would be rendered rather than\nrefused. Raise both together; widening a maximum is not a breaking change.",
+																	Description: "Replicas is how many leader processes run, of which exactly one serves at a time. The rest are\nstandbys: they hold no data, answer no request, and exist to take over.\n- More than one REQUIRES ElectionBackend to be Kubernetes. The webhook refuses None with several\nreplicas, and the renderer clamps it to one if admission is unavailable.\n- Changing the replica count does not change the election mode. The default Kubernetes mode\nruns the election even at one replica, so scaling it up does not restart the first leader.\n- Raising this adds no capacity, which members do. The ceiling is here to catch the reading\nthat it does, and it is duplicated in the webhook on purpose: this one still holds when\nthe webhook is not installed, which is when a second leader would be rendered rather than\nrefused. Raise both together; widening a maximum is not a breaking change.",
 																	Type:        "integer",
 																	Format:      "int32",
 																	Default: &v1.JSON{

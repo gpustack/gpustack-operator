@@ -82,7 +82,7 @@ var LeaderExtraArgsRules = ExtraArgsRules{
 		"allocation_strategy",
 		// The four the election renders, reserved as one group because that is how they are
 		// rendered: together or not at all. Reserved UNCONDITIONALLY, like the offload pair below,
-		// even though nothing renders them for a backend without leader.highAvailability -- a
+		// even though nothing renders them with electionBackend None -- a
 		// passthrough enable_ha with no connection string beside it is a leader that exits at
 		// startup, and cluster_id reached this way would key the store's namespace off something
 		// the object does not say.
@@ -372,10 +372,9 @@ var MemberDerivedEnvs = []string{
 // It is a PLAIN LIST for the same reason MemberDerivedEnvs is: the exclusive and forbidden kinds
 // would both be empty here, and nothing in the leader's namespace voids another setting.
 //
-// None is rendered unconditionally: all three only under high availability. They are reserved
-// UNCONDITIONALLY for the same reason the election flags are: an object must be creatable with the
-// variable already in place and the field turned on afterwards, and a passthrough value would
-// silently win over the reference the rendered argv arrives with.
+// All three render with Kubernetes election, including at one replica. They are reserved
+// UNCONDITIONALLY because an existing passthrough could otherwise override the Pod identity when
+// electionBackend changes from None to Kubernetes.
 var LeaderDerivedEnvs = []string{
 	LeaderPodIPEnv,
 	LeaderPodNameEnv,

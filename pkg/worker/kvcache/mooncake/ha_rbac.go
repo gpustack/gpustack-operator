@@ -20,31 +20,14 @@ func MemberRBACObjectName(kvcb *workercore.KVCacheBackend) string {
 	return kvcb.Name + "-member"
 }
 
-// leaderNeedsAPIAccess reports whether an election runs. The leader then needs API access, and the
-// member account stays available for an explicit Lease address.
-//
-// The election exists only ABOVE ONE REPLICA. A single process has nothing to elect between, so
-// highAvailability with one replica renders no election flag, no Lease and no API token -- and the
-// leader runs exactly the command line it would run with the field unset. That reading is also the
-// only one a store image built without the k8s-lease backend survives: the backend's absence fails
-// the master at startup the moment the election flags appear, so rendering them for one replica
-// would buy nothing and cost such an image the whole backend.
-//
-// The pairing is re-evaluated on every render, not decided at create: raising replicas past one
-// turns the election on, and lowering back to one turns it off. Both flips restart the leader and
-// roll every member because their token and account settings change. An explicit Lease address also
-// changes shape with the election -- see MemberMasterEntry.
+// leaderNeedsAPIAccess reports whether Kubernetes election runs. It is independent of the replica
+// count: one replica also campaigns, so scaling it up does not change the first leader's template.
 //
 // Without an election neither role has a reason to hold a token. Under HA, the leader elects through
 // a Lease and an explicitly Lease-addressed member reads it. The member account is rendered for both
 // address values. The predicate is named because five renderings ask it.
 func leaderNeedsAPIAccess(leader workercore.KVCacheBackendLeader) bool {
-	if leader.HighAvailability == nil {
-		return false
-	}
-	// Nil is the schema's default of one, which is below the election's floor the same as an
-	// explicit 1.
-	return leader.Replicas != nil && *leader.Replicas > 1
+	return leader.KubernetesElectionEnabled()
 }
 
 // leaderServiceAccountName is the account the leader Pod runs as, and it is EMPTY without HA.

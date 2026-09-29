@@ -124,8 +124,8 @@ in one clause and does not describe it.
 **Owns** — the leader process end to end: the Deployment and ClusterIP Service and their two ports,
 the replica ceiling and the clamp that survives a missing webhook, the update strategy per replica
 count, the two probes and why they take different paths, the health document's four fields, and all
-of `leader.highAvailability` -- the Lease, the image both roles need, the per-role ServiceAccounts,
-and how a missing grant fails on each side.
+of leader election -- `leader.electionBackend`, `leader.memberAddressing`, the Lease, the image both
+roles need, the per-role ServiceAccounts, and how a missing grant fails on each side.
 
 **Never** — the member groups, the transport, the status algebra. Those stay on `backend.md`, which
 links here. It was split out when that page hit both the line and the `##` cap.

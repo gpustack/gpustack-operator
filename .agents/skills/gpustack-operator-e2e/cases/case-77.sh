@@ -21,12 +21,11 @@
 #              operator's system namespace. The store image (E2E_MOONCAKE_IMAGE, default pinned to
 #              a CPU-capable tag carrying both the lease backend and the mooncake python client) is
 #              also the probe pod's image, so the client library always matches the master. The
-#              backend MUST be a replicated HA leader: the client reaches the master through
+#              backend uses a replicated HA leader. The client reaches the master through
 #              k8s://<ns>/<backend>-leader, which resolves through the election's Lease, and the
-#              probe's own authorization rides the member Role the operator renders only above one
-#              replica -- a single-replica leader renders neither the Lease nor the Role, and the
-#              client fails at setup instead of exercising the gate (measured; it is a shape
-#              constraint, not a defect).
+#              probe's authorization rides the member Role. The default single-replica leader now
+#              also renders that Lease and Role; replication is retained here to exercise the
+#              multi-replica shape alongside the tenant gate.
 #
 # Inputs:      All real, nothing mocked. One KVCacheBackend (3-replica HA leader, multi-tenancy
 #              on, no snapshot, no Pool, no Binding at first, the leader's read-lease TTL passed
@@ -206,7 +205,6 @@ spec:
       leader:
         replicas: 3
         multiTenancy: true
-        highAvailability: {}
         # The read-lease TTL, shortened for the teardown drain alone. The read-back after the admitted
         # put grants the key a lease of the leader's -default_kv_lease_ttl, a remove is refused with
         # OBJECT_HAS_LEASE until it expires, and the operator renders five minutes -- longer than
@@ -228,7 +226,7 @@ fi
 
 # The k8s:// prerequisites, asserted rather than assumed: the member Role exists (the probe's
 # authorization) and the Lease has a holder (the master address resolves through it). A
-# single-replica leader renders neither, and the failure mode is a client that cannot even setup.
+# a missing grant or holder prevents the client from reaching the elected master.
 HOLDER=""
 for ((i = 0; i < 120; i += 3)); do
   HOLDER="$(kubectl -n "$NS" get leases.coordination.k8s.io "${BACKEND}-leader" -o jsonpath='{.spec.holderIdentity}' 2>/dev/null)"
@@ -241,7 +239,7 @@ if wait_for roles.rbac.authorization.k8s.io "${BACKEND}-member" '{.metadata.name
     "role ${BACKEND}-member exists, lease ${BACKEND}-leader holder='${HOLDER}'"
 else
   record FAIL "the election is rendered (member Role + Lease with a holder)" \
-    "role or lease holder missing; a single-replica leader renders neither and the k8s:// client cannot run"
+    "role or lease holder missing; the k8s:// client cannot run"
   results; exit 1
 fi
 

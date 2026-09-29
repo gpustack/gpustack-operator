@@ -184,12 +184,15 @@ func TestRenderLeaderFlags_DiskTier(t *testing.T) {
 // election flags are derived from. The fixture rather than a bare object, so a rename of the
 // backend or a change to LeaderObjectName reaches every case here.
 func leaderBackend(leader workercore.KVCacheBackendLeader) *workercore.KVCacheBackend {
+	if leader.ElectionBackend == "" {
+		leader.ElectionBackend = "None"
+	}
 	return testBackend(func(kvcb *workercore.KVCacheBackend) {
 		kvcb.Spec.Connection.Managed.Leader = leader
 	})
 }
 
-// TestRenderLeaderFlags_HighAvailability asserts the election group, which is the one part of this
+// TestRenderLeaderFlags_KubernetesElection asserts the election group, which is the one part of this
 // argv derived from the OBJECT rather than from the leader spec.
 //
 // The five flags are asserted as a contiguous group in order, not probed for individually: they are
@@ -200,12 +203,12 @@ func leaderBackend(leader workercore.KVCacheBackendLeader) *workercore.KVCacheBa
 // with -rpc_port into the string it campaigns with, so it is the election's identity AND the address
 // the Lease hands to members that explicitly choose Lease addressing. Its 0.0.0.0 default would
 // give every replica one identity and send those members to an address that resolves to itself.
-func TestRenderLeaderFlags_HighAvailability(t *testing.T) {
+func TestRenderLeaderFlags_KubernetesElection(t *testing.T) {
 	kvcb := leaderBackend(workercore.KVCacheBackendLeader{
 		Replicas:           ptr.To[int32](3),
+		ElectionBackend:    "Kubernetes",
 		AllocationStrategy: "FreeRatioFirst",
 		MultiTenancy:       ptr.To(false),
-		HighAvailability:   &workercore.KVCacheBackendLeaderHighAvailability{},
 	})
 
 	assert.Equal(t, []string{
@@ -241,14 +244,14 @@ func TestRenderLeaderFlags_PodIdentityOnlyUnderElection(t *testing.T) {
 		kvcb *workercore.KVCacheBackend
 		want bool
 	}{
-		{"a single leader", testBackend(), false},
+		{"a single leader without election", testBackend(), false},
 		{
-			"highAvailability at one replica, which elects nothing",
+			"Kubernetes election at one replica",
 			leaderBackend(workercore.KVCacheBackendLeader{
-				Replicas:         ptr.To[int32](1),
-				HighAvailability: &workercore.KVCacheBackendLeaderHighAvailability{},
+				Replicas:        ptr.To[int32](1),
+				ElectionBackend: "Kubernetes",
 			}),
-			false,
+			true,
 		},
 		{"an electing backend", haBackend(), true},
 	}
@@ -351,10 +354,8 @@ func TestRenderLeaderFlags_IsDeterministic(t *testing.T) {
 // the metadata plane is peer-to-peer so there is no store to point at, and -port is deprecated. A
 // flag appearing here later would be a behavior change nobody asked for, so the test names each one.
 //
-// The four election flags are in this list for a DIFFERENT reason than the rest, and it is the one
-// worth keeping: a backend that does not set leader.highAvailability must render the argv it
-// rendered before that field existed. Every other entry is absent because nothing renders it at
-// all; these four are absent because the object did not ask.
+// The election flags are absent because this fixture explicitly selects electionBackend None.
+// Every other entry is absent because nothing in this scope renders it.
 func TestRenderLeaderFlags_OmitsWhatThisScopeDoesNotRun(t *testing.T) {
 	absent := []string{
 		"-etcd_endpoints",

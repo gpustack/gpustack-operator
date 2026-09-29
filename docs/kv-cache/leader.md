@@ -57,24 +57,23 @@ same message a member gets. The schema keys the list by `name`, so one name cann
 
 `replicas` defaults to `1`, and `5` is the ceiling in the **webhook** and in the schema alike: only
 one leader ever serves, so further replicas are spare processes rather than capacity. More than one
-requires [`highAvailability`](#high-availability) and is refused by the webhook without it, naming
-the field that is missing. An enum would answer `Unsupported value: 2` and teach nothing.
+requires `electionBackend: Kubernetes`; the webhook refuses `None` at that count.
 
-⛔ **Without `highAvailability` the Deployment runs one replica whatever `replicas` says.** The
-webhook refuses that combination, but a schema cannot express a cross-field rule — so where the
-webhook is not installed this clamp is what keeps unelected masters off one pool.
+⛔ **With `electionBackend: None` the Deployment runs one replica whatever `replicas` says.** The
+webhook refuses a larger count, and this clamp also protects clusters without the webhook.
 
-**`highAvailability` with one replica is inert: the election exists only above one replica.** A
-single process has nothing to elect between, so no election flag, Lease or API token is rendered
-until `replicas` rises past 1 — set the field up front and a later scale-up is a one-field change.
+**`electionBackend` defaults to `Kubernetes`, even at one replica.** The first leader campaigns for
+a Lease and starts with its election flags and API token. Raising `replicas` from one to three adds
+standbys without changing that leader's Pod template or rolling the members.
 
-The gate is re-evaluated on every reconcile, not decided at create: crossing `replicas: 1` in
-either direction flips the election on or off, and the flip restarts the leader and rolls every
-member, so the store's cached contents do not survive the crossing.
+Set `electionBackend: None` only for a single leader whose image cannot run the Kubernetes Lease
+backend. Switching between `None` and `Kubernetes` changes the leader and member Pod templates, so
+it restarts them and loses their DRAM cache contents.
 
-**Rising past one replica takes two updates.** The first recreates the leader at one replica with the
-election on; the standbys follow once no Pod of the old template is left, and `RolloutComplete` reads
-`False/ReplicasPending` in between. Falling back to one is a single `Recreate`.
+**Rising past one replica normally takes one update.** If a live Deployment still runs an unelected
+template, the controller first replaces it with an elected template at one replica, then adds
+standbys once that template has rolled out. `RolloutComplete` reads `False/ReplicasPending` while
+the second step waits. Falling back to one keeps the election on unless the field is set to `None`.
 
 > **Why** — the Deployment controller applies a replica change to the only active ReplicaSet before it
 > applies any strategy. In the update that also turns the election on, that is the old one, so a single
@@ -97,10 +96,10 @@ would take every standby down together with the leader and leave nothing to elec
 > here, so `replicas-1` makes that `1 > 1`: the old leader is never removed, the new replicas cannot
 > become ready until it releases the Lease, and the rollout stalls for good.
 
-⛔ **A rollout still has a window with no serving master**, and high availability shortens it rather
-than removing it. A floor of zero available replicas is what lets the old leader go, so it can go
-before a replacement has taken the Lease. The window is bounded by the lease expiry plus activation,
-not by a Pod start — the replacements are already running as standbys, contending for it.
+⛔ **A rollout still has a window with no serving master**, and standby replicas can shorten it.
+A floor of zero available replicas is what lets the old leader go, so it can go before a replacement
+has taken the Lease. The window depends on election and activation; replacements already running as
+standbys do not have to wait for scheduling or image pulls.
 
 **The two probes deliberately take different paths**, and this is the one configuration detail on this
 page that must not be "simplified":
@@ -122,16 +121,14 @@ The health document has four fields that matter:
 ⛔ **`status` is a hard-coded constant.** It reads `"ok"` on a leader that is serving nothing.
 **`service_ready` is the only verdict in the document**, and every readiness decision rests on it.
 
-A single leader reports `service_ready: true` from its first answer, because the non-HA path sets it
-unconditionally three lines after the admin server starts. Under high availability it is the standby
-marker, and the readiness gate above is what turns it into an endpoint decision.
+With `electionBackend: None`, a single leader reports `service_ready: true` from its first answer.
+Under the default Kubernetes election, readiness waits for the process to win the Lease.
 
 ## High availability
 
-Set `leader.highAvailability` and the leader elects through a **Kubernetes Lease** — once `replicas`
-exceeds one; below that the election is inert (see above). The election itself needs no settings —
-the Lease carries the leader's own object name, `<backend>-leader`, in this operator's namespace —
-so an empty block is the switch:
+The default `leader.electionBackend: Kubernetes` elects through a **Kubernetes Lease** at every
+replica count. The Lease is named `<backend>-leader` in the operator's namespace. Scale an already
+elected leader by changing only its count:
 
 ```yaml
 spec:
@@ -139,8 +136,11 @@ spec:
     managed:
       leader:
         replicas: 3
-        highAvailability: {}
 ```
+
+`leader.memberAddressing` is optional and only selects how members find the
+winner. It does not turn the election on. With `electionBackend: None`, members
+use the leader Service even if `memberAddressing: Lease` is set.
 
 ⛔ **A published `kvcacheai/mooncake` image cannot do this, on either side.** Leadership backend
 availability is a compile-time switch and every option ships **off**:
@@ -154,9 +154,9 @@ Use an image built from [`pack/mirrored-mooncake`](../../pack/mirrored-mooncake/
 `spec.image` **and for every `members[].image`**, on Mooncake 0.3.12 or later: an electing leader is
 also rendered `-pod_name` and `-pod_namespace` to label the winner, and a 0.3.11 master exits on both.
 
-A lease-less image is not refused outright: at one replica the election flags are never rendered, so
-such an image runs a single-leader backend even with `highAvailability` set — the flags arrive only
-when `replicas` rises past 1, which is where the missing backend would fail the leader at startup.
+A lease-less image can run one leader with `electionBackend: None`. It cannot serve a backend with
+multiple leader replicas. Set `None` when creating a backend with such an image; an omitted field
+selects `Kubernetes` and renders election flags that the image cannot use.
 
 A member group on `RDMA`, `ROCM` or `CANN` runs under high availability on the build that carries
 its transport: every `mirrored-mooncake` target — the default build and the `cuda`, `cann` and
@@ -236,20 +236,24 @@ Both first failed at 31.41 seconds and converged around 60.6 seconds, so electio
 result; retest if election timing changes. The Service endpoint transition was inferred from the
 result, not observed directly. Changing the value rolls every member group when HA is active.
 
-**Several leaders shorten the outage; they do not keep the cache.** A standby holds no data. The
+**Standby leaders can shorten the outage; they do not keep the cache.** A standby holds no data. The
 replica that takes over, like a single leader that restarts, learns the members' segments from their
-remounts and none of the keys in them, so every object held in member memory misses until it is
-written again.
+remounts and none of the keys in them, so a DRAM-only key misses until it is written again.
 
-The exception is what a member's [local disk tier](local-disk-tier.md) already holds: when the new
-leader does not know the disk segment, the member registers it again together with the objects on it.
+Keys fully written to a member's [local disk tier](local-disk-tier.md) may recover after a disk
+segment and its objects are registered again. The directory must still be available and the scan
+must complete. A member restart also loses its DRAM bytes; in the tested Mooncake version, an old
+disk replica record can block the restarted member's new client ID from registering its disk keys.
+Disk recovery is therefore conditional, even when the files survive.
 
 What a second replica buys is time. On a single-node test cluster a failover left the store
-unusable for about 16 seconds and a single-leader restart for about 30; on a real cluster a single
-leader also waits for its replacement to be scheduled and its image pulled.
+unusable for about 16 seconds and a single-leader restart for about 30. Those measured service
+gaps are not a bound on when each disk key first becomes a hit; a disk failover test eventually
+returned 1024/1024 keys but did not time their first hits. DRAM keys continue to miss until
+rewritten. On a real cluster a single leader also waits for scheduling and image pulls.
 
-**Run one leader by default.** Add replicas when that gap costs more than what an election needs: the
-store image and the two accounts described above.
+**Run one leader by default.** Add replicas when the shorter service gap justifies the standby
+processes. The default single leader already uses the Lease and the two accounts described above.
 
 ⛔ **The store's snapshot is not offered, and its flags are refused in `leader.extraArgs`.** A
 snapshot records where each key sits in member memory, and restoring one does not check that the

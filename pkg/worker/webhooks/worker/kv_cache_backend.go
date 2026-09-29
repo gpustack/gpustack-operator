@@ -472,17 +472,17 @@ func validateKVCacheBackendManaged(
 					MaxLeaderReplicas)))
 		}
 
-		// The pairing rule, and it names the field that is MISSING rather than the one that is set.
+		// The pairing rule rejects None when several leader replicas are requested.
 		// Several leaders with nothing electing between them is not a degraded configuration: each
 		// one serves, and the members register with whichever they were told about.
-		if *replicas > 1 && managed.Leader.HighAvailability == nil {
+		if *replicas > 1 && !managed.Leader.KubernetesElectionEnabled() {
 			errs = append(errs, field.Invalid(fldPath.Child("leader", "replicas"), *replicas,
-				"more than one leader requires leader.highAvailability, which elects one of them "+
-					"through a Kubernetes Lease; without it every replica would serve"))
+				"more than one leader requires leader.electionBackend to be Kubernetes; "+
+					"with None every replica would serve"))
 		}
 	}
 
-	// REQUIRED: an update that switches high availability on or off re-runs these rules even over a
+	// REQUIRED: an update that switches Kubernetes election on or off re-runs these rules even over a
 	// list it did not touch, and the exemption below is what makes that necessary. Turning the field
 	// on is what turns `enable_ha`, `ha_backend_type`, `ha_backend_connstring` and `cluster_id` into
 	// DERIVED flags; an object admitted before they were derived may carry one, and the renderer
@@ -493,8 +493,7 @@ func validateKVCacheBackendManaged(
 	haUnchanged := true
 	if oldManaged != nil {
 		oldLeaderExtraArgs = oldManaged.Leader.ExtraArgs
-		haUnchanged = (oldManaged.Leader.HighAvailability == nil) ==
-			(managed.Leader.HighAvailability == nil)
+		haUnchanged = oldManaged.Leader.KubernetesElectionEnabled() == managed.Leader.KubernetesElectionEnabled()
 	}
 	if !haUnchanged ||
 		!unchangedPassthrough(oldManaged != nil, oldLeaderExtraArgs, managed.Leader.ExtraArgs) {
@@ -508,7 +507,7 @@ func validateKVCacheBackendManaged(
 	//
 	// The reserved list being unconditional is what makes the coupling necessary, not what makes it
 	// unnecessary. What a declaration moves is which of those names the renderer EMITS: the Pod's
-	// identity and IP are emitted only under high availability. A list carrying one of those names
+	// identity and IP are emitted only under Kubernetes election. A list carrying one of those names
 	// from before it was reserved is exempted by the passthrough comparison, and the renderer appends
 	// the hatch AFTER the derived variables -- so the update that turns the declaration on is the
 	// moment the stale value starts overriding the reference the argv arrives with, and it is the one
@@ -1073,7 +1072,7 @@ func hasParentDirComponent(path string) bool {
 //
 // A user who touches the list gets the rule. A user who touches anything else, and the controller
 // touching nothing, do not. The leader's extraArgs caller adds one condition on top of this: an
-// update that moves `highAvailability` moves which keys are derived, so it re-runs the rules
+// update that moves `electionBackend` between None and Kubernetes changes the derived keys, so it re-runs the rules
 // regardless.
 func unchangedPassthrough[T comparable](isUpdate bool, old, current []T) bool {
 	return isUpdate && slices.Equal(old, current)

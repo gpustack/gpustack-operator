@@ -11,38 +11,39 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// Replicas is how many leader processes run, of which exactly one serves at a time. The rest are
 	// standbys: they hold no data, answer no request, and exist to take over.
 	//
-	// - More than one REQUIRES HighAvailability. Electing a leader among several needs a leadership
-	// record, and the webhook refuses the pair without one rather than silently running two
-	// leaders against the same members.
-	// - Raising this past one TURNS THE ELECTION ON, and the flip is re-evaluated on every
-	// reconcile rather than decided at create. It restarts the leader and rolls every member —
-	// the member's master entry changes shape with it — so the store's cached contents do not
-	// survive the crossing. The same holds on the way back down to one.
+	// - More than one REQUIRES ElectionBackend to be Kubernetes. The webhook refuses None with several
+	// replicas, and the renderer clamps it to one if admission is unavailable.
+	// - Changing the replica count does not change the election mode. The default Kubernetes mode
+	// runs the election even at one replica, so scaling it up does not restart the first leader.
 	// - Raising this adds no capacity, which members do. The ceiling is here to catch the reading
 	// that it does, and it is duplicated in the webhook on purpose: this one still holds when
 	// the webhook is not installed, which is when a second leader would be rendered rather than
 	// refused. Raise both together; widening a maximum is not a breaking change.
 	Replicas *int32 `json:"replicas,omitempty"`
-	// HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas
-	// above 1. The election itself needs no settings: the Lease is named after this backend, so
-	// there is no connection target to supply, and the API access it needs is rendered beside the
-	// workload. What the block does carry is how members find the leader it elects.
+	// MemberAddressing selects how a member finds the master once an election runs. Both forms
+	// reach the serving leader by different routes. Changing this rolls every member group.
+	// With ElectionBackend None, members use the Service even when this field is Lease.
 	//
-	// - Unset, the leader runs as a single process exactly as before — no election flag, no extra
-	// object, the command line it ran before this field existed.
-	// - Set with Replicas at 1, the ELECTION is INERT: one process has nothing to elect between,
-	// so no election flag, Lease or API token is rendered until Replicas rises above 1. That
-	// makes an empty block safe to set up front on a store image built without the k8s-lease
-	// backend, whose master fails at startup the moment the election flags appear — those flags
-	// arrive only when there is something for them to elect. Snapshot is the exception and says
-	// so on itself.
-	// - With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile
-	// interval. Each replica seeds its tenant quota policy at its own start, so a standby that
-	// took over after a quota was raised applies the older, lower ceiling, and an over-quota
-	// write in this store is not refused — it evicts that tenant's own older objects,
-	// irreversibly and without moving any counter. The quota itself is not lost: the pool
-	// reconciler is the authority and writes the difference back on its next pass.
-	HighAvailability *KVCacheBackendLeaderHighAvailabilityApplyConfiguration `json:"highAvailability,omitempty"`
+	// - Lease: the member reads the Lease's current holder itself. This needs API server access.
+	// - Service: the member uses the leader Service, which publishes only ready endpoints. A
+	// standby is not ready; client reconnect behavior across an election needs verification.
+	//
+	// Service is the default. In one failover comparison the two forms differed by 0.13 seconds,
+	// within the noise of one run. Both first failed at 31.41 seconds and converged around 60.6
+	// seconds, so leader election dominated that comparison. Recheck after changing election timing.
+	// The Service route's endpoint transition was inferred from the result, not observed directly.
+	MemberAddressing *string `json:"memberAddressing,omitempty"`
+	// ElectionBackend selects the leader election backend. Kubernetes uses a Lease even with one replica,
+	// so scaling up does not change the first leader's startup flags. None is for a single leader
+	// whose image cannot use Kubernetes election. More than one replica with None is refused.
+	// The enum can add other backends when they are supported.
+	//
+	// With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile interval.
+	// Each replica seeds its tenant quota policy at its own start, so a standby that took over after
+	// a quota was raised applies the older, lower ceiling. An over-quota write evicts that tenant's
+	// own older objects, irreversibly and without moving any counter. The quota itself is not lost:
+	// the pool reconciler writes the difference back on its next pass.
+	ElectionBackend *string `json:"electionBackend,omitempty"`
 	// AllocationStrategy is how the leader picks which member takes a new write. Random spreads
 	// them; FreeRatioFirst biases toward the emptier member.
 	//
@@ -114,11 +115,19 @@ func (b *KVCacheBackendLeaderApplyConfiguration) WithReplicas(value int32) *KVCa
 	return b
 }
 
-// WithHighAvailability sets the HighAvailability field in the declarative configuration to the given value
+// WithMemberAddressing sets the MemberAddressing field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the HighAvailability field is set to the value of the last call.
-func (b *KVCacheBackendLeaderApplyConfiguration) WithHighAvailability(value *KVCacheBackendLeaderHighAvailabilityApplyConfiguration) *KVCacheBackendLeaderApplyConfiguration {
-	b.HighAvailability = value
+// If called multiple times, the MemberAddressing field is set to the value of the last call.
+func (b *KVCacheBackendLeaderApplyConfiguration) WithMemberAddressing(value string) *KVCacheBackendLeaderApplyConfiguration {
+	b.MemberAddressing = &value
+	return b
+}
+
+// WithElectionBackend sets the ElectionBackend field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ElectionBackend field is set to the value of the last call.
+func (b *KVCacheBackendLeaderApplyConfiguration) WithElectionBackend(value string) *KVCacheBackendLeaderApplyConfiguration {
+	b.ElectionBackend = &value
 	return b
 }
 

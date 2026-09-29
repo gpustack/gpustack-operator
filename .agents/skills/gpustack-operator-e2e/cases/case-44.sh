@@ -184,6 +184,7 @@ spec:
   connection:
     managed:
       leader:
+        electionBackend: None
         multiTenancy: true
         # This case times a lease lapse, so it pins the lease rather than inheriting whatever default
         # the operator renders. At the operator's own five minutes the lapse below would have to sleep

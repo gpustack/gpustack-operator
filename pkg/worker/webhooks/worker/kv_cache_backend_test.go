@@ -34,6 +34,7 @@ func newKVCacheBackend() *workercore.KVCacheBackend {
 				Managed: &workercore.KVCacheBackendManaged{
 					Leader: workercore.KVCacheBackendLeader{
 						Replicas:           ptr.To[int32](1),
+						ElectionBackend:    "None",
 						AllocationStrategy: "FreeRatioFirst",
 					},
 					Members: []workercore.KVCacheBackendMember{{
@@ -194,30 +195,40 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 		{"replicas 1", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
 		}, ""},
+		{"replicas 1 without election", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.ElectionBackend = "None"
+		}, ""},
+		{"replicas 3 without election", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
+			k.Spec.Connection.Managed.Leader.ElectionBackend = "None"
+		}, "requires leader.electionBackend"},
 		{"replicas unset, which the schema defaults", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = nil
 		}, ""},
 		// The pairing rule, in both directions. Refusing the first without accepting the second
 		// would be a rule nobody can satisfy, and accepting the second without refusing the first
 		// is the configuration it exists to prevent: several leaders, each one serving.
-		{"replicas 3 without the field that elects", func(k *workercore.KVCacheBackend) {
+		{"replicas 3 with None", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
-		}, "requires leader.highAvailability"},
-		{"replicas 3 with it", func(k *workercore.KVCacheBackend) {
+		}, "requires leader.electionBackend"},
+		{"replicas 3 with the default election", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
-			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+			k.Spec.Connection.Managed.Leader.ElectionBackend = ""
+		}, ""},
+		{"replicas 3 with Kubernetes", func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
+			k.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 		}, ""},
 		// The ceiling still applies WITH the field: HA lifts the pairing rule, not the bound.
 		{"replicas past the ceiling, even with the field", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](MaxLeaderReplicas + 1)
-			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+			k.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 		}, "at most"},
-		// One replica with the field is accepted rather than refused as pointless: the field is inert
-		// below two replicas and turns live the moment replicas rises, so setting it up front is how
-		// a later scale-up stays a one-field change.
-		{"replicas 1 with the field", func(k *workercore.KVCacheBackend) {
+		// Addressing does not override an explicit None election choice.
+		{"replicas 1 with addressing but no election", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
-			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+			k.Spec.Connection.Managed.Leader.ElectionBackend = "None"
+			k.Spec.Connection.Managed.Leader.MemberAddressing = "Lease"
 		}, ""},
 
 		// The oplog key: refused because the leader cannot START with it, not because this operator
@@ -1000,7 +1011,7 @@ func TestKVCacheBackendWebhook_AGrandfatheredExtraArgIsNotRefusedOnEveryUpdate(t
 		grandfathered := []string{"-enable_ha=false"}
 		oldKvcb.Spec.Connection.Managed.Leader.ExtraArgs = grandfathered
 		newKvcb.Spec.Connection.Managed.Leader.ExtraArgs = slices.Clone(grandfathered)
-		newKvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+		newKvcb.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
 		require.Error(t, err, "the field moved, so the keys it derives are read again")
@@ -1031,11 +1042,11 @@ func TestKVCacheBackendWebhook_AGrandfatheredExtraArgIsNotRefusedOnEveryUpdate(t
 		}
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
 		oldKvcb.Spec.Connection.Managed.Leader.ExtraEnv = grandfathered
-		newKvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+		newKvcb.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 		newKvcb.Spec.Connection.Managed.Leader.ExtraEnv = slices.Clone(grandfathered)
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
-		require.Error(t, err, "high availability moved, so the names it emits are read again")
+		require.Error(t, err, "election changed, so the names it emits are read again")
 		require.Contains(t, err.Error(), "this variable is rendered from this spec")
 	})
 
@@ -1046,9 +1057,7 @@ func TestKVCacheBackendWebhook_AGrandfatheredExtraArgIsNotRefusedOnEveryUpdate(t
 			{Name: mooncake.LeaderPodIPEnv, Value: "10.0.0.1"},
 		}
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		oldKvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		oldKvcb.Spec.Connection.Managed.Leader.ExtraEnv = grandfathered
-		newKvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		newKvcb.Spec.Connection.Managed.Leader.ExtraEnv = slices.Clone(grandfathered)
 		newKvcb.Spec.Image = "example.com/mooncake:v1"
 
