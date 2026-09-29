@@ -59,17 +59,24 @@ var (
 // defaulting reads nothing else.
 func (*ModelArtifactWebhook) ReceiveDeletionUpdate() {}
 
-// ModelArtifactDefaultRevision is the revision a hub source names when it names none, the default
-// branch of a Hugging Face repository.
+// ModelArtifactDefaultRevision is the revision a Hugging Face source names when it names none,
+// the default branch of a Hugging Face repository.
 const ModelArtifactDefaultRevision = "main"
 
-// Default fills an unset hub revision with "main", on update as well as on creation: a full
-// replace that omits the revision would otherwise read as a change from "main" to nothing and be
-// refused as a spec edit.
+// ModelArtifactDefaultModelScopeRevision is the revision a ModelScope source names when it names
+// none, the default branch of a ModelScope repository.
+const ModelArtifactDefaultModelScopeRevision = "master"
+
+// Default fills an unset hub revision with the hub's default branch, on update as well as on
+// creation: a full replace that omits the revision would otherwise read as a change to nothing
+// and be refused as a spec edit.
 func (*ModelArtifactWebhook) Default(_ context.Context, obj runtime.Object) error {
 	ma := obj.(*workercore.ModelArtifact)
 	if hub := ma.Spec.Source.HuggingFace; hub != nil && hub.Revision == "" {
 		hub.Revision = ModelArtifactDefaultRevision
+	}
+	if hub := ma.Spec.Source.ModelScope; hub != nil && hub.Revision == "" {
+		hub.Revision = ModelArtifactDefaultModelScopeRevision
 	}
 
 	return nil
@@ -104,12 +111,6 @@ func (*ModelArtifactWebhook) ValidateDelete(_ context.Context, _ runtime.Object)
 const modelArtifactIdentityMessage = "a ModelArtifact is an identity, so its spec cannot change after " +
 	"creation: a different source or revision is a different artifact, created rather than edited"
 
-// modelArtifactModelScopeMessage is why the reserved member is refused, and what opening it needs.
-const modelArtifactModelScopeMessage = "ModelScope is not accepted in this version. Opening it needs " +
-	"branch resolution cross-checked against git, a file listing that re-lists per directory where " +
-	"the API silently truncates, errors classified by the envelope code, and an engine runner whose " +
-	"ModelScope SDK accepts a commit as the revision"
-
 // huggingFaceRepositoryPartPattern is one part of a Hugging Face repository id, as the Hub names
 // them: letters, digits, "-", "_" and ".", not starting or ending with "-" or ".", at most 96.
 var huggingFaceRepositoryPartPattern = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_.-]{0,94}[A-Za-z0-9_])?$`)
@@ -142,15 +143,15 @@ func validateModelArtifact(ma, old *workercore.ModelArtifact) field.ErrorList {
 	}
 	if len(members) != 1 {
 		return field.ErrorList{field.Invalid(sourcePath, members,
-			"exactly one of huggingFace, persistentVolumeClaim or image is required")}
+			"exactly one of huggingFace, modelScope, persistentVolumeClaim or image is required")}
 	}
 
 	var errs field.ErrorList
 	switch {
-	case source.ModelScope != nil:
-		return field.ErrorList{field.Forbidden(sourcePath.Child("modelScope"), modelArtifactModelScopeMessage)}
 	case source.HuggingFace != nil:
-		errs = validateModelArtifactHuggingFace(source.HuggingFace, sourcePath.Child("huggingFace"))
+		errs = validateModelArtifactHub(source.HuggingFace, sourcePath.Child("huggingFace"))
+	case source.ModelScope != nil:
+		errs = validateModelArtifactHub(source.ModelScope, sourcePath.Child("modelScope"))
 	case source.Image != nil:
 		errs = validateModelArtifactImage(source.Image, sourcePath.Child("image"))
 		errs = append(errs, validateModelArtifactImageVolume(sourcePath.Child("image"))...)
@@ -158,7 +159,8 @@ func validateModelArtifact(ma, old *workercore.ModelArtifact) field.ErrorList {
 		errs = validateModelArtifactClaim(source.PersistentVolumeClaim, sourcePath.Child("persistentVolumeClaim"))
 	}
 
-	return append(errs, validateModelArtifactPatterns(&ma.Spec, specPath, source.HuggingFace != nil, source.Image != nil)...)
+	return append(errs, validateModelArtifactPatterns(&ma.Spec, specPath,
+		source.HuggingFace != nil || source.ModelScope != nil, source.Image != nil)...)
 }
 
 // modelArtifactMaxPatterns and modelArtifactMaxPatternLength bound a list of patterns and each of
@@ -208,7 +210,11 @@ func validateModelArtifactPatterns(spec *workercore.ModelArtifactSpec, specPath 
 	return errs
 }
 
-func validateModelArtifactHuggingFace(hub *workercore.ModelArtifactHubSource, path *field.Path) field.ErrorList {
+// validateModelArtifactHub validates a hub source's shape — the rules the two hubs share: the
+// repository id and the revision's characters. ModelScope ids and Hugging Face ids are written
+// the same way, so one validator serves both; what resolves a revision differs and lives in the
+// client, not here.
+func validateModelArtifactHub(hub *workercore.ModelArtifactHubSource, path *field.Path) field.ErrorList {
 	var errs field.ErrorList
 
 	parts := strings.Split(hub.Repository, "/")
