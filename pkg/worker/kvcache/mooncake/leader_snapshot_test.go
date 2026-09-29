@@ -14,8 +14,8 @@ import (
 // snapshot: no flag, no volume, no mount and no environment variable.
 //
 // The fixtures cover each branch that adds to the command line or the pod spec, because a snapshot
-// piece added under one of them is invisible from the others: the election, one leader under a
-// high-availability block, and the tenant quota policy, which is the one feature that does mount a
+// piece added under one of them is invisible from the others: the election, one leader with Lease
+// addressing, and the tenant quota policy, which is the one feature that does mount a
 // volume.
 func TestRenderLeader_RendersNoSnapshot(t *testing.T) {
 	cases := []struct {
@@ -24,8 +24,8 @@ func TestRenderLeader_RendersNoSnapshot(t *testing.T) {
 	}{
 		{"a plain backend", testBackend()},
 		{"a backend electing its leader", haBackend()},
-		{"one leader under a high-availability block", testBackend(func(kvcb *workercore.KVCacheBackend) {
-			kvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+		{"one leader with Lease addressing", testBackend(func(kvcb *workercore.KVCacheBackend) {
+			kvcb.Spec.Connection.Managed.Leader.MemberAddressing = MemberAddressingLease
 		})},
 		{"an elected leader under multi-tenancy", haBackend(func(kvcb *workercore.KVCacheBackend) {
 			kvcb.Spec.Connection.Managed.Leader.MultiTenancy = ptr.To(true)

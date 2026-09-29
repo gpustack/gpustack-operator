@@ -205,7 +205,6 @@ spec:
       leader:
         replicas: 3
         multiTenancy: true
-        highAvailability: {}
         # The read-lease TTL, shortened for the teardown drain alone. The read-back after the admitted
         # put grants the key a lease of the leader's -default_kv_lease_ttl, a remove is refused with
         # OBJECT_HAS_LEASE until it expires, and the operator renders five minutes -- longer than

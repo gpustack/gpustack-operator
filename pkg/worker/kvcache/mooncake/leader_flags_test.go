@@ -192,7 +192,7 @@ func leaderBackend(leader workercore.KVCacheBackendLeader) *workercore.KVCacheBa
 	})
 }
 
-// TestRenderLeaderFlags_HighAvailability asserts the election group, which is the one part of this
+// TestRenderLeaderFlags_KubernetesElection asserts the election group, which is the one part of this
 // argv derived from the OBJECT rather than from the leader spec.
 //
 // The five flags are asserted as a contiguous group in order, not probed for individually: they are
@@ -203,13 +203,12 @@ func leaderBackend(leader workercore.KVCacheBackendLeader) *workercore.KVCacheBa
 // with -rpc_port into the string it campaigns with, so it is the election's identity AND the address
 // the Lease hands to members that explicitly choose Lease addressing. Its 0.0.0.0 default would
 // give every replica one identity and send those members to an address that resolves to itself.
-func TestRenderLeaderFlags_HighAvailability(t *testing.T) {
+func TestRenderLeaderFlags_KubernetesElection(t *testing.T) {
 	kvcb := leaderBackend(workercore.KVCacheBackendLeader{
 		Replicas:           ptr.To[int32](3),
 		ElectionBackend:    "Kubernetes",
 		AllocationStrategy: "FreeRatioFirst",
 		MultiTenancy:       ptr.To(false),
-		HighAvailability:   &workercore.KVCacheBackendLeaderHighAvailability{},
 	})
 
 	assert.Equal(t, []string{
@@ -249,9 +248,8 @@ func TestRenderLeaderFlags_PodIdentityOnlyUnderElection(t *testing.T) {
 		{
 			"Kubernetes election at one replica",
 			leaderBackend(workercore.KVCacheBackendLeader{
-				Replicas:         ptr.To[int32](1),
-				ElectionBackend:  "Kubernetes",
-				HighAvailability: &workercore.KVCacheBackendLeaderHighAvailability{},
+				Replicas:        ptr.To[int32](1),
+				ElectionBackend: "Kubernetes",
 			}),
 			true,
 		},

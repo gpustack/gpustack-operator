@@ -1281,15 +1281,15 @@ func TestKVCacheBackendReconciler_ConvergesAMultiTenancySwitch(t *testing.T) {
 	assert.NotContains(t, back.Containers[0].Args, "-enable_multi_tenants=true")
 }
 
-// TestKVCacheBackendReconciler_ConvergesAHighAvailabilitySwitch pins that the API access follows the
+// TestKVCacheBackendReconciler_ConvergesAnElectionSwitch pins that the API access follows the
 // field in BOTH directions.
 //
 // The off-to-on half is the obvious one. The on-to-off half is the one with a reason worth writing
 // down: the owner reference collects these three when the BACKEND is deleted, and a backend that
-// merely drops highAvailability is not deleted -- so without an explicit removal it keeps a
+// disables election is not deleted -- so without an explicit removal it keeps a
 // ServiceAccount that can still take a Lease, bound to a leader with no election left. Nothing
 // reports that, which is why it is asserted rather than left to the garbage collector.
-func TestKVCacheBackendReconciler_ConvergesAHighAvailabilitySwitch(t *testing.T) {
+func TestKVCacheBackendReconciler_ConvergesAnElectionSwitch(t *testing.T) {
 	kvcb := newKVCacheBackendObject()
 	cli := newKVCacheBackendClient(kvcb)
 	ctx := context.Background()
@@ -1301,11 +1301,9 @@ func TestKVCacheBackendReconciler_ConvergesAHighAvailabilitySwitch(t *testing.T)
 		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
 		if on {
 			got.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
-			got.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 			got.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
 		} else {
 			got.Spec.Connection.Managed.Leader.ElectionBackend = "None"
-			got.Spec.Connection.Managed.Leader.HighAvailability = nil
 			got.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
 		}
 		require.NoError(t, cli.Update(ctx, got))
@@ -1433,13 +1431,12 @@ func backfillDeprecatedServiceAccount(obj ctrlcli.Object) {
 	pod.DeprecatedServiceAccount = pod.ServiceAccountName
 }
 
-// TestKVCacheBackendReconciler_LeavingHighAvailabilityReleasesTheAccount pins that both workloads
+// TestKVCacheBackendReconciler_LeavingElectionReleasesTheAccount pins that both workloads
 // stop naming their account once the election is gone, against a client that backfills the
 // deprecated alias the way the API server does. The accounts are deleted on the same pass, so a
 // template still naming one leaves every new Pod refused with "serviceaccount not found" and the
-// backend without a leader or a member. Both ways out of the election are covered, because
-// either one alone empties the name.
-func TestKVCacheBackendReconciler_LeavingHighAvailabilityReleasesTheAccount(t *testing.T) {
+// backend without a leader or a member. Disabling election must clear both references.
+func TestKVCacheBackendReconciler_LeavingElectionReleasesTheAccount(t *testing.T) {
 	for name, leave := range map[string]func(*workercore.KVCacheBackendLeader){
 		"ElectionDisabled": func(l *workercore.KVCacheBackendLeader) {
 			l.ElectionBackend = "None"
@@ -1472,7 +1469,7 @@ func TestKVCacheBackendReconciler_LeavingHighAvailabilityReleasesTheAccount(t *t
 				Build()
 
 			require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
-			require.NoError(t, turnOnHighAvailability(t, cli, kvcb.Name))
+			require.NoError(t, turnOnKubernetesElection(t, cli, kvcb.Name))
 
 			leader, member := new(apps.Deployment), new(apps.DaemonSet)
 			require.NoError(t, cli.Get(ctx, leaderObjectKey(kvcb), leader))
@@ -1523,10 +1520,8 @@ func TestKVCacheBackendReconciler_ConvergesTheRolloutShapeOnALiveDeployment(t *t
 		got.Spec.Connection.Managed.Leader.Replicas = ptr.To(n)
 		if n > 1 {
 			got.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
-			got.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		} else {
 			got.Spec.Connection.Managed.Leader.ElectionBackend = "None"
-			got.Spec.Connection.Managed.Leader.HighAvailability = nil
 		}
 		require.NoError(t, cli.Update(ctx, got))
 		require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
@@ -1614,7 +1609,6 @@ func TestKVCacheBackendReconciler_CrossesOneReplicaWithoutMixingMasters(t *testi
 		return func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To(n)
 			k.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
-			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		}
 	}
 	assertOneUnderRecreate := func(t *testing.T, deploy *apps.Deployment) {
@@ -1714,7 +1708,6 @@ func TestKVCacheBackendReconciler_CrossesOneReplicaWithoutMixingMasters(t *testi
 		want := edit(t, cli, kvcb, func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
 			k.Spec.Connection.Managed.Leader.ElectionBackend = "None"
-			k.Spec.Connection.Managed.Leader.HighAvailability = nil
 		})
 		deploy := live(t, cli, kvcb)
 		assert.False(t, elects(deploy))
@@ -1755,16 +1748,15 @@ func TestKVCacheBackendReconciler_CrossesOneReplicaWithoutMixingMasters(t *testi
 	}
 }
 
-// turnOnHighAvailability edits the live object to ask for an election and runs one pass, handing
+// turnOnKubernetesElection edits the live object to ask for an election and runs one pass, handing
 // back whatever that pass returned. It is separate from reconcileKVCacheBackend because the cases
 // below are about a pass that must FAIL, which that helper asserts against.
-func turnOnHighAvailability(t *testing.T, cli ctrlcli.Client, name string) error {
+func turnOnKubernetesElection(t *testing.T, cli ctrlcli.Client, name string) error {
 	t.Helper()
 
 	ctx := context.Background()
 	got := new(workercore.KVCacheBackend)
 	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: name}, got))
-	got.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 	got.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 	got.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
 	require.NoError(t, cli.Update(ctx, got))
@@ -1812,7 +1804,7 @@ func TestKVCacheBackendReconciler_ARoleBindingPointingElsewhere(t *testing.T) {
 		}
 		require.NoError(t, cli.Create(ctx, foreign(key.Namespace, key.Name)))
 
-		err := turnOnHighAvailability(t, cli, kvcb.Name)
+		err := turnOnKubernetesElection(t, cli, kvcb.Name)
 		require.Error(t, err, "a name collision this operator cannot resolve fails the pass")
 		assert.Contains(t, err.Error(), key.Name,
 			"and names the object, which is the only thing an administrator can act on")
@@ -1835,7 +1827,7 @@ func TestKVCacheBackendReconciler_ARoleBindingPointingElsewhere(t *testing.T) {
 
 		// The positive baseline: without it, a check that refused every mismatch would satisfy the
 		// case above just as well, and the repair this path exists for would be gone.
-		require.NoError(t, turnOnHighAvailability(t, cli, kvcb.Name))
+		require.NoError(t, turnOnKubernetesElection(t, cli, kvcb.Name))
 		live := new(rbac.RoleBinding)
 		require.NoError(t, cli.Get(ctx, key, live))
 		require.True(t, renderedForKVCacheBackend(live, kvcb), "this one is ours")
@@ -1884,7 +1876,7 @@ func TestKVCacheBackendReconciler_WillNotClaimAnObjectItDidNotCreate(t *testing.
 			},
 		}))
 
-		err := turnOnHighAvailability(t, cli, kvcb.Name)
+		err := turnOnKubernetesElection(t, cli, kvcb.Name)
 		require.Error(t, err, "a name collision this operator cannot resolve fails the pass")
 		assert.Contains(t, err.Error(), key.Name, "and names the object to act on")
 
@@ -1905,7 +1897,7 @@ func TestKVCacheBackendReconciler_WillNotClaimAnObjectItDidNotCreate(t *testing.
 			Namespace: leaderObjectKey(kvcb).Namespace, Name: mooncake.LeaderObjectName(kvcb),
 		}
 
-		require.NoError(t, turnOnHighAvailability(t, cli, kvcb.Name))
+		require.NoError(t, turnOnKubernetesElection(t, cli, kvcb.Name))
 		live := new(core.ServiceAccount)
 		require.NoError(t, cli.Get(ctx, key, live))
 		require.True(t, renderedForKVCacheBackend(live, kvcb), "this one is ours")
@@ -1952,7 +1944,7 @@ func TestKVCacheBackendReconciler_KeepsTheGrantWhenTheWorkloadUpdateFails(t *tes
 		}).
 		Build()
 
-	require.NoError(t, turnOnHighAvailability(t, cli, kvcb.Name))
+	require.NoError(t, turnOnKubernetesElection(t, cli, kvcb.Name))
 	key := ctrlcli.ObjectKey{
 		Namespace: leaderObjectKey(kvcb).Namespace, Name: mooncake.LeaderObjectName(kvcb),
 	}

@@ -95,7 +95,7 @@ const (
 		`printf '%s' "$POLICY_EMPTY" > "$POLICY_FILE"; fi`
 )
 
-// The two values leader.highAvailability.memberAddressing takes. An empty value renders Service,
+// The two values leader.memberAddressing takes. An empty value renders Service,
 // which is the schema default for objects that passed admission.
 const (
 	MemberAddressingLease   = "Lease"

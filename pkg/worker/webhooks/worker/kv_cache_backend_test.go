@@ -224,10 +224,11 @@ func TestKVCacheBackendWebhook_ValidateCreate(t *testing.T) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](MaxLeaderReplicas + 1)
 			k.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 		}, "at most"},
-		// The addressing block does not override an explicit None election choice.
+		// Addressing does not override an explicit None election choice.
 		{"replicas 1 with addressing but no election", func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
-			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+			k.Spec.Connection.Managed.Leader.ElectionBackend = "None"
+			k.Spec.Connection.Managed.Leader.MemberAddressing = "Lease"
 		}, ""},
 
 		// The oplog key: refused because the leader cannot START with it, not because this operator
@@ -1045,7 +1046,7 @@ func TestKVCacheBackendWebhook_AGrandfatheredExtraArgIsNotRefusedOnEveryUpdate(t
 		newKvcb.Spec.Connection.Managed.Leader.ExtraEnv = slices.Clone(grandfathered)
 
 		_, err := wh.ValidateUpdate(context.Background(), oldKvcb, newKvcb)
-		require.Error(t, err, "high availability moved, so the names it emits are read again")
+		require.Error(t, err, "election changed, so the names it emits are read again")
 		require.Contains(t, err.Error(), "this variable is rendered from this spec")
 	})
 
@@ -1056,9 +1057,7 @@ func TestKVCacheBackendWebhook_AGrandfatheredExtraArgIsNotRefusedOnEveryUpdate(t
 			{Name: mooncake.LeaderPodIPEnv, Value: "10.0.0.1"},
 		}
 		oldKvcb, newKvcb := newKVCacheBackend(), newKVCacheBackend()
-		oldKvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		oldKvcb.Spec.Connection.Managed.Leader.ExtraEnv = grandfathered
-		newKvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		newKvcb.Spec.Connection.Managed.Leader.ExtraEnv = slices.Clone(grandfathered)
 		newKvcb.Spec.Image = "example.com/mooncake:v1"
 

@@ -201,7 +201,7 @@ election and accounts were already present at one replica. See
 [the leader Deployment](leader.md#the-deployment-and-the-two-probes) for the
 cost of changing `leader.electionBackend`.
 
-**`leader.highAvailability.memberAddressing` chooses how members find the master**, and defaults to
+**`leader.memberAddressing` chooses how members find the master**, and defaults to
 `Service`. An explicit `Lease` value uses the member's API access to read the current holder. See
 [High availability](leader.md#high-availability) for the measured failover limits.
 

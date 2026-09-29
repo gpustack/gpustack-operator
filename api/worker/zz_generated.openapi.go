@@ -124,7 +124,6 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.KVCacheBackendEndpoint{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_KVCacheBackendEndpoint(ref),
 		v1alpha1.KVCacheBackendExternal{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_KVCacheBackendExternal(ref),
 		v1alpha1.KVCacheBackendLeader{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref),
-		v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderHighAvailability(ref),
 		v1alpha1.KVCacheBackendList{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_KVCacheBackendList(ref),
 		v1alpha1.KVCacheBackendManaged{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_KVCacheBackendManaged(ref),
 		v1alpha1.KVCacheBackendMember{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_KVCacheBackendMember(ref),
@@ -6467,10 +6466,11 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 							Format:      "int32",
 						},
 					},
-					"highAvailability": {
+					"memberAddressing": {
 						SchemaProps: spec.SchemaProps{
-							Description: "HighAvailability configures how members find the elected leader. Election itself is selected by ElectionBackend, so this block is optional even when Replicas exceeds one.",
-							Ref:         ref(v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName()),
+							Description: "MemberAddressing selects how a member finds the master once an election runs. Both forms reach the serving leader by different routes. Changing this rolls every member group. With ElectionBackend None, members use the Service even when this field is Lease.\n\n  - Lease: the member reads the Lease's current holder itself. This needs API server access.\n  - Service: the member uses the leader Service, which publishes only ready endpoints. A\n    standby is not ready; client reconnect behavior across an election needs verification.\n\nService is the default. In one failover comparison the two forms differed by 0.13 seconds, within the noise of one run. Both first failed at 31.41 seconds and converged around 60.6 seconds, so leader election dominated that comparison. Recheck after changing election timing. The Service route's endpoint transition was inferred from the result, not observed directly.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 					"electionBackend": {
@@ -6540,27 +6540,7 @@ func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeader(ref common.Referen
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.KVCacheBackendLeaderHighAvailability{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1alpha1_KVCacheBackendLeaderHighAvailability(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "KVCacheBackendLeaderHighAvailability configures how members find the elected leader.\n\nA standby REPLICATES NOTHING. Without a snapshot or operation log, the new leader loses the DRAM key index. A member's local disk tier can re-register keys it has fully offloaded after the election. The store's snapshot is not offered: restoring one can make the cache serve another key's bytes instead of a miss, which is why its flags are refused in extraArgs.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"memberAddressing": {
-						SchemaProps: spec.SchemaProps{
-							Description: "MemberAddressing selects how a member is told to find the master once an election runs. Both forms reach the leader that is serving, by different routes, and they are rendered into the same one variable — so changing this rolls every member group.\n\n  - Lease: the member is handed the Lease's coordinates and reads the current holder itself.\n    This needs the member to talk to the API server, which is why the member image has to\n    carry the leadership backend at all.\n  - Service: the member is handed the leader Service's address, exactly as it is without high\n    availability. The Service publishes only READY endpoints and a standby deliberately is not\n    ready, so the address resolves to the serving leader — the open part is whether the\n    client's reconnect follows that endpoint across an election, and how long it takes.\n\nService is the default. In one failover comparison the two forms differed by 0.13 seconds, within the noise of one run. Both first failed at 31.41 seconds and converged around 60.6 seconds, so leader election dominated that comparison. Recheck after changing election timing. The Service route's endpoint transition was inferred from the result, not observed directly.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-				},
-			},
-		},
+			v1alpha1.InstanceEnvVar{}.OpenAPIModelName()},
 	}
 }
 

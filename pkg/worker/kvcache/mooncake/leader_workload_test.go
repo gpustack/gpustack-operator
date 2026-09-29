@@ -282,7 +282,7 @@ func TestLeaderWorkload_UpdateStrategyInvertsWithStandbys(t *testing.T) {
 // TestLeaderWorkload_ReplicasAreClampedWithoutAnElection pins the renderer's own refusal to run
 // several masters, which is the only one left where the webhook is not installed.
 //
-// The schema caps `replicas` at five but cannot express the pairing with `highAvailability`, and it
+// The schema caps `replicas` at five but cannot express its pairing with `electionBackend`, and it
 // is documented as the authority in exactly that cluster -- so without this clamp such a cluster
 // admits `replicas: 3`, and three masters with nothing electing between them each serve, each
 // allocating against one pool. Both directions are asserted: the clamp must not also swallow the

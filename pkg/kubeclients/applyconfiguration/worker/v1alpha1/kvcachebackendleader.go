@@ -20,9 +20,19 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// the webhook is not installed, which is when a second leader would be rendered rather than
 	// refused. Raise both together; widening a maximum is not a breaking change.
 	Replicas *int32 `json:"replicas,omitempty"`
-	// HighAvailability configures how members find the elected leader. Election itself is selected
-	// by ElectionBackend, so this block is optional even when Replicas exceeds one.
-	HighAvailability *KVCacheBackendLeaderHighAvailabilityApplyConfiguration `json:"highAvailability,omitempty"`
+	// MemberAddressing selects how a member finds the master once an election runs. Both forms
+	// reach the serving leader by different routes. Changing this rolls every member group.
+	// With ElectionBackend None, members use the Service even when this field is Lease.
+	//
+	// - Lease: the member reads the Lease's current holder itself. This needs API server access.
+	// - Service: the member uses the leader Service, which publishes only ready endpoints. A
+	// standby is not ready; client reconnect behavior across an election needs verification.
+	//
+	// Service is the default. In one failover comparison the two forms differed by 0.13 seconds,
+	// within the noise of one run. Both first failed at 31.41 seconds and converged around 60.6
+	// seconds, so leader election dominated that comparison. Recheck after changing election timing.
+	// The Service route's endpoint transition was inferred from the result, not observed directly.
+	MemberAddressing *string `json:"memberAddressing,omitempty"`
 	// ElectionBackend selects the leader election backend. Kubernetes uses a Lease even with one replica,
 	// so scaling up does not change the first leader's startup flags. None is for a single leader
 	// whose image cannot use Kubernetes election. More than one replica with None is refused.
@@ -105,11 +115,11 @@ func (b *KVCacheBackendLeaderApplyConfiguration) WithReplicas(value int32) *KVCa
 	return b
 }
 
-// WithHighAvailability sets the HighAvailability field in the declarative configuration to the given value
+// WithMemberAddressing sets the MemberAddressing field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the HighAvailability field is set to the value of the last call.
-func (b *KVCacheBackendLeaderApplyConfiguration) WithHighAvailability(value *KVCacheBackendLeaderHighAvailabilityApplyConfiguration) *KVCacheBackendLeaderApplyConfiguration {
-	b.HighAvailability = value
+// If called multiple times, the MemberAddressing field is set to the value of the last call.
+func (b *KVCacheBackendLeaderApplyConfiguration) WithMemberAddressing(value string) *KVCacheBackendLeaderApplyConfiguration {
+	b.MemberAddressing = &value
 	return b
 }
 

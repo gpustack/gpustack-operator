@@ -140,8 +140,6 @@ func (m *KVCacheBackendExternal) Reset() { *m = KVCacheBackendExternal{} }
 
 func (m *KVCacheBackendLeader) Reset() { *m = KVCacheBackendLeader{} }
 
-func (m *KVCacheBackendLeaderHighAvailability) Reset() { *m = KVCacheBackendLeaderHighAvailability{} }
-
 func (m *KVCacheBackendList) Reset() { *m = KVCacheBackendList{} }
 
 func (m *KVCacheBackendManaged) Reset() { *m = KVCacheBackendManaged{} }
@@ -3476,51 +3474,16 @@ func (m *KVCacheBackendLeader) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.AllocationStrategy)))
 	i--
 	dAtA[i] = 0x1a
-	if m.HighAvailability != nil {
-		{
-			size, err := m.HighAvailability.MarshalToSizedBuffer(dAtA[:i])
-			if err != nil {
-				return 0, err
-			}
-			i -= size
-			i = encodeVarintGenerated(dAtA, i, uint64(size))
-		}
-		i--
-		dAtA[i] = 0x12
-	}
-	if m.Replicas != nil {
-		i = encodeVarintGenerated(dAtA, i, uint64(*m.Replicas))
-		i--
-		dAtA[i] = 0x8
-	}
-	return len(dAtA) - i, nil
-}
-
-func (m *KVCacheBackendLeaderHighAvailability) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *KVCacheBackendLeaderHighAvailability) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *KVCacheBackendLeaderHighAvailability) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
 	i -= len(m.MemberAddressing)
 	copy(dAtA[i:], m.MemberAddressing)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.MemberAddressing)))
 	i--
 	dAtA[i] = 0x12
+	if m.Replicas != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.Replicas))
+		i--
+		dAtA[i] = 0x8
+	}
 	return len(dAtA) - i, nil
 }
 
@@ -9872,10 +9835,8 @@ func (m *KVCacheBackendLeader) Size() (n int) {
 	if m.Replicas != nil {
 		n += 1 + sovGenerated(uint64(*m.Replicas))
 	}
-	if m.HighAvailability != nil {
-		l = m.HighAvailability.Size()
-		n += 1 + l + sovGenerated(uint64(l))
-	}
+	l = len(m.MemberAddressing)
+	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.AllocationStrategy)
 	n += 1 + l + sovGenerated(uint64(l))
 	if m.MultiTenancy != nil {
@@ -9894,17 +9855,6 @@ func (m *KVCacheBackendLeader) Size() (n int) {
 		}
 	}
 	l = len(m.ElectionBackend)
-	n += 1 + l + sovGenerated(uint64(l))
-	return n
-}
-
-func (m *KVCacheBackendLeaderHighAvailability) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	l = len(m.MemberAddressing)
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
@@ -12693,22 +12643,12 @@ func (this *KVCacheBackendLeader) String() string {
 	repeatedStringForExtraEnv += "}"
 	s := strings.Join([]string{`&KVCacheBackendLeader{`,
 		`Replicas:` + valueToStringGenerated(this.Replicas) + `,`,
-		`HighAvailability:` + strings.Replace(this.HighAvailability.String(), "KVCacheBackendLeaderHighAvailability", "KVCacheBackendLeaderHighAvailability", 1) + `,`,
+		`MemberAddressing:` + fmt.Sprintf("%v", this.MemberAddressing) + `,`,
 		`AllocationStrategy:` + fmt.Sprintf("%v", this.AllocationStrategy) + `,`,
 		`MultiTenancy:` + valueToStringGenerated(this.MultiTenancy) + `,`,
 		`ExtraArgs:` + fmt.Sprintf("%v", this.ExtraArgs) + `,`,
 		`ExtraEnv:` + repeatedStringForExtraEnv + `,`,
 		`ElectionBackend:` + fmt.Sprintf("%v", this.ElectionBackend) + `,`,
-		`}`,
-	}, "")
-	return s
-}
-func (this *KVCacheBackendLeaderHighAvailability) String() string {
-	if this == nil {
-		return "nil"
-	}
-	s := strings.Join([]string{`&KVCacheBackendLeaderHighAvailability{`,
-		`MemberAddressing:` + fmt.Sprintf("%v", this.MemberAddressing) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -24327,9 +24267,9 @@ func (m *KVCacheBackendLeader) Unmarshal(dAtA []byte) error {
 			m.Replicas = &v
 		case 2:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field HighAvailability", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field MemberAddressing", wireType)
 			}
-			var msglen int
+			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowGenerated
@@ -24339,27 +24279,23 @@ func (m *KVCacheBackendLeader) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				msglen |= int(b&0x7F) << shift
+				stringLen |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
-			if msglen < 0 {
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
 				return ErrInvalidLengthGenerated
 			}
-			postIndex := iNdEx + msglen
+			postIndex := iNdEx + intStringLen
 			if postIndex < 0 {
 				return ErrInvalidLengthGenerated
 			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if m.HighAvailability == nil {
-				m.HighAvailability = &KVCacheBackendLeaderHighAvailability{}
-			}
-			if err := m.HighAvailability.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
+			m.MemberAddressing = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
@@ -24511,88 +24447,6 @@ func (m *KVCacheBackendLeader) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.ElectionBackend = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipGenerated(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *KVCacheBackendLeaderHighAvailability) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowGenerated
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: KVCacheBackendLeaderHighAvailability: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: KVCacheBackendLeaderHighAvailability: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MemberAddressing", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.MemberAddressing = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

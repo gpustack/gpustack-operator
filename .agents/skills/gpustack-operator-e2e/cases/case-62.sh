@@ -10,7 +10,7 @@
 # cluster-scoped; the Deployment, Service, Lease, ServiceAccounts, Roles and RoleBindings it renders
 # all live in <NS>.
 #
-# Goal:        With leader.replicas=3 and leader.highAvailability={}, three leader processes run and
+# Goal:        With leader.replicas=3 and leader.electionBackend=Kubernetes, three leader processes run and
 #              exactly one serves, elected through a Kubernetes Lease. This proves on a real API
 #              server what rendered objects and unit tests cannot:
 #                (1) THE STEADY STATE IS AN EQUALITY: 3 desired / 1 ready. Three ready would mean
@@ -40,7 +40,7 @@
 #              the wrong image, not a flake. Override with E2E_MOONCAKE_IMAGE; the default below
 #              carries the backend.
 #
-# Inputs:      All real, nothing mocked. One KVCacheBackend (replicas 3, highAvailability, one DRAM
+# Inputs:      All real, nothing mocked. One KVCacheBackend (replicas 3, Kubernetes election, one DRAM
 #              member group of 2Gi per node). The failover is induced by deleting the ready leader
 #              Pod -- the one the Lease names.
 #
@@ -249,7 +249,6 @@ spec:
     managed:
       leader:
         replicas: 3
-        highAvailability: {}
       members:
         - nodeSelector: {kubernetes.io/os: linux}
           medium: DRAM

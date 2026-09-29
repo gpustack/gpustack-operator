@@ -161,7 +161,6 @@ spec:
       leader:
         replicas: 3
         multiTenancy: true
-        highAvailability: {}
       members:
         - nodeSelector: {kubernetes.io/os: linux}
           medium: DRAM

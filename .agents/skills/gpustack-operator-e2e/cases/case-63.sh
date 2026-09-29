@@ -10,7 +10,7 @@
 # cluster-scoped; its rendered objects live in <NS>, and the two probe Pods live in a namespace this
 # case creates and removes.
 #
-# Goal:        Under leader.highAvailability a member can be handed MOONCAKE_MASTER in one of two
+# Goal:        Under Kubernetes leader election a member can be handed MOONCAKE_MASTER in one of two
 #              forms. Path A is "k8s://<ns>/<lease>": the client reads the Lease itself and follows
 #              view changes, which costs the member's image a compiled-in lease backend and so
 #              excludes every vendor image. Path B, the default, is the plain leader Service
@@ -44,7 +44,7 @@
 #              what proves the probe itself can work before any failover is measured, so a
 #              compiled-out backend fails there, loudly, rather than as a zero measurement.
 #
-# Inputs:      All real, nothing mocked. One KVCacheBackend (leader replicas 3, highAvailability,
+# Inputs:      All real, nothing mocked. One KVCacheBackend (leader replicas 3, Kubernetes election,
 #              one DRAM member group of 2Gi). Two probe Pods running the store image's python
 #              client: probe A set up with "k8s://<ns>/<backend>-leader" (it gets a ServiceAccount
 #              bound to the member Role -- `get leases` only -- because that read is exactly what
@@ -276,7 +276,6 @@ spec:
     managed:
       leader:
         replicas: 3
-        highAvailability: {}
       members:
         - nodeSelector: {kubernetes.io/os: linux}
           medium: DRAM

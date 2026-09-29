@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 #
-# CASE 74 — The API has no leader snapshot, and the store's snapshot flags are refused in the leader's
-#            extraArgs with the reason   (MUTATING, self-recovering)
+# CASE 74 — The store's snapshot flags are refused in the leader's extraArgs with the reason
+#            (MUTATING, self-recovering)
 #
 #   case-74.sh <NS>
 #
 # Goal:        The store's snapshot is not offered, because restoring one can make the cache serve
-#              another key's bytes instead of a miss. This case proves both halves on a live API
-#              server: `leader.highAvailability.snapshot` is not a field of the installed schema, so a
-#              strict client is refused on it as an unknown field and a lenient one has it pruned; and
-#              the flags that would turn the snapshot on through the escape hatch are refused by the
-#              webhook with that reason, on create and on an update to a running backend.
+#              another key's bytes instead of a miss. This case checks that the webhook refuses
+#              the snapshot flags in extraArgs on create and on an update to a running backend.
 #
 # Environment: Any cluster with the operator deployed; no GPU, no RDMA, no storage class. <NS> keeps
 #              the suite's calling convention and is read only to clean up the leader Lease: a backend
@@ -18,14 +15,11 @@
 #
 # Inputs:      All real, nothing mocked. The creates and the updates are sent as server-side dry runs,
 #              which pass through admission and persist nothing. The update needs an object to
-#              update, so the case creates one backend with high availability, whose member group
+#              update, so the case creates one backend with Kubernetes election, whose member group
 #              selects no node: it renders a leader and no member Pod.
 #
-# Expected:    - the manifest without a snapshot is accepted (the positive baseline: without it a
+# Expected:    - the manifest without snapshot flags is accepted (the positive baseline: without it a
 #              refusal of every backend would pass);
-#              - with `leader.highAvailability.snapshot`, a strict create is refused naming that
-#              path as an unknown field, and a lenient create is accepted with the block pruned from
-#              the object the server returns;
 #              - `-enable_snapshot=true` in leader.extraArgs is refused on that entry with the
 #              wrong-data reason, and `-snapshot_interval_seconds=60` with the reason that it is
 #              read only under a refused switch;
@@ -54,7 +48,6 @@ LEADER="${BACKEND}-leader"
 
 # Every refusal is matched on its field AND its reason: extraArgs carries several refusals for other
 # keys, so the path alone would pass on any of them.
-UNKNOWN_RE='unknown field "spec\.connection\.managed\.leader\.highAvailability\.snapshot"'
 SWITCH_RE='spec\.connection\.managed\.leader\.extraArgs\[0\]: Forbidden: snapshots are not supported: .*can serve another key.s bytes instead of a miss'
 COMPANION_RE='spec\.connection\.managed\.leader\.extraArgs\[0\]: Forbidden: it is read only when enable_snapshot or enable_snapshot_restore is set'
 
@@ -83,7 +76,7 @@ teardown() {
 trap teardown EXIT
 
 # manifest <leader-extra-yaml> prints one backend with three elected leaders. The argument lands
-# under `leader:`, so it can add a snapshot block or an extraArgs list. The member group selects a
+# under `leader:` to add an extraArgs list. The member group selects a
 # label no node carries, so the one object this case persists renders no member Pod.
 manifest() {
   cat <<YAML
@@ -100,8 +93,6 @@ spec:
     managed:
       leader:
         replicas: 3
-        highAvailability:
-          memberAddressing: Service
 ${1:-}
       members:
         - nodeSelector: {gpustack.ai/case-74-selects-no-node: "true"}
@@ -109,9 +100,6 @@ ${1:-}
           capacityPerMember: 1Gi
 YAML
 }
-
-SNAPSHOT_YAML='          snapshot:
-            persistentVolumeClaimName: mooncake-snapshots'
 
 # expect_refused <label> <regex> <leader-extra-yaml> sends a server-side dry-run create and records
 # whether it was refused for the reason the regex names, rather than for any other.
@@ -129,33 +117,10 @@ expect_refused() {
 # ------------------------------------------------------------- create, as dry runs
 
 if out="$(manifest | kubectl create --dry-run=server -f - 2>&1)"; then
-  record PASS "create without a snapshot is accepted" "${BACKEND}"
+  record PASS "create without snapshot flags is accepted" "${BACKEND}"
 else
-  record FAIL "create without a snapshot is accepted" "${out}"
+  record FAIL "create without snapshot flags is accepted" "${out}"
 fi
-
-if out="$(manifest "$SNAPSHOT_YAML" | kubectl create --dry-run=server --validate=strict -f - 2>&1)"; then
-  record FAIL "a strict create with a snapshot is refused as an unknown field" "accepted: ${out}"
-elif [[ "$out" =~ $UNKNOWN_RE ]]; then
-  record PASS "a strict create with a snapshot is refused as an unknown field" "${BACKEND}"
-else
-  record FAIL "a strict create with a snapshot is refused as an unknown field" "refused by another rule: ${out}"
-fi
-
-# The lenient path: the warning goes to stderr and the object the server would store to stdout, so
-# the two are read apart.
-warn_file="$(mktemp)"
-if obj="$(manifest "$SNAPSHOT_YAML" | kubectl create --dry-run=server --validate=warn -o json -f - 2>"$warn_file")"; then
-  ha="$(printf '%s' "$obj" | jq -c '.spec.connection.managed.leader.highAvailability')"
-  if [[ "$(cat "$warn_file")" =~ $UNKNOWN_RE ]] && [ "$(printf '%s' "$obj" | jq '.spec.connection.managed.leader.highAvailability | has("snapshot")')" = false ]; then
-    record PASS "a lenient create with a snapshot is accepted with the block pruned" "highAvailability=${ha}"
-  else
-    record FAIL "a lenient create with a snapshot is accepted with the block pruned" "highAvailability=${ha} warnings=$(cat "$warn_file")"
-  fi
-else
-  record FAIL "a lenient create with a snapshot is accepted with the block pruned" "refused: $(cat "$warn_file")"
-fi
-rm -f "$warn_file"
 
 expect_refused "-enable_snapshot in extraArgs is refused for serving wrong data" "$SWITCH_RE" \
   '        extraArgs: ["-enable_snapshot=true"]'

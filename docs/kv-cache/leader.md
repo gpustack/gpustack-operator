@@ -138,8 +138,9 @@ spec:
         replicas: 3
 ```
 
-`leader.highAvailability.memberAddressing` is optional and only selects how members find the
-winner. It does not turn the election on.
+`leader.memberAddressing` is optional and only selects how members find the
+winner. It does not turn the election on. With `electionBackend: None`, members
+use the leader Service even if `memberAddressing: Lease` is set.
 
 ⛔ **A published `kvcacheai/mooncake` image cannot do this, on either side.** Leadership backend
 availability is a compile-time switch and every option ships **off**:

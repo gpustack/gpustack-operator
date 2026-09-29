@@ -17,7 +17,6 @@ func haBackend(mutate ...func(*workercore.KVCacheBackend)) *workercore.KVCacheBa
 	all := append([]func(*workercore.KVCacheBackend){
 		func(kvcb *workercore.KVCacheBackend) {
 			kvcb.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
-			kvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 			kvcb.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
 		},
 	}, mutate...)
@@ -210,7 +209,7 @@ func TestMemberMasterEntry_UsesServiceWithAndWithoutHA(t *testing.T) {
 func TestMemberMasterEntry_AddressingSelectsExplicitLease(t *testing.T) {
 	addressed := func(value string) *workercore.KVCacheBackend {
 		return haBackend(func(kvcb *workercore.KVCacheBackend) {
-			kvcb.Spec.Connection.Managed.Leader.HighAvailability.MemberAddressing = value
+			kvcb.Spec.Connection.Managed.Leader.MemberAddressing = value
 		})
 	}
 
@@ -221,6 +220,11 @@ func TestMemberMasterEntry_AddressingSelectsExplicitLease(t *testing.T) {
 	assert.Equal(t, lease, MemberMasterEntry(addressed(MemberAddressingLease)))
 	assert.Equal(t, service, MemberMasterEntry(addressed(MemberAddressingService)),
 		"the Service publishes only ready endpoints, and a standby is not ready")
+	withoutElection := testBackend(func(kvcb *workercore.KVCacheBackend) {
+		kvcb.Spec.Connection.Managed.Leader.MemberAddressing = MemberAddressingLease
+	})
+	assert.Equal(t, service, MemberMasterEntry(withoutElection),
+		"Lease addressing takes effect only while Kubernetes election runs")
 
 	accountFor := func(value string) string {
 		return RenderMemberDaemonSet(addressed(value), 0, "mooncake:v0.3.13").

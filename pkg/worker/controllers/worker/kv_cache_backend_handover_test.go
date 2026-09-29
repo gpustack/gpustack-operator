@@ -50,9 +50,8 @@ func electingBackend(name string) *workercore.KVCacheBackend {
 			Connection: workercore.KVCacheBackendConnection{
 				Managed: &workercore.KVCacheBackendManaged{
 					Leader: workercore.KVCacheBackendLeader{
-						Replicas:         ptr.To[int32](3),
-						ElectionBackend:  "Kubernetes",
-						HighAvailability: &workercore.KVCacheBackendLeaderHighAvailability{},
+						Replicas:        ptr.To[int32](3),
+						ElectionBackend: "Kubernetes",
 					},
 				},
 			},

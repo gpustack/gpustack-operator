@@ -292,9 +292,22 @@ type KVCacheBackendLeader struct {
 	// +k8s:validation:maximum=5
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
-	// HighAvailability configures how members find the elected leader. Election itself is selected
-	// by ElectionBackend, so this block is optional even when Replicas exceeds one.
-	HighAvailability *KVCacheBackendLeaderHighAvailability `json:"highAvailability,omitempty" protobuf:"bytes,2,opt,name=highAvailability"`
+	// MemberAddressing selects how a member finds the master once an election runs. Both forms
+	// reach the serving leader by different routes. Changing this rolls every member group.
+	// With ElectionBackend None, members use the Service even when this field is Lease.
+	//
+	//   - Lease: the member reads the Lease's current holder itself. This needs API server access.
+	//   - Service: the member uses the leader Service, which publishes only ready endpoints. A
+	//     standby is not ready; client reconnect behavior across an election needs verification.
+	//
+	// Service is the default. In one failover comparison the two forms differed by 0.13 seconds,
+	// within the noise of one run. Both first failed at 31.41 seconds and converged around 60.6
+	// seconds, so leader election dominated that comparison. Recheck after changing election timing.
+	// The Service route's endpoint transition was inferred from the result, not observed directly.
+	//
+	// +k8s:validation:default="Service"
+	// +k8s:validation:enum=["Lease","Service"]
+	MemberAddressing string `json:"memberAddressing,omitempty" protobuf:"bytes,2,opt,name=memberAddressing"`
 
 	// ElectionBackend selects the leader election backend. Kubernetes uses a Lease even with one replica,
 	// so scaling up does not change the first leader's startup flags. None is for a single leader
@@ -391,35 +404,6 @@ func (in KVCacheBackendLeader) MultiTenancyEnabled() bool {
 // KubernetesElectionEnabled applies the schema default to objects built without API server defaulting.
 func (in KVCacheBackendLeader) KubernetesElectionEnabled() bool {
 	return in.ElectionBackend == "" || in.ElectionBackend == "Kubernetes"
-}
-
-// KVCacheBackendLeaderHighAvailability configures how members find the elected leader.
-//
-// A standby REPLICATES NOTHING. Without a snapshot or operation log, the new leader loses the DRAM
-// key index. A member's local disk tier can re-register keys it has fully offloaded after the
-// election. The store's snapshot is not offered: restoring one can make the cache
-// serve another key's bytes instead of a miss, which is why its flags are refused in extraArgs.
-type KVCacheBackendLeaderHighAvailability struct {
-	// MemberAddressing selects how a member is told to find the master once an election runs. Both
-	// forms reach the leader that is serving, by different routes, and they are rendered into the
-	// same one variable — so changing this rolls every member group.
-	//
-	//   - Lease: the member is handed the Lease's coordinates and reads the current holder itself.
-	//     This needs the member to talk to the API server, which is why the member image has to
-	//     carry the leadership backend at all.
-	//   - Service: the member is handed the leader Service's address, exactly as it is without high
-	//     availability. The Service publishes only READY endpoints and a standby deliberately is not
-	//     ready, so the address resolves to the serving leader — the open part is whether the
-	//     client's reconnect follows that endpoint across an election, and how long it takes.
-	//
-	// Service is the default. In one failover comparison the two forms differed by 0.13 seconds,
-	// within the noise of one run. Both first failed at 31.41 seconds and converged around 60.6
-	// seconds, so leader election dominated that comparison. Recheck after changing election timing.
-	// The Service route's endpoint transition was inferred from the result, not observed directly.
-	//
-	// +k8s:validation:default="Service"
-	// +k8s:validation:enum=["Lease","Service"]
-	MemberAddressing string `json:"memberAddressing,omitempty" protobuf:"bytes,2,opt,name=memberAddressing"`
 }
 
 // KVCacheBackendTransport is the data plane the members use.

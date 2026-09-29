@@ -2513,27 +2513,20 @@ func crd_gpustack_api_worker_v1alpha1_KVCacheBackend() *v1.CustomResourceDefinit
 																	},
 																	XListType: ptr.To[string]("map"),
 																},
-																"highAvailability": {
-																	Description: "HighAvailability configures how members find the elected leader. Election itself is selected\nby ElectionBackend, so this block is optional even when Replicas exceeds one.",
-																	Type:        "object",
-																	Properties: map[string]v1.JSONSchemaProps{
-																		"memberAddressing": {
-																			Description: "MemberAddressing selects how a member is told to find the master once an election runs. Both\nforms reach the leader that is serving, by different routes, and they are rendered into the\nsame one variable — so changing this rolls every member group.\n- Lease: the member is handed the Lease's coordinates and reads the current holder itself.\nThis needs the member to talk to the API server, which is why the member image has to\ncarry the leadership backend at all.\n- Service: the member is handed the leader Service's address, exactly as it is without high\navailability. The Service publishes only READY endpoints and a standby deliberately is not\nready, so the address resolves to the serving leader — the open part is whether the\nclient's reconnect follows that endpoint across an election, and how long it takes.\nService is the default. In one failover comparison the two forms differed by 0.13 seconds,\nwithin the noise of one run. Both first failed at 31.41 seconds and converged around 60.6\nseconds, so leader election dominated that comparison. Recheck after changing election timing.\nThe Service route's endpoint transition was inferred from the result, not observed directly.",
-																			Type:        "string",
-																			Default: &v1.JSON{
-																				Raw: []byte(`"Service"`),
-																			},
-																			Enum: []v1.JSON{
-																				{
-																					Raw: []byte(`"Lease"`),
-																				},
-																				{
-																					Raw: []byte(`"Service"`),
-																				},
-																			},
+																"memberAddressing": {
+																	Description: "MemberAddressing selects how a member finds the master once an election runs. Both forms\nreach the serving leader by different routes. Changing this rolls every member group.\nWith ElectionBackend None, members use the Service even when this field is Lease.\n- Lease: the member reads the Lease's current holder itself. This needs API server access.\n- Service: the member uses the leader Service, which publishes only ready endpoints. A\nstandby is not ready; client reconnect behavior across an election needs verification.\nService is the default. In one failover comparison the two forms differed by 0.13 seconds,\nwithin the noise of one run. Both first failed at 31.41 seconds and converged around 60.6\nseconds, so leader election dominated that comparison. Recheck after changing election timing.\nThe Service route's endpoint transition was inferred from the result, not observed directly.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`"Service"`),
+																	},
+																	Enum: []v1.JSON{
+																		{
+																			Raw: []byte(`"Lease"`),
+																		},
+																		{
+																			Raw: []byte(`"Service"`),
 																		},
 																	},
-																	Nullable: true,
 																},
 																"multiTenancy": {
 																	Description: "MultiTenancy turns on the leader's per-tenant quota ledger and the tenant-scoped shard index\nbehind it. Off, every request falls into one default tenant and the index degrades to a plain\nkey hash, so two callers using different tenant names read each other's cache.\nIt is a FIELD rather than an extraArgs entry because another API validates against it: a\nKVCachePool over a backend with no ledger to write quota into is admitted with a warning that\nno per-tenant quota is in force, withdrawing the flag from a backend a pool already holds is\nrefused, and a webhook reading an unschema'd \"true\", \"1\" or \"True\" would be judging a value\ndomain that belongs to whoever typed it. The store's global -quota_bytes flag stays in\nextraArgs for the converse reason: no other API needs to interpret it.\nIT DEFAULTS TO TRUE, because the ledger is what makes the rest of this API mean what it says:\nwithout it a KVCachePoolBinding's ceiling is recorded but not enforced, and a master serves one\nreuse domain only, so a second Binding on it is refused. Mooncake has taken the switch since\n0.3.12, and the default store image is on 0.3.13.post1.\nOMITTING THIS KEY AND WRITING `multiTenancy: false` ARE DIFFERENT — the first takes the\ndefault, the second declines the ledger: only the explicit false renders no switch. A store\nimage older than Mooncake 0.3.12 does not recognize the switch and its master exits at\nstartup, so a backend on such an image, including the 0.3.10.post2 variants this project\nalso publishes, sets false here. Read it through KVCacheBackendLeader.MultiTenancyEnabled.",
