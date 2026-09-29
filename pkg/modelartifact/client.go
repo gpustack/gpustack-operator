@@ -25,6 +25,11 @@ const (
 	// ReasonSourceUnavailable is a failure to get an answer at all, which says nothing about the
 	// artifact and is retried.
 	ReasonSourceUnavailable = "SourceUnavailable"
+
+	// ReasonDigestMismatch is a source whose content digests to something other than the
+	// artifact's expectedDigest: the assertion the user made and the content the source
+	// serves disagree.
+	ReasonDigestMismatch = "DigestMismatch"
 	// ReasonInvalidManifest is an answer that violates the manifest format.
 	ReasonInvalidManifest = "InvalidManifest"
 	// ReasonEmptyManifest is a commit with no files.
