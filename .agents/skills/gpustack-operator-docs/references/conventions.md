@@ -162,6 +162,48 @@ Two consequences worth stating:
 - **Links are relative** (`../settings.md`, `architecture/admission.md`), never absolute GitHub URLs —
   the exception is the chart README, which is rendered outside the repo on Artifact Hub.
 
+## Prose tells
+
+Docs here are reference and technical text, so the voice is neutral and plain. Text written on autopilot
+carries patterns a careful writer rarely chooses on purpose. Read a draft once for them before you run
+the checker; the checker does not read prose. The patterns are adapted from the
+[humanizer](https://github.com/blader/humanizer) skill (MIT), strongest first. The first five justify an
+edit on one sighting.
+
+| Pattern | Watch for | Write instead |
+|---|---|---|
+| Not X but Y | "not just X, but Y", "it is not X, it is Y", "X rather than Y", "This does not mean X. It means Y.", a clipped tail such as ", no guessing" | Say Y. Keep the contrast only when the reader really holds the belief X, or when both halves carry a fact |
+| One-line closer | a sentence that restates the paragraph above it, "That is the real win.", "That distinction matters.", a row of fragments ("No cache. No retry. No queue.") | Delete it, or merge the fragments into one sentence with a concrete claim. Keep a closer only if it adds a consequence the text above does not show |
+| Sayings that sound deep | "the real question is", "at its core", "fundamentally", "X is the language of Y", "becomes a trap" | The specific claim |
+| Staged run-up | "Let's dive in", "here is what you need to know", "Honestly?", "the thing is", "note that" before a routine claim | Start with the point |
+| Arguing with no one | "To be clear", "this is not about", "a tempting approach would be", a rejected option no page proposes | Delete it. Keep a rejection only when a reader would really weigh that option, and then state the reason once |
+| Forced triads | three parallel items where the meaning has two, "fast, reliable, and scalable" | One item per real idea; keep three only when there are three |
+| Dashes as connector | ` — `, ` – `, ` -- ` between clauses | A period, comma, colon or parentheses. The header block, footer and table cells keep their template separators, and code, paths and URLs are untouched |
+| Stacked qualifiers | "could potentially", "may arguably", "in some cases it might" | One hedge, and only when the code or a measurement supports the doubt |
+| Inflated significance | "pivotal", "crucial", "plays a key role", "marks a shift", a closing paragraph about the future | The fact. End a page on its last concrete fact |
+| Stock AI words | additionally, delve, robust (figurative), seamless, leverage, showcase, highlight (verb), landscape, tapestry, testament, underscore, valuable, key (adjective) | A plain word, or nothing. "Gate" and "robust" used in their technical sense are fine |
+| Avoiding is, are, has | "serves as", "acts as", "features", "boasts", "offers" | "is", "are", "has" |
+| Shallow -ing riders | ", ensuring X", ", enabling Y", ", reflecting Z" tacked onto a fact | Drop the rider, or make it its own sentence with the mechanism named |
+| Bold as decoration | bold on ordinary terms, a bold label and colon on every bullet | Plain text. Turn a list whose labels carry nothing into a sentence or a table |
+| Decorative headings | Title Case below the H1, emoji, arrows, a rule between sections, a heading that restates its first sentence | Sentence case, none of the decoration |
+| Writing about the page | "the table below compares", "this section is organized by", "was added to replace" | State the subject. Mention a previous version only in `docs/migration/*` and release notes |
+| Chat residue | "Certainly!", "I hope this helps", "let me know", an offer to expand | Delete it |
+
+Three limits keep the cleanup from doing harm:
+
+- **Keep every fact.** A rewrite must not add or drop a name, number, version, key, condition or
+  ranking. A sentence that needs a detail you do not have gets a simpler wording, not a guess.
+- **Change prose only.** Code blocks, inline code, commands, paths, link targets and table rows pinned by
+  a test (see the invariants in `SKILL.md`) stay as they are. A heading keeps its words, because
+  changing them breaks every inbound anchor; re-casing is safe.
+- **A pattern is a default, not a crime.** A `> **Why**` note may legitimately correct a belief the
+  reader holds ("allocatable also falls to zero when a family is merely saturated"), and a quotation, a
+  title or a proper name keeps its wording. One weak tell alone (a single dash, a single hedge) is not
+  worth an edit; several together are.
+
+After a rewrite, search the result again for the survivors: not-X-but-Y contrasts, closers, triads,
+dashes and bold labels.
+
 ## Adding a page
 
 1. Put it under the directory that fits: the reader it serves (`architecture/`, `operation/`,

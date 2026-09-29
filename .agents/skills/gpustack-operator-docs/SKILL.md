@@ -78,7 +78,8 @@ Full routing, including what does **not** belong on a page, is in
 
 Every page in `docs/` (the index excepted) has a header block, a `## Contents` list mirroring its `##`
 headings, and a `**See also**` / `**Next**` footer. Templates and the writing rules — rule first,
-rationale demoted, no fact stated twice — are in [references/conventions.md](references/conventions.md).
+rationale demoted, no fact stated twice, no autopilot prose tells — are in
+[references/conventions.md](references/conventions.md).
 
 ## Sync invariants
 
@@ -117,6 +118,8 @@ It still does **not** read prose: everything below is on you.
 
 - [ ] `wc -l docs/architecture.md` is still ≤ ~200.
 - [ ] The new fact is stated **once**; every other page links to it.
+- [ ] Read the diff once for the prose tells in `references/conventions.md` (*Prose tells*): not-X-but-Y
+      contrasts, one-line closers, forced triads, dashes as connectors, stock AI words, bold labels.
 - [ ] Touched `docs/reference/instance-type-unit-resources.md`? Run
       `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -run TestUnitResourcesPresetDocs ./pkg/nodefeature/`.
 - [ ] Touched `values.yaml`? Run `make generate chart` and commit the regenerated chart README/schema.
