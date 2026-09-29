@@ -47,10 +47,13 @@ spec:                                    # immutable after creation
     #   reference: registry.example.com/team/qwen@sha256:669ed7b1...48   # digest-pinned
   allowPatterns: ["*.safetensors", "*.json", "tokenizer*"]   # optional; hub sources only
   ignorePatterns: ["original/"]                              # optional; wins over allowPatterns
+  expectedDigest: sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448
+  # optional; hub sources only — the digest the source must resolve to
 status:
   resolved:
     revision: 7ae557604adf67be50417f59c2c2f167def9a775
     manifestDigest: sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448
+    digestSource: Hub                    # Hub, the hub's listing | Expected, the spec's anchor
     fileCount: 10
     sizeBytes: 999604126
   nodes:                                 # hub sources only; where the content is across nodes
@@ -81,6 +84,12 @@ status:
   refused on claim and image sources. A filter that keeps no file is `Resolved=False`,
   `EmptyManifest`. A
   filtered artifact needs [Node delivery](#referencing-it-from-a-modeldeployment).
+- **`expectedDigest` asserts what must resolve.** Optional, immutable with the spec, `"sha256:"` and
+  64 lowercase hex — the manifest digest, exactly what `status.resolved.manifestDigest`
+  carries. Admission accepts it on a hub source only: a claim's content is whatever the volume
+  holds at mount time — dynamically provisioned claims differ per provisioning — and its identity is
+  the claim itself, which the user confirms; an image's identity is its reference's digest. What the
+  assertion does is under [Resolution and revalidation](#resolution-and-revalidation).
 - **`status.nodes` counts the content, not the artifact.** Nodes whose `NodeModelStore` lists the
   digest `Ready`, `Downloading` or `Failed`; artifacts with the same digest see the same nodes, and
   only numbers cross namespaces. The mean covers the downloading nodes only, each a whole copy. It
@@ -148,6 +157,35 @@ The HEAD is `/api/models/<repo>/resolve/<commit>/<file>` on Hugging Face and
 `/api/v1/models/<id>/repo?Revision=<commit>&FilePath=<file>` on ModelScope, where a 200 — an LFS
 file's too — confirms and every 404 is an access refusal.
 
+**An `expectedDigest` turns both passes into assertions.** At resolution the digest is compared
+with the anchor; a mismatch refuses with `DigestMismatch`, both digests in the message. At
+revalidation an anchored artifact does not stop at the one-file `HEAD`: the tree is re-listed at
+the resolved commit, so a hub or mirror that stops serving the pinned content fails the same
+staircase — first `Degraded`, then `Resolved=False`. Unanchored artifacts keep the two-request check.
+
+**A hub that cannot be reached, confirmed, hands the identity to the anchor.** One
+`SourceUnavailable` is not a verdict; the artifact asks again a minute later. When the second pass
+fails the same way, the anchor becomes the resolution: `Resolved=True`, `manifestDigest` = the
+anchor, `digestSource: Expected`, no revision, file count or size, and the hub is never contacted
+again. A hub that *answered* is never anchored around; only an unanswered hub falls back.
+
+| `digestSource` | Meaning |
+| --- | --- |
+| `Hub` | the digest came from the hub's own listing, checked against the anchor when one is set |
+| `Expected` | the digest is the spec's anchor, written after the hub's absence was confirmed |
+
+**What an `Expected` identity delivers.** No commit exists, so [Engine
+delivery](#engine-delivery) is refused (`AnchorNeedsNodeDelivery`) and
+[Node delivery](node-store.md#materialization) draws the manifest and the bytes from the other
+nodes; with no peer holding the tree the mount fails naming the digest nothing holds. Seed one
+node while the hub is reachable — the identity stands without it.
+
+**The shipped access model for `Expected` identities.** Integrity is never at risk: only
+anchor-named, verified bytes enter a published set or a mount. What relaxes is secrecy — an
+artifact whose anchor names a digest already published on a node can mount that tree with no
+credential, and digests are visible cluster-wide on `NodeModelStore` status. Private content must
+not rely on digest secrecy; hub-verified identities keep resolving with the namespace's token.
+
 `Resolved=False` stops **new** consumption: no new replica, replacement or scale-up. It never
 deletes a running Pod. A claim source is resolved by the claim existing; the operator never reads
 its content, so it has no revision and no digest.
@@ -179,6 +217,12 @@ Two consequences to keep in mind:
   files have the same digest; authorization always comes from resolving with the namespace's token.
 - The same files on Hugging Face and ModelScope have different digests, because non-LFS files are
   hashed differently there. Content is not deduplicated across hubs.
+- **The anchor is the migration's acceptance contract.** A future import of a legacy GPUStack
+  cache ([gpustack/gpustack-operator#693](https://github.com/gpustack/gpustack-operator/issues/693),
+  deferred) may publish only trees whose computed manifest digest equals the artifact's
+  `expectedDigest`, through the node store's own pipeline, lazily and one-shot — never an online
+  migration of a running install. This format and that pipeline are what such an import verifies
+  against.
 
 ## Referencing it from a ModelDeployment
 
@@ -343,6 +387,7 @@ being the identity. `WeightsReady` says whether every engine role's weights are 
 | False | `ClaimNotBound`, `AccessModeConflict` | no new Pod is created; see the placement table |
 | False | `NodeDeliveryUnavailable` | `Node` delivery, and the CSIDriver `model.csi.gpustack.ai` does not exist; no new Pod is created |
 | False | `FilterNeedsNodeDelivery` | an artifact with patterns under `Engine` delivery, which cannot honor them; no new Pod is created |
+| False | `AnchorNeedsNodeDelivery` | an artifact carrying `expectedDigest` under `Engine` delivery: the engine downloads by repository and revision and cannot anchor-verify what it fetched, and an `Expected` identity has no resolved commit to pin; no new Pod is created |
 | False | `Materializing` | a node Pod is not mounted yet and its node lists the digest `Downloading` |
 | False | `MaterializationFailed` | the same, and the node lists it `Failed`; the message carries the node's reason and retry time |
 | False | `WeightsNotMounted` | a claim, node or image Pod's `PodReadyToStartContainers` is not True yet; for an image Pod the Pod's events carry the pull error |
@@ -379,6 +424,10 @@ waits instead when that node cannot run one, naming the node and the floor
 - **Kubernetes 1.29**, the floor the bundled Kueue already sets. `PodReadyToStartContainers` (beta,
   on by default since 1.29) feeds `WeightsReady`; with it off, a claim deployment's `WeightsReady`
   stays `WeightsNotMounted` while its replicas run.
+- **A downgrade window weakens the anchor's admission.** An old webhook cannot see
+  `expectedDigest`, so an update changing it is not refused while the old webhook serves, and an
+  old worker drops `digestSource` from the status it writes. The CRD serves the field throughout,
+  and re-upgrading recomputes the status on the next pass.
 - **A ModelScope Engine download needs the runner's ModelScope SDK at 1.39.1 or later**, the
   version that accepts a commit as the revision. The operator renders the environment whatever the
   runner holds and cannot see into it: on a runner below the floor the engine fails with the SDK's
