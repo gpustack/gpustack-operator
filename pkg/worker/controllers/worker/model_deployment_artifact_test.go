@@ -25,8 +25,18 @@ func testPvcArtifactRender() *ModelDeploymentArtifactRender {
 func testEngineArtifactRender() *ModelDeploymentArtifactRender {
 	return &ModelDeploymentArtifactRender{
 		Delivery:   workercore.ModelDeploymentModelDeliveryEngine,
+		Hub:        modelDeploymentHubHuggingFace,
 		Repository: "Qwen/Qwen2.5-72B-Instruct", Revision: testArtifactRevision, SecretName: "hf-token",
 		SizeBytes: 100 << 30, Endpoint: "https://hub.example", HTTPSProxy: "http://proxy:3128", NoProxy: "svc",
+	}
+}
+
+func testModelScopeEngineRender() *ModelDeploymentArtifactRender {
+	return &ModelDeploymentArtifactRender{
+		Delivery:   workercore.ModelDeploymentModelDeliveryEngine,
+		Hub:        modelDeploymentHubModelScope,
+		Repository: "qwen/Qwen2.5-72B-Instruct", Revision: testArtifactRevision, SecretName: "ms-token",
+		SizeBytes: 100 << 30, Endpoint: "https://www.modelscope.cn", HTTPSProxy: "http://proxy:3128", NoProxy: "svc",
 	}
 }
 
@@ -339,6 +349,69 @@ func TestRenderModelDeploymentArtifactEnvironment(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRenderModelDeploymentArtifactModelScopeEnvironment renders a ModelScope download's
+// environment: the SDK's own names, the endpoint as the bare host the SDK prefixes, the engine's
+// use-switch, and the token from the artifact's Secret. No Hugging Face name appears.
+func TestRenderModelDeploymentArtifactModelScopeEnvironment(t *testing.T) {
+	cases := []struct {
+		name    string
+		engine  string
+		wantUse string
+		notUse  string
+		absent  []string
+	}{
+		{
+			name: "a vLLM download flips vLLM's switch", engine: workercore.ModelDeploymentEngineVLLM,
+			wantUse: "VLLM_USE_MODELSCOPE", notUse: "SGLANG_USE_MODELSCOPE",
+			absent: []string{"HF_HOME", "HF_ENDPOINT", "HF_TOKEN"},
+		},
+		{
+			name: "a SGLang download flips SGLang's switch", engine: workercore.ModelDeploymentEngineSGLang,
+			wantUse: "SGLANG_USE_MODELSCOPE", notUse: "VLLM_USE_MODELSCOPE",
+			absent: []string{"HF_HOME", "HF_ENDPOINT", "HF_TOKEN"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = c.engine
+			})
+			main := &renderWithArtifact(t, md, testModelScopeEngineRender()).Spec.Containers[0]
+
+			for name, want := range map[string]string{
+				"MODELSCOPE_CACHE":  ModelDeploymentModelCachePath,
+				"MODELSCOPE_DOMAIN": "www.modelscope.cn",
+				c.wantUse:           "true",
+				"HTTPS_PROXY":       "http://proxy:3128",
+			} {
+				e := findEnv(main, name)
+				require.NotNil(t, e, name)
+				assert.Equal(t, want, e.Value, name)
+			}
+			assert.Nil(t, findEnv(main, c.notUse), c.notUse)
+			token := findEnv(main, "MODELSCOPE_API_TOKEN")
+			require.NotNil(t, token)
+			assert.Empty(t, token.Value, "the token is never a literal")
+			require.NotNil(t, token.ValueFrom)
+			assert.Equal(t, "ms-token", token.ValueFrom.SecretKeyRef.Name)
+			assert.Equal(t, "token", token.ValueFrom.SecretKeyRef.Key)
+			for _, name := range c.absent {
+				assert.Nil(t, findEnv(main, name), name)
+			}
+		})
+	}
+
+	t.Run("a public artifact gets no token", func(t *testing.T) {
+		render := testModelScopeEngineRender()
+		render.SecretName, render.HTTPSProxy, render.NoProxy = "", "", ""
+		main := &renderWithArtifact(t, newRenderDeployment(), render).Spec.Containers[0]
+
+		assert.Nil(t, findEnv(main, "MODELSCOPE_API_TOKEN"))
+		assert.Nil(t, findEnv(main, "HTTPS_PROXY"))
+		assert.NotNil(t, findEnv(main, "VLLM_USE_MODELSCOPE"))
+	})
 }
 
 func TestRenderModelDeploymentArtifactEphemeralStorage(t *testing.T) {

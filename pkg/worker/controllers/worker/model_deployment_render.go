@@ -1326,7 +1326,7 @@ func mergeModelDeploymentEnv(
 
 	var artifactEnv, artifactDefaulted []core.EnvVar
 	if artifact != nil {
-		artifactEnv, artifactDefaulted = artifact.env(takeOver)
+		artifactEnv, artifactDefaulted = artifact.env(takeOver, engine)
 	}
 
 	env := make([]core.EnvVar, 0,
