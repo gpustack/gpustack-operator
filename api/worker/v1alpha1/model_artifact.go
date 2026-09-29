@@ -70,6 +70,20 @@ type ModelArtifactSpec struct {
 	// +listType=atomic
 	// +k8s:validation:maxItems=32
 	IgnorePatterns []string `json:"ignorePatterns,omitempty" protobuf:"bytes,3,rep,name=ignorePatterns"`
+
+	// ExpectedDigest optionally asserts the manifest digest this artifact must resolve to:
+	// "sha256:" and 64 lowercase hex, the content address status.resolved.manifestDigest
+	// carries. Admission accepts it on a hub source only: a claim's content is whatever the
+	// volume holds at mount time — dynamically provisioned claims differ per provisioning —
+	// and its identity is the claim itself, which the user confirms; an image's identity is
+	// its reference's digest. A resolution whose digest differs is refused as DigestMismatch,
+	// and an artifact whose hub cannot be reached resolves to the anchor without the hub,
+	// recorded as status.resolved.digestSource "Expected". Immutable with the whole spec.
+	//
+	// +optional
+	// +k8s:validation:pattern="^sha256:[a-f0-9]{64}$"
+	// +k8s:validation:maxLength=71
+	ExpectedDigest string `json:"expectedDigest,omitempty" protobuf:"bytes,4,opt,name=expectedDigest"`
 }
 
 // ModelArtifactSource is a tagged union: exactly one member is set, webhook-enforced.
@@ -79,11 +93,12 @@ type ModelArtifactSource struct {
 	// +optional
 	HuggingFace *ModelArtifactHubSource `json:"huggingFace,omitempty" protobuf:"bytes,1,opt,name=huggingFace"`
 
-	// ModelScope is RESERVED AND REFUSED by admission in this version. Its shape is fixed so that
-	// opening it is a webhook change rather than a schema change, and the refusal names what opening
-	// it needs: branch resolution cross-checked against git, a listing that re-lists per directory at
-	// the API's silent truncation point, errors classified by the envelope code, and an engine runner
-	// whose ModelScope SDK accepts a commit as the revision.
+	// ModelScope is a second hub. Its repository and revision rules are the Hugging Face ones,
+	// the revision defaults to "master", and the patterns apply to it the same way. What
+	// differs is how it resolves: a full commit is taken as is, a branch or tag is resolved
+	// through the commits API and cross-checked against git, the file listing re-lists per
+	// directory at the API's silent truncation point, and the engine's runner needs a
+	// ModelScope SDK that accepts a commit as the revision.
 	//
 	// +optional
 	ModelScope *ModelArtifactHubSource `json:"modelScope,omitempty" protobuf:"bytes,2,opt,name=modelScope"`
@@ -266,7 +281,26 @@ type ModelArtifactResolved struct {
 	//
 	// +optional
 	LastValidatedTime *meta.Time `json:"lastValidatedTime,omitempty" protobuf:"bytes,6,opt,name=lastValidatedTime"`
+
+	// DigestSource says where ManifestDigest came from: Hub, the hub's own listing, or Expected,
+	// the spec's expectedDigest written after the hub's absence was confirmed. An Expected
+	// identity carries no Revision, FileCount or SizeBytes and never contacts the hub again.
+	//
+	// +optional
+	DigestSource ModelArtifactDigestSource `json:"digestSource,omitempty" protobuf:"bytes,7,opt,name=digestSource"`
 }
+
+// ModelArtifactDigestSource is where a resolved manifest digest came from.
+type ModelArtifactDigestSource string
+
+const (
+	// ModelArtifactDigestSourceHub is a digest the hub's own listing produced.
+	ModelArtifactDigestSourceHub ModelArtifactDigestSource = "Hub"
+
+	// ModelArtifactDigestSourceExpected is the spec's expectedDigest, written as the identity
+	// when the hub's absence was confirmed.
+	ModelArtifactDigestSourceExpected ModelArtifactDigestSource = "Expected"
+)
 
 // ModelArtifactList holds the list of ModelArtifact.
 //

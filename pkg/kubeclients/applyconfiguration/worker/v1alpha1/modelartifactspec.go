@@ -22,6 +22,15 @@ type ModelArtifactSpecApplyConfiguration struct {
 	// each pattern is 1 to 256 characters without a control character.
 	AllowPatterns  []string `json:"allowPatterns,omitempty"`
 	IgnorePatterns []string `json:"ignorePatterns,omitempty"`
+	// ExpectedDigest optionally asserts the manifest digest this artifact must resolve to:
+	// "sha256:" and 64 lowercase hex, the content address status.resolved.manifestDigest
+	// carries. Admission accepts it on a hub source only: a claim's content is whatever the
+	// volume holds at mount time — dynamically provisioned claims differ per provisioning —
+	// and its identity is the claim itself, which the user confirms; an image's identity is
+	// its reference's digest. A resolution whose digest differs is refused as DigestMismatch,
+	// and an artifact whose hub cannot be reached resolves to the anchor without the hub,
+	// recorded as status.resolved.digestSource "Expected". Immutable with the whole spec.
+	ExpectedDigest *string `json:"expectedDigest,omitempty"`
 }
 
 // ModelArtifactSpecApplyConfiguration constructs a declarative configuration of the ModelArtifactSpec type for use with
@@ -55,5 +64,13 @@ func (b *ModelArtifactSpecApplyConfiguration) WithIgnorePatterns(values ...strin
 	for i := range values {
 		b.IgnorePatterns = append(b.IgnorePatterns, values[i])
 	}
+	return b
+}
+
+// WithExpectedDigest sets the ExpectedDigest field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ExpectedDigest field is set to the value of the last call.
+func (b *ModelArtifactSpecApplyConfiguration) WithExpectedDigest(value string) *ModelArtifactSpecApplyConfiguration {
+	b.ExpectedDigest = &value
 	return b
 }

@@ -9,11 +9,12 @@ package v1alpha1
 type ModelArtifactSourceApplyConfiguration struct {
 	// HuggingFace is a Hugging Face model repository at one revision.
 	HuggingFace *ModelArtifactHubSourceApplyConfiguration `json:"huggingFace,omitempty"`
-	// ModelScope is RESERVED AND REFUSED by admission in this version. Its shape is fixed so that
-	// opening it is a webhook change rather than a schema change, and the refusal names what opening
-	// it needs: branch resolution cross-checked against git, a listing that re-lists per directory at
-	// the API's silent truncation point, errors classified by the envelope code, and an engine runner
-	// whose ModelScope SDK accepts a commit as the revision.
+	// ModelScope is a second hub. Its repository and revision rules are the Hugging Face ones,
+	// the revision defaults to "master", and the patterns apply to it the same way. What
+	// differs is how it resolves: a full commit is taken as is, a branch or tag is resolved
+	// through the commits API and cross-checked against git, the file listing re-lists per
+	// directory at the API's silent truncation point, and the engine's runner needs a
+	// ModelScope SDK that accepts a commit as the revision.
 	ModelScope *ModelArtifactHubSourceApplyConfiguration `json:"modelScope,omitempty"`
 	// PersistentVolumeClaim is a directory inside a claim in this namespace. The operator never
 	// reads the claim's content, so the artifact has no revision and no digest, and what the

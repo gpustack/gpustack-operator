@@ -159,8 +159,37 @@ func validateModelArtifact(ma, old *workercore.ModelArtifact) field.ErrorList {
 		errs = validateModelArtifactClaim(source.PersistentVolumeClaim, sourcePath.Child("persistentVolumeClaim"))
 	}
 
-	return append(errs, validateModelArtifactPatterns(&ma.Spec, specPath,
-		source.HuggingFace != nil || source.ModelScope != nil, source.Image != nil)...)
+	hub := source.HuggingFace != nil || source.ModelScope != nil
+	errs = append(errs, validateModelArtifactExpectedDigest(ma.Spec.ExpectedDigest, &source,
+		specPath.Child("expectedDigest"))...)
+
+	return append(errs, validateModelArtifactPatterns(&ma.Spec, specPath, hub, source.Image != nil)...)
+}
+
+// validateModelArtifactExpectedDigest accepts the anchor on a hub source only, in the shape the
+// manifest digest is written in. A claim's content is whatever the volume holds at mount time —
+// dynamically provisioned, possibly different each time — and its identity is the claim itself,
+// which the user confirms; an image's identity is its reference's digest. Neither can be anchored
+// to a manifest digest, and an anchor that could never match would only invite a permanently
+// unresolved artifact.
+func validateModelArtifactExpectedDigest(digest string, source *workercore.ModelArtifactSource, path *field.Path) field.ErrorList {
+	switch {
+	case digest == "":
+		return nil
+	case source.HuggingFace != nil || source.ModelScope != nil:
+		if !modelArtifactDigestPattern.MatchString(digest) {
+			return field.ErrorList{field.Invalid(path, digest, `must be "sha256:" and 64 lowercase hex`)}
+		}
+		return nil
+	case source.Image != nil:
+		return field.ErrorList{field.Forbidden(path,
+			"expectedDigest asserts the manifest digest a hub source resolves to; an image's identity is "+
+				"its reference's digest")}
+	default:
+		return field.ErrorList{field.Forbidden(path,
+			"expectedDigest asserts the manifest digest a hub source resolves to; a claim's content is "+
+				"whatever it holds at mount time and its identity is the claim itself")}
+	}
 }
 
 // modelArtifactMaxPatterns and modelArtifactMaxPatternLength bound a list of patterns and each of
