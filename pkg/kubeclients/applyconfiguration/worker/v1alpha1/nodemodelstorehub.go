@@ -18,6 +18,10 @@ type NodeModelStoreHubApplyConfiguration struct {
 	// certificates trusted beside the system pool. The name travels rather than the certificates,
 	// because a bundle can be larger than this object may be.
 	CABundleConfigMap *string `json:"caBundleConfigMap,omitempty"`
+	// ModelScopeEndpoint is the ModelScope hub's base URL. It is empty in a spec an older worker
+	// wrote, and a ModelScope artifact on such a node waits with that named rather than being
+	// resolved against another hub.
+	ModelScopeEndpoint *string `json:"modelScopeEndpoint,omitempty"`
 }
 
 // NodeModelStoreHubApplyConfiguration constructs a declarative configuration of the NodeModelStoreHub type for use with
@@ -55,5 +59,13 @@ func (b *NodeModelStoreHubApplyConfiguration) WithNoProxy(value string) *NodeMod
 // If called multiple times, the CABundleConfigMap field is set to the value of the last call.
 func (b *NodeModelStoreHubApplyConfiguration) WithCABundleConfigMap(value string) *NodeModelStoreHubApplyConfiguration {
 	b.CABundleConfigMap = &value
+	return b
+}
+
+// WithModelScopeEndpoint sets the ModelScopeEndpoint field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ModelScopeEndpoint field is set to the value of the last call.
+func (b *NodeModelStoreHubApplyConfiguration) WithModelScopeEndpoint(value string) *NodeModelStoreHubApplyConfiguration {
+	b.ModelScopeEndpoint = &value
 	return b
 }

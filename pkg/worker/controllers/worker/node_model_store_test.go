@@ -55,7 +55,10 @@ func defaultNodeModelStoreSpec() workercore.NodeModelStoreSpec {
 		Watermarks:      workercore.NodeModelStoreWatermarks{HighPercent: 80, LowPercent: 70},
 		Download:        workercore.NodeModelStoreDownload{Concurrency: 8},
 		PeerSyncEnabled: peerSyncTrue(),
-		Hub:             workercore.NodeModelStoreHub{HuggingFaceEndpoint: "https://huggingface.co"},
+		Hub: workercore.NodeModelStoreHub{
+			HuggingFaceEndpoint: "https://huggingface.co",
+			ModelScopeEndpoint:  "https://www.modelscope.cn",
+		},
 	}
 }
 
@@ -115,6 +118,7 @@ func TestNodeModelStoreReconcile(t *testing.T) {
 				PeerSyncEnabled: peerSyncTrue(),
 				Hub: workercore.NodeModelStoreHub{
 					HuggingFaceEndpoint: "http://hub.local", HTTPSProxy: "http://proxy:3128",
+					ModelScopeEndpoint: "https://www.modelscope.cn",
 				},
 			},
 		},

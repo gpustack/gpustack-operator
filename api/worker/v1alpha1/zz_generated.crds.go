@@ -6527,6 +6527,10 @@ func crd_gpustack_api_worker_v1alpha1_NodeModelStore() *v1.CustomResourceDefinit
 													Type:        "string",
 													MinLength:   ptr.To[int64](1),
 												},
+												"modelScopeEndpoint": {
+													Description: "ModelScopeEndpoint is the ModelScope hub's base URL. It is empty in a spec an older worker\nwrote, and a ModelScope artifact on such a node waits with that named rather than being\nresolved against another hub.",
+													Type:        "string",
+												},
 												"noProxy": {
 													Description: "NoProxy is the comma-separated host list that bypasses HTTPSProxy.",
 													Type:        "string",

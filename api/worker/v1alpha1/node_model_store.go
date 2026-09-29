@@ -186,6 +186,13 @@ type NodeModelStoreHub struct {
 	//
 	// +optional
 	CABundleConfigMap string `json:"caBundleConfigMap,omitempty" protobuf:"bytes,4,opt,name=caBundleConfigMap"`
+
+	// ModelScopeEndpoint is the ModelScope hub's base URL. It is empty in a spec an older worker
+	// wrote, and a ModelScope artifact on such a node waits with that named rather than being
+	// resolved against another hub.
+	//
+	// +optional
+	ModelScopeEndpoint string `json:"modelScopeEndpoint,omitempty" protobuf:"bytes,5,opt,name=modelScopeEndpoint"`
 }
 
 // NodeModelStoreStatus is what the plugin reports about its node, rebuilt from the node's disk and

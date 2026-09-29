@@ -10836,6 +10836,13 @@ func schema_gpustack_api_worker_v1alpha1_NodeModelStoreHub(ref common.ReferenceC
 							Format:      "",
 						},
 					},
+					"modelScopeEndpoint": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ModelScopeEndpoint is the ModelScope hub's base URL. It is empty in a spec an older worker wrote, and a ModelScope artifact on such a node waits with that named rather than being resolved against another hub.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"huggingFaceEndpoint"},
 			},
