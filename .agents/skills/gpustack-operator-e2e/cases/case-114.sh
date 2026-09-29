@@ -114,7 +114,7 @@ fi
 
 echo "== 2. a matching anchor resolves as a hub identity =="
 artifact "$NS" "${P}-match" e2e/anchored "" "$P" "
-      expectedDigest: $DIGEST"
+  expectedDigest: $DIGEST"
 MATCH_DIGEST="$(wait_resolved "$NS" "${P}-match" "$COMMIT_BOUND")"
 MATCH_SRC="$(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai "${P}-match" -o jsonpath='{.status.resolved.digestSource}' 2>/dev/null)"
 MATCH_REV="$(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai "${P}-match" -o jsonpath='{.status.resolved.revision}' 2>/dev/null)"
@@ -126,7 +126,7 @@ fi
 
 echo "== 3. a foreign anchor is refused with both digests =="
 artifact "$NS" "${P}-mismatch" e2e/anchored "" "$P" "
-      expectedDigest: $WRONG"
+  expectedDigest: $WRONG"
 MISMATCH_MSG=""
 for _ in $(seq 1 45); do
   R="$(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai "${P}-mismatch" \
@@ -146,7 +146,7 @@ LOG_BEFORE="$(mh_log "$NS" "${P}-hub" | wc -l | tr -d ' ')"
 setting_set model-artifact-huggingface-endpoint "http://${P}-absent.${NS}.svc:8080" >/dev/null
 settings_settle
 artifact "$NS" "${P}-expected" e2e/anchored "" "$P" "
-      expectedDigest: $DIGEST"
+  expectedDigest: $DIGEST"
 EXPECTED_DIGEST="$(wait_resolved "$NS" "${P}-expected" "$ANCHOR_BOUND")"
 EXPECTED_SRC="$(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai "${P}-expected" -o jsonpath='{.status.resolved.digestSource}' 2>/dev/null)"
 EXPECTED_REV="$(kubectl -n "$NS" get modelartifacts.worker.gpustack.ai "${P}-expected" -o jsonpath='{.status.resolved.revision}' 2>/dev/null)"
