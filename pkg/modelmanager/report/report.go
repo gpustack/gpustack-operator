@@ -205,8 +205,11 @@ func (r *Reporter) Environment(_ context.Context, kind string) (materialize.Hub,
 		}
 
 		return &modelartifact.ModelScope{Endpoint: r.spec.Hub.ModelScopeEndpoint, Client: listingClient(r.client)}, r.Downloader, nil
-	default:
+	case materialize.HubHuggingFace:
 		return &modelartifact.HuggingFace{Endpoint: r.spec.Hub.HuggingFaceEndpoint, Client: listingClient(r.client)}, r.Downloader, nil
+	default:
+		msg := fmt.Sprintf("the node's configuration does not know the hub kind %q", kind)
+		return nil, nil, &download.Error{Reason: download.ReasonInvalidRequest, Message: msg, Detail: msg}
 	}
 }
 

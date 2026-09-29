@@ -240,6 +240,56 @@ func TestEnsureMaterializesAndPublishes(t *testing.T) {
 	}
 }
 
+// TestEnsureTriesTheOtherKindWhenOneEnvironmentFails: one kind's configuration failure says
+// nothing about another kind's, so the remaining source is still materialized.
+func TestEnsureTriesTheOtherKindWhenOneEnvironmentFails(t *testing.T) {
+	hf := newTestHub(t, map[string]map[string][]byte{"owner/repo": {"hf.json": []byte(`{}`)}})
+	ms := newTestHub(t, map[string]map[string][]byte{"qwen/repo": {"ms.json": []byte(`{}`)}})
+	root := t.TempDir()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(root, func(p string, e os.DirEntry, err error) error {
+			if err == nil && e.IsDir() {
+				_ = os.Chmod(p, 0o755)
+			}
+			return err
+		})
+	})
+	st, err := store.Open(root)
+	require.NoError(t, err)
+	clock := &testClock{now: time.Date(2026, 9, 25, 6, 0, 0, 0, time.UTC)}
+	dl := download.New(ms.server.Client(), 8, 0)
+	dl.RetryDelay = time.Millisecond
+	m := &Materializer{
+		Store: st,
+		Environment: func(_ context.Context, kind string) (Hub, *download.Downloader, error) {
+			if kind == HubHuggingFace {
+				return nil, nil, &download.Error{Reason: download.ReasonInvalidRequest, Message: "broken"}
+			}
+			return ms, dl, nil
+		},
+		Now:           clock.Now,
+		CheckInterval: 10 * time.Millisecond,
+	}
+
+	digest := ms.manifest("qwen/repo").Digest
+	ma := &workercore.ModelArtifact{
+		ObjectMeta: meta.ObjectMeta{UID: "uid-ms"},
+		Spec: workercore.ModelArtifactSpec{Source: workercore.ModelArtifactSource{
+			ModelScope: &workercore.ModelArtifactHubSource{Repository: "qwen/repo"},
+		}},
+		Status: workercore.ModelArtifactStatus{Resolved: &workercore.ModelArtifactResolved{
+			Revision: testCommit, ManifestDigest: digest,
+		}},
+	}
+	req := driver.Request{Hex: store.HexOf(digest), Artifact: ma, Token: "ms-token"}
+
+	m.Ensure(context.Background(), req)
+	require.Eventually(t, func() bool { return !m.Downloading()[req.Hex] }, 10*time.Second, 5*time.Millisecond)
+
+	require.True(t, st.IsPublished(req.Hex), "the MS source materializes past the broken HF kind")
+	assert.Empty(t, hf.recorded(), "the Hugging Face hub is never asked")
+}
+
 // TestEnsureMaterializesAModelScopeSource materializes through the hub the source names: the
 // environment is asked for the ModelScope hub, and the Hugging Face one is never touched.
 func TestEnsureMaterializesAModelScopeSource(t *testing.T) {

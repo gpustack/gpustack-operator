@@ -159,6 +159,21 @@ func TestModelScopeResolveRevision(t *testing.T) {
 		assert.Contains(t, ReasonOf(err), ReasonSourceUnavailable)
 	})
 
+	t.Run("a misspelled branch whose index silently answers master is caught", func(t *testing.T) {
+		// The commits endpoint answers master for a misspelled Ref (measured); git names no
+		// refs/heads/masterr, and HEAD is deliberately not a fallback that would confirm the
+		// rewrite.
+		m := newFakeModelScope(t,
+			map[string]http.HandlerFunc{
+				"GET " + modelScopeCommitsPath("qwen/Qwen2.5-0.5B-Instruct"): modelScopeCommitsRoute("13448952f850140b43c5e14d0e19f7e7f8cb3c47"),
+			},
+			map[string]string{"HEAD": "13448952f850140b43c5e14d0e19f7e7f8cb3c47", "refs/heads/master": "13448952f850140b43c5e14d0e19f7e7f8cb3c47"}, nil)
+		_, err := m.resolveRevision(context.Background(), "qwen/Qwen2.5-0.5B-Instruct", "masterr", "")
+		require.Error(t, err)
+		assert.Equal(t, ReasonSourceUnavailable, ReasonOf(err))
+		assert.Contains(t, ReasonOf(err), ReasonSourceUnavailable)
+	})
+
 	t.Run("a ref the index does not know is RevisionNotFound", func(t *testing.T) {
 		m := newFakeModelScope(t,
 			map[string]http.HandlerFunc{
@@ -428,6 +443,20 @@ func TestModelScopeListManifest(t *testing.T) {
 		assert.Contains(t, se.Message, "3000")
 	})
 
+	t.Run("a tree past MaxEntries refuses without walking the rest", func(t *testing.T) {
+		files := make([]map[string]any, 0, 8)
+		for i := 0; i < 8; i++ {
+			files = append(files, msFile(fmt.Sprintf("f-%02d", i), 1, shaOf("a")))
+		}
+		route := modelScopeFilesRoute("qwen/repo", map[string][]map[string]any{"": files}, nil)
+		m := newFakeModelScope(t, map[string]http.HandlerFunc{"GET " + modelScopeFilesPath("qwen/repo"): route}, nil, nil)
+		m.MaxEntries = 5
+
+		_, err := m.ListManifest(context.Background(), "qwen/repo", modelScopeCommit, "", Filter{})
+		require.Error(t, err)
+		assert.Equal(t, ReasonManifestTooLarge, ReasonOf(err))
+	})
+
 	t.Run("an entry without a usable Sha256 is an invalid manifest", func(t *testing.T) {
 		route := modelScopeFilesRoute("qwen/repo", map[string][]map[string]any{
 			"": {{"Type": "blob", "Path": "README.md", "Size": 3}},
@@ -562,6 +591,14 @@ func TestModelScopeRevalidate(t *testing.T) {
 
 		require.NoError(t, m.Revalidate(context.Background(), "qwen/repo", modelScopeCommit, ""))
 	})
+}
+
+func TestModelScopeGitURLKeepsTheEndpointPath(t *testing.T) {
+	m := &ModelScope{Endpoint: "https://git.example.com/ms"}
+
+	got, err := m.gitURL("qwen/repo")
+	require.NoError(t, err)
+	assert.Equal(t, "https://git.example.com/ms/qwen/repo.git", got)
 }
 
 func TestModelScopeFileURL(t *testing.T) {

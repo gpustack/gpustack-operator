@@ -87,11 +87,12 @@ func (m *ModelScope) resolveRevision(ctx context.Context, repository, revision, 
 }
 
 // modelScopeRefCommit picks the commit git names for a revision: the peeled entry of an
-// annotated tag, the tag itself if it is lightweight, the branch's ref, and HEAD last — HEAD can
-// only confirm a commit the index already named, so it cannot mask a disagreement.
+// annotated tag, the tag itself if it is lightweight, the branch's ref. HEAD is deliberately not
+// a fallback: the commits endpoint answers master for a misspelled Ref, and falling back to HEAD
+// — which points at master — would confirm exactly that silent rewrite instead of catching it.
 func modelScopeRefCommit(refs map[string]string, revision string) string {
 	for _, name := range []string{
-		"refs/tags/" + revision + "^{}", "refs/tags/" + revision, "refs/heads/" + revision, "HEAD",
+		"refs/tags/" + revision + "^{}", "refs/tags/" + revision, "refs/heads/" + revision,
 	} {
 		if commit, ok := refs[name]; ok {
 			return commit
@@ -174,6 +175,10 @@ func (m *ModelScope) listRepoFiles(ctx context.Context, repository, commit, toke
 				}
 				if ok {
 					entries = append(entries, entry)
+					if len(entries) > limit {
+						return sourceErrorf(ReasonManifestTooLarge,
+							"commit %s of %q lists more than %d tree entries", commit, repository, limit)
+					}
 				}
 			}
 			return nil
@@ -201,16 +206,16 @@ func (m *ModelScope) listRepoFiles(ctx context.Context, repository, commit, toke
 			}
 			if ok {
 				entries = append(entries, entry)
+				if len(entries) > limit {
+					return sourceErrorf(ReasonManifestTooLarge,
+						"commit %s of %q lists more than %d tree entries", commit, repository, limit)
+				}
 			}
 		}
 		return nil
 	}
 	if err := walk(""); err != nil {
 		return nil, err
-	}
-	if len(entries) > limit {
-		return nil, sourceErrorf(ReasonManifestTooLarge,
-			"commit %s of %q lists more than %d tree entries", commit, repository, limit)
 	}
 
 	return entries, nil
@@ -375,7 +380,7 @@ func (m *ModelScope) gitURL(repository string) (string, error) {
 	if err != nil {
 		return "", sourceErrorf(ReasonSourceUnavailable, "the endpoint %q does not parse: %v", m.Endpoint, err)
 	}
-	base.Path = strings.TrimSuffix(escapeRepository(repository), "/") + ".git"
+	base.Path = strings.TrimSuffix(base.Path, "/") + "/" + strings.TrimSuffix(escapeRepository(repository), "/") + ".git"
 	base.RawQuery, base.Fragment = "", ""
 
 	return base.String(), nil

@@ -363,8 +363,10 @@ func (m *Materializer) attempt(ctx context.Context, j *job) error {
 	for _, src := range j.snapshotSources() {
 		hub, dl, err := m.Environment(ctx, src.kind)
 		if err != nil {
+			// One kind's configuration failure says nothing about another kind's: try the
+			// remaining sources before reporting.
 			lastErr = err
-			break
+			continue
 		}
 		lastErr = m.fromSource(ctx, j, a, hub, dl, src)
 		// Only a refusal of this source's credential is worth another source: the content is the

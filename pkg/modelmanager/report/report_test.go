@@ -328,6 +328,15 @@ func TestEnvironmentBeforeTheSpecArrives(t *testing.T) {
 	assert.Same(t, env.r.Downloader, dl, "every attempt shares the node's limits")
 }
 
+func TestEnvironmentRejectsAnUnknownKind(t *testing.T) {
+	env := newTestEnv(t, validSpec())
+	require.NoError(t, env.r.Report(context.Background()))
+	_, _, err := env.r.Environment(context.Background(), "bogus")
+	require.Error(t, err)
+	assert.Equal(t, download.ReasonInvalidRequest, download.ReasonOf(err))
+	assert.Contains(t, err.Error(), "bogus")
+}
+
 // TestEnvironmentForModelScopeNamesTheUpgrade pins the behavior on a spec an older worker wrote:
 // a ModelScope source waits with that named, never resolved against the Hugging Face endpoint.
 func TestEnvironmentForModelScopeNamesTheUpgrade(t *testing.T) {
