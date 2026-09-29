@@ -361,6 +361,12 @@ func (m *Materializer) attempt(ctx context.Context, j *job) error {
 
 	var lastErr error
 	for _, src := range j.snapshotSources() {
+		// An Expected identity has no commit to list at and no hub to ask: the peers holding the
+		// published tree are the only source there is.
+		if src.commit == "" {
+			lastErr = m.fromPeersOnly(ctx, j, a, src)
+			break
+		}
 		hub, dl, err := m.Environment(ctx, src.kind)
 		if err != nil {
 			// One kind's configuration failure says nothing about another kind's: try the
@@ -382,6 +388,35 @@ func (m *Materializer) attempt(ctx context.Context, j *job) error {
 	return nil
 }
 
+// errNoSourceForAnchored is the loud failure an Expected identity mounts with when no peer holds
+// the tree: the digest is named in the tenant-free detail, and the way out is in the plugin's log.
+func errNoSourceForAnchored(hex string) *download.Error {
+	return &download.Error{
+		Reason: download.ReasonSourceUnavailable,
+		Message: fmt.Sprintf("no node holds sha256:%s and the artifact is anchored to its digest without "+
+			"a hub: seed one node while the hub is reachable, or have a peer serve the tree", hex),
+		Detail: "no peer holds sha256:" + hex,
+	}
+}
+
+// fromPeersOnly materializes an Expected identity from the peers alone: the manifest comes from a
+// peer's published listing, bound to the digest before it is trusted, and every byte comes from a
+// peer — there is no hub to fall back to.
+func (m *Materializer) fromPeersOnly(ctx context.Context, j *job, a *store.Attempt, src *source) error {
+	if !m.Peers.Enabled() {
+		noSource := errNoSourceForAnchored(j.hex)
+		noSource.Detail += ", and peer pulling is not configured"
+
+		return noSource
+	}
+	manifest, err := m.Peers.FetchManifest(ctx, "sha256:"+j.hex)
+	if err != nil {
+		return errNoSourceForAnchored(j.hex)
+	}
+
+	return m.fetchTree(ctx, j, a, manifest, nil, nil, src)
+}
+
 func (m *Materializer) fromSource(
 	ctx context.Context, j *job, a *store.Attempt, hub Hub, dl *download.Downloader, src *source,
 ) error {
@@ -394,6 +429,13 @@ func (m *Materializer) fromSource(
 			"the hub lists %s at commit %s as %s, the artifact's digest is sha256:%s",
 			src.repository, src.commit, manifest.Digest, j.hex), Detail: "the hub lists " + manifest.Digest}
 	}
+
+	return m.fetchTree(ctx, j, a, manifest, hub, dl, src)
+}
+
+func (m *Materializer) fetchTree(
+	ctx context.Context, j *job, a *store.Attempt, manifest modelartifact.Manifest, hub Hub, dl *download.Downloader, src *source,
+) error {
 	j.total.Store(manifest.SizeBytes)
 
 	stateDir := filepath.Join(a.Dir(), "state")
@@ -454,6 +496,11 @@ func (m *Materializer) fromSource(
 			}
 			if m.pullFromPeers(gctx, j, manifestDigest, f) {
 				return nil
+			}
+			// An Expected identity's fallback is not the hub — there is none; the file is on no
+			// peer, which is the no-source failure, not an integrity one.
+			if hub == nil {
+				return errNoSourceForAnchored(j.hex)
 			}
 
 			return dl.Fetch(gctx, f)

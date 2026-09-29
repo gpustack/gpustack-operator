@@ -43,6 +43,7 @@ const (
 	modelWeightsReasonDownloaded       = "Downloaded"
 	modelWeightsReasonNodeUnavailable  = "NodeDeliveryUnavailable"
 	modelWeightsReasonFilterNeedsNode  = "FilterNeedsNodeDelivery"
+	modelWeightsReasonAnchorNeedsNode  = "AnchorNeedsNodeDelivery"
 	modelWeightsReasonMaterializing    = "Materializing"
 	modelWeightsReasonMaterializeFail  = "MaterializationFailed"
 
@@ -203,6 +204,20 @@ func resolveModelArtifactWeights(
 			w.Blocked, w.Reason = true, modelWeightsReasonFilterNeedsNode
 			w.Message = fmt.Sprintf("ModelArtifact %q selects files with allow or ignore patterns, which only node "+
 				"delivery honors: set model-artifact-delivery-mode to Node", name)
+			break
+		}
+		// An anchor is an assertion the engine cannot keep: it downloads by repository and revision
+		// and cannot verify what it fetched against the digest, and an Expected identity has no
+		// commit to pin the revision with at all.
+		if ma.Spec.ExpectedDigest != "" {
+			w.Blocked, w.Reason = true, modelWeightsReasonAnchorNeedsNode
+			message := fmt.Sprintf("ModelArtifact %q carries expectedDigest, and an engine downloads by "+
+				"repository and revision, so it cannot anchor-verify what it fetched: set "+
+				"model-artifact-delivery-mode to Node", name)
+			if resolved.DigestSource == workercore.ModelArtifactDigestSourceExpected {
+				message += "; the artifact resolved to its anchor without the hub and has no resolved commit"
+			}
+			w.Message = message
 		}
 	}
 

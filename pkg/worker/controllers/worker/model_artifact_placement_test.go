@@ -268,6 +268,70 @@ func TestModelDeploymentArtifactNodeDelivery(t *testing.T) {
 	}
 }
 
+// TestModelDeploymentArtifactAnchorNeedsNodeDelivery pins that an anchored artifact never delivers
+// through an engine: the engine downloads by repository and revision and cannot anchor-verify what
+// it fetched, and an Expected identity has no commit to pin at all.
+func TestModelDeploymentArtifactAnchorNeedsNodeDelivery(t *testing.T) {
+	anchored := func() *workercore.ModelArtifact {
+		ma := artifactFixture("", true, true)
+		ma.Spec.ExpectedDigest = testArtifactDigest
+
+		return ma
+	}
+	expected := func() *workercore.ModelArtifact {
+		ma := anchored()
+		ma.Status.Resolved.Revision = ""
+		ma.Status.Resolved.DigestSource = workercore.ModelArtifactDigestSourceExpected
+
+		return ma
+	}
+	driver := &storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: "model.csi.gpustack.ai"}}
+	cases := []struct {
+		name       string
+		delivery   string
+		artifact   func() *workercore.ModelArtifact
+		driver     bool
+		wantPods   int
+		wantReason string
+		wantInMsg  string
+	}{
+		{
+			name: "a hub-resolved anchor under Engine delivery creates nothing", delivery: "Engine",
+			artifact: anchored, wantReason: "AnchorNeedsNodeDelivery", wantInMsg: "cannot anchor-verify",
+		},
+		{
+			name: "an Expected identity under Engine delivery names the missing commit", delivery: "Engine",
+			artifact: expected, wantReason: "AnchorNeedsNodeDelivery", wantInMsg: "no resolved commit",
+		},
+		{
+			name: "a hub-resolved anchor under Node delivery creates the replica", delivery: "Node",
+			artifact: anchored, driver: true, wantPods: 1, wantReason: "WeightsNotMounted",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			orig := modelArtifactDeliveryMode
+			t.Cleanup(func() { modelArtifactDeliveryMode = orig })
+			modelArtifactDeliveryMode = func(context.Context) string { return c.delivery }
+			objs := []ctrlcli.Object{artifactDeploymentFixture(1), newRenderInstanceType(), c.artifact()}
+			if c.driver {
+				objs = append(objs, driver)
+			}
+			cli := newModelDeploymentClient(objs...)
+
+			_, err := reconcileModelDeployment(t, cli)
+			require.NoError(t, err)
+
+			assert.Len(t, listReplicas(t, cli), c.wantPods)
+			md := getModelDeployment(t, cli)
+			assert.Equal(t, c.wantReason, ModelDeploymentConditionWeightsReady.GetReason(md))
+			if c.wantInMsg != "" {
+				assert.Contains(t, ModelDeploymentConditionWeightsReady.GetMessage(md), c.wantInMsg)
+			}
+		})
+	}
+}
+
 // TestModelDeploymentArtifactDeliverySwitchRolls pins that switching the delivery Setting changes the
 // replicas' fingerprint once: the render differs, so each replica is replaced like an image change.
 func TestModelDeploymentArtifactDeliverySwitchRolls(t *testing.T) {
