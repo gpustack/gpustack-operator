@@ -173,18 +173,18 @@ func testModelScopeArtifact(secret string) *workercore.ModelArtifact {
 
 // testModelScopeHub is a fake ModelScope client: every answer swappable, every ask recorded.
 type testModelScopeHub struct {
-	mu          sync.Mutex
-	resolution  modelartifact.Resolution
-	resolveErr  error
-	revalidate  []error // one per Revalidate ask, the last repeating
-	tokenValid  bool
-	tokenErr    error
-	asks        int
-	lastRepo    string
-	lastRev     string
-	lastToken   string
-	lastFilter  modelartifact.Filter
-	lastCommit  string
+	mu         sync.Mutex
+	resolution modelartifact.Resolution
+	resolveErr error
+	revalidate []error // one per Revalidate ask, the last repeating
+	tokenValid bool
+	tokenErr   error
+	asks       int
+	lastRepo   string
+	lastRev    string
+	lastToken  string
+	lastFilter modelartifact.Filter
+	lastCommit string
 }
 
 func (h *testModelScopeHub) Resolve(_ context.Context, repository, revision, token string, filter modelartifact.Filter) (modelartifact.Resolution, error) {
