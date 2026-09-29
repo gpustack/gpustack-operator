@@ -396,7 +396,7 @@ commit). Stage gates go to the coordinator: plan gate (this document), built gat
 T1 is a spike and is run first on purpose: if the kind environment cannot serve image volumes,
 the e2e environment decision escalates while the code tasks are still ahead of it, not after.
 
-- [ ] **T1 · e2e environment verification (spike)**
+- [x] **T1 · e2e environment verification (spike)**
       Blocked by: —
       Gate: review
       Owns: nothing in the tree (a local kind cluster, a probe Pod, evidence files only).
@@ -408,7 +408,7 @@ the e2e environment decision escalates while the code tasks are still ahead of i
       decision rather than improvising.
       Verify: the probe Pod reads the image's marker file; the readings name the node image's
       containerd version and the feature state.
-- [ ] **T2 · API + codegen**
+- [x] **T2 · API + codegen**
       Blocked by: —
       Owns: `api/worker/v1alpha1/model_artifact.go`, `api/worker/v1alpha1/model_deployment.go`,
       generated trees (deepcopy, CRD, openapi, protobuf, applyconfigurations).
@@ -416,7 +416,7 @@ the e2e environment decision escalates while the code tasks are still ahead of i
       identity and the absent resolved fields; `make generate` leaves a clean tree in the gen
       tree.
       Verify: `go build ./... && go test ./api/worker/...`.
-- [ ] **T3 · Admission**
+- [x] **T3 · Admission**
       Blocked by: T2
       Owns: `pkg/kubediscovery/feature.go`,
       `pkg/worker/webhooks/worker/model_artifact.go`,
@@ -425,13 +425,13 @@ the e2e environment decision escalates while the code tasks are still ahead of i
       wording above; the capability gate refusing below the floor and admitting at/above it,
       both directions unit-tested through the swappable version seam; the prefetch refusal.
       Verify: `go test ./pkg/kubediscovery/... ./pkg/worker/webhooks/worker/...`.
-- [ ] **T4 · Resolution**
+- [x] **T4 · Resolution**
       Blocked by: T2
       Owns: `pkg/worker/controllers/worker/model_artifact.go` (+ tests).
       Acceptance: AC5, AC6 — first-pass resolution with a claim-shaped `resolved`; no nodes
       aggregation; no revalidation.
       Verify: `go test ./pkg/worker/controllers/worker/...`.
-- [ ] **T5 · Renderer + placement**
+- [x] **T5 · Renderer + placement**
       Blocked by: T3, T4
       Owns: `pkg/worker/controllers/worker/model_artifact_placement.go`,
       `model_deployment_artifact.go`, `model_deployment.go`, `instance.go`,
@@ -440,13 +440,13 @@ the e2e environment decision escalates while the code tasks are still ahead of i
       raise; `status.model` and `WeightsReady` behavior; the Setting-independence; the Instance
       node pre-check and the images-list preference as adjudicated (both in scope).
       Verify: `go test ./pkg/worker/controllers/worker/...`.
-- [ ] **T6 · Docs**
+- [x] **T6 · Docs**
       Blocked by: T5
       Owns: the three docs paths of AC15/AC16.
       Acceptance: page routing, header/Contents/footer and the index entry per the docs skill;
       every number carries its version condition.
       Verify: `make lint docs`.
-- [ ] **T7 · e2e**
+- [x] **T7 · e2e**
       Blocked by: T1, T5 (T6 not required)
       Owns: the case script + SKILL.md row + execution evidence under the task directory's
       `spec-7/raw/`.
@@ -454,7 +454,7 @@ the e2e environment decision escalates while the code tasks are still ahead of i
       escalates before this task starts); the capability-gate directions stay unit-tested (an
       old-version e2e cluster is out of scope).
       Verify: the case script against the cluster running the image built from the rebased head.
-- [ ] **T8 · Ship prep**
+- [x] **T8 · Ship prep**
       Blocked by: T1–T7
       Owns: rebase, commit folding, chart-matrix local runs (Go change ⇒ REQUIRED: the CI chart
       matrix's 7 node images, locally, all rc=0), case number finalization, PR.

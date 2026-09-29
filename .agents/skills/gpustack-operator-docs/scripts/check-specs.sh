@@ -26,6 +26,14 @@
 #      commands. Measured when a bug fix's specification was moved out: eight markers in two
 #      shipped specifications went on naming it, and all three gates stayed green.
 #
+#   5. a task left unticked in a Shipped spec whose block says nothing about why. The box and the
+#      history then disagree, and completed work reads as outstanding -- measured when two shipped
+#      specifications reached main with every one of their tasks unticked although every task had
+#      landed, and a reader was the only thing that caught it. The legal shapes are a written
+#      deferral in the task's own block ('tracked as', 'routed to', 'left unticked', 'deferred',
+#      'moved to', 'parked', 'NOT DONE'), or a 'Blocked by:' naming an external blocker -- a list
+#      of the plan's own tasks is its ordering, not a deferral, and 'None' or a dash says nothing.
+#
 # Rule 3 reads the whole markdown corpus, not just specs/: the construct is a command someone
 # re-runs, and it goes stale wherever it is written.
 #
@@ -380,6 +388,61 @@ for f in $SPECS; do
     fi
     err "$f:$at: names '$ref', and no such file is under specs/. A reader cannot follow it, and a specification that left the repository leaves every pointer to it behind without anything failing. Name the document without the extension if it is deliberately outside the tree -- the extension is what makes it a path."
   done < "$WORK/refs"
+done
+
+# --- 5. an unticked task in a Shipped spec says why ---------------------------
+echo "==> unticked tasks in shipped specs"
+
+for f in $SPECS; do
+  if [ ! -f "$f" ]; then
+    continue
+  fi
+  word=$(sed -n '3p' "$f" | sed -e 's/^Status: *//' -e 's/[ 	].*$//')
+  if [ "$word" != "Shipped" ]; then
+    continue
+  fi
+  # A task's block runs from its "- [ ]" line to the next task line or the next heading. The block
+  # must carry its deferral: one of the written phrases, or a "Blocked by:" that names something
+  # other than the plan's own task ordering (T-numbers, dashes and "and" are stripped; what
+  # remains has to be words). "None", a bare dash, or silence all say nothing.
+  awk '
+    function flush(   v, t) {
+      if (!open) return
+      open = 0
+      if (block ~ /[Tt]racked as/ || block ~ /[Ll]eft unticked/ || block ~ /[Dd]eferred/ || \
+          block ~ /[Rr]outed to/ || block ~ /[Mm]oved to/ || block ~ /[Pp]arked/ || \
+          index(block, "NOT DONE") > 0) return
+      if (match(block, /[Bb]locked by:[^\n]*/)) {
+        v = substr(block, RSTART + 11, RLENGTH - 11)
+        gsub(/\*\*/, "", v)
+        t = v
+        gsub(/[Tt][0-9]+/, "", t)
+        gsub(/[Aa]nd/, "", t)
+        # ASCII punctuation first, dashes as single-char patterns: a bracket holding them next to
+        # \t reads \t-<dashbyte> as a range that swallows the alphabet, measured on BSD awk.
+        gsub(/[\t ,.;-]/, "", t)
+        gsub(/–/, "", t)
+        gsub(/—/, "", t)
+        if (t != "" && v !~ /^[ \t]*[Nn]one\.?[ \t]*$/) return
+      }
+      print start
+    }
+    /^- \[/ {
+      flush()
+      open = ($0 ~ /^- \[ \] \*\*/)
+      start = FNR
+      block = $0 "\n"
+      next
+    }
+    /^#/ { flush(); next }
+    { if (open) block = block $0 "\n" }
+    END { flush() }
+  ' "$f" > "$WORK/unticked"
+  while IFS= read -r at; do
+    if [ -n "$at" ]; then
+      err "$f:$at: this task is unticked in a Shipped spec and its block does not say why. If the work landed, tick the box; if it did not, the block must carry the deferral in words ('tracked as', 'routed to', 'left unticked', 'deferred', 'moved to', 'parked', 'NOT DONE') or a 'Blocked by:' naming an external blocker — a list of the plan's own tasks is its ordering, not a deferral. Unticked and silent is how completed work reads as outstanding."
+    fi
+  done < "$WORK/unticked"
 done
 
 echo
