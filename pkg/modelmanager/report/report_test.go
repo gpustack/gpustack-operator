@@ -23,8 +23,10 @@ import (
 	gpustack "gpustack.ai/gpustack/api/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/modelartifact"
 	"gpustack.ai/gpustack/pkg/modelmanager/download"
 	"gpustack.ai/gpustack/pkg/modelmanager/gc"
+	"gpustack.ai/gpustack/pkg/modelmanager/materialize"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
 )
 
@@ -252,7 +254,7 @@ func TestReportRefusesAnInvalidSpec(t *testing.T) {
 			assert.Equal(t, meta.ConditionFalse, ready.Status)
 			assert.Equal(t, ReasonInvalidConfiguration, ready.Reason)
 			assert.Contains(t, ready.Message, c.wantErr)
-			_, _, err := env.r.Environment(context.Background())
+			_, _, err := env.r.Environment(context.Background(), materialize.HubHuggingFace)
 			assert.Equal(t, download.ReasonInvalidRequest, download.ReasonOf(err), "no download starts")
 		})
 	}
@@ -316,14 +318,39 @@ func TestReportKeepsTheClientOfAnUnchangedSpec(t *testing.T) {
 
 func TestEnvironmentBeforeTheSpecArrives(t *testing.T) {
 	env := newTestEnv(t, validSpec())
-	_, _, err := env.r.Environment(context.Background())
+	_, _, err := env.r.Environment(context.Background(), materialize.HubHuggingFace)
 	assert.Equal(t, download.ReasonInvalidRequest, download.ReasonOf(err))
 
 	require.NoError(t, env.r.Report(context.Background()))
-	hub, dl, err := env.r.Environment(context.Background())
+	hub, dl, err := env.r.Environment(context.Background(), materialize.HubHuggingFace)
 	require.NoError(t, err)
 	assert.NotNil(t, hub)
 	assert.Same(t, env.r.Downloader, dl, "every attempt shares the node's limits")
+}
+
+// TestEnvironmentForModelScopeNamesTheUpgrade pins the behavior on a spec an older worker wrote:
+// a ModelScope source waits with that named, never resolved against the Hugging Face endpoint.
+func TestEnvironmentForModelScopeNamesTheUpgrade(t *testing.T) {
+	env := newTestEnv(t, validSpec())
+	require.NoError(t, env.r.Report(context.Background()))
+	_, _, err := env.r.Environment(context.Background(), materialize.HubModelScope)
+	require.Error(t, err)
+	assert.Equal(t, download.ReasonInvalidRequest, download.ReasonOf(err))
+	assert.Contains(t, err.Error(), "upgrade the worker")
+
+	hf, _, err := env.r.Environment(context.Background(), materialize.HubHuggingFace)
+	require.NoError(t, err)
+	require.IsType(t, &modelartifact.HuggingFace{}, hf)
+
+	spec := validSpec()
+	spec.Hub.ModelScopeEndpoint = "https://ms.example"
+	env2 := newTestEnv(t, spec)
+	require.NoError(t, env2.r.Report(context.Background()))
+	hub, _, err := env2.r.Environment(context.Background(), materialize.HubModelScope)
+	require.NoError(t, err)
+	ms, ok := hub.(*modelartifact.ModelScope)
+	require.True(t, ok)
+	assert.Equal(t, "https://ms.example", ms.Endpoint)
 }
 
 func TestReportCapsTheWatermarkOnKubeletsFilesystem(t *testing.T) {

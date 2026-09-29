@@ -63,8 +63,8 @@ func authorizeMount(podNamespace string, attrs mountAttributes, ma *workercore.M
 		return deny(ruleArtifactMissing, "does not exist")
 	case string(ma.UID) != attrs.ArtifactUID:
 		return deny(ruleUIDMismatch, fmt.Sprintf("has UID %q, the volume names %q", ma.UID, attrs.ArtifactUID))
-	case ma.Spec.Source.HuggingFace == nil:
-		return deny(ruleNotHub, "only a Hugging Face artifact is delivered by the node")
+	case ma.Spec.Source.HuggingFace == nil && ma.Spec.Source.ModelScope == nil:
+		return deny(ruleNotHub, "only a hub artifact is delivered by the node")
 	case !conditionTrue(ma.Status.Conditions, resolvedCondition) || ma.Status.Resolved == nil:
 		return deny(ruleNotResolved, "is not Resolved; new mounts wait until it is")
 	case ma.Status.Resolved.ManifestDigest != attrs.Digest:

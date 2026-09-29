@@ -179,9 +179,10 @@ func (r *Reporter) Pinned() map[string]bool {
 	return out
 }
 
-// Environment returns the hub and the downloader built from the node's current configuration, or an
-// InvalidRequest error while that configuration is missing or fails its check.
-func (r *Reporter) Environment(context.Context) (materialize.Hub, *download.Downloader, error) {
+// Environment returns the hub of the named kind and the downloader built from the node's current
+// configuration, or an InvalidRequest error while that configuration is missing, fails its check,
+// or does not reach the hub the source names.
+func (r *Reporter) Environment(_ context.Context, kind string) (materialize.Hub, *download.Downloader, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch {
@@ -194,7 +195,19 @@ func (r *Reporter) Environment(context.Context) (materialize.Hub, *download.Down
 		return nil, nil, &download.Error{Reason: download.ReasonInvalidRequest, Message: msg, Detail: msg}
 	}
 
-	return &modelartifact.HuggingFace{Endpoint: r.spec.Hub.HuggingFaceEndpoint, Client: listingClient(r.client)}, r.Downloader, nil
+	switch kind {
+	case materialize.HubModelScope:
+		// Empty in a spec an older worker wrote: a ModelScope artifact waits with that named
+		// rather than being resolved against another hub.
+		if r.spec.Hub.ModelScopeEndpoint == "" {
+			msg := "the node's configuration names no ModelScope endpoint: it was written by an older worker; upgrade the worker"
+			return nil, nil, &download.Error{Reason: download.ReasonInvalidRequest, Message: msg, Detail: msg}
+		}
+
+		return &modelartifact.ModelScope{Endpoint: r.spec.Hub.ModelScopeEndpoint, Client: listingClient(r.client)}, r.Downloader, nil
+	default:
+		return &modelartifact.HuggingFace{Endpoint: r.spec.Hub.HuggingFaceEndpoint, Client: listingClient(r.client)}, r.Downloader, nil
+	}
 }
 
 // PeerSyncEnabled says whether the node's configuration allows pulling content from the other

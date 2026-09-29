@@ -264,6 +264,18 @@ func TestNodePublishAuthorization(t *testing.T) {
 			namespace: "team-a", wantRule: ruleNotHub,
 		},
 		{
+			name: "the Pod's own resolved ModelScope artifact",
+			objs: []ctrlcli.Object{func() *workercore.ModelArtifact {
+				ma := testArtifact("team-a", "qwen", "uid-qwen", testDigest, true)
+				ma.Spec.Source = workercore.ModelArtifactSource{
+					ModelScope: &workercore.ModelArtifactHubSource{Repository: "qwen/repo"},
+				}
+				return ma
+			}()},
+			attrs:     hints("qwen", "uid-qwen", testDigest),
+			namespace: "team-a",
+		},
+		{
 			name:      "no artifact named at all",
 			attrs:     hints("", "", testDigest),
 			namespace: "team-a", wantRule: ruleArtifactMissing,

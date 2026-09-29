@@ -173,7 +173,7 @@ func newTestEnv(t *testing.T, files map[string]map[string][]byte) *testEnv {
 		hub: hub, clock: clock, store: st,
 		m: &Materializer{
 			Store:         st,
-			Environment:   func(context.Context) (Hub, *download.Downloader, error) { return hub, dl, nil },
+			Environment:   func(context.Context, string) (Hub, *download.Downloader, error) { return hub, dl, nil },
 			Now:           clock.Now,
 			CheckInterval: 10 * time.Millisecond,
 		},
@@ -238,6 +238,57 @@ func TestEnsureMaterializesAndPublishes(t *testing.T) {
 	for _, r := range env.hub.recorded() {
 		assert.Equal(t, "Bearer token-a", r.auth)
 	}
+}
+
+// TestEnsureMaterializesAModelScopeSource materializes through the hub the source names: the
+// environment is asked for the ModelScope hub, and the Hugging Face one is never touched.
+func TestEnsureMaterializesAModelScopeSource(t *testing.T) {
+	hf := newTestHub(t, map[string]map[string][]byte{"owner/repo": {"hf.json": []byte(`{}`)}})
+	ms := newTestHub(t, map[string]map[string][]byte{"qwen/repo": {"ms.json": []byte(`{}`)}})
+	root := t.TempDir()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(root, func(p string, e os.DirEntry, err error) error {
+			if err == nil && e.IsDir() {
+				_ = os.Chmod(p, 0o755)
+			}
+			return err
+		})
+	})
+	st, err := store.Open(root)
+	require.NoError(t, err)
+	clock := &testClock{now: time.Date(2026, 9, 25, 6, 0, 0, 0, time.UTC)}
+	dl := download.New(ms.server.Client(), 8, 0)
+	dl.RetryDelay = time.Millisecond
+	m := &Materializer{
+		Store: st,
+		Environment: func(_ context.Context, kind string) (Hub, *download.Downloader, error) {
+			if kind == HubModelScope {
+				return ms, dl, nil
+			}
+			return hf, dl, nil
+		},
+		Now:           clock.Now,
+		CheckInterval: 10 * time.Millisecond,
+	}
+
+	digest := ms.manifest("qwen/repo").Digest
+	ma := &workercore.ModelArtifact{
+		ObjectMeta: meta.ObjectMeta{UID: "uid-ms"},
+		Spec: workercore.ModelArtifactSpec{Source: workercore.ModelArtifactSource{
+			ModelScope: &workercore.ModelArtifactHubSource{Repository: "qwen/repo"},
+		}},
+		Status: workercore.ModelArtifactStatus{Resolved: &workercore.ModelArtifactResolved{
+			Revision: testCommit, ManifestDigest: digest,
+		}},
+	}
+	req := driver.Request{Hex: store.HexOf(digest), Artifact: ma, Token: "ms-token"}
+
+	m.Ensure(context.Background(), req)
+	require.Eventually(t, func() bool { return !m.Downloading()[req.Hex] }, 10*time.Second, 5*time.Millisecond)
+
+	require.True(t, st.IsPublished(req.Hex))
+	assert.Empty(t, hf.recorded(), "the Hugging Face hub is never asked")
+	assert.NotEmpty(t, ms.recorded())
 }
 
 func TestProgressReportsTheRunningAttempts(t *testing.T) {
@@ -425,7 +476,7 @@ func TestEnsureReportsNoRoom(t *testing.T) {
 
 func TestEnsureWaitsForAValidConfiguration(t *testing.T) {
 	env := newTestEnv(t, repoFiles())
-	env.m.Environment = func(context.Context) (Hub, *download.Downloader, error) {
+	env.m.Environment = func(context.Context, string) (Hub, *download.Downloader, error) {
 		return nil, nil, &download.Error{Reason: download.ReasonInvalidRequest, Message: "the endpoint is not a URL"}
 	}
 	req := env.request("owner/repo", "uid-a", "token-a")
@@ -438,7 +489,7 @@ func TestEnsureWaitsForAValidConfiguration(t *testing.T) {
 	assert.Zero(t, rec.Failures, "a configuration the node cannot use yet is not the source's failure")
 
 	// Once the node's configuration arrives, the next mount starts at once: there is no backoff to wait out.
-	env.m.Environment = func(context.Context) (Hub, *download.Downloader, error) {
+	env.m.Environment = func(context.Context, string) (Hub, *download.Downloader, error) {
 		dl := download.New(env.hub.server.Client(), 8, 0)
 		return env.hub, dl, nil
 	}
