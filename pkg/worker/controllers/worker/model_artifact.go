@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +75,8 @@ type ModelArtifactReconciler struct {
 	Now      func() time.Time
 	// NewHuggingFace builds the Hub client from the current Settings. Tests replace it.
 	NewHuggingFace func(ctx context.Context) (*modelartifact.HuggingFace, error)
+	// NewModelScope builds the ModelScope client from the current Settings. Tests replace it.
+	NewModelScope func(ctx context.Context) (modelArtifactHub, error)
 
 	// checks remembers, per artifact UID, the Secret resourceVersion the source was last asked
 	// with and when it may be asked next. It paces the calls to the Hub: this controller also runs
@@ -87,6 +90,14 @@ type ModelArtifactReconciler struct {
 }
 
 var _ ctrlreconcile.Reconciler = (*ModelArtifactReconciler)(nil)
+
+// modelArtifactHub is what a hub source resolves and revalidates through. The two hubs share one
+// staircase; only the endpoints and the reason classifier differ, and those live in the clients.
+type modelArtifactHub interface {
+	Resolve(ctx context.Context, repository, revision, token string, filter modelartifact.Filter) (modelartifact.Resolution, error)
+	Revalidate(ctx context.Context, repository, commit, token string) error
+	ValidToken(ctx context.Context, token string) (bool, error)
+}
 
 func (r *ModelArtifactReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
@@ -128,14 +139,26 @@ func (r *ModelArtifactReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	)
 	switch {
 	case ma.Spec.Source.HuggingFace != nil:
-		result, check = r.reconcileHuggingFace(ctx, ma)
+		hub, err := r.NewHuggingFace(ctx)
+		if err != nil {
+			ModelArtifactConditionDegraded.True(ma, modelartifact.ReasonSourceUnavailable, err.Error())
+			return ctrl.Result{RequeueAfter: modelArtifactUnavailableRetry}, nil
+		}
+		result, check = r.reconcileHubSource(ctx, ma, hub, ma.Spec.Source.HuggingFace)
+	case ma.Spec.Source.ModelScope != nil:
+		hub, err := r.NewModelScope(ctx)
+		if err != nil {
+			ModelArtifactConditionDegraded.True(ma, modelartifact.ReasonSourceUnavailable, err.Error())
+			return ctrl.Result{RequeueAfter: modelArtifactUnavailableRetry}, nil
+		}
+		result, check = r.reconcileHubSource(ctx, ma, hub, ma.Spec.Source.ModelScope)
 	case ma.Spec.Source.PersistentVolumeClaim != nil:
 		result = r.reconcileClaim(ctx, ma)
 	case ma.Spec.Source.Image != nil:
 		r.reconcileImage(ma)
 	default:
-		// Admission refuses every other shape, ModelScope included; one stored before a rule
-		// existed stays unresolved and says why.
+		// Admission refuses every other shape; one stored before a rule existed stays unresolved
+		// and says why.
 		ModelArtifactConditionResolved.False(ma, "UnsupportedSource", "the source is not accepted in this version")
 	}
 	result = earliestResult(result, r.reconcileNodes(ctx, ma, before.Nodes))
@@ -300,13 +323,11 @@ type modelArtifactCheck struct {
 	next          time.Time
 }
 
-// reconcileHuggingFace resolves a Hugging Face source once, then revalidates its access. It returns
-// the pacing entry to record once the status is stored, or nil when the source was not asked.
-func (r *ModelArtifactReconciler) reconcileHuggingFace(
-	ctx context.Context, ma *workercore.ModelArtifact,
+// reconcileHubSource resolves a hub source once, then revalidates its access. It returns the
+// pacing entry to record once the status is stored, or nil when the source was not asked.
+func (r *ModelArtifactReconciler) reconcileHubSource(
+	ctx context.Context, ma *workercore.ModelArtifact, hub modelArtifactHub, source *workercore.ModelArtifactHubSource,
 ) (ctrl.Result, *modelArtifactCheck) {
-	source := ma.Spec.Source.HuggingFace
-
 	token, secretVersion, err := r.modelArtifactToken(ctx, ma.Namespace, source.SecretRef)
 	switch {
 	case errors.Is(err, errModelArtifactSecretMissing):
@@ -332,29 +353,24 @@ func (r *ModelArtifactReconciler) reconcileHuggingFace(
 		}
 	}
 
-	hub, err := r.NewHuggingFace(ctx)
-	if err != nil {
-		ModelArtifactConditionDegraded.True(ma, modelartifact.ReasonSourceUnavailable, err.Error())
-		return ctrl.Result{RequeueAfter: modelArtifactUnavailableRetry}, nil
-	}
 	ctx, cancel := context.WithTimeout(ctx, modelArtifactResolveTimeout)
 	defer cancel()
 
 	var after time.Duration
 	if ma.Status.Resolved == nil {
-		after = r.resolveHuggingFace(ctx, ma, hub, token)
+		after = r.resolveHubSource(ctx, ma, hub, source, token)
 	} else {
-		after = r.revalidateHuggingFace(ctx, ma, hub, token, now, secretChanged)
+		after = r.revalidateHubSource(ctx, ma, hub, source, token, now, secretChanged)
 	}
 
 	return ctrl.Result{RequeueAfter: after}, &modelArtifactCheck{secretVersion: secretVersion, next: now.Add(after)}
 }
 
-// resolveHuggingFace resolves the source once and reports when the source is to be asked next.
-func (r *ModelArtifactReconciler) resolveHuggingFace(
-	ctx context.Context, ma *workercore.ModelArtifact, hub *modelartifact.HuggingFace, token string,
+// resolveHubSource resolves the source once and reports when the source is to be asked next.
+func (r *ModelArtifactReconciler) resolveHubSource(
+	ctx context.Context, ma *workercore.ModelArtifact, hub modelArtifactHub, source *workercore.ModelArtifactHubSource,
+	token string,
 ) time.Duration {
-	source := ma.Spec.Source.HuggingFace
 	resolution, err := hub.Resolve(ctx, source.Repository, source.Revision, token, modelartifact.Filter{
 		Allow: ma.Spec.AllowPatterns, Ignore: ma.Spec.IgnorePatterns,
 	})
@@ -380,20 +396,20 @@ func (r *ModelArtifactReconciler) resolveHuggingFace(
 	ModelArtifactConditionResolved.True(ma, modelArtifactReasonResolved,
 		fmt.Sprintf("%s@%s resolved to commit %s", source.Repository, source.Revision, resolution.Commit))
 	ModelArtifactConditionDegraded.False(ma, modelArtifactReasonHealthy, "")
-	r.warnOnRejectedToken(ctx, ma, hub, token)
+	r.warnOnRejectedToken(ctx, ma, source, hub, token)
 
 	return r.revalidateInterval(ctx)
 }
 
-// revalidateHuggingFace checks access at the resolved commit and reports when the source is to be
+// revalidateHubSource checks access at the resolved commit and reports when the source is to be
 // asked next. The commit and the digest are never re-resolved.
 //
 // A REFUSAL REVOKES ONLY WHEN CONFIRMED. The first one sets Degraded, stamped with the time it
 // happened, and the check is repeated after modelArtifactConfirmDelay; the same refusal then sets
 // Resolved=False. A failure to reach the source never revokes: it says nothing about the grant.
-func (r *ModelArtifactReconciler) revalidateHuggingFace(
-	ctx context.Context, ma *workercore.ModelArtifact, hub *modelartifact.HuggingFace, token string, now time.Time,
-	secretChanged bool,
+func (r *ModelArtifactReconciler) revalidateHubSource(
+	ctx context.Context, ma *workercore.ModelArtifact, hub modelArtifactHub, source *workercore.ModelArtifactHubSource,
+	token string, now time.Time, secretChanged bool,
 ) time.Duration {
 	interval := r.revalidateInterval(ctx)
 	if last := ma.Status.Resolved.LastValidatedTime; last != nil && ModelArtifactConditionResolved.IsTrue(ma) &&
@@ -404,7 +420,6 @@ func (r *ModelArtifactReconciler) revalidateHuggingFace(
 		}
 	}
 
-	source := ma.Spec.Source.HuggingFace
 	err := hub.Revalidate(ctx, source.Repository, ma.Status.Resolved.Revision, token)
 	if err == nil {
 		validated := meta.NewTime(now)
@@ -414,7 +429,7 @@ func (r *ModelArtifactReconciler) revalidateHuggingFace(
 		// The token is judged when it is new, not on every interval: an unchanged rejected token
 		// was already reported, and one more event per interval would only repeat it.
 		if secretChanged {
-			r.warnOnRejectedToken(ctx, ma, hub, token)
+			r.warnOnRejectedToken(ctx, ma, source, hub, token)
 		}
 		return interval
 	}
@@ -459,13 +474,14 @@ func modelArtifactConditionSince(ma *workercore.ModelArtifact, c kubeapistatus.C
 	return time.Time{}
 }
 
-// warnOnRejectedToken emits a Warning when the Hub rejects the token outright. The Hub ignores a
+// warnOnRejectedToken emits a Warning when the hub rejects the token outright. A hub ignores a
 // rejected token on a public repository, answering as if none had been sent, so without this a
 // mistyped token would never surface. It does not change the conditions.
 func (r *ModelArtifactReconciler) warnOnRejectedToken(
-	ctx context.Context, ma *workercore.ModelArtifact, hub *modelartifact.HuggingFace, token string,
+	ctx context.Context, ma *workercore.ModelArtifact, source *workercore.ModelArtifactHubSource,
+	hub modelArtifactHub, token string,
 ) {
-	if token == "" || r.Recorder == nil {
+	if token == "" || r.Recorder == nil || source.SecretRef == nil {
 		return
 	}
 	valid, err := hub.ValidToken(ctx, token)
@@ -473,8 +489,8 @@ func (r *ModelArtifactReconciler) warnOnRejectedToken(
 		return
 	}
 	r.Recorder.Eventf(ma, core.EventTypeWarning, "InvalidToken",
-		"the Hub rejects the token in Secret %q; a public repository still resolves, as if no token had been sent",
-		ma.Spec.Source.HuggingFace.SecretRef.Name)
+		"the hub rejects the token in Secret %q; a public repository still resolves, as if no token had been sent",
+		source.SecretRef.Name)
 }
 
 var errModelArtifactSecretMissing = errors.New("secret missing")
@@ -521,6 +537,33 @@ func (r *ModelArtifactReconciler) now() time.Time {
 
 // newHuggingFaceFromSettings builds the Hub client from the administrator's Settings.
 func (r *ModelArtifactReconciler) newHuggingFaceFromSettings(ctx context.Context) (*modelartifact.HuggingFace, error) {
+	client, err := r.newHubHTTPClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &modelartifact.HuggingFace{
+		Endpoint: settings.ModelArtifactHuggingFaceEndpoint.ShouldValue(ctx),
+		Client:   client,
+	}, nil
+}
+
+// newModelScopeFromSettings builds the ModelScope client from the administrator's Settings, the
+// same proxy and CA bundle the Hugging Face client takes.
+func (r *ModelArtifactReconciler) newModelScopeFromSettings(ctx context.Context) (modelArtifactHub, error) {
+	client, err := r.newHubHTTPClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &modelartifact.ModelScope{
+		Endpoint: settings.ModelArtifactModelScopeEndpoint.ShouldValue(ctx),
+		Client:   client,
+	}, nil
+}
+
+// newHubHTTPClient builds the client both hub controllers send their requests with.
+func (r *ModelArtifactReconciler) newHubHTTPClient(ctx context.Context) (*http.Client, error) {
 	opts := modelartifact.HTTPClientOptions{
 		HTTPSProxy: settings.ModelArtifactHTTPSProxy.ShouldValue(ctx),
 		NoProxy:    settings.ModelArtifactNoProxy.ShouldValue(ctx),
@@ -532,15 +575,8 @@ func (r *ModelArtifactReconciler) newHuggingFaceFromSettings(ctx context.Context
 		}
 		opts.CABundle = []byte(cm.Data["ca.crt"])
 	}
-	client, err := modelartifact.NewHTTPClient(opts)
-	if err != nil {
-		return nil, err
-	}
 
-	return &modelartifact.HuggingFace{
-		Endpoint: settings.ModelArtifactHuggingFaceEndpoint.ShouldValue(ctx),
-		Client:   client,
-	}, nil
+	return modelartifact.NewHTTPClient(opts)
 }
 
 func (r *ModelArtifactReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
@@ -568,6 +604,9 @@ func (r *ModelArtifactReconciler) SetupController(ctx context.Context, opts cont
 	if r.NewHuggingFace == nil {
 		r.NewHuggingFace = r.newHuggingFaceFromSettings
 	}
+	if r.NewModelScope == nil {
+		r.NewModelScope = r.newModelScopeFromSettings
+	}
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("modelartifact").
@@ -588,8 +627,12 @@ func (r *ModelArtifactReconciler) SetupController(ctx context.Context, opts cont
 
 func (r *ModelArtifactReconciler) enqueueModelArtifactsForSecret(ctx context.Context, obj ctrlcli.Object) []ctrlreconcile.Request {
 	return r.enqueueModelArtifacts(ctx, obj.GetNamespace(), func(ma *workercore.ModelArtifact) bool {
-		hub := ma.Spec.Source.HuggingFace
-		return hub != nil && hub.SecretRef != nil && hub.SecretRef.Name == obj.GetName()
+		for _, hub := range []*workercore.ModelArtifactHubSource{ma.Spec.Source.HuggingFace, ma.Spec.Source.ModelScope} {
+			if hub != nil && hub.SecretRef != nil && hub.SecretRef.Name == obj.GetName() {
+				return true
+			}
+		}
+		return false
 	})
 }
 
