@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-specs-selftest.sh — proves check-specs.sh can fail.
 #
-# Both of its rules pass on every file in this repository, and a check that has never been seen to
+# Its rules pass on every file in this repository, and a check that has never been seen to
 # fail is indistinguishable from one that cannot. Each case below builds a throwaway tree, breaks
 # exactly one thing, and asserts the finding names it. Nothing in the real tree is touched.
 #
@@ -335,6 +335,94 @@ echo "=== spec-to-spec: the reference is resolved, not merely pattern-matched ==
 build
 rm -f "$MINI/tree/specs/2026-01-02-blocked.md"
 expect_hit "deleting the target turns the surviving reference red" "no such file is under specs/"
+
+echo
+echo "=== unticked tasks: a bare one in a Shipped spec is caught ==="
+build
+cat >> "$SPEC" <<'EOF'
+
+- [ ] **T9 · The thing that never ran**
+      Owns: nothing in the tree
+      Verify: by hand
+EOF
+expect_hit "an unticked task with no deferral is caught" "unticked in a Shipped spec"
+
+echo
+echo "=== unticked tasks: a written deferral is the legal shape ==="
+build
+cat >> "$SPEC" <<'EOF'
+
+- [ ] **T9 · The thing that never ran**
+      **Routed to the verification matrix, by decision, and left unticked on purpose.**
+      Owns: nothing in the tree
+EOF
+run
+if [ "$rc" -eq 0 ]; then
+  pass "a written deferral passes"
+else
+  fail "a written deferral should pass, got: $out"
+fi
+
+build
+cat >> "$SPEC" <<'EOF'
+
+- [ ] **T9 · The thing that never ran**
+      Blocked by: a cluster with RDMA-capable nodes. NOT DONE.
+EOF
+run
+if [ "$rc" -eq 0 ]; then
+  pass "an external blocker passes"
+else
+  fail "an external blocker should pass, got: $out"
+fi
+
+echo
+echo "=== unticked tasks: 'Blocked by: None' and a bare dash say nothing ==="
+build
+cat >> "$SPEC" <<'EOF'
+
+- [ ] **T9 · The thing that never ran**
+      Blocked by: None
+EOF
+expect_hit "Blocked by None is not a deferral" "unticked in a Shipped spec"
+
+build
+cat >> "$SPEC" <<'EOF'
+
+- [ ] **T9 · The thing that never ran**
+      Blocked by: —
+EOF
+expect_hit "a bare dash is not a deferral" "unticked in a Shipped spec"
+
+echo
+echo "=== unticked tasks: the plan's own ordering is not a deferral ==="
+# The measured corruption shape: every task of a shipped spec unticked, with blocks whose only
+# "Blocked by" lines are the plan's own task numbers.
+build
+cat >> "$SPEC" <<'EOF'
+
+- [ ] **T9 · The thing that never ran**
+      Blocked by: T2
+
+- [ ] **T10 · The other thing**
+      Blocked by: T1–T7
+EOF
+expect_hit "task-ordering blockers are not deferrals" "unticked in a Shipped spec"
+
+echo
+echo "=== unticked tasks: a Building spec keeps its open tasks ==="
+build
+cat >> "$BLOCKED" <<'EOF'
+
+- [ ] **T9 · The thing that never ran**
+      Owns: nothing in the tree
+EOF
+run
+if [ "$rc" -eq 0 ]; then
+  pass "an unticked task in a non-Shipped spec is the ordinary shape"
+else
+  fail "a Building spec's open task should pass, got: $out"
+fi
 
 echo
 if [ "$fails" -gt 0 ]; then
