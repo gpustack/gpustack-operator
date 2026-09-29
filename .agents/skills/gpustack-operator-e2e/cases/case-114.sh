@@ -178,6 +178,7 @@ spec:
   roles:
     - name: server
       instanceType: ${IT}
+      image: ${MH_PYTHON}
       replicas: 1
 YAML
     REASON=""
