@@ -311,7 +311,7 @@ Tasks run sequentially in one seat (repo working agreement): every task starts w
 they run, and each task lands its own `--signoff` commit (folded per module at ship). No per-task
 review gates; the stage gates go to the coordinator (draft confirmed, plan gate, built gate).
 
-- [ ] **T1 · API surface: three CRDs + NodeModelStore fields + codegen**
+- [x] **T1 · API surface: three CRDs + NodeModelStore fields + codegen**
       Blocked by: None
       Owns: `api/worker/v1alpha1/model_store.go`, `api/worker/v1alpha1/model_store_binding.go`,
       `api/worker/v1alpha1/model_prefetch.go`, `api/worker/v1alpha1/node_model_store.go`,
@@ -324,7 +324,7 @@ review gates; the stage gates go to the coordinator (draft confirmed, plan gate,
       API-level tests.
       Verify: `make generate && go build ./... && go test ./api/worker/...`
 
-- [ ] **T2 · L3 merge + SelectorOverlap (worker)**
+- [x] **T2 · L3 merge + SelectorOverlap (worker)**
       Blocked by: T1
       Owns: `pkg/worker/controllers/worker/node_model_store.go`,
       `pkg/worker/controllers/worker/model_store.go` (+ tests)
@@ -334,14 +334,14 @@ review gates; the stage gates go to the coordinator (draft confirmed, plan gate,
       `spec.pinned` field another controller owns.
       Verify: `go test ./pkg/worker/controllers/worker/... ./pkg/modelstore/...`
 
-- [ ] **T3 · plugin pinned consumption**
+- [x] **T3 · plugin pinned consumption**
       Blocked by: T1
       Owns: `pkg/modelmanager/gc/gc.go`, `pkg/modelmanager/manager.go` (+ tests)
       Acceptance: AC11 — pinned digests are excluded from GC candidates while still counted in
       usage and capacity reporting; the saturated-state report is unchanged.
       Verify: `go test ./pkg/modelmanager/...`
 
-- [ ] **T4 · prefetch controller (delivery + aggregation)**
+- [x] **T4 · prefetch controller (delivery + aggregation)**
       Blocked by: T1
       Owns: `pkg/worker/controllers/worker/model_prefetch.go` (+ tests),
       `pkg/worker/controllers/setup.go`
@@ -351,7 +351,7 @@ review gates; the stage gates go to the coordinator (draft confirmed, plan gate,
       `Progressing` / `Available` / `Degraded` conditions; prefetch deletion removes its Pods.
       Verify: `go test ./pkg/worker/controllers/worker/...`
 
-- [ ] **T5 · admission webhooks**
+- [x] **T5 · admission webhooks**
       Blocked by: T1
       Owns: `pkg/worker/webhooks/worker/model_store_binding.go`,
       `pkg/worker/webhooks/worker/model_prefetch.go`, `pkg/worker/webhooks/setup.go` (+ tests)
@@ -362,7 +362,7 @@ review gates; the stage gates go to the coordinator (draft confirmed, plan gate,
       `pinned` without permission).
       Verify: `go test ./pkg/worker/webhooks/worker/...`
 
-- [ ] **T6 · accounting + per-node pinned writer**
+- [x] **T6 · accounting + per-node pinned writer**
       Blocked by: T4
       Owns: `pkg/worker/controllers/worker/model_store_binding.go`,
       `pkg/worker/controllers/worker/model_prefetch.go` (pinned subset) (+ tests),
@@ -373,7 +373,7 @@ review gates; the stage gates go to the coordinator (draft confirmed, plan gate,
       ownership split (prefetch controller writes `pinned`; the L1–L3 reconciler preserves it).
       Verify: `go test ./pkg/worker/controllers/worker/...`
 
-- [ ] **T7 · v1 view for ModelPrefetch**
+- [x] **T7 · v1 view for ModelPrefetch**
       Blocked by: T4
       Owns: `pkg/worker/extensionapis/worker/model_prefetch.go` (+ tests), extension-API
       registration tables
@@ -381,7 +381,7 @@ review gates; the stage gates go to the coordinator (draft confirmed, plan gate,
       precedent; the view serves delete (regression guard pattern).
       Verify: `go test ./pkg/worker/extensionapis/...`
 
-- [ ] **T8 · docs**
+- [x] **T8 · docs**
       Blocked by: T6, T7
       Owns: `docs/**` (one new page + `docs/README.md` index entry + a `docs/settings.md` entry
       for the `model-prefetch-warmup-image` Setting)
@@ -389,7 +389,7 @@ review gates; the stage gates go to the coordinator (draft confirmed, plan gate,
       vocabulary.
       Verify: `make lint docs`
 
-- [ ] **T9 · e2e case on kind**
+- [x] **T9 · e2e case on kind**
       Blocked by: T2, T3, T5, T6, T7
       Owns: `.agents/skills/gpustack-operator-e2e/cases/case-<NNN>.sh` (+ the SKILL.md case-table
       row; `<NNN>` = main's max case number + 1, taken at my-ship after the final rebase)
