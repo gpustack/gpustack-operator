@@ -36,12 +36,16 @@ spec:                                    # immutable after creation
       repository: Qwen/Qwen2.5-7B-Instruct
       revision: main                     # branch, tag or commit; defaults to main
       secretRef: {name: hf-token}        # optional; this namespace; key "token"
+    # modelScope:
+    #   repository: qwen/Qwen2.5-7B-Instruct
+    #   revision: master                 # branch, tag or commit; defaults to master
+    #   secretRef: {name: ms-token}      # optional; this namespace; key "token"
     # persistentVolumeClaim:
     #   claimName: models                # this namespace
     #   path: qwen                       # directory inside the volume; empty is the root
     # image:
     #   reference: registry.example.com/team/qwen@sha256:669ed7b1...48   # digest-pinned
-  allowPatterns: ["*.safetensors", "*.json", "tokenizer*"]   # optional; Hugging Face only
+  allowPatterns: ["*.safetensors", "*.json", "tokenizer*"]   # optional; hub sources only
   ignorePatterns: ["original/"]                              # optional; wins over allowPatterns
 status:
   resolved:
@@ -49,7 +53,7 @@ status:
     manifestDigest: sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448
     fileCount: 10
     sizeBytes: 999604126
-  nodes:                                 # Hugging Face only; where the content is across nodes
+  nodes:                                 # hub sources only; where the content is across nodes
     ready: 3
     downloading: 1
     failed: 0
@@ -63,9 +67,10 @@ status:
   new artifact. That is also what lets a deployment's frozen reference pin anything.
 - **The Secret and the claim need not exist yet.** Admission does not read them; their absence is a
   reason in status (`SecretNotFound`, `ClaimNotFound`).
-- **A `modelScope` member exists and is refused.** Opening it needs branch resolution checked
-  against git, a listing that recovers from the API's silent truncation at 3000 entries, and a vLLM
-  runner whose ModelScope SDK accepts a commit (1.39.1 or later).
+- **A `modelScope` member is a second hub.** Its repository and revision rules are the Hugging Face
+  ones, the revision defaults to `master`, and the patterns apply to it the same way. What differs
+  is [how it resolves](#resolution-and-revalidation) and the [engine
+  environment](#engine-delivery) an Engine download reads.
 - **An `image` member delivers weights already in a registry.** A digest-pinned reference is the
   artifact's whole identity; kubelet pulls and mounts it through an image volume, outside the node
   cache. The digest contract, the build, the floors and the costs are on the
@@ -103,9 +108,31 @@ A repository that does not exist and a private one the token cannot read answer 
 message says "does not exist or is not accessible". A gated repository answers 200 on the revision
 and tree endpoints and only masks its digests, which is why the masked tree is its own row.
 
-**A mistyped token is silent on a public repository**: the Hub answers as if no token had been sent.
-The controller therefore checks each new token with `/api/whoami-v2` and emits a Warning event
-`InvalidToken` when the Hub rejects it; `Resolved` is unchanged.
+**A ModelScope source resolves the same way, against its own API.** A full commit is taken as is; a
+branch or tag is resolved through `GET /api/v1/models/<id>/commits?Ref=<rev>` and **cross-checked
+against git**: `git ls-remote` over `https://www.modelscope.cn/<id>.git` must name the same commit
+(the peeled entry, for an annotated tag).
+
+A disagreement refuses the resolution as `SourceUnavailable` — the hub's index and its git
+disagreeing is exactly how a misspelled parameter would silently resolve the wrong revision. A
+private repository authenticates ls-remote with the user name `oauth2` and the namespace's token.
+
+The file listing walks `repo/files?Revision=<commit>&Recursive=true`; the API truncates **silently
+at 3000 entries**, so a full page is re-listed per directory, and a directory with 3000 or more
+direct children refuses (`SourceUnavailable`) — the API cannot enumerate it, and a partial
+manifest would be a silent wrong answer. Every file must carry the hub's `sha256`.
+
+| ModelScope answers | `Resolved` reason |
+| --- | --- |
+| `commits` answers no commit for the ref, or the listing has no file tree at the revision (code 10990101004) | `RevisionNotFound` |
+| 404 code 10010205001 (not found) or 10010200001 (no access), any other 401/403/404 | `AccessDenied` |
+| 5xx, a network error, a directory the API cannot enumerate | `SourceUnavailable` |
+
+ModelScope has no distinct 401 or 403, and "no access" covers private-without-token,
+gated-without-grant and valid-token-without-grant alike — the message says "does not exist or is
+not accessible" as on Hugging Face. **A mistyped token is silent there too**, so the controller
+checks each new token with `GET /openapi/v1/users/me` and emits the same `InvalidToken` Warning
+when the hub rejects it.
 
 **Access is revalidated** every `model-artifact-revalidate-interval` (default `24h`) and whenever the
 Secret changes, with one `HEAD` of a file at the resolved commit, redirects not followed:
@@ -116,6 +143,10 @@ Secret changes, with one `HEAD` of a file at the resolved commit, redirects not 
   revokes pinned weights; an unreadable Secret is treated the same way;
 - a deleted Secret, or one without its `token` key, sets `Resolved=False` at once;
 - a later pass restores `Resolved=True`, with the commit and digest unchanged.
+
+The HEAD is `/api/models/<repo>/resolve/<commit>/<file>` on Hugging Face and
+`/api/v1/models/<id>/repo?Revision=<commit>&FilePath=<file>` on ModelScope, where a 200 — an LFS
+file's too — confirms and every 404 is an access refusal.
 
 `Resolved=False` stops **new** consumption: no new replica, replacement or scale-up. It never
 deletes a running Pod. A claim source is resolved by the claim existing; the operator never reads
@@ -133,7 +164,8 @@ sha256:8111d5af… 453864 model.safetensors
 ```
 
 - A line is `<algorithm>:<hex> <size> <path>`, sorted by the path's UTF-8 bytes, every line ending
-  in LF. An LFS file uses its `sha256`, any other file its git blob `gitsha1`.
+  in LF. An LFS file uses its `sha256`, any other file its git blob `gitsha1`; **a ModelScope
+  artifact's manifest is all `sha256` lines**, the hub giving no other digest.
 - A path must be valid UTF-8, relative, with no control character and no empty, `.` or `..`
   segment; the whole resolution fails on one that is not.
 - The source, the repository, the commit and the patterns are **not** part of it, so the same files
@@ -161,12 +193,13 @@ spec:
 reference to an artifact that does not exist or has not resolved is admitted, and the deployment
 creates no Pod until it resolves.
 
-A claim source is always mounted directly. A Hugging Face source takes the delivery the
+A claim source is always mounted directly. A hub source (Hugging Face or ModelScope) takes the
+delivery the
 `model-artifact-delivery-mode` Setting names, `Engine` by default and `Node` where the chart deploys
 the node plugin ([switching it](operations.md#switch-delivery) rolls each such
 deployment once):
 
-| | Claim source (`Pvc`) | Hugging Face, `Engine` | Hugging Face, `Node` | Image source (`Image`) |
+| | Claim source (`Pvc`) | Hub source, `Engine` | Hub source, `Node` | Image source (`Image`) |
 | --- | --- | --- | --- | --- |
 | Weights | the claim, read-only, at `/var/lib/gpustack/model`, `subPath` = `path` | downloaded by the engine into `/var/lib/gpustack/model-cache` | the node's verified copy, read-only, at `/var/lib/gpustack/model` | the image, read-only, at `/var/lib/gpustack/model` |
 | vLLM | `vllm serve /var/lib/gpustack/model` | `vllm serve <repository> --revision <commit>` | as a claim | as a claim |
@@ -190,7 +223,9 @@ limit is not raised: the volume's bytes are not the Pod's.
 While `artifactRef` is set, admission refuses:
 
 - on vLLM `--model`, `--revision`, `--tokenizer-revision` and `--download-dir`, on SGLang
-  `--model-path`, `--revision` and `--download-dir`, and `HF_TOKEN`, `HF_ENDPOINT` and `HF_HOME` in
+  `--model-path`, `--revision` and `--download-dir`, and `HF_TOKEN`, `HF_ENDPOINT`, `HF_HOME`,
+  `MODELSCOPE_API_TOKEN`, `MODELSCOPE_DOMAIN`, `MODELSCOPE_CACHE` and the engine's
+  `VLLM_USE_MODELSCOPE` / `SGLANG_USE_MODELSCOPE` in
   `env`, whatever the source — a later value would silently replace the artifact's;
 - a role volume at, inside or around `/var/lib/gpustack/model` or `/var/lib/gpustack/model-cache`.
 
@@ -208,7 +243,15 @@ Under `Engine`, the engine downloads the pinned commit itself, with:
 | `HF_HOME` | `/var/lib/gpustack/model-cache` | yes |
 | `HF_ENDPOINT` | the `model-artifact-huggingface-endpoint` Setting | yes |
 | `HF_TOKEN` | a `secretKeyRef` to the artifact's Secret, key `token`; the value never enters the Pod spec | yes |
+| `MODELSCOPE_CACHE` | `/var/lib/gpustack/model-cache` | yes |
+| `MODELSCOPE_DOMAIN` | the `model-artifact-modelscope-endpoint` Setting's bare host — the runners' SDK prefixes the scheme itself | yes |
+| `MODELSCOPE_API_TOKEN` | a `secretKeyRef` to the artifact's Secret, key `token` | yes |
+| `VLLM_USE_MODELSCOPE` / `SGLANG_USE_MODELSCOPE` | `true`, routing the engine's own download through its bundled ModelScope SDK; each engine reads only its own | yes |
 | `HTTPS_PROXY`, `NO_PROXY` | the proxy Settings, when set | no — a role's own value wins |
+
+A ModelScope artifact renders the `MODELSCOPE_*` rows; a Hugging Face artifact the `HF_*` rows.
+The ModelScope rows reach the engine through the runner's bundled SDK, whose version decides
+whether a commit is accepted — see [Requirements](#requirements-and-limits).
 
 The cache is an `emptyDir` with a `sizeLimit` of the manifest's size plus a tenth, and at least
 1 GiB more. The manifest is the whole commit, so it bounds whatever subset the engine downloads (vLLM
@@ -336,6 +379,14 @@ waits instead when that node cannot run one, naming the node and the floor
 - **Kubernetes 1.29**, the floor the bundled Kueue already sets. `PodReadyToStartContainers` (beta,
   on by default since 1.29) feeds `WeightsReady`; with it off, a claim deployment's `WeightsReady`
   stays `WeightsNotMounted` while its replicas run.
+- **A ModelScope Engine download needs the runner's ModelScope SDK at 1.39.1 or later**, the
+  version that accepts a commit as the revision. The operator renders the environment whatever the
+  runner holds and cannot see into it: on a runner below the floor the engine fails with the SDK's
+  own `NotExistError`.
+- **The floor was measured against the published runners.** The Ascend `cann9.1-*-vllm0.23.0` line
+  and the SGLang 0.5.18 line meet it; the current CUDA `vllm0.25.1` and `vllm0.29.0` lines do not.
+  For those, name a runner image of your own that bundles a conforming SDK, as any role may. Node
+  delivery needs no runner at all.
 - **Image sources need image volumes** and floors above Kubernetes's own; creation is refused
   below them. The full line is on the
   [Model Image Source](image-source.md#versions-and-prerequisites).
@@ -348,8 +399,8 @@ waits instead when that node cannot run one, naming the node and the floor
   [a node-delivered model prefers the nodes holding
   it](../architecture/topology-aware-scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
 - Settings: [Settings & Environment Variables](../settings.md#online-adjustable-settings) carries the
-  endpoint, proxy, no-proxy, CA bundle, revalidation interval, delivery mode and the node cache's
-  watermarks and download limits.
+  two hub endpoints, proxy, no-proxy, CA bundle, revalidation interval, delivery mode and the node
+  cache's watermarks and download limits.
 
 ---
 
