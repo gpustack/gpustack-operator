@@ -417,6 +417,17 @@ func (m *Materializer) fromPeersOnly(ctx context.Context, j *job, a *store.Attem
 	return m.fetchTree(ctx, j, a, manifest, nil, nil, src)
 }
 
+// hubFileURL is a hub download address, or empty when there is no hub: an Expected identity's
+// files carry no fallback URL, and the per-file loop goes to the peers or fails naming the
+// digest nothing holds.
+func hubFileURL(hub Hub, src *source, path string) string {
+	if hub == nil {
+		return ""
+	}
+
+	return hub.FileURL(src.repository, src.commit, path)
+}
+
 func (m *Materializer) fromSource(
 	ctx context.Context, j *job, a *store.Attempt, hub Hub, dl *download.Downloader, src *source,
 ) error {
@@ -484,7 +495,7 @@ func (m *Materializer) fetchTree(
 	for i, e := range manifest.Entries {
 		f := download.File{
 			Path: e.Path, Size: e.Size, Digest: e.Digest,
-			URL:        hub.FileURL(src.repository, src.commit, e.Path),
+			URL:        hubFileURL(hub, src, e.Path),
 			Dest:       dests[i],
 			Checkpoint: checkpoints[i],
 			Token:      src.currentToken,

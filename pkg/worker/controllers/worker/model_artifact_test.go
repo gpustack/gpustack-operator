@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -1139,6 +1141,26 @@ func TestModelArtifactReconcileAssertsTheExpectedDigest(t *testing.T) {
 		env.reconcile(t, "qwen")
 		assert.True(t, ModelArtifactConditionResolved.IsTrue(mustGet(t, env.cli)))
 	})
+}
+
+// TestModelArtifactKVIdentity pins the identity a KV store's keys carry: the manifest digest's
+// leading digits wherever the artifact resolved to one — an anchored artifact included, its
+// Expected identity being a digest like any other — and the UID's hash only where nothing did.
+func TestModelArtifactKVIdentity(t *testing.T) {
+	ma := artifactFixture("", true, true)
+	assert.Equal(t, "m-"+strings.Repeat("1", 32), modelArtifactKVIdentity(ma),
+		"a hub artifact's identity is its digest's leading digits")
+
+	ma.Spec.ExpectedDigest = testArtifactDigest
+	ma.Status.Resolved.Revision = ""
+	ma.Status.Resolved.DigestSource = workercore.ModelArtifactDigestSourceExpected
+	assert.Equal(t, "m-"+strings.Repeat("1", 32), modelArtifactKVIdentity(ma),
+		"an Expected identity keys on the digest it carries")
+
+	claim := artifactFixture("models", true, true)
+	sum := sha256.Sum256([]byte(claim.UID))
+	assert.Equal(t, "m-"+hex.EncodeToString(sum[:])[:32], modelArtifactKVIdentity(claim),
+		"a claim's identity is the artifact, not its content")
 }
 
 func mustGet(t *testing.T, cli ctrlcli.Client) *workercore.ModelArtifact {
