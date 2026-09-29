@@ -138,19 +138,14 @@ func LeaderEndpoints(kvcb *workercore.KVCacheBackend) []workercore.KVCacheBacken
 	}
 }
 
-// LeaderReplicas is how many leader processes the backend RUNS, which is spec.replicas only once
-// something elects between them.
+// LeaderReplicas is how many leader processes the backend runs.
 //
 // REQUIRED: the clamp is the split brain, not defensive tidiness. The schema's `maximum=5` caps the
 // value but cannot express a cross-field pairing, and the schema is the documented authority exactly
-// where the webhook is NOT installed -- so that cluster admits `replicas: 3` with no
-// `highAvailability`, and three masters with nothing electing between them each serve, each
+// where the webhook is NOT installed -- so that cluster admits `replicas: 3` with
+// `electionBackend: None`, and three masters with nothing electing between them each serve, each
 // allocating against one pool. One process is the only safe reading of that object, and the
 // divergence from spec.replicas is visible in `kubectl get deploy` rather than in a log line.
-//
-// The same clamp covers highAvailability with one replica, where it is a no-op on the number: the
-// election the field asks for does not exist below two processes (see leaderNeedsAPIAccess), so the
-// count the field names is the count that renders anyway.
 //
 // Everything else the replica count decides -- the update strategy, the rollout deadline -- reads
 // this rather than the field, so the three cannot disagree about whether there is an election.
@@ -187,8 +182,8 @@ func LeaderTemplateElects(template core.PodTemplateSpec) bool {
 // LeaderDeploymentAtOneReplica is a rendered leader Deployment with the count, strategy and deadline
 // of one replica, and the template left as rendered.
 //
-// It is the first of the two writes that raise an EXISTING Deployment past one replica, where the
-// election turns on. The Deployment controller handles a replica change as a scaling event before it
+// It is the first of the two writes that raise an unelected Deployment past one replica. The
+// Deployment controller handles a replica change as a scaling event before it
 // consults the strategy, and scales the only active ReplicaSet to the new count -- in the update that
 // also changes the template, that is the OLD one. One write carrying both would start more masters
 // that do not elect, next to the one already serving, whatever the strategy says. Written at one
@@ -205,12 +200,10 @@ func LeaderDeploymentAtOneReplica(deploy *apps.Deployment) *apps.Deployment {
 // leaderUpdateStrategy picks how the leader's Deployment is updated, and the two answers are
 // opposites rather than variations.
 //
-// SINGLE REPLICA: Recreate. A RollingUpdate's maxSurge defaults to 25%, which ROUNDS UP -- to one,
-// against one desired replica -- so the new master starts before the old one stops and the two run
-// at once. Without an election that is a split brain, on every image or flag change rather than
-// never. The cost is a gap with no master, which is the right trade: a member that loses its master
-// keeps its segment and re-registers, while two masters allocating against one pool cannot be
-// reconciled after the fact.
+// SINGLE REPLICA: Recreate. A RollingUpdate's maxSurge defaults to 25%, which rounds up to one.
+// With election disabled, the old and new masters would serve together. With election enabled,
+// the new standby cannot become ready until the old leader releases the Lease, so the default
+// maxUnavailable of zero can stall the rollout. Recreate stops the old process first.
 //
 // SEVERAL REPLICAS: RollingUpdate, and both parameters invert.
 //   - maxSurge may exceed zero, because the lease admits one leader however many processes run.

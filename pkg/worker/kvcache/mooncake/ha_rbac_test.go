@@ -12,11 +12,11 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
-// haBackend is the shared fixture with the election turned on, which takes standbys: one replica
-// has nothing to elect between, so the field alone renders no election.
+// haBackend is the shared fixture with Kubernetes election and three replicas.
 func haBackend(mutate ...func(*workercore.KVCacheBackend)) *workercore.KVCacheBackend {
 	all := append([]func(*workercore.KVCacheBackend){
 		func(kvcb *workercore.KVCacheBackend) {
+			kvcb.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 			kvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 			kvcb.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
 		},
@@ -24,27 +24,46 @@ func haBackend(mutate ...func(*workercore.KVCacheBackend)) *workercore.KVCacheBa
 	return testBackend(all...)
 }
 
-// TestTheElectionExistsOnlyAboveOneReplica pins the gate itself, and across the WHOLE surface the
-// predicate feeds rather than only the RBAC half: a single-replica backend that sets
-// highAvailability must render exactly the non-election shape everywhere, because each rendering
-// that disagreed would strand one side -- a member following a Lease no leader takes, or a leader
-// campaigning for one on an image that has no lease backend.
-//
-// The boundary is asserted at two rather than at one: the flip ON is the behavior a scale-up
-// depends on, and a gate that never opened would pass every assertion about staying shut.
-func TestTheElectionExistsOnlyAboveOneReplica(t *testing.T) {
+func TestLeaderElectionChoice(t *testing.T) {
+	cases := []struct {
+		name     string
+		backend  string
+		replicas int32
+		want     bool
+		count    int32
+	}{
+		{name: "default at one replica", replicas: 1, want: true, count: 1},
+		{name: "explicit Kubernetes at one replica", backend: "Kubernetes", replicas: 1, want: true, count: 1},
+		{name: "None at one replica", backend: "None", replicas: 1, count: 1},
+		{name: "default at three replicas", replicas: 3, want: true, count: 3},
+		{name: "None is clamped without admission", backend: "None", replicas: 3, count: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kvcb := testBackend(func(k *workercore.KVCacheBackend) {
+				k.Spec.Connection.Managed.Leader.ElectionBackend = tc.backend
+				k.Spec.Connection.Managed.Leader.Replicas = ptr.To(tc.replicas)
+			})
+			deploy := RenderLeaderDeployment(kvcb, "mooncake:v0.3.13")
+			assert.Equal(t, tc.count, *deploy.Spec.Replicas)
+			assert.Equal(t, tc.want, LeaderTemplateElects(deploy.Spec.Template))
+			assert.Equal(t, tc.want, RenderLeaderRBAC(kvcb).Wanted())
+			assert.Equal(t, tc.want, RenderMemberRBAC(kvcb).Wanted())
+		})
+	}
+}
+
+// TestTheElectionPersistsAtOneReplica pins the startup shape needed for a later scale-up.
+func TestTheElectionPersistsAtOneReplica(t *testing.T) {
 	one := testBackend(func(kvcb *workercore.KVCacheBackend) {
-		kvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+		kvcb.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 	})
 
-	for _, flag := range RenderLeaderFlags(one) {
-		assert.NotContains(t, flag, "enable_ha",
-			"one process has nothing to elect between, so the field stays inert")
-	}
-	assert.False(t, RenderLeaderRBAC(one).Wanted())
-	assert.False(t, RenderMemberRBAC(one).Wanted())
-	assert.Empty(t, leaderServiceAccountName(one))
-	assert.Empty(t, memberServiceAccountName(one))
+	assert.Contains(t, RenderLeaderFlags(one), "-enable_ha=true")
+	assert.True(t, RenderLeaderRBAC(one).Wanted())
+	assert.True(t, RenderMemberRBAC(one).Wanted())
+	assert.NotEmpty(t, leaderServiceAccountName(one))
+	assert.NotEmpty(t, memberServiceAccountName(one))
 	assert.Equal(t, LeaderServiceHost(one)+":50051", MemberMasterEntry(one),
 		"and the member is pointed at the Service, not at a Lease nobody takes")
 
@@ -52,12 +71,13 @@ func TestTheElectionExistsOnlyAboveOneReplica(t *testing.T) {
 	require.NotNil(t, deploy.Spec.Replicas)
 	assert.Equal(t, int32(1), *deploy.Spec.Replicas)
 	for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
-		assert.NotEqual(t, LeaderPodIPEnv, e.Name,
-			"the advertised address is read only by an election, so one replica does not define it")
+		if e.Name == LeaderPodIPEnv {
+			assert.NotEmpty(t, e.ValueFrom)
+		}
 	}
 
 	two := testBackend(func(kvcb *workercore.KVCacheBackend) {
-		kvcb.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
+		kvcb.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 		kvcb.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](2)
 	})
 	assert.Contains(t, RenderLeaderFlags(two), "-enable_ha=true",
@@ -66,7 +86,7 @@ func TestTheElectionExistsOnlyAboveOneReplica(t *testing.T) {
 	assert.Equal(t, LeaderServiceHost(two)+":50051", MemberMasterEntry(two))
 
 	// The reader the aligner judges a live template with agrees with the renderer both ways.
-	assert.False(t, LeaderTemplateElects(deploy.Spec.Template))
+	assert.True(t, LeaderTemplateElects(deploy.Spec.Template))
 	assert.True(t, LeaderTemplateElects(RenderLeaderDeployment(two, "mooncake:v0.3.13").Spec.Template))
 }
 
@@ -78,7 +98,7 @@ func TestTheElectionExistsOnlyAboveOneReplica(t *testing.T) {
 // granted.
 func TestRenderLeaderRBAC_FollowsTheField(t *testing.T) {
 	assert.False(t, RenderLeaderRBAC(testBackend()).Wanted(),
-		"a backend without highAvailability renders no API access")
+		"a backend with electionBackend None renders no API access")
 
 	got := RenderLeaderRBAC(haBackend())
 	require.True(t, got.Wanted())
@@ -96,7 +116,7 @@ func TestRenderLeaderRBAC_FollowsTheField(t *testing.T) {
 	}
 	assert.Equal(t, "mooncake-dram-leader", leaderServiceAccountName(haBackend()))
 	assert.Empty(t, leaderServiceAccountName(testBackend()),
-		"without HA the PodSpec names no account, which is what it did before this existed")
+		"without election the PodSpec names no account")
 
 	for _, ns := range []string{
 		got.ServiceAccount.Namespace, got.Role.Namespace, got.RoleBinding.Namespace,

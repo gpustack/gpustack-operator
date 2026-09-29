@@ -122,6 +122,7 @@ func testBackend(mutate ...func(*workercore.KVCacheBackend)) *workercore.KVCache
 				Managed: &workercore.KVCacheBackendManaged{
 					Leader: workercore.KVCacheBackendLeader{
 						Replicas:           ptr.To[int32](1),
+						ElectionBackend:    "None",
 						AllocationStrategy: "FreeRatioFirst",
 					},
 					Members: []workercore.KVCacheBackendMember{
@@ -206,8 +207,8 @@ func withLeaderReplicas(replicas int32) func(*workercore.KVCacheBackend) {
 // TestLeaderWorkload_UpdateStrategyInvertsWithStandbys asserts the two update shapes ARE opposites,
 // not variations, and each case names the failure the other one produces.
 //
-// One replica has no election, so a surging second master is a split brain. Several replicas have an
-// election, so the surge is safe -- and now the danger is the reverse: exactly one replica is ever
+// With one replica, Recreate avoids an unelected split brain and an elected rollout deadlock.
+// Several replicas have an election, so the surge is safe. Exactly one replica is ever
 // ready, because the standbys deliberately are not, so maxUnavailable has to be the replica count
 // itself. `[跑]` replicas-1 was measured to deadlock on a single-node cluster: the controller scales
 // an old Pod down only while availablePodCount exceeds replicas-maxUnavailable, which at replicas-1

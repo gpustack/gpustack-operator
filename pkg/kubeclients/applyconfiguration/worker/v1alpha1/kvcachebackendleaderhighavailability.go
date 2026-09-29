@@ -5,17 +5,11 @@ package v1alpha1
 // KVCacheBackendLeaderHighAvailabilityApplyConfiguration represents a declarative configuration of the KVCacheBackendLeaderHighAvailability type for use
 // with apply.
 //
-// KVCacheBackendLeaderHighAvailability turns leader election on, and carries how members find the
-// leader it elects.
+// KVCacheBackendLeaderHighAvailability configures how members find the elected leader.
 //
-// DECLARING THE BLOCK IS THE SWITCH, and there is no key inside it to turn the feature back off.
-// An `enabled: false` beside `replicas: 3` would be a third state that admission would have to
-// adjudicate and every reader would have to remember, while presence has no such state. Lease
-// tuning — duration, renew deadline — can also be added here later without a breaking change.
-//
-// A standby REPLICATES NOTHING. The store's operation log is the only way to feed one, and it runs
-// on a leadership backend this operator's image cannot carry, so a failover or a restart starts
-// from an empty cache. The store's snapshot is not offered either: restoring one can make the cache
+// A standby REPLICATES NOTHING. Without a snapshot or operation log, the new leader loses the DRAM
+// key index. A member's local disk tier can re-register keys it has fully offloaded after the
+// election. The store's snapshot is not offered: restoring one can make the cache
 // serve another key's bytes instead of a miss, which is why its flags are refused in extraArgs.
 type KVCacheBackendLeaderHighAvailabilityApplyConfiguration struct {
 	// MemberAddressing selects how a member is told to find the master once an election runs. Both

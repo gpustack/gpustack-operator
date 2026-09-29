@@ -51,6 +51,7 @@ func electingBackend(name string) *workercore.KVCacheBackend {
 				Managed: &workercore.KVCacheBackendManaged{
 					Leader: workercore.KVCacheBackendLeader{
 						Replicas:         ptr.To[int32](3),
+						ElectionBackend:  "Kubernetes",
 						HighAvailability: &workercore.KVCacheBackendLeaderHighAvailability{},
 					},
 				},
@@ -240,10 +241,10 @@ func TestLeaderHandoverIgnoresBackendsWithNoElection(t *testing.T) {
 		kvcb *workercore.KVCacheBackend
 	}{
 		{
-			name: "no high availability",
+			name: "no election",
 			kvcb: func() *workercore.KVCacheBackend {
 				k := electingBackend("store")
-				k.Spec.Connection.Managed.Leader.HighAvailability = nil
+				k.Spec.Connection.Managed.Leader.ElectionBackend = "None"
 				return k
 			}(),
 		},
@@ -409,10 +410,11 @@ func TestElectionObservedDiscriminates(t *testing.T) {
 			wantReason: "NoHolder",
 		},
 		{
-			name:       "one replica, which elects nothing by design",
+			name:       "one replica still elects",
 			objects:    []ctrlcli.Object{readyLeaderDeployment("store")},
 			replicas:   1,
-			wantAbsent: true,
+			wantStatus: meta.ConditionFalse,
+			wantReason: "NoHolder",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -465,14 +467,14 @@ func TestElectionObservedNamesNoCause(t *testing.T) {
 }
 
 // TestElectionObservedIsDroppedWhenTheElectionGoesAway pins the removal half, which the status
-// carrying forward makes necessary: a backend scaled back to one replica would otherwise go on
+// carrying forward makes necessary: a backend switched to electionBackend None would otherwise go on
 // publishing a verdict about a lease nothing takes.
 func TestElectionObservedIsDroppedWhenTheElectionGoesAway(t *testing.T) {
 	r := &KVCacheBackendReconciler{
 		Client: ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build(),
 	}
 	kvcb := electingBackend("store")
-	kvcb.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
+	kvcb.Spec.Connection.Managed.Leader.ElectionBackend = "None"
 
 	holder := kvcb.DeepCopy()
 	holder.Status.Conditions = append(holder.Status.Conditions, gpustack.Condition{

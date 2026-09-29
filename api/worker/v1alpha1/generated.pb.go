@@ -3433,6 +3433,11 @@ func (m *KVCacheBackendLeader) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.ElectionBackend)
+	copy(dAtA[i:], m.ElectionBackend)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.ElectionBackend)))
+	i--
+	dAtA[i] = 0x3a
 	if len(m.ExtraEnv) > 0 {
 		for iNdEx := len(m.ExtraEnv) - 1; iNdEx >= 0; iNdEx-- {
 			{
@@ -9888,6 +9893,8 @@ func (m *KVCacheBackendLeader) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
+	l = len(m.ElectionBackend)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -12691,6 +12698,7 @@ func (this *KVCacheBackendLeader) String() string {
 		`MultiTenancy:` + valueToStringGenerated(this.MultiTenancy) + `,`,
 		`ExtraArgs:` + fmt.Sprintf("%v", this.ExtraArgs) + `,`,
 		`ExtraEnv:` + repeatedStringForExtraEnv + `,`,
+		`ElectionBackend:` + fmt.Sprintf("%v", this.ElectionBackend) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -24471,6 +24479,38 @@ func (m *KVCacheBackendLeader) Unmarshal(dAtA []byte) error {
 			if err := m.ExtraEnv[len(m.ExtraEnv)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
+			iNdEx = postIndex
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ElectionBackend", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ElectionBackend = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

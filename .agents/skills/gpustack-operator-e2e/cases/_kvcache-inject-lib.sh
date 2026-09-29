@@ -163,6 +163,7 @@ spec:
   connection:
     managed:
       leader:
+        electionBackend: None
         multiTenancy: true
       members:
         - nodeSelector: {kubernetes.io/os: linux}

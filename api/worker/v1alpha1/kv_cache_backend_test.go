@@ -34,6 +34,24 @@ func memberSchema(t *testing.T) extension.JSONSchemaProps {
 	return *schema.Items.Schema
 }
 
+func TestKVCacheBackendElectionBackendSchema(t *testing.T) {
+	crd := GetCustomResourceDefinitions()["KVCacheBackend"]
+	require.NotNil(t, crd)
+	leader := *crd.Spec.Versions[0].Schema.OpenAPIV3Schema
+	for _, level := range []string{"spec", "connection", "managed", "leader"} {
+		next, ok := leader.Properties[level]
+		require.True(t, ok, "missing %s", level)
+		leader = next
+	}
+	backend, ok := leader.Properties["electionBackend"]
+	require.True(t, ok)
+	require.NotNil(t, backend.Default)
+	assert.Equal(t, `"Kubernetes"`, string(backend.Default.Raw))
+	require.Len(t, backend.Enum, 2)
+	assert.Equal(t, []string{`"None"`, `"Kubernetes"`},
+		[]string{string(backend.Enum[0].Raw), string(backend.Enum[1].Raw)})
+}
+
 // memberStatusListSchema returns status.members as the generated CRD carries it.
 func memberStatusListSchema(t *testing.T) extension.JSONSchemaProps {
 	t.Helper()

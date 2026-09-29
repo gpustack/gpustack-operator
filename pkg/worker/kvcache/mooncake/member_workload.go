@@ -583,7 +583,7 @@ func memberContainerSpec(
 // standby does not answer as the serving leader.
 func MemberMasterEntry(kvcb *workercore.KVCacheBackend) string {
 	leader := kvcb.Spec.Connection.Managed.Leader
-	if leaderNeedsAPIAccess(leader) &&
+	if leaderNeedsAPIAccess(leader) && leader.HighAvailability != nil &&
 		leader.HighAvailability.MemberAddressing == MemberAddressingLease {
 		return fmt.Sprintf("k8s://%s/%s", kuberess.SystemNamespaceName, LeaderObjectName(kvcb))
 	}

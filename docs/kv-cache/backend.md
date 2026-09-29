@@ -192,11 +192,13 @@ Each variant is built on `0.3.13.post1`, the line vLLM's supported clients are o
 minimum](../model-deployment/engine-versions.md). SGLang's clients are on the 0.3.12 line, which this
 project does not build. Which line a backend needs is that table's question.
 
-**A `0.3.10.post2` variant also needs `leader.multiTenancy: false` written out.** The tenant ledger
-hangs on the master's `-enable_multi_tenants` switch, which Mooncake took in 0.3.12, and the field
-defaults on — so on an older image the default renders a flag the master does not recognize, and it
-exits at startup. The explicit false renders no flag, which is the command line such an image has
-always run.
+**A `0.3.10.post2` variant needs `leader.electionBackend: None` and
+`leader.multiTenancy: false` written out.** It cannot run the default Kubernetes election.
+
+The tenant ledger hangs on the master's `-enable_multi_tenants` switch, which Mooncake took in 0.3.12,
+and the field defaults on. On an older image the default renders a flag the master does not recognize,
+and it exits at startup. The explicit false renders no flag, which is the command line such an image
+has always run.
 
 **A VRAM group needs a build with VRAM segments compiled in (`USE_VRAM_SEGMENT=ON`), and the stock
 `-cpu` default is not one.** VRAM segments exist only on the `0.3.13` line — the `0.3.10.post2`
@@ -263,13 +265,13 @@ its own per-version rule — it needs a master from 0.3.12 on — see
 ## The metadata plane
 
 **The metadata plane is peer-to-peer and has no API field.** The member's `metadata_server` renders as
-the literal `P2PHANDSHAKE`, unconditionally. A single-leader backend therefore has **zero external
-dependencies beyond its image** — no etcd, no Redis, nothing to deploy alongside it.
+the literal `P2PHANDSHAKE`, unconditionally. It needs no etcd or Redis. The default leader election
+does use a Kubernetes Lease and its API access, even with one leader replica.
 
 Two axes get confused here, so both are stated. The metadata plane is how clients find one another.
-The **HA backend store** — `-enable_ha` with `-ha_backend_type` — is how leader replicas elect one
-among them, and that is where the Kubernetes Lease lives. It is
-[`highAvailability`](leader.md#high-availability), and it moves nothing on this plane.
+The **HA backend store** — `-enable_ha` with `-ha_backend_type` — is how the leader elects, even at
+one replica by default. The Kubernetes Lease is selected by
+[`leader.electionBackend`](leader.md#high-availability), and it moves nothing on the metadata plane.
 
 ⛔ **A manifest that tries to configure the metadata plane is not refused with a helpful message.**
 There is no field, so there is nothing for a webhook to see:
@@ -570,8 +572,8 @@ Five phases — `Provisioning`, `Ready`, `Degraded`, `Error`, `Deleting`. `Ready
 
 Conditions report the axes: `LeaderAvailable`, `MembersMounted`, `CapacityObserved`, `PoolWrites`, `Deletable` and
 `RolloutComplete`. Two more appear only where they have something to judge — `ElectionObserved`
-above one leader replica, and `TierWasEmpty` when a member group carries a
-[local disk tier](local-disk-tier.md).
+when `leader.electionBackend` is `Kubernetes` (including at one replica), and
+`TierWasEmpty` when a member group carries a [local disk tier](local-disk-tier.md).
 
 **Those last three do not move the phase, and that is deliberate.** A rollout in flight, an election
 that has not happened, and a disk tier found holding data are all states in which the backend serves

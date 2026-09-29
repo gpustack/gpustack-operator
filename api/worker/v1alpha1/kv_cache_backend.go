@@ -278,13 +278,10 @@ type KVCacheBackendLeader struct {
 	// Replicas is how many leader processes run, of which exactly one serves at a time. The rest are
 	// standbys: they hold no data, answer no request, and exist to take over.
 	//
-	//   - More than one REQUIRES HighAvailability. Electing a leader among several needs a leadership
-	//     record, and the webhook refuses the pair without one rather than silently running two
-	//     leaders against the same members.
-	//   - Raising this past one TURNS THE ELECTION ON, and the flip is re-evaluated on every
-	//     reconcile rather than decided at create. It restarts the leader and rolls every member —
-	//     the member's master entry changes shape with it — so the store's cached contents do not
-	//     survive the crossing. The same holds on the way back down to one.
+	//   - More than one REQUIRES ElectionBackend to be Kubernetes. The webhook refuses None with several
+	//     replicas, and the renderer clamps it to one if admission is unavailable.
+	//   - Changing the replica count does not change the election mode. The default Kubernetes mode
+	//     runs the election even at one replica, so scaling it up does not restart the first leader.
 	//   - Raising this adds no capacity, which members do. The ceiling is here to catch the reading
 	//     that it does, and it is duplicated in the webhook on purpose: this one still holds when
 	//     the webhook is not installed, which is when a second leader would be rendered rather than
@@ -295,26 +292,24 @@ type KVCacheBackendLeader struct {
 	// +k8s:validation:maximum=5
 	Replicas *int32 `json:"replicas,omitempty" protobuf:"varint,1,opt,name=replicas"`
 
-	// HighAvailability elects the leader through a Kubernetes Lease, and it is what allows Replicas
-	// above 1. The election itself needs no settings: the Lease is named after this backend, so
-	// there is no connection target to supply, and the API access it needs is rendered beside the
-	// workload. What the block does carry is how members find the leader it elects.
-	//
-	//   - Unset, the leader runs as a single process exactly as before — no election flag, no extra
-	//     object, the command line it ran before this field existed.
-	//   - Set with Replicas at 1, the ELECTION is INERT: one process has nothing to elect between,
-	//     so no election flag, Lease or API token is rendered until Replicas rises above 1. That
-	//     makes an empty block safe to set up front on a store image built without the k8s-lease
-	//     backend, whose master fails at startup the moment the election flags appear — those flags
-	//     arrive only when there is something for them to elect. Snapshot is the exception and says
-	//     so on itself.
-	//   - With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile
-	//     interval. Each replica seeds its tenant quota policy at its own start, so a standby that
-	//     took over after a quota was raised applies the older, lower ceiling, and an over-quota
-	//     write in this store is not refused — it evicts that tenant's own older objects,
-	//     irreversibly and without moving any counter. The quota itself is not lost: the pool
-	//     reconciler is the authority and writes the difference back on its next pass.
+	// HighAvailability configures how members find the elected leader. Election itself is selected
+	// by ElectionBackend, so this block is optional even when Replicas exceeds one.
 	HighAvailability *KVCacheBackendLeaderHighAvailability `json:"highAvailability,omitempty" protobuf:"bytes,2,opt,name=highAvailability"`
+
+	// ElectionBackend selects the leader election backend. Kubernetes uses a Lease even with one replica,
+	// so scaling up does not change the first leader's startup flags. None is for a single leader
+	// whose image cannot use Kubernetes election. More than one replica with None is refused.
+	// The enum can add other backends when they are supported.
+	//
+	// With MultiTenancy on, a failover costs HIT RATE for up to one KVCachePool reconcile interval.
+	// Each replica seeds its tenant quota policy at its own start, so a standby that took over after
+	// a quota was raised applies the older, lower ceiling. An over-quota write evicts that tenant's
+	// own older objects, irreversibly and without moving any counter. The quota itself is not lost:
+	// the pool reconciler writes the difference back on its next pass.
+	//
+	// +k8s:validation:default="Kubernetes"
+	// +k8s:validation:enum=["None","Kubernetes"]
+	ElectionBackend string `json:"electionBackend,omitempty" protobuf:"bytes,7,opt,name=electionBackend"`
 
 	// AllocationStrategy is how the leader picks which member takes a new write. Random spreads
 	// them; FreeRatioFirst biases toward the emptier member.
@@ -393,17 +388,16 @@ func (in KVCacheBackendLeader) MultiTenancyEnabled() bool {
 	return in.MultiTenancy == nil || *in.MultiTenancy
 }
 
-// KVCacheBackendLeaderHighAvailability turns leader election on, and carries how members find the
-// leader it elects.
+// KubernetesElectionEnabled applies the schema default to objects built without API server defaulting.
+func (in KVCacheBackendLeader) KubernetesElectionEnabled() bool {
+	return in.ElectionBackend == "" || in.ElectionBackend == "Kubernetes"
+}
+
+// KVCacheBackendLeaderHighAvailability configures how members find the elected leader.
 //
-// DECLARING THE BLOCK IS THE SWITCH, and there is no key inside it to turn the feature back off.
-// An `enabled: false` beside `replicas: 3` would be a third state that admission would have to
-// adjudicate and every reader would have to remember, while presence has no such state. Lease
-// tuning — duration, renew deadline — can also be added here later without a breaking change.
-//
-// A standby REPLICATES NOTHING. The store's operation log is the only way to feed one, and it runs
-// on a leadership backend this operator's image cannot carry, so a failover or a restart starts
-// from an empty cache. The store's snapshot is not offered either: restoring one can make the cache
+// A standby REPLICATES NOTHING. Without a snapshot or operation log, the new leader loses the DRAM
+// key index. A member's local disk tier can re-register keys it has fully offloaded after the
+// election. The store's snapshot is not offered: restoring one can make the cache
 // serve another key's bytes instead of a miss, which is why its flags are refused in extraArgs.
 type KVCacheBackendLeaderHighAvailability struct {
 	// MemberAddressing selects how a member is told to find the master once an election runs. Both

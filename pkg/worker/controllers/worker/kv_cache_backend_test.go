@@ -119,7 +119,7 @@ func newKVCacheBackendObject(usedBy ...workercore.KVCacheObjectReference) *worke
 			Image: "example.com/mooncake:v0",
 			Connection: workercore.KVCacheBackendConnection{
 				Managed: &workercore.KVCacheBackendManaged{
-					Leader: workercore.KVCacheBackendLeader{Replicas: ptr.To[int32](1)},
+					Leader: workercore.KVCacheBackendLeader{Replicas: ptr.To[int32](1), ElectionBackend: "None"},
 					Members: []workercore.KVCacheBackendMember{{
 						NodeSelector:      map[string]string{"kvcache-dram": "true"},
 						Medium:            "DRAM",
@@ -1300,10 +1300,11 @@ func TestKVCacheBackendReconciler_ConvergesAHighAvailabilitySwitch(t *testing.T)
 		got := new(workercore.KVCacheBackend)
 		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
 		if on {
+			got.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 			got.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
-			// The election exists only above one replica, so asking for it means standbys.
 			got.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
 		} else {
+			got.Spec.Connection.Managed.Leader.ElectionBackend = "None"
 			got.Spec.Connection.Managed.Leader.HighAvailability = nil
 			got.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
 		}
@@ -1440,11 +1441,9 @@ func backfillDeprecatedServiceAccount(obj ctrlcli.Object) {
 // either one alone empties the name.
 func TestKVCacheBackendReconciler_LeavingHighAvailabilityReleasesTheAccount(t *testing.T) {
 	for name, leave := range map[string]func(*workercore.KVCacheBackendLeader){
-		"ScaledToOneReplica": func(l *workercore.KVCacheBackendLeader) {
+		"ElectionDisabled": func(l *workercore.KVCacheBackendLeader) {
+			l.ElectionBackend = "None"
 			l.Replicas = ptr.To[int32](1)
-		},
-		"HighAvailabilityRemoved": func(l *workercore.KVCacheBackendLeader) {
-			l.HighAvailability = nil
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -1523,8 +1522,10 @@ func TestKVCacheBackendReconciler_ConvergesTheRolloutShapeOnALiveDeployment(t *t
 		require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
 		got.Spec.Connection.Managed.Leader.Replicas = ptr.To(n)
 		if n > 1 {
+			got.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 			got.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		} else {
+			got.Spec.Connection.Managed.Leader.ElectionBackend = "None"
 			got.Spec.Connection.Managed.Leader.HighAvailability = nil
 		}
 		require.NoError(t, cli.Update(ctx, got))
@@ -1577,15 +1578,14 @@ func setLeaderRollout(t *testing.T, cli ctrlcli.Client, kvcb *workercore.KVCache
 }
 
 // TestKVCacheBackendReconciler_CrossesOneReplicaWithoutMixingMasters pins how an EXISTING leader
-// Deployment crosses one replica, which is where the election turns on or off.
+// Deployment crosses one replica, with and without a concurrent election mode change.
 //
 // The Deployment controller handles a replica change as a scaling event BEFORE it looks at the
 // strategy, and scales the only active ReplicaSet to the new count -- which, in the update that also
 // changes the template, is the OLD one. So one write carrying both the election and three replicas
 // starts two more masters that do not elect, whatever the strategy says. Rising is therefore two
-// writes: the elected template at one replica under Recreate, then the count once the live
-// Deployment reports that template rolled out. Falling needs no such split, because the scaling
-// event only removes elected replicas before Recreate replaces the last one.
+// writes for an unelected live template: elect at one replica, then raise the count after that
+// template rolls out. An already elected single leader can scale without a Pod template change.
 func TestKVCacheBackendReconciler_CrossesOneReplicaWithoutMixingMasters(t *testing.T) {
 	ctx := context.Background()
 
@@ -1613,6 +1613,7 @@ func TestKVCacheBackendReconciler_CrossesOneReplicaWithoutMixingMasters(t *testi
 	scaleTo := func(n int32) func(*workercore.KVCacheBackend) {
 		return func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To(n)
+			k.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 			k.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
 		}
 	}
@@ -1678,10 +1679,29 @@ func TestKVCacheBackendReconciler_CrossesOneReplicaWithoutMixingMasters(t *testi
 		assertRendered(t, live(t, cli, kvcb), kvcb)
 	})
 
-	t.Run("falling to one is one write", func(t *testing.T) {
+	t.Run("an elected single leader scales without changing its pod template", func(t *testing.T) {
+		kvcb := newKVCacheBackendObject()
+		kvcb.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
+		cli := newKVCacheBackendClient(kvcb)
+		require.NotNil(t, reconcileKVCacheBackend(t, cli, kvcb.Name))
+		before := live(t, cli, kvcb)
+		require.True(t, elects(before))
+		setLeaderRollout(t, cli, kvcb, true)
+		want := edit(t, cli, kvcb, func(k *workercore.KVCacheBackend) {
+			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
+		})
+		after := live(t, cli, kvcb)
+		assertRendered(t, after, want)
+		assert.Equal(t, ptr.To[int32](3), after.Spec.Replicas)
+		assert.Equal(t, before.Spec.Template, after.Spec.Template,
+			"scaling an already elected leader must not roll its first pod")
+	})
+
+	t.Run("falling to one and disabling election is one write", func(t *testing.T) {
 		cli, kvcb := newElecting(t, 3)
 		want := edit(t, cli, kvcb, func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
+			k.Spec.Connection.Managed.Leader.ElectionBackend = "None"
 		})
 		deploy := live(t, cli, kvcb)
 		assert.False(t, elects(deploy))
@@ -1689,10 +1709,11 @@ func TestKVCacheBackendReconciler_CrossesOneReplicaWithoutMixingMasters(t *testi
 		assertRendered(t, deploy, want)
 	})
 
-	t.Run("dropping highAvailability above one replica is one write", func(t *testing.T) {
+	t.Run("disabling election above one replica clamps to one", func(t *testing.T) {
 		cli, kvcb := newElecting(t, 3)
 		want := edit(t, cli, kvcb, func(k *workercore.KVCacheBackend) {
 			k.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](1)
+			k.Spec.Connection.Managed.Leader.ElectionBackend = "None"
 			k.Spec.Connection.Managed.Leader.HighAvailability = nil
 		})
 		deploy := live(t, cli, kvcb)
@@ -1744,8 +1765,7 @@ func turnOnHighAvailability(t *testing.T, cli ctrlcli.Client, name string) error
 	got := new(workercore.KVCacheBackend)
 	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: name}, got))
 	got.Spec.Connection.Managed.Leader.HighAvailability = &workercore.KVCacheBackendLeaderHighAvailability{}
-	// The field alone renders no election: one replica has nothing to elect between, so an election
-	// takes standbys.
+	got.Spec.Connection.Managed.Leader.ElectionBackend = "Kubernetes"
 	got.Spec.Connection.Managed.Leader.Replicas = ptr.To[int32](3)
 	require.NoError(t, cli.Update(ctx, got))
 
@@ -1941,7 +1961,7 @@ func TestKVCacheBackendReconciler_KeepsTheGrantWhenTheWorkloadUpdateFails(t *tes
 	refuseLeaderUpdate = true
 	got := new(workercore.KVCacheBackend)
 	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: kvcb.Name}, got))
-	got.Spec.Connection.Managed.Leader.HighAvailability = nil
+	got.Spec.Connection.Managed.Leader.ElectionBackend = "None"
 	require.NoError(t, cli.Update(ctx, got))
 
 	r := &KVCacheBackendReconciler{

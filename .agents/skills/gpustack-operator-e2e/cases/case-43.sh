@@ -197,6 +197,7 @@ spec:
   connection:
     managed:
       leader:
+        electionBackend: None
         multiTenancy: true
       members:
         - nodeSelector: {kubernetes.io/os: linux}
@@ -585,6 +586,7 @@ spec:
   connection:
     managed:
       leader:
+        electionBackend: None
         multiTenancy: true
       members:
         - nodeSelector: {gpustack.ai/kvc-e2e-absent: "true"}
@@ -808,6 +810,7 @@ spec:
   connection:
     managed:
       leader:
+        electionBackend: None
         multiTenancy: true
       members:
         - nodeSelector: {gpustack.ai/kvc-e2e-absent: "true"}

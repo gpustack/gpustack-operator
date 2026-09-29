@@ -1661,7 +1661,7 @@ func (r *KVCacheBackendReconciler) ensureHARBAC(
 		mooncake.MemberRBACObjectName(kvcb), mooncake.RenderMemberRBAC(kvcb))
 }
 
-// pruneHARBAC removes the access again when high availability is turned off, and runs AFTER every
+// pruneHARBAC removes the access again when Kubernetes election is turned off, and runs AFTER every
 // workload has been re-rendered without it.
 //
 // REQUIRED: the ordering is the reverse of ensureHARBAC's, and it is not symmetry for its own sake.
@@ -1671,7 +1671,7 @@ func (r *KVCacheBackendReconciler) ensureHARBAC(
 // a grant that outlives its use by one reconcile.
 //
 // It is also why the removal exists at all: the owner reference collects these when the BACKEND is
-// deleted, but a backend that merely drops `highAvailability` is not deleted, so without this it
+// deleted, but a backend that changes `electionBackend` to None is not deleted, so without this it
 // keeps an account that can still take a Lease.
 func (r *KVCacheBackendReconciler) pruneHARBAC(
 	ctx context.Context, kvcb *workercore.KVCacheBackend,
@@ -1872,8 +1872,8 @@ func resolveKVCacheBackendImage(ctx context.Context, kvcb *workercore.KVCacheBac
 // counts still describe the rollout BEFORE it -- one replica, updated and total, on the unelected
 // template -- and reading them as this rollout's is exactly the write this gate exists to hold back.
 //
-// Lowering to one never waits. The scaling event there removes elected replicas only, and Recreate
-// then stops the last of them before the unelected master starts.
+// Lowering to one never waits. The scaling event there removes excess replicas; if election is
+// disabled too, Recreate stops the last elected process before the unelected one starts.
 func leaderCountRiseMustWait(aDeploy, rendered *apps.Deployment) bool {
 	replicas := ptr.Deref(aDeploy.Spec.Replicas, 1)
 	if ptr.Deref(rendered.Spec.Replicas, 1) <= 1 || replicas > 1 {
@@ -1902,8 +1902,8 @@ func alignLeaderDeploymentFn(
 	return func(aDeploy *apps.Deployment) (*apps.Deployment, bool, error) {
 		skip := true
 
-		// Raising a live Deployment past one replica is two writes, and the first holds the count,
-		// strategy and deadline at one replica while the template already elects -- see
+		// Raising an unelected live Deployment past one replica takes two writes. The first holds
+		// the count, strategy and deadline at one replica while the template already elects -- see
 		// LeaderDeploymentAtOneReplica for why one write would run unelected masters beside the new
 		// one. Decided before anything below changes aDeploy, because the gate reads the live object.
 		eDeploy := rendered

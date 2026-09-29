@@ -76,7 +76,7 @@ func (r *KVCacheBackendReconciler) reportRolloutComplete(
 				"counts still describe the update before it", deploy.Generation, deployName))
 
 	case ptr.Deref(deploy.Spec.Replicas, 1) != mooncake.LeaderReplicas(kvcb.Spec.Connection.Managed.Leader):
-		// Raising the count past one is two writes, and between them the Deployment runs one
+		// Raising an unelected leader past one is two writes, and between them the Deployment runs one
 		// replica of the elected template while the backend asks for more. Every count below agrees
 		// with the Deployment's own spec then, so without this the pause between the writes would
 		// read as a finished rollout.

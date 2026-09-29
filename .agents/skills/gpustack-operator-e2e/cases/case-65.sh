@@ -271,11 +271,11 @@ spec:
     protocol: TCP
   connection:
     managed:
-      # Required by the schema, and empty is the shape this case wants: one leader process, no
-      # election. Omitting the key is refused at apply, which the host-directory gate above used to
+      # Required by the schema; this case uses one leader process without election.
+      # Omitting the key is refused at apply, which the host-directory gate above used to
       # hide -- that gate exits 0, so on any cluster without the directory this case reported
       # nothing rather than reporting that it could not build its own fixture.
-      leader: {}
+      leader: {electionBackend: None}
       members:
         - nodeSelector: {kubernetes.io/os: linux}
           medium: DRAM

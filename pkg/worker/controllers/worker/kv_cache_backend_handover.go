@@ -88,8 +88,7 @@ func (h *leaseHolders) forget(backend string) {
 // that took it.
 //
 // IT READS ONLY WHEN A REPORTER WILL LOOK. Each of them returns early on a backend that elects
-// nothing, and the condition here is the union of those two: a backend with no high availability and
-// at most one leader replica pays for no read, because neither reporter would reach the answer.
+// nothing. A backend with electionBackend None pays for no read.
 //
 // A NotFound is returned as the error rather than flattened to a nil lease, because the two readers
 // treat it differently: one forgets its baseline, the other carries on to ask whether a leader is
@@ -98,8 +97,7 @@ func (r *KVCacheBackendReconciler) leaderLease(
 	ctx context.Context, kvcb *workercore.KVCacheBackend,
 ) (*coordination.Lease, error) {
 	managed := kvcb.Spec.Connection.Managed
-	if managed == nil ||
-		(managed.Leader.HighAvailability == nil && mooncake.LeaderReplicas(managed.Leader) <= 1) {
+	if managed == nil || !managed.Leader.KubernetesElectionEnabled() {
 		return nil, nil
 	}
 
@@ -130,13 +128,12 @@ func (r *KVCacheBackendReconciler) reportLeaderHandover(
 	kvcb *workercore.KVCacheBackend, lease *coordination.Lease, leaseErr error,
 ) {
 	managed := kvcb.Spec.Connection.Managed
-	if managed == nil || managed.Leader.HighAvailability == nil {
+	if managed == nil || !managed.Leader.KubernetesElectionEnabled() {
 		return
 	}
 
 	if leaseErr != nil || lease == nil {
-		// A missing lease is the ordinary state of a backend whose election has not started -- one
-		// replica, or a leader still coming up. Forgetting rather than keeping the last holder is
+		// A missing lease is the ordinary state of a leader still coming up. Forgetting the last holder is
 		// what stops the first campaign after a gap from reading as a handover.
 		if leaseErr == nil || kerrors.IsNotFound(leaseErr) {
 			r.leaseHolders.forget(kvcb.Name)
@@ -180,11 +177,9 @@ func (r *KVCacheBackendReconciler) reportElectionObserved(
 	lease *coordination.Lease, leaseErr error,
 ) {
 	managed := kvcb.Spec.Connection.Managed
-	if managed == nil || mooncake.LeaderReplicas(managed.Leader) <= 1 {
-		// Below two replicas there is nothing to elect between, so there is no lease to be the
-		// artifact of anything. Dropped rather than left, because the status this pass builds starts
-		// as a copy of the observed one: a backend scaled back to one leader would otherwise go on
-		// publishing the last verdict, with a transition time that makes it look current.
+	if managed == nil || !managed.Leader.KubernetesElectionEnabled() {
+		// With election disabled there is no Lease to observe. Drop the previous verdict because
+		// status starts as a copy of the last observation, which would otherwise look current.
 		holder.Status.Conditions = slices.DeleteFunc(holder.Status.Conditions,
 			func(c gpustack.Condition) bool {
 				return c.Type == string(KVCacheBackendConditionElectionObserved)
@@ -238,7 +233,7 @@ func (r *KVCacheBackendReconciler) enqueueKVCacheBackendWhenLeaseChanged(
 		return nil
 	}
 	if kvcb.Spec.Connection.Managed == nil ||
-		kvcb.Spec.Connection.Managed.Leader.HighAvailability == nil {
+		!kvcb.Spec.Connection.Managed.Leader.KubernetesElectionEnabled() {
 		return nil
 	}
 

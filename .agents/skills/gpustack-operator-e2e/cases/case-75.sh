@@ -26,14 +26,16 @@
 #              the operator's own namespace yields nothing, because events for the cluster-scoped
 #              backend land in namespace default -- every event read below is against default.
 #
-# Inputs:      All real, nothing mocked. One KVCacheBackend (3-replica HA leader, multi-tenancy on,
-#              no snapshot) created on the start image; after it is Ready and steady the ONLY
-#              mutation is `kubectl patch` of spec.image to the rollout target. A clean baseline is
+# Inputs:      All real, nothing mocked. One KVCacheBackend starts with the default single-replica
+#              Kubernetes election, then scales to three without replacing the first leader Pod.
+#              After it is Ready and steady the rollout's ONLY mutation is an image patch. A clean baseline is
 #              asserted first: zero KVCacheLeaderHandover events for this backend anywhere. The
 #              pod-deletion trigger of the failover cases is deliberately NOT used here, so the
 #              event observed can only be the rollout's.
 #
-# Expected:    - zero KVCacheLeaderHandover events for the backend at steady state (clean baseline);
+# Expected:    - the default single leader holds a Lease; None with three replicas is refused;
+#              - scaling to three preserves the original leader Pod UID;
+#              - zero KVCacheLeaderHandover events for the backend at steady state (clean baseline);
 #              - after the patch, the event exists, read from namespace default;
 #              - the event's cumulative count equals the lease's leaseTransitions after the rollout
 #                (on a fresh backend the baseline is 0, so the count also equals the delta);
@@ -140,9 +142,8 @@ spec:
   connection:
     managed:
       leader:
-        replicas: 3
+        replicas: 1
         multiTenancy: true
-        highAvailability: {}
       members:
         - nodeSelector: {kubernetes.io/os: linux}
           medium: DRAM
@@ -157,6 +158,48 @@ fi
 if ! wait_for deployment "$LEADER" '{.status.readyReplicas}' 1 300 >/dev/null; then
   record FAIL "exactly one leader replica is Ready before the rollout" \
     "readyReplicas settled at '$(kubectl -n "$NS" get deployment "$LEADER" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)' instead of 1"
+  results; exit 1
+fi
+
+FIRST_UID="$(kubectl -n "$NS" get pod -l "$LEADER_SEL" -o jsonpath='{.items[0].metadata.uid}' 2>/dev/null)"
+HOLDER="$(kubectl -n "$NS" get leases.coordination.k8s.io "$LEADER" -o jsonpath='{.spec.holderIdentity}' 2>/dev/null)"
+ARGS="$(kubectl -n "$NS" get deployment "$LEADER" -o jsonpath='{.spec.template.spec.containers[0].args}' 2>/dev/null)"
+if [ -n "$FIRST_UID" ] && [ -n "$HOLDER" ] && [[ "$ARGS" == *-enable_ha=true* ]]; then
+  record PASS "the default single leader already elects" "leader Pod UID=${FIRST_UID}; Lease holder=${HOLDER}"
+else
+  record FAIL "the default single leader already elects" "UID=${FIRST_UID:-<none>}; holder=${HOLDER:-<none>}; args=${ARGS:-<none>}"
+  results; exit 1
+fi
+
+if REFUSAL="$(kubectl patch kvcachebackends.worker.gpustack.ai "$BACKEND" --dry-run=server --type merge \
+  -p '{"spec":{"connection":{"managed":{"leader":{"replicas":3,"electionBackend":"None"}}}}}' 2>&1)"; then
+  record FAIL "None with three replicas is refused" "server accepted the invalid patch"
+  results; exit 1
+elif [[ "$REFUSAL" == *"leader.electionBackend"* ]]; then
+  record PASS "None with three replicas is refused" "$REFUSAL"
+else
+  record FAIL "None with three replicas is refused" "$REFUSAL"
+  results; exit 1
+fi
+
+if ! kubectl patch kvcachebackends.worker.gpustack.ai "$BACKEND" --type merge \
+  -p '{"spec":{"connection":{"managed":{"leader":{"replicas":3}}}}}' >/dev/null 2>&1; then
+  record FAIL "scaling to three is accepted" "replica patch failed"
+  results; exit 1
+fi
+if ! wait_for deployment "$LEADER" '{.status.replicas}' 3 300 >/dev/null; then
+  record FAIL "scaling to three converges" "the Deployment never reached three replicas"
+  results; exit 1
+fi
+if ! wait_for kvcachebackends.worker.gpustack.ai "$BACKEND" '{.status.phase}' Ready 300 >/dev/null; then
+  record FAIL "scaling to three converges" "the backend did not return to Ready"
+  results; exit 1
+fi
+SCALE_UIDS="$(kubectl -n "$NS" get pod -l "$LEADER_SEL" -o jsonpath='{range .items[*]}{.metadata.uid}{" "}{end}' 2>/dev/null)"
+if [ -n "$FIRST_UID" ] && [[ " $SCALE_UIDS " == *" $FIRST_UID "* ]]; then
+  record PASS "scaling to three preserves the first leader Pod" "first UID=${FIRST_UID}; current UIDs=${SCALE_UIDS}"
+else
+  record FAIL "scaling to three preserves the first leader Pod" "first UID=${FIRST_UID}; current UIDs=${SCALE_UIDS}"
   results; exit 1
 fi
 
