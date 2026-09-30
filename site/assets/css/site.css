@@ -1,35 +1,67 @@
-:root {
-  color-scheme: light;
-  --topbar-h: 3.5rem;
-  --bg: light-dark(#ffffff, #15171a);
-  --bg-soft: light-dark(#f6f7f8, #1a1d21);
-  --bg-subtle: light-dark(#eff1f3, #23262b);
-  --bg-sidebar: light-dark(#f7f8f9, #1a1d21);
-  --code-bg: light-dark(#ffffff, #15171a);
-  --diagram-bg: light-dark(#ffffff, #f0f1f3);
-  --text: light-dark(#24292f, #e4e6e9);
-  --text-strong: light-dark(#171b1f, #f2f3f5);
-  --muted: light-dark(#59616a, #9aa1a9);
-  --faint: light-dark(#646b73, #8d949c);
-  --line: light-dark(#e3e5e8, #2a2e33);
-  --line-strong: light-dark(#a9b0b8, #464b52);
-  --line-input: light-dark(#c6ccd3, #3a3f45);
-  --quote-border: light-dark(#c9d1d9, #3a4048);
-  --quote-text: light-dark(#59616a, #a5abb2);
-  --link: light-dark(#1763ed, #58a0f5);
-  --link-hover: light-dark(#0f4fc0, #7db4f8);
-  --button-bg: light-dark(#1257d2, #2563c9);
+{{ $darkPalette := `
+color-scheme: dark;
+  --bg: #15171a;
+  --bg-soft: #1a1d21;
+  --bg-subtle: #23262b;
+  --bg-sidebar: #1a1d21;
+  --code-bg: #15171a;
+  --diagram-bg: #f0f1f3;
+  --text: #e4e6e9;
+  --text-strong: #f2f3f5;
+  --muted: #9aa1a9;
+  --faint: #8d949c;
+  --line: #2a2e33;
+  --line-strong: #464b52;
+  --line-input: #3a3f45;
+  --quote-border: #3a4048;
+  --quote-text: #a5abb2;
+  --link: #58a0f5;
+  --link-hover: #7db4f8;
+  --button-bg: #2563c9;
   --button-fg: #ffffff;
   --row-current-bg: #24292f;
   --row-current-fg: #ffffff;
-  --panel-shadow: 0 8px 24px light-dark(rgba(23, 27, 31, .13), rgba(0, 0, 0, .5));
-  --code-tag: light-dark(#0550ae, #79c0ff);
-  --code-string: light-dark(#116329, #a5d6ff);
-  --diff-add-fg: light-dark(#116329, #7ee787);
-  --diff-add-bg: light-dark(#dafbe1, #11301f);
-  --diff-del-fg: light-dark(#82071e, #ffa198);
-  --diff-del-bg: light-dark(#ffebe9, #3c1618);
-  --scrollbar-thumb: light-dark(#c6ccd3, #3a4048);
+  --panel-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+  --code-tag: #79c0ff;
+  --code-string: #a5d6ff;
+  --diff-add-fg: #7ee787;
+  --diff-add-bg: #11301f;
+  --diff-del-fg: #ffa198;
+  --diff-del-bg: #3c1618;
+  --scrollbar-thumb: #3a4048;
+` }}
+:root {
+  color-scheme: light;
+  --topbar-h: 3.5rem;
+  --bg: #ffffff;
+  --bg-soft: #f6f7f8;
+  --bg-subtle: #eff1f3;
+  --bg-sidebar: #f7f8f9;
+  --code-bg: #ffffff;
+  --diagram-bg: #ffffff;
+  --text: #24292f;
+  --text-strong: #171b1f;
+  --muted: #59616a;
+  --faint: #646b73;
+  --line: #e3e5e8;
+  --line-strong: #a9b0b8;
+  --line-input: #c6ccd3;
+  --quote-border: #c9d1d9;
+  --quote-text: #59616a;
+  --link: #1763ed;
+  --link-hover: #0f4fc0;
+  --button-bg: #1257d2;
+  --button-fg: #ffffff;
+  --row-current-bg: #24292f;
+  --row-current-fg: #ffffff;
+  --panel-shadow: 0 8px 24px rgba(23, 27, 31, .13);
+  --code-tag: #0550ae;
+  --code-string: #116329;
+  --diff-add-fg: #116329;
+  --diff-add-bg: #dafbe1;
+  --diff-del-fg: #82071e;
+  --diff-del-bg: #ffebe9;
+  --scrollbar-thumb: #c6ccd3;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   font-size: 16px;
   line-height: 1.56;
@@ -37,10 +69,14 @@
   background: var(--bg);
 }
 
-:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="dark"] {
+{{ $darkPalette }}
+}
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { color-scheme: dark; }
+  :root:not([data-theme="light"]) {
+{{ $darkPalette }}
+  }
 }
 
 * { box-sizing: border-box; }

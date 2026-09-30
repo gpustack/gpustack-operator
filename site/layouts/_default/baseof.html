@@ -24,8 +24,8 @@
   <link rel="alternate" type="text/markdown" href="{{ .RelPermalink }}">
   {{ end }}
   <link rel="describedby" href="{{ "llms.txt" | relURL }}">
-  <link rel="stylesheet" href="{{ (resources.Get "css/site.css" | fingerprint).RelPermalink }}">
-  <link rel="stylesheet" href="{{ (resources.Get "css/code.css" | fingerprint).RelPermalink }}">
+  <link rel="stylesheet" href="{{ (resources.Get "css/site.css" | resources.ExecuteAsTemplate "css/site.css" . | fingerprint).RelPermalink }}">
+  <link rel="stylesheet" href="{{ (resources.Get "css/code.css" | resources.ExecuteAsTemplate "css/code.css" . | fingerprint).RelPermalink }}">
 </head>
 <body class="{{ if .IsHome }}home{{ else }}docs-page{{ end }}">
   <a class="skip-link" href="#main-content">Skip to content</a>
