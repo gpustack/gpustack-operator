@@ -63,8 +63,12 @@ spec:
       containers:
         - name: server
           image: vllm/vllm-openai:v0.29.0
-          command: ["vllm"]
-          args: ["serve", "--model", "Qwen/Qwen3-8B"]
+          command:
+            - "vllm"
+          args:
+            - "serve"
+            - "--model"
+            - "Qwen/Qwen3-8B"
 ```
 
 A bare Pod follows the same contract — the label opts it in, and the optional annotations select the
@@ -87,8 +91,12 @@ spec:
   containers:
     - name: server
       image: vllm/vllm-openai:v0.29.0
-      command: ["vllm"]
-      args: ["serve", "--model", "Qwen/Qwen2.5-72B-Instruct"]
+      command:
+        - "vllm"
+      args:
+        - "serve"
+        - "--model"
+        - "Qwen/Qwen2.5-72B-Instruct"
 ```
 
 The engine is **declared, never guessed from the image**. Engines take entirely different flags, and a

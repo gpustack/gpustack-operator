@@ -80,7 +80,9 @@ spec:
   containers:
     - name: worker
       image: ubuntu:24.04
-      command: ["sleep", "3600"]
+      command:
+        - "sleep"
+        - "3600"
       resources:
         limits:
           nvidia.com/gpu: "1"
@@ -264,7 +266,10 @@ metadata:
 spec:
   type: gpustack--nvidia-a10g-linux-amd64
   image: ubuntu:24.04
-  command: ["tail", "-f", "/dev/null"]
+  command:
+    - "tail"
+    - "-f"
+    - "/dev/null"
   sshPublicKey:
     name: workspace-key
   resources:

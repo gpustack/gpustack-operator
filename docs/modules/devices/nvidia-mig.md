@@ -134,7 +134,9 @@ metadata:
 spec:
   type: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
   image: ubuntu:24.04
-  command: ["sleep", "86400"]
+  command:
+    - "sleep"
+    - "86400"
   resources:
     accelerator: "1"                       # a partition is always one GPU
     acceleratorPartitionedProfile: 3g.40gb
@@ -504,7 +506,9 @@ spec:
   containers:
     - name: main
       image: ubuntu:24.04
-      command: ["sleep", "86400"]
+      command:
+        - "sleep"
+        - "86400"
       resources:
         limits:
           nvidia.com/gpu.partitioned: "1"              # one partitioned GPU

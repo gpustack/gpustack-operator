@@ -82,6 +82,17 @@ controller storage; do not ask users to switch between versions or describe publ
 "v1 views". Document internal types only when explaining implementation under `docs/contribute/`.
 An inventory snapshot's format version is separate from a Kubernetes resource API version.
 
+## YAML examples
+
+REQUIRED: write Pretty YAML in `README.md` and `docs/`. Expand nonempty mappings and sequences
+into block style with two-space indentation, one field or list item per line. Do not embed
+JSON-style objects or arrays in YAML examples, including commented alternatives. Empty collections
+use `{}` or `[]`; removing their delimiters would change them to null.
+
+When formatting is requested, preserve field order, values, scalar types, quoting, comments and
+intentional invalid examples. Review the YAML diff field by field before finishing. A string whose
+consumer requires JSON and a captured JSON response keep that format.
+
 ## Page shape
 
 Every page in `docs/` (the index excepted) opens with a short introduction, has a `## Contents` list

@@ -516,16 +516,22 @@ the figure is the evidence, and a cap near the card's own size could be read as 
 
 ## Reading the result
 
-One YAML document goes to stdout, with **three sections**:
+One YAML document goes to stdout, with **three sections**. This outline uses `...` for omitted
+values and rows:
 
 ```yaml
 accelerators:            # one group per manufacturer asked about
   - manufacturer: nvidia
-    detection: {...}
-    checks: [...]
+    detection:
+      state: ...
+      depth: ...
+      accelerators: ...
+    checks:
+      - ...
 network:                 # the node's RDMA links — belongs to no manufacturer
   timestamp: ...
-  checks: [...]
+  checks:
+    - ...
 topology:                # what this node's kubelet does with a NUMA hint
   timestamp: ...
   policy: single-numa-node
@@ -619,7 +625,8 @@ plus a `note` with what the panic said. The other eight are read and reported as
     - accelerator: MLU-0
       capability: preflight-panicked
       state: unavailable
-      reason: this manufacturer's preflight panicked and was contained, so none of this
+      reason: >-
+        this manufacturer's preflight panicked and was contained, so none of this
         accelerator's preconditions were established: runtime error: invalid memory address
   note: 'this manufacturer''s preflight panicked and was contained: whatever it had established
     is discarded, and every accelerator it was asked about is reported unavailable below; the

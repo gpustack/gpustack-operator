@@ -46,7 +46,9 @@ kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/<ns>/modelartifacts/<n
 ```yaml
 kind: ModelArtifactProgress
 apiVersion: worker.gpustack.ai/v1
-metadata: {name: qwen-72b, namespace: team-a}
+metadata:
+  name: qwen-72b
+  namespace: team-a
 timestamp: "2026-09-26T00:00:00Z"    # when it was computed
 manifestDigest: sha256:...
 sizeBytes: 145424101604
@@ -57,7 +59,8 @@ downloadingPercent: 42               # the downloading nodes' mean, whole percen
 downloadingBytes: 123482472448       # what the downloading nodes hold, summed
 live: 2                              # downloading nodes read from their plugin for this answer
 failureReasons:
-  - {reason: SourceUnavailable, count: 1}
+  - reason: SourceUnavailable
+    count: 1
 ```
 
 - **It is computed on each request and never written.** The worker reads the artifact and the
@@ -85,11 +88,19 @@ tenant's subjects a Role such as:
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
-metadata: {name: model-artifact-reader, namespace: team-a}
+metadata:
+  name: model-artifact-reader
+  namespace: team-a
 rules:
-  - apiGroups: [worker.gpustack.ai]
-    resources: [modelartifacts, modelartifacts/progress]
-    verbs: [get, list, watch]
+  - apiGroups:
+      - worker.gpustack.ai
+    resources:
+      - modelartifacts
+      - modelartifacts/progress
+    verbs:
+      - get
+      - list
+      - watch
 ```
 
 A subject with that Role in `team-a` reads `team-a`'s progress and is refused another namespace's.

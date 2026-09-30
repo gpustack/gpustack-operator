@@ -30,18 +30,24 @@ spec:                                    # immutable after creation
     huggingFace:
       repository: Qwen/Qwen2.5-7B-Instruct
       revision: main                     # branch, tag or commit; defaults to main
-      secretRef: {name: hf-token}        # optional; this namespace; key "token"
+      secretRef: # optional; this namespace; key "token"
+        name: hf-token
     # modelScope:
     #   repository: qwen/Qwen2.5-7B-Instruct
     #   revision: master                 # branch, tag or commit; defaults to master
-    #   secretRef: {name: ms-token}      # optional; this namespace; key "token"
+    #   secretRef: # optional; this namespace; key "token"
+    #     name: ms-token
     # persistentVolumeClaim:
     #   claimName: models                # this namespace
     #   path: qwen                       # directory inside the volume; empty is the root
     # image:
     #   reference: registry.example.com/team/qwen@sha256:669ed7b1...48   # digest-pinned
-  allowPatterns: ["*.safetensors", "*.json", "tokenizer*"]   # optional; hub sources only
-  ignorePatterns: ["original/"]                              # optional; wins over allowPatterns
+  allowPatterns: # optional; hub sources only
+    - "*.safetensors"
+    - "*.json"
+    - "tokenizer*"
+  ignorePatterns: # optional; wins over allowPatterns
+    - "original/"
   expectedDigest: sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448
   # optional; hub sources only — the digest the source must resolve to
 status:
@@ -57,8 +63,12 @@ status:
     failed: 0
     downloadingPercent: 45               # the downloading nodes' mean, in steps of 5
   conditions:
-    - {type: Resolved, status: "True", reason: Resolved}
-    - {type: Degraded, status: "False", reason: Healthy}
+    - type: Resolved
+      status: "True"
+      reason: Resolved
+    - type: Degraded
+      status: "False"
+      reason: Healthy
 ```
 
 - **The spec is immutable.** An artifact is an identity: other weights, or another revision, are a
@@ -225,7 +235,8 @@ Two consequences to keep in mind:
 spec:
   model:
     name: qwen-7b                        # the served name, unchanged
-    artifactRef: {name: qwen-7b}         # a ModelArtifact in this namespace
+    artifactRef: # a ModelArtifact in this namespace
+      name: qwen-7b
 ```
 
 `artifactRef` is frozen with the rest of `spec.model`: other weights are another deployment. A
@@ -402,7 +413,9 @@ timeout evicts and requeues the replica.
 spec:
   additionalVolumes:
     - mountPath: /models/qwen
-      model: {artifactRef: {name: qwen-7b}}
+      model:
+        artifactRef:
+          name: qwen-7b
 ```
 
 The volume is always read-only and takes no `subPath`. A claim artifact's `path` is the sub-path and

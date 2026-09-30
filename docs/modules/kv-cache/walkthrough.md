@@ -86,7 +86,8 @@ kind: KVCachePool
 metadata:
   name: shared-dram
 spec:
-  backends: [mooncake-dram]              # exactly one
+  backends: # exactly one
+    - mooncake-dram
   quota:
     total: 16Gi
 ---
@@ -96,7 +97,8 @@ metadata:
   name: team-a
   namespace: team-a
 spec:
-  poolRef: {name: shared-dram}
+  poolRef:
+    name: shared-dram
   quota:
     ceiling: 8Gi
   domain:                                # every field here is immutable

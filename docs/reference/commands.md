@@ -197,7 +197,9 @@ docker run --rm --privileged -v /dev:/dev -v /sys:/sys \
   accelerators:
     - id: GPU-5c88007d760374f3
       index: 0
-      physicalIndexes: [1, 128]
+      physicalIndexes:
+        - 1
+        - 128
       topology:
         pciBusId: "0000:04:00.0"
         numaAffinity: "0"

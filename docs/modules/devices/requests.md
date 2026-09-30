@@ -71,13 +71,17 @@ All four are Pods submitted on a pool's entrance `LocalQueue` (`kueue.x-k8s.io/q
 **Exclusive** — two whole accelerators:
 
 ```yaml
-resources: { limits: { nvidia.com/gpu: "2" } }
+resources:
+  limits:
+    nvidia.com/gpu: "2"
 ```
 
 **Shared** — two accelerators on one node, one of each accelerator's 10 ownership shares:
 
 ```yaml
-resources: { limits: { nvidia.com/gpu.shared: "2" } }
+resources:
+  limits:
+    nvidia.com/gpu.shared: "2"
 ```
 
 The value counts accelerators, never shares of one: `"2"` needs a node with two accelerators that each
@@ -116,7 +120,9 @@ resources:
 internal visibility resource for its workload container's accelerator count:
 
 ```yaml
-resources: { limits: { device.gpustack.ai/nvidia.visibility: "1" } }
+resources:
+  limits:
+    device.gpustack.ai/nvidia.visibility: "1"
 ```
 
 ## The request rules
@@ -140,9 +146,13 @@ Accepted — both app containers claim the same family:
 spec:
   containers:
     - name: trainer
-      resources: { limits: { nvidia.com/gpu: "1" } }
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
     - name: sidecar-metrics
-      resources: { limits: { nvidia.com/gpu: "1" } }
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
 ```
 
 Rejected — two families in one Pod:
@@ -150,8 +160,15 @@ Rejected — two families in one Pod:
 ```yaml
 spec:
   containers:
-    - { name: a, resources: { limits: { nvidia.com/gpu: "1" } } }
-    - { name: b, resources: { limits: { nvidia.com/gpu.sliced: "1", nvidia.com/gpu.sliced.memory-percentage: "50" } } }
+    - name: a
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+    - name: b
+      resources:
+        limits:
+          nvidia.com/gpu.sliced: "1"
+          nvidia.com/gpu.sliced.memory-percentage: "50"
 ```
 
 > `spec: Forbidden: a Pod may request only one accelerator family, found [exclusive sliced]`
@@ -160,8 +177,16 @@ Rejected — the same family claimed in both container groups:
 
 ```yaml
 spec:
-  initContainers: [{ name: warmup, resources: { limits: { nvidia.com/gpu: "1" } } }]
-  containers:     [{ name: main,   resources: { limits: { nvidia.com/gpu: "1" } } }]
+  initContainers:
+    - name: warmup
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+  containers:
+    - name: main
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
 ```
 
 > `spec.initContainers: Forbidden: a Pod's accelerator requests must all sit in one container group;
@@ -185,7 +210,10 @@ init container would have held.
 Accepted: `nvidia.com/gpu.sliced: "1"`. Rejected:
 
 ```yaml
-resources: { limits: { nvidia.com/gpu.sliced: "2", nvidia.com/gpu.sliced.memory-percentage: "50" } }
+resources:
+  limits:
+    nvidia.com/gpu.sliced: "2"
+    nvidia.com/gpu.sliced.memory-percentage: "50"
 ```
 
 > `spec.containers[0].resources.limits[nvidia.com/gpu.sliced]: Invalid value: "2": a logical slice
@@ -211,7 +239,10 @@ A logical slice must also name exactly one memory budget:
 Accepted: `nvidia.com/gpu.partitioned: "1"`. Rejected:
 
 ```yaml
-resources: { limits: { nvidia.com/gpu.partitioned: "2", nvidia.com/gpu.partitioned.mig-1g.10gb: "1" } }
+resources:
+  limits:
+    nvidia.com/gpu.partitioned: "2"
+    nvidia.com/gpu.partitioned.mig-1g.10gb: "1"
 ```
 
 > `spec.containers[0].resources.limits[nvidia.com/gpu.partitioned]: Invalid value: "2": a partition
@@ -247,7 +278,10 @@ same way.
 Accepted: `nvidia.com/gpu.partitioned.mig-3g.40gb: "1"`. Rejected:
 
 ```yaml
-resources: { limits: { nvidia.com/gpu.partitioned: "1", nvidia.com/gpu.partitioned.mig-3g.40gb: "2" } }
+resources:
+  limits:
+    nvidia.com/gpu.partitioned: "1"
+    nvidia.com/gpu.partitioned.mig-3g.40gb: "2"
 ```
 
 > `spec.containers[0].resources.limits[nvidia.com/gpu.partitioned.mig-3g.40gb]: Invalid value: "2": a
@@ -264,9 +298,14 @@ Accepted:
 spec:
   containers:
     - name: main
-      resources: { limits: { nvidia.com/gpu.sliced: "1", nvidia.com/gpu.sliced.memory-percentage: "50" } }
+      resources:
+        limits:
+          nvidia.com/gpu.sliced: "1"
+          nvidia.com/gpu.sliced.memory-percentage: "50"
     - name: sshd
-      resources: { limits: { device.gpustack.ai/nvidia.visibility: "1" } }   # visibility, not a slicing family
+      resources: # visibility, not a slicing family
+        limits:
+          device.gpustack.ai/nvidia.visibility: "1"
 ```
 
 Rejected — two containers each holding a slice:
@@ -274,8 +313,16 @@ Rejected — two containers each holding a slice:
 ```yaml
 spec:
   containers:
-    - { name: a, resources: { limits: { nvidia.com/gpu.sliced: "1", nvidia.com/gpu.sliced.memory-percentage: "50" } } }
-    - { name: b, resources: { limits: { nvidia.com/gpu.sliced: "1", nvidia.com/gpu.sliced.memory-percentage: "50" } } }
+    - name: a
+      resources:
+        limits:
+          nvidia.com/gpu.sliced: "1"
+          nvidia.com/gpu.sliced.memory-percentage: "50"
+    - name: b
+      resources:
+        limits:
+          nvidia.com/gpu.sliced: "1"
+          nvidia.com/gpu.sliced.memory-percentage: "50"
 ```
 
 > `spec: Forbidden: at most one container may request a slicing family, found 2`
@@ -287,11 +334,25 @@ native sidecar carries the claim:
 
 ```yaml
 spec:                                                       # accepted
-  initContainers: [{ name: log-shipper, restartPolicy: Always, resources: { limits: { cpu: "100m" } } }]
-  containers:     [{ name: main, resources: { limits: { nvidia.com/gpu: "1" } } }]
+  initContainers:
+    - name: log-shipper
+      restartPolicy: Always
+      resources:
+        limits:
+          cpu: "100m"
+  containers:
+    - name: main
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
 ---
 spec:                                                       # rejected
-  initContainers: [{ name: log-shipper, restartPolicy: Always, resources: { limits: { nvidia.com/gpu: "1" } } }]
+  initContainers:
+    - name: log-shipper
+      restartPolicy: Always
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
 ```
 
 > `spec.initContainers[0].resources.limits: Forbidden: a restartable init container (a native sidecar) may

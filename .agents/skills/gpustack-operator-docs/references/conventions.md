@@ -154,6 +154,8 @@ Two consequences worth stating:
   link — the numbering breaks the moment a page is split.
 - **Wrap at about 100 columns**, and keep tables on one line each (a wrapped table row is unreadable in
   a diff).
+- **Write Pretty YAML.** Follow [YAML examples](../SKILL.md#yaml-examples), including its rules for
+  empty collections, comments and preserving values when formatting.
 - **Links are relative** (`../settings.md`, `architecture/admission.md`), never absolute GitHub URLs —
   the exception is the chart README, which is rendered outside the repo on Artifact Hub.
 
@@ -188,8 +190,9 @@ Three limits keep the cleanup from doing harm:
 
 - **Keep every fact.** A rewrite must not add or drop a name, number, version, key, condition or
   ranking. A sentence that needs a detail you do not have gets a simpler wording, not a guess.
-- **Change prose only.** Code blocks, inline code, commands, paths, link targets and table rows compared with
-  code (see the invariants in `SKILL.md`) stay as they are. A heading keeps its words, because
+- **Change prose only unless the task requests example formatting.** Code blocks, inline code,
+  commands, paths, link targets and table rows compared with code (see the invariants in `SKILL.md`)
+  stay as they are. A heading keeps its words, because
   changing them breaks every inbound anchor; re-casing is safe.
 - **A pattern is a default, not a crime.** A `> **Why**` note may legitimately correct a belief the
   reader holds ("allocatable also falls to zero when a family is merely saturated"), and a quotation, a

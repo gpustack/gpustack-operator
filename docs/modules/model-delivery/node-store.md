@@ -27,10 +27,17 @@ apiVersion: worker.gpustack.ai/v1
 kind: NodeModelStore                         # cluster-scoped, short name nms, category gpustack
 metadata:
   name: gpu-node-01                          # the Node's name
-  ownerReferences: [{apiVersion: v1, kind: Node, name: gpu-node-01}]
+  ownerReferences:
+    - apiVersion: v1
+      kind: Node
+      name: gpu-node-01
 spec:                                        # the worker: this node's effective configuration
-  watermarks: {highPercent: 80, lowPercent: 70}
-  download: {concurrency: 8, bytesPerSecond: 0}      # 0 is unlimited
+  watermarks:
+    highPercent: 80
+    lowPercent: 70
+  download: # 0 is unlimited
+    concurrency: 8
+    bytesPerSecond: 0
   hub:
     huggingFaceEndpoint: https://huggingface.co
     httpsProxy: ""
@@ -62,8 +69,12 @@ status:                                      # the plugin on that node: its fact
       downloadedBytes: 61741236224           # what the attempt holds, a resume's checkpoints included
       source: Hub
   conditions:
-    - {type: Ready, status: "True", reason: Serving}
-    - {type: CapacityLow, status: "False", reason: WithinWatermarks}
+    - type: Ready
+      status: "True"
+      reason: Serving
+    - type: CapacityLow
+      status: "False"
+      reason: WithinWatermarks
 ```
 
 `kubectl get nms` prints Ready, Used (`usedPercent`) and Age.
@@ -140,7 +151,8 @@ volumes:
         artifact: qwen-7b
         artifactUID: 3f0c...
         manifestDigest: sha256:0f3c...
-      nodePublishSecretRef: {name: hf-token} # the artifact's secretRef; absent without one
+      nodePublishSecretRef: # the artifact's secretRef; absent without one
+        name: hf-token
 ```
 
 A hand-written Pod may mount the same volume; it is held to the same rules. The CSIDriver has

@@ -418,22 +418,28 @@ scrape_configs:
     kubernetes_sd_configs:
       - role: endpoints
         namespaces:
-          names: [gpustack-system]
+          names:
+            - gpustack-system
     # The serving certificate is self-signed unless the Device Manager is given --cert-dir,
     # so either skip verification or supply that CA here.
     tls_config:
       insecure_skip_verify: true
     relabel_configs:
-      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+      - source_labels:
+          - __meta_kubernetes_service_annotation_prometheus_io_scrape
         action: keep
         regex: "true"
-      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scheme]
+      - source_labels:
+          - __meta_kubernetes_service_annotation_prometheus_io_scheme
         target_label: __scheme__
         regex: (https?)
-      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+      - source_labels:
+          - __meta_kubernetes_service_annotation_prometheus_io_path
         target_label: __metrics_path__
         regex: (.+)
-      - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+      - source_labels:
+          - __address__
+          - __meta_kubernetes_service_annotation_prometheus_io_port
         target_label: __address__
         regex: ([^:]+)(?::\d+)?;(\d+)
         replacement: $1:$2

@@ -46,7 +46,8 @@ spec:
   connection:
     managed:
       members:
-        - nodeSelector: {kvcache: "true"}
+        - nodeSelector:
+            kvcache: "true"
           medium: DRAM                 # the SEGMENT, which is memory on every group
           capacityPerMember: 8Gi       # sized below — NOT a figure to copy
           localDisks:                  # declaring an entry is what turns the tier on

@@ -29,7 +29,8 @@ kind: KVCachePool                      # cluster-scoped, short name kvcp
 metadata:
   name: shared-dram
 spec:
-  backends: [mooncake-dram]            # exactly one
+  backends: # exactly one
+    - mooncake-dram
   quota:
     total: 900Gi
 ---
@@ -39,7 +40,8 @@ metadata:
   name: team-a
   namespace: team-a
 spec:
-  poolRef: {name: shared-dram}
+  poolRef:
+    name: shared-dram
   quota:                                # required
     ceiling: 600Gi
   domain:                              # required, exactly one, every field immutable

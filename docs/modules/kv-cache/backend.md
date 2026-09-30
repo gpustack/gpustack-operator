@@ -35,7 +35,8 @@ spec:
     managed:                         # or external: — exactly one
       leader: {}                     # replicas, allocationStrategy and multiTenancy default
       members:
-        - nodeSelector: {kubernetes.io/os: linux}
+        - nodeSelector:
+            kubernetes.io/os: linux
           medium: DRAM               # what this group's SEGMENT is made of: DRAM or VRAM
           capacityPerMember: 4Gi
 ```
@@ -486,7 +487,8 @@ driver once the variable tells it which devices to inject:
 
 ```yaml
 members:
-  - nodeSelector: {kvcache-vram: "true"}
+  - nodeSelector:
+      kvcache-vram: "true"
     medium: VRAM
     image: gpustack/mirrored-mooncake:0.3.13.post1-cuda13.0
     capacityPerMember: 8Gi              # the engine's gpu_memory_utilization must leave this free
@@ -505,14 +507,24 @@ mounted from the node:
 
 ```yaml
 members:
-  - nodeSelector: {kvcache-vram: "true"}
+  - nodeSelector:
+      kvcache-vram: "true"
     medium: VRAM
     image: gpustack/mirrored-mooncake:0.3.13.post1-cann9.1
     capacityPerMember: 32Gi
     hostPaths:
-      - {path: /usr/local/Ascend/driver, mountPath: /usr/local/Ascend/driver, type: Directory, readOnly: true}
-      - {path: /usr/local/dcmi, mountPath: /usr/local/dcmi, type: Directory, readOnly: true}
-      - {path: /usr/local/bin/npu-smi, mountPath: /usr/local/bin/npu-smi, type: File, readOnly: true}
+      - path: /usr/local/Ascend/driver
+        mountPath: /usr/local/Ascend/driver
+        type: Directory
+        readOnly: true
+      - path: /usr/local/dcmi
+        mountPath: /usr/local/dcmi
+        type: Directory
+        readOnly: true
+      - path: /usr/local/bin/npu-smi
+        mountPath: /usr/local/bin/npu-smi
+        type: File
+        readOnly: true
 ```
 
 **A VRAM group may also carry a [local disk tier](local-disk-tier.md), and that combination is
@@ -827,8 +839,10 @@ Deployment, no Service, no DaemonSet — and only observes.
   connection:
     external:
       endpoints:
-        - {name: Client, address: mooncake.example:50051}
-        - {name: Admin,  address: mooncake.example:9003}
+        - name: Client
+          address: mooncake.example:50051
+        - name: Admin
+          address: mooncake.example:9003
 ```
 
 Both roles are required, so the list holds exactly two entries: entries are keyed by `name`, which

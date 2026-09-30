@@ -11,19 +11,20 @@ spec:
   connection:
     managed:
       members:
-      - nodeSelector: { kvcache: "true" }
-        medium: DRAM
-        capacityPerMember: 500Gi
-        localDisks:                    # declaring an entry is what turns the tier on
-          - path: /var/lib/kvcache
-            capacity: 4Ti              # optional; unset means the store's own ceiling
-            keyLimit: 10000000         # optional; the same, on the key count
-            eviction:                  # optional; unset means the store's own behaviour
-              enabled: true            # default; false fills the tier and then stops writing
-              policy: LRU              # FIFO | LRU; unset means the store's own, which is FIFO
-              watermark:               # optional; percentages of capacity
-                high: 90
-                low: 80
+        - nodeSelector:
+            kvcache: "true"
+          medium: DRAM
+          capacityPerMember: 500Gi
+          localDisks:                    # declaring an entry is what turns the tier on
+            - path: /var/lib/kvcache
+              capacity: 4Ti              # optional; unset means the store's own ceiling
+              keyLimit: 10000000         # optional; the same, on the key count
+              eviction:                  # optional; unset means the store's own behaviour
+                enabled: true            # default; false fills the tier and then stops writing
+                policy: LRU              # FIFO | LRU; unset means the store's own, which is FIFO
+                watermark:               # optional; percentages of capacity
+                  high: 90
+                  low: 80
 ```
 
 | what it renders | where |
