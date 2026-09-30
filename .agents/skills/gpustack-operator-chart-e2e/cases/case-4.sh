@@ -14,7 +14,7 @@
 #              documented spread is whenUnsatisfiable: DoNotSchedule and would leave pods Pending.
 #              No GPU. Needs a helm client and the chart source tree.
 # Inputs:      A values overlay applied with `helm upgrade --reset-then-reuse-values`, carrying the same knobs
-#              docs/operation/high-availability.md ships (worker / kueue.controllerManager /
+#              docs/operate/high-availability.md ships (worker / kueue.controllerManager /
 #              node-feature-discovery.master / both csi-driver-*.controller). Nothing mocked: the
 #              leader is a real pod, deleted for real.
 # Expected:    - every component reports REPLICAS ready replicas;

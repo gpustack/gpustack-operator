@@ -55,6 +55,22 @@ type InstanceTypeListerExpansion interface{}
 // InstanceTypeFlavorLister.
 type InstanceTypeFlavorListerExpansion interface{}
 
+// KVCacheBackendListerExpansion allows custom methods to be added to
+// KVCacheBackendLister.
+type KVCacheBackendListerExpansion interface{}
+
+// KVCachePoolListerExpansion allows custom methods to be added to
+// KVCachePoolLister.
+type KVCachePoolListerExpansion interface{}
+
+// KVCachePoolBindingListerExpansion allows custom methods to be added to
+// KVCachePoolBindingLister.
+type KVCachePoolBindingListerExpansion interface{}
+
+// KVCachePoolBindingNamespaceListerExpansion allows custom methods to be added to
+// KVCachePoolBindingNamespaceLister.
+type KVCachePoolBindingNamespaceListerExpansion interface{}
+
 // ModelArtifactListerExpansion allows custom methods to be added to
 // ModelArtifactLister.
 type ModelArtifactListerExpansion interface{}
@@ -79,6 +95,22 @@ type ModelPrefetchListerExpansion interface{}
 // ModelPrefetchNamespaceLister.
 type ModelPrefetchNamespaceListerExpansion interface{}
 
+// ModelStoreListerExpansion allows custom methods to be added to
+// ModelStoreLister.
+type ModelStoreListerExpansion interface{}
+
+// ModelStoreBindingListerExpansion allows custom methods to be added to
+// ModelStoreBindingLister.
+type ModelStoreBindingListerExpansion interface{}
+
+// ModelStoreBindingNamespaceListerExpansion allows custom methods to be added to
+// ModelStoreBindingNamespaceLister.
+type ModelStoreBindingNamespaceListerExpansion interface{}
+
 // NodeModelStoreListerExpansion allows custom methods to be added to
 // NodeModelStoreLister.
 type NodeModelStoreListerExpansion interface{}
+
+// TopologySourceListerExpansion allows custom methods to be added to
+// TopologySourceLister.
+type TopologySourceListerExpansion interface{}

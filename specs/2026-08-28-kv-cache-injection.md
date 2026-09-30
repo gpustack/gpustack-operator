@@ -1048,7 +1048,7 @@ accepted on the strength of a flag being accepted.
   majority are below this floor, and admission cannot tell which one a Pod will run: it never
   inspects the image, and there is no `engineVersion` annotation for a user to declare one.
   **No version validation is added** — nothing on this path has the input it would need. The mitigation is that the limitation is written down, in this list and in
-  `docs/reference/kv-cache-injection.md`, together with the one command that distinguishes it: an
+  `docs/modules/kv-cache/injection.md`, together with the one command that distinguishes it: an
   `ImportError` from that module means the injection is inert on that image. Note the symptom differs
   from the unregistered-tenant one in F4a and calls for a different fix — that failure is loud on
   every write, this one is entirely silent.
@@ -1082,7 +1082,7 @@ accepted on the strength of a flag being accepted.
   a protocol and a domain name — no credential. If a future backend needs one, it must not travel in an
   annotation; that is a boundary, not a preference.
 - **The injection is not a Kueue gate and must not be described as one.**
-  `docs/architecture/admission.md` documents a five-gate model; this webhook is deliberately outside it,
+  `docs/modules/devices/admission.md` documents a five-gate model; this webhook is deliberately outside it,
   and the page says so, or the next reader will count six gates and look for the quota this one charges.
 - Go files are snake_case (`pod_kv_cache.go`); the synthesis package holds no cluster types, so it tests
   without a client.
@@ -1226,9 +1226,17 @@ pkg/worker/kvcache/inject/
   vllm.go                      # the vLLM / vllm-ascend synthesis                        (T2)
   sglang.go                    # the SGLang synthesis                                    (T2)
   *_test.go                    # pure, no cluster, no engine
-docs/reference/kv-cache-injection.md   # the label/annotation contract, the injected keys, the refusals
-docs/architecture/admission.md         # one paragraph: a Pod webhook outside the five gates
+docs/modules/kv-cache/injection.md   # the label/annotation contract, the injected keys, the refusals
+docs/modules/devices/admission.md         # one paragraph: a Pod webhook outside the five gates
 ```
+
+### Arbitrary commands and the reuse domain
+
+The deployment take-over tier accepts an arbitrary program and its arguments. Refusing
+`MOONCAKE_TENANT_ID` in the role's environment or managed arguments cannot constrain an assignment
+inside a shell command or a script that program executes. Admission does not interpret those
+programs. The domain exposure also exists for workloads that contact the store directly; an
+arbitrary command is one example of the unauthenticated store boundary tracked by #168.
 
 ### Code Style
 
@@ -1413,7 +1421,7 @@ reads and writes the pool, and a domain-carrying one is refused).
 
 - [x] **T7 · Documentation**
   Blocked by: T5
-  Owns: `docs/reference/kv-cache-injection.md`, `docs/architecture/admission.md`, `docs/README.md`
+  Owns: `docs/modules/kv-cache/injection.md`, `docs/modules/devices/admission.md`, `docs/README.md`
   Gate: review
   Acceptance: a reference page carrying the label and annotation contract, the injected keys per engine
   with the vehicle and the reason for it, and every refusal with its message and its fix. **The tenant
@@ -1427,7 +1435,7 @@ reads and writes the pool, and a domain-carrying one is refused).
   limit, the engine's default is GiB-scale (4 on vLLM, 1 on vLLM-Ascend), and a container whose limit
   was sized for a model alone will OOM — so the page says what to add to the limit and where the
   value comes from. One paragraph in
-  `docs/architecture/admission.md` placing this webhook **outside** the five gates. The index links
+  `docs/modules/devices/admission.md` placing this webhook **outside** the five gates. The index links
   both.
   Verify: `make lint docs`
 

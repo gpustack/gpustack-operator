@@ -567,7 +567,7 @@ contract, which F11 itself scoped to a follow-up spec. CASE 28 stays observation
 
 **F12 — vocabulary and documentation, including the request rules.**
 The rename covers live code comments, error strings, test helper names, chart templates, Dockerfile stage
-comments, `README.md`, `docs/architecture.md`, `docs/walkthrough.md` and `docs/operation/nvidia-mig.md`.
+comments, `README.md`, `docs/getting-started/architecture.md`, `docs/getting-started/walkthrough.md` and `docs/modules/devices/nvidia-mig.md`.
 Beyond it, the docs gain a **normative request-rules section** — the seven rules, the container-group
 scoping and why accelerator claims are confined to one group, the single-card cap and what deferred it, the
 variant exclusion, and a worked example per family — plus the corrected capability-re-detect procedure and a
@@ -1277,8 +1277,8 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       no translation, and that the allocation annotation's value is one too — so a node must be drained
       before its device manager is upgraded, or its running Pods' cards read free; correct the
       partitioning-mode-change procedure (DaemonSet restart, not object deletion); update the MIG guide to the new keys and add the `Instance`-side partition request; update
-      the `Accelerator(E/S/P)` column header — it appears in `docs/walkthrough.md` and
-      `docs/operation/nvidia-mig.md`; state that hand-carving a partition outside GPUStack is unsupported on
+      the `Accelerator(E/S/P)` column header — it appears in `docs/getting-started/walkthrough.md` and
+      `docs/modules/devices/nvidia-mig.md`; state that hand-carving a partition outside GPUStack is unsupported on
       a managed node, and why. Also record the behaviour T12 tightened: a slice percentage against a pool
       that offers no logical slicing used to be ignored and silently served as a whole card, and is now
       rejected at admission. Two stale statements T13 left standing because they are documentation rather
@@ -1289,7 +1289,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       column header in `docs/`; the two success-criteria greps return nothing under `docs/` or
       `README.md`.
       Verify: read-through against the F6 table
-      *Landed:* the rules needed their own page — `docs/accelerator-requests.md`, linked from the README
+      *Landed:* the rules needed their own page — `docs/modules/devices/requests.md`, linked from the README
       index, `architecture.md`, `walkthrough.md` and the MIG guide. Its rule numbering follows the webhook's
       own, and each rule quotes the message verbatim. Two judgment calls worth recording. The old MIG key is
       described compositionally — "a `mig-<profile>` segment on `<base>.sliced`" — because naming it

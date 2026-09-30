@@ -300,6 +300,47 @@ pkg/worker/webhooks/worker/instancetype.go (new)            # F5c InstanceType v
 pkg/worker/settings/value.go                       # F0c three env switches
 pkg/workergateway/service/types.go                 # F6 three-view contract (+ helper.go)
 ```
+### Admission isolation and eviction race retained from the admission guide
+
+The Workload webhook's `matchConditions` constrain it to the operator's LocalQueue name prefix,
+so it does not mutate another tenant's Workloads in a shared Kueue installation.
+
+The per-accelerator check skips an evicted Workload even if quota still appears reserved. Kueue
+resets checks to Pending and drops the reservation in separate writes; an intervening verdict
+can overwrite the reset. Kueue then stops resetting while eviction is set, the scheduler refuses
+to reserve quota while the check is Retry, and this reconciler cannot evaluate without a
+reservation. Skipping that interval avoids the deadlock; re-reservation clears eviction and
+reopens evaluation.
+
+### Deletion-guard classification retained from the admission guide
+
+`pkg/webhook/helper.go` wraps handlers in `deletionGuardedDefaulter` and
+`deletionGuardedValidator` at `ExecuteSetup`. UPDATE defaulting and validation return success
+without calling the handler once `metadata.deletionTimestamp` is set, unless the handler
+implements `webhook.ReceiveDeletionUpdate`. CREATE and DELETE delegation are unchanged.
+The marker applies to both halves. Classify each rule by whether it could reject an update
+changing only `metadata.finalizers`; a cross-object read is safe when it runs only after its
+relevant field changes.
+
+| Handler | Deleting UPDATE | Rationale |
+|---|---|---|
+| KVCachePoolBinding | validates | pool read only when quota ceiling changes |
+| KVCacheBackend | validates | fallback-image read only when image changes |
+| KVCachePool, InstanceType | validates | update rules compare old and new objects |
+| ModelDeployment | validates | validation compares objects; defaulting returns early while deleting |
+| PodKVCache | validates | terminating Pods still serve and receive configuration projections |
+| ModelArtifact | validates | status-writer authorization still holds while consumers drain |
+| NodeModelStore | validates | status authorization reads the request and writer Pod, not a deleted owner; no defaulting |
+| ModelPrefetch, ModelStoreBinding | validates | finalizer-only edits do not invoke a failing owner read |
+| Instance | guarded | defaulting reads InstanceType with UPDATE failurePolicy Fail; a missing type would strand finalizer removal |
+| Accelerator Pod | CREATE only | deletion guard cannot run on this registration |
+
+Instance keeps the shared guard and skips UPDATE checks during deletion. ModelDeployment keeps
+validation through the marker but independently returns early from defaulting. Releasing the
+shared guard while still reading an absent InstanceType would prevent finalizer removal.
+The classification was checked against current handlers and existing deletion-guard tests;
+no new test or runtime claim was introduced by moving this explanation.
+
 ### Code Style
 ```go
 // One whole card = M = 1,600,000 credit units (= 2⁹×5⁵ = 12800×5³): keeps the 2⁹ factor

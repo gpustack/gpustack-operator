@@ -233,7 +233,7 @@ a ClusterQueue references that check only where `NodeQueueReconciler.fillCluster
 (`pkg/worker/controllers/worker/node_queue.go:167`) writes `spec.admissionChecksStrategy` — which it
 does when the pool is accelerated, the check reports `Active`, **and the `instance-type-derived-from-node`
 setting is `true`**. That is the default, but `false` is a documented deployment mode
-(`docs/settings.md` uses it as its worked example of editing a setting), and on that path the
+(`docs/reference/settings.md` uses it as its worked example of editing a setting), and on that path the
 administrator authors the ClusterQueue through the InstanceType API, whose
 `InstanceTypeReconciler.createClusterQueue` does not set the field. No other site in the repository
 writes it.
@@ -1415,8 +1415,8 @@ after T8 (status tells the truth); after T13 (atomic admission is demonstrated a
 
 - [x] **T11 · Documentation**
   Blocked by: T2, T5, T6, T8, T10
-  Owns: `docs/reference/model-deployment.md`, `docs/architecture/admission.md`,
-  `docs/architecture/scheduling-chain.md`
+  Owns: `docs/reference/model-deployment.md`, `docs/modules/devices/admission.md`,
+  `docs/modules/devices/scheduling.md`
   Gate: review
   Acceptance: the reference page gains the P/D section — the pod group and what each label and
   annotation is for, why `pod-group-fast-admission` must never be set, the identical-`instanceType`

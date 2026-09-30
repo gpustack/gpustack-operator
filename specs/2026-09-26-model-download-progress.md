@@ -491,6 +491,12 @@ docs/reference/, docs/operation/model-store.md, docs/README.md
 .agents/skills/gpustack-operator-e2e/cases/case-108.sh, case-109.sh
 ```
 
+### Printer-column implementation
+
+The aggregated handlers for `ModelArtifact` and `NodeModelStore` construct their tables with
+`extensionapi.NewJSONPathTemplateTableConvertor`. Their printer columns describe the objects returned
+by `kubectl get`; the aggregated API owns this rendering rather than relying on the CRD printer.
+
 ### Code Style
 
 The reporter's existing shape, which the write rule extends: compute the whole status, compare it

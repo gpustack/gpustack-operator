@@ -1206,7 +1206,7 @@ code and the hardware verification, because only then is there something to veri
       derives, `LIBVROCM_LOG_LEVEL=1` with the per-denial reasoning, the preload-library provenance
       paragraph, and the fail-open subsection naming `rocm-cumask-check` and the per-card minimum
       percentage. Routed through the `gpustack-operator-docs` skill.
-      Verify: the skill's index / link / table-of-contents checks pass, `docs/architecture.md` gains
+      Verify: the skill's index / link / table-of-contents checks pass, `docs/getting-started/architecture.md` gains
       nothing, and `make lint` still passes
 
 ### Test Plan

@@ -677,7 +677,7 @@ in this operator.
   it marks. That document is a bug fix's specification, so it is not in this repository and naming it
   as a path resolves to nothing. The markers now call it the segment-identity correction, which is a
   name rather than a path. What it supersedes is unchanged, and the rules in force are on the backend
-  page, `docs/kv-cache/backend.md`.
+  page, `docs/modules/kv-cache/backend.md`.
 
 #### F7 — `status.capacity` is read from the master's Prometheus counters
 
@@ -1346,13 +1346,26 @@ pkg/worker/kvcache/
   leader_workload.go                   # Deployment + Service
   member_workload.go                   # DaemonSet, security context, requests
   admin.go                             # /health decode + /metrics parse over an http.Client
-docs/kv-cache/backend.md  # the new page
+docs/modules/kv-cache/backend.md  # the new page
 docs/README.md                         # index entry
 ```
 
 `pkg/worker/kvcache/` is a new package because the renderers and the admin client are pure functions
 over recorded inputs: keeping them out of the reconciler is what lets the whole flag surface and the
 whole status derivation be tested without a cluster.
+
+### Membership compatibility and shutdown evidence retained from the guide
+
+The source/compatibility reading recorded by the guide places `GET /get_segments_detail` at
+Mooncake 0.3.12. The 0.3.10 and 0.3.11 lines return 404 there while `/health` and `/metrics`
+serve; the worker publishes `Unknown/SegmentListingNotServed`, an empty member list, and Ready
+when the leader serves. Other failures retain the old list and report ListingFailed.
+
+For the example member image, the deregistration hook makes a key held only on that tier a
+clean miss immediately. Its wait is unconditional and gives the local member time to finish,
+not a continued remote-read window. A different `spec.image` can deregister or wait differently;
+the operator controls only the timeout it passes. Existing graceful-unmount and drain-job
+analysis above explains why selector narrowing or node removal does not migrate cached data.
 
 ### Code Style
 
@@ -1850,7 +1863,7 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
 
 - [x] **T13 · Documentation**
       Blocked by: T12
-      Owns: `docs/kv-cache/backend.md`, `docs/README.md`
+      Owns: `docs/modules/kv-cache/backend.md`, `docs/README.md`
       Acceptance: the page states the two axes and why they are two; the cluster-scoped argument with
       the Kueue precedent link; the measured master-variant and client-layout tables, why `spec.image`
       is explicit, and that the master image needs no accelerator runtime while a member image needs

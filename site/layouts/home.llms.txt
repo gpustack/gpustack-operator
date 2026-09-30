@@ -1,0 +1,26 @@
+{{- $summary := strings.TrimSpace (.RawContent | replaceRE `\s+` " ") -}}
+{{- $lines := slice (printf "# %s" .Site.Title) "" (printf "> %s" $summary) "" (printf "Documentation version: %s. Source revision: %s." .Site.Params.version .Site.Params.sourceRef) "These pages come from the repository's docs/ sources. For version-specific behavior, use the" "documentation and code for your release. This index routes questions; follow its links for evidence." -}}
+{{- $index := resources.Get "doc-index/README.md" -}}
+{{- $catalog := index (split (index (split $index.Content "## All pages\n") 1) "\n## ") 0 -}}
+{{- $optional := slice -}}
+{{- range split $catalog "\n" -}}
+  {{- if hasPrefix . "### " -}}
+    {{- $lines = $lines | append "" (printf "## %s" (strings.TrimPrefix "### " .)) "" -}}
+  {{- else if hasPrefix . "| [" -}}
+    {{- $fields := split . "|" -}}
+    {{- $link := strings.TrimSpace (index $fields 1) -}}
+    {{- $target := replaceRE `^\[[^\]]*\]\(([^\)]+)\)$` "$1" $link -}}
+    {{- $description := strings.TrimSpace (index $fields 2) -}}
+    {{- with site.GetPage (printf "/docs/%s" $target) -}}
+      {{- $entry := printf "- [%s](%s): %s" (partial "page-title.html" .) (.OutputFormats.Get "Markdown").Permalink $description -}}
+      {{- if hasPrefix $target "contribute/" -}}
+        {{- $optional = $optional | append $entry -}}
+      {{- else -}}
+        {{- $lines = $lines | append $entry -}}
+      {{- end -}}
+    {{- else -}}{{ errorf "docs/README.md indexes a page not mounted in Hugo: %s" $target }}{{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $lines = $lines | append "" "## Optional" "" (printf "- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/%s/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors." .Site.Params.sourceRef) -}}
+{{- range $optional -}}{{ $lines = $lines | append . }}{{- end -}}
+{{- printf "%s\n" (delimit $lines "\n") -}}

@@ -23,10 +23,22 @@ type InstanceTypeExpansion interface{}
 
 type InstanceTypeFlavorExpansion interface{}
 
+type KVCacheBackendExpansion interface{}
+
+type KVCachePoolExpansion interface{}
+
+type KVCachePoolBindingExpansion interface{}
+
 type ModelArtifactExpansion interface{}
 
 type ModelDeploymentExpansion interface{}
 
 type ModelPrefetchExpansion interface{}
 
+type ModelStoreExpansion interface{}
+
+type ModelStoreBindingExpansion interface{}
+
 type NodeModelStoreExpansion interface{}
+
+type TopologySourceExpansion interface{}

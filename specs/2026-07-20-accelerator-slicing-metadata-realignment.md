@@ -1059,8 +1059,8 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
 [x] **T13: MIG manual-lifecycle docs + stale-doc/spec annotations (F9 + R12).**
     - Add the `docs/` page (enable/disable/reboot-recovery/no-auto-descheduling) with the profile + placement
       tables and the grounding lifecycle facts; generic "a Kubernetes cluster" wording only.
-    - Update the stale docs that describe the old group-level model: `docs/architecture.md:156,178` (group
-      `AcceleratorsFeature`, per-vendor `maxSlices`, group-sized token pool) and `docs/walkthrough.md:394`
+    - Update the stale docs that describe the old group-level model: `docs/getting-started/architecture.md:156,178` (group
+      `AcceleratorsFeature`, per-vendor `maxSlices`, group-sized token pool) and `docs/getting-started/walkthrough.md:394`
       (slice VRAM capping). Declare the supersession of the
       `2026-07-16-accelerator-slicing-capability-and-pool-feedback` spec's detector-`LogicalSliced` design in
       **this spec's header** (the "Supersedes prior design" block), leaving the archived spec untouched.

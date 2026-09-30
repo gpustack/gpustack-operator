@@ -1,0 +1,118 @@
+name: Site
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "main or an existing version tag containing the site sources"
+        default: main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    if: github.repository == 'gpustack/gpustack-operator'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    # Chart publication and deployment use this same queue. Acquire it before checkout so
+    # every writer and every deployment sees the latest complete Pages branch.
+    concurrency:
+      group: github-pages
+      queue: max
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      SITE_ROOT_URL: https://docs.gpustack.ai/gpustack-operator/
+      REQUESTED_REF: ${{ inputs.ref || github.ref_name }}
+    steps:
+      - name: Checkout publishing tools
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tools
+          persist-credentials: false
+      - name: Validate documentation ref
+        id: ref
+        run: |
+          kind=$(python3 -c 'import sys; sys.path.insert(0, "tools/hack/site"); from publish import version_kind; print(version_kind(sys.argv[1]))' "${REQUESTED_REF}")
+          if [[ "${REQUESTED_REF}" == main ]]; then
+            ref=refs/heads/main
+          else
+            ref="refs/tags/${REQUESTED_REF}"
+          fi
+          echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
+          echo "kind=${kind}" >> "${GITHUB_OUTPUT}"
+      - name: Checkout documentation sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+          path: source
+          lfs: true
+          persist-credentials: false
+      - name: Verify sources and record revision
+        id: source
+        working-directory: source
+        run: |
+          [[ -f site/hugo.toml && -f site/layouts/home.version.json ]] || {
+            echo "::error::This revision predates the documentation site; publish from a tag containing the site sources."
+            exit 1
+          }
+          echo "commit=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+      - name: Setup Go for Hugo
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: source/go.mod
+      - name: Build and check versioned documentation
+        working-directory: source
+        env:
+          SITE_BASE_URL: ${{ env.SITE_ROOT_URL }}${{ env.REQUESTED_REF }}/
+          HUGO_PARAMS_SITEROOT: ${{ env.SITE_ROOT_URL }}
+          HUGO_PARAMS_VERSION: ${{ env.REQUESTED_REF }}
+          HUGO_PARAMS_SOURCEREF: ${{ steps.source.outputs.commit }}
+          HUGO_PARAMS_RELEASEKIND: ${{ steps.ref.outputs.kind }}
+        run: make site
+      - name: Checkout Pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: github-pages
+          path: pages
+      - name: Compose Pages without changing charts
+        run: |
+          python3 tools/hack/site/publish.py --build source/site/public --pages pages \
+            --ref "${REQUESTED_REF}" --commit "${SOURCE_COMMIT}" --root-url "${SITE_ROOT_URL}"
+        env:
+          SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
+      - name: Commit documentation
+        working-directory: pages
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: publish ${REQUESTED_REF} site"
+            git push origin HEAD:github-pages
+          fi
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+      - name: Upload complete Pages tree
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5

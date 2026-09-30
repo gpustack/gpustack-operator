@@ -1013,7 +1013,7 @@ The download lives in a stage that is never pushed, because BuildKit writes ever
 image history of the stage that declares it — declaring `PPU_SDK_URL` in the final stage would publish the
 presigned link to anyone who pulls the image.
 
-Go conventions are the project's existing ones (`docs/development.md`, `CLAUDE.md`): snake_case multi-word file
+Go conventions are the project's existing ones (`docs/contribute/development.md`, `CLAUDE.md`): snake_case multi-word file
 names, explicit error handling, level-based reconcile. Shell in the skill follows the existing case scripts: a
 `row()` three-column printer, a `fails` counter, `echo "FAILS=${fails}"`, and an outer `grep -q 'FAILS=0'`
 deciding PASS/FAIL and the exit code.

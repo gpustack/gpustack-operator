@@ -82,12 +82,12 @@ has one home.
 6. **Instance sizing from the new unit.** An Instance submitted against each type is sized from
    the fixed unit: whole-card `unit × count`, sliced `unit × memory%`, and a local-storage request
    is capped at `100Gi`.
-7. **Docs + e2e aligned.** `docs/architecture.md` (Stage 3/4 + example) and the e2e cases
+7. **Docs + e2e aligned.** `docs/getting-started/architecture.md` (Stage 3/4 + example) and the e2e cases
    (`case-6`, `references/drain-recycle.md`) reflect the single-home unit spec; `case-9`/`case-10`
    (admin overrides) still pass.
 
 ### Notes / Constraints / Caveats
-- Go + Kubernetes controller-runtime operator; conventions in `CLAUDE.md` / `docs/development.md`.
+- Go + Kubernetes controller-runtime operator; conventions in `CLAUDE.md` / `docs/contribute/development.md`.
 - Consumers to leave untouched: Instance webhook reads `instType.Spec.UnitResources`/`LocalStorage`;
   Pod webhook reads the CQ `memory` note only.
 - Removing the derivation path orphans `adminUnitNotes`, `minPositiveNumeric`,
@@ -141,7 +141,7 @@ pkg/worker/controllers/worker/instancetype_test.go # rework UnitSpecDerivation /
 pkg/worker/controllers/worker/nodeflavor_test.go   # drop RF-note unit assertions
 pkg/worker/webhooks/worker/instancetype.go         # require the full unit-spec triple (reject empty/partial)
 pkg/worker/webhooks/worker/instancetype_test.go    # empty spec now rejected, not accepted
-docs/architecture.md                               # Stage 3/4 + example
+docs/getting-started/architecture.md                               # Stage 3/4 + example
 .claude/skills/gpustack-operator-e2e/cases/case-6.sh            # unit spec now on IT.spec, not CQ notes
 .claude/skills/gpustack-operator-e2e/references/drain-recycle.md
 ```
@@ -225,7 +225,7 @@ is docs/e2e; Task 5 is package + verification on a reachable Kubernetes cluster.
     - Verify: `go test ./pkg/worker/controllers/worker/...` + `make lint` (unused guard).
 
 [x] **Task 4 — Docs + e2e alignment.**
-    - `docs/architecture.md` L178/215/216/227/247: fixed default, single home on InstanceType, no node
+    - `docs/getting-started/architecture.md` L178/215/216/227/247: fixed default, single home on InstanceType, no node
       derivation, no RF/CQ unit notes; example shows accel 4c-16g / non-accel 1c-2g / 100Gi.
     - `case-6.sh` (item 3, L16-18/228-254): assert the admin edit persists on `it.spec.unitResources.cpu`
       (accel → stays "2", not pinned) and touches no worker NodeFeature; drop the `note.gpustack.ai/unitCPU`

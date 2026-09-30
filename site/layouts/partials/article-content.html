@@ -1,0 +1,27 @@
+{{- $parts := split .RawContent "\n---\n" -}}
+{{- $footer := strings.TrimSpace (index $parts (sub (len $parts) 1)) -}}
+{{- if and (gt (len $parts) 1) (hasPrefix $footer "**See also**") -}}
+  {{- $body := delimit (first (sub (len $parts) 1) $parts) "\n---\n" -}}
+  {{ .RenderString (dict "display" "block") $body }}
+  {{- $sections := split $footer "**Next**" -}}
+  {{- $related := replaceRE "^\\*\\*See also\\*\\*\\s*—?\\s*" "" (index $sections 0) -}}
+  <nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages">
+        {{- range split $related "·" -}}
+          <li>{{ $.RenderString (strings.TrimSpace .) }}</li>
+        {{- end -}}
+      </ul>
+    </section>
+    {{- if gt (len $sections) 1 -}}
+      {{- $next := replaceRE "^\\s*→?\\s*" "" (index $sections 1) -}}
+      <section class="next-page">
+        <h2>Next</h2>
+        <div>{{ .RenderString (strings.TrimSpace $next) }}</div>
+      </section>
+    {{- end -}}
+  </nav>
+{{- else -}}
+  {{ .Content }}
+{{- end -}}

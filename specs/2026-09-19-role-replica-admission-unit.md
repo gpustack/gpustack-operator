@@ -755,6 +755,19 @@ F3's identity model already admits and a revision-scoped naming scheme would hav
 
 ## Design Details
 
+### AdmissionCheck installation and queue references
+
+The current runtime installs two checks: `gpustack-node-devices` and
+`gpustack-model-deployment-joint`. `pkg/worker/kuberess/apps_kueue_admission_check.go` owns their
+installation. `pkg/worker/controllers/worker/node_queue.go` references the node-devices check on
+accelerated derived queues and the joint check on every operator-managed queue, but only while
+its `Active` condition is true. This includes CPU queues and administrator-authored InstanceTypes.
+
+The joint controller immediately passes workloads outside a multi-role ModelDeployment, including
+single-role deployments. This records the source-confirmed runtime boundary; it does not change
+this spec's group or role admission semantics.
+
+
 ### The API surface, field by field
 
 Five fields moved. Two are new, one replaced a scalar with a list, and two kept their names while

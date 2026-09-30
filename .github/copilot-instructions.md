@@ -1,24 +1,9 @@
 # Copilot Code Review — GPUStack Operator
 
-GPUStack Operator is a Kubernetes operator that turns raw node hardware into a
-Kueue-based scheduling chain for accelerators (GPU/NPU/TPU), built on Node Feature
-Discovery (NFD) + Kueue. One binary (`cmd/gpustack-operator`) runs four subcommands
-— `worker` (control-plane controllers + aggregated extension API), `worker-gateway`,
-`device-manager` (per-node DaemonSet), and `model-manager` (per-node CSI plugin that
-mounts Hugging Face weights from a verified node cache) — three of which drive a four-stage chain: NFD labels
-nodes → the Device Manager detects accelerators and maintains the `Devices` CR
-ledger (the single authoritative record of who holds what) → the worker profiles
-per-node capacity labels → controllers materialize Kueue `ResourceFlavor` →
-`ClusterQueue` → `LocalQueue`, plus an
-`InstanceType` CRD with a four-view (EX/SH/SL/PT) status. Accelerator quota is
-`credits.gpustack.ai/<manufacturer>`, one whole accelerator = `M = 1,600,000`
-integer credit units. Read `docs/architecture.md` first, then the deep page under
-`docs/architecture/` for the area a PR touches.
-
-Layout: controllers and reconcilers live under `pkg/` (`worker`, `devicemanager`,
-`nodefeature` — the label algebra), API types under `api/`, CGO bindings under
-`binding/`, hand-written C preload shims under `csrc/`, patched k8s modules under
-`staging/`, and the Helm chart under `deploy/gpustack-operator/chart`.
+GPUStack Operator is a Kubernetes operator for accelerator scheduling and workload management,
+built on Node Feature Discovery and Kueue. Read [the module map](../docs/README.md#module-map)
+for the touched capability and its related modules, then [Architecture](../docs/getting-started/architecture.md)
+for the request flow. The shared index owns module, code and spec navigation.
 
 Conventions, for context rather than review: an issue title starts with exactly one of `bug: `,
 `enhancement: `, `support: `, `docs: `, `cleanup: `, `todo: ` and stays at or under 80 characters
@@ -33,6 +18,36 @@ When performing a code review, use the `gpustack-operator-code-review` skill in
 the review criteria and `AGENTS.md` owns the coding conventions; what follows is the part of both
 that this reviewer can see and evaluate. Keep feedback specific and actionable; cite the file and
 line.
+
+## Reading sources for review
+
+Start with [the shared module map](../docs/README.md#module-map), then read the touched module's
+guides, owning specs, code entry points and related modules. [AGENTS.md](../AGENTS.md#finding-sources)
+owns the retrieval and evidence rules. These local files are sufficient without an external index.
+
+- Review behavior against the PR head and its dependency versions. An index entry is navigation;
+  confirm its claims in the cited source before reporting a defect.
+- Guides describe public usage; specs preserve design rationale, measurements and limitations.
+  Check a spec's status and the current implementation before treating a proposal as shipped behavior.
+- For an error or upstream compatibility claim, locate the stable error text, then inspect relevant
+  issues, their resolutions and linked PRs. Confirm that the reviewed version contains the cited fix.
+- Cite the relevant passage or code location and explain the failing scenario. Distinguish source
+  statements from inference, and preserve qualifications when summarizing evidence.
+- Public GPUStack APIs use `v1`; controller storage uses `v1alpha1`. Check the public types,
+  registrations, proxy handlers, clients and permissions together through the API Changes entry.
+  Internal fixtures using `v1alpha1` do not establish a defect in a public example.
+- When a guide is shortened, verify that usage and limits remain, and that moved engineering
+  evidence exists in its owning spec. Do not request implementation narratives in user guides.
+- Flag stale routing when pages, code entry points, owning specs or skill inputs change. Ordinary
+  prose edits do not require a mechanical index edit. Site `llms.txt` and Markdown are generated
+  from repository sources; review their inputs rather than asking for separately maintained copies.
+- For site publication, check the exact tag source revision, version prefixes and shared Pages
+  queue. Documentation publication must preserve chart packages and `/charts/index.yaml`.
+  Hidden prereleases retain direct links; the default follows the latest published stable site.
+  Do not request historical-tag sites built from newer source files.
+
+The review exclusions below still apply. If an excluded implementation or test is needed to verify
+a claim, state what could not be checked; do not infer behavior or missing coverage from its absence.
 
 ## Review conventions — where a low-severity finding goes
 
@@ -75,7 +90,7 @@ measurement it contradicts — that is the only form of it worth a reviewer's at
 ## Out of scope — do not review
 
 Mirrors the `exclude` list in `.opencodereview/rule.json`, verbatim and in the same order.
-`hack/check-review-config.sh` holds the two to that, and runs in `make lint`.
+`hack/check/review-config.sh` holds the two to that, and runs in `make lint`.
 
 A third copy is not in the tree and no gate can reach it: Copilot's real exclusions come from the
 content-exclusion policy in the repository settings, so this list describes that configuration

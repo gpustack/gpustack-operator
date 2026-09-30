@@ -19,22 +19,50 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 
 ## Architecture
 
-Three subcommands (`worker`, `worker-gateway`, `device-manager`) drive a four-stage chain: NFD labels
+The `worker`, `worker-gateway` and `device-manager` subcommands drive the scheduling chain: NFD labels
 nodes → the Device Manager detects accelerators → the worker profiles node capacity → the
 controllers under `pkg/worker/controllers/worker` materialize Kueue `ResourceFlavor` →
 `ClusterQueue` (one isolated queue per pool) → `LocalQueue` plus an `InstanceType` CRD.
-`pkg/nodefeature` holds the label algebra. A fourth, `model-manager`, is a per-node CSI plugin that
+`pkg/nodefeature` holds the label algebra. The `model-manager` subcommand is a per-node CSI plugin that
 mounts Hugging Face weights from a verified node cache (`pkg/modelmanager`, `NodeModelStore`).
 
-Read `docs/architecture.md` first: one page, the four stages, the life of a request, the vocabulary.
-Then the deep page under `docs/architecture/` for what you are touching — `device-discovery.md` (NFD,
-Device Manager, allocator), `scheduling-chain.md` (capacity labels, flavors/queues/InstanceTypes,
-`pkg/nodefeature`), `admission.md` (the five gates, webhooks, four-view status), `installation-modes.md`,
-`internals.md` (startup order and the invariants that fail silently). `docs/README.md` indexes it all.
+Read `docs/getting-started/architecture.md` first: one page, the scheduling chain, the life of a request,
+and the vocabulary. Then use the deep page for the relevant capability: `docs/modules/devices/`
+for discovery, scheduling and admission; `docs/modules/rdma/` for network interfaces;
+`docs/modules/topology/` for placement; `docs/modules/kv-cache/`,
+`docs/modules/model-delivery/`, `docs/modules/model-deployment/` and
+`docs/modules/instances/` for workload features. Installation modes are under `docs/operate/`;
+startup constraints are under `docs/contribute/`. `docs/README.md` indexes every page.
+
+## Finding sources
+
+Start with [the module map](docs/README.md#module-map). It links each capability and shared task
+to its guides, design records, code entry points, related modules and applicable skills.
+Read the relevant entry and its relationships before narrowing a code search. Use the local
+checkout; no external index or running documentation site is required.
+
+- Confirm the checkout, branch, uncommitted changes and relevant dependency versions before
+  reasoning about behavior. Site documentation or a merged PR may describe a different revision.
+- For a concrete error, search its stable text locally first. When it concerns an upstream
+  dependency or known failure, search that project's issues and PRs using the error and dependency
+  name. Remove variable paths, line numbers and IDs if the exact search returns nothing.
+- Cite the relevant source passage or file location for a consequential claim. Keep observed
+  behavior, source statements and inference distinct; preserve conditions and uncertainty when
+  summarizing. A navigation entry points to evidence but is not itself proof.
+- Read an issue's resolution and linked PR before using its opening report as guidance. Confirm
+  that the current checkout or installed version contains the fix and has not superseded it.
+- Guides own usage contracts; specs own design rationale and measurements; current code establishes
+  what this checkout implements. Check spec status and applicable versions when these disagree,
+  and report the disagreement rather than silently choosing one.
+
+REQUIRED: update the shared index in the same change when adding or moving a page, changing a
+module boundary or code entry point, replacing an owning spec, or changing a skill's document
+inputs. Ordinary wording changes need no index edit when routing remains accurate. Run
+`make lint docs`; it also checks the generated site index and Markdown exports.
 
 ## Development
 
-See `docs/development.md` for build/lint/test commands, code generation, and vendored dependencies.
+See `docs/contribute/development.md` for build/lint/test commands, code generation, and vendored dependencies.
 
 These build, deploy or publish, so they are explicit-only: your host never lists them, and offering
 one by name is your job. The change on the left is the trigger.
@@ -51,7 +79,7 @@ one by name is your job. The change on the left is the trigger.
   → `gpustack-operator-xbuild-and-verify`
 
 The `gpustack-operator-lint` hook dispatches on what a turn left dirty and implements this table;
-`hack/check-hook-dispatch.sh` asserts that it still does. It is report-only and runs once the turn
+`hack/check/hook-dispatch.sh` asserts that it still does. It is report-only and runs once the turn
 is over, so run the matching target yourself when you need the answer before that. The last row is a
 default, not a list, so a file type nobody named still has an answer:
 

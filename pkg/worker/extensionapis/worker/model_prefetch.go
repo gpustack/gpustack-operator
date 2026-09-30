@@ -15,9 +15,8 @@ import (
 
 // ModelPrefetchHandler exposes the v1 view of a v1alpha1.ModelPrefetch.
 //
-// It proxies the v1alpha1 resource for every verb and serves no subresource: the per-node facts the
-// status aggregates already live on the nodes' own reports, so a progress-style extra path would
-// name nothing the aggregates need.
+// It proxies configuration changes and reads aggregated readiness from the main object.
+// No status or progress subresource is served.
 type ModelPrefetchHandler struct {
 	extensionapi.ObjectInfo
 	extensionapi.CurdOperations

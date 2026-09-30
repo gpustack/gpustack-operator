@@ -25,10 +25,16 @@ type WorkerV1Interface interface {
 	InstanceSSHPublicKeysGetter
 	InstanceTypesGetter
 	InstanceTypeFlavorsGetter
+	KVCacheBackendsGetter
+	KVCachePoolsGetter
+	KVCachePoolBindingsGetter
 	ModelArtifactsGetter
 	ModelDeploymentsGetter
 	ModelPrefetchesGetter
+	ModelStoresGetter
+	ModelStoreBindingsGetter
 	NodeModelStoresGetter
+	TopologySourcesGetter
 }
 
 // WorkerV1Client is used to interact with features provided by the worker.gpustack.ai group.
@@ -68,6 +74,18 @@ func (c *WorkerV1Client) InstanceTypeFlavors() InstanceTypeFlavorInterface {
 	return newInstanceTypeFlavors(c)
 }
 
+func (c *WorkerV1Client) KVCacheBackends() KVCacheBackendInterface {
+	return newKVCacheBackends(c)
+}
+
+func (c *WorkerV1Client) KVCachePools() KVCachePoolInterface {
+	return newKVCachePools(c)
+}
+
+func (c *WorkerV1Client) KVCachePoolBindings(namespace string) KVCachePoolBindingInterface {
+	return newKVCachePoolBindings(c, namespace)
+}
+
 func (c *WorkerV1Client) ModelArtifacts(namespace string) ModelArtifactInterface {
 	return newModelArtifacts(c, namespace)
 }
@@ -80,8 +98,20 @@ func (c *WorkerV1Client) ModelPrefetches(namespace string) ModelPrefetchInterfac
 	return newModelPrefetches(c, namespace)
 }
 
+func (c *WorkerV1Client) ModelStores() ModelStoreInterface {
+	return newModelStores(c)
+}
+
+func (c *WorkerV1Client) ModelStoreBindings(namespace string) ModelStoreBindingInterface {
+	return newModelStoreBindings(c, namespace)
+}
+
 func (c *WorkerV1Client) NodeModelStores() NodeModelStoreInterface {
 	return newNodeModelStores(c)
+}
+
+func (c *WorkerV1Client) TopologySources() TopologySourceInterface {
+	return newTopologySources(c)
 }
 
 // NewForConfig creates a new WorkerV1Client for the given config.

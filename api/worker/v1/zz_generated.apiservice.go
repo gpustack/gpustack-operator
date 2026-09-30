@@ -336,6 +336,108 @@ func (*InstanceTypeFlavor) Categories() []string {
 	}
 }
 
+var _ rest.Scoper = (*KVCacheBackend)(nil)
+
+func (*KVCacheBackend) NamespaceScoped() bool {
+	return false
+}
+
+var _ rest.KindProvider = (*KVCacheBackend)(nil)
+
+func (*KVCacheBackend) Kind() string {
+	return "KVCacheBackend"
+}
+
+var _ rest.SingularNameProvider = (*KVCacheBackend)(nil)
+
+func (*KVCacheBackend) GetSingularName() string {
+	return "kvcachebackend"
+}
+
+var _ rest.ShortNamesProvider = (*KVCacheBackend)(nil)
+
+func (*KVCacheBackend) ShortNames() []string {
+	return []string{
+		"kvcb",
+	}
+}
+
+var _ rest.CategoriesProvider = (*KVCacheBackend)(nil)
+
+func (*KVCacheBackend) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
+var _ rest.Scoper = (*KVCachePool)(nil)
+
+func (*KVCachePool) NamespaceScoped() bool {
+	return false
+}
+
+var _ rest.KindProvider = (*KVCachePool)(nil)
+
+func (*KVCachePool) Kind() string {
+	return "KVCachePool"
+}
+
+var _ rest.SingularNameProvider = (*KVCachePool)(nil)
+
+func (*KVCachePool) GetSingularName() string {
+	return "kvcachepool"
+}
+
+var _ rest.ShortNamesProvider = (*KVCachePool)(nil)
+
+func (*KVCachePool) ShortNames() []string {
+	return []string{
+		"kvcp",
+	}
+}
+
+var _ rest.CategoriesProvider = (*KVCachePool)(nil)
+
+func (*KVCachePool) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
+var _ rest.Scoper = (*KVCachePoolBinding)(nil)
+
+func (*KVCachePoolBinding) NamespaceScoped() bool {
+	return true
+}
+
+var _ rest.KindProvider = (*KVCachePoolBinding)(nil)
+
+func (*KVCachePoolBinding) Kind() string {
+	return "KVCachePoolBinding"
+}
+
+var _ rest.SingularNameProvider = (*KVCachePoolBinding)(nil)
+
+func (*KVCachePoolBinding) GetSingularName() string {
+	return "kvcachepoolbinding"
+}
+
+var _ rest.ShortNamesProvider = (*KVCachePoolBinding)(nil)
+
+func (*KVCachePoolBinding) ShortNames() []string {
+	return []string{
+		"kvcpb",
+	}
+}
+
+var _ rest.CategoriesProvider = (*KVCachePoolBinding)(nil)
+
+func (*KVCachePoolBinding) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
 var _ rest.Scoper = (*ModelArtifact)(nil)
 
 func (*ModelArtifact) NamespaceScoped() bool {
@@ -438,6 +540,74 @@ func (*ModelPrefetch) Categories() []string {
 	}
 }
 
+var _ rest.Scoper = (*ModelStore)(nil)
+
+func (*ModelStore) NamespaceScoped() bool {
+	return false
+}
+
+var _ rest.KindProvider = (*ModelStore)(nil)
+
+func (*ModelStore) Kind() string {
+	return "ModelStore"
+}
+
+var _ rest.SingularNameProvider = (*ModelStore)(nil)
+
+func (*ModelStore) GetSingularName() string {
+	return "modelstore"
+}
+
+var _ rest.ShortNamesProvider = (*ModelStore)(nil)
+
+func (*ModelStore) ShortNames() []string {
+	return []string{
+		"ms",
+	}
+}
+
+var _ rest.CategoriesProvider = (*ModelStore)(nil)
+
+func (*ModelStore) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
+var _ rest.Scoper = (*ModelStoreBinding)(nil)
+
+func (*ModelStoreBinding) NamespaceScoped() bool {
+	return true
+}
+
+var _ rest.KindProvider = (*ModelStoreBinding)(nil)
+
+func (*ModelStoreBinding) Kind() string {
+	return "ModelStoreBinding"
+}
+
+var _ rest.SingularNameProvider = (*ModelStoreBinding)(nil)
+
+func (*ModelStoreBinding) GetSingularName() string {
+	return "modelstorebinding"
+}
+
+var _ rest.ShortNamesProvider = (*ModelStoreBinding)(nil)
+
+func (*ModelStoreBinding) ShortNames() []string {
+	return []string{
+		"msb",
+	}
+}
+
+var _ rest.CategoriesProvider = (*ModelStoreBinding)(nil)
+
+func (*ModelStoreBinding) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
 var _ rest.Scoper = (*NodeModelStore)(nil)
 
 func (*NodeModelStore) NamespaceScoped() bool {
@@ -465,6 +635,40 @@ func (*NodeModelStore) ShortNames() []string {
 var _ rest.CategoriesProvider = (*NodeModelStore)(nil)
 
 func (*NodeModelStore) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
+var _ rest.Scoper = (*TopologySource)(nil)
+
+func (*TopologySource) NamespaceScoped() bool {
+	return false
+}
+
+var _ rest.KindProvider = (*TopologySource)(nil)
+
+func (*TopologySource) Kind() string {
+	return "TopologySource"
+}
+
+var _ rest.SingularNameProvider = (*TopologySource)(nil)
+
+func (*TopologySource) GetSingularName() string {
+	return "topologysource"
+}
+
+var _ rest.ShortNamesProvider = (*TopologySource)(nil)
+
+func (*TopologySource) ShortNames() []string {
+	return []string{
+		"toposrc",
+	}
+}
+
+var _ rest.CategoriesProvider = (*TopologySource)(nil)
+
+func (*TopologySource) Categories() []string {
 	return []string{
 		"gpustack",
 	}

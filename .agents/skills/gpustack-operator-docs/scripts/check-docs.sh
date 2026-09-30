@@ -2,19 +2,19 @@
 # check-docs.sh — the documentation contract for this repository.
 #
 # Scope:
-#   * links and #anchors — README.md, AGENTS.md, docs/**/*.md, .claude/skills/**/*.md
+#   * links and #anchors — README.md, AGENTS.md, Copilot instructions, docs/**/*.md, .agents/skills/**/*.md
 #   * page structure and index coverage — docs/**/*.md only
 #
 # Fails on:
 #   1. a relative link whose file does not exist, or whose #anchor no heading produces;
 #   2. a "## Contents" list that no longer matches the page's ## headings (missing, extra, reordered);
-#   3. a docs/ page whose header block lacks Purpose / Audience / Prerequisites / Read time, or that
-#      has no "**See also**" footer at its end;
+#   3. a docs/ page with no "**See also**" footer at its end;
 #   4. a docs/ page missing from the "## All pages" table in docs/README.md;
 #   5. a prose paragraph longer than the cap (a set of items belongs in a list or a table);
 #   6. a page longer than the line cap;
 #   7. a page with more "##" sections than the cap;
-#   8. an index label in docs/README.md that differs from the page's own H1.
+#   8. an index label in docs/README.md that differs from the page's own H1;
+#   9. a docs path named in a skill that no longer exists.
 #
 # Usage: bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh [--report] [repo-root]
 #
@@ -56,7 +56,7 @@ PAGES=$(find docs -name '*.md' | sort)
 # test entry points, which can go stale. Its bare backtick paths are outside this link check.
 #
 # Only the two link loops read this list. Being on it subjects a file to link and anchor resolution
-# and to nothing else -- the Contents, header, footer, index and size rules are held by $PAGES, and
+# and to nothing else -- the Contents, footer, index and size rules are held by $PAGES, and
 # AGENTS.md is not a docs page.
 #
 # Expect AGENTS.md to contribute zero checked links, and do not read that as a reason to drop it.
@@ -66,8 +66,8 @@ PAGES=$(find docs -name '*.md' | sort)
 # anyone counting what this list covers would otherwise find nothing to show for the entry and
 # conclude it is dead. It is not: it was confirmed to report both a path and an anchor that do not
 # exist, and to pass a link that resolves, before being trusted.
-LINKED_PAGES=$(printf '%s\n%s\n%s\n%s\n' \
-  "README.md" "AGENTS.md" "$PAGES" "$(find .claude/skills -name '*.md' | sort)")
+LINKED_PAGES=$(printf '%s\n' \
+  "README.md" "AGENTS.md" ".github/copilot-instructions.md" "$PAGES" "$(find .agents/skills -name '*.md' | sort)")
 
 # Shape caps (rules 5-7). The paragraph cap is the one that carries the weight: a long page that
 # reads in short paragraphs and clear lists is fine, a short page that reads as a wall of text is not.
@@ -78,7 +78,7 @@ H2_CAP=10           # "##" sections in one page
 
 # Cap exemptions, declared here rather than escaped inline. Each is a space-separated glob list.
 # A recording and a runbook are as long as the hardware makes them.
-LINE_CAP_EXEMPT='docs/walkthrough.md docs/operation/*'
+LINE_CAP_EXEMPT='docs/getting-started/walkthrough.md docs/operate/* docs/modules/devices/*-mig.md'
 # The index is a table of contents and a reference page is a lookup table: both are meant to be flat.
 H2_CAP_EXEMPT='docs/README.md docs/reference/*'
 
@@ -312,16 +312,11 @@ for f in $LINKED_PAGES; do
   done < <(links_of "$f")
 done
 
-# --- 2. Contents, 3. header block and footer --------------------------------
+# --- 2. Contents, 3. footer ------------------------------------------------
 echo "==> page structure"
 for f in $PAGES; do
   [ "$f" = "docs/README.md" ] && continue
 
-  header=$(sed -n '2,8p' "$f")
-  for field in Purpose Audience Prerequisites 'Read time'; do
-    printf '%s\n' "$header" | grep -q "\*\*${field}\*\*" \
-      || err "$f: the header block below the H1 does not state **${field}**"
-  done
   tail -n 12 "$f" | grep -q '^\*\*See also\*\*' \
     || err "$f: no '**See also**' footer at the end of the page"
 
@@ -390,6 +385,12 @@ for f in $PAGES; do
     || shape_err "$f: index label '$label' is not the page's H1 '$h1'"
 done
 
+# --- 9. paths named as skill inputs -----------------------------------------
+echo "==> skill document paths"
+while IFS= read -r path; do
+  [ -f "$path" ] || err "$path: named in a skill but no longer exists"
+done < <(grep -RhoE 'docs/[[:alnum:]_./-]+\.md' .agents/skills --include='*.md' | sort -u)
+
 if [ "$REPORT" -eq 1 ]; then
   echo
   echo "==> report"
@@ -405,7 +406,7 @@ if [ "$errors" -gt 0 ]; then
   echo "FAIL: $errors problem(s)."
   exit 1
 fi
-summary="OK: $(printf '%s\n' "$PAGES" | awk 'NF { n++ } END { print n + 0 }') docs pages checked; links also verified across README.md, AGENTS.md and .claude/skills."
+summary="OK: $(printf '%s\n' "$PAGES" | awk 'NF { n++ } END { print n + 0 }') docs pages checked; links also verified across README.md, AGENTS.md, Copilot instructions and .agents/skills."
 [ "$warnings" -eq 0 ] || summary="$summary
 WARN: $warnings shape warning(s); rules 5-8 are advisory under --report."
 echo "$summary"

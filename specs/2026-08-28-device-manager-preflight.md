@@ -639,7 +639,7 @@ consumer, so it carries acceptance criteria of its own.
 
 #### F16 — documentation
 
-- `docs/architecture/device-discovery.md`, in the allocator section: what preflight reads, the three
+- `docs/modules/devices/discovery.md`, in the allocator section: what preflight reads, the three
   states, the three depths, how it reaches the host, and why it is not part of `detect`.
 - An operator page under `docs/operation/` carrying the runnable command line, what each mount and flag
   is for, and what the command starts and removes.
@@ -1125,7 +1125,7 @@ a manufacturer cannot be listed before its own package carries a preflighter.
 
 - [x] **T10 · Documentation**
       Blocked by: T8
-      Owns: `docs/architecture/device-discovery.md`, `docs/operation/preflight.md`, `docs/README.md`
+      Owns: `docs/modules/devices/discovery.md`, `docs/modules/devices/preflight.md`, `docs/README.md`
       Acceptance: the allocator section gains what preflight reads, the three states, the three depths
       and why it is not part of `detect`; a new operator page carries the runnable command line for
       both runtimes, what each mount and flag is for, and what the command starts and removes; the page
@@ -1296,7 +1296,7 @@ a manufacturer cannot be listed before its own package carries a preflighter.
       binary can do. `preflight` gets the fullest treatment, since it is the only one an operator runs
       by hand on a node, and its sample output is copied from T11's recorded runs rather than
       invented. The page stays a **reference** — what each command is — and links to
-      `docs/operation/preflight.md` for the procedure, which is the split the rest of `docs/`
+      `docs/modules/devices/preflight.md` for the procedure, which is the split the rest of `docs/`
       already draws.
       It must also answer the question a reader will have on seeing three one-shot commands: **which
       one to run, and why the safe one is separate.** `detect` and `monitor` are pure reads that no

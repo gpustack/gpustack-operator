@@ -51,7 +51,7 @@ function docs_lint() {
   done
   # The skills self-test joins them; check-skills itself runs after, because it is conditional on
   # the self-test's verdict.
-  bash "${ROOT_DIR}/hack/check-skills-selftest.sh" "${ROOT_DIR}" >"${docs_tmp}/check-skills-selftest.out" 2>&1 &
+  bash "${ROOT_DIR}/hack/check/skills-selftest.sh" "${ROOT_DIR}" >"${docs_tmp}/check-skills-selftest.out" 2>&1 &
   pids+=("$!")
   names+=("check-skills-selftest")
 
@@ -80,12 +80,17 @@ function docs_lint() {
   if [[ -z "${skills_selftest_rc}" ]]; then
     # Two failures, two messages: a finding about the skills, or a check that could not run at all.
     local skills_rc=0
-    bash "${ROOT_DIR}/hack/check-skills.sh" "${ROOT_DIR}" || skills_rc=$?
+    bash "${ROOT_DIR}/hack/check/skills.sh" "${ROOT_DIR}" || skills_rc=$?
     if [[ ${skills_rc} -eq 1 ]]; then
       failed+=("check-skills")
     elif [[ ${skills_rc} -gt 1 ]]; then
       failed+=("check-skills (could not run; its diagnostic is above)")
     fi
+  fi
+
+  # Rendered paths and heading IDs can differ from Markdown source links.
+  if ! make -C "${ROOT_DIR}" site; then
+    failed+=("site links")
   fi
 
   if [[ ${#failed[@]} -gt 0 ]]; then
@@ -100,12 +105,16 @@ function docs_lint() {
 # equal to, and fails when a step of lint() is added without a classification or when this
 # function's set disagrees with the table.
 function agents_shell_lint() {
-  if ! bash "${ROOT_DIR}/hack/check-agents-shell-selftest.sh" "${ROOT_DIR}"; then
+  if ! bash "${ROOT_DIR}/hack/check/agents-shell-selftest.sh" "${ROOT_DIR}"; then
     gpustack::log::fatal "the .agents shell check is not trustworthy: its self-test failed"
   fi
 
   local agents_shell_rc=0
-  bash "${ROOT_DIR}/hack/check-agents-shell.sh" "${ROOT_DIR}" || agents_shell_rc=$?
+  if [[ -n "${AGENTS_SHELL_BASE:-}" ]]; then
+    bash "${ROOT_DIR}/hack/check/agents-shell.sh" --base "${AGENTS_SHELL_BASE}" "${ROOT_DIR}" || agents_shell_rc=$?
+  else
+    bash "${ROOT_DIR}/hack/check/agents-shell.sh" "${ROOT_DIR}" || agents_shell_rc=$?
+  fi
   if [[ ${agents_shell_rc} -eq 1 ]]; then
     gpustack::log::fatal "new syntax errors or shellcheck findings in changed .agents/ shell"
   elif [[ ${agents_shell_rc} -gt 1 ]]; then
@@ -116,7 +125,7 @@ function agents_shell_lint() {
   # purpose: it exercises fixtures of its own and reads nothing this turn dirtied, and the full
   # code gate still runs it on every turn that dirties anything else.
   local symbols_rc=0
-  bash "${ROOT_DIR}/hack/check-symbols.sh" "${ROOT_DIR}" || symbols_rc=$?
+  bash "${ROOT_DIR}/hack/check/symbols.sh" "${ROOT_DIR}" || symbols_rc=$?
   if [[ ${symbols_rc} -eq 1 ]]; then
     gpustack::log::fatal "decorative symbols in commented sources"
   elif [[ ${symbols_rc} -gt 1 ]]; then
@@ -151,13 +160,13 @@ function lint() {
   # The self-test runs first and is part of the gate, for the same reason it is in docs_lint: a
   # check that has only ever been seen to pass cannot be told apart from one that cannot fail, and
   # this one's whole design is a set of ranges it must NOT report.
-  if ! bash "${ROOT_DIR}/hack/check-symbols-selftest.sh" "${ROOT_DIR}"; then
+  if ! bash "${ROOT_DIR}/hack/check/symbols-selftest.sh" "${ROOT_DIR}"; then
     gpustack::log::fatal "the decorative-symbol check is not trustworthy: its self-test failed"
   fi
   # Two failures, two messages. A check that could not run is not a finding about the sources, and
   # reporting it as one sends the reader looking for a symbol that is not there.
   local symbols_rc=0
-  bash "${ROOT_DIR}/hack/check-symbols.sh" "${ROOT_DIR}" || symbols_rc=$?
+  bash "${ROOT_DIR}/hack/check/symbols.sh" "${ROOT_DIR}" || symbols_rc=$?
   if [[ ${symbols_rc} -eq 1 ]]; then
     gpustack::log::fatal "decorative symbols in commented sources"
   elif [[ ${symbols_rc} -gt 1 ]]; then
@@ -171,7 +180,7 @@ function lint() {
   # the set of validators from the tree rather than from a list it carries, so a tool added without
   # a row fails here instead of going unmeasured. It carries its own fixtures rather than checking
   # the sources, so unlike the symbol check above there is nothing separate to self-test.
-  if ! bash "${ROOT_DIR}/hack/check-toolpins-selftest.sh" "${ROOT_DIR}"; then
+  if ! bash "${ROOT_DIR}/hack/check/toolpins-selftest.sh" "${ROOT_DIR}"; then
     gpustack::log::fatal "the tool-pin validators in hack/lib are not trustworthy: their self-test failed"
   fi
 
@@ -183,7 +192,7 @@ function lint() {
   # and one stuck at "everything" each fail half of it -- so unlike the symbol check above there is
   # nothing separate to self-test.
   local dispatch_rc=0
-  bash "${ROOT_DIR}/hack/check-hook-dispatch.sh" "${ROOT_DIR}" || dispatch_rc=$?
+  bash "${ROOT_DIR}/hack/check/hook-dispatch.sh" "${ROOT_DIR}" || dispatch_rc=$?
   if [[ ${dispatch_rc} -eq 1 ]]; then
     gpustack::log::fatal "the lint hook routes a dirty path to a target that does not cover it"
   elif [[ ${dispatch_rc} -gt 1 ]]; then
@@ -198,11 +207,11 @@ function lint() {
   # Its self-test runs first because both lists are parsed out of text: a parse that matches nothing
   # yields two empty sets that compare equal, so the check has to be shown to report that as a
   # broken instrument rather than as agreement.
-  if ! bash "${ROOT_DIR}/hack/check-review-config-selftest.sh" "${ROOT_DIR}"; then
+  if ! bash "${ROOT_DIR}/hack/check/review-config-selftest.sh" "${ROOT_DIR}"; then
     gpustack::log::fatal "the review-config check is not trustworthy: its self-test failed"
   fi
   local review_config_rc=0
-  bash "${ROOT_DIR}/hack/check-review-config.sh" "${ROOT_DIR}" || review_config_rc=$?
+  bash "${ROOT_DIR}/hack/check/review-config.sh" "${ROOT_DIR}" || review_config_rc=$?
   if [[ ${review_config_rc} -eq 1 ]]; then
     gpustack::log::fatal "the two review-exclusion lists disagree"
   elif [[ ${review_config_rc} -gt 1 ]]; then
@@ -217,11 +226,11 @@ function lint() {
   # a time forever. Its self-test runs first because the check is a vocabulary matched against
   # generated text, and both halves fail silently: a term matching nothing reports a clean tree,
   # and a term matched as a bare substring reports so much that the check gets switched off.
-  if ! bash "${ROOT_DIR}/hack/check-api-descriptions-selftest.sh" "${ROOT_DIR}"; then
+  if ! bash "${ROOT_DIR}/hack/check/api-descriptions-selftest.sh" "${ROOT_DIR}"; then
     gpustack::log::fatal "the API-description check is not trustworthy: its self-test failed"
   fi
   local api_descriptions_rc=0
-  bash "${ROOT_DIR}/hack/check-api-descriptions.sh" "${ROOT_DIR}" || api_descriptions_rc=$?
+  bash "${ROOT_DIR}/hack/check/api-descriptions.sh" "${ROOT_DIR}" || api_descriptions_rc=$?
   if [[ ${api_descriptions_rc} -eq 1 ]]; then
     gpustack::log::fatal "an API description a cluster renders describes Go rather than the field"
   elif [[ ${api_descriptions_rc} -gt 1 ]]; then
@@ -233,7 +242,7 @@ function lint() {
   # self-test runs first, for the same reason as every other gate here: a comparison gate that has
   # only ever been seen to pass cannot be told apart from one whose comparison is broken. It
   # checks only the .agents shell files this tree changed, so a clean tree costs one git call.
-  if ! bash "${ROOT_DIR}/hack/check-agents-shell-selftest.sh" "${ROOT_DIR}"; then
+  if ! bash "${ROOT_DIR}/hack/check/agents-shell-selftest.sh" "${ROOT_DIR}"; then
     gpustack::log::fatal "the .agents shell check is not trustworthy: its self-test failed"
   fi
   # Exit 3 is the gate stepping aside in an image build from a git worktree, the one shape where
@@ -241,7 +250,7 @@ function lint() {
   # only: agents_shell_lint(), the hook route, never runs inside an image, so there it stays a
   # failure.
   local agents_shell_rc=0
-  bash "${ROOT_DIR}/hack/check-agents-shell.sh" "${ROOT_DIR}" || agents_shell_rc=$?
+  bash "${ROOT_DIR}/hack/check/agents-shell.sh" "${ROOT_DIR}" || agents_shell_rc=$?
   if [[ ${agents_shell_rc} -eq 1 ]]; then
     gpustack::log::fatal "new syntax errors or shellcheck findings in changed .agents/ shell"
   elif [[ ${agents_shell_rc} -eq 3 ]]; then

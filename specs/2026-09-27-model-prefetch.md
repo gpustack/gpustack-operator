@@ -256,7 +256,7 @@ counted in usage and capacity reporting.
 - `pkg/worker/webhooks/worker/model_store_binding.go`, `model_prefetch.go` — admission.
 - `pkg/modelstore/config.go` — nothing structural; Layer already supports field-level override.
 - `pkg/modelmanager/gc/gc.go` + `pkg/modelmanager/manager.go` — consume `spec.pinned`
-  (excluded from candidates, counted in usage).
+  through `gc.Collector.Pinned` (excluded from candidates, counted in usage).
 - `docs/` new page + `docs/README.md` index entry (routing per the docs skill).
 - `.agents/skills/gpustack-operator-e2e/cases/case-<NNN>.sh` — number taken at my-ship time as
   current main's max case number + 1.
@@ -383,7 +383,7 @@ review gates; the stage gates go to the coordinator (draft confirmed, plan gate,
 
 - [x] **T8 · docs**
       Blocked by: T6, T7
-      Owns: `docs/**` (one new page + `docs/README.md` index entry + a `docs/settings.md` entry
+      Owns: `docs/**` (one new page + `docs/README.md` index entry + a `docs/reference/settings.md` entry
       for the `model-prefetch-warmup-image` Setting)
       Acceptance: page routing, header/Contents/footer per the docs skill; naming avoids KV-cache
       vocabulary.

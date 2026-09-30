@@ -84,6 +84,66 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
+	if err := s.AddGeneratedConversionFunc((*KVCacheBackend)(nil), (*v1alpha1.KVCacheBackend)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1_KVCacheBackend_To_v1alpha1_KVCacheBackend(a.(*KVCacheBackend), b.(*v1alpha1.KVCacheBackend), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*v1alpha1.KVCacheBackend)(nil), (*KVCacheBackend)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_KVCacheBackend_To_v1_KVCacheBackend(a.(*v1alpha1.KVCacheBackend), b.(*KVCacheBackend), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*KVCacheBackendList)(nil), (*v1alpha1.KVCacheBackendList)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1_KVCacheBackendList_To_v1alpha1_KVCacheBackendList(a.(*KVCacheBackendList), b.(*v1alpha1.KVCacheBackendList), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*v1alpha1.KVCacheBackendList)(nil), (*KVCacheBackendList)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_KVCacheBackendList_To_v1_KVCacheBackendList(a.(*v1alpha1.KVCacheBackendList), b.(*KVCacheBackendList), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*KVCachePool)(nil), (*v1alpha1.KVCachePool)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1_KVCachePool_To_v1alpha1_KVCachePool(a.(*KVCachePool), b.(*v1alpha1.KVCachePool), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*v1alpha1.KVCachePool)(nil), (*KVCachePool)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_KVCachePool_To_v1_KVCachePool(a.(*v1alpha1.KVCachePool), b.(*KVCachePool), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*KVCachePoolBinding)(nil), (*v1alpha1.KVCachePoolBinding)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1_KVCachePoolBinding_To_v1alpha1_KVCachePoolBinding(a.(*KVCachePoolBinding), b.(*v1alpha1.KVCachePoolBinding), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*v1alpha1.KVCachePoolBinding)(nil), (*KVCachePoolBinding)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_KVCachePoolBinding_To_v1_KVCachePoolBinding(a.(*v1alpha1.KVCachePoolBinding), b.(*KVCachePoolBinding), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*KVCachePoolBindingList)(nil), (*v1alpha1.KVCachePoolBindingList)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1_KVCachePoolBindingList_To_v1alpha1_KVCachePoolBindingList(a.(*KVCachePoolBindingList), b.(*v1alpha1.KVCachePoolBindingList), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*v1alpha1.KVCachePoolBindingList)(nil), (*KVCachePoolBindingList)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_KVCachePoolBindingList_To_v1_KVCachePoolBindingList(a.(*v1alpha1.KVCachePoolBindingList), b.(*KVCachePoolBindingList), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*KVCachePoolList)(nil), (*v1alpha1.KVCachePoolList)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1_KVCachePoolList_To_v1alpha1_KVCachePoolList(a.(*KVCachePoolList), b.(*v1alpha1.KVCachePoolList), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*v1alpha1.KVCachePoolList)(nil), (*KVCachePoolList)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_KVCachePoolList_To_v1_KVCachePoolList(a.(*v1alpha1.KVCachePoolList), b.(*KVCachePoolList), scope)
+	}); err != nil {
+		return err
+	}
 	if err := s.AddGeneratedConversionFunc((*ModelArtifact)(nil), (*v1alpha1.ModelArtifact)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1_ModelArtifact_To_v1alpha1_ModelArtifact(a.(*ModelArtifact), b.(*v1alpha1.ModelArtifact), scope)
 	}); err != nil {
@@ -144,6 +204,46 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
+	if err := s.AddGeneratedConversionFunc((*ModelStore)(nil), (*v1alpha1.ModelStore)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1_ModelStore_To_v1alpha1_ModelStore(a.(*ModelStore), b.(*v1alpha1.ModelStore), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*v1alpha1.ModelStore)(nil), (*ModelStore)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_ModelStore_To_v1_ModelStore(a.(*v1alpha1.ModelStore), b.(*ModelStore), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*ModelStoreBinding)(nil), (*v1alpha1.ModelStoreBinding)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1_ModelStoreBinding_To_v1alpha1_ModelStoreBinding(a.(*ModelStoreBinding), b.(*v1alpha1.ModelStoreBinding), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*v1alpha1.ModelStoreBinding)(nil), (*ModelStoreBinding)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_ModelStoreBinding_To_v1_ModelStoreBinding(a.(*v1alpha1.ModelStoreBinding), b.(*ModelStoreBinding), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*ModelStoreBindingList)(nil), (*v1alpha1.ModelStoreBindingList)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1_ModelStoreBindingList_To_v1alpha1_ModelStoreBindingList(a.(*ModelStoreBindingList), b.(*v1alpha1.ModelStoreBindingList), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*v1alpha1.ModelStoreBindingList)(nil), (*ModelStoreBindingList)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_ModelStoreBindingList_To_v1_ModelStoreBindingList(a.(*v1alpha1.ModelStoreBindingList), b.(*ModelStoreBindingList), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*ModelStoreList)(nil), (*v1alpha1.ModelStoreList)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1_ModelStoreList_To_v1alpha1_ModelStoreList(a.(*ModelStoreList), b.(*v1alpha1.ModelStoreList), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*v1alpha1.ModelStoreList)(nil), (*ModelStoreList)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_ModelStoreList_To_v1_ModelStoreList(a.(*v1alpha1.ModelStoreList), b.(*ModelStoreList), scope)
+	}); err != nil {
+		return err
+	}
 	if err := s.AddGeneratedConversionFunc((*NodeModelStore)(nil), (*v1alpha1.NodeModelStore)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1_NodeModelStore_To_v1alpha1_NodeModelStore(a.(*NodeModelStore), b.(*v1alpha1.NodeModelStore), scope)
 	}); err != nil {
@@ -161,6 +261,26 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}
 	if err := s.AddGeneratedConversionFunc((*v1alpha1.NodeModelStoreList)(nil), (*NodeModelStoreList)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha1_NodeModelStoreList_To_v1_NodeModelStoreList(a.(*v1alpha1.NodeModelStoreList), b.(*NodeModelStoreList), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*TopologySource)(nil), (*v1alpha1.TopologySource)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1_TopologySource_To_v1alpha1_TopologySource(a.(*TopologySource), b.(*v1alpha1.TopologySource), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*v1alpha1.TopologySource)(nil), (*TopologySource)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_TopologySource_To_v1_TopologySource(a.(*v1alpha1.TopologySource), b.(*TopologySource), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*TopologySourceList)(nil), (*v1alpha1.TopologySourceList)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1_TopologySourceList_To_v1alpha1_TopologySourceList(a.(*TopologySourceList), b.(*v1alpha1.TopologySourceList), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*v1alpha1.TopologySourceList)(nil), (*TopologySourceList)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_TopologySourceList_To_v1_TopologySourceList(a.(*v1alpha1.TopologySourceList), b.(*TopologySourceList), scope)
 	}); err != nil {
 		return err
 	}
@@ -363,6 +483,144 @@ func Convert_v1alpha1_InstanceTypeList_To_v1_InstanceTypeList(in *v1alpha1.Insta
 	return autoConvert_v1alpha1_InstanceTypeList_To_v1_InstanceTypeList(in, out, s)
 }
 
+func autoConvert_v1_KVCacheBackend_To_v1alpha1_KVCacheBackend(in *KVCacheBackend, out *v1alpha1.KVCacheBackend, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	out.Spec = in.Spec
+	out.Status = in.Status
+	return nil
+}
+
+// Convert_v1_KVCacheBackend_To_v1alpha1_KVCacheBackend is an autogenerated conversion function.
+func Convert_v1_KVCacheBackend_To_v1alpha1_KVCacheBackend(in *KVCacheBackend, out *v1alpha1.KVCacheBackend, s conversion.Scope) error {
+	return autoConvert_v1_KVCacheBackend_To_v1alpha1_KVCacheBackend(in, out, s)
+}
+
+func autoConvert_v1alpha1_KVCacheBackend_To_v1_KVCacheBackend(in *v1alpha1.KVCacheBackend, out *KVCacheBackend, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	out.Spec = in.Spec
+	out.Status = in.Status
+	return nil
+}
+
+// Convert_v1alpha1_KVCacheBackend_To_v1_KVCacheBackend is an autogenerated conversion function.
+func Convert_v1alpha1_KVCacheBackend_To_v1_KVCacheBackend(in *v1alpha1.KVCacheBackend, out *KVCacheBackend, s conversion.Scope) error {
+	return autoConvert_v1alpha1_KVCacheBackend_To_v1_KVCacheBackend(in, out, s)
+}
+
+func autoConvert_v1_KVCacheBackendList_To_v1alpha1_KVCacheBackendList(in *KVCacheBackendList, out *v1alpha1.KVCacheBackendList, s conversion.Scope) error {
+	out.ListMeta = in.ListMeta
+	out.Items = *(*[]v1alpha1.KVCacheBackend)(unsafe.Pointer(&in.Items))
+	return nil
+}
+
+// Convert_v1_KVCacheBackendList_To_v1alpha1_KVCacheBackendList is an autogenerated conversion function.
+func Convert_v1_KVCacheBackendList_To_v1alpha1_KVCacheBackendList(in *KVCacheBackendList, out *v1alpha1.KVCacheBackendList, s conversion.Scope) error {
+	return autoConvert_v1_KVCacheBackendList_To_v1alpha1_KVCacheBackendList(in, out, s)
+}
+
+func autoConvert_v1alpha1_KVCacheBackendList_To_v1_KVCacheBackendList(in *v1alpha1.KVCacheBackendList, out *KVCacheBackendList, s conversion.Scope) error {
+	out.ListMeta = in.ListMeta
+	out.Items = *(*[]KVCacheBackend)(unsafe.Pointer(&in.Items))
+	return nil
+}
+
+// Convert_v1alpha1_KVCacheBackendList_To_v1_KVCacheBackendList is an autogenerated conversion function.
+func Convert_v1alpha1_KVCacheBackendList_To_v1_KVCacheBackendList(in *v1alpha1.KVCacheBackendList, out *KVCacheBackendList, s conversion.Scope) error {
+	return autoConvert_v1alpha1_KVCacheBackendList_To_v1_KVCacheBackendList(in, out, s)
+}
+
+func autoConvert_v1_KVCachePool_To_v1alpha1_KVCachePool(in *KVCachePool, out *v1alpha1.KVCachePool, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	out.Spec = in.Spec
+	out.Status = in.Status
+	return nil
+}
+
+// Convert_v1_KVCachePool_To_v1alpha1_KVCachePool is an autogenerated conversion function.
+func Convert_v1_KVCachePool_To_v1alpha1_KVCachePool(in *KVCachePool, out *v1alpha1.KVCachePool, s conversion.Scope) error {
+	return autoConvert_v1_KVCachePool_To_v1alpha1_KVCachePool(in, out, s)
+}
+
+func autoConvert_v1alpha1_KVCachePool_To_v1_KVCachePool(in *v1alpha1.KVCachePool, out *KVCachePool, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	out.Spec = in.Spec
+	out.Status = in.Status
+	return nil
+}
+
+// Convert_v1alpha1_KVCachePool_To_v1_KVCachePool is an autogenerated conversion function.
+func Convert_v1alpha1_KVCachePool_To_v1_KVCachePool(in *v1alpha1.KVCachePool, out *KVCachePool, s conversion.Scope) error {
+	return autoConvert_v1alpha1_KVCachePool_To_v1_KVCachePool(in, out, s)
+}
+
+func autoConvert_v1_KVCachePoolBinding_To_v1alpha1_KVCachePoolBinding(in *KVCachePoolBinding, out *v1alpha1.KVCachePoolBinding, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	out.Spec = in.Spec
+	out.Status = in.Status
+	return nil
+}
+
+// Convert_v1_KVCachePoolBinding_To_v1alpha1_KVCachePoolBinding is an autogenerated conversion function.
+func Convert_v1_KVCachePoolBinding_To_v1alpha1_KVCachePoolBinding(in *KVCachePoolBinding, out *v1alpha1.KVCachePoolBinding, s conversion.Scope) error {
+	return autoConvert_v1_KVCachePoolBinding_To_v1alpha1_KVCachePoolBinding(in, out, s)
+}
+
+func autoConvert_v1alpha1_KVCachePoolBinding_To_v1_KVCachePoolBinding(in *v1alpha1.KVCachePoolBinding, out *KVCachePoolBinding, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	out.Spec = in.Spec
+	out.Status = in.Status
+	return nil
+}
+
+// Convert_v1alpha1_KVCachePoolBinding_To_v1_KVCachePoolBinding is an autogenerated conversion function.
+func Convert_v1alpha1_KVCachePoolBinding_To_v1_KVCachePoolBinding(in *v1alpha1.KVCachePoolBinding, out *KVCachePoolBinding, s conversion.Scope) error {
+	return autoConvert_v1alpha1_KVCachePoolBinding_To_v1_KVCachePoolBinding(in, out, s)
+}
+
+func autoConvert_v1_KVCachePoolBindingList_To_v1alpha1_KVCachePoolBindingList(in *KVCachePoolBindingList, out *v1alpha1.KVCachePoolBindingList, s conversion.Scope) error {
+	out.ListMeta = in.ListMeta
+	out.Items = *(*[]v1alpha1.KVCachePoolBinding)(unsafe.Pointer(&in.Items))
+	return nil
+}
+
+// Convert_v1_KVCachePoolBindingList_To_v1alpha1_KVCachePoolBindingList is an autogenerated conversion function.
+func Convert_v1_KVCachePoolBindingList_To_v1alpha1_KVCachePoolBindingList(in *KVCachePoolBindingList, out *v1alpha1.KVCachePoolBindingList, s conversion.Scope) error {
+	return autoConvert_v1_KVCachePoolBindingList_To_v1alpha1_KVCachePoolBindingList(in, out, s)
+}
+
+func autoConvert_v1alpha1_KVCachePoolBindingList_To_v1_KVCachePoolBindingList(in *v1alpha1.KVCachePoolBindingList, out *KVCachePoolBindingList, s conversion.Scope) error {
+	out.ListMeta = in.ListMeta
+	out.Items = *(*[]KVCachePoolBinding)(unsafe.Pointer(&in.Items))
+	return nil
+}
+
+// Convert_v1alpha1_KVCachePoolBindingList_To_v1_KVCachePoolBindingList is an autogenerated conversion function.
+func Convert_v1alpha1_KVCachePoolBindingList_To_v1_KVCachePoolBindingList(in *v1alpha1.KVCachePoolBindingList, out *KVCachePoolBindingList, s conversion.Scope) error {
+	return autoConvert_v1alpha1_KVCachePoolBindingList_To_v1_KVCachePoolBindingList(in, out, s)
+}
+
+func autoConvert_v1_KVCachePoolList_To_v1alpha1_KVCachePoolList(in *KVCachePoolList, out *v1alpha1.KVCachePoolList, s conversion.Scope) error {
+	out.ListMeta = in.ListMeta
+	out.Items = *(*[]v1alpha1.KVCachePool)(unsafe.Pointer(&in.Items))
+	return nil
+}
+
+// Convert_v1_KVCachePoolList_To_v1alpha1_KVCachePoolList is an autogenerated conversion function.
+func Convert_v1_KVCachePoolList_To_v1alpha1_KVCachePoolList(in *KVCachePoolList, out *v1alpha1.KVCachePoolList, s conversion.Scope) error {
+	return autoConvert_v1_KVCachePoolList_To_v1alpha1_KVCachePoolList(in, out, s)
+}
+
+func autoConvert_v1alpha1_KVCachePoolList_To_v1_KVCachePoolList(in *v1alpha1.KVCachePoolList, out *KVCachePoolList, s conversion.Scope) error {
+	out.ListMeta = in.ListMeta
+	out.Items = *(*[]KVCachePool)(unsafe.Pointer(&in.Items))
+	return nil
+}
+
+// Convert_v1alpha1_KVCachePoolList_To_v1_KVCachePoolList is an autogenerated conversion function.
+func Convert_v1alpha1_KVCachePoolList_To_v1_KVCachePoolList(in *v1alpha1.KVCachePoolList, out *KVCachePoolList, s conversion.Scope) error {
+	return autoConvert_v1alpha1_KVCachePoolList_To_v1_KVCachePoolList(in, out, s)
+}
+
 func autoConvert_v1_ModelArtifact_To_v1alpha1_ModelArtifact(in *ModelArtifact, out *v1alpha1.ModelArtifact, s conversion.Scope) error {
 	out.ObjectMeta = in.ObjectMeta
 	out.Spec = in.Spec
@@ -501,6 +759,98 @@ func Convert_v1alpha1_ModelPrefetchList_To_v1_ModelPrefetchList(in *v1alpha1.Mod
 	return autoConvert_v1alpha1_ModelPrefetchList_To_v1_ModelPrefetchList(in, out, s)
 }
 
+func autoConvert_v1_ModelStore_To_v1alpha1_ModelStore(in *ModelStore, out *v1alpha1.ModelStore, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	out.Spec = in.Spec
+	out.Status = in.Status
+	return nil
+}
+
+// Convert_v1_ModelStore_To_v1alpha1_ModelStore is an autogenerated conversion function.
+func Convert_v1_ModelStore_To_v1alpha1_ModelStore(in *ModelStore, out *v1alpha1.ModelStore, s conversion.Scope) error {
+	return autoConvert_v1_ModelStore_To_v1alpha1_ModelStore(in, out, s)
+}
+
+func autoConvert_v1alpha1_ModelStore_To_v1_ModelStore(in *v1alpha1.ModelStore, out *ModelStore, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	out.Spec = in.Spec
+	out.Status = in.Status
+	return nil
+}
+
+// Convert_v1alpha1_ModelStore_To_v1_ModelStore is an autogenerated conversion function.
+func Convert_v1alpha1_ModelStore_To_v1_ModelStore(in *v1alpha1.ModelStore, out *ModelStore, s conversion.Scope) error {
+	return autoConvert_v1alpha1_ModelStore_To_v1_ModelStore(in, out, s)
+}
+
+func autoConvert_v1_ModelStoreBinding_To_v1alpha1_ModelStoreBinding(in *ModelStoreBinding, out *v1alpha1.ModelStoreBinding, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	out.Spec = in.Spec
+	out.Status = in.Status
+	return nil
+}
+
+// Convert_v1_ModelStoreBinding_To_v1alpha1_ModelStoreBinding is an autogenerated conversion function.
+func Convert_v1_ModelStoreBinding_To_v1alpha1_ModelStoreBinding(in *ModelStoreBinding, out *v1alpha1.ModelStoreBinding, s conversion.Scope) error {
+	return autoConvert_v1_ModelStoreBinding_To_v1alpha1_ModelStoreBinding(in, out, s)
+}
+
+func autoConvert_v1alpha1_ModelStoreBinding_To_v1_ModelStoreBinding(in *v1alpha1.ModelStoreBinding, out *ModelStoreBinding, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	out.Spec = in.Spec
+	out.Status = in.Status
+	return nil
+}
+
+// Convert_v1alpha1_ModelStoreBinding_To_v1_ModelStoreBinding is an autogenerated conversion function.
+func Convert_v1alpha1_ModelStoreBinding_To_v1_ModelStoreBinding(in *v1alpha1.ModelStoreBinding, out *ModelStoreBinding, s conversion.Scope) error {
+	return autoConvert_v1alpha1_ModelStoreBinding_To_v1_ModelStoreBinding(in, out, s)
+}
+
+func autoConvert_v1_ModelStoreBindingList_To_v1alpha1_ModelStoreBindingList(in *ModelStoreBindingList, out *v1alpha1.ModelStoreBindingList, s conversion.Scope) error {
+	out.ListMeta = in.ListMeta
+	out.Items = *(*[]v1alpha1.ModelStoreBinding)(unsafe.Pointer(&in.Items))
+	return nil
+}
+
+// Convert_v1_ModelStoreBindingList_To_v1alpha1_ModelStoreBindingList is an autogenerated conversion function.
+func Convert_v1_ModelStoreBindingList_To_v1alpha1_ModelStoreBindingList(in *ModelStoreBindingList, out *v1alpha1.ModelStoreBindingList, s conversion.Scope) error {
+	return autoConvert_v1_ModelStoreBindingList_To_v1alpha1_ModelStoreBindingList(in, out, s)
+}
+
+func autoConvert_v1alpha1_ModelStoreBindingList_To_v1_ModelStoreBindingList(in *v1alpha1.ModelStoreBindingList, out *ModelStoreBindingList, s conversion.Scope) error {
+	out.ListMeta = in.ListMeta
+	out.Items = *(*[]ModelStoreBinding)(unsafe.Pointer(&in.Items))
+	return nil
+}
+
+// Convert_v1alpha1_ModelStoreBindingList_To_v1_ModelStoreBindingList is an autogenerated conversion function.
+func Convert_v1alpha1_ModelStoreBindingList_To_v1_ModelStoreBindingList(in *v1alpha1.ModelStoreBindingList, out *ModelStoreBindingList, s conversion.Scope) error {
+	return autoConvert_v1alpha1_ModelStoreBindingList_To_v1_ModelStoreBindingList(in, out, s)
+}
+
+func autoConvert_v1_ModelStoreList_To_v1alpha1_ModelStoreList(in *ModelStoreList, out *v1alpha1.ModelStoreList, s conversion.Scope) error {
+	out.ListMeta = in.ListMeta
+	out.Items = *(*[]v1alpha1.ModelStore)(unsafe.Pointer(&in.Items))
+	return nil
+}
+
+// Convert_v1_ModelStoreList_To_v1alpha1_ModelStoreList is an autogenerated conversion function.
+func Convert_v1_ModelStoreList_To_v1alpha1_ModelStoreList(in *ModelStoreList, out *v1alpha1.ModelStoreList, s conversion.Scope) error {
+	return autoConvert_v1_ModelStoreList_To_v1alpha1_ModelStoreList(in, out, s)
+}
+
+func autoConvert_v1alpha1_ModelStoreList_To_v1_ModelStoreList(in *v1alpha1.ModelStoreList, out *ModelStoreList, s conversion.Scope) error {
+	out.ListMeta = in.ListMeta
+	out.Items = *(*[]ModelStore)(unsafe.Pointer(&in.Items))
+	return nil
+}
+
+// Convert_v1alpha1_ModelStoreList_To_v1_ModelStoreList is an autogenerated conversion function.
+func Convert_v1alpha1_ModelStoreList_To_v1_ModelStoreList(in *v1alpha1.ModelStoreList, out *ModelStoreList, s conversion.Scope) error {
+	return autoConvert_v1alpha1_ModelStoreList_To_v1_ModelStoreList(in, out, s)
+}
+
 func autoConvert_v1_NodeModelStore_To_v1alpha1_NodeModelStore(in *NodeModelStore, out *v1alpha1.NodeModelStore, s conversion.Scope) error {
 	out.ObjectMeta = in.ObjectMeta
 	out.Spec = in.Spec
@@ -545,4 +895,50 @@ func autoConvert_v1alpha1_NodeModelStoreList_To_v1_NodeModelStoreList(in *v1alph
 // Convert_v1alpha1_NodeModelStoreList_To_v1_NodeModelStoreList is an autogenerated conversion function.
 func Convert_v1alpha1_NodeModelStoreList_To_v1_NodeModelStoreList(in *v1alpha1.NodeModelStoreList, out *NodeModelStoreList, s conversion.Scope) error {
 	return autoConvert_v1alpha1_NodeModelStoreList_To_v1_NodeModelStoreList(in, out, s)
+}
+
+func autoConvert_v1_TopologySource_To_v1alpha1_TopologySource(in *TopologySource, out *v1alpha1.TopologySource, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	out.Spec = in.Spec
+	out.Status = in.Status
+	return nil
+}
+
+// Convert_v1_TopologySource_To_v1alpha1_TopologySource is an autogenerated conversion function.
+func Convert_v1_TopologySource_To_v1alpha1_TopologySource(in *TopologySource, out *v1alpha1.TopologySource, s conversion.Scope) error {
+	return autoConvert_v1_TopologySource_To_v1alpha1_TopologySource(in, out, s)
+}
+
+func autoConvert_v1alpha1_TopologySource_To_v1_TopologySource(in *v1alpha1.TopologySource, out *TopologySource, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	out.Spec = in.Spec
+	out.Status = in.Status
+	return nil
+}
+
+// Convert_v1alpha1_TopologySource_To_v1_TopologySource is an autogenerated conversion function.
+func Convert_v1alpha1_TopologySource_To_v1_TopologySource(in *v1alpha1.TopologySource, out *TopologySource, s conversion.Scope) error {
+	return autoConvert_v1alpha1_TopologySource_To_v1_TopologySource(in, out, s)
+}
+
+func autoConvert_v1_TopologySourceList_To_v1alpha1_TopologySourceList(in *TopologySourceList, out *v1alpha1.TopologySourceList, s conversion.Scope) error {
+	out.ListMeta = in.ListMeta
+	out.Items = *(*[]v1alpha1.TopologySource)(unsafe.Pointer(&in.Items))
+	return nil
+}
+
+// Convert_v1_TopologySourceList_To_v1alpha1_TopologySourceList is an autogenerated conversion function.
+func Convert_v1_TopologySourceList_To_v1alpha1_TopologySourceList(in *TopologySourceList, out *v1alpha1.TopologySourceList, s conversion.Scope) error {
+	return autoConvert_v1_TopologySourceList_To_v1alpha1_TopologySourceList(in, out, s)
+}
+
+func autoConvert_v1alpha1_TopologySourceList_To_v1_TopologySourceList(in *v1alpha1.TopologySourceList, out *TopologySourceList, s conversion.Scope) error {
+	out.ListMeta = in.ListMeta
+	out.Items = *(*[]TopologySource)(unsafe.Pointer(&in.Items))
+	return nil
+}
+
+// Convert_v1alpha1_TopologySourceList_To_v1_TopologySourceList is an autogenerated conversion function.
+func Convert_v1alpha1_TopologySourceList_To_v1_TopologySourceList(in *v1alpha1.TopologySourceList, out *TopologySourceList, s conversion.Scope) error {
+	return autoConvert_v1alpha1_TopologySourceList_To_v1_TopologySourceList(in, out, s)
 }

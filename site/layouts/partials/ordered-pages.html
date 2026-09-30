@@ -1,0 +1,17 @@
+{{- $order := index site.Data.navigation.order (partial "page-key.html" .) | default slice -}}
+{{- $pages := .Pages -}}
+{{- $result := slice -}}
+{{- $included := slice -}}
+{{- range $order -}}
+  {{- $key := . -}}
+  {{- range $pages -}}
+    {{- if eq (path.Base (strings.TrimSuffix "/" .RelPermalink)) $key -}}
+      {{- $result = $result | append . -}}
+      {{- $included = $included | append .RelPermalink -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- range $pages.ByTitle -}}
+  {{- if not (in $included .RelPermalink) -}}{{ $result = $result | append . }}{{- end -}}
+{{- end -}}
+{{- return $result -}}

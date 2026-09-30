@@ -1,0 +1,82 @@
+baseURL = "/"
+title = "GPUStack Operator"
+enableRobotsTXT = true
+disableKinds = ["taxonomy", "term"]
+defaultContentLanguage = "en"
+defaultContentLanguageInSubdir = false
+disableLanguages = ["zh"]
+
+[languages.en]
+  languageCode = "en"
+  languageName = "English"
+  weight = 1
+
+[languages.zh]
+  languageCode = "zh-CN"
+  languageName = "简体中文"
+  weight = 2
+
+[params]
+  version = "local"
+  sourceRef = "main"
+  siteRoot = ""
+  releaseKind = "development"
+
+[outputs]
+  home = ["HTML", "JSON", "LLMS", "Markdown", "Version"]
+  page = ["HTML", "Markdown"]
+  section = ["HTML", "Markdown"]
+
+[mediaTypes."text/markdown"]
+  suffixes = ["md"]
+
+[outputFormats.Markdown]
+  mediaType = "text/markdown"
+  baseName = "index"
+  isPlainText = true
+  permalinkable = true
+
+[outputFormats.LLMS]
+  mediaType = "text/plain"
+  baseName = "llms"
+  isPlainText = true
+  notAlternative = true
+
+[outputFormats.Version]
+  mediaType = "application/json"
+  baseName = "site-version"
+  isPlainText = true
+  notAlternative = true
+
+[markup]
+  [markup.highlight]
+    style = "github"
+    noClasses = false
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      # Reader tables use <br/>; agent-index.py rejects other raw HTML in published Markdown.
+      unsafe = true
+    [markup.goldmark.renderHooks.link]
+      useEmbedded = "auto"
+
+[module]
+  [[module.mounts]]
+    source = "content"
+    target = "content"
+  [[module.mounts]]
+    source = "../docs"
+    target = "content/docs"
+    excludeFiles = ["README.md"]
+  [[module.mounts]]
+    source = "layouts"
+    target = "layouts"
+  [[module.mounts]]
+    source = "assets"
+    target = "assets"
+  [[module.mounts]]
+    source = "data"
+    target = "data"
+  [[module.mounts]]
+    source = "../docs"
+    target = "assets/doc-index"
+    includeFiles = ["README.md"]

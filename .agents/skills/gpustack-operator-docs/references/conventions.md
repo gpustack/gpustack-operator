@@ -7,10 +7,8 @@ Every page under `docs/` (the index excepted) looks like this:
 ```markdown
 # Scheduling Chain
 
-> **Purpose** — how the capacity labels become Kueue queues and a materialized InstanceType.
-> **Audience** contributors · **Prerequisites** [Architecture](../architecture.md) · **Read time** ~15 min
-
-One or two sentences of orientation, if the purpose line is not enough. Optional.
+The worker turns Node and `Devices` signals into capacity labels, Kueue queues and `InstanceType`
+resources. [Architecture](../../getting-started/architecture.md) introduces the earlier discovery stages.
 
 ## Contents
 
@@ -23,19 +21,16 @@ One or two sentences of orientation, if the purpose line is not enough. Optional
 
 ---
 
-**See also** — [Device Discovery](device-discovery.md) · [Walkthrough](../walkthrough.md)
+**See also** — [Device Discovery](discovery.md) · [Walkthrough](../../getting-started/walkthrough.md)
 
-**Next** → [Admission](admission.md) — the five gates a request passes.
+**Next** → [Admission](admission.md) — the admission gates a request passes.
 ```
 
-**Header block** — a single blockquote, immediately under the H1, within the first six lines
-(`check-docs.sh` looks there):
-
-- `**Purpose**` — one sentence, what the page answers. Not a summary of the project.
-- `**Audience**` — `everyone` / `users` / `operators` / `contributors`, or a combination.
-- `**Prerequisites**` — the page to read first, as a link, or `none`.
-- `**Read time**` — an honest estimate, rounded to the minute; `~18 min` beats a flattering `~5 min`.
-  Use `reference — look up your product` for lookup tables.
+**Introduction** — start with the subject or the task in one short paragraph. If the page already
+opens with useful prose, use it. Do not prepend a second summary or metadata fields for purpose,
+audience or reading time. Put required software, permissions and earlier steps beside the operation
+that needs them, or in a prerequisites section when several steps share them. Link to background
+reading where it helps the reader follow a mechanism.
 
 **`## Contents`** — one bullet per `##` heading, in document order, no `###`. Regenerate rather than
 hand-edit (this short form does not handle a heading with an inline link; `scripts/check-docs.sh` is
@@ -49,7 +44,7 @@ awk '
     t = substr($0, 4); if (t == "Contents") next
     a = tolower(t); gsub(/`|\*/, "", a); gsub(/[^a-z0-9 _-]/, "", a); gsub(/ /, "-", a)
     gsub(/`/, "", t); printf "- [%s](#%s)\n", t, a
-  }' docs/architecture/scheduling-chain.md
+  }' docs/modules/devices/scheduling.md
 ```
 
 **Footer** — a `---` rule, then `**See also**` (sideways links, ` · `-separated, each with a
@@ -64,10 +59,10 @@ shaped by the directory it lives in:
 
 | Directory | H1 form | Example |
 |---|---|---|
-| root, `architecture/` | `<Subject>` | `Installation Modes` |
-| a domain directory — `kv-cache/`, `model-store/`, `model-deployment/` | `<Domain> <Topic>` where the domain reads naturally; a subject that names itself (`Engine Versions`, `Node-to-Node Sync`) stands without it; the domain's runbook keeps the `Operations` suffix | `KV Cache Backend`, `Model Artifact`, `Engine Versions`, `Node-to-Node Sync`, `Model Store Operations` |
-| `operation/` | `<Subject> Operations` | `High Availability Operations` |
-| `migration/` | `Migrating <from\|to> <what>`; a recovery page is `<Subject> Troubleshooting` | `Migrating from v0.5.x`, `Migration Troubleshooting` |
+| `getting-started/`, `operate/`, `contribute/` | `<Subject>` | `Installation Modes` |
+| `modules/<capability>/` | `<Domain> <Topic>` where the domain reads naturally; a subject that names itself (`Engine Versions`, `Node-to-Node Sync`) stands without it; runbooks keep the `Operations` suffix | `KV Cache Backend`, `Model Artifact`, `Engine Versions`, `Node-to-Node Sync` |
+| `operate/` and runbooks under `modules/` | `<Subject> Operations` | `High Availability Operations` |
+| `operate/migration/` | `Migrating <from\|to> <what>`; a recovery page is `<Subject> Troubleshooting` | `Migrating from v0.5.x`, `Migration Troubleshooting` |
 | `reference/` | `<Subject> Reference` | `Instance Metrics Reference` |
 
 A domain directory collects every page orbiting one CR family — the contracts, the field references,
@@ -86,7 +81,7 @@ something that belongs in a list, a table, or another page.
 | Cap | Limit | Exempt |
 |---|---|---|
 | prose paragraph | 5 lines / 500 rendered characters | fenced blocks, table rows, list *markers*, `> **Why**` notes, the footer |
-| page length | 1000 lines | `docs/walkthrough.md`, `docs/operation/*` — recordings and runbooks |
+| page length | 1000 lines | `docs/getting-started/walkthrough.md`, `docs/operate/*`, `docs/modules/devices/*-mig.md` — recordings and runbooks |
 | `##` sections | 10 per page, `## Contents` not counted | `docs/README.md`, `docs/reference/*` — both are lookup tables |
 
 A paragraph nested under a list item is prose a reader still has to get through, so it is measured on
@@ -98,7 +93,7 @@ corpus align with their marker, at two or three spaces, so the two never collide
 reads in short paragraphs and clear lists is a good page, and a short one that reads as a wall of text is
 not. The line cap is a backstop against a page nobody split, not a budget to spend down.
 
-`docs/architecture.md` is capped tighter still, at 200 lines: it is the front door, and a front door that
+`docs/getting-started/architecture.md` is capped tighter still, at 200 lines: it is the front door, and a front door that
 grows a mechanism has stopped being one.
 
 Run `scripts/check-docs.sh --report` while writing — it demotes the caps to warnings and prints the
@@ -111,10 +106,10 @@ it as follows — when a page starts serving two modes at once, that is the mome
 
 | Mode | Reader is… | Our pages |
 |---|---|---|
-| Tutorial | learning by doing | `README.md` Quick Start, `docs/walkthrough.md`, the MIG walkthrough, `docs/kv-cache/walkthrough.md` |
-| How-to | achieving a goal | `docs/operation/*`, `docs/migration/*`, `docs/development.md`, a domain runbook (`docs/model-store/operations.md`) |
-| Reference | looking something up | `docs/accelerator-requests.md`, `docs/settings.md`, `docs/reference/*` |
-| Explanation | building understanding | `docs/architecture.md`, `docs/architecture/*`, and the domain pages under `docs/kv-cache/`, `docs/model-store/` and `docs/model-deployment/` (a domain page serves the mode its reader arrives in — contract pages read as reference, mechanism pages as explanation) |
+| Tutorial | learning by doing | `README.md` Usage examples, `docs/getting-started/walkthrough.md`, the MIG walkthrough, `docs/modules/kv-cache/walkthrough.md` |
+| How-to | achieving a goal | `docs/operate/*`, `docs/modules/devices/*-mig.md`, `docs/operate/migration/*`, `docs/contribute/development.md`, a domain runbook (`docs/modules/model-delivery/operations.md`) |
+| Reference | looking something up | `docs/modules/devices/requests.md`, `docs/reference/settings.md`, `docs/reference/*` |
+| Explanation | building understanding | `docs/getting-started/architecture.md` and the deep pages under `docs/modules/` (contract pages read as reference, mechanism pages as explanation) |
 
 Two consequences worth stating:
 
@@ -122,12 +117,36 @@ Two consequences worth stating:
 - **A tutorial shows real output.** Every command and result in a walkthrough is captured from a live
   cluster, with node names genericized. Never hand-write plausible output.
 
+## Reader and implementation detail
+
+User documentation explains how to configure, use and operate a capability. Keep public field
+contracts, commands, defaults, permissions, compatibility limits and observable failure behavior.
+A filename, method name or internal HTTP route is not evidence a reader needs to finish a task.
+Use a source path only in contributor documentation or when the task is editing that source.
+Keep public API routes when the reader calls them; explain a missing capability through its effect
+on the workload rather than a missing internal endpoint.
+
+Implementation rationale, source investigations, measured traces and rejected alternatives belong
+in the existing owning `specs/` document. Before removing such material from a guide, compare the
+actual spec section and preserve any missing fact there, including its evidence limits. Link to the
+spec for readers who need the engineering detail. Do not duplicate evidence across guides or erase
+uncertainty while shortening prose.
+
+A documentation review checks both sides of a move: the guide still gives the reader the correct
+operation and limits, and the spec retains the implementation information. Check referenced skills
+as well; a skill that needs source or measurement detail should read the owning spec explicitly.
+Existing docs lint checks structure and links; it does not prove that a moved contract is complete.
+
 ## Writing rules
+
+Avoid counting extensible lists in prose when the adjacent list or table already states their
+members. Name the subject directly. Keep quantities that affect configuration, compatibility,
+capacity, timing or a safety limit.
 
 - **State the rule first, in the first sentence of the paragraph or section.** A reader who stops
   there must still be correct.
-- **Demote rationale into a `> **Why**` note.** The measured failure, the alternative rejected, the
-  race that forced the design — valuable, but not on the critical reading path:
+- **Keep decision-relevant rationale short.** Put source investigations, measured traces and rejected
+  alternatives in the owning spec; a brief note may explain a constraint the reader must act on:
 
   ```markdown
   The gate reads capacity rather than allocatable.
@@ -138,7 +157,8 @@ Two consequences worth stating:
 
 - **Delete some rationale rather than demoting it.** Before writing a `> **Why**` that names the error a
   step avoids, ask **who takes that step** — not which page you are on. One the operator performs
-  unconditionally leaves the reader nothing to decide, so its error is noise: delete the block, then
+  unconditionally leaves the reader nothing to decide: preserve the technical rationale in its owning
+  spec before removing the block, then
   re-read around it, since a removal orphans the pronouns and cross-references that pointed into it. One
   the reader takes keeps its error, which is what tells them what they are choosing. Either way keep the
   **boundary of a measurement** — which hardware, which driver generation, what is still unmeasured.
@@ -153,12 +173,16 @@ Two consequences worth stating:
   more than one paragraph — and past 5 lines it fails the paragraph cap. A `###` heading is cheap and
   becomes an anchor others can link to.
 - **Prefer a table for anything enumerable** — modes, keys, vendors, gates, knobs.
-- **Name the code.** `pkg/nodefeature`, `node_queue.go`, `TestUnitResourcesPresetDocs` — a reader
-  should be able to jump from the claim to the source. Do not paste code that will drift; name it.
+- **Keep table headers short.** Use a precise noun or short phrase, such as `Resource`, `Scope` or
+  `Default`. Put conditions and explanations in the cells or adjacent prose. Preserve technical names.
+- **Name code in contributor guides.** Give a source path when the reader is editing that code.
+  User guides state the behavior and link to the owning spec for its implementation.
 - **No symbol-numbered cross-references** (`switch ①`, "gate-2 above"). Use the heading name and a
   link — the numbering breaks the moment a page is split.
 - **Wrap at about 100 columns**, and keep tables on one line each (a wrapped table row is unreadable in
   a diff).
+- **Write Pretty YAML.** Follow [YAML examples](../SKILL.md#yaml-examples), including its rules for
+  empty collections, comments and preserving values when formatting.
 - **Links are relative** (`../settings.md`, `architecture/admission.md`), never absolute GitHub URLs —
   the exception is the chart README, which is rendered outside the repo on Artifact Hub.
 
@@ -178,7 +202,7 @@ edit on one sighting.
 | Staged run-up | "Let's dive in", "here is what you need to know", "Honestly?", "the thing is", "note that" before a routine claim | Start with the point |
 | Arguing with no one | "To be clear", "this is not about", "a tempting approach would be", a rejected option no page proposes | Delete it. Keep a rejection only when a reader would really weigh that option, and then state the reason once |
 | Forced triads | three parallel items where the meaning has two, "fast, reliable, and scalable" | One item per real idea; keep three only when there are three |
-| Dashes as connector | ` — `, ` – `, ` -- ` between clauses | A period, comma, colon or parentheses. The header block, footer and table cells keep their template separators, and code, paths and URLs are untouched |
+| Dashes as connector | ` — `, ` – `, ` -- ` between clauses | A period, comma, colon or parentheses. The footer and table cells keep their template separators, and code, paths and URLs are untouched |
 | Stacked qualifiers | "could potentially", "may arguably", "in some cases it might" | One hedge, and only when the code or a measurement supports the doubt |
 | Inflated significance | "pivotal", "crucial", "plays a key role", "marks a shift", a closing paragraph about the future | The fact. End a page on its last concrete fact |
 | Stock AI words | additionally, delve, robust (figurative), seamless, leverage, showcase, highlight (verb), landscape, tapestry, testament, underscore, valuable, key (adjective) | A plain word, or nothing. "Gate" and "robust" used in their technical sense are fine |
@@ -186,16 +210,17 @@ edit on one sighting.
 | Shallow -ing riders | ", ensuring X", ", enabling Y", ", reflecting Z" tacked onto a fact | Drop the rider, or make it its own sentence with the mechanism named |
 | Bold as decoration | bold on ordinary terms, a bold label and colon on every bullet | Plain text. Turn a list whose labels carry nothing into a sentence or a table |
 | Decorative headings | Title Case below the H1, emoji, arrows, a rule between sections, a heading that restates its first sentence | Sentence case, none of the decoration |
-| Writing about the page | "the table below compares", "this section is organized by", "was added to replace" | State the subject. Mention a previous version only in `docs/migration/*` and release notes |
+| Writing about the page | "the table below compares", "this section is organized by", "was added to replace" | State the subject. Mention a previous version only in `docs/operate/migration/*` and release notes |
 | Chat residue | "Certainly!", "I hope this helps", "let me know", an offer to expand | Delete it |
 
 Three limits keep the cleanup from doing harm:
 
 - **Keep every fact.** A rewrite must not add or drop a name, number, version, key, condition or
   ranking. A sentence that needs a detail you do not have gets a simpler wording, not a guess.
-- **Change prose only.** Code blocks, inline code, commands, paths, link targets and table rows pinned by
-  a test (see the invariants in `SKILL.md`) stay as they are. A heading keeps its words, because
-  changing them breaks every inbound anchor; re-casing is safe.
+- **Change prose only unless the task requests example formatting.** Code blocks, inline code,
+  commands, paths, link targets and table rows compared with code (see the invariants in `SKILL.md`)
+  stay as they are. When the task includes headings, use concise technical names and update Contents,
+  self links and every inbound anchor. Re-casing alone preserves anchors.
 - **A pattern is a default, not a crime.** A `> **Why**` note may legitimately correct a belief the
   reader holds ("allocatable also falls to zero when a family is merely saturated"), and a quotation, a
   title or a proper name keeps its wording. One weak tell alone (a single dash, a single hedge) is not
@@ -209,7 +234,7 @@ dashes and bold labels.
 1. Put it under the directory that fits: the reader it serves (`architecture/`, `operation/`,
    `migration/`, `reference/`), or the domain directory of the CR family it orbits
    (`kv-cache/`, `model-store/`, `model-deployment/`) when the page joins a family that already has one.
-2. Copy the template above; fill the header block honestly — an inflated read time is worse than none.
+2. Copy the template above and write a short introduction. Add prerequisites only when the task needs them.
 3. Add a row to the `docs/README.md` page table, and a step to any reading path it belongs on.
 4. Add it to the routing table in the skill's `SKILL.md` and to `references/page-map.md`, saying what it
    owns and what it must not absorb.

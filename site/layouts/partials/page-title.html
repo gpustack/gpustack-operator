@@ -1,0 +1,14 @@
+{{- with .Title -}}
+  {{- . -}}
+{{- else -}}
+  {{- $headings := findRE `(?m)^# .+$` .RawContent 1 -}}
+  {{- if $headings -}}
+    {{- replaceRE `^# ` "" (index $headings 0) | plainify -}}
+  {{- else -}}
+    {{- with .File -}}
+      {{- .BaseFileName | humanize -}}
+    {{- else -}}
+      {{- .Site.Title -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}

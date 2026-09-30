@@ -1,0 +1,9 @@
+{{ define "main" }}
+  {{ partial "article-content.html" . }}
+  {{ if not .Content }}
+    <h1>{{ partial "page-title.html" . }}</h1>
+    <ul>
+      {{ range partial "ordered-pages.html" . }}<li><a href="{{ .RelPermalink }}">{{ partial "page-title.html" . }}</a></li>{{ end }}
+    </ul>
+  {{ end }}
+{{ end }}

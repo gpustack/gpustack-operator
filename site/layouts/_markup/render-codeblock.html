@@ -1,0 +1,21 @@
+{{- if eq .Type "mermaid" -}}
+{{- .Page.Store.Set "hasMermaid" true -}}
+<div class="diagram-block">
+  <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
+  <p class="diagram-status" role="status">Rendering diagram…</p>
+  <details class="diagram-source"><summary>Mermaid source</summary>
+    <div class="code-block">
+      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+      <pre><code>{{ .Inner }}</code></pre>
+    </div>
+  </details>
+</div>
+{{- else -}}
+{{- $options := dict -}}
+{{- if not (transform.CanHighlight .Type) -}}{{ $options = dict "type" "text" }}{{- end -}}
+{{- $result := transform.HighlightCodeBlock . $options -}}
+<div class="code-block">
+  <div class="code-toolbar"><span>{{ .Type | default "text" }}</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  {{ $result.Wrapped }}
+</div>
+{{- end -}}

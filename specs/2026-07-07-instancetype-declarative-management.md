@@ -252,7 +252,20 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
 - `pkg/worker/extensionapis/worker/instance_type_flavor.go` + `extensionapis/setup.go` — new handler.
 - `pkg/worker/settings/value.go` — `InstanceTypeDrainWhenNoFlavors`.
 - `pkg/worker/controllers/setup.go` — register `NodeQueueReconciler`.
-- `docs/architecture.md`, `docs/settings.md`, `docs/development.md`, `README.md`, e2e cases — updated.
+- `docs/getting-started/architecture.md`, `docs/reference/settings.md`, `docs/contribute/development.md`, `README.md`, e2e cases — updated.
+
+### Output recovery and empty-plan hold retained from the scheduling guide
+
+Output watches recover a deleted derived InstanceType: periodic informer resync re-delivers an
+unchanged flavor and its update predicate drops it. Losing a definition can remove all derived
+types without changing flavor inputs. Output deletion must enqueue reconciliation directly.
+Queue draining no longer requires a separate drain tombstone or minimum-capacity-node selection;
+flavor quotas retain their per-flavor capacity inputs.
+
+`topology.gpustack.ai/empty-plan-hold` marks a worker-imposed Hold when no live flavor plan remains.
+It distinguishes that hold from administrator inactivity. The InstanceType reconciler does not
+backfill `Inactive` while the marker exists; restoring the plan permits admission unless the
+administrator made the type inactive. No false inactive state needs to be cleared.
 
 ### Code Style
 Editable setting, read per-reconcile (matches `value.go`):
@@ -375,9 +388,9 @@ scheduling chain functional. Each task is TDD (RED → GREEN → suite → `make
   - *Verify:* `go test ./pkg/worker/... -run 'InstanceType|NodeQueue|NodeFlavor|Pod'`, then the full
     suite + build; `make lint`. **Checkpoint: run the entire test suite and build before continuing.**
 
-- [x] **Task 5 — Docs.** `docs/architecture.md` (webhook enrichment + immutable sizing, `.count`
+- [x] **Task 5 — Docs.** `docs/getting-started/architecture.md` (webhook enrichment + immutable sizing, `.count`
   pinning, group/cores notes, the queue-ownership split, drain-then-empty + reactivate,
-  InstanceTypeFlavor), `docs/settings.md` (new setting row), `docs/development.md` (InstanceTypeFlavor
+  InstanceTypeFlavor), `docs/reference/settings.md` (new setting row), `docs/contribute/development.md` (InstanceTypeFlavor
   in the inventory), `README.md` (declarative InstanceType + catalog). *Verify:* links resolve, wording
   matches the shipped behavior.
 

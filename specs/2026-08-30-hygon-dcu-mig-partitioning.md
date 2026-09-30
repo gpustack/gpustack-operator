@@ -31,7 +31,7 @@ follow, and it is the reason several of the existing partition abstractions cann
   workload reclaims the instance.
 - **G4 — Metrics.** Per-instance memory and compute utilisation reach the `Devices` subresource, the
   exporter and `/monitor/snapshot`, the way the whole-card and logical-slice figures already do.
-- **G5 — Documentation.** A `docs/operation/hygon-mig.md` operations page alongside `nvidia-mig.md`
+- **G5 — Documentation.** A `docs/modules/devices/hygon-mig.md` operations page alongside `nvidia-mig.md`
   and `thead-mig.md`, covering the node-level mode, the forced teardown order, and the failure modes
   an operator will actually hit.
 - **G6 — End-to-end coverage.** Cases for the allocation shapes Hygon can serve, plus explicit
@@ -131,7 +131,7 @@ instances makes every card unusable, so that I do not brick a node during a main
 subresource, the exporter and `/monitor/snapshot`. A figure the library refuses is reported with a
 reason rather than as a zero.
 
-**F5 — `docs/operation/hygon-mig.md`.** Covers the system-wide mode and why it is out of the
+**F5 — `docs/modules/devices/hygon-mig.md`.** Covers the system-wide mode and why it is out of the
 operator's hands, the exclusivity with whole-card and logical slicing, the profile table, the forced
 CI→GI→mode teardown order, and the failure modes below.
 
@@ -266,7 +266,7 @@ pkg/devicemanager/detector/hygon/
 pkg/devicemanager/allocator/hygon/
   mig.go                    # reserve / adopt / release, placement selection
   mig_visibility.go         # CI conf mount, device nodes, DMI_MIG_VISIBLE_DEVICE
-docs/operation/hygon-mig.md
+docs/modules/devices/hygon-mig.md
 .claude/skills/gpustack-operator-e2e/cases/   # new Hygon partition cases
 ```
 
@@ -342,8 +342,8 @@ Tasks are ordered by dependency. T1 blocks everything; T2 blocks T3 and T4; T5 a
   subresource, the exporter and `/monitor/snapshot`; a refused figure carries a reason.
 
 **T5 — Documentation.**
-`Owns:` `docs/operation/hygon-mig.md`, `README.md`, `docs/README.md`,
-`docs/accelerator-requests.md`, `docs/architecture/device-discovery.md`,
+`Owns:` `docs/modules/devices/hygon-mig.md`, `README.md`, `docs/README.md`,
+`docs/modules/devices/requests.md`, `docs/modules/devices/discovery.md`,
 `docs/reference/instance-metrics.md`
 - The operations page, the index entries, and the cross-links.
 - The metrics page's availability matrix, which this is the first change to make a partition's

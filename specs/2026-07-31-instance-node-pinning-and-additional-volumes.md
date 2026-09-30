@@ -200,7 +200,7 @@ an administrator opening node-path mounts to also open privileged to every CR au
   nothing — a held `subPath` covers itself and any path beneath it, and an absent one covers the
   whole volume. An absent `type` and an explicit empty one are the same unset kind, so respelling it is not
   a new grant either.
-- **AC3.5** Both settings appear in the `docs/settings.md` online-adjustable table and in the settings
+- **AC3.5** Both settings appear in the `docs/reference/settings.md` online-adjustable table and in the settings
   catalog test.
 
 ### Notes / Constraints / Caveats
@@ -267,7 +267,7 @@ an administrator opening node-path mounts to also open privileged to every CR au
 
 - A `hostPath` mount, or `privileged`, lets an Instance read the node's filesystem and other tenants'
   data → one default-off administrator setting each, CREATE-time rejection, documented in
-  `docs/settings.md`.
+  `docs/reference/settings.md`.
 - The `main` container runs as root (`RunAsUser: 0`), so an allowed `hostPath` mount of `/` is already
   total over the node's filesystem — the second gate buys separation of *kind* (filesystem vs. devices
   and kernel), not a weaker grant → recorded as an Ask-first follow-up (a `hostPath` path allowlist),
@@ -372,8 +372,8 @@ pkg/worker/webhooks/worker/instance.go          # node-pin validation (T3), volu
                                                 # the host-access gates (T5)
 pkg/worker/settings/value.go                    # the instance-privileged-allowed and
                                                 # instance-host-path-volume-allowed Settings
-docs/settings.md                                # the two new Setting rows
-docs/walkthrough.md                             # a worked pinned + extra-mount Instance example
+docs/reference/settings.md                                # the two new Setting rows
+docs/getting-started/walkthrough.md                             # a worked pinned + extra-mount Instance example
 ```
 
 ### Code Style
@@ -479,12 +479,12 @@ concurrently — scaffolding for parallelism's sake, deliberately not done.
 
 - [x] **T2 · Settings `instance-privileged-allowed` and `instance-host-path-volume-allowed`**
       Blocked by: None
-      Owns: `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `docs/settings.md`
+      Owns: `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `docs/reference/settings.md`
       Acceptance: AC3.5. Two editable boolean Settings, `instance-privileged-allowed` and
         `instance-host-path-volume-allowed`, both default `"false"`, seeded from
         `GPUSTACK_INSTANCE_PRIVILEGED_ALLOWED` / `GPUSTACK_INSTANCE_HOST_PATH_VOLUME_ALLOWED`; one
         table-driven catalog test pins both names, defaults, editability and env mapping the way the
-        existing switches are pinned; `docs/settings.md` gains a row for each in the online-adjustable
+        existing switches are pinned; `docs/reference/settings.md` gains a row for each in the online-adjustable
         table, each stating that a gate is enforced when an Instance takes the escape, at creation
         or later, and never on an escape it already holds.
       Verify: `go test -race -count=1 ./pkg/worker/settings/...`
@@ -536,7 +536,7 @@ concurrently — scaffolding for parallelism's sake, deliberately not done.
 
 - [x] **T6 · Checkpoint: docs + live e2e**
       Blocked by: T3, T4, T5
-      Owns: `docs/walkthrough.md`,
+      Owns: `docs/getting-started/walkthrough.md`,
         `.claude/skills/gpustack-operator-e2e/cases/case-36.sh` and its row + notes bullet in
         `.claude/skills/gpustack-operator-e2e/SKILL.md` (added while building: the e2e half of this task
         is only reproducible as a case in the suite, not as a one-off run),

@@ -1,126 +1,277 @@
 # GPUStack Operator Documentation
 
-Everything written about GPUStack Operator, and the order to read it in. Start at the
-[project README](../README.md) if you have not installed it yet.
+Start with the [project README](../README.md) to install the operator. This index groups the
+remaining pages by task and lists every page below.
+
+The capability guides are [Heterogeneous Devices](modules/devices/_index.md),
+[RDMA Networking](modules/rdma/_index.md), [Topology Management](modules/topology/_index.md),
+[KV Cache](modules/kv-cache/_index.md), [Model Delivery](modules/model-delivery/_index.md),
+[Model Deployment](modules/model-deployment/_index.md) and
+[Accelerated Instances](modules/instances/_index.md).
 
 ## Reading paths
 
-**I want to run it** — 30 minutes, no Kubernetes internals required.
+For a first workload, follow [Usage](../README.md#usage), then use
+[Accelerator Requests](modules/devices/requests.md) to choose its resource keys. The
+[Walkthrough](getting-started/walkthrough.md) records a run on a four-node cluster. Workloads that
+need RDMA also need [RDMA Operations](modules/rdma/operations.md).
 
-1. [README — Quick Start](../README.md#quick-start) — install the chart, verify the chain, run a sliced
-   workload.
-2. [Accelerator Requests](accelerator-requests.md) — the resource keys and the rules your Pod must obey.
-3. [Walkthrough](walkthrough.md) — the same steps on a real four-node cluster, with real output.
-4. [RDMA Operations](operation/rdma.md) — only if your workloads use RDMA: how many endpoints to ask
-   for beside N accelerators, and what the pairing does and does not guarantee.
+For cluster operations, read [Architecture](getting-started/architecture.md) and [Installation
+Modes](operate/installation-modes.md) first. The [settings](reference/settings.md), [vendor
+prerequisites](getting-started/vendor-prerequisites.md) and
+[preflight](modules/devices/preflight.md) pages cover installation decisions.
 
-**I run the cluster** — what to configure, and what to do when hardware changes.
+Use the [topology](modules/topology/operations.md),
+[model store](modules/model-delivery/operations.md), [high availability](operate/high-availability.md)
+and [RDMA](modules/rdma/operations.md) runbooks as those features are enabled. Hardware partitioning
+has separate runbooks for [NVIDIA](modules/devices/nvidia-mig.md),
+[T-Head](modules/devices/thead-mig.md) and [Hygon](modules/devices/hygon-mig.md).
 
-1. [Architecture](architecture.md) — the overview, so the objects make sense.
-2. [Installation Modes](architecture/installation-modes.md) — what the chart owns, what the worker applies.
-3. [Topology-Aware Scheduling Operations](operation/topology-aware-scheduling.md) — select a topology
-   inventory, publish a hierarchy, and verify Kueue TAS.
-4. [High Availability Operations](operation/high-availability.md) — the replica knob per component.
-5. [Settings & Environment Variables](settings.md) — online-adjustable settings and every `GPUSTACK_*`.
-   [Model Store Operations](model-store/operations.md) — the node model cache: its watermarks,
-   which delivery a Hugging Face model takes, and the upgrade that switches it.
-6. [Vendor Prerequisites](vendor-prerequisites.md) — what to install per manufacturer, and which vendor
-   GPU Operator components to disable.
-7. [Preflight Operations](operation/preflight.md) — one container run that says what a node can
-   detect, slice and manage, before anything is installed on it.
-8. [RDMA Operations](operation/rdma.md) — the kubelet topology policy to set before an accelerator
-   and an RDMA adapter land together, and how to confirm the node is running it.
-9. [NVIDIA MIG Operations](operation/nvidia-mig.md), [T-Head MIG Operations](operation/thead-mig.md)
-   and [Hygon MIG Operations](operation/hygon-mig.md) —
-   the runbook for enabling and disabling partitioning on a node.
-10. Upgrading: [Migrating to Bundled Subcharts](migration/to-subcharts.md) · [Migrating from
-   v0.5.x](migration/from-v0.5.md) · [Upgrading to an Enforced Binding
-   Dtype](migration/kv-cache-dtype.md) with a KV cache pool · [Migration
-   Troubleshooting](migration/troubleshooting.md) when it goes wrong.
+Start an upgrade with the relevant page under [migration](operate/migration/to-subcharts.md).
 
-**I change the code** — read the overview first; it is the map for everything else.
+For code changes, read [Architecture](getting-started/architecture.md), then the relevant deep page in the
+table below. [Internals](contribute/internals.md) covers startup constraints, and
+[Development](contribute/development.md) lists the build and validation commands. The
+[`gpustack-operator-docs`](../.agents/skills/gpustack-operator-docs/SKILL.md) skill routes
+documentation changes.
 
-1. [Architecture](architecture.md) → [Device Discovery](architecture/device-discovery.md) → [Network
-   Topology](architecture/network-topology.md) → [Scheduling
-   Chain](architecture/scheduling-chain.md) → [Topology-Aware
-   Scheduling](architecture/topology-aware-scheduling.md) → [Admission](architecture/admission.md).
-2. [Internals](architecture/internals.md) — the invariants that break quietly if you miss them.
-3. [Development](development.md) — build, lint, test, code generation, vendored dependencies.
-4. The [`gpustack-operator-docs`](../.claude/skills/gpustack-operator-docs/SKILL.md) skill — where a doc
-   change belongs once the code change lands.
+Agents should load `gpustack-operator-overview`, [Architecture](getting-started/architecture.md),
+and only the deep page needed for the task.
 
-**I am an AI agent** — load in this order, stop as soon as the question is answered.
+## Module map
 
-1. The `gpustack-operator-overview` skill (directory layout, naming conventions).
-2. [Architecture](architecture.md) — one page, with the vocabulary table and the request trace.
-3. The one deep page the question maps to, from the table below. Do not load all six.
+Each entry routes one module or shared task to its guides, owning specs, code entry points, related
+modules and skills. Links here are navigation, not proof: a spec records what was decided and
+measured when it was written, so what the current checkout implements needs the current code.
+A skill link names a procedure; the entry's other fields carry shared facts.
+
+### Devices Manager
+
+- ID: `devices`
+- Use for: which resource key a workload asks for; how detection, capacity labels, queues and admission checks enforce it; MIG partitioning runbooks.
+- Aliases: `Devices`, `GPU`, `NPU`, `MIG`, `accelerator`, `device plugin`
+- Guides: [Heterogeneous Devices](modules/devices/_index.md); the request contract in [Accelerator Requests](modules/devices/requests.md); the gates in [Admission](modules/devices/admission.md).
+- Specs: [accelerator resource modes](../specs/2026-06-21-accelerator-resource-modes-refactor.md) · [soft-slicing runtime isolation](../specs/2026-06-25-accelerator-soft-slicing-runtime-isolation.md) · [unified pool](../specs/2026-06-29-instancetype-unified-pool-refactor.md) · [credit scoring](../specs/2026-06-24-unified-credit-base-scoring.md)
+- Code: [pkg/devicemanager](../pkg/devicemanager/) (detector, allocator, preflight) · [pkg/deviceplugin](../pkg/deviceplugin/) · [pkg/nodefeature](../pkg/nodefeature/) · chain reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/)
+- Related: [RDMA Manager](#rdma-manager) (interfaces in the same node inventory) · [Topology Aware](#topology-aware) (placement over pool capacity) · [GPU Instances](#gpu-instances) (the workload the chain admits)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (scheduling-chain cases) · [gpustack-operator-xbuild-and-verify](../.agents/skills/gpustack-operator-xbuild-and-verify/SKILL.md) (slicing builder stages and shims)
+
+### RDMA Manager
+
+- ID: `rdma`
+- Use for: requesting RDMA endpoints for a workload; how the NIC inventory, link states and labels are discovered; aligning requests with the kubelet TopologyManager policy.
+- Aliases: `RDMA`, `NIC`, `RoCE`, `link state`, `rdma.capable`
+- Guides: [RDMA Networking](modules/rdma/_index.md); keys and policy in [RDMA Operations](modules/rdma/operations.md); inventory in [Network Topology](modules/rdma/network-topology.md).
+- Specs: [NIC/RDMA topology](../specs/2026-09-02-devices-nic-rdma-topology.md) · [extended resource](../specs/2026-09-20-rdma-extended-resource.md) · [NVIDIA fabric domain](../specs/2026-09-20-nvidia-fabric-domain.md) · [fabric by protocol](../specs/2026-09-22-fabric-device-by-protocol.md) · [interface count](../specs/2026-09-22-fabric-interface-count.md)
+- Code: NIC and link discovery in [pkg/devicemanager/detector](../pkg/devicemanager/detector/) (`network.go`, `link.go`) · request vocabulary in [pkg/nodefeature/rdma.go](../pkg/nodefeature/rdma.go) and [pkg/nodefeature/fabric.go](../pkg/nodefeature/fabric.go)
+- Related: [Devices Manager](#devices-manager) (the interfaces are entries in the same per-node inventory)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (RDMA cases)
+
+### Topology Aware
+
+- ID: `topology`
+- Use for: describing domains such as zones and racks; letting Kueue place replicas within a domain; enabling a topology source; diagnosing a Pending group.
+- Aliases: `TAS`, `Topograph`, `topology source`, `zone`, `placement`
+- Guides: [Topology Management](modules/topology/_index.md); semantics in [Topology-Aware Scheduling](modules/topology/scheduling.md); enablement in [Topology-Aware Scheduling Operations](modules/topology/operations.md).
+- Specs: [topology discovery](../specs/2026-09-22-topology-discovery.md) · [model placement preference](../specs/2026-09-26-model-placement-preference.md)
+- Code: [pkg/worker/controllers/worker/topology_source.go](../pkg/worker/controllers/worker/topology_source.go) and [pkg/worker/controllers/worker/node_topology.go](../pkg/worker/controllers/worker/node_topology.go)
+- Related: [Devices Manager](#devices-manager) (placement constrains which pool serves a replica) · [Model Deployment](#model-deployment) (replicas can prefer nodes holding their model)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (TAS cases)
+
+### KV Cache
+
+- ID: `kv-cache`
+- Use for: standing up a shared inference cache; pool grants and quotas; attaching a workload to a pool.
+- Aliases: `KVCacheBackend`, `KVCachePool`, `Mooncake`, `prefix cache`, `injection`
+- Guides: [KV Cache](modules/kv-cache/_index.md); setup order in [KV Cache Walkthrough](modules/kv-cache/walkthrough.md); store and grants in [KV Cache Backend](modules/kv-cache/backend.md) and [KV Cache Pool](modules/kv-cache/pool.md).
+- Specs: [backend](../specs/2026-08-28-kv-cache-backend.md) · [pool](../specs/2026-08-28-kv-cache-pool.md) · [injection](../specs/2026-08-28-kv-cache-injection.md) · [media and scaling](../specs/2026-09-05-kv-cache-media-and-scaling.md) · [high availability](../specs/2026-09-06-kv-cache-backend-high-availability.md)
+- Code: store rendering and read-back in [pkg/worker/kvcache](../pkg/worker/kvcache/) · per-engine client config in [pkg/worker/kvcache/inject](../pkg/worker/kvcache/inject/) · `kv_cache_*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/)
+- Related: [Model Deployment](#model-deployment) (deployments and Pods consume a pool through injection)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (cache and serving cases)
+
+### Model Delivery
+
+- ID: `model-delivery`
+- Use for: giving model weights a stable identity; node caching and delivery; prefetch, peer sync, progress views and cache operations.
+- Aliases: `ModelArtifact`, `NodeModelStore`, `ModelStore`, `ModelPrefetch`, `model cache`, `Hugging Face`
+- Guides: [Model Delivery](modules/model-delivery/_index.md); the artifact contract in [Model Artifact](modules/model-delivery/artifact.md); the node cache in [Node Model Store](modules/model-delivery/node-store.md); the runbook in [Model Store Operations](modules/model-delivery/operations.md).
+- Specs: [model artifact](../specs/2026-09-25-model-artifact.md) · [node model store](../specs/2026-09-25-node-model-store.md) · [prefetch](../specs/2026-09-27-model-prefetch.md) · [peer sync](../specs/2026-09-27-model-peer-sync.md) · [image source](../specs/2026-09-27-model-image-source.md)
+- Code: Hub resolution in [pkg/modelartifact](../pkg/modelartifact/) · the per-node plugin and cache in [pkg/modelmanager](../pkg/modelmanager/) · cache configuration in [pkg/modelstore](../pkg/modelstore/)
+- Related: [Model Deployment](#model-deployment) (deployments mount or download artifacts) · [KV Cache](#kv-cache) (the weight identity enters KV keys) · [GPU Instances](#gpu-instances) (an Instance can mount weights)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (node-delivery cases)
+
+### Model Deployment
+
+- ID: `model-deployment`
+- Use for: describing a serving workload's model, engine and roles; prefill/decode pairing; replica routing, status and metrics.
+- Aliases: `ModelDeployment`, `prefill`, `decode`, `router`, `vLLM`, `SGLang`, `replica`
+- Guides: [Model Deployment](modules/model-deployment/_index.md); the role contract in [Model Deployment Configuration](modules/model-deployment/deployment.md); pairing in [Prefill and Decode](modules/model-deployment/prefill-decode.md).
+- Specs: [consolidation](../specs/2026-09-18-kvcache-and-model-deployment-consolidation.md) · [role replica admission](../specs/2026-09-19-role-replica-admission-unit.md) · [P/D pairing and router](../specs/2026-09-12-model-deployment-pd-pairing-and-router.md) · [router implementations](../specs/2026-09-19-model-deployment-router-implementations.md)
+- Code: `model_deployment_*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/) · webhooks in [pkg/worker/webhooks/worker](../pkg/worker/webhooks/worker/) · router image under [pack/llm-router](../pack/llm-router/)
+- Related: [KV Cache](#kv-cache) (a deployment can attach a shared cache) · [Model Delivery](#model-delivery) (weights reach replicas through an artifact) · [Topology Aware](#topology-aware) (the placement field constrains replicas)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (serving cases)
+
+### GPU Instances
+
+- ID: `instances`
+- Use for: launching an accelerator-backed container workspace; SSH access; node pinning and instance metrics.
+- Aliases: `Instance`, `InstanceType`, `SSH`, `workspace`
+- Guides: [Accelerated Instances](modules/instances/_index.md); the request form in [Accelerator Requests](modules/devices/requests.md); utilization in [Instance Metrics Reference](reference/instance-metrics.md).
+- Specs: [SSH instance slicing](../specs/2026-07-04-ssh-instance-accelerator-slicing.md) · [sidecar partition visibility](../specs/2026-07-26-ssh-sidecar-partition-visibility.md) · [node pinning and additional volumes](../specs/2026-07-31-instance-node-pinning-and-additional-volumes.md) · [utilization metrics](../specs/2026-08-07-instance-utilization-metrics.md)
+- Code: `instance*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/) · API handlers in [pkg/worker/extensionapis/worker](../pkg/worker/extensionapis/worker/) · gauges in [pkg/devicemanager/exporter](../pkg/devicemanager/exporter/) and [pkg/kubemetrics](../pkg/kubemetrics/)
+- Related: [Devices Manager](#devices-manager) (the request families and the admission chain) · [Model Delivery](#model-delivery) (mounting weights into an Instance)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (Instance cases)
+
+### API Changes
+
+- ID: `api`
+- Use for: which version a manifest or call targets. User-facing resources are `worker.gpustack.ai/v1`; `worker.gpustack.ai/v1alpha1` is internal controller storage behind the public API, not a version users switch between. The layers: public types, the handlers that proxy them onto internal storage, code generation, and the RBAC that grants access.
+- Aliases: `worker.gpustack.ai/v1`, `v1alpha1`, `CRD`, `aggregated apiserver`
+- Guides: the version table in [Development](contribute/development.md); a public surface example with its grants in [Model Artifact API](modules/model-delivery/views.md).
+- Code: public types in [api/worker/v1](../api/worker/v1/) and internal storage in [api/worker/v1alpha1](../api/worker/v1alpha1/) · handlers and proxies in [pkg/worker/extensionapis](../pkg/worker/extensionapis/) over the [pkg/extensionapi](../pkg/extensionapi/) plumbing · generators in [gen/api](../gen/api/) · worker RBAC in [deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml](../deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml)
+- Related: [Development](#development) (`make generate` regenerates the API surface) · [GPU Instances](#gpu-instances) (Instance and InstanceType are the main public resources)
+- Skills: [gpustack-operator-generate](../.agents/skills/gpustack-operator-generate/SKILL.md) (regenerate after type or webhook edits)
+
+### Installation
+
+- ID: `installation`
+- Use for: choosing chart or image mode; vendored subcharts and their patches; vendor prerequisites; upgrade and migration paths.
+- Aliases: `Helm chart`, `subchart`, `chart mode`, `image mode`, `values.yaml`
+- Guides: choices in [Installation Modes](operate/installation-modes.md); node drivers in [Vendor Prerequisites](getting-started/vendor-prerequisites.md); transfer in [Migrating to Bundled Subcharts](operate/migration/to-subcharts.md).
+- Specs: [bundled apps subchart split](../specs/2026-07-28-bundled-apps-subchart-split.md)
+- Code: [deploy/gpustack-operator/chart](../deploy/gpustack-operator/chart/) · vendoring in [hack/deps.sh](../hack/deps.sh) · image-mode in-cluster install in [pkg/worker/kuberess](../pkg/worker/kuberess/)
+- Related: [Development](#development) (chart targets and subchart patches) · [Devices Manager](#devices-manager) (the Device Manager DaemonSets the chart deploys)
+- Skills: [gpustack-operator-chart-e2e](../.agents/skills/gpustack-operator-chart-e2e/SKILL.md) (install, rollout and uninstall verification) · [gpustack-operator-chart-subcharts-manage](../.agents/skills/gpustack-operator-chart-subcharts-manage/SKILL.md) (add, patch or bump a vendored subchart)
+
+### Development
+
+- ID: `development`
+- Use for: build, lint, test and codegen commands; commit and PR conventions; contributor invariants; release steps; site publication and translations.
+- Aliases: `make`, `lint`, `codegen`, `vendored dependencies`, `staging`, `Hugo`, `GitHub Pages`
+- Guides: commands and targets in [Development](contribute/development.md); startup invariants in [Internals](contribute/internals.md); orientation in [Architecture](getting-started/architecture.md).
+- Code: [Makefile](../Makefile) and the scripts behind it in [hack](../hack/) · site publication in [Site workflow](../.github/workflows/site.yml) and [publisher](../hack/site/publish.py) · patched modules in [staging](../staging/) · generators in [gen](../gen/)
+- Related: [API Changes](#api-changes) (what `make generate` owns) · [Installation](#installation) (chart targets and vendoring)
+- Skills: [gpustack-operator-overview](../.agents/skills/gpustack-operator-overview/SKILL.md) (codebase tour) · [gpustack-operator-docs](../.agents/skills/gpustack-operator-docs/SKILL.md) (documentation changes) · [gpustack-operator-code-review](../.agents/skills/gpustack-operator-code-review/SKILL.md) (PR review axes) · [gpustack-operator-issue-pr](../.agents/skills/gpustack-operator-issue-pr/SKILL.md) (issue and PR titles) · [gpustack-operator-release](../.agents/skills/gpustack-operator-release/SKILL.md) (cut a release) · [gpustack-operator-generate](../.agents/skills/gpustack-operator-generate/SKILL.md) (API codegen)
 
 ## All pages
 
-| Page | What it answers | Audience | Read time |
-|---|---|---|---|
-| [Architecture](architecture.md) | What the operator builds, the four stages, the life of one sliced-GPU request, the vocabulary | everyone | ~4 min |
-| [Device Discovery](architecture/device-discovery.md) | How NFD and the Device Manager turn hardware into labels and a per-accelerator ledger; what the allocator injects | contributors | ~20 min |
-| [Network Topology](architecture/network-topology.md) | The node's network interface inventory and its accelerators' scale-up fabric, how an RDMA link is verified, and which of those facts can reach a scheduling decision | contributors, operators | ~10 min |
-| [Scheduling Chain](architecture/scheduling-chain.md) | How capacity labels become ResourceFlavors, ClusterQueues, LocalQueues and InstanceTypes | contributors | ~9 min |
-| [Topology-Aware Scheduling](architecture/topology-aware-scheduling.md) | How Topograph or TopologySource inventory becomes profiles, Kueue Topologies, TAS queues and per-replica placement, and how a node-delivered model prefers the nodes holding it | operators, contributors | ~11 min |
-| [Admission](architecture/admission.md) | The five gates, the four-view status, which field answers "what can I still get" | contributors, operators | ~8 min |
-| [Installation Modes](architecture/installation-modes.md) | Chart mode vs image mode; which objects the worker must apply itself | operators, contributors | ~3 min |
-| [Internals](architecture/internals.md) | Startup ordering, the gateway mirror, the device-plugin registration loop, per-manufacturer packages, CGO bindings, the 63-char rule | contributors | ~5 min |
-| [KV Cache Backend](kv-cache/backend.md) | How a Mooncake store is run and observed; why capacity is read rather than derived, why shrinking a group drops its cache, and why a group's identity is its position in a list | operators, contributors | ~14 min |
-| [KV Cache Leader](kv-cache/leader.md) | The metadata process a backend runs: its Deployment and Service, why its two probes take different paths, and what electing through a Kubernetes Lease costs | operators, contributors | ~7 min |
-| [KV Cache Local Disk Tier](kv-cache/local-disk-tier.md) | The optional disk layer on a member group: what it renders, the bucket that is its write unit, and why it can be configured correctly and still hold nothing | operators, contributors | ~10 min |
-| [KV Cache on Disk-Heavy Nodes](kv-cache/disk-heavy-nodes.md) | What to configure on a node whose capacity is disk rather than memory: why no member group can be disk alone, and how small its memory segment may be | operators | ~5 min |
-| [KV Cache Pool](kv-cache/pool.md) | How a namespace is granted a quota on a store, what a quota ceiling buys, and why a full quota discards data instead of refusing writes | operators, contributors | ~12 min |
-| [KV Cache Walkthrough](kv-cache/walkthrough.md) | The shortest path from nothing to a ModelDeployment on a shared cache: the four objects in order, the pasteable manifests, and the three things that go wrong | operators, users | ~11 min |
-| [Model Artifact](model-store/artifact.md) | How a `ModelArtifact` names a model's weights, how it is resolved and revalidated — with an optional `expectedDigest` asserting the manifest digest — how a `ModelDeployment` or an `Instance` mounts or downloads them under each delivery, and what an air-gapped cluster can still deliver | users, operators | ~16 min |
-| [Model Image Source](model-store/image-source.md) | The `ModelArtifact` image source: the digest-pinned reference and what it does and does not promise, building weights into an image, image-volume delivery to a `ModelDeployment` or an `Instance`, the version floors, double storage, kubelet image GC, and registry mirrors | users, operators | ~8 min |
-| [Model Prefetch](model-store/prefetch.md) | Warming a model onto nodes before any Pod asks: the `ModelStore` / `ModelStoreBinding` / `ModelPrefetch` objects, placement, the warm-up pod and why it carries no queue-name label, budgets, pinning and expiry, and the status views | users, operators | ~9 min |
-| [Node Model Store](model-store/node-store.md) | The `NodeModelStore` resource and the `model-manager` plugin: every field and its writer, the status guard, mount authorization, how content is downloaded, verified and published, failure reasons, collection and metrics | operators, contributors | ~12 min |
-| [Node-to-Node Sync](model-store/peer-sync.md) | The peer port a node's published trees are served on, the token authentication and NetworkPolicy that bound it, how a cold node pulls with in-stream checkpoints, and the `source` field and metrics that tell peer bytes from hub bytes | operators, contributors | ~6 min |
-| [Model Artifact Views](model-store/views.md) | The `v1` views of `ModelArtifact` and `NodeModelStore`, the `progress` subresource (aggregate, live, authorized, naming no node), the tenant Role, and the capability map for GPUStack server's model files | users, operators, console developers | ~8 min |
-| [Model Store Operations](model-store/operations.md) | Running node delivery: enabling the plugin, where its configuration comes from, reading a node, the capacity rule against kubelet's eviction, switching delivery, where replicas land and turning the placement preference off, upgrade notes, and removing the cache | operators | ~11 min |
-| [Model Deployment](model-deployment/deployment.md) | The `ModelDeployment` contract: the inherited reuse domain, the three override tiers and the owned-key table, and the runner-image formula | users, operators, contributors | ~9 min |
-| [Model Deployment Prefill and Decode](model-deployment/prefill-decode.md) | What pairs a prefill role with a decode role: the connector each engine and router renders, the router block and its fields, the direct transfer's transport, roles on different hardware, and a role's own address | users, operators, contributors | ~4 min |
-| [Engine Versions](model-deployment/engine-versions.md) | The lowest vLLM, vLLM-Ascend and SGLang release each deployment shape has been run with, the Mooncake client its runner image carries, the store line it needs, and which transport each engine can use on each leg | users, operators | reference |
-| [Model Deployment Routing](model-deployment/routing.md) | Which replica each managed router picks by default, why shared-prefix traffic lands on one replica, switching `vllm-router` or `sglang-gateway` to round robin through `spec.router.extraArgs`, and the router series that show which replica served a request | users, operators | ~5 min |
-| [Model Deployment Metrics](model-deployment/metrics.md) | The structured metrics subresource, which series each field reads per engine, role and router, windowed cache hits and Pod scrape annotations | users, operators, console developers | ~7 min |
-| [Model Deployment Status](model-deployment/status.md) | What each `ModelDeployment` status condition and published field means, and how to read them when a deployment misbehaves | users, operators | ~8 min |
-| [Model Deployment Shutdown](model-deployment/shutdown.md) | What a replica does between its Pod's delete and its engine's exit: the drain window, the gauges it waits on, and the requests it does not save | users, operators | ~4 min |
-| [Accelerator Requests](accelerator-requests.md) | The resource keys per family and the seven rules admission enforces, with worked examples | users, contributors | ~11 min |
-| [Walkthrough](walkthrough.md) | A recorded end-to-end run: every object, before/after each operation | everyone | ~12 min |
-| [Settings & Environment Variables](settings.md) | Online-adjustable settings, every `GPUSTACK_*` env, per-manufacturer overrides, toolkit paths | operators | ~8 min |
-| [Vendor Prerequisites](vendor-prerequisites.md) | What to install per manufacturer before GPUStack, and which vendor GPU Operator components to keep or disable | operators | ~10 min |
-| [Development](development.md) | Build, lint, test, code generation, vendored subcharts and dependencies | contributors | ~6 min |
-| [High Availability Operations](operation/high-availability.md) | Which knob to raise per control-plane component, and the one topology that cannot be redundant | operators | ~4 min |
-| [Topology-Aware Scheduling Operations](operation/topology-aware-scheduling.md) | Enabling Topograph or publishing generic inventory, requesting a level, verifying TAS, and diagnosing Pending groups | operators, users | ~16 min |
-| [NVIDIA MIG Operations](operation/nvidia-mig.md) | Enabling/disabling MIG, reboot recovery, and a recorded three-configuration walkthrough | operators | ~21 min |
-| [T-Head MIG Operations](operation/thead-mig.md) | Enabling/disabling T-Head's own MIG-named partitioning, the busy-mode-change prerequisite, and reboot recovery | operators | ~10 min |
-| [Hygon MIG Operations](operation/hygon-mig.md) | The same runbook for Hygon, whose mode is node-wide and whose partitioned nodes serve nothing else | operators | ~10 min |
-| [Preflight Operations](operation/preflight.md) | Verifying on a bare host what a node can detect, slice and manage: the command line for both runtimes, every mount and flag, what it starts and removes | operators | ~9 min |
-| [RDMA Operations](operation/rdma.md) | Which RDMA key to ask for and how many endpoints beside N accelerators, what a grant injects, the kubelet policy that aligns the two sides, why no queue meters these keys, and the engine image an EFA leg needs | operators, users | ~16 min |
-| [Migrating to Bundled Subcharts](migration/to-subcharts.md) | The one-time ownership transfer from the runtime-installed releases | operators | ~9 min |
-| [Migrating from v0.5.x](migration/from-v0.5.md) | Upgrading across the scheduling-chain refactor | operators | ~5 min |
-| [Upgrading to an Enforced Binding Dtype](migration/kv-cache-dtype.md) | What a Binding's `dtype` reaching the engine does to existing pool-attached workloads, the pre-upgrade check, and the way out | operators | ~5 min |
-| [Migration Troubleshooting](migration/troubleshooting.md) | Recovering from a wedged upgrade (worker CrashLoopBackOff) or a namespace stuck Terminating | operators | ~8 min |
-| [Instance Type Unit Resources Reference](reference/instance-type-unit-resources.md) | The per-product CPU/RAM tier a derived InstanceType is sized with, and where each tier came from | operators | reference |
-| [Instance Metrics Reference](reference/instance-metrics.md) | The `instances/<name>/metrics` subresource and the Device Manager's Prometheus exporter: the fields, the gauges, their sources and limits | users, operators, console developers | ~9 min |
-| [Command Reference](reference/commands.md) | Every command the binary offers: what each does, who runs it, its flags, and a runnable invocation | operators, developers | ~10 min |
-| [KV Cache Injection Reference](reference/kv-cache-injection.md) | How any Pod joins a KV cache pool with one label: the contract, what is injected per engine, every refusal, and what a cache changes about a workload | users, operators | ~14 min |
+### Heterogeneous devices
+
+| Page | Description |
+|---|---|
+| [Heterogeneous Devices](modules/devices/_index.md) | Choose an accelerator request. |
+| [Device Discovery](modules/devices/discovery.md) | Trace hardware detection and allocation. |
+| [Scheduling Chain](modules/devices/scheduling.md) | Follow capacity from labels to queues. |
+| [Admission](modules/devices/admission.md) | Understand the five request checks. |
+| [Accelerator Requests](modules/devices/requests.md) | Look up resource keys and valid requests. |
+| [NVIDIA MIG Operations](modules/devices/nvidia-mig.md) | Enable and recover NVIDIA partitions. |
+| [T-Head MIG Operations](modules/devices/thead-mig.md) | Enable and recover T-Head partitions. |
+| [Hygon MIG Operations](modules/devices/hygon-mig.md) | Enable and recover Hygon partitions. |
+| [Preflight Operations](modules/devices/preflight.md) | Check a node before installation. |
+| [Instance Type Unit Resources Reference](reference/instance-type-unit-resources.md) | Look up CPU and memory presets. |
+
+### RDMA networking
+
+| Page | Description |
+|---|---|
+| [RDMA Networking](modules/rdma/_index.md) | Start with RDMA requests. |
+| [Network Topology](modules/rdma/network-topology.md) | See how links and devices are discovered. |
+| [RDMA Operations](modules/rdma/operations.md) | Request and check RDMA endpoints. |
+
+### Topology management
+
+| Page | Description |
+|---|---|
+| [Topology Management](modules/topology/_index.md) | Start with placement by domain. |
+| [Topology-Aware Scheduling](modules/topology/scheduling.md) | Follow topology data into scheduling. |
+| [Topology-Aware Scheduling Operations](modules/topology/operations.md) | Enable and diagnose topology placement. |
+
+### KV cache
+
+| Page | Description |
+|---|---|
+| [KV Cache](modules/kv-cache/_index.md) | Start with a shared inference cache. |
+| [KV Cache Backend](modules/kv-cache/backend.md) | Understand the store and its capacity. |
+| [KV Cache Leader](modules/kv-cache/leader.md) | Understand leader election and health. |
+| [KV Cache Local Disk Tier](modules/kv-cache/local-disk-tier.md) | Configure local disk storage. |
+| [KV Cache on Disk-Heavy Nodes](modules/kv-cache/disk-heavy-nodes.md) | Size memory on disk-heavy nodes. |
+| [KV Cache Pool](modules/kv-cache/pool.md) | Grant and limit cache use. |
+| [KV Cache Walkthrough](modules/kv-cache/walkthrough.md) | Create a working cache from backend to workload. |
+| [KV Cache Injection Reference](modules/kv-cache/injection.md) | Attach a Pod to a pool. |
+
+### Model delivery
+
+| Page | Description |
+|---|---|
+| [Model Delivery](modules/model-delivery/_index.md) | Choose how weights reach workloads. |
+| [Model Artifact](modules/model-delivery/artifact.md) | Resolve and verify model weights. |
+| [Model Image Source](modules/model-delivery/image-source.md) | Package weights in an image. |
+| [Model Prefetch](modules/model-delivery/prefetch.md) | Warm weights before a workload starts. |
+| [Node Model Store](modules/model-delivery/node-store.md) | Understand node cache state and collection. |
+| [Node-to-Node Sync](modules/model-delivery/peer-sync.md) | Move cached weights between nodes. |
+| [Model Artifact API](modules/model-delivery/views.md) | Read artifact and node cache status. |
+| [Model Store Operations](modules/model-delivery/operations.md) | Operate the node model cache. |
+
+### Model deployment
+
+| Page | Description |
+|---|---|
+| [Model Deployment](modules/model-deployment/_index.md) | Start with managed model serving. |
+| [Model Deployment Configuration](modules/model-deployment/deployment.md) | Configure serving roles and overrides. |
+| [Model Deployment Prefill and Decode](modules/model-deployment/prefill-decode.md) | Pair serving roles. |
+| [Engine Versions](modules/model-deployment/engine-versions.md) | Check supported engine versions. |
+| [Model Deployment Routing](modules/model-deployment/routing.md) | Choose a routing policy. |
+| [Model Deployment Metrics](modules/model-deployment/metrics.md) | Read serving metrics. |
+| [Model Deployment Status](modules/model-deployment/status.md) | Diagnose deployment conditions. |
+| [Model Deployment Shutdown](modules/model-deployment/shutdown.md) | Understand replica draining. |
+
+### Accelerated instances
+
+| Page | Description |
+|---|---|
+| [Accelerated Instances](modules/instances/_index.md) | Start an accelerator-backed workspace. |
+| [Instance Metrics Reference](reference/instance-metrics.md) | Read an Instance’s resource use. |
+
+### Start here
+
+| Page | Description |
+|---|---|
+| [Architecture](getting-started/architecture.md) | See the operator’s four-stage path. |
+| [Walkthrough](getting-started/walkthrough.md) | Follow a recorded cluster run. |
+| [Vendor Prerequisites](getting-started/vendor-prerequisites.md) | Prepare each manufacturer’s driver. |
+
+### Cluster operations and upgrades
+
+| Page | Description |
+|---|---|
+| [Installation Modes](operate/installation-modes.md) | Choose chart or image installation. |
+| [High Availability Operations](operate/high-availability.md) | Set replica counts for control-plane parts. |
+| [Migrating to Bundled Subcharts](operate/migration/to-subcharts.md) | Transfer chart ownership. |
+| [Migrating from v0.5.x](operate/migration/from-v0.5.md) | Upgrade across the queue refactor. |
+| [Upgrading to an Enforced Binding Dtype](operate/migration/kv-cache-dtype.md) | Check dtype before upgrading. |
+| [Migration Troubleshooting](operate/migration/troubleshooting.md) | Recover a stuck upgrade. |
+
+### Reference and contribution
+
+| Page | Description |
+|---|---|
+| [Internals](contribute/internals.md) | Review startup and naming constraints. |
+| [Settings & Environment Variables](reference/settings.md) | Look up operator configuration. |
+| [Development](contribute/development.md) | Build, generate and lint the project. |
+| [Command Reference](reference/commands.md) | Look up binary commands and flags. |
 
 ## Conventions
 
 Every page in this directory (this index excepted) carries:
 
-- a **header block** — one-line purpose, then audience · prerequisites · read time;
+- a short introduction that explains the subject or task;
 - a **`## Contents`** list mirroring its `##` headings, in order;
 - a **footer** — `**See also**` for sideways links and `**Next** →` for the next page on the path.
 
 A page's file name, its H1 and its label above are the same words. Deep rationale is demoted into a
 `> **Why**` note, so the rule stays skimmable. Length is not the defect, verbosity is.
 
-Adding or moving a page means adding a row above. The
-[`gpustack-operator-docs`](../.claude/skills/gpustack-operator-docs/SKILL.md) skill carries the routing
-table, the sync invariants (which page a Go test or a generator pins), and `scripts/check-docs.sh`, which
-fails on a broken link, a stale `## Contents`, a paragraph over the cap, a label that is not its page's
-H1, or a page missing from this index.
+Adding or moving a page means updating its row above. Run `make lint docs` to check links, Contents,
+paragraph length, index labels, page coverage and paths named in skills.
+Documentation changes do not require Go tests. The former Go tests that read Markdown pages were
+removed; compare code-owned values with their reference pages when either changes.

@@ -10,89 +10,59 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 
 ## Architecture in brief
 
-One `gpustack-operator` binary, four subcommands (`worker`, `worker-gateway`, `device-manager`,
-`model-manager`); the scheduling chain builds in four stages, and `model-manager` sits beside it as a
-per-node CSI plugin that delivers Hugging Face weights:
+The `gpustack-operator` binary provides these subcommands: `worker` ([pkg/worker](../../../pkg/worker/),
+the control plane), `worker-gateway` ([pkg/workergateway](../../../pkg/workergateway/), the fleet
+view), `device-manager` ([pkg/devicemanager](../../../pkg/devicemanager/), one DaemonSet per
+manufacturer) and `model-manager` ([pkg/modelmanager](../../../pkg/modelmanager/), a per-node CSI
+plugin that delivers Hugging Face weights). The scheduling chain proceeds as follows: NFD labels the nodes; the
+Device Manager detects accelerators and network interfaces into a per-node `Devices` ledger; the
+worker derives per-card capacity labels ([pkg/nodefeature](../../../pkg/nodefeature/) is the label
+algebra); worker controllers materialize them into Kueue `ResourceFlavor`, `ClusterQueue` (one
+isolated queue per pool), `LocalQueue` and an `InstanceType` CRD, gated per card by an
+AdmissionCheck. Vendor runtime bindings under [binding/](../../../binding/) are generated from
+[gen/binding/](../../../gen/binding/). Hand-written slicing preload libraries live in
+[csrc/](../../../csrc/). [architecture.md](../../../docs/getting-started/architecture.md) is the
+one-page version: the scheduling chain, the life of a sliced-GPU request, and the vocabulary.
 
-1. **Bootstrap** — the Helm chart deploys NFD, Kueue, the two CSI drivers and the per-manufacturer Device Manager DaemonSets as vendored subcharts of one release; the `worker` installs them itself only where no chart deploys the worker (image mode). Either way the worker applies the two custom resources no chart can carry — the `gpustack-cpu-info` NodeFeatureRule and the `gpustack-node-devices` AdmissionCheck.
-2. **Device discovery** — the Device Manager detects accelerators and writes `acceleratable.feature.gpustack.ai/*` labels.
-3. **Capacity profiling** — the worker's `NodeFeatureReconciler` stamps the `gpustack.ai/managed` marker and `NodeCapacityReconciler` derives `general.`/`acceleratable.` per-card capacity labels (CPU cores plus the two accelerator families' capacities — `.sliced.*` for logically sliceable cards, `.partitioned.*` for cards in a hardware partitioning mode; a card serves exactly one family). The general(CPU) key defaults to `generic` and does not encode os/arch. `NodeFitLabelReconciler` adds the per-card fit labels (the largest free slice units on one card, the cards that can still grant a share), which the Workload webhook turns into a node-affinity pin so TAS skips a fragmented node.
-4. **Queue construction & admission** — worker controllers materialize the labels into Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, no Cohort) plus a materialized `InstanceType` CRD, fronted by a per-namespace `LocalQueue` and gated per-card by a `gpustack-node-devices` AdmissionCheck.
+## Routing
 
-`pkg/nodefeature` is the heart of the label algebra (construct/extract of node keys, flavors,
-queues, credits). [architecture.md](../../../docs/architecture.md) is the one-page version — the four
-stages, the life of a sliced-GPU request, and the vocabulary; load **one** deep page from
-[Going deeper](#going-deeper) when the question needs it, not all of them.
+Load [the module map](../../../docs/README.md#module-map) and read the entry that owns the task;
+each entry lists its guides, owning specs, code entry points, related modules and skills.
+Capability entries: [Devices Manager](../../../docs/README.md#devices-manager),
+[RDMA Manager](../../../docs/README.md#rdma-manager),
+[Topology Aware](../../../docs/README.md#topology-aware),
+[KV Cache](../../../docs/README.md#kv-cache),
+[Model Delivery](../../../docs/README.md#model-delivery),
+[Model Deployment](../../../docs/README.md#model-deployment) and
+[GPU Instances](../../../docs/README.md#gpu-instances). Shared task entries:
+[API Changes](../../../docs/README.md#api-changes),
+[Installation](../../../docs/README.md#installation) and
+[Development](../../../docs/README.md#development).
 
-## Key directories
+Then load only the deep page the task needs, from the entry's Guides field. For code changes, the
+build, lint, test and codegen commands are in
+[development.md](../../../docs/contribute/development.md); writing or updating any documentation
+page is the `gpustack-operator-docs` skill. Every page is listed in
+[docs/README.md](../../../docs/README.md).
 
-```
-cmd/gpustack-operator/            single binary entrypoint (4 cobra subcommands)
-pkg/
-  worker/                         control-plane process (worker subcommand)
-    worker.go                     Prepare → Start lifecycle (startup ordering)
-    controllers/worker/           the scheduling-chain reconcilers
-    extensionapis/                aggregated extension-API handlers (Instance, Devices, InstanceType, …)
-    webhooks/worker/              admission webhooks (generated + hand-written)
-    kvcache/                      renders a Mooncake store (leader/member workloads) and reads it back
-    kvcache/inject/               renders one engine's client config; pure, no cluster (see the Pod webhook)
-    kuberess/                     installs the bundled operator chart (image mode) + the two CRs
-  workergateway/                  worker-gateway subcommand (upstream aggregation)
-  devicemanager/                  device-manager subcommand (per-node DaemonSet)
-    detector/<mfr>/               per-manufacturer accelerator detection
-    allocator/<mfr>/              per-manufacturer device-plugin allocation
-    product/<mfr>/                product-shape rules both halves above share, driver-free
-    preflight/                    can this node actually slice? (host chroot, probe containers)
-    exporter/                     this node's Instances as Prometheus gauges on /metrics
-  kubemetrics/                    Instance utilization from the kubelet, behind both surfaces
-                                  (the metrics subresource and the exporter above)
-  modelartifact/                  resolves a Hub repository to a commit and its canonical manifest (ModelArtifact)
-  modelmanager/                   model-manager subcommand: the CSI node plugin and its node cache (NodeModelStore)
-  modelstore/                     the node cache's effective configuration: layers, merge, checks
-  nodefeature/                    label algebra (node keys, flavors, queues, credits)
-  extensionapi/                   generic aggregated-apiserver storage plumbing
-api/
-  v1/                             gpustack.ai/v1 extension API (settings, status)
-  worker/v1/                      worker.gpustack.ai/v1 extension API
-  worker/v1alpha1/                worker.gpustack.ai/v1alpha1 CRDs
-binding/<runtime>/                generated CGO bindings (nvml, rsmi, cndev, dcmi, …)
-csrc/<mfr>/                       hand-written C preload libraries injected into sliced containers
-gen/
-  api/generator/                  custom code generators (apireg-gen, crd-gen, webhook-gen)
-  binding/<runtime>/config.yaml   c-for-go config per GPU runtime
-hack/                             build/lint/test/deps/generate scripts behind the Makefile
-staging/                          patched k8s modules (managed by make deps)
-```
+## Contributor invariants
 
-Manufacturers: nvidia, amd, ascend, cambricon, hygon, iluvatar, metax, mthreads, thead.
-
-Reconcilers under `controllers/worker/` are unit-tested with the controller-runtime fake client
-(`sigs.k8s.io/controller-runtime/pkg/client/fake`), registering the same field indexers the
-controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
-
-## Naming conventions
-
-- **Kueue object names**: `gpustack-${key}-${os}-${arch}-${count}{c|d}` for a `ResourceFlavor` (`c` = CPU cores, `d` = devices); `gpustack-${key}-${os}-${arch}` for the `ClusterQueue` / `InstanceType` — single dash, CPU and device pools split (not composite), os/arch in full.
-- **LocalQueue names**: `gpustack-fnv64-<fnv64a-hash>` — always 31 chars (the full ClusterQueue name goes in the `schedule.gpustack.ai/queue` annotation).
-- **Label domains**: `feature.gpustack.ai/` (CPU/PCI facts), `acceleratable.feature.gpustack.ai/` (device models + `.sliced.*` / `.partitioned.*` capacities), `general.feature.gpustack.ai/` (CPU-only capacity), `credits.gpustack.ai/<mfr>` (Kueue quota resource), `schedule.gpustack.ai/` + `note.gpustack.ai/` (long names / unit-spec annotations); `gpustack.ai/managed` and `gpustack.ai/controlled` mark node onboarding and queue teardown.
-- **63-char rule**: Kubernetes label *values* cap at 63 chars — names that exceed it live in annotations, not labels. Always check when generating a name that flows into a label value.
+- Manufacturers: nvidia, amd, ascend, cambricon, hygon, iluvatar, metax, mthreads, thead.
+- **Kueue object names**: `gpustack-${key}-${os}-${arch}-${count}{c|d}` for a `ResourceFlavor`
+  (`c` = CPU cores, `d` = devices); `gpustack-${key}-${os}-${arch}` for the `ClusterQueue` /
+  `InstanceType` — single dash, CPU and device pools split (not composite), os/arch in full.
+- **LocalQueue names**: `gpustack-fnv64-<fnv64a-hash>` — always 31 chars (the full ClusterQueue
+  name goes in the `schedule.gpustack.ai/queue` annotation).
+- **Label domains**: `feature.gpustack.ai/` (CPU/PCI facts), `acceleratable.feature.gpustack.ai/`
+  (device models + `.sliced.*` / `.partitioned.*` capacities), `general.feature.gpustack.ai/`
+  (CPU-only capacity), `credits.gpustack.ai/<mfr>` (Kueue quota resource), `schedule.gpustack.ai/`
+  + `note.gpustack.ai/` (long names / unit-spec annotations); `gpustack.ai/managed` and
+  `gpustack.ai/controlled` mark node onboarding and queue teardown.
+- **63-char rule**: Kubernetes label *values* cap at 63 chars — names that exceed it live in
+  annotations, not labels. Always check when generating a name that flows into a label value.
 - **Build-constrained files**: `_linux.go` / `_other.go` split platform-specific code.
-- **Generated files**: anything matching `zz_generated.*`, `generated.pb.go`, `generated.proto` is generated — never hand-edit; edit the source types and run the `gpustack-operator-generate` skill.
-
-## Going deeper
-
-- The whole map, with reading paths per role → [docs/README.md](../../../docs/README.md)
-- What the operator builds, in one page → [architecture.md](../../../docs/architecture.md)
-- NFD labels, Device Manager detection, the `Devices` ledger, allocator injection → [architecture/device-discovery.md](../../../docs/architecture/device-discovery.md)
-- Capacity labels, flavor/queue/InstanceType naming, the five reconcilers → [architecture/scheduling-chain.md](../../../docs/architecture/scheduling-chain.md)
-- The five admission gates, webhook rules, the four-view status → [architecture/admission.md](../../../docs/architecture/admission.md)
-- Chart mode vs image mode, what the worker applies itself → [architecture/installation-modes.md](../../../docs/architecture/installation-modes.md)
-- Startup ordering, the gateway mirror, CGO bindings, the 63-char rule → [architecture/internals.md](../../../docs/architecture/internals.md)
-- Running and observing a pooled KV cache — a chain of its own, not part of the four stages → [kv-cache/backend.md](../../../docs/kv-cache/backend.md)
-- The two accelerator families, their resource keys and request rules → [accelerator-requests.md](../../../docs/accelerator-requests.md)
-- Settings & `GPUSTACK_*` configuration knobs → [settings.md](../../../docs/settings.md)
-- Every command the binary offers, its flags and a runnable invocation → [reference/commands.md](../../../docs/reference/commands.md)
-- Checking a node can slice before it has to: the procedure → [operation/preflight.md](../../../docs/operation/preflight.md)
-- Node delivery of weights: the plugin and `NodeModelStore` → [model-store/node-store.md](../../../docs/model-store/node-store.md); running it → [model-store/operations.md](../../../docs/model-store/operations.md); the `v1` views and `progress` → [model-store/views.md](../../../docs/model-store/views.md)
-- Build / lint / test / codegen / vendored deps → [development.md](../../../docs/development.md)
-- Writing or updating any of the above → the `gpustack-operator-docs` skill
+- **Generated files**: anything matching `zz_generated.*`, `generated.pb.go`, `generated.proto` is
+  generated — never hand-edit; edit the source types and run the `gpustack-operator-generate` skill.
+- Reconcilers under `controllers/worker/` are unit-tested with the controller-runtime fake client
+  (`sigs.k8s.io/controller-runtime/pkg/client/fake`), registering the same field indexers the
+  controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.

@@ -234,7 +234,7 @@ the image volume read-only, with no `subPath`.
   Instance's existing `imagePullSecrets`.
 - AC16: `docs/reference/model-artifact.md` gains the union member (resource example, patterns
   note, delivery table row, status row, requirements bullet) and links the new page;
-  `docs/README.md` indexes the new page. No `docs/settings.md` change: the feature adds no
+  `docs/README.md` indexes the new page. No `docs/reference/settings.md` change: the feature adds no
   Setting.
 
 ### Notes / Constraints / Caveats

@@ -1,0 +1,31 @@
+{{- $destination := .destination -}}
+{{- $url := urls.Parse $destination -}}
+{{- if and (not $url.IsAbs) (not $url.Host) (not (strings.HasPrefix $destination "#")) -}}
+  {{- with .page.GetPage $url.Path -}}
+    {{- $destination = .RelPermalink -}}
+    {{- if $.markdown -}}
+      {{- with .OutputFormats.Get "Markdown" -}}{{ $destination = .RelPermalink }}{{- end -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $destination = $url.Path -}}
+    {{- if not (strings.HasPrefix $url.Path "/") -}}
+      {{- $source := path.Clean (path.Join $.page.File.Dir $url.Path) -}}
+      {{- $filename := replace $.page.File.Filename "\\" "/" -}}
+      {{- if hasSuffix $filename (printf "/site/content/%s" $.page.File.Path) -}}
+        {{- $source = path.Clean (path.Join "site/content" $source) -}}
+      {{- end -}}
+      {{- if and (eq $source "docs/README.md") (not $.markdown) (not $url.Fragment) -}}
+        {{- $destination = "docs/" | relLangURL -}}
+      {{- else if and (ne $source "docs/README.md") (hasPrefix $source "docs/") -}}
+        {{- $destination = $source | relURL -}}
+      {{- else if hasPrefix $source "site/content/" -}}
+        {{- $destination = strings.TrimPrefix "site/content/" $source | relURL -}}
+      {{- else -}}
+        {{- $destination = printf "https://github.com/gpustack/gpustack-operator/blob/%s/%s" $.page.Site.Params.sourceRef $source -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- with $url.RawQuery -}}{{ $destination = printf "%s?%s" $destination . }}{{- end -}}
+  {{- with $url.Fragment -}}{{ $destination = printf "%s#%s" $destination . }}{{- end -}}
+{{- end -}}
+{{- return $destination -}}

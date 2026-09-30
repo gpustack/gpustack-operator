@@ -1,0 +1,2 @@
+{{- $destination := partial "link-destination.html" (dict "page" .Page "destination" .Destination "markdown" false) -}}
+<a href="{{ $destination }}">{{ .Text }}</a>

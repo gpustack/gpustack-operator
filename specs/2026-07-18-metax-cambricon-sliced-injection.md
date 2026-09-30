@@ -402,6 +402,15 @@ pkg/devicemanager/allocator/cambricon/smlu_driver_linux.go # F4/F5 NEW (Task 5, 
 pkg/devicemanager/allocator/cambricon/deviceplugin_test.go # F7 NEW
 pkg/devicemanager/allocator/cambricon/smlu_test.go       # F7 NEW: mapping/marker/reclaim/fail-closed (fake sMLU driver)
 ```
+### Cambricon mode preflight retained from the discovery guide
+
+`binding/cndev` resolves the sMLU getter and setter independently. A missing getter refuses an
+allocation even if the mode might already be enabled; a missing setter refuses by the same rule.
+Other read failures are logged and still reach the write, because the write establishes the mode.
+A driver that exposes the flag but refuses the write is handed back to the administrator with
+`cnmon set -c <index> -smlu on`; the mode persists until an administrator clears it. These are
+source-level failure classifications, not an additional hardware validation run.
+
 ### Code Style
 ```go
 // MetaX sliced branch: compute is a hard fixed-share quota; memory is a hard VRAM cap. Both come
@@ -600,4 +609,4 @@ advertisement (no per-vendor isolation e2e is added here).
   can co-locate and the second strands; the fix (per-card `cores` accounting / non-100 default) lives in the
   capability spec / Pod webhook.
 - **K2 — webhook enforcement of `.sliced > 1` support per vendor (deferred).** The Pod webhook should reject
-  `.sliced > 1` for non-NVIDIA vendors; documented in `docs/architecture.md`, a follow-up.
+  `.sliced > 1` for non-NVIDIA vendors; documented in `docs/getting-started/architecture.md`, a follow-up.

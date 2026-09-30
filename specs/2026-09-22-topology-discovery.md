@@ -501,7 +501,7 @@ them.
 ### Notes / Constraints / Caveats
 
 - Topograph's purpose and boundary are confirmed by its
-  [provider/graph/engine architecture](https://github.com/NVIDIA/topograph/blob/main/docs/architecture.md)
+  [provider/graph/engine architecture](https://github.com/NVIDIA/topograph/blob/main/docs/getting-started/architecture.md)
   and [Helm chart](https://github.com/NVIDIA/topograph/blob/main/charts/topograph/README.md).
   Providers discover environment facts, a canonical graph carries switch tiers and accelerator
   domains, and engines translate that graph. The Kubernetes engine writes labels; it does not

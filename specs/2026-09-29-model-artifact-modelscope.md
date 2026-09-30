@@ -186,13 +186,13 @@ behavior (progress aggregation, prefetch, placement preference) is proven digest
 
 ### Documentation
 
-- `docs/model-store/artifact.md` (the page the HANDOFF's `docs/reference/model-artifact.md`
+- `docs/modules/model-delivery/artifact.md` (the page the HANDOFF's `docs/reference/model-artifact.md`
   became): the "refused" bullet becomes an accepted source — the resource example, the delivery
   table, the resolution section (ModelScope rows in the reason table, the cross-check, the
   truncation recovery), the digest section (all-`sha256` manifests; cross-hub digests stay
   incomparable), the engine-delivery env table, the requirements list (the runner SDK floor, per
   the coordination).
-- `docs/settings.md`: `model-artifact-modelscope-endpoint` joins the ModelArtifact table.
+- `docs/reference/settings.md`: `model-artifact-modelscope-endpoint` joins the ModelArtifact table.
 - `docs/README.md` and the docs skill routing follow the docs skill; no new page is expected (the
   artifact page owns the source kind), decided finally by the docs skill's routing.
 
@@ -473,7 +473,7 @@ mutation of exactly the mechanism it guards, then green again after reverting.
       Verify: `go test ./pkg/modelmanager/...`
 - [x] **T8 · Documentation**
       Blocked by: T6, T7
-      Owns: `docs/model-store/artifact.md`, `docs/settings.md`, `docs/README.md` as the docs skill routes
+      Owns: `docs/modules/model-delivery/artifact.md`, `docs/reference/settings.md`, `docs/README.md` as the docs skill routes
       Acceptance: the source is documented per Documentation above — accepted member, ModelScope
       rows in the reason table, the cross-check and truncation recovery, the all-`sha256` digest
       note, the engine env table, the SDK floor with the measured runner list on each side, the

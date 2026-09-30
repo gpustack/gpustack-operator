@@ -1069,7 +1069,7 @@ there too (Open Question 1).
       via `nvidia-smi`, `libvgpu.so` absent, `Remaining` decrements → delete → instance destroyed, `Remaining` restores;
       assert the `/8` denominator on the actual card generation. A100 reset path documented, validated externally.
     - Acceptance: doc renders (generic "a Kubernetes cluster"); H100 e2e passes on the H100 host.
-    - **Ship-phase result (2026-07-23):** the docs shipped in `docs/operation/nvidia-mig.md`; the H100 real-card
+    - **Ship-phase result (2026-07-23):** the docs shipped in `docs/modules/devices/nvidia-mig.md`; the H100 real-card
       e2e then ran on a provisioned H100 80GB HBM3 (driver 570.211.01, Hopper, MIG mode enabled reset-free) and
       **passed** — the per-profile `Remaining` ledger appeared with canonical names, a Kueue LocalQueue
       `nvidia.com/gpu.sliced.mig-3g.40gb` workload admitted, the container saw exactly one `MIG 3g.40gb` device

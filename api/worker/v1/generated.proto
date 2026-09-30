@@ -344,6 +344,7 @@ message InstanceMetricsSample {
 // and the InstancePersistentVolume's name is the same as the Kubernetes PersistentVolumeClaim's name.
 //
 // +genclient
+// +genclient:noStatus
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
 message InstancePersistentVolume {
@@ -591,6 +592,89 @@ message InstanceTypeList {
   repeated InstanceType items = 2;
 }
 
+// KVCacheBackend declares a managed or external KV cache backend and reports its endpoints and capacity.
+//
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
+//
+// +genclient
+// +genclient:noStatus
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["kvcb"]
+message KVCacheBackend {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCacheBackendSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCacheBackendStatus status = 3;
+}
+
+// KVCacheBackendList holds the list of KVCacheBackends.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message KVCacheBackendList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated KVCacheBackend items = 2;
+}
+
+// KVCachePool declares a backend quota shared through namespace bindings.
+//
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
+//
+// +genclient
+// +genclient:noStatus
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["kvcp"]
+message KVCachePool {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCachePoolSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCachePoolStatus status = 3;
+}
+
+// KVCachePoolBinding grants a namespace a cache quota and reuse domain within a pool.
+//
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
+//
+// +genclient
+// +genclient:noStatus
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["kvcpb"]
+message KVCachePoolBinding {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCachePoolBindingSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCachePoolBindingStatus status = 3;
+}
+
+// KVCachePoolBindingList holds the list of KVCachePoolBindings.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message KVCachePoolBindingList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated KVCachePoolBinding items = 2;
+}
+
+// KVCachePoolList holds the list of KVCachePools.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message KVCachePoolList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated KVCachePool items = 2;
+}
+
 // ModelArtifact is the v1 view of a model's weights: where they come from and where they are.
 //
 // It proxies the v1alpha1 resource for every verb and serves the progress subresource. IT HAS NO
@@ -599,6 +683,7 @@ message InstanceTypeList {
 // is read through the object.
 //
 // +genclient
+// +genclient:noStatus
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
 message ModelArtifact {
@@ -808,11 +893,11 @@ message ModelDeploymentMetrics {
 // ModelPrefetch is the v1 view of a namespace's model residency: what is being warmed where, and
 // how far it has got.
 //
-// It proxies the v1alpha1 resource for every verb. It is status-only by design: per-node facts
-// already live in the node's report, so the view serves the aggregates and adds no subresource of
-// its own.
+// It proxies configuration changes to the v1alpha1 resource. Status reports aggregated node
+// readiness through the main object; the public API serves no status or progress subresource.
 //
 // +genclient
+// +genclient:noStatus
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
 message ModelPrefetch {
@@ -830,6 +915,61 @@ message ModelPrefetchList {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
 
   repeated ModelPrefetch items = 2;
+}
+
+// ModelStore declares cache policy for nodes selected by an administrator.
+//
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
+//
+// +genclient
+// +genclient:noStatus
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["ms"]
+message ModelStore {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelStoreSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelStoreStatus status = 3;
+}
+
+// ModelStoreBinding grants a namespace a model-cache budget and permission to pin artifacts.
+//
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
+//
+// +genclient
+// +genclient:noStatus
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["msb"]
+message ModelStoreBinding {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelStoreBindingSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelStoreBindingStatus status = 3;
+}
+
+// ModelStoreBindingList holds the list of ModelStoreBindings.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelStoreBindingList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelStoreBinding items = 2;
+}
+
+// ModelStoreList holds the list of ModelStores.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelStoreList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelStore items = 2;
 }
 
 // NFSInstancePersistentVolumeSource defines the source of NFS.
@@ -987,5 +1127,33 @@ message S3InstancePersistentVolumeSource {
   //
   // +default=["--no-checksum","--memory-limit=4000","--max-flushers=32","--max-parallel-parts=32","--part-sizes=25","--list-type=2","--no-specials"]
   repeated string mountOptions = 9;
+}
+
+// TopologySource selects the topology inventory used to form Kueue placement hierarchies.
+//
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
+//
+// +genclient
+// +genclient:noStatus
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["toposrc"]
+message TopologySource {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.TopologySourceSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.TopologySourceStatus status = 3;
+}
+
+// TopologySourceList holds the list of TopologySources.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message TopologySourceList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated TopologySource items = 2;
 }
 

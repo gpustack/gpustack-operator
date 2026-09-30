@@ -322,7 +322,15 @@ the same CPU.
 - `api/worker/v1/instance_type_flavor.go` + `pkg/worker/extensionapis/worker/instance_type_flavor.go`
   — `GeneralGroup`+`AcceleratorGroup` on the catalog; setting-aware grouping.
 - `pkg/worker/settings/value.go` — add `InstanceTypeAwareCPUManufacturer`.
-- `docs/architecture.md`, `docs/settings.md`, `docs/development.md`, `README.md`, e2e cases — updated.
+- `docs/getting-started/architecture.md`, `docs/reference/settings.md`, `docs/contribute/development.md`, `README.md`, e2e cases — updated.
+
+### CPU identity rationale retained from the discovery guide
+
+CPU family/model numbers are independent numbering spaces on x86 (CPUID) and arm64 (MIDR).
+A value such as `25-1` can occur in both; pooling also retains the architecture because their
+binaries are not interchangeable. The revised key removes the old abbreviated `-ln-x64` suffix
+and recovers its label-length budget. `nodefeature.ExtractGeneralNodeKey` owns key construction;
+the CPU-info discovery rule uses the `cpuid` library to report the readable model name.
 
 ### Code Style
 Editable setting, read per-reconcile (matches `value.go`):
@@ -479,12 +487,12 @@ CPU-aware on top of it (Task 2); descriptors, catalog, docs, and e2e follow.
     "false" default); `make generate` clean; build; `make lint`. **— Done: `./...` builds, `make generate`
     idempotent, `./pkg/... ./api/...` green, `make lint` 0 issues.**
 
-- [x] **Task 5 — Docs.** `docs/architecture.md` (unconditional CPU key; the finest-grain flavor + the
+- [x] **Task 5 — Docs.** `docs/getting-started/architecture.md` (unconditional CPU key; the finest-grain flavor + the
   `feature.gpustack.ai/acceleratable` discriminator + `cpuDetail`; the awareness setting's
   collapse/split naming table; the reconciler/webhook bullets; the rewritten worked example showing
-  RF-per-CPU vs collapsed CQ/IT), `docs/settings.md` (new `instance-type-aware-cpu-manufacturer` row;
+  RF-per-CPU vs collapsed CQ/IT), `docs/reference/settings.md` (new `instance-type-aware-cpu-manufacturer` row;
   removed the deleted `GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME` env var; "last five" per-reconcile),
-  `README.md` (one discovery-bullet clause). `docs/development.md` needed no change (its
+  `README.md` (one discovery-bullet clause). `docs/contribute/development.md` needed no change (its
   `TestExtractGeneralNodeKey` reference is now correct); the historical `docs/migration/v0.5-to-v0.6.md`
   is left as-is. *Verify:* the `settings.md#online-adjustable-settings` anchor resolves; wording matches
   shipped behavior. **— Done.**
@@ -531,7 +539,7 @@ CPU-aware on top of it (Task 2); descriptors, catalog, docs, and e2e follow.
   orphans. The intermediate single-dash v0.6.0–v0.6.2 line never shipped to users, so the only real
   upgrade is **v0.5.x → v0.6.x** — both double-dash. Because both are double-dash, the existing
   `cleanup-v0.5-orphans.sh` discriminator (`^gpustack--`) would now also match the healthy v0.6.x chain —
-  a footgun. **Revised the existing `docs/migration/v0.5-to-v0.6.md` + `docs/migration/cleanup-v0.5-orphans.sh`
+  a footgun. **Revised the existing `docs/migration/v0.5-to-v0.6.md` + `docs/operate/migration/cleanup-v0.5-orphans.sh`
   in place:** corrected the v0.6.x endpoint to the double-dash split scheme and moved the orphan
   discriminator to a v0.5.x-only signal — the `-${n}c-${n}g` CPU/RAM unit-spec baked into every v0.5.x
   composite RF/CQ/Cohort name, which no v0.6.x split name carries (v0.6.x names end in a bare `-${n}c` /

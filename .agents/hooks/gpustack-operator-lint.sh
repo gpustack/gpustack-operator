@@ -7,7 +7,7 @@
 # not been re-vendored. Report-only — it surfaces output but always exits 0 so it never blocks
 # the turn (and never risks a Stop-hook loop).
 #
-# hack/check-hook-dispatch.sh asserts the routing below, per kind of dirty path and in both
+# hack/check/hook-dispatch.sh asserts the routing below, per kind of dirty path and in both
 # directions. Change a pattern here and run `make lint`.
 
 set -o pipefail
@@ -107,7 +107,7 @@ fi
 # paths are all markdown or .agents/skills shell routes to `make lint agents-shell`, which runs the
 # .agents shell gate plus check-symbols.sh — of everything the full code gate runs, those are the
 # pieces that read such files, and .agents/hooks shell is deliberately NOT carved out because
-# check-hook-dispatch.sh reads the hook itself. hack/check-hook-dispatch.sh holds the step-to-inputs
+# check-hook-dispatch.sh reads the hook itself. hack/check/hook-dispatch.sh holds the step-to-inputs
 # table behind that sentence, asserts both directions of this routing, and fails when a step joins
 # the code gate without a classification or when the covering set drifts from the table. This
 # branch fires only when the branch above did not, which is exactly "every non-markdown dirty path
@@ -123,7 +123,7 @@ fi
 # the Codex invocation policy beside each skill, and the exclusion list in .opencodereview -- are
 # named here so that a turn editing only one of them gets the target that compares them, rather
 # than only the code gate, which does not read them.
-if paths_match '\.md$|/check-(docs|skills)\.sh$|\.agents/skills/|\.opencodereview/rule\.json'; then
+if paths_match '\.md$|/check-docs\.sh$|^hack/check/skills\.sh$|\.agents/skills/|\.opencodereview/rule\.json|^site/|^hack/(site(-serve)?\.sh|lib/hugo\.sh|check/site-links\.py)$'; then
   run_lint "make lint docs" make lint docs
 fi
 

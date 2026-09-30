@@ -52,6 +52,12 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstanceTypeFlavorList{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_InstanceTypeFlavorList(ref),
 		v1.InstanceTypeFlavorSpec{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_InstanceTypeFlavorSpec(ref),
 		v1.InstanceTypeList{}.OpenAPIModelName():                                     schema_gpustack_api_worker_v1_InstanceTypeList(ref),
+		v1.KVCacheBackend{}.OpenAPIModelName():                                       schema_gpustack_api_worker_v1_KVCacheBackend(ref),
+		v1.KVCacheBackendList{}.OpenAPIModelName():                                   schema_gpustack_api_worker_v1_KVCacheBackendList(ref),
+		v1.KVCachePool{}.OpenAPIModelName():                                          schema_gpustack_api_worker_v1_KVCachePool(ref),
+		v1.KVCachePoolBinding{}.OpenAPIModelName():                                   schema_gpustack_api_worker_v1_KVCachePoolBinding(ref),
+		v1.KVCachePoolBindingList{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_KVCachePoolBindingList(ref),
+		v1.KVCachePoolList{}.OpenAPIModelName():                                      schema_gpustack_api_worker_v1_KVCachePoolList(ref),
 		v1.ModelArtifact{}.OpenAPIModelName():                                        schema_gpustack_api_worker_v1_ModelArtifact(ref),
 		v1.ModelArtifactList{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1_ModelArtifactList(ref),
 		v1.ModelArtifactProgress{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1_ModelArtifactProgress(ref),
@@ -65,10 +71,16 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.ModelDeploymentMetrics{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_ModelDeploymentMetrics(ref),
 		v1.ModelPrefetch{}.OpenAPIModelName():                                        schema_gpustack_api_worker_v1_ModelPrefetch(ref),
 		v1.ModelPrefetchList{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1_ModelPrefetchList(ref),
+		v1.ModelStore{}.OpenAPIModelName():                                           schema_gpustack_api_worker_v1_ModelStore(ref),
+		v1.ModelStoreBinding{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1_ModelStoreBinding(ref),
+		v1.ModelStoreBindingList{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1_ModelStoreBindingList(ref),
+		v1.ModelStoreList{}.OpenAPIModelName():                                       schema_gpustack_api_worker_v1_ModelStoreList(ref),
 		v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref),
 		v1.NodeModelStore{}.OpenAPIModelName():                                       schema_gpustack_api_worker_v1_NodeModelStore(ref),
 		v1.NodeModelStoreList{}.OpenAPIModelName():                                   schema_gpustack_api_worker_v1_NodeModelStoreList(ref),
 		v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref),
+		v1.TopologySource{}.OpenAPIModelName():                                       schema_gpustack_api_worker_v1_TopologySource(ref),
+		v1.TopologySourceList{}.OpenAPIModelName():                                   schema_gpustack_api_worker_v1_TopologySourceList(ref),
 		v1alpha1.Accelerator{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1alpha1_Accelerator(ref),
 		v1alpha1.AcceleratorAllocation{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref),
 		v1alpha1.AcceleratorLogicalSliced{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_AcceleratorLogicalSliced(ref),
@@ -1995,6 +2007,297 @@ func schema_gpustack_api_worker_v1_InstanceTypeList(ref common.ReferenceCallback
 	}
 }
 
+func schema_gpustack_api_worker_v1_KVCacheBackend(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCacheBackend declares a managed or external KV cache backend and reports its endpoints and capacity.\n\nConfiguration changes proxy to the v1alpha1 resource. Controller-owned status is read-only through the main object; the public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.KVCacheBackendSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.KVCacheBackendStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.KVCacheBackendSpec{}.OpenAPIModelName(), v1alpha1.KVCacheBackendStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_KVCacheBackendList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCacheBackendList holds the list of KVCacheBackends.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.KVCacheBackend{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.KVCacheBackend{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_KVCachePool(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePool declares a backend quota shared through namespace bindings.\n\nConfiguration changes proxy to the v1alpha1 resource. Controller-owned status is read-only through the main object; the public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.KVCachePoolSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.KVCachePoolStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.KVCachePoolSpec{}.OpenAPIModelName(), v1alpha1.KVCachePoolStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_KVCachePoolBinding(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolBinding grants a namespace a cache quota and reuse domain within a pool.\n\nConfiguration changes proxy to the v1alpha1 resource. Controller-owned status is read-only through the main object; the public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.KVCachePoolBindingSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.KVCachePoolBindingStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.KVCachePoolBindingSpec{}.OpenAPIModelName(), v1alpha1.KVCachePoolBindingStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_KVCachePoolBindingList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolBindingList holds the list of KVCachePoolBindings.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.KVCachePoolBinding{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.KVCachePoolBinding{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_KVCachePoolList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KVCachePoolList holds the list of KVCachePools.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.KVCachePool{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.KVCachePool{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1_ModelArtifact(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -2780,7 +3083,7 @@ func schema_gpustack_api_worker_v1_ModelPrefetch(ref common.ReferenceCallback) c
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelPrefetch is the v1 view of a namespace's model residency: what is being warmed where, and how far it has got.\n\nIt proxies the v1alpha1 resource for every verb. It is status-only by design: per-node facts already live in the node's report, so the view serves the aggregates and adds no subresource of its own.",
+				Description: "ModelPrefetch is the v1 view of a namespace's model residency: what is being warmed where, and how far it has got.\n\nIt proxies configuration changes to the v1alpha1 resource. Status reports aggregated node readiness through the main object; the public API serves no status or progress subresource.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -2870,6 +3173,200 @@ func schema_gpustack_api_worker_v1_ModelPrefetchList(ref common.ReferenceCallbac
 		},
 		Dependencies: []string{
 			v1.ModelPrefetch{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelStore(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStore declares cache policy for nodes selected by an administrator.\n\nConfiguration changes proxy to the v1alpha1 resource. Controller-owned status is read-only through the main object; the public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelStoreSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelStoreStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelStoreSpec{}.OpenAPIModelName(), v1alpha1.ModelStoreStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelStoreBinding(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreBinding grants a namespace a model-cache budget and permission to pin artifacts.\n\nConfiguration changes proxy to the v1alpha1 resource. Controller-owned status is read-only through the main object; the public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelStoreBindingSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.ModelStoreBindingStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelStoreBindingSpec{}.OpenAPIModelName(), v1alpha1.ModelStoreBindingStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelStoreBindingList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreBindingList holds the list of ModelStoreBindings.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelStoreBinding{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.ModelStoreBinding{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_ModelStoreList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelStoreList holds the list of ModelStores.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.ModelStore{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.ModelStore{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -3117,6 +3614,103 @@ func schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref common.R
 				Required: []string{"endpoint"},
 			},
 		},
+	}
+}
+
+func schema_gpustack_api_worker_v1_TopologySource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "TopologySource selects the topology inventory used to form Kueue placement hierarchies.\n\nConfiguration changes proxy to the v1alpha1 resource. Controller-owned status is read-only through the main object; the public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.TopologySourceSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.TopologySourceStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.TopologySourceSpec{}.OpenAPIModelName(), v1alpha1.TopologySourceStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_TopologySourceList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "TopologySourceList holds the list of TopologySources.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.TopologySource{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.TopologySource{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -8998,7 +9592,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRole is one engine role and its replicas.\n\nReplicas, InstanceType and Resources are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to admission and scheduling — Kueue PodSet counts, flavor selection and the request the queue accounts — so a container field able to shadow any of them would make the admission feasibility check read a ledger that does not match reality. That is why the container fields below carry no resource request at all: the accelerator half belongs in Resources and the rest is derived from the InstanceType, and neither can be overridden here.\n\nEDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's -- with one exception. The declared parallel degrees of a prefill or decode role -- the degree flags in ExtraArgs, and vLLM's VLLM_DP_SIZE environment entry -- are the one container field that can render into a document BOTH roles carry: the vLLM-Ascend transfer leg writes the same parallel blocks into both roles' Pods, so on that leg editing one role's degrees rewrites the other role's Pods too, and the edit rolls the pair. Where no shared document renders them, a degree edit stays this role's own like every other container-field edit: every replica is a Kueue pod group of its own, so they are replaced one at a time -- one per role per pass -- and every sibling role keeps serving throughout. A `replicas` change rolls nothing at all: it adds or removes instances, and every instance that stays keeps running, keeps the accelerators it was admitted with and keeps whatever cache it holds.\n\nTHE SET OF ROLES IS FIXED AFTER CREATION. Admission refuses adding, removing or renaming a role. A replica's group is named from the deployment, its role and its ordinal, so edits to one role's running configuration do not rename a sibling role's groups.\n\nA DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A ROLLOUT. The replica that left is replaced on its own, under a new name, while its siblings keep serving — see docs/model-deployment/deployment.md under \"One group per replica\" and \"Rollout is a rolling replacement\".",
+				Description: "ModelDeploymentRole is one engine role and its replicas.\n\nReplicas, InstanceType and Resources are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to admission and scheduling — Kueue PodSet counts, flavor selection and the request the queue accounts — so a container field able to shadow any of them would make the admission feasibility check read a ledger that does not match reality. That is why the container fields below carry no resource request at all: the accelerator half belongs in Resources and the rest is derived from the InstanceType, and neither can be overridden here.\n\nEDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's -- with one exception. The declared parallel degrees of a prefill or decode role -- the degree flags in ExtraArgs, and vLLM's VLLM_DP_SIZE environment entry -- are the one container field that can render into a document BOTH roles carry: the vLLM-Ascend transfer leg writes the same parallel blocks into both roles' Pods, so on that leg editing one role's degrees rewrites the other role's Pods too, and the edit rolls the pair. Where no shared document renders them, a degree edit stays this role's own like every other container-field edit: every replica is a Kueue pod group of its own, so they are replaced one at a time -- one per role per pass -- and every sibling role keeps serving throughout. A `replicas` change rolls nothing at all: it adds or removes instances, and every instance that stays keeps running, keeps the accelerators it was admitted with and keeps whatever cache it holds.\n\nTHE SET OF ROLES IS FIXED AFTER CREATION. Admission refuses adding, removing or renaming a role. A replica's group is named from the deployment, its role and its ordinal, so edits to one role's running configuration do not rename a sibling role's groups.\n\nA DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A ROLLOUT. The replica that left is replaced on its own, under a new name, while its siblings keep serving — see docs/modules/model-deployment/deployment.md under \"One group per replica\" and \"Rollout is a rolling replacement\".",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"name": {

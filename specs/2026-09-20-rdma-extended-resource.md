@@ -642,14 +642,14 @@ exit code is unchanged in every case.
 
 #### F8 — the documentation says what is now true
 
-- `docs/architecture/network-topology.md` gains the resource side of the RDMA story: the three keys,
+- `docs/modules/rdma/network-topology.md` gains the resource side of the RDMA story: the three keys,
   the mode judgment, the link gate and the NUMA hint. That page already owns the interface inventory,
   the three link states and the `rdma.*` node labels, and it has the heading room.
-- `docs/accelerator-requests.md` gains the request rules: the keys, what a quantity means, the
+- `docs/modules/devices/requests.md` gains the request rules: the keys, what a quantity means, the
   same-container requirement, and the TopologyManager prerequisite.
 - The page-map table in the documentation skill gains the row routing "the RDMA extended resources"
   to the first of these, so the next change lands there without re-deciding.
-- `docs/operation/preflight.md` gains the `topology` section: what it reports, why an unread policy
+- `docs/modules/devices/preflight.md` gains the `topology` section: what it reports, why an unread policy
   is `unknown` rather than the kubelet's default, and that it never moves the exit code. **This
   page was missed when this list was first written, and the miss has a shape worth naming: the
   page's own sentence "One YAML document goes to stdout, with **two sections**" became false the
@@ -1045,9 +1045,9 @@ pkg/devicemanager/preflight/
   topology.go             # T8  the TopologyManager policy section
   preflight.go            # T8  the report gains that section
   hostexec.go             # T8  the kubelet-configuration reader, generalized to take a setting
-docs/architecture/network-topology.md    # T9
-docs/accelerator-requests.md             # T9
-docs/operation/preflight.md              # T9
+docs/modules/rdma/network-topology.md    # T9
+docs/modules/devices/requests.md             # T9
+docs/modules/devices/preflight.md              # T9
 ```
 
 **The split between the two RDMA locations is forced, not stylistic.** The servers need
@@ -1240,8 +1240,8 @@ which layout a live host answers through.
 
 - [x] **T9 · Documentation**
       Blocked by: T2, T6, T8
-      Owns: `docs/architecture/network-topology.md`, `docs/accelerator-requests.md`,
-      `docs/operation/preflight.md`,
+      Owns: `docs/modules/rdma/network-topology.md`, `docs/modules/devices/requests.md`,
+      `docs/modules/devices/preflight.md`,
       `.claude/skills/gpustack-operator-docs/references/page-map.md`,
       `.claude/skills/gpustack-operator-docs/SKILL.md`
       — `preflight.md` because F7 adds a section to the document that page describes, and the

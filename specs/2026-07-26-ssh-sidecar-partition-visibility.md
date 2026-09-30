@@ -515,13 +515,13 @@ GetPhysicalSlicedVisibilityResponse(
 
 - [x] **T6 · Docs record the sidecar's grant and its new seam**
       Blocked by: T4
-      Owns: `docs/architecture.md`, `docs/operation/nvidia-mig.md`
+      Owns: `docs/getting-started/architecture.md`, `docs/modules/devices/nvidia-mig.md`
       `architecture.md`'s SSH-Instance paragraph states that a partition-backed sidecar is served the partition
       through the responder capability, and that the co-allocation has a durable fallback;
       `nvidia-mig.md` records that the ownership marker is the visibility path's authority too, and that the
       read is liveness-checked.
       Acceptance: no doc still says the sidecar is granted the same *card* for a partition-backed workload.
-      Verify: `grep -n "visibility" docs/architecture.md docs/operation/nvidia-mig.md` reads consistently with
+      Verify: `grep -n "visibility" docs/getting-started/architecture.md docs/modules/devices/nvidia-mig.md` reads consistently with
       the shipped behavior.
 
 - [x] **T6b · The device layer stops naming the SSH sidecar**

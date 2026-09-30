@@ -298,9 +298,9 @@ my version.
 
 #### F5 - Documentation
 
-- `docs/architecture/topology-aware-scheduling.md`, the page on how TAS places a replica, explains
+- `docs/modules/topology/scheduling.md`, the page on how TAS places a replica, explains
   where the preference comes from, why TAS and not kube-scheduler consumes it, the gate, and the rule
-  on `podset-preferred-topology`; `docs/architecture/scheduling-chain.md` points to it.
+  on `podset-preferred-topology`; `docs/modules/devices/scheduling.md` points to it.
 - `docs/operation/model-store.md` tells an administrator how to read where replicas landed and why, how
   to turn the preference off, and what the upgrade changes for Pods that already write a preferred
   affinity.
@@ -421,7 +421,7 @@ image tag to this branch's build.
 - `pkg/worker/controllers/worker/instance.go` — the Pod built for an Instance gets its terms.
 - `deploy/gpustack-operator/chart/values.yaml`, `values.schema.json`, `README.md` — the gate.
 - `README.md`, `deploy/gpustack-operator/chart/README.md.gotmpl` — the two floors.
-- `docs/architecture/topology-aware-scheduling.md`, `docs/architecture/scheduling-chain.md`,
+- `docs/modules/topology/scheduling.md`, `docs/modules/devices/scheduling.md`,
   `docs/operation/model-store.md` — the documentation.
 - `.agents/skills/gpustack-operator-e2e/cases/` — the new case and its kind configuration.
 
@@ -545,8 +545,8 @@ when its Pod is built. A pass that creates nothing reads no `NodeModelStore`.
 - [x] **T7 · Documentation and the two floors**
       Blocked by: T2, T3
       Owns: `README.md`, `deploy/gpustack-operator/chart/README.md.gotmpl`,
-      `deploy/gpustack-operator/chart/README.md`, `docs/architecture/topology-aware-scheduling.md`,
-      `docs/architecture/scheduling-chain.md`, `docs/operation/model-store.md`, `docs/README.md`,
+      `deploy/gpustack-operator/chart/README.md`, `docs/modules/topology/scheduling.md`,
+      `docs/modules/devices/scheduling.md`, `docs/operation/model-store.md`, `docs/README.md`,
       `.agents/skills/gpustack-operator-docs/SKILL.md`
       Gate: None
       Acceptance: F5. The README states the two floors and closes #579's "does not count" list item by

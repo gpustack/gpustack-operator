@@ -1,0 +1,10 @@
+{{ define "main" }}
+<h1>Search documentation</h1>
+<form class="search-form" role="search">
+  <label for="search-query">Words or phrases</label>
+  <div><input id="search-query" name="q" type="search" required><button type="submit">Search</button></div>
+</form>
+<p id="search-status" role="status">Enter a term to search the documentation.</p>
+<ul id="search-results" data-index="{{ (.Site.Home.OutputFormats.Get "JSON").RelPermalink }}"></ul>
+<noscript>Enable JavaScript to search. You can also browse the documentation in the navigation.</noscript>
+{{ end }}

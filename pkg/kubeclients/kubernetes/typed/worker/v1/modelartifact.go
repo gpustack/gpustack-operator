@@ -29,8 +29,6 @@ type ModelArtifactsGetter interface {
 type ModelArtifactInterface interface {
 	Create(ctx context.Context, modelArtifact *workerv1.ModelArtifact, opts metav1.CreateOptions) (*workerv1.ModelArtifact, error)
 	Update(ctx context.Context, modelArtifact *workerv1.ModelArtifact, opts metav1.UpdateOptions) (*workerv1.ModelArtifact, error)
-	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-	UpdateStatus(ctx context.Context, modelArtifact *workerv1.ModelArtifact, opts metav1.UpdateOptions) (*workerv1.ModelArtifact, error)
 	Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error
 	Get(ctx context.Context, name string, opts metav1.GetOptions) (*workerv1.ModelArtifact, error)
@@ -38,8 +36,6 @@ type ModelArtifactInterface interface {
 	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *workerv1.ModelArtifact, err error)
 	Apply(ctx context.Context, modelArtifact *applyconfigurationworkerv1.ModelArtifactApplyConfiguration, opts metav1.ApplyOptions) (result *workerv1.ModelArtifact, err error)
-	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-	ApplyStatus(ctx context.Context, modelArtifact *applyconfigurationworkerv1.ModelArtifactApplyConfiguration, opts metav1.ApplyOptions) (result *workerv1.ModelArtifact, err error)
 	ModelArtifactExpansion
 }
 

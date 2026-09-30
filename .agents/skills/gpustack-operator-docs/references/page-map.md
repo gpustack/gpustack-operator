@@ -3,9 +3,18 @@
 One page owns each fact. When two pages could plausibly carry it, the owner is the one whose **reader**
 needs it to finish their task; everyone else links.
 
+## Reader boundary
+
+The page ownership below covers the reader's configuration and operational questions. Source-file
+proofs, internal call chains, historical measurements and design alternatives are owned by the
+corresponding `specs/` document, even where an older entry below names those details. Preserve missing
+technical material in that spec before removing it from a guide. Contributor pages may retain source
+navigation because editing the implementation is their reader's task.
+
 ## `README.md` (project front page)
 
-**Owns** — the pitch, the accelerator support matrix, the five-step Quick Start, a short index.
+**Owns** — the features, installation and uninstallation, capability Usage examples, accelerator support
+and license.
 
 **Never** — reconciler names, label schemas, rationale, anything that changes more often than a
 release. A user who needs those follows a link.
@@ -15,16 +24,21 @@ release. A user who needs those follows a link.
 
 ## `docs/README.md` (index)
 
-**Owns** — the reading paths and the page table (page · what it answers · audience · read time).
+**Owns** — reading paths, the page table, and module routing to guides, specs, code entry points,
+related modules and skills. It is the shared local navigation source; the site generates `llms.txt`
+from its page table.
 
 **Never** — content. If you are explaining something here, it belongs on a page.
 
-**Rule** — a new page is not done until it has a row here. `check-docs.sh` enforces it.
+**Rule** — a new page needs a row here. A new capability needs a module entry, and changes to
+code entry points, owning specs or skill inputs must update the entry in the same PR.
+`make lint docs` checks coverage, paths and generated exports; review checks the relationships.
 
-## `docs/architecture.md` (overview, ≤ ~200 lines)
+## `docs/getting-started/architecture.md` (overview, ≤ ~200 lines)
 
-**Owns** — what the operator builds, the four subcommands, the four stages + the chain diagram, the
-*Life of a sliced-GPU request* trace, the vocabulary table, the map of deep pages.
+**Owns** — the four components, the capability diagram, device scheduling, optional model delivery
+and KV cache, request admission, vocabulary and the map of deep pages. The diagram shows how GPU
+Instances, model deployments, devices, RDMA and topology share the workload flow.
 
 **Never** — a new mechanism, a label table, a webhook rule, a measured failure story. It gains at most
 one clause and a link when a deep page grows.
@@ -32,7 +46,7 @@ one clause and a link when a deep page grows.
 **Test** — a reader who knows Kubernetes but not this project should answer "what does it do, and what
 happens to my request" from this page alone, in under 10 minutes.
 
-## `docs/architecture/device-discovery.md` (stages 1–2)
+## `docs/modules/devices/discovery.md` (stages 1–2)
 
 **Owns** — NFD's three jobs, the general(CPU) node key, the `gpustack-cpu-info` rule and the
 manufacturer map, the Device Manager DaemonSets, the accelerator label table, the `Devices` ledger, the
@@ -43,7 +57,7 @@ one-driver-stack-per-node guard.
 **Never** — how those labels become Kueue objects (that is `scheduling-chain.md`), or whether a request
 is *allowed* (that is `admission.md`).
 
-## `docs/architecture/network-topology.md` (the NIC side of stage 2)
+## `docs/modules/rdma/network-topology.md` (the NIC side of stage 2)
 
 **Owns** — the `Devices.spec.interfaces` inventory and why enumeration starts at the interface rather
 than the bus, the sysfs read discipline, `pciRootId` (the outermost bridge) against `pciSwitches`, the
@@ -56,15 +70,15 @@ gate into health, the NUMA hint, and what an allocation hands over.
 flavor selector (`scheduling-chain.md`), or the request rules an RDMA key obeys
 (`accelerator-requests.md`). Cross-link all three.
 
-## `docs/architecture/scheduling-chain.md` (stages 3–4)
+## `docs/modules/devices/scheduling.md` (stages 3–4)
 
 **Owns** — `NodeFeatureReconciler` / `NodeCapacityReconciler`, the `.sliced.*` and `.partitioned.*`
 capacity tables, per-vendor slice counts, presence-gating, the unit-spec default, the naming/grouping
-scheme, the controller diagram, and the five reconcilers' ownership split.
+scheme, the controller diagram, and the scheduling controllers' ownership split.
 
 **Never** — the ledger's internals (`device-discovery.md`) or gate behavior (`admission.md`). Cross-link both.
 
-## `docs/architecture/topology-aware-scheduling.md`
+## `docs/modules/topology/scheduling.md`
 
 **Owns** — the topology discovery boundary, `TopologySource` source and ownership model, hierarchy
 profiles, generated Kueue Topologies, TAS flavor and queue semantics, per-replica requests, the
@@ -73,7 +87,7 @@ profiles, generated Kueue Topologies, TAS flavor and queue semantics, per-replic
 **Never** — the commands and manifests an operator follows (`operation/topology-aware-scheduling.md`)
 or the full `ModelDeployment` field contract (`model-deployment/deployment.md`). Link both.
 
-## `docs/architecture/admission.md`
+## `docs/modules/devices/admission.md`
 
 **Owns** — the five gates, the `Devices` ledger's role beneath them, the four-view status, capability
 versus availability, the InstanceType / Instance / Pod webhook rules, running-instance stop, and the
@@ -82,16 +96,16 @@ deployed Kueue Configuration's known behaviors.
 **Never** — the normative request contract itself. That is `accelerator-requests.md`; this page says
 where each rule is *enforced*.
 
-## `docs/architecture/installation-modes.md`
+## `docs/operate/installation-modes.md`
 
 **Owns** — chart mode vs image mode, `worker.disableApplications`, the exclusivity argument, the
 `deviceManager.enabled` / `worker.enabled` switches, and the chart-versus-worker custom-resource
 boundary.
 
-**Never** — subchart vendoring mechanics (`docs/development.md`) or replica counts
-(`docs/operation/high-availability.md`).
+**Never** — subchart vendoring mechanics (`docs/contribute/development.md`) or replica counts
+(`docs/operate/high-availability.md`).
 
-## `docs/architecture/internals.md`
+## `docs/contribute/internals.md`
 
 **Owns** — the contributor invariants: worker startup order, the two ensurers, the applications lock,
 the gateway's hand-maintained mirror, the device-plugin generation/re-registration loop, the
@@ -99,7 +113,7 @@ per-manufacturer package split, the CGO bindings, the 63-character rule.
 
 **Rule of thumb** — if breaking it produces a *silent* failure, it belongs here.
 
-## `docs/operation/topology-aware-scheduling.md`
+## `docs/modules/topology/operations.md`
 
 **Owns** — choosing and enabling Topograph or a generic source, snapshot and credential examples,
 webhook trust/RBAC/egress, AWS identity and IMDS requirements, requesting a level, live hierarchy
@@ -109,17 +123,17 @@ handoff or cleanup warning.
 **Never** — re-explain why profiles split capacity or how each reconciler owns the Kueue chain; that
 is `architecture/topology-aware-scheduling.md`. Do not turn the temporary EKS shape into a benchmark.
 
-## `docs/kv-cache/backend.md`
+## `docs/modules/kv-cache/backend.md`
 
 **Owns** — the `KVCacheBackend` chain: the managed/external and leader/member axes, the rendered
 leader and member workloads, the admin surface the status is read from, the phase and condition
 algebra, and the two operator surprises (capacity is observed rather than summed; shrinking a member
 group discards that member's cache).
 
-**Never** — the four-stage scheduling chain. This chain is its own; `docs/architecture.md` links to it
+**Never** — the four-stage scheduling chain. This chain is its own; `docs/getting-started/architecture.md` links to it
 in one clause and does not describe it.
 
-## `docs/kv-cache/leader.md`
+## `docs/modules/kv-cache/leader.md`
 
 **Owns** — the leader process end to end: the Deployment and ClusterIP Service and their two ports,
 the replica ceiling and the clamp that survives a missing webhook, the update strategy per replica
@@ -128,9 +142,9 @@ of leader election -- `leader.electionBackend`, `leader.memberAddressing`, the L
 roles need, the per-role ServiceAccounts, and how a missing grant fails on each side.
 
 **Never** — the member groups, the transport, the status algebra. Those stay on `backend.md`, which
-links here. It was split out when that page hit both the line and the `##` cap.
+links here. The leader page owns the leader configuration and operational limits.
 
-## `docs/kv-cache/local-disk-tier.md`
+## `docs/modules/kv-cache/local-disk-tier.md`
 
 **Owns** — the `members[].localDisks` layer end to end: the two halves admission pairs, the rendering
 table, the bucket that is the tier's write unit and the three bounds that follow from it, the
@@ -138,21 +152,19 @@ eviction algebra and its four refusals, the five path rules and the host directo
 tier's immutability and its one exit, and the `hostPath` cost nothing accounts for.
 
 **Never** — the object the tier sits on. The leader, the member groups, the transport, the status
-algebra and the growing/shrinking rules are `backend.md`'s. It was split out of that page when it hit
-both the line and the `##` cap; the split is along the reader's question, not the subsystem.
+algebra and the growing/shrinking rules are `backend.md`'s.
 
-## `docs/kv-cache/disk-heavy-nodes.md`
+## `docs/modules/kv-cache/disk-heavy-nodes.md`
 
 **Owns** — the configuration a node whose capacity is disk rather than memory needs: that no member
 group is disk alone and what that costs if attempted, the thin-segment/thick-tier manifest, and the
 one-bucket floor on `capacityPerMember` together with what that floor is and is not evidence of.
 
 **Never** — how the tier itself behaves. Its rendering table, its eviction algebra, its five path
-rules, its failure modes and the one exit that removes it are `backend.md`'s; this page links to
-each. It exists because `backend.md` sits at both the line and the `##` cap, and because the reader
-arriving with a disk-heavy machine is asking a configuration question rather than a mechanism one.
+rules, its failure modes and the one exit that removes it belong to `local-disk-tier.md`; this page
+links to that contract.
 
-## `docs/kv-cache/pool.md`
+## `docs/modules/kv-cache/pool.md`
 
 **Owns** — the `KVCachePool` / `KVCachePoolBinding` pair: why they split by scope, the Binding as the
 provisioning point, one Binding to one reuse domain, ceiling-versus-grant, the immutable `spec.domain`
@@ -164,7 +176,7 @@ backend and links to it. And never the *enforcement* the Binding does not do: th
 it is a grant and not an isolation boundary belongs here, but the mechanism a real boundary would need
 is not this page's to design.
 
-## `docs/kv-cache/walkthrough.md`
+## `docs/modules/kv-cache/walkthrough.md`
 
 **Owns** — the ORDER, and nothing else: the four objects a working shared cache takes, one pasteable
 manifest each, the check to run after each one, and the three configurations that read as working and
@@ -176,7 +188,7 @@ owns it; a second account of `quota.ceiling` or of the snapshot's access modes i
 apart. If a paragraph here grows past a clause, it belongs on `backend.md`, `leader.md` or `pool.md`
 and this page should link to it instead.
 
-## `docs/model-store/artifact.md`
+## `docs/modules/model-delivery/artifact.md`
 
 **Owns** — the `ModelArtifact` contract: sources, resolution and revalidation, the manifest digest and
 its patterns, how a `ModelDeployment` or an `Instance` consumes it under each delivery, claim
@@ -186,7 +198,7 @@ placement, and the weight identity in KV keys.
 `model-deployment/deployment.md`, which keeps one pointer here and states nothing about the artifact
 itself), or the node plugin's internals (`node-store.md`).
 
-## `docs/model-store/image-source.md`
+## `docs/modules/model-delivery/image-source.md`
 
 **Owns** — the `image` source of a `ModelArtifact`: the digest contract and what it does and does not
 promise, building weights into an image, image-volume delivery to a `ModelDeployment` or an
@@ -195,7 +207,7 @@ promise, building weights into an image, image-volume delivery to a `ModelDeploy
 **Never** — the other sources or the delivery modes they share (`artifact.md` owns those); this page
 is the deep dive on one source.
 
-## `docs/model-store/prefetch.md`
+## `docs/modules/model-delivery/prefetch.md`
 
 **Owns** — the prefetch family: `ModelStore` (pool policy, selector overlap), `ModelStoreBinding`
 (budget grant, allowPinned, immutability), `ModelPrefetch` (placement, warm-up pod shape, the
@@ -204,7 +216,7 @@ queue-name-label fact, budget projection and accounting, pin union, TTL).
 **Never** — the node plugin's field reference (`node-store.md`), the artifact sources
 (`artifact.md`), or the pool layer's operational knobs (`operations.md`).
 
-## `docs/model-store/node-store.md`
+## `docs/modules/model-delivery/node-store.md`
 
 **Owns** — the `NodeModelStore` resource and the `model-manager` plugin behind it: every field and its
 writer, the status guard, mount authorization, materialization, failure reasons, collection and
@@ -213,7 +225,7 @@ metrics.
 **Never** — the administrator's procedure (values, Settings, watermarks, switching delivery,
 upgrading, removing). That is `operations.md`, which links back.
 
-## `docs/model-store/peer-sync.md`
+## `docs/modules/model-delivery/peer-sync.md`
 
 **Owns** — the peer port a node's published trees are served on, the token authentication and
 NetworkPolicy that bound it, how a cold node pulls with in-stream checkpoints, and the `source` field
@@ -222,25 +234,25 @@ and metrics that tell peer bytes from hub bytes.
 **Never** — how a tree is materialized or verified in the first place (`node-store.md`); this page
 owns the node-to-node leg only.
 
-## `docs/model-store/views.md`
+## `docs/modules/model-delivery/views.md`
 
-**Owns** — the `v1` views of `ModelArtifact` and `NodeModelStore`, the `progress` subresource
+**Owns** — the public APIs for `ModelArtifact` and `NodeModelStore`, the `progress` subresource
 (aggregate, live, authorized, naming no node), the tenant Role, and the GPUStack server capability
 map.
 
 **Never** — what the underlying fields mean. A view's semantics live on `artifact.md` and
 `node-store.md`; this page says how they are read and by whom.
 
-## `docs/model-store/operations.md`
+## `docs/modules/model-delivery/operations.md`
 
 **Owns** — the administrator's procedure for node delivery: enabling the plugin, its configuration
 layers, reading a node, the watermark cap against kubelet's thresholds, switching delivery, where
 replicas land and turning the placement preference off, the upgrade notes, and removing the cache.
 
 **Rule** — a page with a `## Verify` block states the expected output of every command in it. Unlike
-`docs/operation/*`, this runbook is not line-cap exempt — split it if it grows past the cap.
+other runbooks, this page is not line-cap exempt — split it if it grows past the cap.
 
-## `docs/model-deployment/deployment.md`
+## `docs/modules/model-deployment/deployment.md`
 
 **Owns** — the `ModelDeployment` contract: the inherited reuse domain, the three override tiers, the
 owned-key table, the runner-image formula, prefill/decode pairing, the topology-placement field
@@ -250,7 +262,7 @@ contract, and what turns a replica over.
 (`shutdown.md`), the router's own behavior (`routing.md`), or the status views
 (`status.md`). Link each.
 
-## `docs/model-deployment/prefill-decode.md`
+## `docs/modules/model-deployment/prefill-decode.md`
 
 **Owns** — what pairs a prefill role with a decode role: the connector each engine and router
 renders, the router block and its fields, the direct transfer's transport, roles on different
@@ -259,28 +271,28 @@ hardware, and a role's own Service.
 **Never** — the deployment-level contract around the pair (`deployment.md`) or the KV cache leg's
 transport (`../kv-cache/backend.md`); this page owns the P/D leg.
 
-## `docs/model-deployment/routing.md`
+## `docs/modules/model-deployment/routing.md`
 
 **Owns** — which replica each managed router picks and how to switch its policy.
 
 **Pinned** — its defaults and `--policy` values are read from each router's source at the version
 `pack/llm-router/Dockerfile` pins, so bumping one of those `ARG`s is a re-read of that page.
 
-## `docs/model-deployment/metrics.md`
+## `docs/modules/model-deployment/metrics.md`
 
 **Owns** — the structured metrics subresource: which series each field reads per engine, role and
 router, windowed cache hits, and the Pod scrape annotations.
 
 **Never** — the exporter's own gauges (`../reference/instance-metrics.md` owns the exporter side).
 
-## `docs/model-deployment/status.md`
+## `docs/modules/model-deployment/status.md`
 
 **Owns** — what each `ModelDeployment` status condition and published field means, and how to read
 them when a deployment misbehaves.
 
 **Never** — the lifecycle rules the conditions report (`deployment.md` owns those).
 
-## `docs/model-deployment/shutdown.md`
+## `docs/modules/model-deployment/shutdown.md`
 
 **Owns** — the drain window and what a replica does between its Pod's delete and its engine's exit,
 including what it does not cover.
@@ -288,7 +300,7 @@ including what it does not cover.
 **Never** — what turns a replica over in the first place. That stays on `deployment.md`, which links
 here.
 
-## `docs/model-deployment/engine-versions.md`
+## `docs/modules/model-deployment/engine-versions.md`
 
 **Owns** — the lowest engine release each deployment shape has been run with, the Mooncake client its
 runner image carries, the store line it needs, and which transport each engine can use on each leg.
@@ -296,7 +308,7 @@ runner image carries, the store line it needs, and which transport each engine c
 **Rule** — the one place an engine's minimum is stated. A paragraph elsewhere that explains why a
 release below it fails is collapsed into a link to it, not kept beside it.
 
-## `docs/accelerator-requests.md`
+## `docs/modules/devices/requests.md`
 
 **Owns** — the normative contract: the two families, every resource key, a worked example per family,
 the seven request rules with an accepted and a rejected example each, the `Instance` API form,
@@ -310,29 +322,29 @@ request, but this page's table says only what a request asks for — a reviewer 
 restating each other while the prose between them claimed the fact was stated once, so keep this
 one to the one column that is the request contract.
 
-**Not** — what each TopologyManager policy does with a hint. `docs/operation/preflight.md` owns
+**Not** — what each TopologyManager policy does with a hint. `docs/modules/devices/preflight.md` owns
 that, beside the report that says which policy a node runs; this page states the prerequisite and
 links there.
 
 **Not** — how many RDMA endpoints to ask for beside N accelerators, or how to configure a node so
-the two align. That is a how-to and `docs/operation/rdma.md` owns it; a reference page states the
+the two align. That is a how-to and `docs/modules/rdma/operations.md` owns it; a reference page states the
 contract and does not teach.
 
 **Never** — implementation. A rule's *enforcement point* is a link to `admission.md`.
 
-## `docs/walkthrough.md`
+## `docs/getting-started/walkthrough.md`
 
 **Owns** — recorded runs with real `kubectl` output and before/after comparisons.
 
 **Rule** — every command and every output is real, captured from a live cluster; node names are
 genericized. Never hand-write plausible output.
 
-## `docs/settings.md`
+## `docs/reference/settings.md`
 
 **Owns** — the online-adjustable `Setting` catalog and every `GPUSTACK_*` variable, including the
 per-manufacturer overrides and vendor toolkit paths.
 
-## `docs/vendor-prerequisites.md`
+## `docs/getting-started/vendor-prerequisites.md`
 
 **Owns** — what to install on a node before GPUStack, per manufacturer; which of a vendor GPU
 Operator's components conflict with ours and the switch that turns each off; what to change when one
@@ -347,13 +359,13 @@ the values this operator needs changed. Link, do not restate a vendor's chart.
 injects. Every section names the vendor product version its statements were read against — move that
 version only together with a re-reading.
 
-## `docs/development.md`
+## `docs/contribute/development.md`
 
 **Owns** — make targets, the chart targets, vendored subcharts and how to patch one, commit-message
 rules, running a single test, runtime log verbosity, API groups and code generation, patched
-dependencies.
+dependencies, local site commands, Pages publication, version retention and translation setup.
 
-## `docs/operation/*.md`
+## Runbooks under `docs/modules/` and `docs/operate/`
 
 **Owns** — administrator procedures: what to run, in what order, and how to verify. Today: high
 availability, `preflight.md` — the one-container run that says what a bare node can detect, slice and
@@ -367,7 +379,7 @@ cache's runbook lives with its domain, at `model-store/operations.md`.
 **Rule** — a page with a `## Verify` block states the expected output of every command in it. These
 pages are exempt from the line cap: a runbook is as long as the hardware makes it.
 
-## `docs/migration/*.md`
+## `docs/operate/migration/*.md`
 
 **Owns** — version-to-version upgrade paths, what changes permanently, and the recovery when it goes
 wrong.
@@ -380,33 +392,37 @@ transition, so do not "modernize" its version numbers.
 **Owns** — lookup tables with provenance. Today: the per-product unit-resources presets
 (`instance-type-unit-resources.md`), the `instances/<name>/metrics` subresource and the Device
 Manager's Prometheus exporter behind it (`instance-metrics.md`), every command the binary offers with
-its flags and exit codes (`commands.md`), and the KV cache injection contract — opt-in keys, what
-each engine receives, every refusal with its fix (`kv-cache-injection.md`). The model store and model
-deployment domains have their own directories and their own sections above.
+its flags and exit codes (`commands.md`). KV cache injection is under
+`docs/modules/kv-cache/injection.md`; model delivery and deployment have their own sections above.
 
 **Not** — `commands.md` states what a flag does, not when to reach for the command. The procedure a
-one-shot belongs to lives on its operator page (`docs/operation/preflight.md` for `device-manager
+one-shot belongs to lives on its operator page (`docs/modules/devices/preflight.md` for `device-manager
 preflight`), and the reference row links to it rather than restating it.
 
-**Pinned** — `kv-cache-injection.md` carries per-engine facts read from engine source at named
+**Pinned** — `docs/modules/kv-cache/injection.md` carries per-engine facts read from engine source at named
 versions. Those rows go stale silently when an engine ships a new build, so a change there is a
 re-read rather than an edit; the same facts are mirrored in `pkg/worker/kvcache/inject/engine.go`,
 which carries the line numbers to re-read from.
 
-`instance-type-unit-resources.md` is matched row-by-row by `TestUnitResourcesPresetDocs`,
-by path. Do not rename it or reshape its tables. `commands.md` has no test behind it: its flag tables
+`instance-type-unit-resources.md` records the product rows from
+`pkg/nodefeature/unit_resources_preset.yaml`; compare both when either changes. `commands.md` has no test behind it: its flag tables
 are only as true as the last person who ran `--help`, so change a flag and change the row in the same
 commit.
 
 **Rule** — these pages are exempt from the ten-`##` cap: a lookup page is meant to be flat.
 
-## `specs/` — not documentation
+## `specs/` — engineering records
 
 Decision records, motivation, alternatives, task breakdowns and build logs live there. Docs state the
 resulting rule. Never edit a spec to reflect a later change, and never update a spec's references when
 a doc moves — a spec is a record of what was true when it was written.
 
-The one exception is a **correction**, and `docs/development.md` defines it: an in-place edit is
+A reader-documentation cleanup may add missing implementation notes to the existing owning spec.
+Keep the original design, task status and historical evidence intact; identify source-confirmed
+behavior separately from measurements and proposals. This preserves technical material removed from
+a guide without rewriting the decision it records.
+
+A **correction** is another exception, and `docs/contribute/development.md` defines it: an in-place edit is
 allowed when evidence proves a claim wrong while the shipped design stands, and a bug fix's
 supersession is recorded that way because it has no new spec to be recorded in. Both are marked
 `**Corrected after shipping.**`. A spec naming another spec by file name is the case that forces one:

@@ -21,6 +21,16 @@ on:
     paths:
       - "**.md"
       - "docs/**"
+      - "site/**"
+      - "Makefile"
+      - "hack/check/site-links.py"
+      - "hack/check/agent-index.py"
+      - "hack/site/**"
+      - ".github/workflows/site.yml"
+      - ".github/workflows/chart.yml"
+      - "hack/site.sh"
+      - "hack/site-serve.sh"
+      - "hack/lib/hugo.sh"
       # README.md links ./LICENSE, and the script resolves non-markdown link targets too.
       - "LICENSE"
       # A renamed test breaks a spec's `go test -run` line without touching any markdown, so the
@@ -32,8 +42,8 @@ on:
       # it compares are JSON and prose, so each needs its own trigger or the gate misses the edit.
       - ".agents/skills/**"
       - ".opencodereview/rule.json"
-      - "hack/check-skills.sh"
-      - "hack/check-skills-selftest.sh"
+      - "hack/check/skills.sh"
+      - "hack/check/skills-selftest.sh"
       - "hack/lint.sh"
       - ".github/workflows/docs.yml"
   pull_request:
@@ -43,6 +53,16 @@ on:
     paths:
       - "**.md"
       - "docs/**"
+      - "site/**"
+      - "Makefile"
+      - "hack/check/site-links.py"
+      - "hack/check/agent-index.py"
+      - "hack/site/**"
+      - ".github/workflows/site.yml"
+      - ".github/workflows/chart.yml"
+      - "hack/site.sh"
+      - "hack/site-serve.sh"
+      - "hack/lib/hugo.sh"
       # README.md links ./LICENSE, and the script resolves non-markdown link targets too.
       - "LICENSE"
       # A renamed test breaks a spec's `go test -run` line without touching any markdown, so the
@@ -54,23 +74,30 @@ on:
       # it compares are JSON and prose, so each needs its own trigger or the gate misses the edit.
       - ".agents/skills/**"
       - ".opencodereview/rule.json"
-      - "hack/check-skills.sh"
-      - "hack/check-skills-selftest.sh"
+      - "hack/check/skills.sh"
+      - "hack/check/skills-selftest.sh"
       - "hack/lint.sh"
       - ".github/workflows/docs.yml"
 
 jobs:
   check:
-    timeout-minutes: 10
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
+    env:
+      # The repo-file shortcut in "Check links under .github" must recognize the branch a
+      # "blob" link pins, and that branch is whatever this event's repository calls its
+      # default, not a literal "main": a fork or a renamed default branch would otherwise
+      # send every default-branch link back through the flaky HTTP path. Structured
+      # context rather than a shell default, so it follows each event's repository.
+      default_branch: ${{ github.event.repository.default_branch }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          lfs: true
           persist-credentials: false
-      # Links and anchors, the "## Contents" list, each page's header block and
-      # footer, the docs/README.md index, the prose paragraph cap, the page line
-      # and "##" caps, every index label against its page's H1 -- and, over specs/,
+      # Links and anchors, the "## Contents" list, each page's footer, the docs/README.md
+      # index, the prose paragraph cap, the page line and "##" caps, every index label against its page's H1 -- and, over specs/,
       # the Status word, every `go test -run` that must select something, and
       # cross-references. The two self-tests run first: they are what establishes
       # that the rules can fail at all.
@@ -80,11 +107,22 @@ jobs:
       # the 20200816 on a current macOS, so a feature added between the two still passes here.
       - name: Setup onetrueawk
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends original-awk
+      - name: Setup Go for Hugo
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - name: Check
         run: |
           sudo update-alternatives --set awk /usr/bin/original-awk
           awk --version 2>&1 | head -1
           make lint docs
+      - name: Check versioned build
+        env:
+          SITE_BASE_URL: https://docs.gpustack.ai/gpustack-operator/main/
+          HUGO_PARAMS_SITEROOT: https://docs.gpustack.ai/gpustack-operator/
+          HUGO_PARAMS_VERSION: main
+          HUGO_PARAMS_SOURCEREF: ${{ github.sha }}
+        run: make site
       # The local check above never resolves an external URL — it only follows relative paths and
       # in-file anchors — which is how a 404 in PULL_REQUEST_TEMPLATE.md survived unnoticed. This step
       # fetches them, and it lives here rather than in "make lint docs" so the local check keeps its
@@ -103,7 +141,7 @@ jobs:
       #
       # Deliberately awk-free: the awk pinned above is onetrueawk to match check-docs.sh's portability
       # floor, and a step leaning on any awk behaviour would silently inherit that constraint too.
-      - name: Check external links under .github
+      - name: Check links under .github
         run: |
           urls=$(grep -rhoE 'https?://[^][ )>"`]+' .github --include='*.md' | sed 's/[.,;:]*$//' | sort -u || true)
           if [[ -z "${urls}" ]]; then
@@ -113,8 +151,31 @@ jobs:
           echo "Checking $(printf '%s\n' "${urls}" | wc -l | tr -d ' ') unique URL(s) under .github/**/*.md:"
           failed=""
           unverified=""
+          repository_files="https://github.com/${GITHUB_REPOSITORY}/blob/${default_branch}/"
           while IFS= read -r url; do
             [[ -n "${url}" ]] || continue
+            # A PR may move its own docs before the default branch contains them. Check those
+            # paths against this checkout; links to other repositories and pinned revisions
+            # still use HTTP, because the current checkout cannot prove a file existed at the
+            # revision the link pins.
+            if [[ "${url}" == "${repository_files}"* ]]; then
+              file="${url#"${repository_files}"}"
+              # Query and fragment first: a path's own "?" or "#" only exists once decoded.
+              file="${file%%\?*}"
+              file="${file%%\#*}"
+              # Blob URLs percent-encode what the checkout stores raw; decode via stdlib
+              # unquote, passing the path as an argument, never inside the program text.
+              if [[ "${file}" == *%* ]]; then
+                file=$(python3 -c 'import sys, urllib.parse; sys.stdout.write(urllib.parse.unquote(sys.argv[1]))' "${file}")
+              fi
+              if [[ -f "${file}" ]]; then
+                printf '  ok          file %s\n' "${url}"
+              else
+                printf '  FAIL        file %s\n' "${url}"
+                failed="${failed}missing file ${url}"$'\n'
+              fi
+              continue
+            fi
             # Retry a transient failure rather than turning the build red on one dropped connection.
             # A 4xx other than 408/429 is a genuinely broken link, so it fails on the first answer.
             #
@@ -124,7 +185,9 @@ jobs:
             # first dropped connection — the exact case this retry exists to absorb. The default
             # covers the one path where curl exits before writing anything at all.
             for attempt in 1 2 3; do
-              code=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 20 "${url}")
+              # `|| true` keeps curl's non-zero exit from tripping errexit: without it the
+              # first dropped connection aborts the step before this loop can retry.
+              code=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 20 "${url}") || true
               code=${code:-000}
               case "${code}" in
                 000|408|429|5??) [[ "${attempt}" == 3 ]] || sleep 5 ;;
@@ -156,7 +219,7 @@ jobs:
           fi
           # Report every broken URL, not just the first: a gate that names one of three costs three CI rounds.
           if [[ -n "${failed}" ]]; then
-            echo "Broken external link(s) under .github/**/*.md:"
+            echo "Broken link(s) under .github/**/*.md:"
             printf '%s' "${failed}"
             exit 1
           fi

@@ -17,7 +17,7 @@ Components:
   `/dev` nodes itself, so must its container toolkit. A vendor GPU Operator can run alongside once
   the components that would compete with this chart's are turned off; which those are, and the
   vendors where it has to go instead, are per manufacturer:
-  https://github.com/gpustack/gpustack-operator/blob/main/docs/vendor-prerequisites.md
+  https://github.com/gpustack/gpustack-operator/blob/main/docs/getting-started/vendor-prerequisites.md
 {{- /*
   Which manufacturers need a container toolkit is derived from the same two facts that decide which
   RuntimeClasses this chart creates, never from a list spelled out here: a manufacturer whose runtime
