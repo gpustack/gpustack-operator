@@ -4,6 +4,8 @@ enableRobotsTXT = true
 disableKinds = ["taxonomy", "term"]
 
 [markup]
+  [markup.highlight]
+    style = "github"
   [markup.goldmark]
     [markup.goldmark.renderer]
       unsafe = true

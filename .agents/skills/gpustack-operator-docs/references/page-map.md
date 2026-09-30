@@ -225,7 +225,7 @@ owns the node-to-node leg only.
 
 ## `docs/modules/model-delivery/views.md`
 
-**Owns** — the `v1` views of `ModelArtifact` and `NodeModelStore`, the `progress` subresource
+**Owns** — the public APIs for `ModelArtifact` and `NodeModelStore`, the `progress` subresource
 (aggregate, live, authorized, naming no node), the tenant Role, and the GPUStack server capability
 map.
 

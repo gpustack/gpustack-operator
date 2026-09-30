@@ -61,7 +61,8 @@
       <div class="toc-inner">
         {{ with .File }}
           {{ $source := .Path }}
-          {{ if not (fileExists (printf "../%s" $source)) }}{{ $source = printf "site/content/%s" $source }}{{ end }}
+          {{ $filename := replace .Filename "\\" "/" }}
+          {{ if hasSuffix $filename (printf "/site/content/%s" $source) }}{{ $source = printf "site/content/%s" $source }}{{ end }}
           <nav class="page-actions" aria-label="Page source">
             <a href="https://github.com/gpustack/gpustack-operator/blob/main/{{ $source }}">View page source</a>
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/{{ $source }}">Edit this page</a>

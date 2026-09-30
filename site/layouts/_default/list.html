@@ -1,5 +1,5 @@
 {{ define "main" }}
-  {{ .Content }}
+  {{ partial "article-content.html" . }}
   {{ if not .Content }}
     <h1>{{ partial "page-title.html" . }}</h1>
     <ul>
