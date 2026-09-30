@@ -393,8 +393,8 @@ into the keys above:
 | Field | Effect |
 |---|---|
 | `accelerator: "N"` | whole accelerators (exclusive) — may span accelerators |
-| `accelerator: "1"` + `acceleratorSlicedMemoryPercentage` (+ `acceleratorSlicedCoresPercentage`) | one logical slice |
-| `accelerator: "1"` + `acceleratorPartitionedProfile: "3g.40gb"` | one hardware partition of that profile |
+| `accelerator: "1"`<br/>`acceleratorSlicedMemoryPercentage`<br/>`acceleratorSlicedCoresPercentage` (optional) | one logical slice |
+| `accelerator: "1"`<br/>`acceleratorPartitionedProfile: "3g.40gb"` | one hardware partition of that profile |
 
 ```yaml
 kind: Instance

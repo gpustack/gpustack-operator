@@ -25,20 +25,21 @@ changes to the operator's services. Vendor libraries and object names have their
 - **`device-manager`** has subcommands `serve` / `detect` / `monitor`: it detects and monitors local
   accelerators, reports a `NodeFeature` + `Devices` CR, and runs the device-plugin allocator.
 - **`model-manager`** (alias `mm`) is a CSI node plugin on every node, not tied to a manufacturer:
-  it materializes and mounts Hugging Face weights and writes only its own node's `NodeModelStore`
+  it materializes and mounts model weights and writes only its own node's `NodeModelStore`
   status ([Node Model Store](../modules/model-delivery/node-store.md)).
 
 ## Worker startup order matters
 
 `pkg/worker/worker.go` runs `Prepare` (system namespace → CRDs → extension API services → webhook
 configs → settings → applications → the `gpustack-cpu-info` NodeFeatureRule → the
-`gpustack-node-devices` AdmissionCheck) then `Start`, where the controller manager starts **only after**
-the extension API services report ready, so controllers can index extension-API resources. Preserve this
-ordering when adding steps.
+`gpustack-node-devices` AdmissionCheck → the `gpustack-model-deployment-joint` AdmissionCheck).
 
-The last two steps are the chain's two ends, and both **retry until their CRD is established** (5 min
-each): a worker booting alongside the rollout that brings those CRDs reaches them before they are
-served, so it waits instead of failing. They are in Go, not the chart, per the boundary in [Installation
+In `Start`, the controller manager starts only after the extension API services report ready, so
+controllers can index extension-API resources. Preserve this ordering when adding steps.
+
+The last three steps each retry for up to 5 minutes while their CRD becomes available. A worker
+starting alongside NFD and Kueue can reach these steps before their CRDs are served. The worker
+applies the resources in both installation modes; see [Installation
 Modes](../operate/installation-modes.md#the-chart-deploys-workloads-the-worker-applies-the-custom-resources).
 
 ### Every `Prepare` step runs in every replica

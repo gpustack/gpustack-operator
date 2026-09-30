@@ -62,7 +62,7 @@ fragmentation.
 nodes through the `Devices` ledger, closing the credits "over-admit exclusive" gap: a scalar total cannot
 see that 8 accelerators each 50 %-sliced satisfy no 5-exclusive request.
 
-The worker's `Prepare()` applies the `gpustack-node-devices` AdmissionCheck last at startup, retrying
+The worker's `Prepare()` applies the `gpustack-node-devices` AdmissionCheck at startup, retrying
 until Kueue's CRD is established — the chart cannot ship it, since Kueue templates its own CRDs and
 nothing orders them ahead of a custom resource in the same render (see [Install
 modes](../../operate/installation-modes.md#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)).

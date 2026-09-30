@@ -78,13 +78,27 @@ Because they change what a mode installs:
 
 **A chart cannot own a custom resource whose CRD it does not ship.** Helm REST-maps the *entire*
 manifest before creating anything, so an unserved kind fails the whole install rather than degrading.
-Two objects sit on the wrong side of that line, so the worker applies them:
+The worker applies three resources after their CRDs become available:
 
-- the `gpustack-node-devices` **AdmissionCheck** — its CRD belongs to Kueue, which templates its CRDs,
-  so nothing can order them ahead of a custom resource in the same render;
+- the `gpustack-node-devices` and `gpustack-model-deployment-joint` AdmissionChecks. Their CRD belongs
+  to Kueue, which templates its CRDs, so nothing can order it ahead of a custom resource in the same
+  render;
 - the `gpustack-cpu-info` **NodeFeatureRule** — its CRD belongs to NFD, and the rule is required even
   when `node-feature-discovery.enabled=false`; that install ships no NFD CRD, so a chart-owned rule
   fails outright: `resource mapping not found ... no matches for kind "NodeFeatureRule"`.
+
+Both AdmissionChecks are created in chart mode and image mode, including when applications are
+disabled. You do not create them manually. `pkg/worker/worker.go` installs them during `Prepare`;
+their controllers mark them `Active` before queues reference them.
+
+| AdmissionCheck | Purpose | Queues that reference it once `Active` |
+| --- | --- | --- |
+| `gpustack-node-devices` | Checks whether individual accelerators can satisfy a request | Accelerated queues while `instance-type-derived-from-node` is enabled |
+| `gpustack-model-deployment-joint` | Coordinates admission across a ModelDeployment's roles | Every operator-managed queue, including CPU queues and queues for administrator-authored InstanceTypes |
+
+The joint check immediately passes workloads outside a multi-role ModelDeployment, including
+single-role deployments. Queue reference conditions are in `node_queue.go`; the checks are installed
+by `pkg/worker/kuberess/apps_kueue_admission_check.go`.
 
 The division: **the chart deploys workloads and configuration; the worker applies the custom resources
 whose CRDs the chart cannot order** — the boundary the worker's own CRDs, aggregated APIServices and
@@ -92,7 +106,7 @@ webhook configurations already sit on, in Go for the same reason. The cost: `hel
 of them. All are *applied*, not created, so a repeat run only sets `spec`, never clobbering a
 controller-owned status.
 
-No release owns them either, so `helm uninstall` leaves them behind. The AdmissionCheck goes with
+No release owns them either, so `helm uninstall` leaves them behind. Both AdmissionChecks go with
 Kueue's CRDs; `files/cleanup.sh` deletes the NodeFeatureRule, but only while it carries the
 `app.kubernetes.io/part-of: gpustack-operator` label the worker puts on it.
 
