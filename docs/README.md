@@ -149,7 +149,7 @@ and only the deep page needed for the task.
 
 Every page in this directory (this index excepted) carries:
 
-- a **header block** — one-line purpose, then audience · prerequisites · read time;
+- a short introduction that explains the subject or task;
 - a **`## Contents`** list mirroring its `##` headings, in order;
 - a **footer** — `**See also**` for sideways links and `**Next** →` for the next page on the path.
 

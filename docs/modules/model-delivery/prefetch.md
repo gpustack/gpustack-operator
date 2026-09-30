@@ -1,9 +1,5 @@
 # Model Prefetch
 
-> **Purpose** — the three objects that warm a model onto nodes before any Pod asks, the budgets and pins that bound them, and what runs on the node.
-> **Audience** users, operators, contributors · **Prerequisites** [Model Artifact](artifact.md) ·
-> **Read time** ~9 min
-
 Warming is declared, not performed: a tenant names an artifact and a target set, and the operator
 lands the weights through the node cache's ordinary delivery. Three objects divide the concerns —
 

@@ -1,11 +1,5 @@
 # KV Cache Walkthrough
 
-> **Purpose** — the shortest path from nothing to a `ModelDeployment` reading and writing a shared KV
-> cache: every object in order, what to check after each one, and the three places a working
-> configuration is usually got wrong.
-> **Audience** operators, users · **Prerequisites** [KV Cache Backend](backend.md) ·
-> **Read time** ~11 min
-
 Create four objects in order: a store, a pool, a namespace grant and a workload that uses it.
 
 On a cluster with GPUStack installed, replace the node selector, namespace, instance type and model

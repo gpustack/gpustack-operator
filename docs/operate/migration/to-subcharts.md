@@ -1,10 +1,5 @@
 # Migrating to Bundled Subcharts
 
-> **Purpose** — the one-time ownership transfer that folds the runtime-installed Kueue / NFD / CSI
-> releases into the operator release, and the four things it changes permanently.
-> **Audience** operators on a v0.7.x-or-earlier install · **Prerequisites** [Two install
-> modes](../installation-modes.md) · **Read time** ~9 min
-
 Through v0.7.x the chart deployed only the worker and device managers; the **worker installed**
 Kueue, Node Feature Discovery and the two CSI drivers at runtime, each its own Helm release:
 

@@ -1,9 +1,7 @@
 # Model Image Source
 
-> **Purpose** — the `image` source of a `ModelArtifact`: the digest contract, how weights are built
-> into an image, how it is delivered, and what it costs in disk and re-pulls.
-> **Audience** users, operators · **Prerequisites** [Model Artifact](artifact.md) ·
-> **Read time** ~8 min
+A `ModelArtifact` can deliver weights from an OCI image pinned by digest. Kubernetes mounts the
+image read-only for the workload; packaging and pulling it adds disk and registry costs.
 
 ## Contents
 

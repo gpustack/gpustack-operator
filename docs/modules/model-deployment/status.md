@@ -1,9 +1,7 @@
 # Model Deployment Status
 
-> **Purpose** — what each `ModelDeployment` status condition and published field means, and how to
-> read them when a deployment misbehaves.
-> **Audience** users, operators · **Prerequisites** [Model Deployment](deployment.md)
-> **Read time** ~8 min
+A `ModelDeployment` reports its phase, ready replicas and serving endpoint in `status`. Use these
+fields and its conditions to diagnose a deployment that is still starting or has lost capacity.
 
 ## Contents
 

@@ -1,9 +1,5 @@
 # Node-to-Node Sync
 
-> **Purpose** — how a node's plugin serves its published trees to the other nodes' plugins, how a cold node pulls from them, and what bounds and protects that path.
-> **Audience** users, operators · **Prerequisites** [Node Model Store](node-store.md)
-> **Read time** ~6 min
-
 A fleet's nodes need the same weights far more often than they need different ones. When the
 hub serves every node separately, egress grows with node count and a hub outage stalls every
 cold node.

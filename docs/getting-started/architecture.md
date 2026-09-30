@@ -1,8 +1,5 @@
 # Architecture
 
-> **Purpose** — how GPUStack Operator turns node hardware into schedulable accelerator capacity.
-> **Audience** everyone · **Prerequisites** none · **Read time** ~4 min
-
 GPUStack Operator uses [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery)
 to publish node features as labels. [Kueue](https://github.com/kubernetes-sigs/kueue) queues workloads
 against the resulting capacity; its AdmissionCheck lets GPUStack check the fit on individual

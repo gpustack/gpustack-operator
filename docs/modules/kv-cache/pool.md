@@ -1,11 +1,5 @@
 # KV Cache Pool
 
-> **Purpose** — how a `KVCachePool` and a `KVCachePoolBinding` grant a namespace a quota on a KV cache,
-> what that ceiling actually buys, and the two things operators get wrong: a full quota does not refuse
-> writes but discards that namespace's own objects, and a Binding is not an isolation boundary.
-> **Audience** operators, contributors · **Prerequisites** [KV Cache Backend](backend.md) ·
-> **Read time** ~12 min
-
 A `KVCacheBackend` runs a store. A `KVCachePool` publishes one, and a `KVCachePoolBinding` gives a
 namespace a quota on it under one reuse domain.
 

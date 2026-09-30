@@ -1,10 +1,7 @@
 # Internals
 
-> **Purpose** — the code map and the invariants a contributor has to keep: startup ordering, the
-> gateway's hand-maintained mirror, the device-plugin registration loop, the per-manufacturer split,
-> the CGO bindings, and the recurring 63-character limit.
-> **Audience** contributors · **Prerequisites** [Architecture](../getting-started/architecture.md) ·
-> **Read time** ~5 min
+Startup ordering, the worker-gateway API mirror and the device-plugin registration loop constrain
+changes to the operator's services. Vendor libraries and object names have their own constraints.
 
 ## Contents
 

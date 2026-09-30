@@ -1,11 +1,5 @@
 # KV Cache Backend
 
-> **Purpose** — how a `KVCacheBackend` runs a Mooncake store, what its status is read from, and the
-> three things that surprise operators: capacity is observed rather than derived, shrinking a group
-> discards the cache that member held, and a member group's identity is its position in a list.
-> **Audience** operators, contributors · **Prerequisites** [Architecture](../../getting-started/architecture.md) ·
-> **Read time** ~14 min
-
 A `KVCacheBackend` declares a pooled KV cache for inference workloads. The operator runs a **leader**
 (one metadata process) and a **member** group (one store process per selected node), then reports what
 that backend is observed to be doing.

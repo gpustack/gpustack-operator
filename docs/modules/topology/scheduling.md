@@ -1,10 +1,5 @@
 # Topology-Aware Scheduling
 
-> **Purpose** — how topology inventory becomes Kueue topology-aware admission for each
-> `ModelDeployment` replica group.
-> **Audience** operators, contributors · **Prerequisites** [Scheduling
-> Chain](../devices/scheduling.md) · **Read time** ~11 min
-
 Topology is a capacity boundary, not a placement hint. GPUStack first establishes an ordered,
 validated hierarchy for each Node, then makes every generated queue topology-aware so Kueue admits
 the complete PodSet only when one requested domain has enough capacity.

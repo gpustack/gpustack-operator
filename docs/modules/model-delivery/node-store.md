@@ -1,11 +1,5 @@
 # Node Model Store
 
-> **Purpose** — the `NodeModelStore` resource and the `model-manager` node plugin behind it: what
-> each field means and who writes it, when a mount is allowed, how content is downloaded, verified
-> and published, why an attempt fails, and what the plugin measures.
-> **Audience** operators, contributors · **Prerequisites** [Model Artifact](artifact.md)
-> **Read time** ~12 min
-
 Node delivery replaces an engine's own download with a node-local cache. The `model-manager` plugin
 runs on every node as a CSI node plugin serving inline ephemeral volumes of the driver
 `model.csi.gpustack.ai`. On the first mount of a digest on a node it downloads the files, verifies

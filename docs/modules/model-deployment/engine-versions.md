@@ -1,11 +1,5 @@
 # Engine Versions
 
-> **Purpose** — the lowest vLLM, vLLM-Ascend and SGLang release each deployment shape has been run
-> with on this operator, with the Mooncake client it carries and the store it needs, and which
-> transport each engine can use on each leg.
-> **Audience** users, operators · **Prerequisites** [Model Deployment](deployment.md)
-> **Read time** reference — look up your engine
-
 **An engine below its minimum here is not supported.** Older releases fail in ways that belong to
 those releases, and this documentation does not track them; upgrading is the fix for each of them.
 

@@ -1,11 +1,5 @@
 # Model Deployment
 
-> **Purpose** — the `ModelDeployment` contract: what you declare, what the operator owns and will
-> refuse to merge, and how a role's runner image is assembled.
-> **Audience** users, operators, contributors · **Prerequisites** [KV Cache
-> Pool](../kv-cache/pool.md) ·
-> **Read time** ~9 min
-
 A `ModelDeployment` defines one or more inference-engine roles, each with its own replicas. The
 roles can share cached prefixes through a KV cache pool, form a direct prefill/decode pair, or do
 both.

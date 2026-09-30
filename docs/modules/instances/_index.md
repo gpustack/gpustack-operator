@@ -1,8 +1,5 @@
 # Accelerated Instances
 
-> **Purpose** — use an accelerator from a container workspace that can offer SSH access.
-> **Audience** users, operators · **Prerequisites** [Architecture](../../getting-started/architecture.md) · **Read time** ~2 min
-
 An `Instance` is a container workspace backed by a Kubernetes Pod. It can use a whole, shared,
 sliced or partitioned accelerator. With an SSH public key, the operator adds a sidecar that lets
 the user enter the workload container.

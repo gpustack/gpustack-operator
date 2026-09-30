@@ -1,11 +1,5 @@
 # Preflight Operations
 
-> **Purpose** — the runbook for `device-manager preflight`: the command line for both container
-> runtimes, what each mount and flag is for, and what the command starts, writes and removes.
-> **Audience** operators · **Prerequisites** [Device
-> Discovery](discovery.md#preflight-the-preconditions-read-before-a-workload-does)
-> · **Read time** ~9 min
-
 One container run on a bare host answers what that node can serve. It needs no cluster, no CRDs, no
 NFD labels and no running device-manager. What the answers mean — the three states, the three depths
 and why this is not part of `detect` — is on the linked page; this one is the procedure.

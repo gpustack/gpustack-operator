@@ -1,9 +1,7 @@
 # Installation Modes
 
-> **Purpose** — what deploys the chain (chart mode vs image mode), why the two can never run together,
-> and which objects the worker must apply itself in either mode.
-> **Audience** operators, contributors touching the chart or `pkg/worker/kuberess` ·
-> **Prerequisites** [Architecture](../getting-started/architecture.md) · **Read time** ~3 min
+The operator can deploy its dependencies as subcharts in one Helm release, or let the worker
+install them at runtime. Choose one mode for the cluster; both use the operator chart's `values.yaml`.
 
 ## Contents
 

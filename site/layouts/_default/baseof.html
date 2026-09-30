@@ -3,35 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f8fafc">
+  <meta name="theme-color" content="#ffffff">
   <title>{{ if not .IsHome }}{{ partial "page-title.html" . }} · {{ end }}{{ .Site.Title }}</title>
   <link rel="stylesheet" href="{{ "css/site.css" | relURL }}">
 </head>
 <body class="{{ if .IsHome }}home{{ else }}docs-page{{ end }}">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
-    <a class="brand" href="{{ .Site.Home.RelPermalink }}" aria-label="GPUStack Operator home">
-      <span class="brand-mark" aria-hidden="true">G</span>
-      <span>GPUStack <span class="brand-light">Operator</span></span>
-    </a>
+    <a class="brand" href="{{ .Site.Home.RelPermalink }}">GPUStack Operator</a>
     <nav class="top-links" aria-label="Main navigation">
       <a href="{{ "/docs/" | relURL }}" {{ if hasPrefix .RelPermalink "/docs/" }}aria-current="page"{{ end }}>Documentation</a>
-      <a href="https://github.com/gpustack/gpustack-operator">GitHub <span aria-hidden="true">↗</span></a>
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
     </nav>
   </header>
   <div class="layout">
-    {{ if not .IsHome }}
-    {{ $current := .RelPermalink }}
     <aside class="sidebar" aria-label="Documentation navigation">
-      <nav class="sidebar-inner">
-        <a class="nav-home" href="{{ "/docs/" | relURL }}" {{ if eq $current "/docs/" }}aria-current="page"{{ end }}>Documentation home</a>
-        <div class="nav-label">Start here</div>
-        <a class="nav-link" href="{{ "/docs/getting-started/architecture/" | relURL }}" {{ if eq $current "/docs/getting-started/architecture/" }}aria-current="page"{{ end }}>Architecture</a>
-        <a class="nav-link" href="{{ "/docs/getting-started/walkthrough/" | relURL }}" {{ if eq $current "/docs/getting-started/walkthrough/" }}aria-current="page"{{ end }}>Walkthrough</a>
-        <a class="nav-link" href="{{ "/docs/getting-started/vendor-prerequisites/" | relURL }}" {{ if eq $current "/docs/getting-started/vendor-prerequisites/" }}aria-current="page"{{ end }}>Vendor prerequisites</a>
-
-        <div class="nav-label">Capabilities</div>
-        {{ $modules := slice
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="{{ "/" | relURL }}" {{ if .IsHome }}aria-current="page"{{ end }}>Overview</a>
+        {{ $groups := slice
+          (dict "name" "Getting started" "path" "/docs/getting-started/")
           (dict "name" "Heterogeneous Devices" "path" "/docs/modules/devices/")
           (dict "name" "RDMA Networking" "path" "/docs/modules/rdma/")
           (dict "name" "Topology Management" "path" "/docs/modules/topology/")
@@ -39,30 +31,16 @@
           (dict "name" "Model Delivery" "path" "/docs/modules/model-delivery/")
           (dict "name" "Model Deployment" "path" "/docs/modules/model-deployment/")
           (dict "name" "Accelerated Instances" "path" "/docs/modules/instances/")
+          (dict "name" "Operations" "path" "/docs/operate/")
+          (dict "name" "Reference" "path" "/docs/reference/")
+          (dict "name" "Contributing" "path" "/docs/contribute/")
         }}
-        {{ range $modules }}
-          {{ $module := site.GetPage .path }}
-          {{ $active := hasPrefix $current .path }}
-          <details class="nav-section" {{ if $active }}open{{ end }}>
-            <summary>{{ .name }}</summary>
-            <div class="nav-children">
-              <a href="{{ $module.RelPermalink }}" {{ if eq $current $module.RelPermalink }}aria-current="page"{{ end }}>Overview</a>
-              {{ range $module.RegularPages.ByTitle }}
-                <a href="{{ .RelPermalink }}" {{ if eq $current .RelPermalink }}aria-current="page"{{ end }}>{{ partial "page-title.html" . }}</a>
-              {{ end }}
-            </div>
-          </details>
+        {{ range $groups }}
+          {{ partial "nav-section.html" (dict "page" (site.GetPage .path) "name" .name "current" $) }}
         {{ end }}
-
-        <div class="nav-label">Operate &amp; build</div>
-        <a class="nav-link" href="{{ "/docs/operate/installation-modes/" | relURL }}" {{ if eq $current "/docs/operate/installation-modes/" }}aria-current="page"{{ end }}>Installation modes</a>
-        <a class="nav-link" href="{{ "/docs/operate/high-availability/" | relURL }}" {{ if eq $current "/docs/operate/high-availability/" }}aria-current="page"{{ end }}>High availability</a>
-        <a class="nav-link" href="{{ "/docs/reference/settings/" | relURL }}" {{ if eq $current "/docs/reference/settings/" }}aria-current="page"{{ end }}>Settings reference</a>
-        <a class="nav-link" href="{{ "/docs/contribute/development/" | relURL }}" {{ if eq $current "/docs/contribute/development/" }}aria-current="page"{{ end }}>Development</a>
-        <a class="nav-link" href="{{ "/docs/readme/" | relURL }}" {{ if eq $current "/docs/readme/" }}aria-current="page"{{ end }}>All pages</a>
+        <a class="nav-home" href="{{ "/docs/readme/" | relURL }}" {{ if eq .RelPermalink "/docs/readme/" }}aria-current="page"{{ end }}>All pages</a>
       </nav>
     </aside>
-    {{ end }}
     <main id="main-content">
       {{ if not .IsHome }}
       <div class="breadcrumbs">
@@ -79,6 +57,26 @@
         {{ block "main" . }}{{ end }}
       </article>
     </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        {{ with .File }}
+          {{ $source := .Path }}
+          {{ if not (fileExists (printf "../%s" $source)) }}{{ $source = printf "site/content/%s" $source }}{{ end }}
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/main/{{ $source }}">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/{{ $source }}">Edit this page</a>
+          </nav>
+        {{ end }}
+        {{ if .IsHome }}
+          <div class="toc-title">On this page</div>
+          <nav><ul><li><a href="#start-here">Start here</a></li><li><a href="#capabilities">Capabilities</a></li></ul></nav>
+        {{ else if gt (len (findRE `<li>` .TableOfContents)) 0 }}
+          <div class="toc-title">On this page</div>
+          {{ .TableOfContents }}
+        {{ end }}
+      </div>
+    </aside>
   </div>
+  <script src="{{ "js/site.js" | relURL }}" defer></script>
 </body>
 </html>

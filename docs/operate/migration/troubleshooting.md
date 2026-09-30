@@ -1,12 +1,5 @@
 # Migration Troubleshooting
 
-> **Purpose** — recovering from the four failures an in-place operator upgrade or a cluster reset can
-> leave behind: a worker stuck in CrashLoopBackOff while the old replica keeps serving, a namespace
-> that never finishes deleting, Kueue CRDs left Terminating by a teardown, and an NFD prune Job that
-> never finishes.
-> **Audience** operators · **Prerequisites** [Migrating to Bundled Subcharts](to-subcharts.md) ·
-> **Read time** ~8 min
-
 Chart-mode installs are fixed in current releases: the worker Deployment defaults to `Recreate`
 (`worker.strategyType`), abandoned Helm pending records repair without a destructive rollback,
 and a terminating worker removes the APIServices backed by its namespace. Image mode is not —

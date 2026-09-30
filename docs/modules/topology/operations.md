@@ -1,10 +1,5 @@
 # Topology-Aware Scheduling Operations
 
-> **Purpose** — enable a topology provider, publish a hierarchy, request a placement level, and
-> diagnose topology-aware admission.
-> **Audience** operators, users · **Prerequisites** [Topology-Aware
-> Scheduling](scheduling.md) · **Read time** ~16 min
-
 This runbook starts with fresh managed queues and also covers changes to their live topology profile.
 Queues created by a previously published version are outside that transition path.
 

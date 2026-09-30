@@ -80,9 +80,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-      # Links and anchors, the "## Contents" list, each page's header block and
-      # footer, the docs/README.md index, the prose paragraph cap, the page line
-      # and "##" caps, every index label against its page's H1 -- and, over specs/,
+      # Links and anchors, the "## Contents" list, each page's footer, the docs/README.md
+      # index, the prose paragraph cap, the page line and "##" caps, every index label against its page's H1 -- and, over specs/,
       # the Status word, every `go test -run` that must select something, and
       # cross-references. The two self-tests run first: they are what establishes
       # that the rules can fail at all.

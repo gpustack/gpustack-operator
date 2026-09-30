@@ -1,8 +1,5 @@
 # Model Deployment
 
-> **Purpose** — deploy model-serving roles with coordinated admission and routing.
-> **Audience** users, operators · **Prerequisites** [Architecture](../../getting-started/architecture.md) · **Read time** ~2 min
-
 A `ModelDeployment` describes the model, engine and roles of a serving workload. Each role can have
 its own replicas and resources.
 

@@ -1,8 +1,5 @@
 # Topology Management
 
-> **Purpose** — place multi-Pod work where the required topology has enough capacity.
-> **Audience** users, operators · **Prerequisites** [Architecture](../../getting-started/architecture.md) · **Read time** ~2 min
-
 GPUStack can describe domains such as zones and racks, then let Kueue account for capacity within
 those domains.
 

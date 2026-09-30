@@ -1,9 +1,5 @@
 # Settings & Environment Variables
 
-> **Purpose** — the two configuration surfaces: settings an administrator changes at runtime with
-> `kubectl`, and the `GPUSTACK_*` environment read once at process startup.
-> **Audience** operators · **Prerequisites** none · **Read time** ~10 min
-
 GPUStack Operator is configured two ways, and the distinction matters operationally.
 
 > **First-deploy seeding vs. runtime changes.** On first deploy, `settings.Initialize` creates the delegated

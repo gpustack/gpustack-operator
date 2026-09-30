@@ -1,9 +1,5 @@
 # KV Cache on Disk-Heavy Nodes
 
-> **Purpose** — what to configure on a node whose capacity is disk rather than memory: why no member
-> group can be disk alone, how the shape that works is written, and how small its memory segment may be.
-> **Audience** operators · **Prerequisites** [KV Cache Backend](backend.md) · **Read time** ~5 min
-
 A node with terabytes of NVMe and little spare RAM still needs a memory segment for its cache
 member. Add local disks to that member, then size the memory segment as described below.
 

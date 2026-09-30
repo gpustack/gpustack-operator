@@ -1,12 +1,9 @@
 # Scheduling Chain
 
-> **Purpose** — how node and device signals become capacity labels, and how five controllers
-> materialize them with topology profiles into a Kueue `Topology` → `ResourceFlavor` →
-> `ClusterQueue` → `LocalQueue` chain plus an `InstanceType` CRD.
-> **Audience** contributors · **Prerequisites** [Architecture](../../getting-started/architecture.md),
-> [Device Discovery](discovery.md) · **Read time** ~9 min
-
-Stages 3 and 4 of the four-stage chain; what a request must then pass is in [Admission](admission.md).
+The worker turns Node and `Devices` signals into capacity labels, Kueue queues and `InstanceType`
+resources. These are stages 3 and 4 of the chain introduced in
+[Architecture](../../getting-started/architecture.md); [Admission](admission.md) covers the checks
+a workload then passes.
 
 ## Contents
 

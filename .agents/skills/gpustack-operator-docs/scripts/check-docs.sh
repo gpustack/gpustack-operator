@@ -8,8 +8,7 @@
 # Fails on:
 #   1. a relative link whose file does not exist, or whose #anchor no heading produces;
 #   2. a "## Contents" list that no longer matches the page's ## headings (missing, extra, reordered);
-#   3. a docs/ page whose header block lacks Purpose / Audience / Prerequisites / Read time, or that
-#      has no "**See also**" footer at its end;
+#   3. a docs/ page with no "**See also**" footer at its end;
 #   4. a docs/ page missing from the "## All pages" table in docs/README.md;
 #   5. a prose paragraph longer than the cap (a set of items belongs in a list or a table);
 #   6. a page longer than the line cap;
@@ -57,7 +56,7 @@ PAGES=$(find docs -name '*.md' | sort)
 # test entry points, which can go stale. Its bare backtick paths are outside this link check.
 #
 # Only the two link loops read this list. Being on it subjects a file to link and anchor resolution
-# and to nothing else -- the Contents, header, footer, index and size rules are held by $PAGES, and
+# and to nothing else -- the Contents, footer, index and size rules are held by $PAGES, and
 # AGENTS.md is not a docs page.
 #
 # Expect AGENTS.md to contribute zero checked links, and do not read that as a reason to drop it.
@@ -313,16 +312,11 @@ for f in $LINKED_PAGES; do
   done < <(links_of "$f")
 done
 
-# --- 2. Contents, 3. header block and footer --------------------------------
+# --- 2. Contents, 3. footer ------------------------------------------------
 echo "==> page structure"
 for f in $PAGES; do
   [ "$f" = "docs/README.md" ] && continue
 
-  header=$(sed -n '2,8p' "$f")
-  for field in Purpose Audience Prerequisites 'Read time'; do
-    printf '%s\n' "$header" | grep -q "\*\*${field}\*\*" \
-      || err "$f: the header block below the H1 does not state **${field}**"
-  done
   tail -n 12 "$f" | grep -q '^\*\*See also\*\*' \
     || err "$f: no '**See also**' footer at the end of the page"
 

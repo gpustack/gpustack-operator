@@ -1,0 +1,22 @@
+{{ $page := .page }}
+{{ $current := .current }}
+{{ $active := hasPrefix $current.RelPermalink $page.RelPermalink }}
+<details class="nav-section" {{ if or $active (and $current.IsHome (eq $page.RelPermalink "/docs/getting-started/")) }}open{{ end }}>
+  <summary>{{ .name }}</summary>
+  <div class="nav-children">
+    {{ if $page.Content }}
+      <a href="{{ $page.RelPermalink }}" {{ if eq $current.RelPermalink $page.RelPermalink }}aria-current="page"{{ end }}>Overview</a>
+    {{ end }}
+    {{ $children := slice }}
+    {{ range $page.Pages }}
+      {{ $children = $children | append (dict "page" . "name" (partial "page-title.html" .)) }}
+    {{ end }}
+    {{ range sort $children "name" }}
+      {{ if .page.IsSection }}
+        {{ partial "nav-section.html" (dict "page" .page "name" .name "current" $current) }}
+      {{ else }}
+        <a href="{{ .page.RelPermalink }}" {{ if eq $current.RelPermalink .page.RelPermalink }}aria-current="page"{{ end }}>{{ .name }}</a>
+      {{ end }}
+    {{ end }}
+  </div>
+</details>

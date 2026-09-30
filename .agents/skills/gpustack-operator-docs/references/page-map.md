@@ -5,7 +5,8 @@ needs it to finish their task; everyone else links.
 
 ## `README.md` (project front page)
 
-**Owns** — the pitch, the accelerator support matrix, the five-step Quick Start, a short index.
+**Owns** — the features, installation and uninstallation, capability Usage examples, accelerator support
+and license.
 
 **Never** — reconciler names, label schemas, rationale, anything that changes more often than a
 release. A user who needs those follows a link.
@@ -15,7 +16,7 @@ release. A user who needs those follows a link.
 
 ## `docs/README.md` (index)
 
-**Owns** — the reading paths and the page table (page · what it answers · audience · read time).
+**Owns** — the reading paths and the page table (page and the task it helps with).
 
 **Never** — content. If you are explaining something here, it belongs on a page.
 

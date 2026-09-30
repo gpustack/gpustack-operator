@@ -1,9 +1,7 @@
 # Admission
 
-> **Purpose** — the five gates a workload passes before a container gets a device, the ledger beneath
-> them, and how to read the capacity an `InstanceType` reports.
-> **Audience** contributors, operators debugging a stuck workload · **Prerequisites**
-> [Architecture](../../getting-started/architecture.md), [Scheduling Chain](scheduling.md) · **Read time** ~8 min
+A workload passes five admission gates before a container receives a device. Kueue accounts for
+pool capacity, while GPUStack checks whether individual accelerators can satisfy the request.
 
 ## Contents
 

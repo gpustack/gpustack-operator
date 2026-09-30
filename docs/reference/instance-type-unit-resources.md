@@ -1,11 +1,5 @@
 # Instance Type Unit Resources Reference
 
-> **Purpose** — the per-product CPU/RAM tier a node-derived `InstanceType` is sized with, and the
-> public configuration each tier was taken from.
-> **Audience** operators · **Prerequisites** [Scheduling
-> Chain](../modules/devices/scheduling.md#the-unit-spec-is-not-derived-from-node-capacity) ·
-> **Read time** reference — look up your product
-
 With `instance-type-derived-from-node` enabled, the operator summarizes a node into an
 `InstanceType` and stamps its **unit resources** — the CPU and RAM for *one unit*, which for an
 acceleratable type is **one whole accelerator**.

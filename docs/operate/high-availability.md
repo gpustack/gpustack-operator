@@ -1,10 +1,5 @@
 # High Availability Operations
 
-> **Purpose** — which replica knob to raise per control-plane component, what each subchart can and
-> cannot spread, and the one topology that must stay single-replica.
-> **Audience** operators · **Prerequisites** [Two install
-> modes](installation-modes.md) · **Read time** ~4 min
-
 Every control-plane component the chart deploys elects a leader, so extra replicas stand by: **they buy
 failover, not throughput.** A highly available install raises each replica count and turns on its
 disruption budget; everything else is one pod per node (device managers, NFD worker, both CSI node

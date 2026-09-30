@@ -7,10 +7,8 @@ Every page under `docs/` (the index excepted) looks like this:
 ```markdown
 # Scheduling Chain
 
-> **Purpose** — how the capacity labels become Kueue queues and a materialized InstanceType.
-> **Audience** contributors · **Prerequisites** [Architecture](../architecture.md) · **Read time** ~15 min
-
-One or two sentences of orientation, if the purpose line is not enough. Optional.
+The worker turns Node and `Devices` signals into capacity labels, Kueue queues and `InstanceType`
+resources. [Architecture](../../getting-started/architecture.md) introduces the earlier discovery stages.
 
 ## Contents
 
@@ -23,19 +21,16 @@ One or two sentences of orientation, if the purpose line is not enough. Optional
 
 ---
 
-**See also** — [Device Discovery](device-discovery.md) · [Walkthrough](../walkthrough.md)
+**See also** — [Device Discovery](discovery.md) · [Walkthrough](../../getting-started/walkthrough.md)
 
 **Next** → [Admission](admission.md) — the five gates a request passes.
 ```
 
-**Header block** — a single blockquote, immediately under the H1, within the first six lines
-(`check-docs.sh` looks there):
-
-- `**Purpose**` — one sentence, what the page answers. Not a summary of the project.
-- `**Audience**` — `everyone` / `users` / `operators` / `contributors`, or a combination.
-- `**Prerequisites**` — the page to read first, as a link, or `none`.
-- `**Read time**` — an honest estimate, rounded to the minute; `~18 min` beats a flattering `~5 min`.
-  Use `reference — look up your product` for lookup tables.
+**Introduction** — start with the subject or the task in one short paragraph. If the page already
+opens with useful prose, use it. Do not prepend a second summary or metadata fields for purpose,
+audience or reading time. Put required software, permissions and earlier steps beside the operation
+that needs them, or in a prerequisites section when several steps share them. Link to background
+reading where it helps the reader follow a mechanism.
 
 **`## Contents`** — one bullet per `##` heading, in document order, no `###`. Regenerate rather than
 hand-edit (this short form does not handle a heading with an inline link; `scripts/check-docs.sh` is
@@ -111,7 +106,7 @@ it as follows — when a page starts serving two modes at once, that is the mome
 
 | Mode | Reader is… | Our pages |
 |---|---|---|
-| Tutorial | learning by doing | `README.md` Quick Start, `docs/getting-started/walkthrough.md`, the MIG walkthrough, `docs/modules/kv-cache/walkthrough.md` |
+| Tutorial | learning by doing | `README.md` Usage examples, `docs/getting-started/walkthrough.md`, the MIG walkthrough, `docs/modules/kv-cache/walkthrough.md` |
 | How-to | achieving a goal | `docs/operate/*`, `docs/modules/devices/*-mig.md`, `docs/operate/migration/*`, `docs/contribute/development.md`, a domain runbook (`docs/modules/model-delivery/operations.md`) |
 | Reference | looking something up | `docs/modules/devices/requests.md`, `docs/reference/settings.md`, `docs/reference/*` |
 | Explanation | building understanding | `docs/getting-started/architecture.md` and the deep pages under `docs/modules/` (contract pages read as reference, mechanism pages as explanation) |
@@ -178,7 +173,7 @@ edit on one sighting.
 | Staged run-up | "Let's dive in", "here is what you need to know", "Honestly?", "the thing is", "note that" before a routine claim | Start with the point |
 | Arguing with no one | "To be clear", "this is not about", "a tempting approach would be", a rejected option no page proposes | Delete it. Keep a rejection only when a reader would really weigh that option, and then state the reason once |
 | Forced triads | three parallel items where the meaning has two, "fast, reliable, and scalable" | One item per real idea; keep three only when there are three |
-| Dashes as connector | ` — `, ` – `, ` -- ` between clauses | A period, comma, colon or parentheses. The header block, footer and table cells keep their template separators, and code, paths and URLs are untouched |
+| Dashes as connector | ` — `, ` – `, ` -- ` between clauses | A period, comma, colon or parentheses. The footer and table cells keep their template separators, and code, paths and URLs are untouched |
 | Stacked qualifiers | "could potentially", "may arguably", "in some cases it might" | One hedge, and only when the code or a measurement supports the doubt |
 | Inflated significance | "pivotal", "crucial", "plays a key role", "marks a shift", a closing paragraph about the future | The fact. End a page on its last concrete fact |
 | Stock AI words | additionally, delve, robust (figurative), seamless, leverage, showcase, highlight (verb), landscape, tapestry, testament, underscore, valuable, key (adjective) | A plain word, or nothing. "Gate" and "robust" used in their technical sense are fine |
@@ -209,7 +204,7 @@ dashes and bold labels.
 1. Put it under the directory that fits: the reader it serves (`architecture/`, `operation/`,
    `migration/`, `reference/`), or the domain directory of the CR family it orbits
    (`kv-cache/`, `model-store/`, `model-deployment/`) when the page joins a family that already has one.
-2. Copy the template above; fill the header block honestly — an inflated read time is worse than none.
+2. Copy the template above and write a short introduction. Add prerequisites only when the task needs them.
 3. Add a row to the `docs/README.md` page table, and a step to any reading path it belongs on.
 4. Add it to the routing table in the skill's `SKILL.md` and to `references/page-map.md`, saying what it
    owns and what it must not absorb.

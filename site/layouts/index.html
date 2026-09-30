@@ -1,29 +1,21 @@
 {{ define "main" }}
-  <section class="hero">
-    <div class="eyebrow">Documentation</div>
-    <h1>Accelerators, ready for Kubernetes.</h1>
-    {{ .Content }}
-    <div class="hero-actions">
-      <a class="button button-primary" href="{{ "/docs/getting-started/architecture/" | relURL }}">Understand the operator</a>
-      <a class="button button-secondary" href="{{ "/docs/" | relURL }}">Browse all docs</a>
-    </div>
-  </section>
-  <h2>Find your starting point</h2>
-  <p class="section-intro">Follow the path that matches what you need to do.</p>
-  <div class="path-cards">
-    <a href="{{ "/docs/getting-started/walkthrough/" | relURL }}"><span class="card-kicker">Get started</span><strong>Run a workload</strong><span>Follow a recorded run from hardware discovery to an admitted workload.</span></a>
-    <a href="{{ "/docs/operate/installation-modes/" | relURL }}"><span class="card-kicker">Operate</span><strong>Set up a cluster</strong><span>Choose an installation mode and understand the components it manages.</span></a>
-    <a href="{{ "/docs/contribute/development/" | relURL }}"><span class="card-kicker">Contribute</span><strong>Work on the code</strong><span>Find the build, generation, and validation commands.</span></a>
+  <p class="section-label">Documentation</p>
+  <h1>GPUStack Operator</h1>
+  {{ .Content }}
+  <h2 id="start-here">Start here</h2>
+  <div class="directory">
+    <div><a href="{{ "/docs/getting-started/architecture/" | relURL }}">Architecture</a><p>See how discovery, capacity, and admission fit together.</p></div>
+    <div><a href="{{ "/docs/getting-started/walkthrough/" | relURL }}">Walkthrough</a><p>Follow an accelerator request through a working cluster.</p></div>
+    <div><a href="{{ "/docs/operate/installation-modes/" | relURL }}">Installation modes</a><p>Choose how the operator and its dependencies are deployed.</p></div>
   </div>
-  <h2>Explore the capabilities</h2>
-  <p class="section-intro">Each guide starts with the task and links to the deeper reference pages.</p>
-  <div class="cards">
-    <a href="{{ "/docs/modules/devices/" | relURL }}"><strong>Heterogeneous Devices</strong><span>Discover and allocate accelerators.</span></a>
-    <a href="{{ "/docs/modules/rdma/" | relURL }}"><strong>RDMA Networking</strong><span>Request network endpoints.</span></a>
-    <a href="{{ "/docs/modules/topology/" | relURL }}"><strong>Topology Management</strong><span>Place work within domains.</span></a>
-    <a href="{{ "/docs/modules/kv-cache/" | relURL }}"><strong>KV Cache</strong><span>Share inference cache.</span></a>
-    <a href="{{ "/docs/modules/model-delivery/" | relURL }}"><strong>Model Delivery</strong><span>Get weights to workloads.</span></a>
-    <a href="{{ "/docs/modules/model-deployment/" | relURL }}"><strong>Model Deployment</strong><span>Serve models with roles.</span></a>
-    <a href="{{ "/docs/modules/instances/" | relURL }}"><strong>Accelerated Instances</strong><span>Work inside a container with an accelerator.</span></a>
+  <h2 id="capabilities">Capabilities</h2>
+  <div class="directory">
+    <div><a href="{{ "/docs/modules/devices/" | relURL }}">Heterogeneous Devices</a><p>Discover, slice, and allocate accelerators.</p></div>
+    <div><a href="{{ "/docs/modules/rdma/" | relURL }}">RDMA Networking</a><p>Give workloads network interfaces alongside accelerators.</p></div>
+    <div><a href="{{ "/docs/modules/topology/" | relURL }}">Topology Management</a><p>Place workloads within the requested network or location domain.</p></div>
+    <div><a href="{{ "/docs/modules/kv-cache/" | relURL }}">KV Cache</a><p>Share inference cache across workloads.</p></div>
+    <div><a href="{{ "/docs/modules/model-delivery/" | relURL }}">Model Delivery</a><p>Fetch and cache model weights before workloads need them.</p></div>
+    <div><a href="{{ "/docs/modules/model-deployment/" | relURL }}">Model Deployment</a><p>Run serving replicas with routing and prefill/decode roles.</p></div>
+    <div><a href="{{ "/docs/modules/instances/" | relURL }}">Accelerated Instances</a><p>Work in an accelerator-backed container over SSH.</p></div>
   </div>
 {{ end }}

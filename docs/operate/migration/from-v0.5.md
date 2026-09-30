@@ -1,10 +1,5 @@
 # Migrating from v0.5.x
 
-> **Purpose** — the two supported upgrade paths across the scheduling-chain refactor, and how to clear
-> the v0.5.x orphans a plain `helm upgrade` leaves behind.
-> **Audience** operators on a v0.5.x install · **Prerequisites** [Architecture](../../getting-started/architecture.md) ·
-> **Read time** ~5 min
-
 v0.5.x is superseded by versions that reshape the scheduling objects the operator materializes.
 The first, v0.6.x ("unified-pool refactor",
 [`specs/2026-06-29-instancetype-unified-pool-refactor.md`](../../../specs/2026-06-29-instancetype-unified-pool-refactor.md)),

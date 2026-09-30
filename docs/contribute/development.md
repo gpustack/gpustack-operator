@@ -1,9 +1,8 @@
 # Development
 
-> **Purpose** — every command you need to build, lint, test and regenerate the operator, plus how the
-> vendored subcharts and patched dependencies work.
-> **Audience** contributors · **Prerequisites** none (read [Architecture](../getting-started/architecture.md) before
-> changing behavior) · **Read time** ~6 min
+Build, lint and regenerate the operator with `make`. The same tooling manages vendored Helm
+charts and patched Kubernetes dependencies. Read [Architecture](../getting-started/architecture.md)
+before changing the operator's behavior.
 
 ## Contents
 

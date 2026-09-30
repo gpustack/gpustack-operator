@@ -1,11 +1,5 @@
 # Model Artifact Views
 
-> **Purpose** — the `v1` views of `ModelArtifact` and `NodeModelStore`, the `progress` subresource
-> that says where an artifact's content is, who may read it, and how GPUStack server's model-file
-> handling maps onto this API.
-> **Audience** users, operators, console developers · **Prerequisites** [Model
-> Artifact](artifact.md) · **Read time** ~8 min
-
 The aggregated API serves `worker.gpustack.ai/v1` beside the `v1alpha1` resources: the read surface
 GPUStack server and consoles use. A node's download progress [is stored on
 thresholds](node-store.md#the-resource); `progress` answers between them, on request, and

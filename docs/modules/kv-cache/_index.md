@@ -1,8 +1,5 @@
 # KV Cache
 
-> **Purpose** — give inference workloads a shared KV cache with bounded access and capacity.
-> **Audience** users, operators · **Prerequisites** [Architecture](../../getting-started/architecture.md) · **Read time** ~2 min
-
 A backend runs the cache store. A pool and binding decide which workloads may use it and how much
 capacity they receive.
 

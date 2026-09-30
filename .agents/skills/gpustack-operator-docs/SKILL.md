@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-docs
-description: "Write or update the GPUStack Operator documentation: route a new fact to the page that owns it, and keep each page's header, Contents, footer and the docs/README.md index in sync. Also adding a page or reviewing a docs diff."
+description: "Write or update the GPUStack Operator documentation: route a new fact to the page that owns it, and keep each page's title, Contents, footer and the docs/README.md index in sync. Also adding a page or reviewing a docs diff."
 ---
 
 # GPUStack Operator — documentation
@@ -77,9 +77,9 @@ Full routing, including what does **not** belong on a page, is in
 
 ## Page shape
 
-Every page in `docs/` (the index excepted) has a header block, a `## Contents` list mirroring its `##`
-headings, and a `**See also**` / `**Next**` footer. Templates and the writing rules — rule first,
-rationale demoted, no fact stated twice, no autopilot prose tells — are in
+Every page in `docs/` (the index excepted) opens with a short introduction, has a `## Contents` list
+mirroring its `##` headings and a `**See also**` / `**Next**` footer. Templates and the writing rules
+are in
 [references/conventions.md](references/conventions.md).
 
 ## Sync invariants
@@ -91,7 +91,7 @@ These pages are not free text. Changing one side without the other breaks a buil
 | `docs/reference/instance-type-unit-resources.md` | `pkg/nodefeature/unit_resources_preset.yaml` | compare the product rows with the preset data when either changes; no Go documentation test pins this table |
 | `deploy/gpustack-operator/chart/README.md`, `values.schema.json` | `values.yaml` + `README.md.gotmpl` via `make generate chart` | generated — never hand-edit; a doc path quoted in a `values.yaml` comment needs a regenerate, and `chart.yml` fails on drift |
 | `README.md` accelerator matrix | `pkg/nodefeature/knowns.go` (resource names, `SharedResourceMaxSize`, `_ManufacturerPartitionKindMap`) and **whether** each `pkg/devicemanager/detector/<mfr>/device.go` sets `LogicalSliced` at all | nothing fails; the table silently lies about what a vendor can do. The matrix is deliberately ✅/— only — per-card slice counts and the per-vendor isolation mechanism live in `docs/modules/devices/discovery.md`, not on the front page |
-| `README.md` Quick Start's four request shapes | `docs/modules/devices/requests.md` — *The resource keys* and *Worked example per family* | nothing fails; the front page and the normative contract drift apart. This copy is the one sanctioned exception to "state a fact once" (the README is the shop window) — change both together |
+| `README.md` Usage accelerator examples | `docs/modules/devices/requests.md` — *The resource keys* and *Worked example per family* | nothing fails; the front page and the normative contract drift apart. This copy is the one sanctioned exception to "state a fact once" (the README is the shop window) — change both together |
 | `docs/modules/model-deployment/deployment.md` owned-key table | `modelDeploymentOwnedKeys` | compare the owned keys with each engine's table row when either changes; the Go documentation test was removed |
 | `docs/reference/settings.md` tables | `pkg/worker/settings` and the `GPUSTACK_*` readers | nothing fails; an operator configures something that no longer exists |
 | `docs/README.md` page table | the set of files under `docs/` | `check-docs.sh` fails |
@@ -105,10 +105,10 @@ bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh --report   # wh
 ```
 
 It verifies relative links and `#anchor`s across `README.md`, `AGENTS.md`, `docs/**` and
-`.claude/skills/**`; and — for `docs/**` only — each page's `## Contents` against its headings, the four
-header-block fields, a `**See also**` footer at the end, registration in the `## All pages` table of
-`docs/README.md`, the label there against the page's H1, and the three size caps (paragraph, page
-length, `##` count — see `references/conventions.md`). `--report` demotes the caps to warnings and
+`.claude/skills/**`; and — for `docs/**` only — each page's `## Contents` against its headings, a
+`**See also**` footer at the end, registration in the `## All pages` table of `docs/README.md`, the
+label there against the page's H1, and the three size caps (paragraph, page length, `##` count; see
+`references/conventions.md`). `--report` demotes the caps to warnings and
 prints the per-page metrics. The gate also resolves literal `docs/*.md` paths named across skills,
 so a moved page cannot leave a skill reading a missing file.
 

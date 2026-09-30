@@ -1,10 +1,7 @@
 # Network Topology
 
-> **Purpose** — what the Device Manager records about the node's network interfaces and its
-> accelerators' scale-up fabric, how an RDMA link is verified, and which of those facts can reach a
-> scheduling decision.
-> **Audience** contributors touching `pkg/devicemanager/detector`, operators debugging a missing
-> `rdma.capable` · **Prerequisites** [Device Discovery](../devices/discovery.md) · **Read time** ~10 min
+The Device Manager records a node's network interfaces and accelerator fabric in `Devices`. It
+checks RDMA links before publishing the labels and resource keys used for scheduling.
 
 ## Contents
 

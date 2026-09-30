@@ -1,10 +1,5 @@
 # NVIDIA MIG Operations
 
-> **Purpose** — the runbook for MIG *mode* on a node (enable, disable, reboot recovery), the contract for
-> requesting a partition, and — last on the page — a recorded three-configuration walkthrough.
-> **Audience** operators, users requesting partitions · **Prerequisites** [Accelerator
-> Requests](requests.md) · **Read time** ~21 min
-
 You drive MIG **mode** with `nvidia-smi`; GPUStack catches up when the node's Device Manager re-detects.
 NVIDIA **MIG** (Multi-Instance GPU) mode is a **manually managed** node property: the operator *observes*
 the geometry into the `Devices` ledger and the advertised partitioning capability, but never enables,

@@ -1,11 +1,5 @@
 # KV Cache Injection Reference
 
-> **Purpose** — how any Pod joins a KV cache pool with one label and a handful of annotations: the
-> contract, what gets injected per engine, every refusal and its fix, and the operational facts a
-> cache changes about a workload.
-> **Audience** users, operators · **Prerequisites** [KV Cache Pool](pool.md) ·
-> **Read time** ~14 min
-
 A `KVCachePool` is usable by any Pod, not only by workloads this operator renders. A mutating
 admission webhook watches for one label, reads the `KVCachePoolBinding` the Pod names, and writes the
 client configuration its inference engine expects. Nothing else about the Pod changes.

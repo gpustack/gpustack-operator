@@ -1,9 +1,7 @@
 # KV Cache Leader
 
-> **Purpose** — the metadata process a `KVCacheBackend` runs: the Deployment and Service it renders,
-> why its two probes take different paths, and what electing through a Kubernetes Lease costs.
-> **Audience** operators, contributors · **Prerequisites** [KV Cache Backend](backend.md) ·
-> **Read time** ~7 min
+A `KVCacheBackend` runs a leader process for cache metadata. The operator manages its Deployment,
+Service, probes and Kubernetes Lease election.
 
 This API says **leader**; the artifact says **master**, and every rendered flag, environment variable
 and metric keeps the vendor's spelling.

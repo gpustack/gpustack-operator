@@ -1,11 +1,5 @@
 # RDMA Operations
 
-> **Purpose** — how a workload asks for RDMA beside its accelerators: which key, how many endpoints
-> for how many accelerators, what a grant hands the container, the kubelet policy to set before
-> any of it aligns, and the engine image an EFA leg needs.
-> **Audience** operators, users writing workloads · **Prerequisites** [Accelerator
-> Requests](../devices/requests.md) · **Read time** ~16 min
-
 Choose an RDMA resource key for the workload, set the kubelet's NUMA policy, and check the Pod's
 placement. [Network Topology](network-topology.md) explains how endpoints become available;
 [Accelerator Requests](../devices/requests.md) lists the admission rules.

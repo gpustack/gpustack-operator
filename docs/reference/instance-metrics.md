@@ -1,14 +1,8 @@
 # Instance Metrics Reference
 
-> **Purpose** — the two surfaces reporting an Instance's utilization: the
-> `instances/<name>/metrics` subresource and the Device Manager's Prometheus exporter — their
-> fields, names, sources and limits.
-> **Audience** users, operators, console developers · **Prerequisites** [Accelerator
-> Requests](../modules/devices/requests.md) · **Read time** ~9 min
-
-Both surfaces report the same figures from the same code, so they can never disagree by a
-rounding step. They differ in who asks: the subresource answers one Instance per request, the
-exporter publishes every Instance of one node for a scrape.
+The `instances/<name>/metrics` subresource returns utilization for one Instance. The Device
+Manager's Prometheus exporter publishes it for every Instance on a node. Both use the same
+calculation code.
 
 ## Contents
 

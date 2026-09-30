@@ -1,11 +1,8 @@
 # Device Discovery
 
-> **Purpose** — how a node's hardware becomes labels and a per-accelerator ledger: what NFD
-> publishes, what the Device Manager detects, and what the device-plugin allocator does at `Allocate`.
-> **Audience** contributors · **Prerequisites** [Architecture](../../getting-started/architecture.md) · **Read time** ~20 min
-
-Stages 1 and 2 of the four-stage chain. Stages 3 and 4 are in [Scheduling
-Chain](scheduling.md).
+Node Feature Discovery publishes hardware labels, and the Device Manager records each accelerator
+in `Devices`. These are stages 1 and 2 of the operator's discovery and scheduling chain.
+[Scheduling Chain](scheduling.md) covers capacity profiling and queue creation in stages 3 and 4.
 
 ## Contents
 

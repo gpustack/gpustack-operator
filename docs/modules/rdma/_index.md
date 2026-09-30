@@ -1,8 +1,5 @@
 # RDMA Networking
 
-> **Purpose** — request network interfaces beside accelerators and understand their placement limits.
-> **Audience** users, operators · **Prerequisites** [Architecture](../../getting-started/architecture.md) · **Read time** ~2 min
-
 The Device Manager publishes usable RDMA endpoints as Kubernetes resources. Workloads request a
 count; kubelet decides which endpoints a container receives.
 

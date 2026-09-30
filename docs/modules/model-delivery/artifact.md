@@ -1,10 +1,5 @@
 # Model Artifact
 
-> **Purpose** — how a `ModelArtifact` names a model's weights, how the operator resolves and
-> revalidates it, and how a `ModelDeployment` or an `Instance` consumes it.
-> **Audience** users, operators · **Prerequisites** [Model
-> Deployment](../model-deployment/deployment.md) · **Read time** ~16 min
-
 A `ModelArtifact` records where model weights come from and which credential reads them. A
 `ModelDeployment` refers to it through `spec.model.artifactRef`; an `Instance` uses a `model` volume.
 Neither workload needs its own URI, revision or token.

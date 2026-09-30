@@ -1,9 +1,7 @@
 # Model Deployment Shutdown
 
-> **Purpose** — what a `ModelDeployment` replica does between its Pod's delete and its engine's exit,
-> and which requests that window does not save.
-> **Audience** users, operators · **Prerequisites** [Model Deployment](deployment.md)
-> **Read time** ~4 min
+A `ModelDeployment` replica drains during the interval between Pod deletion and engine exit.
+The grace period bounds how long it can wait for running requests and engine shutdown.
 
 ## Contents
 

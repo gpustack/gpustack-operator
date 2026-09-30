@@ -1,10 +1,5 @@
 # Model Deployment Routing
 
-> **Purpose** — which replica each managed router sends a request to by default, how to change
-> that choice through `spec.router.extraArgs`, and the router series that show where requests went.
-> **Audience** users, operators · **Prerequisites** [Model Deployment](deployment.md)
-> **Read time** ~5 min
-
 A router only chooses when a role has more than one replica. Every routing choice measured here ran
 on a server role; on a prefill/decode pair, where each half is chosen separately, none has been run.
 

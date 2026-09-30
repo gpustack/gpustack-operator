@@ -1,10 +1,5 @@
 # Accelerator Requests
 
-> **Purpose** — the normative request contract: every resource key a workload may set, the seven rules
-> admission enforces, and a worked example per family.
-> **Audience** users writing workloads, contributors touching the webhooks · **Prerequisites**
-> [Architecture](../../getting-started/architecture.md) · **Read time** ~11 min
-
 The Pod webhooks check these requests at creation and reject invalid ones before a container starts.
 They select Pods with the `kueue.x-k8s.io/queue-name` label. Without that label, a Pod can still
 request device-plugin resources, but these checks and resource-unit calculations do not run.

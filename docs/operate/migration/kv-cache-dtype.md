@@ -1,10 +1,5 @@
 # Upgrading to an Enforced Binding Dtype
 
-> **Purpose** — what changes for pool-attached workloads once a `KVCachePoolBinding`'s `dtype` is
-> handed to the engine, the check to run before upgrading, and the way out when a spelling is wrong.
-> **Audience** operators with a KV cache pool · **Prerequisites** [KV Cache Pool](../../modules/kv-cache/pool.md) ·
-> **Read time** ~5 min
-
 From this release, a Binding's `spec.domain.dtype` stops being a declaration and becomes the engine's
 `--kv-cache-dtype`. The rule itself is stated once, under
 [The dtype is handed to the engine](../../modules/kv-cache/pool.md#the-dtype-is-handed-to-the-engine); this page

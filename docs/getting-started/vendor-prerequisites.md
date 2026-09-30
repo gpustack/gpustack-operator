@@ -1,10 +1,5 @@
 # Vendor Prerequisites
 
-> **Purpose** — what to install before GPUStack per manufacturer, and which vendor GPU Operator
-> components to keep or disable so exactly one device plugin, feature-discovery component and
-> scheduler own each job.
-> **Audience** operators · **Prerequisites** [Architecture](architecture.md) · **Read time** ~10 min
-
 Vendor value keys and component names change between releases, so each manufacturer section names the
 vendor artifact and product version its statements were read against.
 

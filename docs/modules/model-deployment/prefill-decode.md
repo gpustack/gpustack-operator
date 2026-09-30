@@ -1,11 +1,5 @@
 # Model Deployment Prefill and Decode
 
-> **Purpose** — what pairs a `Prefill` role with a `Decode` role: the connector each engine and
-> router renders, the router block and its fields, the direct transfer and its transport, roles on
-> different hardware, and a role's own address.
-> **Audience** users, operators, contributors · **Prerequisites** [Model Deployment](deployment.md)
-> · **Read time** ~4 min
-
 A deployment with `Prefill` and `Decode` roles is admitted as one set. Once both roles run, the
 operator connects them through a router and a transfer leg. [Prefill and
 decode](deployment.md#prefill-and-decode) describes the role fields and admission rules.

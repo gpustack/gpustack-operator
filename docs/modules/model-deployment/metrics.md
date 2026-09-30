@@ -1,10 +1,5 @@
 # Model Deployment Metrics
 
-> **Purpose** — the structured `ModelDeployment` metrics snapshot and the managed Pods' raw
-> Prometheus scrape endpoints.
-> **Audience** users, operators, console developers · **Prerequisites** [Model
-> Deployment](deployment.md) · **Read time** ~7 min
-
 The aggregated API combines selected current gauges from a deployment's engine and router Pods.
 Each managed Pod also exposes its own native `/metrics` output for Prometheus users.
 

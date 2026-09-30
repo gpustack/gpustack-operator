@@ -1,11 +1,5 @@
 # Model Store Operations
 
-> **Purpose** — running node delivery: enabling the `model-manager` plugin, where its configuration
-> comes from, reading what a node applied and holds, keeping the cache away from kubelet's eviction,
-> switching delivery, where replicas land, upgrading, and removing it.
-> **Audience** operators · **Prerequisites** [Node Model Store](node-store.md) · **Read time** ~11
-> min
-
 The `model-manager` DaemonSet keeps one model cache per node. It downloads each Hugging Face
 `ModelArtifact` digest once per node and mounts it for workloads. Configure and inspect that cache
 with the steps below; [Node Model Store](node-store.md) explains each mount.

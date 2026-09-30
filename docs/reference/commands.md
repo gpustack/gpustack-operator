@@ -1,10 +1,5 @@
 # Command Reference
 
-> **Purpose** — every command the `gpustack-operator` binary offers: what each one does, who runs
-> it and when, the flags that change its behaviour, and a runnable invocation.
-> **Audience** operators, developers · **Prerequisites** [Architecture](../getting-started/architecture.md) ·
-> **Read time** ~10 min
-
 One binary carries four long-running services and three one-shot commands. The services are what a
 deployment runs; the one-shots are what you run by hand on a node, and choosing between them is the
 first thing this page answers.

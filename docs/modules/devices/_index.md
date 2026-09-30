@@ -1,8 +1,5 @@
 # Heterogeneous Devices
 
-> **Purpose** — find out how GPUStack discovers and allocates accelerators from different manufacturers.
-> **Audience** users, operators · **Prerequisites** [Architecture](../../getting-started/architecture.md) · **Read time** ~2 min
-
 GPUStack uses one request model for GPUs, NPUs, MLUs, DCUs and PPUs. The resource name and the
 runtime isolation method depend on the manufacturer.
 

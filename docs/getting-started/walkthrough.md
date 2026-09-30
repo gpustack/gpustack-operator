@@ -1,9 +1,5 @@
 # Walkthrough
 
-> **Purpose** — the whole scheduling chain on a real four-node cluster: every materialized object as
-> real YAML, and a before/after for each operation.
-> **Audience** everyone · **Prerequisites** [Architecture](./architecture.md) · **Read time** ~12 min
-
 Real `kubectl` invocations with their real output, objects as YAML trimmed to `metadata.labels` /
 `spec` / `status`, and a **before / after** per operation via `kubectl get instancetypes`. Node names
 are genericized (`node-cpu`, `node-a10g`, `node-t4-a`, `node-t4-b`).

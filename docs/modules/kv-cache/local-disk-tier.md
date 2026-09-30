@@ -1,11 +1,5 @@
 # KV Cache Local Disk Tier
 
-> **Purpose** — the optional disk layer on a `KVCacheBackend` member group: what it renders, the
-> bucket that is its write unit, what it does when it fills, what the host directory must already be,
-> and the cost nothing in Kubernetes accounts for.
-> **Audience** operators, contributors · **Prerequisites** [KV Cache Backend](backend.md) ·
-> **Read time** ~10 min
-
 A member group may declare a directory on each of its nodes, which configures the store client's
 offload keys to point at it. **Declaring the entry is the whole switch**: the leader has no field of
 its own and takes its offload flags from this list's presence. The list holds one entry, keyed by

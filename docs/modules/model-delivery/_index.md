@@ -1,8 +1,5 @@
 # Model Delivery
 
-> **Purpose** — choose how model weights reach a workload and when to keep them on nodes.
-> **Audience** users, operators · **Prerequisites** [Architecture](../../getting-started/architecture.md) · **Read time** ~2 min
-
 `ModelArtifact` gives a model version a stable identity. Its delivery can be handled by the engine,
 a node cache, a PVC or an image.
 

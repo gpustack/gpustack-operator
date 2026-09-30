@@ -1,11 +1,5 @@
 # T-Head MIG Operations
 
-> **Purpose** — the administrator runbook for T-Head PPU partitioning *mode* (enable, disable, reboot
-> recovery) and the user contract for requesting a partition, mirroring [NVIDIA MIG
-> Operations](nvidia-mig.md).
-> **Audience** operators, users requesting partitions · **Prerequisites** [Accelerator
-> Requests](requests.md) · **Read time** ~10 min
-
 An administrator sets the node's partitioning mode. The Device Manager reads the geometry and
 publishes it in `Devices`; GPUStack does not change the mode. When a workload is scheduled, GPUStack
 creates its GPU and Compute Instance pair and removes the pair when the Pod exits.
