@@ -55,7 +55,7 @@ func (h *ModelArtifactHandler) SetupHandler(
 	}, nil
 }
 
-// modelArtifactSourceColumn names where the weights come from: the repository, or the claim.
+// modelArtifactSourceColumn names the model repository, claim or image reference.
 func modelArtifactSourceColumn(obj *worker.ModelArtifact) string {
 	switch s := obj.Spec.Source; {
 	case s.HuggingFace != nil:
@@ -64,6 +64,8 @@ func modelArtifactSourceColumn(obj *worker.ModelArtifact) string {
 		return s.ModelScope.Repository
 	case s.PersistentVolumeClaim != nil:
 		return fmt.Sprintf("claim/%s", s.PersistentVolumeClaim.ClaimName)
+	case s.Image != nil:
+		return s.Image.Reference
 	}
 	return ""
 }

@@ -3083,7 +3083,7 @@ func schema_gpustack_api_worker_v1_ModelPrefetch(ref common.ReferenceCallback) c
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelPrefetch is the v1 view of a namespace's model residency: what is being warmed where, and how far it has got.\n\nIt proxies the v1alpha1 resource for every verb. It is status-only by design: per-node facts already live in the node's report, so the view serves the aggregates and adds no subresource of its own.",
+				Description: "ModelPrefetch is the v1 view of a namespace's model residency: what is being warmed where, and how far it has got.\n\nIt proxies configuration changes to the v1alpha1 resource. Status reports aggregated node readiness through the main object; the public API serves no status or progress subresource.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {

@@ -10,11 +10,11 @@ import (
 // ModelPrefetch is the v1 view of a namespace's model residency: what is being warmed where, and
 // how far it has got.
 //
-// It proxies the v1alpha1 resource for every verb. It is status-only by design: per-node facts
-// already live in the node's report, so the view serves the aggregates and adds no subresource of
-// its own.
+// It proxies configuration changes to the v1alpha1 resource. Status reports aggregated node
+// readiness through the main object; the public API serves no status or progress subresource.
 //
 // +genclient
+// +genclient:noStatus
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
 type ModelPrefetch workercore.ModelPrefetch

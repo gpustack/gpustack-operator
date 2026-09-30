@@ -223,3 +223,31 @@ func TestFetchPluginDownloads(t *testing.T) {
 	_, err = fetchPluginDownloads(ctx, srv.URL+"/hangs"+modelstore.DownloadsPath)
 	assert.Error(t, err, "a hanging plugin ends with the caller's bound")
 }
+
+func TestModelArtifactSourceColumn(t *testing.T) {
+	cases := []struct {
+		name   string
+		source workercore.ModelArtifactSource
+		want   string
+	}{
+		{name: "hugging face", source: workercore.ModelArtifactSource{
+			HuggingFace: &workercore.ModelArtifactHubSource{Repository: "Qwen/Qwen3-8B"},
+		}, want: "Qwen/Qwen3-8B"},
+		{name: "model scope", source: workercore.ModelArtifactSource{
+			ModelScope: &workercore.ModelArtifactHubSource{Repository: "Qwen/Qwen3-8B"},
+		}, want: "Qwen/Qwen3-8B"},
+		{name: "claim", source: workercore.ModelArtifactSource{
+			PersistentVolumeClaim: &workercore.ModelArtifactPersistentVolumeClaimSource{ClaimName: "weights"},
+		}, want: "claim/weights"},
+		{name: "image", source: workercore.ModelArtifactSource{
+			Image: &workercore.ModelArtifactImageSource{Reference: "registry.example/models/qwen@sha256:" + strings.Repeat("a", 64)},
+		}, want: "registry.example/models/qwen@sha256:" + strings.Repeat("a", 64)},
+		{name: "empty"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &worker.ModelArtifact{Spec: workercore.ModelArtifactSpec{Source: tc.source}}
+			assert.Equal(t, tc.want, modelArtifactSourceColumn(obj))
+		})
+	}
+}

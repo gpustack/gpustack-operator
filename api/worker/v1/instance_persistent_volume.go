@@ -13,6 +13,7 @@ import (
 // and the InstancePersistentVolume's name is the same as the Kubernetes PersistentVolumeClaim's name.
 //
 // +genclient
+// +genclient:noStatus
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
 type InstancePersistentVolume struct {

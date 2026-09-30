@@ -14,6 +14,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/extensionapi"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	workerclient "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/worker/v1"
 )
 
 // TestEveryCRDViewServesDelete pins the rule on setups: a v1 view of a kind the CRDs also serve
@@ -86,4 +87,40 @@ func TestEveryStorageKindHasPublicProxy(t *testing.T) {
 		})
 	}
 	assert.GreaterOrEqual(t, checked, 13, "every primary storage kind is enumerated here")
+}
+
+// TestPublicClientStatusMethodsMatchHandlers compares client promises with installed status routes.
+func TestPublicClientStatusMethodsMatchHandlers(t *testing.T) {
+	clients := reflect.TypeFor[workerclient.WorkerV1Interface]()
+	checked := 0
+	for i := range clients.NumMethod() {
+		getter := clients.Method(i)
+		if getter.Name == "RESTClient" || getter.Type.NumOut() != 1 || getter.Type.Out(0).Kind() != reflect.Interface {
+			continue
+		}
+		client := getter.Type.Out(0)
+		get, ok := client.MethodByName("Get")
+		if !ok {
+			continue
+		}
+		kind := get.Type.Out(0).Elem().Name()
+		checked++
+		t.Run(kind, func(t *testing.T) {
+			var storage rest.Storage
+			for _, setup := range setups {
+				candidate, ok := setup.(rest.Storage)
+				if ok && reflect.TypeOf(candidate.New()).Elem().Name() == kind {
+					storage = candidate
+					break
+				}
+			}
+			require.NotNil(t, storage)
+			_, servesStatus := storage.New().(extensionapi.ObjectWithStatusSubResource)
+			for _, name := range []string{"UpdateStatus", "ApplyStatus"} {
+				_, exposesStatus := client.MethodByName(name)
+				assert.Equal(t, servesStatus, exposesStatus, "%s must match the served status route", name)
+			}
+		})
+	}
+	assert.Equal(t, clients.NumMethod()-1, checked, "every resource client is checked")
 }

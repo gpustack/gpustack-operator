@@ -29,8 +29,6 @@ type InstancePersistentVolumesGetter interface {
 type InstancePersistentVolumeInterface interface {
 	Create(ctx context.Context, instancePersistentVolume *workerv1.InstancePersistentVolume, opts metav1.CreateOptions) (*workerv1.InstancePersistentVolume, error)
 	Update(ctx context.Context, instancePersistentVolume *workerv1.InstancePersistentVolume, opts metav1.UpdateOptions) (*workerv1.InstancePersistentVolume, error)
-	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-	UpdateStatus(ctx context.Context, instancePersistentVolume *workerv1.InstancePersistentVolume, opts metav1.UpdateOptions) (*workerv1.InstancePersistentVolume, error)
 	Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error
 	Get(ctx context.Context, name string, opts metav1.GetOptions) (*workerv1.InstancePersistentVolume, error)
@@ -38,8 +36,6 @@ type InstancePersistentVolumeInterface interface {
 	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *workerv1.InstancePersistentVolume, err error)
 	Apply(ctx context.Context, instancePersistentVolume *applyconfigurationworkerv1.InstancePersistentVolumeApplyConfiguration, opts metav1.ApplyOptions) (result *workerv1.InstancePersistentVolume, err error)
-	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-	ApplyStatus(ctx context.Context, instancePersistentVolume *applyconfigurationworkerv1.InstancePersistentVolumeApplyConfiguration, opts metav1.ApplyOptions) (result *workerv1.InstancePersistentVolume, err error)
 	InstancePersistentVolumeExpansion
 }
 
