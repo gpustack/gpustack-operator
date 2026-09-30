@@ -20,7 +20,7 @@ Neither workload needs its own URI, revision or token.
 ## The resource
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: ModelArtifact                      # namespaced, short name mart
 metadata:
   name: qwen-7b
@@ -89,7 +89,7 @@ status:
   digest `Ready`, `Downloading` or `Failed`; artifacts with the same digest see the same nodes, and
   only numbers cross namespaces. The mean covers the downloading nodes only, each a whole copy. It
   is written on the [thresholds](node-store.md#the-resource) the nodes store progress on. The
-  `v1` view's [progress](views.md#the-progress-subresource) answers the same at full
+  [progress](views.md#the-progress-subresource) answers the same at full
   precision.
 - **Deletion waits for the last reference.** The finalizer `worker.gpustack.ai/model-artifact-protection`
   holds a referenced artifact in `Terminating` until no `ModelDeployment` or `Instance` in the
@@ -450,7 +450,7 @@ waits instead when that node cannot run one, naming the node and the floor
 
 **See also** — [Model Deployment](../model-deployment/deployment.md) for the rest of the deployment
 contract · [Node Model Store](node-store.md) for Node delivery ·
-[Model Artifact Views](views.md) for the `v1` view and `progress` · [KV Cache Injection Reference](../kv-cache/injection.md) for the store connector this
+[Model Artifact API](views.md) for resource status and `progress` · [KV Cache Injection Reference](../kv-cache/injection.md) for the store connector this
 prefixes · [Model Deployment Status](../model-deployment/status.md) for the other conditions.
 
 **Next** → [Model Deployment Status](../model-deployment/status.md)

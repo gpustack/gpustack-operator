@@ -24,7 +24,7 @@ admission still applies to every replica.
 ## A minimal deployment
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: ModelDeployment                    # namespaced, short name md
 metadata:
   name: qwen-chat

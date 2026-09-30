@@ -95,7 +95,7 @@ kubectl get nms                                    # Ready and Used per node
 kubectl get nms gpu-node-01 -o yaml                # spec: what the plugin applies; status: what it holds
 kubectl get nms gpu-node-01 -o jsonpath='{.metadata.generation} {.status.observedGeneration}{"\n"}'
 kubectl describe pod <consumer>                    # FailedMount events carry refusals and download progress
-kubectl get nodemodelstores.v1.worker.gpustack.ai  # the v1 view: Ready, Used, Models, Downloading
+kubectl get nodemodelstores.v1.worker.gpustack.ai  # Ready, Used, Models, Downloading
 ```
 
 - **`spec` is the effective configuration**, and `observedGeneration` equal to the object's

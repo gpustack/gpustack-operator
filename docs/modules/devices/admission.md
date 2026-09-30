@@ -303,7 +303,8 @@ its catalog ceilings, as the node's per-profile capacity keys do.
 > free. A read-only projection over the ClusterQueue could not: it borrows the CQ `resourceVersion`,
 > unchanged on a `Devices`-only allocation.
 
-The v1 (`worker.gpustack.ai/v1`) InstanceType is a thin proxy + conversion over the real `v1alpha1` CRD.
+The InstanceType API proxies the controller-managed resource and converts it to the public
+representation.
 
 ## The InstanceType and Instance webhooks
 

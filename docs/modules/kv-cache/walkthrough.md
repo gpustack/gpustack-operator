@@ -36,7 +36,7 @@ being a same-namespace reference.
 ## Step 1: the store
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: KVCacheBackend
 metadata:
   name: mooncake-dram
@@ -81,7 +81,7 @@ says — `kubectl describe kvcb mooncake-dram` and its `MembersMounted` conditio
 ## Step 2: the pool and the grant
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: KVCachePool
 metadata:
   name: shared-dram
@@ -90,7 +90,7 @@ spec:
   quota:
     total: 16Gi
 ---
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: KVCachePoolBinding
 metadata:
   name: team-a
@@ -130,7 +130,7 @@ injected tenant then needs a second Binding whose domain is `default`, or that l
 ## Step 3: the workload
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: ModelDeployment
 metadata:
   name: qwen-chat

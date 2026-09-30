@@ -120,7 +120,7 @@ would close the gap lapsed past `ttlAfterLastUse`, were unpinned and are not re-
 message says how many. It stays False while the shortfall has any other cause, so a lapse never
 masks a warm-up still running or a delivery that failed.
 
-The [v1 view](views.md) proxies every verb and adds no subresource: the per-node
+The [ModelPrefetch API](views.md) supports resource operations and adds no subresource: the per-node
 facts already live on the nodes' reports, and the table prints who warms what and how far.
 
 ---

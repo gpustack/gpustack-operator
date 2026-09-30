@@ -36,7 +36,7 @@ and **declaring the tier on the group is the whole switch** — the leader's off
 from that declaration, so there is no second half to forget.
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: KVCacheBackend
 metadata:
   name: mooncake-disk

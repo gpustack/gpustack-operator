@@ -87,7 +87,7 @@ AND share a pool with every other deployment bound to it".
 **Without a shared pool** — the ordinary shape for a pair serving one model:
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: ModelDeployment
 metadata:
   name: qwen-pd

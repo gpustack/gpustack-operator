@@ -1,24 +1,24 @@
-# Model Artifact Views
+# Model Artifact API
 
-The aggregated API serves `worker.gpustack.ai/v1` beside the `v1alpha1` resources: the read surface
-GPUStack server and consoles use. A node's download progress [is stored on
+GPUStack server and consoles use `worker.gpustack.ai/v1` to manage model artifacts and inspect
+node caches. A node's download progress [is stored on
 thresholds](node-store.md#the-resource); `progress` answers between them, on request, and
 stores nothing.
 
 ## Contents
 
-- [The v1 views](#the-v1-views)
+- [Resources](#resources)
 - [The progress subresource](#the-progress-subresource)
 - [Authorization](#authorization)
 - [Capability map for GPUStack server](#capability-map-for-gpustack-server)
 - [Requirements and limits](#requirements-and-limits)
 - [Table columns](#table-columns)
 
-## The v1 views
+## Resources
 
-| View | Scope | Verbs | Printer columns |
+| Resource | Scope | Verbs | Printer columns |
 | --- | --- | --- | --- |
-| `modelartifacts.v1.worker.gpustack.ai` | namespaced | every verb, proxied to `v1alpha1`; subresource `progress` | Name, Source, Revision (12 characters), Size, Ready, Downloading, Resolved; Age with `-o wide` |
+| `modelartifacts.v1.worker.gpustack.ai` | namespaced | create, get, list, watch, update, patch, delete; subresource `progress` | Name, Source, Revision (12 characters), Size, Ready, Downloading, Resolved; Age with `-o wide` |
 | `nodemodelstores.v1.worker.gpustack.ai` | cluster | `get`, `list`, `watch`, `delete` | Name, Ready, Used, Models, Downloading; Age with `-o wide` |
 
 ```bash
@@ -26,23 +26,16 @@ kubectl get modelartifacts.v1.worker.gpustack.ai -n team-a
 kubectl get nodemodelstores.v1.worker.gpustack.ai
 ```
 
-`v1` is the group's preferred version, so a bare `kubectl get nms` or `modelartifacts.worker.gpustack.ai`
-reaches the `v1` view. **A write to a NodeModelStore, or to a ModelArtifact's status, names
-`v1alpha1`** (`nodemodelstores.v1alpha1.worker.gpustack.ai`), and so does the read of an object that
-is written back: an object read through `v1` carries `apiVersion: worker.gpustack.ai/v1`, which the
-`v1alpha1` endpoint refuses.
+`worker.gpustack.ai/v1` is the public API. A bare `kubectl get nms` or
+`kubectl get modelartifacts.worker.gpustack.ai` uses it.
 
-- **`v1` ModelArtifact has no `status` subresource.** The proxy writes with the worker's identity,
-  and the status guard admits exactly that identity to a `ModelArtifact`'s status, which mounts are
-  authorized by. An update through the main resource leaves the stored status as it is; read the
-  status through the object.
-- **`v1` NodeModelStore creates and updates nothing.** Its writers, the worker (`spec`) and each
-  node's plugin (`status`), keep writing `v1alpha1`. It serves `delete` for the garbage collector,
-  which watches the group's preferred version and collects only what that version can delete;
-  without it no NodeModelStore went with its Node on Kubernetes 1.36. The worker creates a deleted
-  object again while its node runs the plugin.
-- Both views carry the same fields as `v1alpha1`: the [artifact](artifact.md#the-resource) and
-  the [node store](node-store.md#the-resource).
+- ModelArtifact exposes no writable `status` subresource. The worker owns its status, which is
+  used to authorize model mounts. Updating the main resource preserves the stored status.
+- NodeModelStore supports reads and deletion. The worker manages its `spec`, and each node's plugin
+  reports `status`. Deletion supports Kubernetes garbage collection; the worker recreates the object
+  while its node runs the plugin.
+- Resource fields are described in [Model Artifact](artifact.md#the-resource) and
+  [Node Model Store](node-store.md#the-resource).
 
 ## The progress subresource
 
@@ -74,7 +67,7 @@ failureReasons:
   cap, or one that does not answer, contributes the bytes it last wrote and is not counted in
   `live`.
 - **It names no node.** It is namespaced and tenants read it; node names would give every tenant the
-  cluster's topology. The per-node view is the `v1` NodeModelStore.
+  cluster's topology. Read NodeModelStore for the node-level details.
 - **The mean covers the downloading nodes only**, each downloading a whole copy; a node starting a
   download does not pull the ready ones down. `downloadingPercent` is absent while none downloads.
 - **Nothing to count** answers zeros and a `reason`: the artifact is not resolved yet, or its claim
@@ -115,7 +108,7 @@ By capability, not by field.
 | `download_progress` and `size` | the entry's `downloadedBytes` and `sizeBytes`; live through `progress`; the artifact's `status.nodes` | none |
 | `resolved_paths` on the worker | the fixed mount path in the consumer's container; host paths are never exposed | by design |
 | `local_dir` | none: the plugin owns the cache layout | by design |
-| Listing a worker's model files | `v1` NodeModelStore get, list, watch | none |
+| Listing a worker's model files | NodeModelStore get, list, watch | none |
 | Download to a worker ahead of use | a [ModelPrefetch](prefetch.md) naming nodes | none |
 | Delete with `cleanup_on_delete` | delete the prefetch; collection after the last reference and its grace | none |
 | `reset` (retry now) | automatic backoff to `retryTime` | not planned |
@@ -131,7 +124,7 @@ By capability, not by field.
   installs on.
 - **Live bytes need the plugin's Pod reachable from the worker** on its HTTPS port. A NetworkPolicy
   that blocks it leaves the stored values, and `live` says how many nodes answered.
-- **No watch on `progress`**: it answers one request. Watch the `v1` NodeModelStores for changes.
+- **No watch on `progress`**: it answers one request. Watch NodeModelStores for changes.
 
 ---
 
@@ -144,11 +137,9 @@ the same way.
 
 ## Table columns
 
-The `v1` views' printer columns are rendered by the aggregated API server's own
-`TableConvertor` (`NewJSONPathTemplateTableConvertor`, under `pkg/worker/extensionapis/worker/`),
-not by the CRDPrinterColumn machinery — so the columns the `v1alpha1` CRD lists for the same
-resources are a different, smaller set, and a client asking either version gets the columns
-documented above rather than the CRD's.
+The aggregated API server renders the printer columns with its own `TableConvertor`
+(`NewJSONPathTemplateTableConvertor`, under `pkg/worker/extensionapis/worker/`). The columns in the
+resource table above describe the output of `kubectl get`.
 
 **See also** — [Node-to-Node Sync](peer-sync.md) for where a node's bytes come from,
 and [Node Model Store](node-store.md) for the status the views project.

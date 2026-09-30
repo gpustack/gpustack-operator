@@ -24,7 +24,7 @@ A backend has a **connection** axis and a **medium** axis, and they are separate
 different questions: who runs the backend, and what it is made of.
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: KVCacheBackend                 # cluster-scoped, short name kvcb
 metadata:
   name: mooncake-dram

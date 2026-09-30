@@ -93,6 +93,6 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 - Settings & `GPUSTACK_*` configuration knobs → [settings.md](../../../docs/reference/settings.md)
 - Every command the binary offers, its flags and a runnable invocation → [reference/commands.md](../../../docs/reference/commands.md)
 - Checking a node can slice before it has to: the procedure → [operation/preflight.md](../../../docs/modules/devices/preflight.md)
-- Node delivery of weights: the plugin and `NodeModelStore` → [model-store/node-store.md](../../../docs/modules/model-delivery/node-store.md); running it → [model-store/operations.md](../../../docs/modules/model-delivery/operations.md); the `v1` views and `progress` → [model-store/views.md](../../../docs/modules/model-delivery/views.md)
+- Node delivery of weights: the plugin and `NodeModelStore` → [model-store/node-store.md](../../../docs/modules/model-delivery/node-store.md); running it → [model-store/operations.md](../../../docs/modules/model-delivery/operations.md); resource status and `progress` → [model-store/views.md](../../../docs/modules/model-delivery/views.md)
 - Build / lint / test / codegen / vendored deps → [development.md](../../../docs/contribute/development.md)
 - Writing or updating any of the above → the `gpustack-operator-docs` skill

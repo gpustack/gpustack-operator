@@ -24,7 +24,7 @@ Two vocabularies meet here, as on the backend page. This API says **reuse domain
 ## Two kinds, split by scope
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: KVCachePool                      # cluster-scoped, short name kvcp
 metadata:
   name: shared-dram
@@ -33,7 +33,7 @@ spec:
   quota:
     total: 900Gi
 ---
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: KVCachePoolBinding               # namespaced, short name kvcpb
 metadata:
   name: team-a

@@ -43,7 +43,7 @@ one, not to widen the overview.
 | A `ModelArtifact`: its sources, resolution and revalidation, the manifest digest, how a `ModelDeployment` or an `Instance` mounts or downloads it, claim placement, the weight identity in KV keys | `docs/modules/model-delivery/artifact.md` |
 | The `image` source of a `ModelArtifact`: the digest contract, building weights into an image, image-volume delivery, the version floors, double storage, kubelet image GC, registry mirrors | `docs/modules/model-delivery/image-source.md` |
 | A `ModelStore`, `ModelStoreBinding` or `ModelPrefetch`: the grant, the budget, pinning, TTL expiry, the warm-up pod and why it is label-free | `docs/modules/model-delivery/prefetch.md` |
-| The `v1` views of `ModelArtifact` and `NodeModelStore`, the `progress` subresource and who may read it, the GPUStack server capability map | `docs/modules/model-delivery/views.md` |
+| The public APIs for `ModelArtifact` and `NodeModelStore`, the `progress` subresource and who may read it, the GPUStack server capability map | `docs/modules/model-delivery/views.md` |
 | A `NodeModelStore` or the `model-manager` plugin: a field and its writer, the status guard, mount authorization, materialization, a failure reason, collection, a metric | `docs/modules/model-delivery/node-store.md` |
 | Running node delivery: the chart values, where the node's configuration comes from, reading a node, the watermark cap, switching delivery, where replicas land and turning the preference off, upgrading, removing the cache | `docs/modules/model-delivery/operations.md` |
 | The `ModelDeployment` contract: the inherited reuse domain, the three override tiers, the owned-key table, the runner-image formula, prefill/decode pairing, the topology-placement field contract | `docs/modules/model-deployment/deployment.md` |
@@ -74,6 +74,13 @@ needs to not undo it.
 
 Full routing, including what does **not** belong on a page, is in
 [references/page-map.md](references/page-map.md).
+
+## Public API versions
+
+User-facing manifests and API calls use `worker.gpustack.ai/v1`. The `v1alpha1` types are internal
+controller storage; do not ask users to switch between versions or describe public resources as
+"v1 views". Document internal types only when explaining implementation under `docs/contribute/`.
+An inventory snapshot's format version is separate from a Kubernetes resource API version.
 
 ## Page shape
 

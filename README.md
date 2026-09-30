@@ -110,7 +110,7 @@ usable endpoint, and NUMA alignment depends on its kubelet policy. See
 When nodes already carry region and zone labels, an administrator can publish their hierarchy:
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: TopologySource
 metadata:
   name: cloud-zones
@@ -142,7 +142,7 @@ topology before depending on that placement.
 An administrator creates the store, its capacity pool and a grant for `team-a`, in that order:
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: KVCacheBackend
 metadata:
   name: mooncake-dram
@@ -157,7 +157,7 @@ spec:
           medium: DRAM
           capacityPerMember: 8Gi
 ---
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: KVCachePool
 metadata:
   name: shared-dram
@@ -167,7 +167,7 @@ spec:
   quota:
     total: 8Gi
 ---
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: KVCachePoolBinding
 metadata:
   name: qwen-cache
@@ -191,7 +191,7 @@ The [KV Cache Walkthrough](./docs/modules/kv-cache/walkthrough.md) explains what
 A `ModelArtifact` names the weights that the serving workload will use:
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: ModelArtifact
 metadata:
   name: qwen-7b
@@ -213,7 +213,7 @@ This deployment uses the artifact and cache binding above. Replace `instanceType
 cluster:
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: ModelDeployment
 metadata:
   name: qwen-chat

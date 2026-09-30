@@ -23,7 +23,7 @@ Enabling it and operating it are on [Model Store Operations](operations.md).
 ## The resource
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: NodeModelStore                         # cluster-scoped, short name nms, category gpustack
 metadata:
   name: gpu-node-01                          # the Node's name
@@ -100,10 +100,9 @@ status:                                      # the plugin on that node: its fact
 | `spec.kubelet` | worker | the node's kubelet thresholds, read through `nodes/<node>/proxy/configz` when the object is written and every 30 minutes; a failed read keeps the last reading, and a node never read has none. The plugin gets no `nodes/proxy` access |
 | `status` | the plugin on that node | admitted only through the status webhook below |
 
-With `kubectl`, a write to the object names `v1alpha1` (`nodemodelstores.v1alpha1.worker.gpustack.ai`):
-the group's preferred version is the [`v1` view](views.md#the-v1-views), which serves
-reads and `delete` only. A deleted object is created again by the worker while its node runs the
-plugin.
+The public [NodeModelStore API](views.md#resources) supports reads and deletion. Its configuration
+and status are maintained by the worker and node plugin. The worker recreates a deleted object
+while its node runs the plugin.
 
 The worker does **not** delete an object when the driver leaves `CSINode`, because every plugin
 restart unregisters it for a moment. A node the plugin no longer runs on keeps a stale object whose
@@ -300,7 +299,7 @@ between the status thresholds.
 ---
 
 **See also** — [Model Artifact](artifact.md) for the artifact and its other
-deliveries · [Model Artifact Views](views.md) for the `v1` views and
+deliveries · [Model Artifact API](views.md) for resource status and
 `progress` · [Node-to-Node Sync](peer-sync.md) for where a node's bytes come from ·
 [Model Store Operations](operations.md) for enabling, configuring and upgrading ·
 [Settings](../../reference/settings.md#online-adjustable-settings) for the Settings `spec` is built from.

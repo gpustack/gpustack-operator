@@ -223,8 +223,8 @@ step, with the operational caveats.
 | Path | Group / Version | Kind |
 |------|-----------------|------|
 | `api/v1` | `gpustack.ai/v1` | Extension API (settings, status) |
-| `api/worker/v1` | `worker.gpustack.ai/v1` | Extension API served by the aggregated apiserver: a proxy/conversion over the v1alpha1 CRDs plus the read-only (get, list, watch) `InstanceTypeFlavor` catalog |
-| `api/worker/v1alpha1` | `worker.gpustack.ai/v1alpha1` | CRDs (Instance, Devices, InstanceType) |
+| `api/worker/v1` | `worker.gpustack.ai/v1` | Public API served by the aggregated apiserver, including resource proxies and the read-only (get, list, watch) `InstanceTypeFlavor` catalog |
+| `api/worker/v1alpha1` | internal storage | Controller-managed CRDs behind the public API |
 
 `gen/api/main.go` configures which packages are CRDs vs extension APIs and drives the custom generators in
 `gen/api/generator` (apireg-gen, crd-gen, webhook-gen). **Never hand-edit generated files**

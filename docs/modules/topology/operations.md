@@ -78,7 +78,7 @@ After Topograph writes labels, create a read-only source that chooses the hierar
 Kueue. This example combines Kubernetes cloud labels with a Topograph fabric tier:
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: TopologySource
 metadata:
   name: cloud-fabric
@@ -102,7 +102,7 @@ Use `nodeLabels` when another trusted component already owns the values. It vali
 but never modifies those labels:
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: TopologySource
 metadata:
   name: cloud-zones
@@ -144,7 +144,7 @@ nodes:
 Reference that key and declare the same ordered levels:
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: TopologySource
 metadata:
   name: data-center
@@ -183,7 +183,7 @@ URL, does not follow redirects or use proxy-derived destinations, accepts at mos
 exactly one of bearer-token or client-certificate authentication.
 
 ```yaml
-apiVersion: worker.gpustack.ai/v1alpha1
+apiVersion: worker.gpustack.ai/v1
 kind: TopologySource
 metadata:
   name: inventory-service

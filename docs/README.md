@@ -94,7 +94,7 @@ and only the deep page needed for the task.
 | [Model Prefetch](modules/model-delivery/prefetch.md) | Warm weights before a workload starts. |
 | [Node Model Store](modules/model-delivery/node-store.md) | Understand node cache state and collection. |
 | [Node-to-Node Sync](modules/model-delivery/peer-sync.md) | Move cached weights between nodes. |
-| [Model Artifact Views](modules/model-delivery/views.md) | Read artifact and node cache status. |
+| [Model Artifact API](modules/model-delivery/views.md) | Read artifact and node cache status. |
 | [Model Store Operations](modules/model-delivery/operations.md) | Operate the node model cache. |
 
 ### Model deployment
