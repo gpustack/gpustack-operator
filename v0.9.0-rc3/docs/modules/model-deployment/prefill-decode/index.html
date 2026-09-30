@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0-rc3/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Model Deployment Prefill and Decode · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/prefill-decode/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0-rc3/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc3/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc3/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0-rc3/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0-rc3/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0-rc3/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0-rc3"
+    data-home="/gpustack-operator/v0.9.0-rc3/" data-page="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/prefill-decode/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0-rc3</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0-rc3</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0-rc3/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0-rc3/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/prefill-decode/" aria-current="page">Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0-rc3/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0-rc3/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0-rc3/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0-rc3/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Deployment Prefill and Decode</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-deployment-prefill-and-decode">Model Deployment Prefill and Decode</h1>
+<p>A deployment with <code>Prefill</code> and <code>Decode</code> roles is admitted as one set. Once both roles run, the
+operator connects them through a router and a transfer leg. <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/#prefill-and-decode">Prefill and
+decode</a>
+ describes the role fields and admission rules.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#how-a-pair-is-wired">How a pair is wired</a>
+</li>
+<li><a href="#two-ways-to-configure-a-pair">Two ways to configure a pair</a>
+</li>
+<li><a href="#the-router-block">The router block</a>
+</li>
+<li><a href="#the-two-router-fields">The two router fields</a>
+</li>
+<li><a href="#direct-transfer-transport">Direct transfer transport</a>
+</li>
+<li><a href="#different-hardware-per-role">Different hardware per role</a>
+</li>
+<li><a href="#addressing-a-role">Addressing a role</a>
+</li>
+</ul>
+<h2 id="how-a-pair-is-wired">How a pair is wired</h2>
+<p>Without <code>spec.router</code>, <code>kind</code> adds the role discriminator to the engine&rsquo;s shared-store connector and
+nothing pairs the two roles.</p>
+<p>With the managed <code>llm-d-router</code>, the connector a native vLLM role runs depends on whether
+<code>spec.kvCache</code> is set; the two settings render two different connector documents, not one document
+with a field toggled:</p>
+<table>
+  <thead>
+      <tr>
+          <th><code>spec.kvCache</code></th>
+          <th>Connector rendered</th>
+          <th>Block path</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>omitted</td>
+          <td><code>MooncakeConnector</code> alone</td>
+          <td>the direct prefill-to-decode transfer, and nothing else</td>
+      </tr>
+      <tr>
+          <td>set</td>
+          <td><code>MultiConnector</code> wrapping <code>MooncakeConnector</code> and <code>MooncakeStoreConnector</code></td>
+          <td>the direct transfer, with the shared pool attached alongside it</td>
+      </tr>
+  </tbody>
+</table>
+<p>A pair needs no shared pool to hand blocks over, so omitting <code>spec.kvCache</code> is a supported shape.
+Attaching a pool adds reuse across deployments.</p>
+<p>In both shapes the decode Pod runs llm-d&rsquo;s routing proxy as a restartable sidecar; it executes the
+prefill leg named by the router and then forwards the request to the decoder.</p>
+<p>On <strong>Ascend</strong> the same two shapes render with that platform&rsquo;s own connector names
+(<code>MooncakeConnectorV1</code> for the leg and <code>AscendStoreConnector</code> for the pool), and the sidecar relays
+the handshake in its <code>nixlv2</code> mode, the one whose per-request document matches what that connector
+waits for.</p>
+<p>That is the only router combination that renders the leg on Ascend. Behind <code>vllm-router</code> an Ascend
+pair renders no leg: that router drives its pairs in a handshake vocabulary the Ascend connector
+rejects, and behind no router nothing pairs the roles at all. The missing leg is quiet: the
+deployment goes Ready, every request is answered normally, and the two roles never exchange a
+block. A correctly answering deployment is exactly what makes the failure hard to see.</p>
+<p>Both role containers then mount the host&rsquo;s <code>/usr/local/Ascend/driver</code> tree read-only: the leg&rsquo;s
+transport builds Device RoCE endpoints and reads each NPU&rsquo;s NIC address through the <code>hccn_tool</code>
+that ships with the driver, while the engine image carries the driver libraries but not the tool.</p>
+<p>Without the mount the leg renders but the engine dies at startup, unable to resolve a device IP; a
+node with no driver installation fails the Pod&rsquo;s volume setup instead, naming the path. The mount
+ships with the transfer leg alone; an Ascend deployment without one carries no host path.</p>
+<p>The leg reads each role&rsquo;s parallel size from that role&rsquo;s own command line: a managed role&rsquo;s
+<code>extraArgs</code>, or a take-over role&rsquo;s whole <code>command</code>, never both. The one degree vLLM accepts as a
+literal environment entry, <code>VLLM_DP_SIZE</code>, rides alongside either. A role declaring none renders
+<code>1/1</code>, exactly as before.</p>
+<p>The command line is the whole of what the leg can see. A degree arriving any other way is invisible
+to it: the image&rsquo;s own entrypoint (never part of the rendered argv), a config file, a flag inside a
+<code>sh -c</code> string, <code>--additional-config</code>&rsquo;s JSON value, an environment value pulled from a ConfigMap or
+Secret. An invisibly widened role keeps its <code>1/1</code> half.</p>
+<p>The connector&rsquo;s startup assert compares the document against itself, not against the engine. An
+invisibly widened pair therefore fails loudly only when the document&rsquo;s decode degree exceeds its
+prefill one. A pair widened symmetrically starts, answers, and pulls a wrong layout.</p>
+<p>Admission holds the visible side of the contract: a degree the command line does not state legibly
+is refused, and so is a declared per-member width the role&rsquo;s card request cannot hold; see
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/#admission-refusals">Admission refusals</a>
+.</p>
+<p>SGLang renders its halves through the engine&rsquo;s own disaggregation arguments rather than this
+connector path; the two engines&rsquo; legs differ by <a href="#direct-transfer-transport">their handshake</a>
+
+alone.</p>
+<h2 id="two-ways-to-configure-a-pair">Two ways to configure a pair</h2>
+<p>Both are complete objects. The only difference is the <code>kvCache</code> block, and it is the difference
+between &ldquo;these two roles hand blocks to each other&rdquo; and &ldquo;these two roles hand blocks to each other
+and share a pool with every other deployment bound to it&rdquo;.</p>
+<p><strong>Without a shared pool</strong>, the ordinary shape for a pair serving one model:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-pd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-72B-Instruct</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">                                </span><span class="c"># vLLM | SGLang; this example walks the vLLM pair</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.29.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-d-router                </span><span class="w"> </span><span class="c"># required to pair the roles; takes either engine</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h20-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-nvidia-h20-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
+</div><p><strong>Each replica of a role becomes its own Kueue pod group: one group per replica, declaring a total
+equal to the role&rsquo;s <code>size</code>.</strong> Two roles naming the same <code>instanceType</code> are still separate groups,
+each replica composing its own Workload. The example above therefore has <strong>four</strong> single-Pod
+groups, admitted as a set.</p>
+<p><strong>A lost replica is replaced once its slot reads empty, and its siblings keep serving.</strong> A node
+drained, a replica preempted for higher-priority work, a kubelet evicting under pressure: each costs
+the one replica that left, not its siblings. Every replica is its own group with its own Workload, so
+a departure touches no other replica&rsquo;s admission.</p>
+<blockquote>
+<p><strong>Why the slot is what a replacement waits for</strong> — the group is annotated as serving, so Kueue never
+releases the finalizer it holds on the departed Pod; only that replica&rsquo;s Workload being deleted
+releases it. The replacement is created once no Pod for that replica&rsquo;s ordinal reads on the API
+server, never beside a member still listed, because a group over its declared total reads as
+excess, and Kueue&rsquo;s answer to the excess is to delete the newcomer.</p>
+</blockquote>
+<p><strong>The replica bounds the blast radius.</strong> A loss or an edit inside one replica&rsquo;s group does not reach
+another replica&rsquo;s group: one <code>Prefill</code> replica turning over leaves its siblings and all of <code>Decode</code>
+serving. The groups are still admitted together; an <code>AdmissionCheck</code> holds them until the whole set
+has reserved quota, so <code>Prefill</code> still never starts without <code>Decode</code>.</p>
+<p>Splitting <code>instanceType</code>s buys different hardware; the isolation it used to buy, every replica has
+by default.</p>
+<p><strong>With a shared pool</strong>, the same object plus one block:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># ... everything above, unchanged ...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kvCache</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">poolRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">team-a-dram                 </span><span class="w"> </span><span class="c"># a KVCachePoolBinding in THIS namespace</span></span></span></code></pre></div>
+</div><h2 id="the-router-block">The router block</h2>
+<p><strong><code>spec.router</code> is what pairs the roles, and <code>spec.kvCache</code> is not a substitute for it.</strong> A
+deployment declaring <code>Prefill</code> and <code>Decode</code> with no router is admitted and renders two roles that
+nothing routes between: each gets the shared-store connector with its role discriminator, and no
+request is ever split across them. Attaching a pool does not change that.</p>
+<p>Conversely a router with no pool is complete. What each shape renders is the table under <a href="#how-a-pair-is-wired">How a pair is wired</a>
+.</p>
+<p><code>spec.router.replicas</code> is optional, and absent means one. More than one trades cache consistency for
+availability: a router scoring on a prefix cache holds that state per replica; upstream reports radix
+trees that do not synchronize across replicas and a hit rate falling by ten to twenty percent as a
+result. Where replicas do exchange events, the exchange improves load estimation without making two
+replicas route alike.</p>
+<p><code>spec.router.extraArgs</code> takes additional flags for the router process. A flag the operator derives
+itself is <strong>refused rather than merged</strong>, so one setting has one source. The owned catalog is keyed by
+router, and the refusal names the flag and the router.</p>
+<p>For <code>llm-d-router</code> it is <code>--endpoint-selector</code>, <code>--endpoint-target-ports</code>, <code>--config-file</code>,
+<code>--secure-serving</code>, <code>--grpc-health-port</code> and <code>--metrics-endpoint-auth</code>.</p>
+<p><code>vllm-router</code> and <code>sglang-gateway</code> take their whole configuration on the command line, so their
+catalogs are wider: the two bind addresses and their ports, the four service-discovery flags and
+each project&rsquo;s own spelling of the disaggregation switch. Only <code>vllm-router</code> names a transfer
+connector; the gateway has no such flag, because its transfer backend is the engine&rsquo;s.</p>
+<p>A router is also <strong>engine-matched</strong>, and a pair outside this table is refused naming both sides:</p>
+<table>
+  <thead>
+      <tr>
+          <th><code>spec.router.name</code></th>
+          <th>Engines</th>
+          <th>Rendered shape</th>
+          <th>Routing policy</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td><code>vLLM</code>, <code>SGLang</code></td>
+          <td>An endpoint picker behind a proxy, configured by a mounted document</td>
+          <td><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/routing/#llm-d-router-takes-no-policy-flag">A fixed scoring profile</a>
+</td>
+      </tr>
+      <tr>
+          <td><code>vllm-router</code></td>
+          <td><code>vLLM</code></td>
+          <td>One process, configured entirely by its command line</td>
+          <td><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/routing/#switching-to-round-robin"><code>cache_aware</code> unless <code>extraArgs</code> names another</a>
+</td>
+      </tr>
+      <tr>
+          <td><code>sglang-gateway</code></td>
+          <td><code>SGLang</code></td>
+          <td>One process, configured entirely by its command line</td>
+          <td><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/routing/#switching-to-round-robin"><code>cache_aware</code> unless <code>extraArgs</code> names another</a>
+</td>
+      </tr>
+  </tbody>
+</table>
+<p><code>llm-d-router</code> takes both engines because upstream carries a handshake connector and a metrics
+configuration for each. The other two are each one project&rsquo;s router for that project&rsquo;s own engine,
+and admitting a cross pairing would be a claim this repository has not measured.</p>
+<h2 id="the-two-router-fields">The two router fields</h2>
+<p><code>spec.router.requestTimeoutSeconds</code> is how long the router waits for a reply. <strong>Leaving it out does
+not mean one thing across the three.</strong> It renders nothing, so each router keeps its own upstream
+default: <strong>one day</strong> under <code>llm-d-router</code>, whose proxy carries the timeout, against <strong>half an hour</strong>
+under the two configured by their command line, a factor of forty-eight.</p>
+<p>Setting it is what makes a declaration survive a change of router. Zero is refused: it would mean
+&ldquo;wait forever&rdquo; under the proxy and nothing in particular under the other two.</p>
+<p><code>spec.router.disaggregationThresholdTokens</code> is how many prompt tokens <strong>not already in a prefix
+cache</strong> make a request worth splitting between a prefiller and a decoder; below it the decode replica
+serves the whole request itself. Unset renders the value the picker already used.</p>
+<p><strong>Zero disables splitting entirely</strong> rather than meaning &ldquo;always split&rdquo; (the decider returns &ldquo;do not
+disaggregate&rdquo; on a zero threshold before reading anything else), and it is accepted because it is a
+value upstream defines. It is <strong>refused</strong> on the other two routers rather than ignored: they have no
+per-request decision to threshold, and a field that is legal to write and renders nothing is a shape
+this API has rejected before.</p>
+<p>The proxy under <code>llm-d-router</code> also writes <strong>one access log</strong>: a JSON object per request on the
+container&rsquo;s standard output, carrying the response code, the response flags, the response code
+details, the duration, the endpoint the picker selected, the method, the path, the request id and the
+byte counts. It is not a field: the gap it fills is that nothing is logged at all, so there is no
+value to choose. The other two routers log whatever their own flags say.</p>
+<p><strong>Two flags are fixed.</strong> The router runs with
+<code>--secure-serving=false</code> and <code>--metrics-endpoint-auth=false</code>, where upstream defaults both to
+<strong>true</strong>. The inversion is deliberate: a router manages <strong>east-west</strong> traffic, picking which replica
+of this deployment serves a request already inside the cluster, while TLS and caller authentication
+are <strong>north-south</strong> concerns owned by the gateway that admits traffic into the cluster.</p>
+<p>Where those two flags sit, neither protects anything. <code>--secure-serving</code> puts TLS on the endpoint
+picker&rsquo;s gRPC server, whose only client is the proxy container <strong>in the same Pod</strong> dialing
+<code>127.0.0.1</code>; <code>--metrics-endpoint-auth</code> guards the picker&rsquo;s own <code>/metrics</code>, scraped in-cluster. So
+there is no field for either, and neither is reachable through <code>extraArgs</code>.</p>
+<h2 id="direct-transfer-transport">Direct transfer transport</h2>
+<p>The point-to-point leg renders Mooncake&rsquo;s <code>tcp</code> when the API field is unset:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kvTransfer</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">RDMA                    </span><span class="w"> </span><span class="c"># unset renders &#34;tcp&#34;</span></span></span></code></pre></div>
+</div><p>The value is a property of <strong>one link</strong>, so it is deployment-wide: a per-role field could only
+express two ends naming different protocols for one connection, which fails at transfer time rather
+than at admission.</p>
+<p>The API accepts <code>Auto</code>, <code>TCP</code>, <code>RDMA</code>, <code>EFA</code>, <code>CANN</code> and <code>ROCM</code>,
+using the same Mooncake mapping as <code>KVCacheBackend</code>: <code>Auto</code> and <code>TCP</code> render <code>tcp</code>, <code>CANN</code>
+renders <code>ascend</code>, and <code>ROCM</code> renders <code>hip</code>. <code>MUSA</code> and <code>MACA</code> are excluded because they are
+same-node IPC transports and the two roles may run on different nodes.</p>
+<p>The engine image must still carry a build for its transport. SGLang maps <code>tcp</code> to
+<code>--disaggregation-transfer-backend mooncake_tcp</code> and every other mapped value to <code>mooncake</code>.
+Which value works on which engine is <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/#which-transport-each-engine-can-use">the transport matrix</a>
+.</p>
+<p><strong><code>tcp</code> is enforced, not only requested</strong>: the transfer engine picks its transport from the host,
+and with no RDMA device a build with multi-node NVLink installs NVLink between hosts with no NVLink
+path. So native vLLM also gets the <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/#operator-owned-keys">defaulted</a>
+ <code>MC_FORCE_TCP=1</code>. Both pins
+are process-wide, so neither renders beside a store on another transport, and every client at
+its engine&rsquo;s <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/">supported minimum</a>
+ honors them.</p>
+<p>It is read on the direct-transfer leg, which every <strong>admitted router-and-engine pair</strong> renders on its
+<code>Prefill</code> and <code>Decode</code> roles: a prefiller that cannot hand a decoder its blocks is not disaggregated
+under any router. On every other shape the field is accepted and renders nothing.</p>
+<p>What differs per pair is the handshake, not whether there is a leg: Mooncake&rsquo;s bootstrap server
+under native vLLM, SGLang&rsquo;s own registry under SGLang, and on Ascend the decode sidecar&rsquo;s relay
+(<a href="#how-a-pair-is-wired">the one router combination that renders a leg there</a>
+). There the field is
+ignored: the tested vLLM-Ascend v0.23.0 and v0.26.0rc1 builds use <code>ascend</code> on this leg.</p>
+<p>It is separate from the pool&rsquo;s transport. <code>KVCacheBackend.spec.transport</code> feeds the engine&rsquo;s store
+client; this leg is engine to engine and never traverses the store, so the two declare separately: a
+deployment with no <code>kvCache</code> block still has this leg to configure.</p>
+<p>Editing it <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/#rollout-behavior">turns over every role</a>
+: the value renders
+into both ends&rsquo; arguments, so every role&rsquo;s replicas turn over one at a time. A prefiller and a decoder
+can disagree on the protocol until both converge, the same window an <code>engine.version</code> edit opens.</p>
+<h2 id="different-hardware-per-role">Different hardware per role</h2>
+<p>A Kueue Workload carries one <code>queueName</code>, and that name is the one the role&rsquo;s <code>instanceType</code>
+publishes as its <code>status.entrance</code>. Every replica is its own group regardless, so two roles were
+never going to share a Workload, on two <code>instanceType</code>s or on one. The set is admitted together by an
+admission check rather than by Kueue&rsquo;s intra-group rule.</p>
+<p>See <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/#one-group-per-replica">One group per replica</a>
+ for what that costs an edit, and
+<a href="/gpustack-operator/v0.9.0-rc3/docs/reference/settings/#authoring-the-instancetype">Authoring the InstanceType yourself</a>
+ for which
+queues carry the check.</p>
+<p><strong>Adding a second manufacturer uses the same mechanism.</strong> A queue&rsquo;s accelerator quota is
+<code>credits.gpustack.ai/&lt;manufacturer&gt;</code>, one resource name per manufacturer, and Kueue&rsquo;s own webhook
+refuses a second resource group repeating a covered resource within one queue. With a queue per role
+there is no second group to repeat anything.</p>
+<p><strong>Two roles on different manufacturers cannot share KV through their pool.</strong> The deployment is
+admitted and both halves serve; what fails is the sharing, and it fails silently: reads from the
+shared store miss, and nothing on the deployment reports it. Three independent reasons stand
+between the halves:</p>
+<ul>
+<li><strong>This operator&rsquo;s own refusal is the one an administrator meets.</strong> On a pool left at its default
+transport, the renderer <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/injection/#transport-compatibility-at-binding">refuses the vLLM-Ascend
+half</a>
+ (the rule and its
+remediation are stated there). The check is one-sided: it fires for a single-manufacturer Ascend
+deployment just the same, and it is the only one of the three that produces a message;
+following its remediation clears only this refusal; the next two apply regardless.</li>
+<li><strong>Two upstream limits then apply</strong>, described at the versions each engine is supported at (see
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/#the-minimum-per-shape">the minimum per shape</a>
+); they describe that pair of
+releases, not a permanent property of either project. The operator
+renders no key that lets the Ascend half load from the shared store, and the two engines address
+it with incompatible keys, so every lookup misses and no error is raised.</li>
+</ul>
+<p>This limit governs the shared pool alone: <a href="#how-a-pair-is-wired">a pair needs no shared pool to hand blocks
+over</a>
+.</p>
+<p><strong>For the direct transfer, what matters is the router in front, not the manufacturers.</strong> The leg
+renders per role, and on Ascend <a href="#how-a-pair-is-wired">only one router combination
+carries it</a>
+.</p>
+<p>A mixed pair never forms a transfer either way: the two sides&rsquo; connectors speak different handshake
+vocabularies, so a relayed document from one names nothing the other reads. Two non-Ascend roles
+both render it (NVIDIA and AMD, say), and what the engines then do is upstream&rsquo;s answer,
+unmeasured here.</p>
+<p><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/scheduling/#stage-4-the-kueue-chain">Kueue assigns a ResourceFlavor per
+PodSet</a>
+, so a role still takes whatever
+its own pool assigns; what selects the hardware is the <code>instanceType</code> the role names.</p>
+<h2 id="addressing-a-role">Addressing a role</h2>
+<p>Each role gets a <code>ClusterIP</code> Service named <code>&lt;deployment&gt;-&lt;role&gt;</code>, beside the deployment-wide one, so a
+decoder is reachable <strong>as</strong> a decoder. The managed router uses these stable role addresses for the
+tokenizer and cache-event contracts; they also remain useful for addressing one half directly while
+debugging.</p>
+<p>With <code>spec.router</code>, the operator renders resources named <code>&lt;deployment&gt;-router</code>: a Deployment,
+ConfigMap, Service, ServiceAccount, Role and RoleBinding. Removing <code>spec.router</code> prunes these resources.
+What <code>status.endpoint</code> publishes in each shape is under <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/status/#status">Status</a>
+.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/">Model Deployment</a>
+ for the role fields, the owned-key
+table and what admission refuses</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/routing/">Model Deployment Routing</a>
+ for which replica each
+router picks</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/">Engine Versions</a>
+ for which transport each engine can use on
+each leg</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/status/">Model Deployment Status</a>
+ for what <code>status.endpoint</code> publishes.</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/routing/">Model Deployment Routing</a></div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/d7dffeab10b4baa46ccdf377928f567629b61017/docs/modules/model-deployment/prefill-decode.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#how-a-pair-is-wired">How a pair is wired</a></li>
+    <li><a href="#two-ways-to-configure-a-pair">Two ways to configure a pair</a></li>
+    <li><a href="#the-router-block">The router block</a></li>
+    <li><a href="#the-two-router-fields">The two router fields</a></li>
+    <li><a href="#direct-transfer-transport">Direct transfer transport</a></li>
+    <li><a href="#different-hardware-per-role">Different hardware per role</a></li>
+    <li><a href="#addressing-a-role">Addressing a role</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0-rc3/js/site.67c391187af9bb2c73f652f6a057af0de934b5621d2854fd931860ca36b15ae8.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,258 @@
+# Model Store Operations
+
+The `model-manager` DaemonSet keeps one model cache per node. It downloads each Hugging Face or ModelScope
+`ModelArtifact` digest once per node and mounts it for workloads. Configure and inspect that cache
+with the steps below; [Node Model Store](/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/node-store/index.md) explains each mount.
+
+## Contents
+
+- [Enable it](#enable-it)
+- [Where the configuration comes from](#where-the-configuration-comes-from)
+- [Read a node](#read-a-node)
+- [The capacity rule](#the-capacity-rule)
+- [Switch delivery](#switch-delivery)
+- [Where replicas land](#where-replicas-land)
+- [Upgrade notes](#upgrade-notes)
+- [Uninstall, and moving the cache](#uninstall-and-moving-the-cache)
+- [A deployment waiting for its weights](#a-deployment-waiting-for-its-weights)
+
+## Enable it
+
+The chart deploys it by default (`modelManager.enabled: true`) with the CSIDriver
+`model.csi.gpustack.ai`, one DaemonSet Pod per node, a ServiceAccount and a ClusterRole that grants
+only get, list and watch on `modelartifacts` and `nodemodelstores`, update on
+`nodemodelstores/status`, and ConfigMaps in the operator namespace. It reads no Secret: kubelet
+hands each mount its artifact's Secret.
+
+| Value | Default | Meaning |
+| --- | --- | --- |
+| `modelManager.rootPath` | `/var/lib/gpustack/models` | the node's cache directory, a hostPath; mount a dedicated filesystem here |
+| `modelManager.kubeletDir` | `/var/lib/kubelet` | kubelet's root; the plugin mounts its `pods` directory with `Bidirectional` propagation and its own plugin directory separately |
+| `modelManager.securePort` | `32444` | metrics, readiness and liveness |
+| `modelManager.registrar.image` | `docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.17.0` | the sidecar that registers the plugin with kubelet |
+| `modelManager.nodeSelector`, `tolerations` | every node, every taint | where it runs; a node without it cannot mount node-delivered weights |
+
+- **The operator namespace must admit privileged Pods.** The plugin container is privileged, so an
+  enforced `pod-security.kubernetes.io/enforce` label there must be `privileged`, as the device
+  manager already needs. Tenant namespaces may enforce `restricted`: it admits `csi` volumes.
+- **Image mode** installs it unless `--disable-applications` names `model-manager` (values key
+  `modelManager`); see [Installation Modes](/gpustack-operator/v0.9.0-rc3/docs/operate/installation-modes/index.md). Its overlay
+  sets only that switch: every other value keeps the chart's default, and no delivery is seeded, so
+  `model-artifact-delivery-mode` stays `Engine` until you set it.
+- **A kubelet with another root directory** (some distributions use `/var/snap/...` or
+  `/var/lib/k0s/kubelet`) needs `modelManager.kubeletDir` set to it, or no mount reaches a Pod. Image
+  mode cannot set it, so there the plugin only works with the standard `/var/lib/kubelet`.
+
+## Where the configuration comes from
+
+| Layer | Carrier | Who changes it | What |
+| --- | --- | --- | --- |
+| Deploy time | chart values; in image mode the worker's overlay, which sets only the switch | installer | the switch, the cache root, the kubelet directory, images, resources and placement, the delivery seed |
+| Cluster runtime | [Settings](/gpustack-operator/v0.9.0-rc3/docs/reference/settings/index.md#online-adjustable-settings) in the operator namespace | administrator | delivery mode, Hub endpoint, proxy, no-proxy, CA bundle, watermarks, download concurrency and bandwidth |
+| Object | the `ModelArtifact` | tenant | source, revision, patterns, Secret; immutable |
+
+The worker merges the runtime layer into every node's `NodeModelStore.spec` within a minute of a
+change, and the plugin reads only that object and the CA ConfigMap it names. Nothing a tenant
+writes chooses where a node connects. The Settings this adds:
+
+| Setting | Default | Check |
+| --- | --- | --- |
+| `model-artifact-delivery-mode` | `Engine`; the chart seeds `Node` with the plugin | `Engine` or `Node`; `Node` needs the CSIDriver |
+| `model-store-high-watermark` | `80` | integer, above the low watermark, at most `95` |
+| `model-store-low-watermark` | `70` | integer, at least `1`, below the high watermark |
+| `model-store-download-concurrency` | `8` | concurrent requests per node, `1` to `64` |
+| `model-store-download-bandwidth` | `0` | bytes per second per node as a quantity (`200Mi`); `0` is unlimited |
+
+The endpoint, proxy, no-proxy and CA bundle Settings a `ModelArtifact` already resolves through feed
+`spec.hub` as well, so the controller, an engine and the plugin reach the same Hub the same way.
+The CA bundle **is** given to the plugin, which runs in the operator namespace.
+
+**A default is checked where it is used.** A value seeded from a `GPUSTACK_*` variable skips
+admission, so the worker refuses to start on an invalid one, never writes one into `spec`, and the
+plugin checks `spec` again: an invalid one sets `Ready=False`, `InvalidConfiguration`, and no
+download starts.
+
+```bash
+kubectl -n gpustack-system patch setting model-store-download-bandwidth --type merge -p '{"spec":{"value":"200Mi"}}'
+```
+
+### The pool layer
+
+A [`ModelStore`](/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/prefetch/index.md) is a fourth layer above the cluster Settings: a
+cluster-scoped object whose `nodeSelector` picks a pool and whose watermarks and download limits
+override the matched nodes field by field. A field the store leaves out keeps the cluster default,
+and an explicit `bytesPerSecond: 0` means "unlimited on this pool". The winner's name lands in the
+node's `spec.store`; nodes no store matches keep the cluster defaults.
+
+Two stores whose selectors match one node never merge silently: both report `SelectorOverlap`, and
+the alphabetically first name wins the shared nodes. Fix the selectors rather than relying on the
+order; it is a tie-break, not a policy.
+
+## Read a node
+
+```bash
+kubectl get nms                                    # Ready and Used per node
+kubectl get nms gpu-node-01 -o yaml                # spec: what the plugin applies; status: what it holds
+kubectl get nms gpu-node-01 -o jsonpath='{.metadata.generation} {.status.observedGeneration}{"\n"}'
+kubectl describe pod <consumer>                    # FailedMount events carry refusals and download progress
+kubectl get nodemodelstores.v1.worker.gpustack.ai  # Ready, Used, Models, Downloading
+```
+
+- **`spec` is the effective configuration**, and `observedGeneration` equal to the object's
+  `generation` means the plugin applies it. The `Ready` message says when the high watermark was
+  capped, and from what.
+- **`status.models`** lists each digest the node holds, is downloading or failed on, and whether a
+  Pod mounts it; a download's `downloadedBytes` [moves in steps](/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/node-store/index.md#the-resource).
+  It names no tenant: find a deployment's digest in its `status.model.manifestDigest`, and an
+  artifact's nodes in its `status.nodes` or its
+  [progress](/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/views/index.md#the-progress-subresource).
+- **A `Failed` digest** carries its reason and `retryTime`. Mounts of it do not download again
+  before then; fix the cause (the Secret, the proxy, the CA) and the next attempt after `retryTime`
+  picks it up.
+- **A stale object**: a node the plugin stopped running on keeps its object, with a `Ready`
+  condition that no longer changes.
+- **Metrics** are on the plugin's port: `kubectl get --raw
+  "/api/v1/namespaces/gpustack-system/pods/https:<plugin-pod>:32444/proxy/metrics"`.
+
+## The capacity rule
+
+The watermarks are percentages of the cache filesystem's usage **by everything on it**, with the
+blocks reserved for root counted as used, the way kubelet reads a filesystem's available space. Collection
+starts above the high one and removes unreferenced content down to the low one, never a tree a Pod
+mounts; with nothing removable it sets `CapacityLow=True`.
+
+**Give the cache its own filesystem**, mounted at `modelManager.rootPath`. There the Settings apply
+as written. When the cache shares the filesystem holding kubelet's `pods` directory (the two paths
+report the same device), a cache near the watermark would push kubelet into disk-pressure eviction
+or image collection, so the plugin caps the high watermark:
+
+- It takes `evictionHard["nodefs.available"]`, `evictionHard["imagefs.available"]` and
+  `imageGCHighThresholdPercent` from the node's `spec.kubelet`, which the worker reads from kubelet's
+  `configz` endpoint: kubelet's effective configuration, its flags, configuration file and drop-ins
+  merged. The plugin reads no kubelet file. A quantity is converted to a percentage of the
+  filesystem.
+- The cap is the lowest of `100 - nodefs.available - 5`, `100 - imagefs.available - 5` and
+  `imageGCHighThresholdPercent - 5`. The image thresholds count because the plugin cannot see where
+  the image store is, so it assumes the same filesystem.
+- A threshold kubelet does not set takes kubelet's default, `10%`, `15%` and `85`, which cap at
+  `80`; so do all three while `spec.kubelet` is absent (configz disabled or unreachable), and the
+  `Ready` message says the effective configuration could not be read. A quantity at or above the
+  filesystem's size cannot be a share of it: it takes the default and the message names it, rather
+  than drive the cap to its 2% floor.
+- A change of the thresholds reaches the plugin through its `spec`, without a restart.
+
+The low watermark is lowered with the cap when it would reach it. When the cap lowers the Setting,
+the `Ready` message says so and where the thresholds came from; with the defaults the Setting's own
+`80` is not lowered.
+
+Measured on a managed node whose cache shares a 265 GB boot disk with kubelet (`nodefs.available`
+10%, image collection 85/80): filled to 78.5% under the 80% watermark, the next 65.5 GB download
+was refused, kubelet never reported `DiskPressure`, evicted nothing and collected no image.
+Reservations count the downloads still running, so several starting together stay under the
+watermark as one would.
+
+## Switch delivery
+
+`model-artifact-delivery-mode` chooses how a hub artifact reaches a `ModelDeployment`:
+`Engine`, the engine downloads its commit into its own cache, or `Node`, the plugin mounts it at
+`/var/lib/gpustack/model`. A claim artifact is always mounted directly, and an `Instance` always
+uses the plugin for a hub artifact, whatever the Setting says.
+
+- **Changing it rolls every deployment using a hub artifact once**, the way an image change does. Replicas
+  on the old and the new delivery serve the same weights under the same served name.
+- **vLLM's KV store key also carries the last path segment of `--model`**, which differs between the
+  two (`model` against the repository's name), so KV blocks written before the switch are not hit
+  after it.
+- **`Node` is refused while the CSIDriver does not exist.** A value that reaches the store anyway,
+  from the environment or a plugin removed later, leaves consumers with `WeightsReady=False`,
+  `NodeDeliveryUnavailable`, and no new Pod; running Pods are not touched.
+- **A filtered artifact needs `Node`.** Under `Engine`, a deployment on an artifact with
+  `allowPatterns` or `ignorePatterns` creates no Pod and reports `FilterNeedsNodeDelivery`.
+
+## Where replicas land
+
+A node-delivered Pod prefers the nodes holding its digest when they can take it; the mechanism is in
+[Topology-Aware Scheduling](/gpustack-operator/v0.9.0-rc3/docs/modules/topology/scheduling/index.md#placement-of-node-delivered-models).
+Compute always comes first, so a warm cache never holds a Pod back.
+
+```bash
+kubectl get pod <replica> -o jsonpath='{.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution}{"\n"}{.spec.nodeName}{"\n"}'
+kubectl get nms -o custom-columns='NODE:.metadata.name,DIGESTS:.status.models[*].digest'
+```
+
+A replica on a node that downloads again is expected when the first command shows one of these
+(each rule is in the mechanism section linked above):
+
+- **a term naming nodes other than `spec.nodeName`**: those hot nodes had no room for it;
+- **no term at all**: no node held the digest when the Pod was created, the Pod is not
+  node-delivered, or it asks for a preferred topology level;
+- **the gate is off**, in a string you override or in a Kueue this chart does not install.
+
+To turn the preference off, set `TASRespectNodeAffinityPreferred: false` in
+`kueue.managerConfig.controllerManagerConfigYaml`, copying the whole string, since Helm replaces a
+string value whole. The gate is Kueue's, so it also stops Kueue honoring a preferred node affinity
+any other author wrote in a TAS queue. Pods keep their terms, which then change nothing. There is no
+Setting for it.
+
+**The gate is alpha** in the bundled Kueue. A Kueue that does not know a gate its configuration
+names refuses to start, so a Kueue upgrade checks it first.
+
+## Upgrade notes
+
+**From the version before node delivery.** With the plugin enabled, the upgrade seeds
+`model-artifact-delivery-mode=Node`, and every `ModelDeployment` using a hub artifact rolls
+once, to Node delivery. A seed fills only a Setting the cluster does not have yet, so there are two
+ways to avoid the roll:
+
+1. set the Setting to `Engine` before upgrading, which the seed then leaves alone; or
+2. upgrade with `--set modelManager.enabled=false`, which seeds nothing and keeps `Engine`.
+
+Either way you can switch later, at a time of your choosing. A later `helm upgrade` never overrides
+the Setting.
+
+**To the version with the placement preference.** Kueue restarts with `TASRespectNodeAffinityPreferred`
+on. Running replicas are not touched; new node-delivered Pods carry the preference. A Pod in a TAS
+queue whose author wrote a preferred node affinity is now ranked by it, where before it was
+ignored. If you override `controllerManagerConfigYaml`, your string keeps its own gates: add the
+line to get the preference.
+
+What the gate is, and how to turn it off, is in [Where replicas land](#where-replicas-land).
+
+**Rolling the plugin.** The DaemonSet rolls one node at a time. Mounted Pods keep running and reading
+throughout: a mount is a kernel bind mount. A mount asked for while a node's plugin restarts fails,
+kubelet retries it, and it succeeds once the new Pod serves.
+
+## Uninstall, and moving the cache
+
+- **Disabling the plugin** (`modelManager.enabled=false`) removes the CSIDriver, and the worker then
+  deletes every `NodeModelStore`. Consumers under Node delivery stop creating Pods with
+  `NodeDeliveryUnavailable`; switch the Setting to `Engine` first to keep them scaling.
+- **`helm uninstall` with `cleanupOnUninstall=true`** also removes the CRD with its objects, as for
+  every CRD of this group.
+- **The cache stays on each node.** Remove it by hand once nothing mounts from it, on every node:
+  `rm -rf /var/lib/gpustack/models` (or your `rootPath`).
+- **Changing `rootPath`** points the plugin at an empty cache. Nothing is migrated or removed from
+  the old path, and Pods that mount from it keep their mounts. Treat it as a migration: move the
+  directory yourself while no Pod on the node mounts from it, or let the new path fill on demand
+  and remove the old one afterwards.
+
+## A deployment waiting for its weights
+
+`WeightsReady` on the `ModelDeployment` says which side to look at; the full table is in the
+[Model Artifact](/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/artifact/index.md#status).
+
+| Reason | Look at |
+| --- | --- |
+| `NodeDeliveryUnavailable` | the CSIDriver `model.csi.gpustack.ai` and `modelManager.enabled` |
+| `FilterNeedsNodeDelivery` | the delivery Setting, or the artifact's patterns |
+| `Materializing` | the Pod's `FailedMount` events for bytes received; a Pod starts up to about two minutes after the download ends |
+| `MaterializationFailed` | the node's `status.models` entry: reason, message and `retryTime` |
+| `WeightsNotMounted` | the Pod's `FailedMount` events: a `PermissionDenied` names the authorization rule that failed |
+
+---
+
+**See also** — [Node Model Store](/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/node-store/index.md) for every field and
+reason · [Model Artifact](/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/artifact/index.md) for the artifact and its
+patterns · [Settings](/gpustack-operator/v0.9.0-rc3/docs/reference/settings/index.md#online-adjustable-settings) for every Setting.
+
+**Next** → [Model Artifact](/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/artifact/index.md)

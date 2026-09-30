@@ -1,0 +1,96 @@
+# GPUStack Operator
+
+> GPUStack Operator discovers hardware, shapes accelerator capacity, and helps Kubernetes place workloads where that capacity is available.
+
+Documentation version: v0.9.0-rc3. Source revision: d7dffeab10b4baa46ccdf377928f567629b61017.
+These pages come from the repository's docs/ sources. For version-specific behavior, use the
+documentation and code for your release. This index routes questions; follow its links for evidence.
+
+## Heterogeneous devices
+
+- [Heterogeneous Devices](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/devices/index.md): Choose an accelerator request.
+- [Device Discovery](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/devices/discovery/index.md): Trace hardware detection and allocation.
+- [Scheduling Chain](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/devices/scheduling/index.md): Follow capacity from labels to queues.
+- [Admission](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/devices/admission/index.md): Understand the five request checks.
+- [Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/devices/requests/index.md): Look up resource keys and valid requests.
+- [NVIDIA MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/devices/nvidia-mig/index.md): Enable and recover NVIDIA partitions.
+- [T-Head MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/devices/thead-mig/index.md): Enable and recover T-Head partitions.
+- [Hygon MIG Operations](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/devices/hygon-mig/index.md): Enable and recover Hygon partitions.
+- [Preflight Operations](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/devices/preflight/index.md): Check a node before installation.
+- [Instance Type Unit Resources Reference](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/reference/instance-type-unit-resources/index.md): Look up CPU and memory presets.
+
+## RDMA networking
+
+- [RDMA Networking](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/index.md): Start with RDMA requests.
+- [Network Topology](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/index.md): See how links and devices are discovered.
+- [RDMA Operations](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/operations/index.md): Request and check RDMA endpoints.
+
+## Topology management
+
+- [Topology Management](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/topology/index.md): Start with placement by domain.
+- [Topology-Aware Scheduling](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/topology/scheduling/index.md): Follow topology data into scheduling.
+- [Topology-Aware Scheduling Operations](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/topology/operations/index.md): Enable and diagnose topology placement.
+
+## KV cache
+
+- [KV Cache](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/index.md): Start with a shared inference cache.
+- [KV Cache Backend](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/backend/index.md): Understand the store and its capacity.
+- [KV Cache Leader](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/index.md): Understand leader election and health.
+- [KV Cache Local Disk Tier](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/index.md): Configure local disk storage.
+- [KV Cache on Disk-Heavy Nodes](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/disk-heavy-nodes/index.md): Size memory on disk-heavy nodes.
+- [KV Cache Pool](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/pool/index.md): Grant and limit cache use.
+- [KV Cache Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/walkthrough/index.md): Create a working cache from backend to workload.
+- [KV Cache Injection Reference](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/injection/index.md): Attach a Pod to a pool.
+
+## Model delivery
+
+- [Model Delivery](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/index.md): Choose how weights reach workloads.
+- [Model Artifact](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/artifact/index.md): Resolve and verify model weights.
+- [Model Image Source](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/image-source/index.md): Package weights in an image.
+- [Model Prefetch](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/prefetch/index.md): Warm weights before a workload starts.
+- [Node Model Store](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/node-store/index.md): Understand node cache state and collection.
+- [Node-to-Node Sync](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/peer-sync/index.md): Move cached weights between nodes.
+- [Model Artifact API](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/views/index.md): Read artifact and node cache status.
+- [Model Store Operations](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/operations/index.md): Operate the node model cache.
+
+## Model deployment
+
+- [Model Deployment](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/index.md): Start with managed model serving.
+- [Model Deployment Configuration](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/index.md): Configure serving roles and overrides.
+- [Model Deployment Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/prefill-decode/index.md): Pair serving roles.
+- [Engine Versions](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/index.md): Check supported engine versions.
+- [Model Deployment Routing](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/routing/index.md): Choose a routing policy.
+- [Model Deployment Metrics](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/metrics/index.md): Read serving metrics.
+- [Model Deployment Status](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/status/index.md): Diagnose deployment conditions.
+- [Model Deployment Shutdown](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/shutdown/index.md): Understand replica draining.
+
+## Accelerated instances
+
+- [Accelerated Instances](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/modules/instances/index.md): Start an accelerator-backed workspace.
+- [Instance Metrics Reference](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/reference/instance-metrics/index.md): Read an Instance’s resource use.
+
+## Start here
+
+- [Architecture](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/getting-started/architecture/index.md): See the operator’s four-stage path.
+- [Walkthrough](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/getting-started/walkthrough/index.md): Follow a recorded cluster run.
+- [Vendor Prerequisites](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/getting-started/vendor-prerequisites/index.md): Prepare each manufacturer’s driver.
+
+## Cluster operations and upgrades
+
+- [Installation Modes](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/operate/installation-modes/index.md): Choose chart or image installation.
+- [High Availability Operations](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/operate/high-availability/index.md): Set replica counts for control-plane parts.
+- [Migrating to Bundled Subcharts](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/operate/migration/to-subcharts/index.md): Transfer chart ownership.
+- [Migrating from v0.5.x](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/operate/migration/from-v0.5/index.md): Upgrade across the queue refactor.
+- [Upgrading to an Enforced Binding Dtype](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/operate/migration/kv-cache-dtype/index.md): Check dtype before upgrading.
+- [Migration Troubleshooting](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/operate/migration/troubleshooting/index.md): Recover a stuck upgrade.
+
+## Reference and contribution
+
+- [Settings & Environment Variables](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/reference/settings/index.md): Look up operator configuration.
+- [Command Reference](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/reference/commands/index.md): Look up binary commands and flags.
+
+## Optional
+
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/d7dffeab10b4baa46ccdf377928f567629b61017/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Internals](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/contribute/internals/index.md): Review startup and naming constraints.
+- [Development](https://docs.gpustack.ai/gpustack-operator/v0.9.0-rc3/docs/contribute/development/index.md): Build, generate and lint the project.

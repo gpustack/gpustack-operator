@@ -1,0 +1,1452 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0-rc3/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>KV Cache Backend · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/backend/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0-rc3/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc3/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc3/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0-rc3/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0-rc3/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0-rc3/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0-rc3"
+    data-home="/gpustack-operator/v0.9.0-rc3/" data-page="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/backend/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0-rc3</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0-rc3</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0-rc3/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0-rc3/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/backend/" aria-current="page">Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0-rc3/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0-rc3/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0-rc3/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0-rc3/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/">KV Cache</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">KV Cache Backend</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="kv-cache-backend">KV Cache Backend</h1>
+<p>A <code>KVCacheBackend</code> configures shared KV cache for inference workloads. With a managed backend,
+the operator runs a leader for metadata and a member group with one store process per selected
+node. An external backend connects to an existing service.</p>
+<p>Mooncake calls the leader a master. Its flags, environment variables and metrics use that name.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#connection-and-medium">Connection and medium</a>
+</li>
+<li><a href="#the-image">The image</a>
+</li>
+<li><a href="#the-metadata-plane">The metadata plane</a>
+</li>
+<li><a href="#the-members">The members</a>
+</li>
+<li><a href="#status-and-conditions">Status and conditions</a>
+</li>
+<li><a href="#growing-and-shrinking-a-group">Growing and shrinking a group</a>
+</li>
+<li><a href="#the-external-mode">The external mode</a>
+</li>
+<li><a href="#operating-notes">Operating notes</a>
+</li>
+</ul>
+<h2 id="connection-and-medium">Connection and medium</h2>
+<p><code>connection</code> chooses whether the operator manages the backend or connects to an external service.
+For managed backends, <code>members[].medium</code> chooses host memory (<code>DRAM</code>) or accelerator memory (<code>VRAM</code>).</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend                </span><span class="w"> </span><span class="c"># cluster-scoped, short name kvcb</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mooncake-dram</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Mooncake</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">docker.io/kvcacheai/mooncake:0.3.13</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed:                         # or external</span><span class="p">:</span><span class="w"> </span><span class="l">— exactly one</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">leader</span><span class="p">:</span><span class="w"> </span>{}<span class="w">                     </span><span class="c"># replicas, allocationStrategy and multiTenancy default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium: DRAM               # what this group&#39;s SEGMENT is made of</span><span class="p">:</span><span class="w"> </span><span class="l">DRAM or VRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">4Gi</span></span></span></code></pre></div>
+</div><p>The example uses Mooncake <code>0.3.13</code>, which is compatible with the documented vLLM client. SGLang
+requires a different version; check <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/">Engine Versions</a>
+ before
+choosing <code>spec.image</code>.</p>
+<p><code>connection.managed</code> and <code>connection.external</code> are both optional pointers and <strong>exactly one</strong> must be
+set; neither and both are refused at admission with a message naming the two. Several member groups
+are allowed; at most one of them may carry a <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
+.</p>
+<p><strong><code>members[].medium</code> takes two values, <code>DRAM</code> and <code>VRAM</code></strong>: host memory or device memory. The
+renderer treats the two differently. On a <code>DRAM</code> group the segment is host memory, so the operator
+adds <code>capacityPerMember</code> to the member Pod&rsquo;s host memory request. On a <code>VRAM</code> group the segment is
+device memory, so the Pod request carries nothing for it: the member claims its slice by allocating
+it.</p>
+<p>One binary is one medium, so a node contributing both does so as two groups selecting it. See
+<a href="#the-members">The members</a>
+ for the renderings each value produces.</p>
+<p>The field is <strong>immutable</strong>: a segment already mounted cannot change the kind of memory underneath
+the data it holds, so an edit is refused and the choice is made when the group is declared.</p>
+<p>An earlier shape offered five values. Four of them named things that are <strong>not member groups</strong>, and
+each is reached another way:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Former <code>medium</code> value</th>
+          <th>What it is</th>
+          <th>Location</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>LocalDisk</code></td>
+          <td>a tier on the members that already hold the memory replica</td>
+          <td><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/"><code>members[].localDisks</code></a>
+</td>
+      </tr>
+      <tr>
+          <td><code>NoF</code></td>
+          <td>an NVMe-oF target coordinate, registered once, with no node affinity and no Pod</td>
+          <td>no API surface; it is not a member group</td>
+      </tr>
+      <tr>
+          <td><code>CXL</code></td>
+          <td>a DAX device the <strong>leader process</strong> allocates from</td>
+          <td>nowhere in this API: <code>enable_cxl</code>, <code>cxl_path</code> and <code>cxl_size</code> are refused in <code>leader.extraArgs</code>, because the first replaces <code>leader.allocationStrategy</code> and then brings the leader up advertising the allocator&rsquo;s size as capacity even where no DAX device exists</td>
+      </tr>
+      <tr>
+          <td><code>DFS</code></td>
+          <td>a distributed filesystem the <strong>leader process</strong> allocates from</td>
+          <td>the leader&rsquo;s own environment, which this API does not render</td>
+      </tr>
+  </tbody>
+</table>
+<blockquote>
+<p><strong>Why the shape matters more than the names</strong> — the leader routes an offload task to the client
+holding the key&rsquo;s memory replica. A member group with no memory segment is therefore never chosen,
+so a group declared as &ldquo;the disk one&rdquo; would report its disk capacity to the leader and never
+receive a single write. The object would say one thing, the running member another, and nothing
+would report a fault.</p>
+</blockquote>
+<p>What an object written against that earlier shape can still do depends on the API server&rsquo;s
+<code>CRDValidationRatcheting</code> gate, which follows the cluster&rsquo;s <strong>effective</strong> Kubernetes version:</p>
+<ul>
+<li><strong>v1.33 and later</strong> — the gate is locked on. An update whose invalid field is <strong>unchanged</strong> is
+admitted, so removing a finalizer works and the object deletes normally.</li>
+<li><strong>v1.30 through v1.32</strong> — the gate is on by default; a cluster that switches it off behaves like
+an older one.</li>
+<li><strong>v1.28 and v1.29</strong> — the gate exists but is off by default; turned on, it admits the
+unchanged-field update.</li>
+<li><strong>Earlier</strong> — the gate does not exist. Every write touching the object is refused, <strong>finalizer
+removal included</strong>, so the object cannot be deleted either. Remove such an object <strong>before</strong>
+applying a CRD that narrows the enum, not after.</li>
+</ul>
+<p>No released version of this API carried those values, so the question does not arise on a cluster
+that installed a release; this is a development-cluster shape.</p>
+<p>The object is <strong>cluster-scoped</strong>: it names nodes, claims host memory and host paths, and on the RDMA
+and EFA paths needs <code>hostNetwork</code> and a fabric device. Only a cluster administrator can legitimately
+declare one.</p>
+<p>A pool sets the quota ceiling on a backend; a Binding grants a namespace a share of that quota.
+This mirrors Kueue&rsquo;s <code>ClusterQueue</code> and <code>LocalQueue</code> split
+(<a href="https://kueue.sigs.k8s.io/docs/concepts/">https://kueue.sigs.k8s.io/docs/concepts/</a>
+). Several pools can reference one backend. The grant
+does not enforce access to the store; see <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/pool/#limitations">Limitations</a>
+.</p>
+<h2 id="the-image">The image</h2>
+<p><strong><code>spec.image</code> is explicit and never derived from the operator&rsquo;s own image</strong>, which breaks
+deliberately with how the Device Manager image is derived from the worker image. Leave it unset and
+the cluster-wide <code>kv-cache-backend-image</code> Setting supplies it. That Setting ships a default, so a
+backend naming no image runs this project&rsquo;s own build; unset in both places (which takes an
+administrator clearing the Setting) is refused at admission, naming both.</p>
+<p><strong>Clearing that Setting later does not strand a backend admitted under it.</strong> Admission re-asks for a
+fallback only when an update moves <code>spec.image</code> itself. Every other update is admitted whatever the
+Setting says now. That includes the reconciler&rsquo;s own removal of the finalizer, which would otherwise
+leave an object that owns nothing and cannot be deleted.</p>
+<blockquote>
+<p><strong>Why</strong> — the master&rsquo;s link-time dependencies differ per published vendor variant, so no single
+derivation is correct. On a CUDA-less host, for example, the base (CUDA 12) master build needs
+<code>libcuda.so.1</code> and <code>libcudart.so.12</code> and cannot load, while the <code>-rocm</code> and <code>-npu</code> builds need no
+accelerator library at all and load cleanly.</p>
+</blockquote>
+<p>The client side is where the vendor lives, and it lives in the published engine wheel rather than in
+this image: which transports a client can drive is a property of the wheel the engine image carries,
+not of <code>spec.image</code>.</p>
+<p><strong>The master image needs no accelerator runtime; a member image needs the runtime of the transport it
+uses.</strong> An <code>-npu</code>-built master on an all-NVIDIA cluster is legitimate, because the master is a pure
+metadata service. A member on <code>ascend</code>, by contrast, needs CANN (<code>libascendcl.so</code>) in its container,
+and a CANN-less image fails as a loader error whose own message reaches <code>status.phaseMessage</code>.</p>
+<p>A member on <code>EFA</code> needs libfabric in its image, and one that can drive the node&rsquo;s adapter, not the
+distro build. <code>mirrored-mooncake</code> installs AWS&rsquo;s, ahead of that copy in its loader cache.</p>
+<p>Nothing has to be built to run this <strong>without high availability</strong>.
+The example image above is published for amd64 and arm64 and carries <strong>both</strong> <code>mooncake_master</code> and
+<code>mc_store_rest_server</code>, so one <code>spec.image</code> serves the leader and the members.
+It runs on a host with no GPU: its <code>libcuda.so.1</code> is a stub and its <code>libcudart.so.12</code> is the real
+library, and neither reaches a driver.</p>
+<p><strong><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/#high-availability">High availability</a>
+ needs a different image, and for both roles.</strong> That
+section carries which build, why no published one will do, and what each role does when handed one
+that cannot.</p>
+<blockquote>
+<p><strong>Why the stub/real split matters</strong> — the stub alone is enough for the master, but the Python client
+needs a versioned <code>cudaFreeHost</code> from a real runtime. An image carrying two stubs runs the master and
+fails every member.</p>
+</blockquote>
+<p><strong>That split is what the <code>kv-cache-backend-image</code> default cannot cover.</strong> Its value is this project&rsquo;s
+own CPU build, carrying TCP, RDMA and EFA over DRAM, and one value cannot be right for every backend
+at once: which build a member needs depends on the transport its backend asks for and the hardware
+its group selects. A backend on a vendor fabric names its <code>spec.image</code>, which always wins over the
+Setting.</p>
+<p>The failure mode moved with the default, and that is what having one costs. Blank made a mismatch an
+admission refusal naming both places to fix; a default makes a wrong image a loader error at runtime,
+which is quieter and further from whoever can fix it. Clearing the Setting restores the refusal.</p>
+<h3 id="the-projects-own-build-variants">The project&rsquo;s own build variants</h3>
+<p>Beside the <code>-cpu</code> default, this project publishes <code>mirrored-mooncake</code> in one build target per vendor
+(<code>cuda</code>, <code>cann</code>, <code>rocm</code>), whose base images are dispatch-time build arguments. Tags carry the
+toolchain version: <code>&lt;mooncake-version&gt;-&lt;variant&gt;&lt;toolchain&gt;</code>, such as <code>0.3.13.post1-cuda13.0</code>.</p>
+<p>Each variant is built on <code>0.3.13.post1</code>, the line vLLM&rsquo;s supported clients are on, and on
+<code>0.3.10.post2</code>, which serves only engines below the <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/">supported
+minimum</a>
+. SGLang&rsquo;s clients are on the 0.3.12 line, which this
+project does not build. Which line a backend needs is that table&rsquo;s question.</p>
+<p><strong>A <code>0.3.10.post2</code> variant needs <code>leader.electionBackend: None</code> and
+<code>leader.multiTenancy: false</code> written out.</strong> It cannot run the default Kubernetes election.</p>
+<p>The tenant ledger hangs on the master&rsquo;s <code>-enable_multi_tenants</code> switch, which Mooncake took in 0.3.12,
+and the field defaults on. On an older image the default renders a flag the master does not recognize,
+and it exits at startup. The explicit false renders no flag, which is the command line such an image
+has always run.</p>
+<p><strong>A VRAM group needs a build with VRAM segments compiled in (<code>USE_VRAM_SEGMENT=ON</code>), and the stock
+<code>-cpu</code> default is not one.</strong> VRAM segments exist only on the <code>0.3.13</code> line (the <code>0.3.10.post2</code>
+variants carry the vendor transfer engine without them), so a VRAM group always names a
+<code>0.3.13.post1</code> variant tag.</p>
+<p>Nothing refuses a VRAM group that names no image: the default is an administrator-editable Setting,
+so this paragraph is the guidance rather than a gate. A group names its image through
+<code>members[].image</code>, which wins over the backend&rsquo;s <code>spec.image</code>, which wins over the Setting.</p>
+<p><strong>The other direction fails at startup, on purpose.</strong> A build with VRAM segments compiled in takes
+device memory whenever it can reach a device, whatever medium the group declared. So a DRAM group is
+rendered with every vendor&rsquo;s visibility variable set to <code>void</code>, which keeps the accelerators out of
+its containers: such an image then finds no device and refuses to start, against the group that
+asked for a medium it does not implement.</p>
+<p>Without that, the failure was silent and landed elsewhere. The group consumed device memory no Pod
+had requested, so neither the scheduler nor the quota chain knew it was gone, and what an operator
+saw was an unrelated deployment crash-looping on a figure nobody had configured. Pick the image that
+matches the medium; whether an image implements one is a fact about the image.</p>
+<p><strong>A private registry needs <code>spec.imagePullSecrets</code></strong>, and an explicit policy needs
+<code>spec.imagePullPolicy</code>. Both are backend-wide: they apply to the leader and to every member group,
+including a group that names its own <code>image</code>. Left unset, the policy is <strong>resolved from the image
+tag by the same rule the API server would have applied</strong> (<code>Always</code> for <code>:latest</code> or no tag,
+<code>IfNotPresent</code> otherwise), and it is re-resolved whenever the image or the field moves.</p>
+<blockquote>
+<p><strong>Why they are fields and not Settings</strong> — the cluster-wide <code>image-pull-policy</code> and
+<code>image-pull-secrets</code> Settings are values of the bundled-application chart install. They reach the
+subcharts and nothing a controller renders, so a <code>KVCacheBackend</code> that inherited them would be the
+only object in this API whose running workloads move when a chart value moves. The service accounts
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/#high-availability">high availability</a>
+ renders carry no registry credentials either (they
+grant Lease access and nothing else), so without these fields no image here could come from a
+private registry at all.</p>
+</blockquote>
+<h3 id="the-store-version-must-match-the-engines-client">The store version must match the engine&rsquo;s client</h3>
+<p><strong>A store and an engine-embedded Mooncake client interoperate only within one minor line.</strong> The
+criterion is the RPC wire signature, not the version string: the handshake answers <code>2.0.0</code> for every
+0.3.x release, so a mismatched pair is not refused at startup. Every probe reads green, and every
+write then fails at transfer time with <code>RPC_FAIL (-900)</code>.</p>
+<p>Two posts of one minor line share their RPC signatures and interoperate. The 0.3.12 and 0.3.13
+lines do not: the method names are unchanged, so the client reaches the handler and mis-decodes the
+arguments. Multi-tenancy moves neither: with it off (a declared <code>multiTenancy: false</code>, the field
+defaulting on) every request resolves to the default tenant.</p>
+<p><strong>The client&rsquo;s version is a property of the engine image, not of anything on this CR.</strong> Which
+client each supported engine&rsquo;s runner image carries, and so which line its store runs, is in the
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/">Engine Versions</a>
+; an engine below its minimum there is
+not supported.</p>
+<p>For any other image, read the client off the image in hand rather than off an engine version. A
+CUDA build resolves <code>mooncake-transfer-engine</code> against a lower bound at build time, so two images of
+one vLLM version built on different days can carry different clients.</p>
+<p>Direct P/D transfer (<code>MooncakeConnector</code>, no <code>spec.kvCache</code>) is engine to engine and exempt from this
+matching.</p>
+<p>Upstream has <strong>no 0.3.12.post2</strong>; the 0.3.12 line ends at 0.3.12.post1. High availability carries
+its own per-version rule, a master from 0.3.12 on. See
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/#high-availability">High availability</a>
+.</p>
+<h2 id="the-metadata-plane">The metadata plane</h2>
+<p><strong>The metadata plane is peer-to-peer and has no API field.</strong> The member&rsquo;s <code>metadata_server</code> renders as
+the literal <code>P2PHANDSHAKE</code>, unconditionally. It needs no etcd or Redis. The default leader election
+does use a Kubernetes Lease and its API access, even with one leader replica.</p>
+<p>Two axes get confused here, so both are stated. The metadata plane is how clients find one another.
+The <strong>HA backend store</strong> (<code>-enable_ha</code> with <code>-ha_backend_type</code>) is how the leader elects, even at
+one replica by default. The Kubernetes Lease is selected by
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/#high-availability"><code>leader.electionBackend</code></a>
+, and it moves nothing on the metadata plane.</p>
+<p><strong>A manifest that tries to configure the metadata plane is not refused with a helpful message.</strong>
+There is no field, so there is nothing for a webhook to see:</p>
+<ul>
+<li>a strict client (<code>kubectl apply</code>&rsquo;s default) is refused by the schema with
+<code>strict decoding error: unknown field &quot;spec.metadata&quot;</code>;</li>
+<li>a client with validation turned off has the block <strong>silently pruned</strong>, and the object is admitted
+and reconciled as though nothing had been written.</li>
+</ul>
+<p>The second is indistinguishable from success at the point of apply. The protection against it is the
+rule the page states: the metadata plane takes no configuration at all.</p>
+<h2 id="the-members">The members</h2>
+<p>One member group renders <strong>one DaemonSet</strong> over <code>members[].nodeSelector</code>. A member is one node&rsquo;s
+contribution to the store: it holds that node&rsquo;s host memory, or on a VRAM group its device memory,
+plus the node&rsquo;s host paths and, on a host-fabric group, the number of fabric devices the group
+requests.</p>
+<p>The member&rsquo;s identity is the node, and a DaemonSet is the workload that gives one Pod to every
+matching node. Two groups may select the same node (a DRAM group and a VRAM group is the shape the
+second medium exists for), and each still renders its own DaemonSet.</p>
+<p>The member&rsquo;s whole configuration renders as <strong>environment variables</strong>: no ConfigMap, no volume, no init
+container.</p>
+<table>
+  <thead>
+      <tr>
+          <th>config key</th>
+          <th>environment variable</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>local_hostname</code></td>
+          <td><code>MOONCAKE_LOCAL_HOSTNAME</code> (the <strong>pod IP</strong>, from the downward API)</td>
+      </tr>
+      <tr>
+          <td><code>metadata_server</code></td>
+          <td><code>MOONCAKE_TE_META_DATA_SERVER</code></td>
+      </tr>
+      <tr>
+          <td><code>master_server_address</code></td>
+          <td><code>MOONCAKE_MASTER</code></td>
+      </tr>
+      <tr>
+          <td><code>protocol</code></td>
+          <td><code>MOONCAKE_PROTOCOL</code></td>
+      </tr>
+      <tr>
+          <td><code>global_segment_size</code></td>
+          <td><code>MOONCAKE_GLOBAL_SEGMENT_SIZE</code></td>
+      </tr>
+      <tr>
+          <td><code>local_buffer_size</code></td>
+          <td><code>MOONCAKE_LOCAL_BUFFER_SIZE</code></td>
+      </tr>
+      <tr>
+          <td><code>device_name</code></td>
+          <td><code>MOONCAKE_DEVICE</code> — <strong>deliberately left unset</strong>, see below</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong><code>MOONCAKE_TE_META_DATA_SERVER</code> carries an underscore inside <code>META_DATA</code>.</strong> It is not
+<code>MOONCAKE_TE_METADATA_SERVER</code>, and normalising it to the spelling that reads correctly <strong>silently
+degrades the metadata plane</strong> rather than erroring.</p>
+<p><strong><code>MOONCAKE_DEVICE</code> is left unset on purpose, and the documented value <code>auto-discovery</code> is a trap.</strong>
+The client splits that key on commas into a device filter and nothing special-cases the string, so
+setting it produces a filter matching a device no host has. <strong>Empty means &ldquo;use every device found&rdquo;.</strong></p>
+<p><strong><code>members[].extraArgs</code> is the exception to the table above: it renders into the container&rsquo;s
+argv</strong>, as <code>-D key=value</code>, not into an environment variable. <code>leader.extraArgs</code> does the same on the
+leader, as <code>-key=value</code>.</p>
+<p><strong>Either way the value is world-readable, on three paths.</strong> It is stored verbatim on the
+<code>KVCacheBackend</code> (which is cluster-scoped, so reading it needs no access to any workload), and it is
+rendered into the container&rsquo;s argv, readable again from the Pod and from the DaemonSet or Deployment
+carrying it. <strong>Do not put a credential in <code>extraArgs</code>.</strong> Nothing refuses one at admission.</p>
+<p><code>spec.transport.protocol</code> accepts <code>Auto</code>, <code>TCP</code>, <code>RDMA</code>, <code>EFA</code>, <code>CANN</code>, <code>ROCM</code>, <code>MUSA</code> and <code>MACA</code>,
+and defaults to <code>Auto</code> whether or not the <code>transport</code> block is written at all. <strong><code>Auto</code> resolves to
+<code>TCP</code>.</strong> It is not a per-node probe that promotes itself. <code>MUSA</code> and <code>MACA</code> are intra-node IPC
+transports, not host fabrics, so they take none of the fabric privileges below.</p>
+<p>Which engine each value serves, and on which images, is <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/#which-transport-each-engine-can-use">the transport
+matrix</a>
+.</p>
+<p><strong><code>members[].transport.protocol</code> overrides that value for one group; left unset, the group inherits
+the backend&rsquo;s.</strong> The override exists for the one thing two media do not agree on: a VRAM group
+reaching its peers over a fabric while the DRAM group beside it stays on <code>TCP</code>.</p>
+<p><strong><code>TCP</code> is complete, not a fallback, and it costs CPU.</strong> Everything the store does works over it:
+the cache fills, cross-instance prefix reuse works, and capacity scales with DRAM and the disk tier.
+What it does not have is the zero-copy path the fabrics take. Every transfer traverses the kernel
+network stack packet by packet, and the CPU that does so is CPU the node is not giving to anything
+else.</p>
+<p>So a <code>TCP</code> pool under load shows higher CPU on the member nodes and higher transfer latency than the
+same pool on <code>RDMA</code>, and <strong>that is the transport behaving as designed</strong>. Read it as a reason to ask
+for a fabric, not as a defect to open a report against.</p>
+<p>The fabric privileges below render per group from the group&rsquo;s effective protocol, and an engine is
+handed the protocol of the group it matched. An engine whose constraint no group in the pool
+satisfies is refused at admission rather than started.</p>
+<p><code>CANN</code> is the one value an engine can <strong>require</strong>: vllm-ascend&rsquo;s store client currently raises on
+any other protocol (verified at vLLM-Ascend v0.23.0 and v0.26.0rc1; upstream state, not a contract,
+and it may change), so a pool serving Ascend engines declares <code>CANN</code> here, or on one member group,
+rather than settling for the <code>TCP</code> default.</p>
+<p>The member then needs a CANN-carrying image, per the variant table above. The project&rsquo;s own CPU
+build compiles no <code>ascend</code> transport.</p>
+<blockquote>
+<p><strong>Why</strong> — one group is one Pod template, which cannot express a per-node transport; and promoting to
+a host fabric would mean granting <code>hostNetwork</code> plus <code>IPC_LOCK</code> and <code>SYS_RESOURCE</code>. A privilege is
+requested, never inferred. Naming <code>RDMA</code> or <code>EFA</code> is also what accepts the security context that
+comes with it — which is those three things and <strong>not</strong> <code>privileged</code>. A <code>TCP</code> group sets none of
+them. <code>privileged</code> is reachable, but only by writing it into
+<a href="#vram-group-accelerator-access"><code>members[].securityContext</code></a>
+, never by naming a protocol.</p>
+</blockquote>
+<p><strong>Both host fabrics also grant the member one device, and the protocol names it.</strong> Nothing is
+declared: an <code>RDMA</code> group asks for <code>device.gpustack.ai/rdma.shared</code>, one of
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/#the-rdma-resource-keys">this operator&rsquo;s own RDMA keys</a>
+;
+an <code>EFA</code> group asks for
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/#the-rdma-resource-keys">the key AWS&rsquo;s EFA device plugin advertises</a>
+.</p>
+<p>The renderer <strong>derives</strong> the RDMA name rather than spelling it, so the page linked above is the one
+to trust if the two ever disagree. The request is the permission (a bind mount of a device tree is
+not), so the member that gets one can <code>open()</code> the adapter and the member that gets none could not
+have.</p>
+<p><strong><code>members[].fabricInterfaceCount</code> sets how many interfaces each member asks for, on <code>RDMA</code> and
+<code>EFA</code> only.</strong> Left unset it counts as one, and an unset count renders the same member as a written
+<code>1</code>. On <code>RDMA</code>, one asks for the shared key and more than one asks for that many exclusive
+<code>device.gpustack.ai/rdma</code>. A written count is at least <code>1</code>.</p>
+<p>On every other protocol the count has no effect: no device is requested. Admission <strong>warns rather
+than refuses</strong> when a group writes one there, so the update that moves a group from <code>RDMA</code> back to
+<code>TCP</code> still goes through with the count in it.</p>
+<p><strong>On a cluster tracking the default branch, this changes what running RDMA members ask for.</strong> No
+release has ever carried this API, so there is no upgrade path to migrate; but a development cluster
+whose <code>RDMA</code> backend predates the change will have its members re-rendered against
+<code>device.gpustack.ai/rdma.shared</code> on the next reconcile. <strong>Confirm the Device Manager is running on
+those nodes first</strong>, or the members roll and stay <code>Pending</code>.</p>
+<p><strong>The cluster therefore needs the plugin that advertises the group&rsquo;s resource</strong>, and a node without
+it never runs that member: the Pod stays <code>Pending</code>. That refusal is the intended one. A cluster
+whose nodes cannot serve the fabric is a cluster whose backend should say <code>TCP</code>, and an operator who
+wants it back says so in <code>protocol</code> rather than by leaving a field empty.</p>
+<p><strong>No member mounts <code>/dev/infiniband</code>.</strong> Each fabric&rsquo;s plugin injects the verbs character device of
+every device it grants, so mounting the tree beside that grant would add every adapter the member
+was <strong>not</strong> granted, visible and unopenable.</p>
+<p><strong>On <code>EFA</code> the mount breaks a partial grant.</strong> A member granted fewer EFA devices than its node has
+would see the rest through the tree, and <code>open()</code> on one returns <code>EPERM</code> from the device cgroup.
+libfabric&rsquo;s EFA provider gives up its whole device list on the first <code>EPERM</code>, so the store reports
+<code>No available EFA devices</code> and the container restarts in a loop. Without the mount it initializes.</p>
+<p>Nothing is mounted from a host EFA install: the libfabric an <code>EFA</code> member runs on is in the image.</p>
+<p><strong>The engines an <code>EFA</code> group serves need an EFA build of Mooncake as well</strong>, which no runner image
+carries. See <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/operations/#efa-engine-images">what an EFA leg needs from the engine
+image</a>
+.</p>
+<p>EFA capability is a property of the instance size rather than of its family (the largest <code>i7ie</code>
+sizes carry it while every smaller one does not), so check the size about to run, with
+<code>fi_info -p efa</code> on the node or the instance type&rsquo;s own EFA field, never a family name.</p>
+<p><strong>Cross-node EFA requires both nodes in one cluster placement group.</strong> One availability zone is
+necessary and not sufficient. Two nodes sharing a zone but in different placement groups complete
+the libfabric handshake (the endpoint pair is reported established), and then every work request
+hangs forever with the receiving adapter&rsquo;s byte counters at zero and no error on either side. The
+silence is the problem: it reads as a hung probe, not as a placement fault.</p>
+<p>Where nodes sit is outside this operator, so it belongs to whoever builds the cluster. A managed
+node group typically gets a placement group of its own, which makes &ldquo;members of one pool spread
+across two groups&rdquo; the default outcome rather than an unusual one. A pool whose members are meant
+to reach each other should be pinned to node groups that share one.</p>
+<p><strong>The medium and the transport are independent.</strong> A <code>DRAM</code> group is as entitled to a fabric as a
+<code>VRAM</code> one, and this rendering reads the medium nowhere: the protocol decides the network, the
+capabilities and the device, while the medium decides only what the segment is made of and what it
+is charged to.</p>
+<p><strong>What a member&rsquo;s Pod requests follows the group&rsquo;s medium.</strong> A DRAM member requests host memory for
+<code>capacityPerMember + localBufferSize</code>. A VRAM member&rsquo;s segment is device memory, which <strong>nothing
+requests</strong>: host memory carries <code>localBufferSize</code> only, and the device memory is claimed by
+allocating it.</p>
+<p><strong>The engine sharing that accelerator does not know the member took a slice of it.</strong> Nothing in
+Kubernetes accounts for device memory, so the two are held apart by <strong>sizing <code>capacityPerMember</code>
+against the engine&rsquo;s own memory fraction</strong>, and by nothing else. Give the engine a
+<code>gpu_memory_utilization</code> that leaves <code>capacityPerMember</code> free, and expect whichever starts second to
+fail on allocation if you do not.</p>
+<p>A member group asks for <strong>no</strong> accelerator extended resource, because the claim would not be true: in the tested Mooncake v0.3.13.post1,
+a member allocates its whole segment on one device, so a resource request would take a whole
+accelerator away from inference to account for a slice of one.</p>
+<p><strong>One member&rsquo;s segment is therefore on one device</strong>, whichever the container sees first. An
+eight-accelerator node keeps all eight available to inference, and one member contributes a slice of
+the first.</p>
+<h3 id="vram-group-accelerator-access">VRAM group accelerator access</h3>
+<p>A VRAM group&rsquo;s container needs the vendor&rsquo;s <strong>user-space driver</strong>, which is what the store&rsquo;s client
+loads to allocate a segment at all. That driver is the node&rsquo;s and is never in the image, so it has to
+be brought in. Nothing is inferred; every route is written on the group:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Field</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>members[].extraEnv</code></td>
+          <td>The vendor runtime&rsquo;s own trigger, where one exists — <code>NVIDIA_VISIBLE_DEVICES: all</code> makes the NVIDIA toolkit inject the driver and every device. Ascend has no counterpart.</td>
+      </tr>
+      <tr>
+          <td><code>members[].runtimeClassName</code></td>
+          <td>The vendor container runtime named explicitly, for a cluster where it is not the default runtime.</td>
+      </tr>
+      <tr>
+          <td><code>members[].hostPaths[]</code></td>
+          <td>The driver tree taken from the node directly, for a cluster running no vendor runtime at all.</td>
+      </tr>
+      <tr>
+          <td><code>members[].securityContext</code></td>
+          <td>Privilege, when a mount alone is not enough to open what was mounted.</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Privilege alone does not cover this.</strong> It opens the node&rsquo;s device tree under <code>/dev</code>, which is
+where the device nodes are and is <strong>not</strong> where the libraries are: Ascend&rsquo;s driver is under
+<code>/usr/local/Ascend/driver</code> with DCMI beside it, and NVIDIA&rsquo;s <code>libcuda.so</code> is injected by the
+container runtime. A privileged member with neither a runtime class nor the driver mounted starts,
+reports healthy, and fails to allocate.</p>
+<p><code>securityContext</code> is <strong>merged onto</strong> what the group&rsquo;s protocol already earned, field by field, with
+<code>capabilities.add</code> <strong>unioned</strong>. A <code>RDMA</code> or <code>EFA</code> group therefore keeps <code>IPC_LOCK</code> and <code>SYS_RESOURCE</code>
+whatever it declares. Without them the transfer engine fails when it registers memory, long after
+the container looked healthy. Declaring a capability adds it; a group that must hold neither of those
+two declares a protocol that does not ask for them.</p>
+<p>Each <code>hostPaths[]</code> entry is <code>{path, mountPath, type, readOnly}</code>. Name a <code>type</code>: left empty, the
+kubelet checks nothing, so a missing path becomes an empty directory in the container and the member
+starts anyway. A mount path is refused if it duplicates another entry&rsquo;s, if it is <code>/dev/infiniband</code>
+(where a fabric&rsquo;s device plugin injects the granted device nodes, refused under every protocol since
+that can change later), or if it is this group&rsquo;s own <code>localDisks[].path</code>.</p>
+<p>Two worked groups. The NVIDIA one needs no mounts at all, because the container runtime injects the
+driver once the variable tells it which devices to inject:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">members</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kvcache-vram</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">VRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/mirrored-mooncake:0.3.13.post1-cuda13.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">8Gi             </span><span class="w"> </span><span class="c"># the engine&#39;s gpu_memory_utilization must leave this free</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">extraEnv</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">NVIDIA_VISIBLE_DEVICES</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">all</span></span></span></code></pre></div>
+</div><p>That variable is honored only while the toolkit&rsquo;s
+<code>accept-nvidia-visible-devices-envvar-when-unprivileged</code> is on, which is its default and which
+NVIDIA&rsquo;s own hardening guidance turns <strong>off</strong>. On a cluster that turned it off, use
+<code>runtimeClassName</code> instead.</p>
+<p>The Ascend one has no such variable, and this cluster runs no vendor runtime, so the driver is
+mounted from the node:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">members</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kvcache-vram</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">VRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/mirrored-mooncake:0.3.13.post1-cann9.1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">32Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">hostPaths</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/Ascend/driver</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/Ascend/driver</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Directory</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/dcmi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/dcmi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Directory</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/bin/npu-smi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/bin/npu-smi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">File</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span></span></span></code></pre></div>
+</div><p><strong>A VRAM group may also carry a <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
+, and that combination is
+measured on NVIDIA.</strong> Objects written past a 256Mi device segment left memory for the tier and read
+back with matching digests. No upstream test covers the pairing, so the reading is this project&rsquo;s own.</p>
+<p><strong>The equivalent on Ascend (<code>cann</code>) and AMD (<code>rocm</code>) is still unmeasured.</strong> Treat the pairing as
+verified on NVIDIA and as unverified elsewhere, rather than as guaranteed everywhere.</p>
+<p><strong>A writer against this tier must retry.</strong> A put that fails on a full segment means eviction has
+not caught up, not that the tier is full: the offload heartbeat runs on an interval, so a writer that
+abandons on first failure reads &ldquo;eviction in progress&rdquo; as &ldquo;cannot write&rdquo;.</p>
+<p><strong>Reachability is a port range, never a list.</strong> The transfer engine picks its data ports at random,
+and the peer-to-peer plane is what binds them. Write firewall and NetworkPolicy rules between member
+nodes, and from engine clients, as a <strong>range</strong>. The rendered Pod declares no fixed data-plane
+<code>containerPort</code>, because a fixed list would be a false statement.</p>
+<p><strong>The management port is fixed, and on a host fabric it lands on the node.</strong> A member serves its HTTP
+API on <code>8080 + &lt;group index&gt;</code> (<code>8080</code> for the first group, <code>8081</code> for a second). A <code>TCP</code> group
+holds that port inside its own pod network namespace, but an <code>RDMA</code> or <code>EFA</code> group holds the host&rsquo;s,
+so on every node such a group selects that port must be free. Reserve one port from <code>8080</code> upward per
+member group.</p>
+<blockquote>
+<p><strong>Why it moves per group</strong> — two host-network groups whose node selectors both match one node place
+two host-network Pods on it. On a single fixed port only the first binds; the second runs, never
+passes readiness, and reports nothing about why.</p>
+</blockquote>
+<p>Members advertise their Pod IPs for client connections. Target those addresses in data-plane
+network rules. With host networking, the Pod IP is the node address.</p>
+<p>Every segment mount gets a new identity and transfer port. After a member restarts, clients
+must discover its current endpoint rather than reuse a previous connection address.</p>
+<h2 id="status-and-conditions">Status and conditions</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get kvcb
+</span></span><span class="line"><span class="cl"><span class="go">NAME            TYPE       PHASE   ENDPOINT                                        CAPACITY
+</span></span></span><span class="line"><span class="cl"><span class="go">mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051  12Gi
+</span></span></span></code></pre></div>
+</div><p>Five phases: <code>Provisioning</code>, <code>Ready</code>, <code>Degraded</code>, <code>Error</code>, <code>Deleting</code>. <code>Ready</code> carries no
+<code>phaseMessage</code>; every other phase carries one.</p>
+<p>Conditions report the axes: <code>LeaderAvailable</code>, <code>MembersMounted</code>, <code>CapacityObserved</code>, <code>PoolWrites</code>, <code>Deletable</code> and
+<code>RolloutComplete</code>. Two more appear only where they have something to judge: <code>ElectionObserved</code>
+when <code>leader.electionBackend</code> is <code>Kubernetes</code> (including at one replica), and
+<code>TierWasEmpty</code> when a member group carries a <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
+.</p>
+<p><strong>Those last three do not move the phase, and that is deliberate.</strong> A rollout in flight, an election
+that has not happened, and a disk tier found holding data are all states in which the backend serves
+normally. Reporting them as <code>Degraded</code> would put a storage arrangement in the same field as a
+leader nobody can reach. Read the conditions for them; the phase will not tell you.</p>
+<p><strong>A member that is starting is not a shortfall; a member that is stuck is one.</strong> A Pod still pulling
+its image is left alone. Holding it against the backend would report <code>Degraded</code> for the length of
+every rollout. But one whose container will not start, or that no node will take, is never going to
+arrive, so it reads <code>Degraded</code> even while the other members serve, and <code>phaseMessage</code> carries that
+Pod&rsquo;s own reason.</p>
+<p><strong>A member reads Ready only once its segment is mounted.</strong> Its container carries a readiness probe
+that connects to the entrypoint&rsquo;s REST port, and the entrypoint mounts the segment <em>before</em> it serves
+that port. Readiness is therefore evidence of the mount, not of the process.</p>
+<blockquote>
+<p><strong>Why the probe is load-bearing</strong> — without it the kubelet reports Ready as soon as the container
+runs. Every ready member Pod is held to the leader&rsquo;s listing, so that window would read as a
+shortfall and move a healthy backend to <code>Degraded</code> for the length of every rollout.</p>
+</blockquote>
+<p><strong>A listing too large to publish is withheld, never truncated.</strong> Past what <code>status.members</code> can carry,
+the phase reads <code>Degraded</code> with reason <code>ListingTooLarge</code> and the previous listing is kept.</p>
+<blockquote>
+<p><strong>Why</strong> — every entry is republished on each pass, so publishing past the object size the API server
+accepts would make every status write fail from then on while the read that produced it reported
+success. A truncated list would be worse: it reads exactly like a backend that lost members.</p>
+</blockquote>
+<p><strong>Status is polled every 15 seconds, not only refreshed on events.</strong> Everything above is read over
+HTTP from the leader, and a store whose contents move while its Pods sit still produces no Kubernetes
+event at all. An external backend produces none ever, since this operator owns no workload for it.
+So <code>kubectl get kvcb -w</code> moves on its own.</p>
+<blockquote>
+<p><strong>15 seconds is an interval, not a maximum age.</strong> The timer starts after a pass finishes, and a
+pass makes up to three sequential HTTP reads. More importantly, <code>status.members</code> is <strong>deliberately
+retained</strong> when a read of the segment listing fails (a stale list plus <code>MembersMounted=False</code> is
+more honest than an empty one), so it has no age bound at all while that read keeps failing. The
+condition is what says whether the list was refreshed; the list alone never does.</p>
+</blockquote>
+<p><strong>Capacity is observed, not derived.</strong> <code>status.capacity</code> is read from the leader&rsquo;s own counters,
+never from what the spec declares. Nothing multiplies <code>capacityPerMember</code> by a replica count. A
+backend with no disk tier reads <code>master_total_capacity_bytes</code>; one <strong>with</strong> a tier reads that plus
+<code>master_total_file_capacity_bytes</code>. Adding two <strong>observed</strong> families is not the same thing as
+adding up what members were asked to provide.</p>
+<p><strong><code>status.capacity.total</code> is capacity, not usage</strong>, and a disk tier contributes the ceiling the
+member declared (published as soon as the member registers, before anything is written there).</p>
+<p><code>PoolWrites</code> reports pool-wide write activity. <code>True</code> means the leader has seen a put end since
+its current process started, or a member reports positive <code>allocator_used_bytes</code>. <code>False</code> means
+the leader has seen both a put start and a put revoke while every member reports zero allocated
+bytes. <code>Unknown</code> covers no put start, an unfinished put, or a missing reading.</p>
+<p>The process lifetime is the observation window because these counters reset when the leader
+restarts; a single status poll could miss a short write.</p>
+<p>This condition does not identify which deployment attempted a write, and a previous failure in that
+window does not prove that every current write fails.</p>
+<p>To ask whether the <strong>disk</strong> tier is holding data, the figure to read is not on the CR at all. See
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/#bucket-writes">Bucket writes</a>
+.</p>
+<p><strong>Capacity is absent (not zero) while the leader is starting.</strong> <code>/metrics</code> is ungated: a leader
+that is up but not serving answers 200 with a well-formed exposition whose gauges all read zero, and a
+zero is indistinguishable at the parser from a genuinely empty cache. Publishing is therefore gated on
+<code>service_ready</code>, not on the scrape succeeding.</p>
+<p><code>status.members[]</code> is read from the leader&rsquo;s segment listing, one entry per <strong>listed</strong> segment. Each
+row carries the leader&rsquo;s <code>segmentID</code>, <code>clientID</code> and advertised <code>segmentName</code>; the list is keyed by the
+unique segment ID because several members may legitimately share a name.</p>
+<p>The leader is what allocation goes through, so a running member Pod it does not list holds nothing
+and is counted in <code>MembersMounted</code>&rsquo;s message instead. The two fields the listing cannot supply
+(node name and medium) are joined in from the member Pod behind that segment, and left <strong>empty</strong>
+rather than guessed when nothing matches.</p>
+<p><strong>Two ready host-network member Pods that share an address make Pod attribution ambiguous.</strong> Their
+rows remain publishable because their segment and client IDs are distinct, but neither Pod exposes
+the ID that maps a row back to it. <code>MembersMounted</code> goes <code>False</code> with reason
+<code>AmbiguousMemberIdentity</code>; each row still carries the node and the medium its candidates <strong>agree</strong>
+on, neither being a fact about one Pod, and leaves empty whichever of the two they dispute.</p>
+<p>Two groups on one node do <strong>not</strong> collide by themselves. A <code>TCP</code> member advertises its own pod IP, so
+each segment carries a distinct name even though both Pods answer to the node&rsquo;s name; the collision is
+on host-network paths (<code>RDMA</code> and <code>EFA</code>), where both Pods hold the host&rsquo;s network namespace and
+advertise the node&rsquo;s address.</p>
+<p>The remedy is to give the groups node selectors that keep them on different nodes.</p>
+<p>A failed listing scrape <strong>keeps</strong> the previous list and sets <code>MembersMounted=False</code>; a failed capacity
+scrape <strong>clears</strong> the figures. That asymmetry is deliberate: capacity is two pointers and has an
+&ldquo;absent&rdquo; that means <em>not observed</em>, while an empty list is a legible value meaning <em>no segments</em>, so
+clearing it would publish a falsehood.</p>
+<p>Mooncake masters before 0.3.12 do not report segment membership. They can serve requests and
+report <code>Ready</code> while <code>MembersMounted</code> is <code>Unknown/SegmentListingNotServed</code> and <code>status.members</code>
+is empty. Waiting does not add a capability missing from that version.</p>
+<p>Other listing failures, including server errors or an unreachable master, report <code>ListingFailed</code>
+and retain the previous member list.</p>
+<p><code>PoolWrites</code> on such a leader is still <code>True</code> once it has seen a put end, since that counter is on
+<code>/metrics</code>; before that it is <code>Unknown</code> with the same reason, because its other verdicts read the
+members&rsquo; allocations off the listing.</p>
+<p>Two states still read <code>MembersMounted=False</code> and <code>Degraded</code> there: a member Pod that will not start,
+read from the Pod&rsquo;s own status, and a <code>status.capacity.total</code> of zero, reported as <code>NoSegments</code>
+(the gauge sums the mounted segments, so zero is every member unmounted).</p>
+<h2 id="growing-and-shrinking-a-group">Growing and shrinking a group</h2>
+<p><strong>Widening <code>members[].nodeSelector</code> adds members without restarting the ones already running.</strong> The
+DaemonSet places a Pod on each newly matching node; every existing Pod keeps its UID and its restart
+count, leader included. The DaemonSet is left on <code>OnDelete</code>, and restarts are decided from a
+comparison over the whole Pod template except the node selector: a widening matches that comparison,
+while an image, argv, environment, resource or fabric change fails it and every member is recreated.</p>
+<p><strong>A Pod runs the template it was created from, so a setting cannot protect the same edit that
+removes it.</strong> Anything rendered into the member Pod (the shutdown hook, its grace, the environment)
+reaches a member only when that member is recreated. A departing member leaves with what it started
+with.</p>
+<p>To make such a setting apply to a shrink, do it in <strong>two steps</strong>: change only the setting and wait
+for members to be recreated with it (their pod-spec-hash annotation moves), then narrow the selector
+or remove the group. <code>scaleIn.gracePeriodSeconds</code> below is the case this bites today; the property
+belongs to the Pod template, not to that field.</p>
+<p><strong>Existing objects are not rebalanced.</strong> How fast the cluster converges onto a new member depends on
+<code>allocationStrategy</code>: <code>FreeRatioFirst</code> (the default) biases new writes toward the emptier member,
+<code>Random</code> does not.</p>
+<h3 id="group-identity-by-position">Group identity by position</h3>
+<p>A group has <strong>no name</strong>. Its position in <code>members</code> is what the DaemonSet&rsquo;s name, its immutable
+selector labels and its members&rsquo; HTTP port are all derived from, so moving an entry in that list
+leaves every one of those in place and changes only the spec underneath it.</p>
+<p><strong>Moving a group to another position is refused at apply time.</strong> The refusal names both positions.
+Two shapes reach it:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Edit</th>
+          <th>Outcome</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>swapping two entries</td>
+          <td>refused</td>
+      </tr>
+      <tr>
+          <td>removing a group ahead of others, which shifts the rest up</td>
+          <td>refused</td>
+      </tr>
+      <tr>
+          <td>appending a group</td>
+          <td>allowed</td>
+      </tr>
+      <tr>
+          <td>removing from the <strong>end</strong> of the list</td>
+          <td>allowed</td>
+      </tr>
+      <tr>
+          <td>editing a group in place, including widening its <code>nodeSelector</code></td>
+          <td>allowed</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>To take a group out of service without removing it, narrow its <code>nodeSelector</code> until it matches no
+node.</strong> The group keeps its position, every later group keeps its DaemonSet, and nothing is rebuilt.
+Positions are used instead of names because a DaemonSet&rsquo;s selector cannot change after creation: a
+name free enough to make reordering possible would force every member DaemonSet to be deleted and
+recreated, and the entire cache would go with them.</p>
+<p><strong>The rule recognises a group that arrived unchanged at a position another group left; it does not
+recognise every reorder.</strong> Without a name there is nothing else to recognise a group by, so two shapes
+are knowingly admitted:</p>
+<ul>
+<li>a reorder <strong>combined with an edit</strong> to the same group, which is indistinguishable from two ordinary
+edits;</li>
+<li>removing a group when a <strong>later group is identical</strong> to the one taking its place, <code>[A, B, C]</code>
+becoming <code>[A, C, C]</code>. That produces the same two lists as editing position 1 to match an unchanged
+position 2, which is how the second of two look-alike groups is taken out of service, so refusing
+it would forbid the operation recommended above. <code>[A, B, C]</code> to <code>[A, C]</code>, with no look-alike to
+arrive in the gap, is still refused.</li>
+</ul>
+<p>Both admitted shapes leave one trace: the resulting <code>members</code> holds <strong>two identical groups</strong>. What
+the rule buys is that the mechanical reorder (the one a rewritten manifest produces) is reported
+instead of silently rebuilding members against another group&rsquo;s spec.</p>
+<p>Shrinking a group discards the cache held by the removed members. Narrowing the selector or
+removing a node immediately unmounts its segment; the operator does not migrate its cached data.
+The termination grace period gives the process time to finish shutdown and does not preserve
+that data.</p>
+<p><strong><code>scaleIn.gracePeriodSeconds</code> holds the process, not the tier.</strong> A member with a
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
+ gets a <code>preStop</code> hook that deregisters the tier with the
+leader and then waits out the grace. A group with no tier renders no hook and the setting is inert.</p>
+<p>With the example image, deregistration takes effect when the hook runs. A key held only by that
+tier becomes a clean miss immediately, and the process waits for the full configured period even
+if no reads remain. Size the period for the departing member&rsquo;s local work.</p>
+<p>This timing is specific to the example image. <code>spec.image</code> selects the backend implementation;
+other images may deregister later or wait differently. The operator controls the value sent to
+the endpoint.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">scaleIn</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">gracePeriodSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">       </span><span class="c"># 0..3600</span></span></span></code></pre></div>
+</div><p><strong>The Pod&rsquo;s termination window is derived from it</strong>, as <code>gracePeriodSeconds + 60</code>, rather than being
+a second field beside it. That is what makes the relationship hold: two independent fields could be
+set so the kubelet kills the container in the middle of the wait, and no validation makes that
+impossible. It only makes it checkable.</p>
+<p>The upper bound of 3600 is the member endpoint&rsquo;s own; above it the call is refused with a <code>400</code>, so a
+larger value would render a hook that fails every time it runs. None of it makes a shrink lossless:
+the memory segment is still dropped, and the disk tier stops answering as soon as the hook runs.</p>
+<p>Migrating a member&rsquo;s data before it leaves (the store&rsquo;s drain job API) is <strong>not</strong> offered here. It
+is stateful orchestration, and it reaches only the memory and NVMe-oF replicas: it cannot name the
+segments of the disk-backed ones and skips those keys without counting them as blocked, so <strong>a drain
+over a backend with a disk tier reports success while leaving that tier&rsquo;s data where it was</strong>. Its
+own success signal does not tell you that happened.</p>
+<h2 id="the-external-mode">The external mode</h2>
+<p><code>connection.external</code> points at a backend somebody else runs. The operator creates <strong>nothing</strong>
+(no Deployment, no Service, no DaemonSet) and only observes.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">external</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">endpoints</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Client</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">mooncake.example:50051</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Admin</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">mooncake.example:9003</span></span></span></code></pre></div>
+</div><p>Both roles are required, so the list holds exactly two entries: entries are keyed by <code>name</code>, which
+has two values, and admission refuses a list missing either one. Each address is validated as
+<code>host:port</code> at admission. A blank or portless one would otherwise be mirrored into status and
+handed to an engine that cannot dial it.</p>
+<p><strong><code>Admin</code> is what this operator reads</strong> (health, metrics and the segment listing), and <strong><code>Client</code> is
+what an inference engine connects to</strong>. The addresses are mirrored into <code>status.endpoints</code> unchanged.</p>
+<p>Two behaviours differ from the managed mode:</p>
+<ul>
+<li><strong>An address that does not answer is reported as an <code>Error</code>, not as a backend still starting.</strong> A
+managed leader is excused while its own Deployment has no ready replica; an external address was
+declared to name something that already runs, so there is no Pod to wait on and a mistyped endpoint
+would otherwise sit at <code>Provisioning</code> forever.</li>
+<li><code>status.members[]</code> carries <strong>no</strong> node name or medium, because those Pods are not this operator&rsquo;s to
+look up. Capacity is the <strong>sum of both pools</strong>, since an external object names no medium to pick one
+by.</li>
+<li><strong>A redirect from the <code>Admin</code> address is never followed.</strong> That address belongs to whoever wrote
+the spec, and honouring a <code>3xx</code> from it would read some other host with the operator&rsquo;s network
+identity, then copy an excerpt of the answer into a status readable by anyone who can read the
+object. The redirect is reported as the response it is.</li>
+</ul>
+<h3 id="two-objects-on-one-leader">Two objects on one leader</h3>
+<p><strong>Two <code>KVCacheBackend</code> objects may name the same leader, and nothing in the operator notices.</strong> For
+a managed backend the object <em>is</em> the leader, so two objects are two leaders. For an external one the
+object is a <strong>declaration of addresses</strong>, and one leader is reachable under more than one spelling:
+by Service name in one object and by IP in another, with or without a trailing dot or an explicit
+default port.</p>
+<blockquote>
+<p><strong>Why no check</strong> — every identity the operator could compare is either editable or needs the leader
+reachable at admission. The comparison cheap enough to run (byte-identical addresses) catches the
+copy-paste case and misses the one a real deployment produces, which is the same leader spelled two
+ways. A check that catches the easy half invites the reader to trust it for the other half. This is
+tracked in <a href="https://github.com/gpustack/gpustack-operator/issues/288">issue #288</a>
+.</p>
+</blockquote>
+<p><strong>Three consequences follow, and the third is the one to read before deciding the duplication is
+safe.</strong> The reuse-domain uniqueness rule is enforced between Bindings whose pools name the <strong>same
+backend object</strong>, so two Bindings reaching one leader through two objects are both admitted on one
+<code>domain.name</code>:</p>
+<ol>
+<li><strong>The quota of a shared domain flips and never settles.</strong> The leader keeps one ledger entry per
+tenant, and each pool&rsquo;s reconciler converges that entry toward its own Binding&rsquo;s <code>quota.ceiling</code>
+<strong>on every pass</strong>. Each pass reads the other&rsquo;s figure, finds it wrong, and writes its own back.</li>
+<li><strong>The symptom of an undersized quota is a low hit rate and nothing else.</strong> Exceeding a tenant&rsquo;s
+quota does not refuse the write: the store frees room by dropping that tenant&rsquo;s own older objects
+and retries, irreversibly and <strong>without any counter moving</strong>. So the flipping above never surfaces
+as an error. It surfaces as a cache that keeps losing content nobody asked it to lose.</li>
+<li><strong>Two Bindings on one <code>domain.name</code> with a different <code>blockSize</code> or <code>dtype</code> corrupt each
+other&rsquo;s blocks.</strong> The reuse identity an engine is handed is the domain <strong>name alone</strong>. Each
+Binding hands its own <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/pool/#engine-dtype"><code>dtype</code></a>
+ to its own
+engines, and <code>blockSize</code> reaches no engine at all. So two differently-shaped caches land under
+one identity, which is <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/#inherited-reuse-domain">the silent cache pollution</a>
+
+a wrong <code>blockSize</code> or <code>dtype</code> causes, reached here without either value being wrong.</li>
+</ol>
+<p>If you point two objects at one leader, either keep their pools&rsquo; Bindings on <strong>different</strong>
+<code>domain.name</code> values, or make sure every Binding that shares a name also shares its <code>blockSize</code>,
+<code>dtype</code> and <code>quota.ceiling</code>.</p>
+<h2 id="operating-notes">Operating notes</h2>
+<p><strong><code>replica_num</code> is engine-side.</strong> How many replicas of a stored object Mooncake keeps is a per-<code>Put</code>
+argument the caller supplies through its connector configuration. It is not controllable from this CR.</p>
+<p><strong>One benign startup line, documented so nobody files it as a bug.</strong> It appears on every client start
+and is harmless:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <pre tabindex="0"><code>E transfer_metadata.cpp:991] Local segment descriptor not found</code></pre>
+</div><p><strong>Client-side environment knobs</strong>, observed at startup:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <pre tabindex="0"><code>MC_TE_METRIC=1                        enable transfer-engine metrics (OFF by default)
+MC_STORE_CLIENT_METRIC_BANDWIDTH      client bandwidth summary
+MC_STORE_MEMCPY                       unset =&gt; auto-detected (&#34;TCP-only environment, memcpy enabled&#34;)
+MC_METADATA_SERVER / P2PHANDSHAKE     the transfer engine&#39;s own low-level metadata knob</code></pre>
+</div><p><strong><code>MC_TE_METRIC</code> is rendered on every member group and cannot be turned off from the CR.</strong> The other
+three are set on the <em>workload</em> and not here. It is reserved in <code>members[].extraEnv</code> for the reason
+every rendered name is: the hatch appends, and a container carrying one name twice leaves the winner
+to the runtime.</p>
+<p>The switch reports throughput and a task-latency distribution to the container log, on an interval
+that prints nothing when nothing moved. The leader&rsquo;s Prometheus surface counts keys and bytes and
+measures no data plane, so without it the receiving end of every transfer is unmeasured while the
+sending end already reports.</p>
+<p><code>MC_METADATA_SERVER</code> is <strong>not</strong> the variable this operator renders. The member is configured
+through the store client&rsquo;s key, <code>MOONCAKE_TE_META_DATA_SERVER</code>. Two names for the metadata plane is
+exactly the near-miss that gets one of them typed into a template.</p>
+<p><strong>A backend in use cannot be deleted.</strong> While <code>status.usedBy</code> names a consumer the finalizer holds,
+the object stays at <code>phase: Deleting</code> with the claimant named in its message, and the workloads keep
+running. Clearing the last claim lets the teardown complete.</p>
+<p><strong>A backend in use also cannot have <code>leader.multiTenancy</code> turned off.</strong> The webhook refuses the edit
+while <code>status.usedBy</code> names a consumer, and the refusal names them. Remove the consumers first. See
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/pool/#operating-notes">KV Cache Pool</a>
+ for what the withdrawal costs on their side.</p>
+<blockquote>
+<p><strong>Why</strong> — the flag decides whether the master keeps a per-tenant ledger, and a consumer&rsquo;s quota is
+both written and released through that ledger. Withdrawing it under a live consumer therefore takes
+away the way that consumer is unwound, and the cost only appears when something is deleted. The
+refusal reads <code>status.usedBy</code> as it is written, not as it resolves: an entry naming an object that
+no longer exists refuses the edit too, and that list is where it is cleared.</p>
+</blockquote>
+<p><strong>The teardown deletes the workloads first, and the object disappears last.</strong> The leader Deployment,
+its Service and every member DaemonSet go before the finalizer comes off. It waits for them to be
+<strong>gone</strong>, not merely for the deletes to be accepted, so the object going away means the backend is
+gone rather than scheduled to be.</p>
+<blockquote>
+<p><strong>Why not leave it to ownership</strong> — they are owned dependents, so the collector would reach them
+either way. But between the finalizer coming off and it running, the leader is still serving on an
+address nothing accounts for. Ownership is the safety net, not the mechanism.</p>
+</blockquote>
+<p><strong>That wait is bounded, one workload at a time.</strong> Each gets the termination grace its own Pod template
+declares plus a couple of minutes, timed from its own deletion timestamp. Past that it stops being
+waited for, and a warning Event on the workload names the nodes its Pods are still terminating on.
+Deleting a backend therefore finishes even when a node it ran on has stopped answering.</p>
+<blockquote>
+<p><strong>Why its own grace and not one number</strong> — a member group with a disk tier derives its Pod&rsquo;s grace
+from <code>scaleIn.gracePeriodSeconds</code>, which reaches an hour, so any constant short enough to bound an
+unreachable node would abandon a group draining exactly as configured. That grace works as the clock
+because the kubelet treats it as a hard kill deadline: a Pod outliving it is not a slow one, it is
+one whose kubelet is not acting.</p>
+</blockquote>
+<p><strong>Only objects carrying this backend&rsquo;s own note are deleted.</strong> The names are derived, so an unrelated
+object can hold one, and a delete has to be surer than a name. The member sweep finds its DaemonSets
+by the same note it then checks, rather than by the identity labels. Discovering on one key and
+judging on another is how an object goes missing from its own teardown.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/">KV Cache Leader</a>
+ (the metadata process, its probes and its
+Lease election)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/">KV Cache Local Disk Tier</a>
+ (the optional disk layer on a member
+group, and the bucket that is its write unit)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/pool/">KV Cache Pool</a>
+ (how a namespace is granted
+a quota on this store, and what a quota ceiling buys)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/admission/">Admission</a>
+ (the gates and the four-view status pattern)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/reference/settings/">Settings &amp; Environment Variables</a>
+ (the <code>kv-cache-backend-image</code> Setting)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/operate/installation-modes/">Installation Modes</a>
+ (why the CRD is applied by the worker, not the chart)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0-rc3/docs/contribute/internals/">Internals</a>
+ — startup ordering and the invariants that fail silently.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/d7dffeab10b4baa46ccdf377928f567629b61017/docs/modules/kv-cache/backend.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#connection-and-medium">Connection and medium</a></li>
+    <li><a href="#the-image">The image</a>
+      <ul>
+        <li><a href="#the-projects-own-build-variants">The project&rsquo;s own build variants</a></li>
+        <li><a href="#the-store-version-must-match-the-engines-client">The store version must match the engine&rsquo;s client</a></li>
+      </ul>
+    </li>
+    <li><a href="#the-metadata-plane">The metadata plane</a></li>
+    <li><a href="#the-members">The members</a>
+      <ul>
+        <li><a href="#vram-group-accelerator-access">VRAM group accelerator access</a></li>
+      </ul>
+    </li>
+    <li><a href="#status-and-conditions">Status and conditions</a></li>
+    <li><a href="#growing-and-shrinking-a-group">Growing and shrinking a group</a>
+      <ul>
+        <li><a href="#group-identity-by-position">Group identity by position</a></li>
+      </ul>
+    </li>
+    <li><a href="#the-external-mode">The external mode</a>
+      <ul>
+        <li><a href="#two-objects-on-one-leader">Two objects on one leader</a></li>
+      </ul>
+    </li>
+    <li><a href="#operating-notes">Operating notes</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0-rc3/js/site.67c391187af9bb2c73f652f6a057af0de934b5621d2854fd931860ca36b15ae8.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,1240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0-rc3/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Accelerator Requests · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/requests/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0-rc3/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc3/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc3/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0-rc3/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0-rc3/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0-rc3/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0-rc3"
+    data-home="/gpustack-operator/v0.9.0-rc3/" data-page="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/requests/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0-rc3</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0-rc3</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0-rc3/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0-rc3/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/requests/" aria-current="page">Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0-rc3/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0-rc3/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0-rc3/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0-rc3/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/">Heterogeneous Devices</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Accelerator Requests</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="accelerator-requests">Accelerator Requests</h1>
+<p>The Pod webhooks check these requests at creation and reject invalid ones before a container starts.
+They select Pods with the <code>kueue.x-k8s.io/queue-name</code> label. Without that label, a Pod can still
+request device-plugin resources, but these checks and resource-unit calculations do not run.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#two-families-two-accelerator-populations">Two families, two accelerator populations</a>
+</li>
+<li><a href="#the-resource-keys">The resource keys</a>
+</li>
+<li><a href="#worked-example-per-family">Worked example per family</a>
+</li>
+<li><a href="#the-request-rules">The request rules</a>
+</li>
+<li><a href="#the-rdma-keys-beside-the-accelerator-families">The RDMA keys, beside the accelerator families</a>
+</li>
+<li><a href="#co-locating-an-accelerator-and-an-rdma-interface">Co-locating an accelerator and an RDMA interface</a>
+</li>
+<li><a href="#requesting-through-the-instance-api">Requesting through the Instance API</a>
+</li>
+<li><a href="#pre-release-breaks">Pre-release breaks</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+</ul>
+<h2 id="two-families-two-accelerator-populations">Two families, two accelerator populations</h2>
+<p>An accelerator is shared in one of two physically incompatible ways, and GPUStack names them apart:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Term</th>
+          <th>Definition</th>
+          <th>Isolation</th>
+          <th>Example</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><strong>Logical slicing</strong> (<code>.sliced*</code>)</td>
+          <td>software slicing of a whole accelerator</td>
+          <td>the manufacturer&rsquo;s own sharing facility caps compute and VRAM per container — <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/discovery/#sliced-logical-slicing">which facility, per manufacturer</a>
+</td>
+          <td>50 % of an A10G</td>
+      </tr>
+      <tr>
+          <td><strong>Physical partitioning</strong> (<code>.partitioned*</code>)</td>
+          <td>hardware partitioning of an accelerator put into a partitioning mode</td>
+          <td>the hardware itself; the operator materializes the instance</td>
+          <td>an NVIDIA MIG <code>3g.40gb</code>, or a partition of a T-Head PPU or a Hygon DCU</td>
+      </tr>
+  </tbody>
+</table>
+<p>The two never apply to the same accelerator: one in a partitioning mode advertises <strong>only</strong> the partition
+family, an unpartitioned one <strong>only</strong> the whole-accelerator, shared and logical-slice families. Hence the
+four separate <code>InstanceType</code> views (<code>EX</code> / <code>SH</code> / <code>SL</code> / <code>PT</code>) — each accelerator feeds exactly one.</p>
+<p><code>&lt;kind&gt;</code> is the manufacturer&rsquo;s own word for hardware partitioning, and manufacturers that offer it call it
+<code>mig</code>: <code>nvidia.com/gpu.partitioned.mig-3g.40gb</code>, <code>alibabacloud.com/ppu.partitioned.mig-&lt;profile&gt;</code>,
+<code>hygon.com/dcu.partitioned.mig-2g.15gb</code>. A manufacturer with no hardware partitioning has no kind, and
+no <code>.partitioned*</code> keys at all.</p>
+<h2 id="the-resource-keys">The resource keys</h2>
+<p><code>&lt;base&gt;</code> is the manufacturer&rsquo;s device resource (<code>nvidia.com/gpu</code>, <code>huawei.com/npu</code>, … — see
+<a href="https://github.com/gpustack/gpustack-operator/blob/d7dffeab10b4baa46ccdf377928f567629b61017/README.md#accelerator-support">Accelerator support</a>
+).</p>
+<table>
+  <thead>
+      <tr>
+          <th>Key</th>
+          <th>Served by</th>
+          <th>Eligible accelerators</th>
+          <th>Request value</th>
+          <th>Node value</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>&lt;base&gt;</code></td>
+          <td>device plugin (Exclusive)</td>
+          <td>unpartitioned only</td>
+          <td>accelerator count</td>
+          <td>Σ healthy tokens</td>
+      </tr>
+      <tr>
+          <td><code>&lt;base&gt;.shared</code></td>
+          <td>device plugin (Shared)</td>
+          <td>unpartitioned only</td>
+          <td>distinct accelerators on one node, one ownership share on each (10 per accelerator)</td>
+          <td>Σ healthy tokens</td>
+      </tr>
+      <tr>
+          <td><code>&lt;base&gt;.sliced</code></td>
+          <td>device plugin (Sliced)</td>
+          <td>logically sliceable only</td>
+          <td>always <code>1</code></td>
+          <td>Σ healthy tokens</td>
+      </tr>
+      <tr>
+          <td><code>&lt;base&gt;.sliced.units</code></td>
+          <td>node capacity</td>
+          <td>logically sliceable</td>
+          <td><strong>webhook-derived</strong>, per accelerator</td>
+          <td>Σ accelerators × 1,600,000</td>
+      </tr>
+      <tr>
+          <td><code>&lt;base&gt;.sliced.cores-percentage</code></td>
+          <td>node capacity</td>
+          <td>logically sliceable</td>
+          <td>per accelerator, <code>(0,100]</code></td>
+          <td>Σ per-accelerator budget</td>
+      </tr>
+      <tr>
+          <td><code>&lt;base&gt;.sliced.memory-percentage</code></td>
+          <td>node capacity</td>
+          <td>logically sliceable</td>
+          <td>per accelerator, <code>(0,100]</code></td>
+          <td>Σ per-accelerator budget</td>
+      </tr>
+      <tr>
+          <td><code>&lt;base&gt;.sliced.memory-mib</code></td>
+          <td>node capacity</td>
+          <td>logically sliceable</td>
+          <td>per accelerator, ≤ accelerator VRAM</td>
+          <td>Σ per-accelerator budget</td>
+      </tr>
+      <tr>
+          <td><code>&lt;base&gt;.partitioned</code></td>
+          <td>device plugin (Partitioned)</td>
+          <td>partitioned only</td>
+          <td>always <code>1</code></td>
+          <td>Σ healthy tokens</td>
+      </tr>
+      <tr>
+          <td><code>&lt;base&gt;.partitioned.units</code></td>
+          <td>node capacity</td>
+          <td>partitioned</td>
+          <td><strong>webhook-derived</strong></td>
+          <td>Σ accelerators × 1,600,000</td>
+      </tr>
+      <tr>
+          <td><code>&lt;base&gt;.partitioned.&lt;kind&gt;-&lt;profile&gt;</code></td>
+          <td>node capacity</td>
+          <td>partitioned</td>
+          <td>always <code>1</code></td>
+          <td>Σ (allocated + remaining)</td>
+      </tr>
+      <tr>
+          <td><code>device.gpustack.ai/&lt;manufacturer&gt;.visibility</code></td>
+          <td>device plugin (Visibility)</td>
+          <td>every accelerator</td>
+          <td>sidecar&rsquo;s accelerator count</td>
+          <td>Σ tokens</td>
+      </tr>
+  </tbody>
+</table>
+<p>Two things the table does not say:</p>
+<ul>
+<li><strong>Never write a <code>.units</code> key by hand.</strong> The Pod webhook recomputes it from the memory budget (logical)
+or the profile&rsquo;s VRAM (partition), overwriting any client value. It feeds Kueue&rsquo;s <code>credits</code>
+transformation, so a partition and a logical slice of the same VRAM cost the same credits.</li>
+<li><strong>The two token shapes differ.</strong> <code>&lt;base&gt;</code>, <code>.shared</code> and <code>.sliced</code> tokens are <em>accelerator-bound</em>: the
+token the kubelet picks is the accelerator. <code>.partitioned</code> and visibility tokens are a <em>fungible
+count</em>: the plugin picks the accelerator itself against the live partition geometry and records the
+one it used. So a partition request never lands where its profile does not fit, and a rejection from
+<code>Allocate</code> means the whole node has no room.</li>
+</ul>
+<h2 id="worked-example-per-family">Worked example per family</h2>
+<p>All four are Pods submitted on a pool&rsquo;s entrance <code>LocalQueue</code> (<code>kueue.x-k8s.io/queue-name</code>).</p>
+<p><strong>Exclusive</strong> — two whole accelerators:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span></span></span></code></pre></div>
+</div><p><strong>Shared</strong> — two accelerators on one node, one of each accelerator&rsquo;s 10 ownership shares:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.shared</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span></span></span></code></pre></div>
+</div><p>The value counts accelerators, never shares of one: <code>&quot;2&quot;</code> needs a node with two accelerators that each
+still have a free share. It is per container, and each container is one holder: two Pods, or two
+containers of one Pod, may hold a share of the same accelerator. A share carries no memory or compute
+cap: up to 10 holders use the whole accelerator side by side; isolating them is a logical slice&rsquo;s job.</p>
+<p>The Pod webhook pins a request of two or more (its largest container&rsquo;s) to nodes with that many
+accelerators. It adds
+<code>acceleratable.feature.gpustack.ai/&lt;group&gt;.count Gt N-1</code> to every required node-affinity term, reading
+<code>&lt;group&gt;</code> from the <code>InstanceType</code> fronting the queue, and rejects the Pod when that cannot be read.
+Ten tokens per accelerator hide a node&rsquo;s accelerator count from Kueue and the scheduler; the label does not.</p>
+<p><strong>Logical slice</strong> — half of one accelerator&rsquo;s VRAM, capped at 40 % of its compute:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.sliced</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">                       </span><span class="c"># always exactly 1 accelerator</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.sliced.memory-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">    </span><span class="c"># per accelerator; or .sliced.memory-mib, never both</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.sliced.cores-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;40&#34;</span><span class="w">     </span><span class="c"># per accelerator; defaults to 100 when omitted</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># nvidia.com/gpu.sliced.units is folded by the webhook — do not set it</span></span></span></code></pre></div>
+</div><p><strong>Physical partition</strong> — one MIG <code>3g.40gb</code> instance:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">                  </span><span class="c"># always exactly 1 accelerator</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.partitioned.mig-3g.40gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">      </span><span class="c"># always exactly 1 instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># nvidia.com/gpu.partitioned.units is folded by the webhook — do not set it</span></span></span></code></pre></div>
+</div><p><strong>The SSH sidecar</strong> sits outside the four families, so no family rule counts it. It requests the
+internal visibility resource for its workload container&rsquo;s accelerator count:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">device.gpustack.ai/nvidia.visibility</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div><h2 id="the-request-rules">The request rules</h2>
+<p>The rules are scoped by a container&rsquo;s lifetime group, not by the field it sits in:</p>
+<ul>
+<li>the <strong>init group</strong> is <code>spec.initContainers</code> <em>without</em> <code>restartPolicy: Always</code>;</li>
+<li>the <strong>running group</strong> is <code>spec.containers</code>;</li>
+<li>a <strong>native sidecar</strong> — <code>spec.initContainers</code> <em>with</em> <code>restartPolicy: Always</code> — belongs to neither. It
+starts during the init phase and keeps running, so it overlaps every later init container as well as
+every app container.</li>
+</ul>
+<h3 id="rule-1--one-family-in-exactly-one-container-group">Rule 1 — one family, in exactly one container group</h3>
+<p><em>All containers of a Pod request the same accelerator family, and the accelerator claims sit in exactly
+one container group.</em></p>
+<p>Accepted — both app containers claim the same family:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">trainer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sidecar-metrics</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div><p>Rejected — two families in one Pod:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced.memory-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span></span></span></code></pre></div>
+</div><blockquote>
+<p><code>spec: Forbidden: a Pod may request only one accelerator family, found [exclusive sliced]</code></p>
+</blockquote>
+<p>Rejected — the same family claimed in both container groups:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">initContainers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">warmup</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div><blockquote>
+<p><code>spec.initContainers: Forbidden: a Pod's accelerator requests must all sit in one container group; spec.initContainers must give up its request, because its devices are held for the Pod's whole life while the scheduler charges the Pod only once</code></p>
+</blockquote>
+<p>Needs a device in two phases? Keep the claim on the app container: its device is the same hardware the
+init container would have held.</p>
+<blockquote>
+<p><strong>Why</strong> — two independent reasons, and one group makes charge and consumption agree by construction.</p>
+<ul>
+<li><em>Nothing releases the earlier claim.</em> The kubelet holds a finished init container&rsquo;s devices for the
+Pod&rsquo;s whole life, and GPUStack&rsquo;s reclaimer destroys a partition on <strong>Pod</strong> deletion, not container
+termination. The second claim coexists with the first.</li>
+<li><em>The scheduler charges once.</em> A Pod&rsquo;s demand for a key is <code>max(Σ init, Σ app)</code>, so two same-family
+claims cost <strong>one</strong> unit of quota while consuming <strong>two</strong> accelerators. The node over-advertises by
+one slot per such Pod, and the <em>next</em> tenant fails terminally.</li>
+</ul>
+</blockquote>
+<h3 id="rule-2--basesliced-is-exactly-1">Rule 2 — <code>&lt;base&gt;.sliced</code> is exactly 1</h3>
+<p>Accepted: <code>nvidia.com/gpu.sliced: &quot;1&quot;</code>. Rejected:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.sliced</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.sliced.memory-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span></span></span></code></pre></div>
+</div><blockquote>
+<p><code>spec.containers[0].resources.limits[nvidia.com/gpu.sliced]: Invalid value: &quot;2&quot;: a logical slice request is always a single accelerator; multi-accelerator logical slicing is not supported yet</code></p>
+</blockquote>
+<p>A multi-accelerator workload asks for several Pods, or for whole accelerators.</p>
+<blockquote>
+<p><strong>Why</strong> — a <strong>deferral, not a manufacturer limit</strong>: NVIDIA can isolate more than one accelerator. No
+node-level key expresses &ldquo;N <em>distinct</em> accelerators&rdquo; — an additive scalar cannot tell &ldquo;two at half
+each&rdquo; from &ldquo;one in full&rdquo;, so a one-accelerator node would accept the request and fail it at
+<code>Allocate</code>. Lifting the cap needs a node-level accelerator-count dimension.</p>
+</blockquote>
+<p>A logical slice must also name exactly one memory budget:</p>
+<ul>
+<li>neither <code>.sliced.memory-percentage</code> nor <code>.sliced.memory-mib</code> → <code>Required value: a nvidia.com/gpu.sliced request must set nvidia.com/gpu.sliced.memory-percentage or nvidia.com/gpu.sliced.memory-mib</code>;</li>
+<li>both → <code>Forbidden: cannot set both …memory-percentage and …memory-mib</code>;</li>
+<li>a percentage outside <code>(0,100]</code>, a non-positive MiB value, or a MiB value above the accelerator&rsquo;s
+VRAM → rejected.</li>
+</ul>
+<h3 id="rule-3--basepartitioned-is-exactly-1">Rule 3 — <code>&lt;base&gt;.partitioned</code> is exactly 1</h3>
+<p>Accepted: <code>nvidia.com/gpu.partitioned: &quot;1&quot;</code>. Rejected:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.partitioned.mig-1g.10gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div><blockquote>
+<p><code>spec.containers[0].resources.limits[nvidia.com/gpu.partitioned]: Invalid value: &quot;2&quot;: a partition request is always a single accelerator; request one Pod per instance</code></p>
+</blockquote>
+<p>Unlike rule 2 this is a scope decision: the plugin picks the accelerator itself, so <code>N &gt; 1</code> would
+be implementable. No workload needs it yet, so a multi-partition workload asks for several Pods.</p>
+<p>A bare accelerator key with no profile is also rejected; there is no hardware shape to actuate.</p>
+<blockquote>
+<p><code>Required value: a nvidia.com/gpu.partitioned request must name a profile, e.g. nvidia.com/gpu.partitioned.&lt;kind&gt;-&lt;profile&gt;</code></p>
+</blockquote>
+<h3 id="rule-4--a-partition-request-names-exactly-one-profile-shape">Rule 4 — a partition request names exactly one profile shape</h3>
+<p>Accepted: one per-profile key. Rejected:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.partitioned.mig-1g.10gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.partitioned.mig-3g.40gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div><blockquote>
+<p><code>spec: Forbidden: a Pod may request only one partition profile, found [1g.10gb 3g.40gb]</code></p>
+</blockquote>
+<p>The rule is Pod-wide as well as per-container: two containers naming different profiles are rejected the
+same way.</p>
+<h3 id="rule-5--each-per-profile-key-is-exactly-1">Rule 5 — each per-profile key is exactly 1</h3>
+<p>Accepted: <code>nvidia.com/gpu.partitioned.mig-3g.40gb: &quot;1&quot;</code>. Rejected:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.partitioned.mig-3g.40gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span></span></span></code></pre></div>
+</div><blockquote>
+<p><code>spec.containers[0].resources.limits[nvidia.com/gpu.partitioned.mig-3g.40gb]: Invalid value: &quot;2&quot;: a partition profile request must be exactly 1 instance</code></p>
+</blockquote>
+<h3 id="rule-6--at-most-one-container-may-request-a-slicing-family">Rule 6 — at most one container may request a slicing family</h3>
+<p>Logical or physical, one claiming container per Pod. The SSH sidecar is unaffected: the visibility
+resource sits deliberately outside the accelerator families.</p>
+<p>Accepted:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced.memory-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sshd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w"> </span><span class="c"># visibility, not a slicing family</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">device.gpustack.ai/nvidia.visibility</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div><p>Rejected — two containers each holding a slice:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced.memory-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.sliced.memory-percentage</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span></span></span></code></pre></div>
+</div><blockquote>
+<p><code>spec: Forbidden: at most one container may request a slicing family, found 2</code></p>
+</blockquote>
+<h3 id="rule-7--a-restartable-init-container-may-not-request-an-accelerator">Rule 7 — a restartable init container may not request an accelerator</h3>
+<p>Accepted — the claim sits on an app container while the native sidecar carries none; rejected — the
+native sidecar carries the claim:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">                                                       </span><span class="c"># accepted</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">initContainers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">log-shipper</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">restartPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">Always</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;100m&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">                                                       </span><span class="c"># rejected</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">initContainers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">log-shipper</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">restartPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">Always</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div><blockquote>
+<p><code>spec.initContainers[0].resources.limits: Forbidden: a restartable init container (a native sidecar) may not request an accelerator; move the request to an app container</code></p>
+</blockquote>
+<p>A native sidecar belongs to neither container group, so its claim would overlap every later init
+container <em>and</em> every app container — the exact double-consumption rule 1 exists to prevent, with no
+group to move it out of.</p>
+<h2 id="the-rdma-keys-beside-the-accelerator-families">The RDMA keys, beside the accelerator families</h2>
+<p>An RDMA interface is requested through three node-level keys that sit beside the accelerator
+families, not inside them: a network interface belongs to the node rather than to a manufacturer,
+so no <code>&lt;base&gt;</code> applies. The mechanism (which interface serves which key, and what a grant hands
+the container) is described in
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/#the-rdma-resource-keys">Network Topology</a>
+; the request rules are here.</p>
+<p><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/operations/">RDMA Operations</a>
+ covers how many to ask for and how to configure a node so
+the request lands well.</p>
+<p>All three are served by the device plugin, and a request names what it wants one of:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Key</th>
+          <th>Quantity meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>device.gpustack.ai/rdma</code></td>
+          <td>whole interfaces</td>
+      </tr>
+      <tr>
+          <td><code>device.gpustack.ai/rdma.shared</code></td>
+          <td>concurrent uses of an interface</td>
+      </tr>
+      <tr>
+          <td><code>device.gpustack.ai/rdma.partitioned</code></td>
+          <td>virtual functions</td>
+      </tr>
+  </tbody>
+</table>
+<p>What a quantity of each key means, how many tokens an endpoint carries, and which allocation mode
+each key belongs to, are stated once with the mechanism:
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/#the-rdma-resource-keys">the RDMA resource keys</a>
+.
+There are no <code>.units</code> keys on this side: nothing is webhook-derived, and the value you set is the
+value that schedules.</p>
+<p><strong>The keys are not an accelerator family.</strong> The family classifier returns none for them, so the
+accelerator rules above neither apply to them nor can be violated by them: an accelerator family and an
+RDMA key in one Pod is legal.</p>
+<p>The same blindness reaches Kueue, which therefore meters these keys not at all. See
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/operations/#kueue-and-the-rdma-keys">RDMA Operations</a>
+ for what that costs a
+fleet and what to do instead of a quota.</p>
+<p>Neither a node without an RDMA-capable interface nor an endpoint whose link the node judged
+<code>failed</code> carries allocatable tokens (what each one advertises is on
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/#the-rdma-resource-keys">the mechanism page</a>
+),
+so a request for these keys never schedules onto them.</p>
+<p>A grant injects the endpoint&rsquo;s own verbs character device, the node-level connection-manager device
+where the host has one, and <code>NCCL_IB_HCA</code> naming the granted devices. That set is evidenced for
+RoCE and for nothing else — see
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/#the-allocation-response">what an allocation hands over</a>
+.</p>
+<p><strong>Shared accelerator and RDMA interface in one container</strong>, the shape a co-located workload uses:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.shared</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">device.gpustack.ai/rdma.shared</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">     </span><span class="c"># one concurrent use of one RDMA interface</span></span></span></code></pre></div>
+</div><h2 id="co-locating-an-accelerator-and-an-rdma-interface">Co-locating an accelerator and an RDMA interface</h2>
+<p>A container that requests an accelerator and an RDMA interface together is granted both on one NUMA
+node (the kubelet aligns resources that publish NUMA hints, and both sides publish them) but only
+when every condition below holds. Outside these conditions nothing aligns the two, and no error
+says so.</p>
+<ul>
+<li><strong>Both requests sit in the same container.</strong> The kubelet aligns per container by default, so an
+accelerator in one container and an RDMA interface in another are aligned by nothing.</li>
+<li><strong>Both resources publish a hint.</strong> The accelerator&rsquo;s whole-device modes do; an accelerator
+partition token does not (it names no accelerator), so a partition profile paired with
+<code>rdma.partitioned</code> is aligned to the RDMA side alone and is not covered, even though both are
+allocatable in the same container. An RDMA endpoint whose affinity the kernel did not report
+publishes none either.</li>
+<li><strong>The node&rsquo;s kubelet runs <code>restricted</code> or <code>single-numa-node</code>.</strong> It is node-level kubelet
+configuration this operator cannot change, and what each of the four policies does with a hint is
+in <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/preflight/#reading-the-result">the preflight runbook</a>
+, which is also where you
+read the policy a given node runs. No release sets one for you — <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/operations/#enabling-numa-alignment-on-the-kubelet">how to set it, and how to
+confirm it took</a>
+.</li>
+<li><strong>The alignment&rsquo;s unit is the NUMA node.</strong> See
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/#the-rdma-resource-keys">the RDMA resource keys</a>
+
+for why a shared PCIe switch is finer than a hint can express.</li>
+</ul>
+<p>What is not guaranteed is the node itself: the scheduler selects by quantities and cannot see
+inside a node&rsquo;s topology, so a node whose totals suffice but whose devices sit on two NUMA nodes is
+selected and the container is then refused at admission — and a Pod refused that way is not
+rescheduled onto another node.</p>
+<p><code>device-manager preflight</code> reports the node&rsquo;s TopologyManager policy as a <code>topology</code> section, read
+off the running kubelet&rsquo;s own command line and the configuration it names; <code>unknown</code> means no
+readable source named one, never a guess of the default. See
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/preflight/">Preflight Operations</a>
+.</p>
+<h2 id="requesting-through-the-instance-api">Requesting through the <code>Instance</code> API</h2>
+<p>An <code>Instance</code> expresses the same request families through <code>spec.resources</code>, and the controller shapes them
+into the keys above:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Field</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>accelerator: &quot;N&quot;</code></td>
+          <td>whole accelerators (exclusive) — may span accelerators</td>
+      </tr>
+      <tr>
+          <td><code>accelerator: &quot;1&quot;</code><br/><code>acceleratorSlicedMemoryPercentage</code><br/><code>acceleratorSlicedCoresPercentage</code> (optional)</td>
+          <td>one logical slice</td>
+      </tr>
+      <tr>
+          <td><code>accelerator: &quot;1&quot;</code><br/><code>acceleratorPartitionedProfile: &quot;3g.40gb&quot;</code></td>
+          <td>one hardware partition of that profile</td>
+      </tr>
+  </tbody>
+</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratorPartitionedProfile</span><span class="p">:</span><span class="w"> </span><span class="l">3g.40gb</span></span></span></code></pre></div>
+</div><p>The webhook rejects these at admission rather than leaving the Instance Pending:</p>
+<ul>
+<li>a profile the pool does not offer — the message lists the offered set;</li>
+<li>a profile on a manufacturer with no hardware partitioning;</li>
+<li>a profile <strong>and</strong> a slice percentage together (<code>a hardware partition and a logical slice percentage are mutually exclusive</code>);</li>
+<li>an <code>accelerator</code> count other than <code>1</code> for a slice or a partition request;</li>
+<li>a whole-accelerator count over the pool&rsquo;s whole-accelerator <strong>capacity</strong> (<code>status.accelerator.capacity</code>),
+never over what is free right now: an Instance submitted while every accelerator is held is admitted
+and waits in its queue;</li>
+<li><strong>a slice percentage against a pool that offers no logical slicing</strong> — a tightening; such a request
+used to be silently reshaped into a whole-accelerator one and served. On an all-partitioned pool the
+message points at <code>spec.resources.acceleratorPartitionedProfile</code> instead.</li>
+</ul>
+<p>A partition&rsquo;s host CPU and RAM are sized by the profile&rsquo;s share of the accelerator&rsquo;s VRAM, so a <code>1g</code>
+instance does not ask for a whole accelerator&rsquo;s worth.</p>
+<h2 id="pre-release-breaks">Pre-release breaks</h2>
+<p>No released version is marked stable, so each of the following is a clean break with <strong>no</strong> translation
+layer.</p>
+<p><strong>The old MIG key is gone.</strong> A MIG profile used to be requested through the <em>logical</em> family: a
+per-profile key built from <code>&lt;base&gt;.sliced</code> with a <code>mig-&lt;profile&gt;</code> segment appended, alongside
+<code>&lt;base&gt;.sliced: 1</code>. It is replaced by <code>&lt;base&gt;.partitioned.&lt;kind&gt;-&lt;profile&gt;</code> alongside
+<code>&lt;base&gt;.partitioned: 1</code>.</p>
+<p>Nothing recognizes the old one — not the builders, not the parsers, not the node-capacity reconciler,
+and deliberately <strong>not even a rejection by name</strong>. Rewrite such a manifest; untouched, it meets two
+ordinary failures, neither naming the replacement:</p>
+<ul>
+<li>its per-profile key is an extended resource no node advertises, so it never schedules;</li>
+<li>the <code>&lt;base&gt;.sliced: 1</code> beside it is a logical slice with no memory budget, which rule 2 rejects.</li>
+</ul>
+<blockquote>
+<p><strong>Why</strong> — legibility would cost a legacy branch in every key path, to serve a request no
+documentation, no <code>InstanceType</code> and no example produces.</p>
+</blockquote>
+<p>A development node an earlier build wrote those legacy capacities onto keeps them, because nothing owns
+them. List what is left and patch it off — one JSON-patch removal per stale key:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get node &lt;node&gt; -o json <span class="p">|</span> jq -r <span class="s1">&#39;.status.capacity | keys[] | select(contains(&#34;mig-&#34;))&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> kubectl patch node &lt;node&gt; --subresource<span class="o">=</span>status --type<span class="o">=</span>json <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="go">    -p &#39;[{&#34;op&#34;:&#34;remove&#34;,&#34;path&#34;:&#34;/status/capacity/&lt;escaped-key&gt;&#34;}]&#39;   # escape &#34;/&#34; in the key as &#34;~1&#34;
+</span></span></span></code></pre></div>
+</div><p><strong>The allocation annotation&rsquo;s value changed too, so drain a node before upgrading its device manager.</strong>
+The Pod annotation <code>device.gpustack.ai/accelerator.allocated</code> is now a per-container map; the old flat
+shape is not read. Drain the node (or delete its accelerator Pods) before rolling the device-manager
+DaemonSet, then let the workloads reschedule.</p>
+<blockquote>
+<p><strong>Why</strong> — a Pod carrying the old shape on a restarted device manager <strong>drops out of the ledger</strong>: its
+accelerators read <em>free</em> while its containers hold them, and the next opposite-mode Pod can land on an
+occupied one. The rebuild cannot recover — the occupancy is exactly what became unreadable — so it
+logs loudly, naming the Pod.</p>
+</blockquote>
+<p><strong><code>&lt;base&gt;.shared: N</code> counts accelerators now.</strong> It used to be read as N shares of one accelerator in
+some places and N accelerators in others; it is N distinct accelerators on one node, one share on each.
+A manifest asking <code>&quot;3&quot;</code> for a heavier share of one accelerator now needs a node with three.</p>
+<p><code>InstanceType.status.acceleratorShared.onceMaxRequest</code> moved with it: it counts a node&rsquo;s accelerators
+with a free share, where it used to sum their shares. Output recorded before the change, in the
+<a href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/walkthrough/">Walkthrough</a>
+ and <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
+, still shows the
+old reading under <code>SH</code> — <code>10/10</code> on one free accelerator now reads <code>1/10</code>.</p>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li>
+<p><strong>Media-engine and graphics profile variants are not exposed.</strong> A profile whose name is not a valid
+Kubernetes resource-name segment (the <code>+me</code>, <code>+me.all</code> and <code>+gfx</code> MIG variants) is <strong>excluded</strong> from
+an accelerator&rsquo;s inventory rather than rewritten to something key-safe, so a key always maps back to
+its profile by a plain prefix strip. Those variants cannot be requested.</p>
+</li>
+<li>
+<p><strong>One accelerator per slice or partition request</strong> (rules 2 and 3), for the different reasons given
+above.</p>
+</li>
+<li>
+<p><strong>The whole-accelerator bound is the pool&rsquo;s total, not one node&rsquo;s.</strong> A count above the largest node&rsquo;s
+accelerators but within the pool&rsquo;s total is admitted and then stays queued, because one Pod&rsquo;s
+accelerators come from one node and <code>InstanceType.status</code> carries no per-node capacity to refuse it
+with. It applies to an <code>Instance</code> and a <code>ModelDeployment</code> role alike.</p>
+</li>
+<li>
+<p><strong>Hand-carving a partition outside GPUStack is unsupported on a managed node.</strong> Every node-level key —
+per-profile capacity, partition token health, the admission check — comes from the Pod annotations the
+device plugin writes, and an instance made with <code>nvidia-smi mig -cgi</code> produces none.</p>
+<p>The node keeps advertising room it does not have, and unlike a transient over-advertisement this
+<strong>never converges</strong>: it persists until the instance is removed. Placement reads the live hardware and
+will not double-book it, but the accounting above stays wrong. Let GPUStack materialize the instances;
+it reuses any already on an accelerator it manages.</p>
+</li>
+<li>
+<p><strong>Flipping an accelerator&rsquo;s partitioning mode is an operational procedure, not a live switch.</strong> An
+accelerator advertises a family&rsquo;s tokens only while its reported capability backs that family, so a
+flip removes the old tokens rather than marking them unhealthy: there is no continuity across it.</p>
+<p>Drain the accelerator (the hardware refuses the toggle under load anyway), flip the mode with the
+manufacturer&rsquo;s tool, then <strong>restart that node&rsquo;s Device Manager DaemonSet</strong>: the re-detect trigger
+watches the device set and health, not the partitioning mode. Deleting the node&rsquo;s <code>Devices</code> object is
+<strong>not</strong> required, since an existing group&rsquo;s capability is rewritten in place.</p>
+<p>Full procedure: <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/nvidia-mig/#enabling-partitioning-on-a-node">NVIDIA MIG Operations</a>
+ ·
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/thead-mig/#enabling-partitioning-on-a-node">T-Head MIG Operations</a>
+ ·
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/hygon-mig/#enabling-partitioning-on-a-node">Hygon MIG Operations</a>
+.</p>
+</li>
+<li>
+<p><strong>A shared request on a node with fewer free accelerators than it names fails for good.</strong> Each
+accelerator advertises 10 shared tokens, so the scheduler fits <code>.shared: &quot;2&quot;</code> on a one-accelerator
+node; the device plugin refuses the two tokens the kubelet picked there rather than grant one short.
+The Pod ends <code>Failed</code> with <code>UnexpectedAdmissionError</code> and must be recreated.</p>
+<p>A pool&rsquo;s queue holds such a request first
+(<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/admission/#gate-3--the-per-accelerator-admissioncheck">Admission</a>
+), so a Pod
+reaches this only by skipping the queue or racing another allocation.</p>
+</li>
+<li>
+<p><strong>The shared card-count pin has two gaps.</strong> Where it misses, a request placed on too few
+accelerators retries for good (<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/admission/#gate-3--the-per-accelerator-admissioncheck">Admission</a>
+).</p>
+<ul>
+<li><em>Workloads built from a template.</em> Kueue builds a batch Job&rsquo;s, a JobSet&rsquo;s or a RayJob&rsquo;s Workload
+from its Pod template before any Pod exists, and the webhook only sees Pods, so none is pinned.</li>
+<li><em>Partitioned accelerators count.</em> <code>.count</code> is the node&rsquo;s total, so a node whose accelerators are
+mostly in a partitioning mode still passes the pin with too few left to share.</li>
+</ul>
+</li>
+<li>
+<p><strong>A non-default <code>TopologyManager</code> policy can mis-align a partition.</strong> The Partitioned resource reports
+no NUMA topology (the plugin may not use the accelerator the kubelet aligned to), so under
+<code>single-numa-node</code> the CPU and memory providers can settle on one socket while the only accelerator
+with room is on the other. The default <code>none</code> is unaffected.</p>
+</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
+ (the administrator runbook for an
+accelerator&rsquo;s partitioning mode, plus a recorded enable → request → reclaim → disable walkthrough)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/hygon-mig/">Hygon MIG Operations</a>
+ (the same runbook for Hygon, whose mode is
+node-wide and whose partitioned nodes serve no whole-card or sliced request at all)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/thead-mig/">T-Head MIG Operations</a>
+ (the same runbook for T-Head&rsquo;s own
+partitioning)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/admission/">Admission</a>
+ (where these keys are checked)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/discovery/#the-device-plugin-allocator">Device Discovery</a>
+ (where they are
+served)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/operations/">RDMA Operations</a>
+ (how many RDMA endpoints to ask for beside N
+accelerators, and the kubelet policy that aligns the two sides)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/walkthrough/">Walkthrough</a>
+ — the same requests on a live cluster.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/d7dffeab10b4baa46ccdf377928f567629b61017/docs/modules/devices/requests.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#two-families-two-accelerator-populations">Two families, two accelerator populations</a></li>
+    <li><a href="#the-resource-keys">The resource keys</a></li>
+    <li><a href="#worked-example-per-family">Worked example per family</a></li>
+    <li><a href="#the-request-rules">The request rules</a>
+      <ul>
+        <li><a href="#rule-1--one-family-in-exactly-one-container-group">Rule 1 — one family, in exactly one container group</a></li>
+        <li><a href="#rule-2--basesliced-is-exactly-1">Rule 2 — <code>&lt;base&gt;.sliced</code> is exactly 1</a></li>
+        <li><a href="#rule-3--basepartitioned-is-exactly-1">Rule 3 — <code>&lt;base&gt;.partitioned</code> is exactly 1</a></li>
+        <li><a href="#rule-4--a-partition-request-names-exactly-one-profile-shape">Rule 4 — a partition request names exactly one profile shape</a></li>
+        <li><a href="#rule-5--each-per-profile-key-is-exactly-1">Rule 5 — each per-profile key is exactly 1</a></li>
+        <li><a href="#rule-6--at-most-one-container-may-request-a-slicing-family">Rule 6 — at most one container may request a slicing family</a></li>
+        <li><a href="#rule-7--a-restartable-init-container-may-not-request-an-accelerator">Rule 7 — a restartable init container may not request an accelerator</a></li>
+      </ul>
+    </li>
+    <li><a href="#the-rdma-keys-beside-the-accelerator-families">The RDMA keys, beside the accelerator families</a></li>
+    <li><a href="#co-locating-an-accelerator-and-an-rdma-interface">Co-locating an accelerator and an RDMA interface</a></li>
+    <li><a href="#requesting-through-the-instance-api">Requesting through the <code>Instance</code> API</a></li>
+    <li><a href="#pre-release-breaks">Pre-release breaks</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0-rc3/js/site.67c391187af9bb2c73f652f6a057af0de934b5621d2854fd931860ca36b15ae8.js" defer></script>
+</body>
+</html>

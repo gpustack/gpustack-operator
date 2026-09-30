@@ -1,0 +1,892 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0-rc3/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Model Store Operations · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/operations/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0-rc3/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc3/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc3/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0-rc3/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0-rc3/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0-rc3/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0-rc3"
+    data-home="/gpustack-operator/v0.9.0-rc3/" data-page="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/operations/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0-rc3</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0-rc3</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0-rc3/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0-rc3/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/operations/" aria-current="page">Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0-rc3/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0-rc3/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0-rc3/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0-rc3/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/">Model Delivery</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Store Operations</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-store-operations">Model Store Operations</h1>
+<p>The <code>model-manager</code> DaemonSet keeps one model cache per node. It downloads each Hugging Face or ModelScope
+<code>ModelArtifact</code> digest once per node and mounts it for workloads. Configure and inspect that cache
+with the steps below; <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/node-store/">Node Model Store</a>
+ explains each mount.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#enable-it">Enable it</a>
+</li>
+<li><a href="#where-the-configuration-comes-from">Where the configuration comes from</a>
+</li>
+<li><a href="#read-a-node">Read a node</a>
+</li>
+<li><a href="#the-capacity-rule">The capacity rule</a>
+</li>
+<li><a href="#switch-delivery">Switch delivery</a>
+</li>
+<li><a href="#where-replicas-land">Where replicas land</a>
+</li>
+<li><a href="#upgrade-notes">Upgrade notes</a>
+</li>
+<li><a href="#uninstall-and-moving-the-cache">Uninstall, and moving the cache</a>
+</li>
+<li><a href="#a-deployment-waiting-for-its-weights">A deployment waiting for its weights</a>
+</li>
+</ul>
+<h2 id="enable-it">Enable it</h2>
+<p>The chart deploys it by default (<code>modelManager.enabled: true</code>) with the CSIDriver
+<code>model.csi.gpustack.ai</code>, one DaemonSet Pod per node, a ServiceAccount and a ClusterRole that grants
+only get, list and watch on <code>modelartifacts</code> and <code>nodemodelstores</code>, update on
+<code>nodemodelstores/status</code>, and ConfigMaps in the operator namespace. It reads no Secret: kubelet
+hands each mount its artifact&rsquo;s Secret.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Default</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>modelManager.rootPath</code></td>
+          <td><code>/var/lib/gpustack/models</code></td>
+          <td>the node&rsquo;s cache directory, a hostPath; mount a dedicated filesystem here</td>
+      </tr>
+      <tr>
+          <td><code>modelManager.kubeletDir</code></td>
+          <td><code>/var/lib/kubelet</code></td>
+          <td>kubelet&rsquo;s root; the plugin mounts its <code>pods</code> directory with <code>Bidirectional</code> propagation and its own plugin directory separately</td>
+      </tr>
+      <tr>
+          <td><code>modelManager.securePort</code></td>
+          <td><code>32444</code></td>
+          <td>metrics, readiness and liveness</td>
+      </tr>
+      <tr>
+          <td><code>modelManager.registrar.image</code></td>
+          <td><code>docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.17.0</code></td>
+          <td>the sidecar that registers the plugin with kubelet</td>
+      </tr>
+      <tr>
+          <td><code>modelManager.nodeSelector</code>, <code>tolerations</code></td>
+          <td>every node, every taint</td>
+          <td>where it runs; a node without it cannot mount node-delivered weights</td>
+      </tr>
+  </tbody>
+</table>
+<ul>
+<li><strong>The operator namespace must admit privileged Pods.</strong> The plugin container is privileged, so an
+enforced <code>pod-security.kubernetes.io/enforce</code> label there must be <code>privileged</code>, as the device
+manager already needs. Tenant namespaces may enforce <code>restricted</code>: it admits <code>csi</code> volumes.</li>
+<li><strong>Image mode</strong> installs it unless <code>--disable-applications</code> names <code>model-manager</code> (values key
+<code>modelManager</code>); see <a href="/gpustack-operator/v0.9.0-rc3/docs/operate/installation-modes/">Installation Modes</a>
+. Its overlay
+sets only that switch: every other value keeps the chart&rsquo;s default, and no delivery is seeded, so
+<code>model-artifact-delivery-mode</code> stays <code>Engine</code> until you set it.</li>
+<li><strong>A kubelet with another root directory</strong> (some distributions use <code>/var/snap/...</code> or
+<code>/var/lib/k0s/kubelet</code>) needs <code>modelManager.kubeletDir</code> set to it, or no mount reaches a Pod. Image
+mode cannot set it, so there the plugin only works with the standard <code>/var/lib/kubelet</code>.</li>
+</ul>
+<h2 id="where-the-configuration-comes-from">Where the configuration comes from</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Layer</th>
+          <th>Carrier</th>
+          <th>Who changes it</th>
+          <th>What</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Deploy time</td>
+          <td>chart values; in image mode the worker&rsquo;s overlay, which sets only the switch</td>
+          <td>installer</td>
+          <td>the switch, the cache root, the kubelet directory, images, resources and placement, the delivery seed</td>
+      </tr>
+      <tr>
+          <td>Cluster runtime</td>
+          <td><a href="/gpustack-operator/v0.9.0-rc3/docs/reference/settings/#online-adjustable-settings">Settings</a>
+ in the operator namespace</td>
+          <td>administrator</td>
+          <td>delivery mode, Hub endpoint, proxy, no-proxy, CA bundle, watermarks, download concurrency and bandwidth</td>
+      </tr>
+      <tr>
+          <td>Object</td>
+          <td>the <code>ModelArtifact</code></td>
+          <td>tenant</td>
+          <td>source, revision, patterns, Secret; immutable</td>
+      </tr>
+  </tbody>
+</table>
+<p>The worker merges the runtime layer into every node&rsquo;s <code>NodeModelStore.spec</code> within a minute of a
+change, and the plugin reads only that object and the CA ConfigMap it names. Nothing a tenant
+writes chooses where a node connects. The Settings this adds:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Setting</th>
+          <th>Default</th>
+          <th>Check</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>model-artifact-delivery-mode</code></td>
+          <td><code>Engine</code>; the chart seeds <code>Node</code> with the plugin</td>
+          <td><code>Engine</code> or <code>Node</code>; <code>Node</code> needs the CSIDriver</td>
+      </tr>
+      <tr>
+          <td><code>model-store-high-watermark</code></td>
+          <td><code>80</code></td>
+          <td>integer, above the low watermark, at most <code>95</code></td>
+      </tr>
+      <tr>
+          <td><code>model-store-low-watermark</code></td>
+          <td><code>70</code></td>
+          <td>integer, at least <code>1</code>, below the high watermark</td>
+      </tr>
+      <tr>
+          <td><code>model-store-download-concurrency</code></td>
+          <td><code>8</code></td>
+          <td>concurrent requests per node, <code>1</code> to <code>64</code></td>
+      </tr>
+      <tr>
+          <td><code>model-store-download-bandwidth</code></td>
+          <td><code>0</code></td>
+          <td>bytes per second per node as a quantity (<code>200Mi</code>); <code>0</code> is unlimited</td>
+      </tr>
+  </tbody>
+</table>
+<p>The endpoint, proxy, no-proxy and CA bundle Settings a <code>ModelArtifact</code> already resolves through feed
+<code>spec.hub</code> as well, so the controller, an engine and the plugin reach the same Hub the same way.
+The CA bundle <strong>is</strong> given to the plugin, which runs in the operator namespace.</p>
+<p><strong>A default is checked where it is used.</strong> A value seeded from a <code>GPUSTACK_*</code> variable skips
+admission, so the worker refuses to start on an invalid one, never writes one into <code>spec</code>, and the
+plugin checks <code>spec</code> again: an invalid one sets <code>Ready=False</code>, <code>InvalidConfiguration</code>, and no
+download starts.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-store-download-bandwidth --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;200Mi&#34;}}&#39;</span></span></span></code></pre></div>
+</div><h3 id="the-pool-layer">The pool layer</h3>
+<p>A <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/prefetch/"><code>ModelStore</code></a>
+ is a fourth layer above the cluster Settings: a
+cluster-scoped object whose <code>nodeSelector</code> picks a pool and whose watermarks and download limits
+override the matched nodes field by field. A field the store leaves out keeps the cluster default,
+and an explicit <code>bytesPerSecond: 0</code> means &ldquo;unlimited on this pool&rdquo;. The winner&rsquo;s name lands in the
+node&rsquo;s <code>spec.store</code>; nodes no store matches keep the cluster defaults.</p>
+<p>Two stores whose selectors match one node never merge silently: both report <code>SelectorOverlap</code>, and
+the alphabetically first name wins the shared nodes. Fix the selectors rather than relying on the
+order; it is a tie-break, not a policy.</p>
+<h2 id="read-a-node">Read a node</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get nms                                    <span class="c1"># Ready and Used per node</span>
+</span></span><span class="line"><span class="cl">kubectl get nms gpu-node-01 -o yaml                <span class="c1"># spec: what the plugin applies; status: what it holds</span>
+</span></span><span class="line"><span class="cl">kubectl get nms gpu-node-01 -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.metadata.generation} {.status.observedGeneration}{&#34;\n&#34;}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl describe pod &lt;consumer&gt;                    <span class="c1"># FailedMount events carry refusals and download progress</span>
+</span></span><span class="line"><span class="cl">kubectl get nodemodelstores.v1.worker.gpustack.ai  <span class="c1"># Ready, Used, Models, Downloading</span></span></span></code></pre></div>
+</div><ul>
+<li><strong><code>spec</code> is the effective configuration</strong>, and <code>observedGeneration</code> equal to the object&rsquo;s
+<code>generation</code> means the plugin applies it. The <code>Ready</code> message says when the high watermark was
+capped, and from what.</li>
+<li><strong><code>status.models</code></strong> lists each digest the node holds, is downloading or failed on, and whether a
+Pod mounts it; a download&rsquo;s <code>downloadedBytes</code> <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/node-store/#the-resource">moves in steps</a>
+.
+It names no tenant: find a deployment&rsquo;s digest in its <code>status.model.manifestDigest</code>, and an
+artifact&rsquo;s nodes in its <code>status.nodes</code> or its
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/views/#the-progress-subresource">progress</a>
+.</li>
+<li><strong>A <code>Failed</code> digest</strong> carries its reason and <code>retryTime</code>. Mounts of it do not download again
+before then; fix the cause (the Secret, the proxy, the CA) and the next attempt after <code>retryTime</code>
+picks it up.</li>
+<li><strong>A stale object</strong>: a node the plugin stopped running on keeps its object, with a <code>Ready</code>
+condition that no longer changes.</li>
+<li><strong>Metrics</strong> are on the plugin&rsquo;s port: <code>kubectl get --raw &quot;/api/v1/namespaces/gpustack-system/pods/https:&lt;plugin-pod&gt;:32444/proxy/metrics&quot;</code>.</li>
+</ul>
+<h2 id="the-capacity-rule">The capacity rule</h2>
+<p>The watermarks are percentages of the cache filesystem&rsquo;s usage <strong>by everything on it</strong>, with the
+blocks reserved for root counted as used, the way kubelet reads a filesystem&rsquo;s available space. Collection
+starts above the high one and removes unreferenced content down to the low one, never a tree a Pod
+mounts; with nothing removable it sets <code>CapacityLow=True</code>.</p>
+<p><strong>Give the cache its own filesystem</strong>, mounted at <code>modelManager.rootPath</code>. There the Settings apply
+as written. When the cache shares the filesystem holding kubelet&rsquo;s <code>pods</code> directory (the two paths
+report the same device), a cache near the watermark would push kubelet into disk-pressure eviction
+or image collection, so the plugin caps the high watermark:</p>
+<ul>
+<li>It takes <code>evictionHard[&quot;nodefs.available&quot;]</code>, <code>evictionHard[&quot;imagefs.available&quot;]</code> and
+<code>imageGCHighThresholdPercent</code> from the node&rsquo;s <code>spec.kubelet</code>, which the worker reads from kubelet&rsquo;s
+<code>configz</code> endpoint: kubelet&rsquo;s effective configuration, its flags, configuration file and drop-ins
+merged. The plugin reads no kubelet file. A quantity is converted to a percentage of the
+filesystem.</li>
+<li>The cap is the lowest of <code>100 - nodefs.available - 5</code>, <code>100 - imagefs.available - 5</code> and
+<code>imageGCHighThresholdPercent - 5</code>. The image thresholds count because the plugin cannot see where
+the image store is, so it assumes the same filesystem.</li>
+<li>A threshold kubelet does not set takes kubelet&rsquo;s default, <code>10%</code>, <code>15%</code> and <code>85</code>, which cap at
+<code>80</code>; so do all three while <code>spec.kubelet</code> is absent (configz disabled or unreachable), and the
+<code>Ready</code> message says the effective configuration could not be read. A quantity at or above the
+filesystem&rsquo;s size cannot be a share of it: it takes the default and the message names it, rather
+than drive the cap to its 2% floor.</li>
+<li>A change of the thresholds reaches the plugin through its <code>spec</code>, without a restart.</li>
+</ul>
+<p>The low watermark is lowered with the cap when it would reach it. When the cap lowers the Setting,
+the <code>Ready</code> message says so and where the thresholds came from; with the defaults the Setting&rsquo;s own
+<code>80</code> is not lowered.</p>
+<p>Measured on a managed node whose cache shares a 265 GB boot disk with kubelet (<code>nodefs.available</code>
+10%, image collection 85/80): filled to 78.5% under the 80% watermark, the next 65.5 GB download
+was refused, kubelet never reported <code>DiskPressure</code>, evicted nothing and collected no image.
+Reservations count the downloads still running, so several starting together stay under the
+watermark as one would.</p>
+<h2 id="switch-delivery">Switch delivery</h2>
+<p><code>model-artifact-delivery-mode</code> chooses how a hub artifact reaches a <code>ModelDeployment</code>:
+<code>Engine</code>, the engine downloads its commit into its own cache, or <code>Node</code>, the plugin mounts it at
+<code>/var/lib/gpustack/model</code>. A claim artifact is always mounted directly, and an <code>Instance</code> always
+uses the plugin for a hub artifact, whatever the Setting says.</p>
+<ul>
+<li><strong>Changing it rolls every deployment using a hub artifact once</strong>, the way an image change does. Replicas
+on the old and the new delivery serve the same weights under the same served name.</li>
+<li><strong>vLLM&rsquo;s KV store key also carries the last path segment of <code>--model</code></strong>, which differs between the
+two (<code>model</code> against the repository&rsquo;s name), so KV blocks written before the switch are not hit
+after it.</li>
+<li><strong><code>Node</code> is refused while the CSIDriver does not exist.</strong> A value that reaches the store anyway,
+from the environment or a plugin removed later, leaves consumers with <code>WeightsReady=False</code>,
+<code>NodeDeliveryUnavailable</code>, and no new Pod; running Pods are not touched.</li>
+<li><strong>A filtered artifact needs <code>Node</code>.</strong> Under <code>Engine</code>, a deployment on an artifact with
+<code>allowPatterns</code> or <code>ignorePatterns</code> creates no Pod and reports <code>FilterNeedsNodeDelivery</code>.</li>
+</ul>
+<h2 id="where-replicas-land">Where replicas land</h2>
+<p>A node-delivered Pod prefers the nodes holding its digest when they can take it; the mechanism is in
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/scheduling/#placement-of-node-delivered-models">Topology-Aware Scheduling</a>
+.
+Compute always comes first, so a warm cache never holds a Pod back.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get pod &lt;replica&gt; -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution}{&#34;\n&#34;}{.spec.nodeName}{&#34;\n&#34;}&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl get nms -o custom-columns<span class="o">=</span><span class="s1">&#39;NODE:.metadata.name,DIGESTS:.status.models[*].digest&#39;</span></span></span></code></pre></div>
+</div><p>A replica on a node that downloads again is expected when the first command shows one of these
+(each rule is in the mechanism section linked above):</p>
+<ul>
+<li><strong>a term naming nodes other than <code>spec.nodeName</code></strong>: those hot nodes had no room for it;</li>
+<li><strong>no term at all</strong>: no node held the digest when the Pod was created, the Pod is not
+node-delivered, or it asks for a preferred topology level;</li>
+<li><strong>the gate is off</strong>, in a string you override or in a Kueue this chart does not install.</li>
+</ul>
+<p>To turn the preference off, set <code>TASRespectNodeAffinityPreferred: false</code> in
+<code>kueue.managerConfig.controllerManagerConfigYaml</code>, copying the whole string, since Helm replaces a
+string value whole. The gate is Kueue&rsquo;s, so it also stops Kueue honoring a preferred node affinity
+any other author wrote in a TAS queue. Pods keep their terms, which then change nothing. There is no
+Setting for it.</p>
+<p><strong>The gate is alpha</strong> in the bundled Kueue. A Kueue that does not know a gate its configuration
+names refuses to start, so a Kueue upgrade checks it first.</p>
+<h2 id="upgrade-notes">Upgrade notes</h2>
+<p><strong>From the version before node delivery.</strong> With the plugin enabled, the upgrade seeds
+<code>model-artifact-delivery-mode=Node</code>, and every <code>ModelDeployment</code> using a hub artifact rolls
+once, to Node delivery. A seed fills only a Setting the cluster does not have yet, so there are two
+ways to avoid the roll:</p>
+<ol>
+<li>set the Setting to <code>Engine</code> before upgrading, which the seed then leaves alone; or</li>
+<li>upgrade with <code>--set modelManager.enabled=false</code>, which seeds nothing and keeps <code>Engine</code>.</li>
+</ol>
+<p>Either way you can switch later, at a time of your choosing. A later <code>helm upgrade</code> never overrides
+the Setting.</p>
+<p><strong>To the version with the placement preference.</strong> Kueue restarts with <code>TASRespectNodeAffinityPreferred</code>
+on. Running replicas are not touched; new node-delivered Pods carry the preference. A Pod in a TAS
+queue whose author wrote a preferred node affinity is now ranked by it, where before it was
+ignored. If you override <code>controllerManagerConfigYaml</code>, your string keeps its own gates: add the
+line to get the preference.</p>
+<p>What the gate is, and how to turn it off, is in <a href="#where-replicas-land">Where replicas land</a>
+.</p>
+<p><strong>Rolling the plugin.</strong> The DaemonSet rolls one node at a time. Mounted Pods keep running and reading
+throughout: a mount is a kernel bind mount. A mount asked for while a node&rsquo;s plugin restarts fails,
+kubelet retries it, and it succeeds once the new Pod serves.</p>
+<h2 id="uninstall-and-moving-the-cache">Uninstall, and moving the cache</h2>
+<ul>
+<li><strong>Disabling the plugin</strong> (<code>modelManager.enabled=false</code>) removes the CSIDriver, and the worker then
+deletes every <code>NodeModelStore</code>. Consumers under Node delivery stop creating Pods with
+<code>NodeDeliveryUnavailable</code>; switch the Setting to <code>Engine</code> first to keep them scaling.</li>
+<li><strong><code>helm uninstall</code> with <code>cleanupOnUninstall=true</code></strong> also removes the CRD with its objects, as for
+every CRD of this group.</li>
+<li><strong>The cache stays on each node.</strong> Remove it by hand once nothing mounts from it, on every node:
+<code>rm -rf /var/lib/gpustack/models</code> (or your <code>rootPath</code>).</li>
+<li><strong>Changing <code>rootPath</code></strong> points the plugin at an empty cache. Nothing is migrated or removed from
+the old path, and Pods that mount from it keep their mounts. Treat it as a migration: move the
+directory yourself while no Pod on the node mounts from it, or let the new path fill on demand
+and remove the old one afterwards.</li>
+</ul>
+<h2 id="a-deployment-waiting-for-its-weights">A deployment waiting for its weights</h2>
+<p><code>WeightsReady</code> on the <code>ModelDeployment</code> says which side to look at; the full table is in the
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/artifact/#status">Model Artifact</a>
+.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Reason</th>
+          <th>Look at</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>NodeDeliveryUnavailable</code></td>
+          <td>the CSIDriver <code>model.csi.gpustack.ai</code> and <code>modelManager.enabled</code></td>
+      </tr>
+      <tr>
+          <td><code>FilterNeedsNodeDelivery</code></td>
+          <td>the delivery Setting, or the artifact&rsquo;s patterns</td>
+      </tr>
+      <tr>
+          <td><code>Materializing</code></td>
+          <td>the Pod&rsquo;s <code>FailedMount</code> events for bytes received; a Pod starts up to about two minutes after the download ends</td>
+      </tr>
+      <tr>
+          <td><code>MaterializationFailed</code></td>
+          <td>the node&rsquo;s <code>status.models</code> entry: reason, message and <code>retryTime</code></td>
+      </tr>
+      <tr>
+          <td><code>WeightsNotMounted</code></td>
+          <td>the Pod&rsquo;s <code>FailedMount</code> events: a <code>PermissionDenied</code> names the authorization rule that failed</td>
+      </tr>
+  </tbody>
+</table>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/node-store/">Node Model Store</a>
+ for every field and
+reason</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/artifact/">Model Artifact</a>
+ for the artifact and its
+patterns</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/reference/settings/#online-adjustable-settings">Settings</a>
+ for every Setting.</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/artifact/">Model Artifact</a></div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/d7dffeab10b4baa46ccdf377928f567629b61017/docs/modules/model-delivery/operations.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#enable-it">Enable it</a></li>
+    <li><a href="#where-the-configuration-comes-from">Where the configuration comes from</a>
+      <ul>
+        <li><a href="#the-pool-layer">The pool layer</a></li>
+      </ul>
+    </li>
+    <li><a href="#read-a-node">Read a node</a></li>
+    <li><a href="#the-capacity-rule">The capacity rule</a></li>
+    <li><a href="#switch-delivery">Switch delivery</a></li>
+    <li><a href="#where-replicas-land">Where replicas land</a></li>
+    <li><a href="#upgrade-notes">Upgrade notes</a></li>
+    <li><a href="#uninstall-and-moving-the-cache">Uninstall, and moving the cache</a></li>
+    <li><a href="#a-deployment-waiting-for-its-weights">A deployment waiting for its weights</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0-rc3/js/site.67c391187af9bb2c73f652f6a057af0de934b5621d2854fd931860ca36b15ae8.js" defer></script>
+</body>
+</html>

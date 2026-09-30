@@ -1,0 +1,942 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0-rc3/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>KV Cache Pool · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/pool/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0-rc3/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc3/css/site.284826ec786ed93c1bdf0a0b63206cbcbfeddde97a507fd3444eb53de9cc141d.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc3/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0-rc3/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0-rc3/images/logo_hu_ced145186d6eddf4.1b9278b9d701b05bfbc0076d548ffef5008968302de8618a79a135090ceb46c3.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0-rc3/docs/" aria-current="page">Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      
+  <details class="picker version-picker" id="version-picker"
+    data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0-rc3"
+    data-home="/gpustack-operator/v0.9.0-rc3/" data-page="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/pool/">
+    <summary>
+      <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
+      <span class="visually-hidden">Documentation version: </span><span class="picker-value">v0.9.0-rc3</span>
+      <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+    </summary>
+    <div class="picker-panel">
+      <span class="picker-row is-current" aria-current="true">v0.9.0-rc3</span>
+      <p class="picker-note">Enable JavaScript to list other versions.</p>
+    </div>
+  </details>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+<details class="picker theme-picker">
+  <summary>
+    <span class="theme-icons" aria-hidden="true">
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <svg class="theme-icon theme-icon-system" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+    </span>
+    <span class="visually-hidden">Theme</span>
+    <svg class="picker-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+  </summary>
+  <div class="picker-panel">
+    <button class="picker-row theme-row" type="button" data-theme-choice="light">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.657-8.157a.75.75 0 0 1 0 1.061l-1.061 1.06a.749.749 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.749.749 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.061Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 1 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Z"/></svg>
+      <span>Light</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="dark">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.499 5.499 0 1 0 7.678-7.678Z"/></svg>
+      <span>Dark</span>
+    </button>
+    <button class="picker-row theme-row" type="button" data-theme-choice="system" aria-current="true">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 13H8.75v2h1.5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.5v-2H1.75A1.75 1.75 0 0 1 0 11.25v-7.5C0 2.784.784 2 1.75 2Zm0 1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      <span>System</span>
+    </button>
+  </div>
+</details>
+
+      <form class="top-search" role="search" action="/gpustack-operator/v0.9.0-rc3/search/" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0-rc3/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/v0.9.0-rc3/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/pool/" aria-current="page">Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0-rc3/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0-rc3/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0-rc3/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0-rc3/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0-rc3/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/">KV Cache</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">KV Cache Pool</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="kv-cache-pool">KV Cache Pool</h1>
+<p>A <code>KVCacheBackend</code> runs a store. A <code>KVCachePool</code> publishes one, and a <code>KVCachePoolBinding</code> gives a
+namespace a quota on it under one reuse domain.</p>
+<p><strong>A Binding provisions capacity; it does not enforce access.</strong> See
+<a href="#limitations">Limitations</a>
+ before treating it as an isolation boundary.</p>
+<p>Two vocabularies meet here, as on the backend page. This API says <strong>reuse domain</strong>; the store says
+<strong>tenant</strong>, and every flag, metric and error keeps the vendor&rsquo;s spelling.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#two-kinds-split-by-scope">Two kinds, split by scope</a>
+</li>
+<li><a href="#capacity-grants">Capacity grants</a>
+</li>
+<li><a href="#one-binding-one-reuse-domain">One Binding, one reuse domain</a>
+</li>
+<li><a href="#the-domain-is-immutable">The domain is immutable</a>
+</li>
+<li><a href="#ceiling-and-grant">Ceiling and grant</a>
+</li>
+<li><a href="#full-quota-behavior">Full-quota behavior</a>
+</li>
+<li><a href="#the-quota-policy-file">The quota policy file</a>
+</li>
+<li><a href="#zero-grants">Zero grants</a>
+</li>
+<li><a href="#operating-notes">Operating notes</a>
+</li>
+</ul>
+<h2 id="two-kinds-split-by-scope">Two kinds, split by scope</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePool                     </span><span class="w"> </span><span class="c"># cluster-scoped, short name kvcp</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-dram</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">backends</span><span class="p">:</span><span class="w"> </span><span class="c"># exactly one</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mooncake-dram</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">quota</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">total</span><span class="p">:</span><span class="w"> </span><span class="l">900Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCachePoolBinding              </span><span class="w"> </span><span class="c"># namespaced, short name kvcpb</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">poolRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-dram</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">quota</span><span class="p">:</span><span class="w">                                </span><span class="c"># required</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ceiling</span><span class="p">:</span><span class="w"> </span><span class="l">600Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">domain</span><span class="p">:</span><span class="w">                              </span><span class="c"># required, exactly one, every field immutable</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-72b-v2                  </span><span class="w"> </span><span class="c"># optional; left out, it is &#34;default&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">blockSize</span><span class="p">:</span><span class="w"> </span><span class="m">64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">dtype</span><span class="p">:</span><span class="w"> </span><span class="l">fp8_e4m3</span></span></span></code></pre></div>
+</div><p>The object split mirrors the scheduling chain: <strong><code>ClusterQueue</code> : <code>LocalQueue</code></strong>.
+A cluster-scoped object owns the capacity and an administrator manages it; a namespaced object is how
+a namespace draws on that capacity, and it is the object RBAC can be written against.</p>
+<p><code>spec.backends</code> is validated as <strong>length exactly 1</strong>. Quota lands on a single store&rsquo;s per-tenant
+ledger, and one store cannot account for bytes held in another. A pool spanning two backends could
+not answer the question the pool exists to answer.</p>
+<h2 id="capacity-grants">Capacity grants</h2>
+<p><strong>A namespace without a Binding has no quota on the pool.</strong> An administrator creating the Binding is
+the act that provisions the two things a namespace needs, a ceiling and a registered reuse domain,
+which is why it is a separate object rather than a field on the pool or a name a workload types.</p>
+<p>A workload reaches the cache by sending the <strong>reuse domain name</strong> its Binding registered: that
+string is the store&rsquo;s tenant id, and it is what the store keys the cache on. Two workloads sending
+the same domain share one cache and one ledger entry; two sending different domains do not. Nothing
+at runtime takes a Binding <em>name</em>; the Binding is what put that domain on the store and what
+accounts for it.</p>
+<blockquote>
+<p><strong>Why</strong> — a pool name a workload could type would make its quota a spelling question. Here it is an
+object an admin has to create in that namespace, so it is RBAC-able on its own.</p>
+</blockquote>
+<h3 id="limitations">Limitations</h3>
+<p><strong>It is not an isolation boundary, and nothing here enforces one.</strong> The store is reached over a
+Service any pod in the cluster can dial, no credential is derived from this object, and nothing ties
+a tenant id to the identity of whoever sent it. A workload that knows another namespace&rsquo;s domain name
+<strong>can read and write that domain&rsquo;s cache today</strong>, whether a Binding covers it or not.</p>
+<p>A tenant id must be <em>registered</em>: a multi-tenant master refuses a name absent from its ledger, and a
+Binding is what puts one there (see the next section). That constrains which names <strong>exist</strong>, never
+who may use one.</p>
+<p>A managed backend keeps a ledger unless it declares <code>leader.multiTenancy: false</code>, which a store image
+older than Mooncake 0.3.12 has to. See <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/backend/#the-projects-own-build-variants">KV Cache Backend</a>
+.
+An external backend keeps one only if its master was started with multi-tenancy on.</p>
+<p>A backend running without multi-tenancy has no ledger and makes no such check. A <code>KVCachePool</code> over a
+<em>managed</em> backend in that state is admitted with a <strong>warning</strong> that no per-tenant quota is in force;
+an external backend is not inspected at admission. Once the pool reports the missing ledger, its
+workloads are configured with no tenant id at all, so every write lands in the store&rsquo;s default tenant.</p>
+<p>A Binding governs who is <em>granted</em> capacity, and under which name: provisioning and accounting.
+Real enforcement needs an authenticated proxy or network isolation between workloads and the store,
+and neither exists yet. Do not place two mutually distrusting tenants on one backend and treat their
+separate Bindings as the thing keeping them apart.</p>
+<h2 id="one-binding-one-reuse-domain">One Binding, one reuse domain</h2>
+<p><code>spec.domain</code> declares exactly one reuse domain, and the domain <strong>is</strong> the store&rsquo;s tenant id.
+Everything below is about <em>registering</em> a name; using one somebody else registered is a separate
+question, answered in
+<a href="#limitations">Limitations</a>
+.</p>
+<ul>
+<li><strong>Leaving <code>name</code> out registers <code>default</code>.</strong> The API server stores an omitted <code>spec.domain.name</code>
+as <code>default</code>, the store&rsquo;s own tenant for a writer that names none. On a multi-tenant master, the
+default for a managed backend, <code>default</code> is the tenant the engines are handed, so name each domain
+once a second Binding shares the master. On a master without multi-tenancy no tenant is forwarded,
+so the name only records the registration. It is claimed like any other name, so two Bindings that both leave it out collide on a
+shared master.</li>
+<li><strong>A domain name is claimed per master.</strong> Suppose one backend serves two pools, and a Binding on the
+second pool names a domain the first pool&rsquo;s Binding already holds. Admission <strong>rejects</strong> that
+Binding with a message naming the holder and the shared backend, wherever in the cluster the
+colliding namespace lives. The same name against a pool a <em>different</em> backend serves is admitted:
+two masters hold two ledgers, so the claims collide with nothing.</li>
+<li><strong>A second <em>distinct</em> domain needs a master that can tell the two apart.</strong> When the pool has
+observed that its master holds no ledger, or a managed backend declares none, every request lands
+in one default tenant, so a second distinct domain against it is <strong>rejected at admission</strong>.
+Otherwise the Binding is admitted with a <strong>warning</strong>, including when the master&rsquo;s ledger state
+is still unknown. The store&rsquo;s support is unproven, so the image must meet the
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/injection/#tenant-compatibility">engine&rsquo;s tenant compatibility floor</a>
+.</li>
+<li><strong>A workload may not <em>register</em> its own domain.</strong> It sends a domain name at runtime, because that
+is how the store is addressed, but a multi-tenant master accepts only names an admin already
+registered through a Binding. Every distinct registered name is a new tenant with its own
+ceiling, so a workload free to mint them would draw a fresh ceiling for each. Registration stays on
+the object an admin controls; sending an unregistered name gets <code>TENANT_NOT_REGISTERED</code>, not a new
+quota.</li>
+<li><strong>Sharing a pool works; sharing a domain on one master does not.</strong> Two namespaces on one pool is
+the ordinary case. Two Bindings on one domain over one master would share cache, which is
+sometimes the intent, but collide on one ledger, which never is.</li>
+</ul>
+<p><code>status.domains</code> on the pool lists the domains its Bindings registered. <code>DomainExclusive</code> on the
+Binding reports whether this Binding still holds its own name; <code>QuotaGranted</code> reports whether the
+grant it observed can serve a write at all.</p>
+<h2 id="the-domain-is-immutable">The domain is immutable</h2>
+<p>Every field of <code>spec.domain</code> is rejected on update, and so is <code>spec.poolRef</code>:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Field</th>
+          <th>Reason</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>domain.name</code></td>
+          <td>the tenant id; changing it abandons the ledger entry and its bytes under the old name</td>
+      </tr>
+      <tr>
+          <td><code>domain.blockSize</code></td>
+          <td>a warm cache is read back at the block size it was written at</td>
+      </tr>
+      <tr>
+          <td><code>domain.dtype</code></td>
+          <td>same, one level down — reading fp8 blocks as bf16 is silent tensor corruption</td>
+      </tr>
+      <tr>
+          <td><code>poolRef</code></td>
+          <td>re-pointing moves a namespace&rsquo;s grant without moving its bytes, which stay on the old store</td>
+      </tr>
+  </tbody>
+</table>
+<p>To change any of them, delete the Binding and create a new one; the cache under the old domain is
+not carried over.</p>
+<h3 id="engine-dtype">Engine dtype</h3>
+<p><code>domain.dtype</code> is rendered as <code>--kv-cache-dtype &lt;dtype&gt;</code>, <strong>verbatim</strong>, on every engine attached
+through the Binding: each <code>ModelDeployment</code> role the operator builds the command line of, and each
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/injection/">injected Pod</a>
+. Neither engine&rsquo;s store key carries the dtype, so
+without this two engines on one domain can write two element types under one key.</p>
+<blockquote>
+<p><strong>Why</strong> — the failure is silent in one direction. A reader whose dtype is narrower than the
+writer&rsquo;s asks for fewer bytes than the block holds, the store refuses the read, and the engine
+recomputes. A reader whose dtype is wider gets the block&rsquo;s bytes as a success over a partly stale
+buffer, because neither engine compares the bytes read with the bytes expected.</p>
+</blockquote>
+<ul>
+<li><strong>The spelling is the engine&rsquo;s.</strong> A Binding serving both engines needs a
+spelling both accept: <code>bfloat16</code>, <code>fp8_e4m3</code>, <code>fp8_e5m2</code> or <code>nvfp4</code>.</li>
+<li><strong>A spelling the engine rejects stops every new Pod</strong> at argument parsing, and the dtype is
+immutable. The recovery is under
+<a href="/gpustack-operator/v0.9.0-rc3/docs/operate/migration/kv-cache-dtype/">Upgrading to an enforced Binding dtype</a>
+.</li>
+<li><strong><code>auto</code> is refused on a new Binding.</strong> Both engines accept it and resolve it from the model they
+load, so it binds nothing. A Binding stored with it before the refusal stays usable and updatable.</li>
+<li><strong>The engine is not free to disagree.</strong> A role naming <code>--kv-cache-dtype</code> itself is refused; the
+rule and its exceptions are under
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/#operator-owned-keys">Operator-owned keys</a>
+.</li>
+</ul>
+<p>All of it follows the Setting <code>model-deployment-kv-cache-dtype-owned</code>, on by default; turning it
+off renders and refuses nothing, as before. See <a href="/gpustack-operator/v0.9.0-rc3/docs/reference/settings/">Settings</a>
+.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Engine</th>
+          <th>Accepts</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>vllm</code>, including on Ascend</td>
+          <td><code>auto</code>, <code>bfloat16</code>, <code>float16</code>, <code>fp8</code>, <code>fp8_e4m3</code>, <code>fp8_e5m2</code>, <code>fp8_inc</code>, <code>fp8_ds_mla</code>, <code>nvfp4</code> and the rest of vLLM&rsquo;s <code>CacheDType</code> — <strong>not</strong> <code>bf16</code></td>
+      </tr>
+      <tr>
+          <td><code>sglang</code></td>
+          <td><code>auto</code>, <code>bfloat16</code>, <code>bf16</code>, <code>fp8_e4m3</code>, <code>fp8_e5m2</code>, <code>mxfp8</code>, <code>nvfp4</code>, <code>fp4_mx_block16</code> — <strong>not</strong> <code>fp8</code> or <code>float16</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>The lists are read from vLLM v0.29.0 and SGLang v0.5.18; the engine image in use is the authority.</p>
+<h2 id="ceiling-and-grant">Ceiling and grant</h2>
+<p><code>spec.quota.ceiling</code> is what this namespace <strong>asks for</strong>. <code>status.effectiveQuota</code> is what the pool
+<strong>granted</strong>, and the two differ whenever the pool is oversubscribed.</p>
+<ul>
+<li>When every ceiling fits inside the pool&rsquo;s allocatable capacity, the grant equals the ceiling.</li>
+<li>When the ceilings sum past it, the store recomputes each grant <strong>in proportion to what was
+requested</strong>: a domain asking for twice as much gets twice the share of the shortfall&rsquo;s remainder.</li>
+<li>The reduction is computed by the store, not by this operator. The operator writes ceilings into the
+policy file and reads the resulting grants back.</li>
+</ul>
+<p>The pool&rsquo;s verdict on the sum is a Condition, not a refusal: <code>QuotaWithinTotal</code> on the pool is
+<code>True</code> while the ceilings fit within the pool&rsquo;s declared <code>total</code>, and turns <code>False</code> with reason
+<code>Oversubscribed</code> (naming the sum and the <code>total</code>) the moment the ceilings pass it. Nothing is
+refused; the store keeps serving, and each Binding&rsquo;s <code>status.effectiveQuota</code> is the proportional
+share already described.</p>
+<p><strong><code>QuotaWithinTotal=True</code> does not promise a full grant.</strong> It compares the ceilings with the declared
+<code>total</code>, not with the master&rsquo;s allocatable capacity, so the grants still fall below the ceilings
+whenever the ceilings sum past what the members have mounted.</p>
+<p><code>status.usage</code> is what the master reports the domain as holding, republished as read. The operator
+caps nothing. What is bounded is the <strong>store&rsquo;s charge</strong>: it refuses a charge that would overshoot the
+grant, discarding the domain&rsquo;s own objects instead, so usage normally settles <em>at</em> the grant rather
+than above it. It genuinely exceeds the grant in the one case the next section describes, a grant
+recut below what the domain already holds, and is reported that way.</p>
+<blockquote>
+<p><strong>Why a ceiling is required</strong> — the store has no default quota. A tenant with no policy is refused
+<code>TENANT_NOT_REGISTERED</code> on every write, so a Binding without a ceiling would report Ready and be
+unusable. The field is required rather than defaulted because a guessed ceiling is a number nobody
+chose.</p>
+</blockquote>
+<h2 id="full-quota-behavior">Full-quota behavior</h2>
+<p><strong>A quota is not an admission barrier. It is the point at which the store starts discarding this
+domain&rsquo;s own objects to make room for the next write.</strong></p>
+<ul>
+<li>Writing eight 4 MiB objects into a 16 MiB grant produces <strong>eight successful writes</strong>, four
+surviving objects, and a charge of exactly 16 MiB. Nothing reports an error.</li>
+<li>The store&rsquo;s general eviction counters stay at <strong>zero</strong> throughout (this path is not on them), so a
+dashboard watching evictions sees nothing happen.</li>
+<li>A write <strong>is</strong> refused, with <code>TENANT_QUOTA_EXCEEDED</code>, when nothing can be discarded: reading an
+object puts it under a lease (five minutes as this operator renders the store, adjustable per
+backend through <code>extraArgs</code>; see <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/">The leader</a>
+), and a write while every object in a
+filled grant holds one fails.</li>
+</ul>
+<p><strong><code>status.overQuota</code> does not report this, and cannot.</strong> The store computes it as <em>charge exceeds
+grant</em> while refusing any charge that would overshoot, so writing past a grant leaves it <code>false</code>
+forever. It reports one situation: <strong>the grant was recut below what the domain already holds</strong>, which
+is what a proportional recomputation does when a pool&rsquo;s members shrink or another Binding joins.</p>
+<p><strong>So: do not wait on <code>overQuota</code> to learn that writes are being refused.</strong> Watch <code>usage</code> against
+<code>effectiveQuota</code> instead, and treat a domain sitting at its grant as one already discarding objects to
+admit new ones. The order is not predictable: the store scans from an arbitrary shard and
+stops as soon as it has freed enough, so a recently written object can go before an older one, and a
+hit rate cannot be reasoned about from age.</p>
+<h3 id="eviction">Eviction</h3>
+<p>Neither kind has an eviction field, and neither reports an eviction figure.</p>
+<p>Ratios are <strong>process-level startup flags on the store</strong>, and one backend may serve several pools. A
+per-pool setting is therefore unimplementable rather than merely awkward. The counter the store does
+export covers the <strong>global</strong> high-water eviction (not the per-domain discarding above, which is on no
+counter at all), and it is process-global, so a per-pool figure would charge a co-tenant&rsquo;s evictions
+here.</p>
+<p>Eviction is reached where it lives: the store&rsquo;s own process-level startup flags, which reach it
+through the backend&rsquo;s <code>spec.connection.managed.leader.extraArgs</code>. See
+<a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/leader/">The leader</a>
+ for how that container is assembled. The flag names are the
+store&rsquo;s to document, and are deliberately not restated here.</p>
+<h2 id="the-quota-policy-file">The quota policy file</h2>
+<p>The store reads tenant ceilings from a file, and this operator renders that file <strong>whole</strong> from the
+Bindings of every pool on that backend. A partial write is never emitted: a refused render leaves the
+previous file in place.</p>
+<p>The file lives on a <strong>writable</strong> volume, and that is deliberate rather than an oversight:</p>
+<ul>
+<li>the store <strong>rewrites it itself</strong> on every admin-API change, renaming a new file over the old one;</li>
+<li>a read-only mount would make the store fail that rename, and it does not degrade: it reports the
+failure and the ledger stops accepting policy updates.</li>
+</ul>
+<p>A <code>ConfigMap</code> is mounted read-only alongside it as a <strong>seed</strong>, copied into place by an init container
+before the store starts. The pool reconciler renders the ConfigMap. On a backend whose multi-tenancy
+is on but that no pool has bound yet, no pool exists to render one, so the mount is optional and the
+init container then writes an <strong>empty policy document</strong> in its place.</p>
+<p><strong>The file itself is never optional</strong>: the store is started with a flag naming it and fails
+without it. What varies is only whether its contents came from a ConfigMap or from that empty
+fallback.</p>
+<p><code>QuotaPolicyWritable</code> on the pool reports whether the operator can still write that file. False means
+ceilings have stopped propagating, whatever the rest of the status says.</p>
+<h2 id="zero-grants">Zero grants</h2>
+<p>A pool whose backend has <strong>nothing mounted</strong> has nothing to allocate. Every domain&rsquo;s effective quota
+is then zero and no write can succeed, so this is reported rather than left to look healthy:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <pre tabindex="0"><code>CapacityAllocatable   False   NothingToAllocate
+  the master reports nothing to allocate, so every reuse domain&#39;s effective quota is zero and no
+  write can succeed. Its members have either not mounted their segments yet, or not finished
+  remounting them after the master restarted</code></pre>
+</div><p>The pool does <strong>not</strong> report <code>Ready</code> in this state. A zero grant that looked healthy would send a
+workload to a cache that refuses every byte it writes, with nothing in the status saying so.</p>
+<p><strong>The condition names the reading, not a cause, because it cannot tell the two apart.</strong> A first start
+and a restart both present as a zero capacity gauge, and the gauge is all this check reads.</p>
+<p>The restart case is the one that surprises. A restarted master answers its admin API in about two
+seconds and passes its readiness probe there (the probe reads the segment list, not the ledger),
+then reports a <strong>zero</strong> effective quota until its segments have remounted.</p>
+<p><strong>How long depends on where the replacement Pod lands, and the slow case is the ordinary one.</strong>
+When the master keeps its address or returns to the node its member is on, the window is a few
+seconds. When it changes address <em>and</em> lands elsewhere, which is what a deleted Pod does in any
+deployment whose leader and member are on separate nodes, it is around half a minute.</p>
+<p><strong>So expect the pool and every Binding on it to report <code>Error</code> for around half a minute after a
+master restarts.</strong> That is the conditions working, not a fault to chase: the phase clears itself and
+nothing needs to be done to it. What it does mean is that a workload admitted in that window would
+have every byte refused, which is why the Bindings stop reporting Ready rather than only the pool.</p>
+<p><strong>Every Binding on that pool reports it too, on its own <code>QuotaGranted</code>.</strong> It is a separate
+condition from <code>QuotaObserved</code> because the master answers perfectly throughout: a grant of zero is a
+successful observation, and a Binding that reported Ready on observation alone would send a workload
+to a cache that refuses every byte, which is the reading this whole status exists to prevent.</p>
+<p>The same shape covers a policy file the store cannot rewrite: it cannot receive ceilings, and that
+surfaces as a False condition and a non-Ready pool rather than as a pool that quietly grants nothing.</p>
+<p>A store started without multi-tenancy is the exception. A managed backend that declares
+<code>leader.multiTenancy: false</code>, or an external master started without it, has no per-tenant ledger
+at all, which is a declared single-tenant topology rather than a fault: <code>QuotaLedgerAvailable</code> reads False with reason
+<code>MultiTenancyDisabled</code>, and the pool stays <code>Ready</code> with a message saying it serves one reuse domain.</p>
+<h2 id="operating-notes">Operating notes</h2>
+<p><strong>A Binding&rsquo;s deletion is held for three different reasons, and the condition says which.</strong> Read the
+reason on <code>Releasable=False</code> before acting. They need different remedies:</p>
+<ul>
+<li><code>HeldByWorkloads</code> — a workload in the namespace still references the Binding (it is in
+<code>status.usedBy</code>). The message names the <strong>workloads</strong>. Remove them; nothing needs draining.</li>
+<li><code>LedgerNotReleased</code> — the store refuses to drop the tenant while its domain is non-empty. The
+message names the <strong>domain</strong>; drain it and the release completes on the next pass.</li>
+<li><code>LedgerRequestFailed</code> — a ledger request failed, leaving whether the tenant is gone unknown.
+Draining changes nothing; read the pool&rsquo;s own conditions for what the master reported.</li>
+</ul>
+<p>They are separate because the action differs: removing workloads, draining a domain and restoring
+an unanswering master are three different operations.</p>
+<p><strong>A master that holds no tenant ledger releases the Binding rather than holding it.</strong> With
+multi-tenancy declared off there is no ledger for a quota entry to be in, so the deletion strands nothing and
+completes, the same answer the pool&rsquo;s own teardown takes. Every other failed ledger request leaves
+whether the entry is gone unknown and holds, because a Binding released over an entry still on the
+master leaves capacity nothing can reclaim: the ledger records no owner.</p>
+<p><strong>A pool is held while a Binding still references it</strong>, and a backend while a pool still claims it.
+Each layer names what to remove in its own condition message.</p>
+<p><strong>A pool&rsquo;s deletion needs its master only when that master can hold a ledger.</strong> A managed backend
+declaring <code>leader.multiTenancy: false</code> holds none, so its pools are released without asking the master, and a
+leader that never started does not hold them. On any other backend the pool may still have entries on
+the master; while the master does not answer, the pool stays <code>Deleting</code> with <code>Releasable=False</code>,
+reason <code>LedgerNotReleased</code>, and the pass is retried every 30 seconds.</p>
+<p><strong>There are two ways out of that hold.</strong> Restore the master, so that it answers on its admin address,
+and the next pass completes the release. Or, once the master&rsquo;s ledger is known to be gone or its
+entries no longer matter, remove the finalizer by hand:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl patch kvcp &lt;pool&gt; --type<span class="o">=</span>merge -p <span class="s1">&#39;{&#34;metadata&#34;:{&#34;finalizers&#34;:null}}&#39;</span></span></span></code></pre></div>
+</div><p><strong>Removing it by hand skips what the teardown still owed.</strong> The pool&rsquo;s quota entries stay on the
+master with no record of which pool created them, so nothing reclaims that capacity; the seed policy
+document keeps the pool&rsquo;s tenants until a sibling pool re-renders it, or indefinitely if this was the
+last pool. Its deleting Bindings are released once it is gone, and its claim no longer holds the backend.</p>
+<p><strong>A claimed backend cannot have its multi-tenancy withdrawn</strong>, which is refused on the backend itself.
+See <a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/backend/#operating-notes">KV Cache Backend</a>
+ for the rule and the remedy. What it protects on
+this side is a pool&rsquo;s own exit: releasing a pool means releasing every quota it registered.</p>
+<p><strong>Read the grant, not the ceiling, when diagnosing.</strong> <code>kubectl get kvcpb</code> prints both. The output
+below is from a multi-tenant backend, a managed one&rsquo;s default; on one declaring
+<code>leader.multiTenancy: false</code> there is no ledger, and
+<code>EFFECTIVE</code> and <code>USAGE</code> stay empty:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <pre tabindex="0"><code>NAME     POOL          DOMAIN        EFFECTIVE   USAGE    PHASE   AGE
+team-a   shared-dram   qwen-72b-v2   450Gi       280Gi    Ready   6d</code></pre>
+</div><p>A grant well below the ceiling is oversubscription, which is legitimate and reported. A grant of
+zero is the <a href="#zero-grants">Zero grants</a>
+ case.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/backend/">KV Cache Backend</a>
+ (the store this pool publishes, and where eviction is
+configured)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/kv-cache/injection/">KV Cache Injection</a>
+ (how a Pod consumes the grant
+this page describes)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/model-deployment/deployment/">Model Deployment</a>
+ (the other half of the
+worked pair: a rendered engine names this Binding through <code>spec.kvCache.poolRef</code>)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/admission/">Admission</a>
+ (the gates and the four-view status
+pattern)</li><li><a href="/gpustack-operator/v0.9.0-rc3/docs/reference/settings/">Settings &amp; Environment Variables</a></li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0-rc3/docs/modules/devices/requests/">Accelerator Requests</a>
+ — how a workload asks for the devices it
+runs on.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/d7dffeab10b4baa46ccdf377928f567629b61017/docs/modules/kv-cache/pool.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#two-kinds-split-by-scope">Two kinds, split by scope</a></li>
+    <li><a href="#capacity-grants">Capacity grants</a>
+      <ul>
+        <li><a href="#limitations">Limitations</a></li>
+      </ul>
+    </li>
+    <li><a href="#one-binding-one-reuse-domain">One Binding, one reuse domain</a></li>
+    <li><a href="#the-domain-is-immutable">The domain is immutable</a>
+      <ul>
+        <li><a href="#engine-dtype">Engine dtype</a></li>
+      </ul>
+    </li>
+    <li><a href="#ceiling-and-grant">Ceiling and grant</a></li>
+    <li><a href="#full-quota-behavior">Full-quota behavior</a>
+      <ul>
+        <li><a href="#eviction">Eviction</a></li>
+      </ul>
+    </li>
+    <li><a href="#the-quota-policy-file">The quota policy file</a></li>
+    <li><a href="#zero-grants">Zero grants</a></li>
+    <li><a href="#operating-notes">Operating notes</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0-rc3/js/site.67c391187af9bb2c73f652f6a057af0de934b5621d2854fd931860ca36b15ae8.js" defer></script>
+</body>
+</html>
