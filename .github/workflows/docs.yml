@@ -118,7 +118,7 @@ jobs:
       #
       # Deliberately awk-free: the awk pinned above is onetrueawk to match check-docs.sh's portability
       # floor, and a step leaning on any awk behaviour would silently inherit that constraint too.
-      - name: Check external links under .github
+      - name: Check links under .github
         run: |
           urls=$(grep -rhoE 'https?://[^][ )>"`]+' .github --include='*.md' | sed 's/[.,;:]*$//' | sort -u || true)
           if [[ -z "${urls}" ]]; then
@@ -128,8 +128,22 @@ jobs:
           echo "Checking $(printf '%s\n' "${urls}" | wc -l | tr -d ' ') unique URL(s) under .github/**/*.md:"
           failed=""
           unverified=""
+          repository_files="https://github.com/${GITHUB_REPOSITORY}/blob/main/"
           while IFS= read -r url; do
             [[ -n "${url}" ]] || continue
+            # A PR may move its own docs before main contains them. Check those paths against
+            # this checkout; links to other repositories and pinned revisions still use HTTP.
+            if [[ "${url}" == "${repository_files}"* ]]; then
+              file="${url#"${repository_files}"}"
+              file="${file%%\#*}"
+              if [[ -f "${file}" ]]; then
+                printf '  ok          file %s\n' "${url}"
+              else
+                printf '  FAIL        file %s\n' "${url}"
+                failed="${failed}missing file ${url}"$'\n'
+              fi
+              continue
+            fi
             # Retry a transient failure rather than turning the build red on one dropped connection.
             # A 4xx other than 408/429 is a genuinely broken link, so it fails on the first answer.
             #
@@ -171,7 +185,7 @@ jobs:
           fi
           # Report every broken URL, not just the first: a gate that names one of three costs three CI rounds.
           if [[ -n "${failed}" ]]; then
-            echo "Broken external link(s) under .github/**/*.md:"
+            echo "Broken link(s) under .github/**/*.md:"
             printf '%s' "${failed}"
             exit 1
           fi
