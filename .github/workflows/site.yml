@@ -118,6 +118,32 @@ jobs:
               --merge pages/charts/index.yaml
             cp "${package_dir}/${package}" pages/charts/
             cp "${package_dir}/index.yaml" pages/charts/index.yaml
+          else
+            index_dir=$(mktemp -d)
+            trap 'rm -rf "${index_dir}"' EXIT
+            helm repo index "${index_dir}" --merge pages/charts/index.yaml --json
+            python3 - "${index_dir}/index.yaml" "${version}" "${package}" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          index_path, version, package = sys.argv[1:]
+          index = json.loads(Path(index_path).read_text())
+          digest = hashlib.sha256(Path("pages/charts", package).read_bytes()).hexdigest()
+          entries = index.get("entries", {}).get("gpustack-operator", [])
+          if not any(
+              entry.get("version") == version
+              and entry.get("digest") == digest
+              and any(Path(urlsplit(url).path).name == package for url in entry.get("urls", []))
+              for entry in entries
+          ):
+              raise SystemExit(
+                  "::error::Published chart is missing a matching index entry. "
+                  "Restore its version, package URL and digest using the original package, then retry."
+              )
+          PY
           fi
       - name: Commit chart and documentation
         id: content
