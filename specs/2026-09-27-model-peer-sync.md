@@ -68,7 +68,7 @@ those trees.
 
 ## Proposal
 
-The plugin gains a second listener on its own TCP port (a chart value, `0` = off by default).
+The plugin gains a second listener on its own TCP port (a chart value, default `32445`; `0` = off).
 It serves one thing: the node's *published* trees, read-only, per file, with byte ranges, under
 a serving-stream limit, authenticated by the requester plugin's ServiceAccount token verified
 through a TokenReview. A node materializing a digest discovers the other nodes that hold it
@@ -207,7 +207,7 @@ authentication (F3) is then the only gate.
 
 #### F6 — Configuration and accounting
 
-Chart value `modelManager.port` (default `0` = off) opens the listener; extra args carry the
+Chart value `modelManager.port` (default `32445`; `0` = off) opens the listener; extra args carry the
 limits (`max-serving-streams`, `streams-per-source`). L2 Setting `model-store-peer-sync`
 (default `true`) turns peer *pulling* on or off independently of the listener. The plugin's
 RBAC gains two permanent rules — TokenReview create, and Pods get/list in the operator
@@ -541,7 +541,7 @@ environment and the reason are recorded in the case headers and the final SUMMAR
 
 None — the three carried into review were adjudicated on 2026-09-27: the manifest listing
 comes from peers and is bound to the artifact's resolved root digest (forged listings are
-rejected and rotate); `model-store-peer-sync` defaults to `true` (the port's `0` default is the
+rejected and rotate); `model-store-peer-sync` defaults to `true` (setting the port to `0` is the
 chart-level master switch); #655 floors the cap at 2%, consistent with #634's reading that an
 unreachable threshold means permanent DiskPressure and a minimal cache footprint. The docs
 page's name is decided at T6 by the docs routing rules.
