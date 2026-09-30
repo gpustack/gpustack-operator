@@ -1,7 +1,8 @@
-/* Generated using: hugo gen chromastyles --style=github */
+/* Light rules adapted from: hugo gen chromastyles --style=github.
+   Hugo expands the shared dark palette below; regenerating this file would remove it. */
 
-/* Background */ .bg { background-color:#fff; }
-/* PreWrapper */ .chroma { background-color:#fff; }
+/* Background */ .bg { background-color:var(--code-bg); }
+/* PreWrapper */ .chroma { background-color:var(--code-bg); }
 /* Error */ .chroma .err { color:#f6f8fa;background-color:#82071e }
 /* LineLink */ .chroma .lnlinks { outline:none;text-decoration:none;color:inherit }
 /* LineTableTD */ .chroma .lntd { vertical-align:top;padding:0;margin:0;border:0; }
@@ -72,3 +73,77 @@
 /* GenericOutput */ .chroma .go { color:#1f2328 }
 /* GenericUnderline */ .chroma .gl { text-decoration:underline }
 /* TextWhitespace */ .chroma .w { color:#fff }
+
+/* Share the dark palette across explicit and system theme selectors. */
+{{ $darkPalette := `
+THEME .chroma .err { color:#ffdcd7;background-color:#67060c }
+THEME .chroma .lnt { color:#6e7681 }
+THEME .chroma .ln { color:#6e7681 }
+THEME .chroma .hl { background-color:#2d333b }
+THEME .chroma .k,
+THEME .chroma .kc,
+THEME .chroma .kd,
+THEME .chroma .kn,
+THEME .chroma .kp,
+THEME .chroma .kr,
+THEME .chroma .kt,
+THEME .chroma .nl { color:#ff7b72 }
+THEME .chroma .na,
+THEME .chroma .nc,
+THEME .chroma .nn,
+THEME .chroma .nx,
+THEME .chroma .p,
+THEME .chroma .ge,
+THEME .chroma .go { color:#e4e6e9 }
+THEME .chroma .no,
+THEME .chroma .nd,
+THEME .chroma .nt,
+THEME .chroma .m,
+THEME .chroma .mb,
+THEME .chroma .mf,
+THEME .chroma .mh,
+THEME .chroma .mi,
+THEME .chroma .il,
+THEME .chroma .mo,
+THEME .chroma .o,
+THEME .chroma .ow { color:#79c0ff }
+THEME .chroma .ni,
+THEME .chroma .nb,
+THEME .chroma .nf,
+THEME .chroma .fm { color:#d2a8ff }
+THEME .chroma .bp { color:#9198a1 }
+THEME .chroma .nv,
+THEME .chroma .vc,
+THEME .chroma .vg,
+THEME .chroma .vi,
+THEME .chroma .vm { color:#ffa657 }
+THEME .chroma .s,
+THEME .chroma .sa,
+THEME .chroma .sb,
+THEME .chroma .sc,
+THEME .chroma .dl,
+THEME .chroma .sd,
+THEME .chroma .s2,
+THEME .chroma .se,
+THEME .chroma .sh,
+THEME .chroma .si,
+THEME .chroma .sx,
+THEME .chroma .sr,
+THEME .chroma .s1,
+THEME .chroma .ss { color:#a5d6ff }
+THEME .chroma .c,
+THEME .chroma .ch,
+THEME .chroma .cm,
+THEME .chroma .c1,
+THEME .chroma .cs,
+THEME .chroma .cp,
+THEME .chroma .cpf { color:#8b949e }
+THEME .chroma .gd { color:#ffdcd7;background-color:#67060c }
+THEME .chroma .gi { color:#7ee787;background-color:#0d4429 }
+THEME .chroma .w { color:#e4e6e9 }
+` }}
+{{ replace $darkPalette "THEME" `:root[data-theme="dark"]` }}
+
+@media (prefers-color-scheme: dark) {
+{{ replace $darkPalette "THEME" `:root:not([data-theme="light"])` }}
+}
