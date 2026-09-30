@@ -195,7 +195,7 @@ if (versionPicker) {
   // Keep the language and article path when another version contains that page.
   const articlePath = currentPath.slice(currentPath.indexOf("/") + 1);
   note.textContent = "Loading versions…";
-  fetch(new URL("versions.json", root)).then(response => {
+  fetch(new URL("versions.json", root), { cache: "no-store" }).then(response => {
     if (!response.ok) throw new Error("Version index unavailable");
     return response.json();
   }).then(index => {
