@@ -627,7 +627,8 @@ role. `template.env` merges into `roles[].env`. `template.resources` is deleted 
   difference: `command` is the take-over tier, where the operator synthesizes no engine argument and
   no client environment, the role is marked unmanaged and `CacheAttached` goes to Unknown; `extraArgs`
   is appended after the derived arguments. Renaming `extraArgs` to `args` would make it read as the
-  whole argv, which is what `command` means.
+  whole argv, which is what `command` means. A separate `args` append tier would have no defined
+  precedence beside `extraArgs`; an `args` value alone would express neither take-over nor append.
 
 ### F9 `imagePullSecret` becomes `imagePullSecrets`
 
@@ -1136,6 +1137,94 @@ by comparing file hashes rather than by its exit code.
 - `pkg/worker/controllers/worker/` — the pool ledger, the connector synthesis, the render, the
   converge loop, the group bookkeeping and the status.
 - `docs/kv-cache/`, `docs/reference/` — F17.
+
+### Engine integration evidence retained from user guides
+
+These notes preserve the source readings and measurements formerly included in the deployment,
+engine-version, prefill/decode and shutdown guides. They record prior evidence, not a new run.
+
+#### Runner image tags
+
+The runner tag formula was compared with 338 published records with zero mismatches. None of those
+records carried an architecture in its tag, and they collapsed to 208 distinct tag names. That is
+consistent with multi-architecture publication; the record counts alone do not prove the contents
+of every manifest. The reader guide keeps the tag formula and omits architecture from it.
+
+#### SGLang TCP port exhaustion
+
+An SGLang 0.5.18 prefill/decode pair with a TCP store, sent short chat requests sequentially, stopped
+serving after about 183 requests in one run and 940 in another. A pair without a store, behind
+`sglang-gateway`, stopped after about 285 requests; its `TIME-WAIT` sockets pointed at the decode
+half, and the gateway returned `503`, `No available prefill workers`.
+
+With `net.ipv4.tcp_tw_reuse=1` set manually in the prefiller's network namespace, the pair with a
+store answered 1905 requests without failure. It held about 19,500 sockets in `TIME-WAIT` against
+28,232 ephemeral ports. The pair without a store was not tested with that setting. Widening
+`net.ipv4.ip_local_port_range` delays exhaustion; whether a fabric transport avoids it was not
+verified. The `model-deployment-tcp-tw-reuse` setting renders the reuse value, but requires the
+corresponding kubelet allowed-sysctl configuration on every eligible node.
+
+The vLLM direct leg behaved differently in the recorded runs: without a store it kept four transfer
+connections open and at most nine sockets in `TIME-WAIT` over 729 requests. With a TCP store,
+vLLM 0.29.0 kept four connections to the decoder and four to each of two store members, and at most
+16 sockets in `TIME-WAIT` over 720 requests without failure. The decoder's count settled below 200.
+These results describe the tested shapes and versions rather than all engine releases.
+
+#### SGLang shutdown
+
+The SGLang 0.5.18 source reading found a five-second SIGTERM check in `sigterm_watchdog`
+(`python/sglang/srt/managers/tokenizer_manager.py`) followed by a wait of up to 15 seconds for its
+schedulers. The loops in `disaggregation/decode.py` and `disaggregation/prefill.py` do not read the
+shutdown flag as the plain scheduler loop does. `SGL_FORCE_SHUTDOWN` skips the drain rather than
+shortening this scheduler wait. This explains the guide's 45-second termination-grace recommendation;
+it is not an operator guarantee about another engine version.
+
+#### Ascend transfer and driver access
+
+The direct-transfer protocol was read as fixed to `ascend` in upstream
+`mooncake_transfer_engine.py` at vLLM-Ascend v0.23.0 and v0.26.0rc1. The operator's transfer field
+therefore does not select another protocol on those builds. This is upstream behavior at the named
+versions, separate from the cache store's transport.
+
+The Ascend direct leg obtains NPU NIC addresses through the driver installation's `hccn_tool`.
+Reading `/etc/hccn.conf` was an alternative, but it depends on the host retaining that file; the
+tool reads from the installed driver. The engine image lacks the tool, so the driver host path is
+mounted only for the direct leg. Without the mount the engine cannot resolve the device IP at
+startup; without the host driver directory the Pod fails volume setup.
+
+The cross-manufacturer shared-store analysis was read at vLLM v0.29.0 and vLLM-Ascend v0.23.0. At
+those versions, the operator renders no key enabling the Ascend half to load from the shared store,
+and the two engine implementations use incompatible store addressing keys. Lookups miss without
+an error. This is a version-specific integration limit, not a permanent property of the projects.
+
+### Image and status evidence retained from user guides
+
+The following tables preserve prior image inspection from the backend guide. `readelf -d` was run
+on one host without CUDA; the unresolved column is that host's library count, not a portability
+claim for every environment.
+
+| Variant | Accelerator dependencies | Unresolved |
+|---|---|---|
+| Base (CUDA 12) | `libcuda.so.1`, `libcudart.so.12`; also `libmlx5.so.1` and `libibverbs.so.1` | 2 |
+| `-rocm` | No ROCm/HIP dependency; `libibverbs.so.1` remains | 0 |
+| `-npu` | No accelerator dependency or `libibverbs.so.1` | 0 |
+
+The client wheel was inspected separately; its transports are independent of the master image.
+
+| Variant | Client layout | Transports |
+|---|---|---|
+| Base (CUDA 12) | Static `store.so`, 18.8 MB | `RdmaTransport`, `TcpTransport` |
+| `-rocm` | `store.so`, 19.3 MB | `HipTransport`, `RdmaTransport`, `TcpTransport` |
+| `-npu` | Shims over `libmooncake_store.so` and a separate `ascend_transport.so` | Includes Ascend |
+
+The vLLM-Ascend store-client check was read in `MooncakeBackend.__init__` at v0.23.0 and v0.26.0rc1:
+non-CANN protocols raise before serving. That is upstream behavior at those versions, separate from
+the direct leg's fixed `ascend` protocol.
+
+A development object's old member listing may lack the now-required segment and client IDs.
+`omitLegacyMemberListing` in `pkg/worker/controllers/worker/kv_cache_backend.go` omits the entire
+listing instead of inventing identities or publishing a partial list. `MembersMounted` reports
+`LegacyMemberStatus` until a successful leader read replaces it. No released API used that old shape.
 
 ### Code Style
 

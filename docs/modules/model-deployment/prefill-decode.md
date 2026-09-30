@@ -28,9 +28,8 @@ with a field toggled:
 | omitted | `MooncakeConnector` alone | the direct prefill-to-decode transfer, and nothing else |
 | set | `MultiConnector` wrapping `MooncakeConnector` and `MooncakeStoreConnector` | the direct transfer, with the shared pool attached alongside it |
 
-A pair needs no shared pool to hand blocks over, which is why omitting `spec.kvCache` is a supported
-shape rather than a degraded one. Attaching a pool adds reuse across deployments; it is not what
-makes the pair work.
+A pair needs no shared pool to hand blocks over, so omitting `spec.kvCache` is a supported shape.
+Attaching a pool adds reuse across deployments.
 
 In both shapes the decode Pod runs llm-d's routing proxy as a restartable sidecar; it executes the
 prefill leg named by the router and then forwards the request to the decoder.
@@ -51,10 +50,8 @@ transport builds Device RoCE endpoints and reads each NPU's NIC address through 
 that ships with the driver, while the engine image carries the driver libraries but not the tool.
 
 Without the mount the leg renders but the engine dies at startup, unable to resolve a device IP; a
-node with no driver installation fails the Pod's volume setup instead, naming the path. Reading
-`/etc/hccn.conf` would work too, but only on a host that keeps that file, while the tool answers
-from the driver on every host that has one. The mount ships with the transfer leg alone; an
-Ascend deployment without one carries no host path.
+node with no driver installation fails the Pod's volume setup instead, naming the path. The mount
+ships with the transfer leg alone; an Ascend deployment without one carries no host path.
 
 The leg reads each role's parallel size from that role's own command line: a managed role's
 `extraArgs`, or a take-over role's whole `command`, never both. The one degree vLLM accepts as a
@@ -68,8 +65,7 @@ Secret. An invisibly widened role keeps its `1/1` half.
 
 The connector's startup assert compares the document against itself, not against the engine. An
 invisibly widened pair therefore fails loudly only when the document's decode degree exceeds its
-prefill one. A pair widened symmetrically starts, answers, and pulls a wrong layout: the same quiet
-failure as the missing leg, one level down.
+prefill one. A pair widened symmetrically starts, answers, and pulls a wrong layout.
 
 Admission holds the visible side of the contract: a degree the command line does not state legibly
 is refused, and so is a declared per-member width the role's card request cannot hold; see
@@ -117,8 +113,9 @@ spec:
 ```
 
 **Each replica of a role becomes its own Kueue pod group: one group per replica, declaring a total
-of one.** Two roles naming the same `instanceType` are still separate groups, each replica composing
-its own Workload. The example above therefore has **four** groups of one replica, admitted as a set.
+equal to the role's `size`.** Two roles naming the same `instanceType` are still separate groups,
+each replica composing its own Workload. The example above therefore has **four** single-Pod
+groups, admitted as a set.
 
 **A lost replica is replaced once its slot reads empty, and its siblings keep serving.** A node
 drained, a replica preempted for higher-priority work, a kubelet evicting under pressure: each costs
@@ -128,17 +125,16 @@ a departure touches no other replica's admission.
 > **Why the slot is what a replacement waits for** — the group is annotated as serving, so Kueue never
 > releases the finalizer it holds on the departed Pod; only that replica's Workload being deleted
 > releases it. The replacement is created once no Pod for that replica's ordinal reads on the API
-> server, never beside a member still listed, because a second member in a group of one reads as
+> server, never beside a member still listed, because a group over its declared total reads as
 > excess, and Kueue's answer to the excess is to delete the newcomer.
 
-**The replica is what bounds the blast radius, and no knob is needed to get that.** A loss or an
-edit inside one replica's group does not reach another replica's group: one `Prefill` replica turning
-over leaves its siblings and all of `Decode` serving. The groups are still admitted together; an
-`AdmissionCheck` holds them until the whole set has reserved quota, so `Prefill` still never starts
-without `Decode`.
+**The replica bounds the blast radius.** A loss or an edit inside one replica's group does not reach
+another replica's group: one `Prefill` replica turning over leaves its siblings and all of `Decode`
+serving. The groups are still admitted together; an `AdmissionCheck` holds them until the whole set
+has reserved quota, so `Prefill` still never starts without `Decode`.
 
-Splitting `instanceType`s now buys different hardware, and nothing else: the isolation it used to
-buy, every replica has by default.
+Splitting `instanceType`s buys different hardware; the isolation it used to buy, every replica has
+by default.
 
 **With a shared pool**, the same object plus one block:
 
@@ -215,15 +211,15 @@ details, the duration, the endpoint the picker selected, the method, the path, t
 byte counts. It is not a field: the gap it fills is that nothing is logged at all, so there is no
 value to choose. The other two routers log whatever their own flags say.
 
-**Two of those are a boundary rather than a derived value.** The router runs with
-`--secure-serving=false` and `--metrics-endpoint-auth=false`, and upstream defaults both to **true**.
-The inversion is deliberate: a router manages **east-west** traffic, picking which replica of this
-deployment serves a request already inside the cluster. TLS and caller authentication are
-**north-south** concerns, owned by the gateway that admits traffic into the cluster.
+**Two flags are fixed.** The router runs with
+`--secure-serving=false` and `--metrics-endpoint-auth=false`, where upstream defaults both to
+**true**. The inversion is deliberate: a router manages **east-west** traffic, picking which replica
+of this deployment serves a request already inside the cluster, while TLS and caller authentication
+are **north-south** concerns owned by the gateway that admits traffic into the cluster.
 
 Where those two flags sit, neither protects anything. `--secure-serving` puts TLS on the endpoint
-picker's ext_proc gRPC server, whose only client is the Envoy container **in the same Pod** dialing
-`127.0.0.1`. `--metrics-endpoint-auth` guards the picker's own `/metrics`, scraped in-cluster. So
+picker's gRPC server, whose only client is the proxy container **in the same Pod** dialing
+`127.0.0.1`; `--metrics-endpoint-auth` guards the picker's own `/metrics`, scraped in-cluster. So
 there is no field for either, and neither is reachable through `extraArgs`.
 
 ## Direct transfer transport
@@ -240,7 +236,7 @@ The value is a property of **one link**, so it is deployment-wide: a per-role fi
 express two ends naming different protocols for one connection, which fails at transfer time rather
 than at admission.
 
-It is declared, not discovered. The API accepts `Auto`, `TCP`, `RDMA`, `EFA`, `CANN` and `ROCM`,
+The API accepts `Auto`, `TCP`, `RDMA`, `EFA`, `CANN` and `ROCM`,
 using the same Mooncake mapping as `KVCacheBackend`: `Auto` and `TCP` render `tcp`, `CANN`
 renders `ascend`, and `ROCM` renders `hip`. `MUSA` and `MACA` are excluded because they are
 same-node IPC transports and the two roles may run on different nodes.
@@ -262,10 +258,9 @@ under any router. On every other shape the field is accepted and renders nothing
 What differs per pair is the handshake, not whether there is a leg: Mooncake's bootstrap server
 under native vLLM, SGLang's own registry under SGLang, and on Ascend the decode sidecar's relay
 ([the one router combination that renders a leg there](#how-a-pair-is-wired)). There the field is
-ignored: vllm-ascend hardcodes the protocol to `ascend` (upstream `mooncake_transfer_engine.py`,
-verified at v0.23.0 and v0.26.0rc1).
+ignored: the tested vLLM-Ascend v0.23.0 and v0.26.0rc1 builds use `ascend` on this leg.
 
-It is also **not** the pool's transport. `KVCacheBackend.spec.transport` feeds the engine's store
+It is separate from the pool's transport. `KVCacheBackend.spec.transport` feeds the engine's store
 client; this leg is engine to engine and never traverses the store, so the two declare separately: a
 deployment with no `kvCache` block still has this leg to configure.
 
@@ -284,7 +279,7 @@ See [One group per replica](deployment.md#one-group-per-replica) for what that c
 [Authoring the InstanceType yourself](../../reference/settings.md#authoring-the-instancetype) for which
 queues carry the check.
 
-**Across manufacturers is the same change, not a second one.** A queue's accelerator quota is
+**Adding a second manufacturer uses the same mechanism.** A queue's accelerator quota is
 `credits.gpustack.ai/<manufacturer>`, one resource name per manufacturer, and Kueue's own webhook
 refuses a second resource group repeating a covered resource within one queue. With a queue per role
 there is no second group to repeat anything.
@@ -300,17 +295,17 @@ between the halves:
   remediation are stated there). The check is one-sided: it fires for a single-manufacturer Ascend
   deployment just the same, and it is the only one of the three that produces a message;
   following its remediation clears only this refusal; the next two apply regardless.
-- **Two upstream walls then apply, read in the source of vLLM `v0.29.0` and vLLM-Ascend `v0.23.0`,
-  the [minimum each is supported at](engine-versions.md#the-minimum-per-shape), a description of
-  that pair of releases and not a permanent property of either project.** The operator
+- **Two upstream limits then apply**, described at the versions each engine is supported at (see
+  [the minimum per shape](engine-versions.md#the-minimum-per-shape)); they describe that pair of
+  releases, not a permanent property of either project. The operator
   renders no key that lets the Ascend half load from the shared store, and the two engines address
   it with incompatible keys, so every lookup misses and no error is raised.
 
 This limit governs the shared pool alone: [a pair needs no shared pool to hand blocks
 over](#how-a-pair-is-wired).
 
-**The direct transfer across manufacturers follows a different rule: not "two manufacturers" but the
-router in front.** The leg renders per role, and on Ascend [only one router combination
+**For the direct transfer, what matters is the router in front, not the manufacturers.** The leg
+renders per role, and on Ascend [only one router combination
 carries it](#how-a-pair-is-wired).
 
 A mixed pair never forms a transfer either way: the two sides' connectors speak different handshake

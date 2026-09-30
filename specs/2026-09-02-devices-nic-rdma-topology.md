@@ -1324,6 +1324,30 @@ explicit decision** — `pkg/device/helper.go` (T5's single construction point) 
 remains out: F5 needs no new entry point there, and a future check that does would have to regenerate
 a tree that drifts several bindings at once.
 
+### Devices ownership and ordering retained from the discovery guide
+
+A cluster-scoped `Devices` object is owned by its Node. A namespaced NodeFeature cannot serve
+as a resolvable owner for a cluster-scoped dependent. `NodeDevicesReconciler` also deletes a
+ledger after an uncached Node read reports NotFound: garbage collection accesses the preferred
+aggregated API, and an unavailable worker can leave stale node capacity until collector backoff
+expires. That reconciler mirrors the Node's managed mark; the device-manager does not decide
+node management. The detect loop uses `nodefeature.ConstructAcceleratableNodeLabels` for labels.
+
+Accelerators are stored canonically by index, and groups by manufacturer and first accelerator,
+to avoid rewriting unchanged inventory. The API lists are identity-keyed maps, so consumers must
+not depend on group order for positional injection: a walk over groups can interleave models.
+Allocators sort the selected accelerators themselves.
+
+### RDMA server and allocation details retained from the guide
+
+All three RDMA servers start once beside the per-manufacturer allocators, outside the
+manufacturer loop: interfaces belong to the node rather than an accelerator manufacturer.
+Allocation resolves a verbs device first through `class/infiniband_verbs/uverbsN` and its
+`ibdev` attribute, then through `infiniband_verbs` under the RDMA device's hardware parent.
+The second layout matters because a class device sits at `<parent>/<class>/<name>`.
+Failure under both layouts reports both locations instead of treating an unresolved device
+as an injectable endpoint.
+
 ### Implementation Plan
 
 Nine tasks, plus three that are deferred or withdrawn and keep their numbers. Each declares the paths it owns;

@@ -237,11 +237,13 @@ list formatting that cannot be fixed by editing the source comment; fix the gene
 
 ## Vendored / patched dependencies
 
-`go.mod` `replace`s several k8s modules (`k8s.io/api`, `apimachinery`, `code-generator`,
-`apiextensions-apiserver`, `kube-aggregator`, `klog`) plus `gogo/protobuf` and `go-logr/logr` with patched
-copies under `./staging/`, checked out and patched by `make deps` (sources + versions in `hack/deps.sh`,
-patches in `hack/staging/`). Don't hand-edit `staging/`; change the patch and re-run `make deps`. The
-subcharts are staged the same way, for the same reason — see [Vendored subcharts](#vendored-subcharts).
+`go.mod` replaces several Kubernetes modules (`k8s.io/api`, `apimachinery`, `code-generator`,
+`apiextensions-apiserver`, `kube-aggregator`, `klog`), `gogo/protobuf` and `go-logr/logr` with patched
+copies under `./staging/`. `make deps` checks out their versions from `hack/deps.sh` and applies
+patches from `hack/staging/`. Change the patch and re-run `make deps`; do not hand-edit `staging/`.
+
+`make deps` also stages the subcharts. Their versions are in `hack/deps.sh` and their patches
+are under `hack/deploy/`.
 
 ---
 

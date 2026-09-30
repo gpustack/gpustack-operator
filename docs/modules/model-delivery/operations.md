@@ -128,10 +128,9 @@ or image collection, so the plugin caps the high watermark:
 
 - It takes `evictionHard["nodefs.available"]`, `evictionHard["imagefs.available"]` and
   `imageGCHighThresholdPercent` from the node's `spec.kubelet`, which the worker reads from kubelet's
-  `configz`: what kubelet enforces, its flags, configuration file and drop-ins merged. The plugin
-  reads no kubelet file; the path kubelet reads is its `--config` flag, and on managed nodes the
-  kubeadm path `<kubeletDir>/config.yaml` was measured to hold another, unused file. A quantity is
-  converted to a percentage of the filesystem.
+  `configz` endpoint: kubelet's effective configuration, its flags, configuration file and drop-ins
+  merged. The plugin reads no kubelet file. A quantity is converted to a percentage of the
+  filesystem.
 - The cap is the lowest of `100 - nodefs.available - 5`, `100 - imagefs.available - 5` and
   `imageGCHighThresholdPercent - 5`. The image thresholds count because the plugin cannot see where
   the image store is, so it assumes the same filesystem.
@@ -146,10 +145,11 @@ The low watermark is lowered with the cap when it would reach it. When the cap l
 the `Ready` message says so and where the thresholds came from; with the defaults the Setting's own
 `80` is not lowered.
 
-Measured on a node whose cache shares a 265 GB boot disk with kubelet (`nodefs.available` 10%, image
-collection 85/80): filled to 78.5% under the 80% watermark, the next 65.5 GB download was refused,
-kubelet never reported `DiskPressure`, evicted nothing and collected no image. Reservations count
-the downloads still running, so several starting together stay under the watermark as one would.
+Measured on a managed node whose cache shares a 265 GB boot disk with kubelet (`nodefs.available`
+10%, image collection 85/80): filled to 78.5% under the 80% watermark, the next 65.5 GB download
+was refused, kubelet never reported `DiskPressure`, evicted nothing and collected no image.
+Reservations count the downloads still running, so several starting together stay under the
+watermark as one would.
 
 ## Switch delivery
 

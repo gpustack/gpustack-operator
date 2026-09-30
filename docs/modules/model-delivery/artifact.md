@@ -107,47 +107,41 @@ status:
 
 ## Resolution and revalidation
 
-A Hugging Face source is resolved **once**, with the namespace's own token: the revision becomes a
-40-character commit through `/api/models/<repo>/revision/<rev>`, which peels an annotated tag, and
-every page of `/api/models/<repo>/tree/<commit>?recursive=true` becomes the manifest. Nothing follows
-the branch afterwards.
+A Hugging Face source is resolved **once**, with the namespace's own token: the revision is pinned
+to the commit it names at resolution time, an annotated tag is peeled to that commit, and the
+commit's file listing becomes the manifest. Nothing follows the branch afterwards.
 
-| Hub response | `Resolved` reason |
+| `Resolved` reason | Cause |
 | --- | --- |
-| 404 with `X-Error-Code: RevisionNotFound` | `RevisionNotFound` |
-| 401, 403, 404 `RepoNotFound`, `GatedRepo`, or a tree whose LFS digests are masked with `*` | `AccessDenied` |
-| 5xx, 429, a network error | `SourceUnavailable` |
+| `RevisionNotFound` | the revision, branch or tag does not exist |
+| `AccessDenied` | the repository does not exist, is private and the token cannot read it, or is gated without a grant |
+| `SourceUnavailable` | the hub is unreachable, erroring or rate-limiting |
 
 A repository that does not exist and a private one the token cannot read answer alike, so the
-message says "does not exist or is not accessible". A gated repository answers 200 on the revision
-and tree endpoints and only masks its digests, which is why the masked tree is its own row.
+message says "does not exist or is not accessible". A gated repository is the subtle case: its
+listing answers as if readable and only masks the files' digests, and that masked listing is
+refused as `AccessDenied`.
 
 **A ModelScope source resolves the same way, against its own API.** A full commit is taken as is; a
-branch or tag is resolved through `GET /api/v1/models/<id>/commits?Ref=<rev>` and cross-checked
-against git: `git ls-remote` over `https://www.modelscope.cn/<id>.git` must name the same commit
-(the peeled entry, for an annotated tag).
+branch or tag is resolved and cross-checked against the repository's git refs, and a hub index
+that disagrees with its own git refuses the resolution as `SourceUnavailable`. That disagreement,
+often caused by a misspelled parameter, is what would silently resolve the wrong revision.
 
-A disagreement refuses the resolution as `SourceUnavailable`: a misspelled parameter can make the
-hub's index and its git disagree, and that disagreement is what would silently resolve the wrong
-revision. A private repository authenticates ls-remote with the user name `oauth2` and the
-namespace's token.
+The file listing the ModelScope API returns truncates silently at 3000 entries, so the operator
+re-lists large directories itself, and a directory with 3000 or more direct children refuses
+(`SourceUnavailable`): the API cannot enumerate it, and a partial manifest would be a silent wrong
+answer. Every file must carry the hub's `sha256`, so a ModelScope manifest's digest lines are all
+`sha256`.
 
-The file listing walks `repo/files?Revision=<commit>&Recursive=true`; the API truncates silently
-at 3000 entries, so a full page is re-listed per directory, and a directory with 3000 or more
-direct children refuses (`SourceUnavailable`): the API cannot enumerate it, and a partial
-manifest would be a silent wrong answer. Every file must carry the hub's `sha256`.
-
-| ModelScope response | `Resolved` reason |
-| --- | --- |
-| `commits` answers no commit for the ref, or the listing has no file tree at the revision (code 10990101004) | `RevisionNotFound` |
-| 404 code 10010205001 (not found) or 10010200001 (no access), any other 401/403/404 | `AccessDenied` |
-| 5xx, a network error, a directory the API cannot enumerate | `SourceUnavailable` |
+Access failures map to the same reasons: a ref that answers no commit, or a listing with no file
+tree at the revision, is `RevisionNotFound`; a refusal of the content's accessibility (a missing,
+private or gated repository, or a token the hub rejects) is `AccessDenied`; a hub that cannot
+answer at all, answers a server error, or cannot enumerate a directory is `SourceUnavailable`.
 
 ModelScope has no distinct 401 or 403, and "no access" covers private-without-token,
 gated-without-grant and valid-token-without-grant alike; the message says "does not exist or is
-not accessible" as on Hugging Face. A mistyped token is silent in the same way, so the controller
-checks each new token with `GET /openapi/v1/users/me` and emits the same `InvalidToken` Warning
-when the hub rejects it.
+not accessible" as on Hugging Face. A mistyped token is silent in the same way, so the operator
+probes each new token against the hub and emits an `InvalidToken` Warning when the hub rejects it.
 
 Access is revalidated every `model-artifact-revalidate-interval` (default `24h`) and whenever the
 Secret changes, with one `HEAD` of a file at the resolved commit, redirects not followed:
@@ -159,9 +153,8 @@ Secret changes, with one `HEAD` of a file at the resolved commit, redirects not 
 - a deleted Secret, or one without its `token` key, sets `Resolved=False` at once;
 - a later pass restores `Resolved=True`, with the commit and digest unchanged.
 
-The HEAD is `/api/models/<repo>/resolve/<commit>/<file>` on Hugging Face and
-`/api/v1/models/<id>/repo?Revision=<commit>&FilePath=<file>` on ModelScope, where a 200 (an LFS
-file's too) confirms and every 404 is an access refusal.
+The check is one request for one file at the resolved commit, on either hub: a 200 (an LFS file's
+too) confirms access and a 404 is an access refusal.
 
 **An `expectedDigest` turns both passes into assertions.** At resolution the digest is compared
 with the anchor; a mismatch refuses with `DigestMismatch`, both digests in the message. At
@@ -185,7 +178,7 @@ answer at all falls back.
 
 **Delivery under an `Expected` identity.** No commit exists, so [Engine
 delivery](#engine-delivery) is refused (`AnchorNeedsNodeDelivery`) and
-[Node delivery](node-store.md#materialization) draws the manifest and the bytes from the other
+[Node delivery](node-store.md#download-and-verification) draws the manifest and the bytes from the other
 nodes; with no peer holding the tree the mount fails naming the digest nothing holds. Seed one
 node while the hub is reachable, and the identity stands without it.
 
@@ -210,15 +203,12 @@ gitsha1:4ff64fe5… 807 config.json
 sha256:8111d5af… 453864 model.safetensors
 ```
 
-- A line is `<algorithm>:<hex> <size> <path>`, sorted by the path's UTF-8 bytes, every line ending
-  in LF. An LFS file uses its `sha256`, any other file its git blob `gitsha1`; a ModelScope
-  artifact's manifest is all `sha256` lines, the hub giving no other digest.
-- A path must be valid UTF-8, relative, with no control character and no empty, `.` or `..`
-  segment; the whole resolution fails on one that is not.
+- A line is `<algorithm>:<hex> <size> <path>`, sorted by the path, every line ending in LF. An LFS
+  file uses its `sha256`, any other file its git blob `gitsha1`; a ModelScope artifact's manifest
+  is all `sha256` lines, the hub giving no other digest.
 - The source, the repository, the commit and the patterns are not part of it, so the same files
   have the same digest wherever they live. A filter changes the digest only through the files it
-  keeps, and an artifact without patterns has the digest it always had. The reference
-  implementation is `pkg/modelartifact`.
+  keeps, and an artifact without patterns has the digest it always had.
 
 Two consequences follow:
 
@@ -226,12 +216,6 @@ Two consequences follow:
   files have the same digest; authorization always comes from resolving with the namespace's token.
 - The same files on Hugging Face and ModelScope have different digests, because non-LFS files are
   hashed differently there. Content is not deduplicated across hubs.
-- **The anchor is the migration's acceptance contract.** A future import of a legacy GPUStack
-  cache ([gpustack/gpustack-operator#693](https://github.com/gpustack/gpustack-operator/issues/693),
-  deferred) may publish only trees whose computed manifest digest equals the artifact's
-  `expectedDigest`, through the node store's own pipeline, lazily and one-shot, never an online
-  migration of a running install. This format and that pipeline are what such an import verifies
-  against.
 
 ## Referencing it from a ModelDeployment
 

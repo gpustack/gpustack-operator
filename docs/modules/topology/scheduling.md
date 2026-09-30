@@ -82,11 +82,11 @@ last applied, not an ordering scheme.
 
 ## Hierarchy profiles
 
-`NodeTopologyReconciler` selects exactly one Ready `TopologySource` for a Node. Zero or multiple
+The worker selects exactly one Ready `TopologySource` for a Node. Zero or multiple
 matching sources deliberately fall back to a hostname-only hierarchy. When the inventory is
 ambiguous, no tree is invented: flattening two conflicting sources into one would misplace Pods.
 
-The reconciler takes the longest populated prefix of the selected level list and always appends
+The worker takes the longest populated prefix of the selected level list and always appends
 `kubernetes.io/hostname`. Missing a finer suffix is valid, but a child without its parent is not.
 Contiguous Topograph fabric tiers are normalized to coarsest-to-finest order before validation.
 
@@ -94,10 +94,9 @@ The ordered label-key list is hashed into `topology.gpustack.ai/profile`. Nodes 
 share a generated Kueue `Topology`; the domain values remain opaque Node labels. A profile therefore
 describes the hierarchy shape, not a particular region, zone, rack, switch, or host.
 
-The profile value is `fnv64-` followed by 16 lowercase hexadecimal digits from FNV-1a 64-bit over
-the NUL-delimited ordered level keys. The generated Topology is named `gpustack-<profile>`.
-`NodeDevicesReconciler` mirrors the Node profile onto its `Devices` ledger so accelerator admission
-checks the same profile as the flavor and Kueue placement.
+The worker assigns a stable profile ID to each ordered hierarchy and names its Kueue Topology
+`gpustack-<profile>`. It mirrors the profile onto the Node's `Devices` ledger, so accelerator
+admission checks the same hierarchy as the flavor and Kueue placement.
 
 ## Profiles in the Kueue chain
 
@@ -105,7 +104,7 @@ Every generated `ResourceFlavor` pins the Node's topology profile and references
 `Topology`. Hardware identity and topology profile together form flavor identity, so capacity from
 different hierarchy shapes is never silently combined.
 
-`NodeQueueReconciler` admits a queue only when every flavor is topology-aware, its referenced
+The worker admits a queue only when every flavor is topology-aware, its referenced
 Topology exists, selectors do not overlap, and quota is conserved across the split. The resulting
 ClusterQueue is TAS-only: Kueue evaluates the full PodSet requests, including CPU, memory, and
 GPUStack resources, against the selected domains.
@@ -180,7 +179,7 @@ profile. A change such as region → zone → rack creates replacement Topologie
 the managed ClusterQueue keeps its name and UID.
 
 When the new plan drops a flavor that Kueue still reports reservation or usage on, or does not
-report at all, `NodeQueueReconciler` sets `HoldAndDrain`, waits for Kueue to report zero reserving
+report at all, the worker sets `HoldAndDrain`, waits for Kueue to report zero reserving
 Workloads, switches the complete flavor plan, and restores the queue's previous stop policy. Kueue
 owns eviction and readmission; serving workloads can be interrupted.
 

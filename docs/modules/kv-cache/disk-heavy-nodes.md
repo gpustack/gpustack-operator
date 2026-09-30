@@ -14,15 +14,11 @@ member. Add local disks to that member, then size the memory segment as describe
 **Every member group mounts a memory segment, and a disk tier is a layer on a group that already
 holds one.** `members[].medium` names which memory (`DRAM` for the host's, `VRAM` for the
 accelerator's), and the disk is declared beside it in `members[].localDisks`, a layer on either one.
-See [the two axes](backend.md#the-two-axes) for the full shape.
+See [Connection and medium](backend.md#connection-and-medium) for the full shape.
 
 The shape is the store's own data flow: the leader routes an offload task to the client holding the
 key's **memory** replica, so a group with none is never chosen. It would still report its disk
 capacity, so the failure is quiet: the tier looks healthy and holds nothing.
-
-Why the API is shaped that way is [the two axes](backend.md#the-two-axes); the upstream source both
-halves were read from is in
-[the spec](../../../specs/2026-09-05-kv-cache-media-and-scaling.md#the-finding-that-decides-the-shape-offload-is-routed-to-the-memory-replicas-owner).
 
 A disk-heavy node still needs enough memory to drive its disk tier. The next section gives the
 group shape and the memory floor.
@@ -79,9 +75,8 @@ Three things that manifest depends on and does not state:
 ## Memory segment floor
 
 **`capacityPerMember` has a floor of 16Mi on a group declaring `localDisks`.** That is one bucket,
-the unit the tier is written in and the figure this operator renders as `MemberBucketSizeLimit` in
-`pkg/worker/kvcache/mooncake/member_workload.go`. Why a segment below one bucket can never fill one
-is in [bucket writes](local-disk-tier.md#bucket-writes).
+the unit the tier is written in. Why a segment below one bucket can never fill one is in
+[bucket writes](local-disk-tier.md#bucket-writes).
 
 **The bound is judged only when a write moves the value** (on creation, or on an update that
 changes it). An object already carrying a smaller figure is admitted for every other edit, including

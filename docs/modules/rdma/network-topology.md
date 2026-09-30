@@ -162,7 +162,7 @@ The inventory and the link verdict describe an RDMA endpoint. Three device-plugi
 allocatable: the interface inventory decides which endpoints each key serves, the link verdict
 decides their health, and every token carries its endpoint's NUMA affinity.
 
-The keys, named by `GetRDMAResourceName` (`pkg/nodefeature/rdma.go`), are node-level and carry no
+The keys are node-level and carry no
 manufacturer: a network interface belongs to the node rather than to a vendor.
 
 | key | allocation mode | `1` means | tokens per endpoint |
@@ -175,7 +175,7 @@ EFA is allocated under none of these keys. AWS's EFA device plugin advertises it
 `vpc.amazonaws.com/efa` key, and an EFA allocation follows that plugin's capacity rather than
 `Devices.spec.interfaces[]`.
 
-The mode is **read off the node, never chosen** (`pkg/deviceplugin/rdma_endpoint.go`):
+The mode is **read off the node, never chosen**:
 
 | Interface | Serves | Endpoints |
 |---|---|---|
@@ -193,7 +193,7 @@ allocation resolves to a character device, so an endpoint without one has nothin
 node whose RDMA tree exists but could not be read produces exactly that shape, an `Unverified`
 record with no device, and advertises zero.
 
-The link verdict above gates health, not existence (`pkg/deviceplugin/rdma_server.go`): `OK`,
+The link verdict above gates health, not existence: `OK`,
 `Unverified` and no record at all advertise `Healthy`; `Failed` advertises the endpoint's tokens
 `Unhealthy`. No verdict is not a verdict of failure: an endpoint reaches this gate only by carrying
 a bound device, so a missing link record is the `Unverified` case arriving by a different route.
@@ -235,10 +235,7 @@ the detector has since corrected cannot survive into a response built from an ol
 is that no cluster-level view maps a Pod to the interface it holds; the container itself is the
 record, through its injected device nodes and its `NCCL_IB_HCA` value.
 
-One server per mode registers its key with kubelet. `Allocator.Start` starts all three beside the
-per-manufacturer allocators, once, rather than inside the detected-manufacturer loop: that loop is
-keyed on a manufacturer, which a network interface does not have
-(`pkg/devicemanager/allocator/rdma/`).
+The Device Manager registers one RDMA resource server per mode with kubelet, once per node.
 
 Every node the Device Manager serves on Linux runs the servers, accelerator or not, so a node with
 no RDMA-capable interface registers all three keys with zero devices.
@@ -251,23 +248,15 @@ families; exclusive is ungated.
 ## The allocation response
 
 A granted token is resolved back to its endpoint in `Devices.spec.interfaces[]` at allocation
-time, and the response hands the container three things
-(`pkg/deviceplugin/rdma_allocate.go`):
+time, and the response hands the container three things:
 
 - the endpoint's own verbs character device, resolved from its RDMA device name;
 - the node-level connection-manager device (`rdma_cm`), once per response however many endpoints
   were granted, and only where the host has one;
 - `NCCL_IB_HCA`, naming the granted RDMA devices, comma-joined.
 
-The verbs device is resolved through two sysfs layouts, in order
-(`pkg/deviceplugin/rdma_devices.go`): `class/infiniband_verbs/uverbsN` matched by its `ibdev`
-attribute, then the `infiniband_verbs` directory under the RDMA device's own hardware parent.
-
-> **Why that second path** — a class device sits at `<parent>/<class>/<name>`, never directly under
-> the parent, the same rule that puts the RDMA device at `<parent>/infiniband/<name>`.
-
-A name that resolves under neither fails the allocation naming both layouts; a single hard-coded
-path that is wrong on one distribution fails exactly like a host that has no RDMA at all.
+If the endpoint's verbs device cannot be resolved from the host's RDMA inventory, allocation
+fails with a diagnostic naming the locations checked.
 
 Devices are injected one endpoint at a time, never the whole `/dev/infiniband` directory: injecting
 a directory hands every container every adapter on the node, and degrades to handing it none with

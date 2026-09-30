@@ -46,8 +46,7 @@ unreferenced and past grace.
 ## Placement
 
 `spec.placement` picks the target set one of three ways, and admission and delivery share one
-expansion (`PrefetchTargetNodes` in `pkg/worker/controllers/worker/model_prefetch.go`), so the two
-can never disagree about what a prefetch would warm:
+expansion, so the two can never disagree about what a prefetch would warm:
 
 | Form | Field | Target set |
 |---|---|---|
@@ -78,15 +77,15 @@ registry has it.
 A grant's budget counts filesystem usage: each distinct digest at its full size, for every node
 holding it, whatever the entry's state. A tree two namespaces share counts fully against each of
 them; that is conservative, and impossible to game by warming what another tenant already warmed.
-The counting runs in `model_store_binding.go` and lands on the binding's status:
+The measured footprint lands on the binding's status:
 
 - `status.usedBytes`: the measured figure, absent while any referenced artifact has not resolved
   (an absent figure was not measured; zero is a measurement).
 - `OverQuota`: True when the footprint passed the grant, Unknown when it could not be counted.
 
-Admission (`model_prefetch.go` in `pkg/worker/webhooks/worker`) refuses the shapes that cannot
-work: a missing artifact or grant, a target set outside every store the grant names, pinning
-without the grant's permission, and a projection past the budget.
+Admission refuses the shapes that cannot work: a missing artifact or grant, a target set outside
+every store the grant names, pinning without the grant's permission, and a projection past the
+budget.
 
 The projection is the accounting at admission time: per distinct digest, the resolved size times
 the widest node count asked of it. An artifact that has not resolved yet contributes no size, and
@@ -96,7 +95,7 @@ the accounting reports the drift that projection could not see.
 
 `spec.retention.pinned` keeps the content on every target node against collection: a pinned digest
 is never a collection candidate, though it still counts toward usage, so a cache full of pinned
-content reports its saturation exactly as a cache full of references does (`gc.Collector.Pinned`).
+content reports its saturation exactly as a cache full of references does.
 
 Pinning requires the grant. The nodes' pin lists are written as one union by the prefetch
 controller, the field's single writer, so two namespaces pinning one node keep both digests. See

@@ -133,8 +133,7 @@ spellings each engine accepts, is under
 [Engine dtype](pool.md#engine-dtype).
 
 The file is a `downwardAPI` projection of the Pod's own `kvcache.gpustack.ai/client-config`
-annotation. No ConfigMap is created, so the webhook needs no RBAC for one and leaves nothing to
-garbage-collect: the configuration's lifetime is exactly the Pod's.
+annotation. No ConfigMap is created, so the configuration's lifetime is exactly the Pod's.
 
 The values are the same on every engine; only the spellings differ. Both vLLM-family engines read
 the same file with the same key names. Where they differ is the connector selected alongside it,
@@ -358,10 +357,6 @@ must ignore that legacy field and must not infer image compatibility from it.
 container: `"file"` means a projected configuration document plus its volume, `"environment"` means
 variables alone.
 
-It used to carry a second job: telling you that your own `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` had
-taken precedence and left the injection inert. That outcome no longer occurs. Those keys are refused
-at admission, so a Pod that was injected is a Pod whose injection is read.
-
 ## Transport compatibility at binding
 
 An engine configured with one transport cannot safely bind to a pool whose member groups offer
@@ -448,9 +443,9 @@ uses a 16 MiB default. Budget those 16 MiB the same way, in the request as well 
 > grant. What an absent key costs instead is under
 > [Injection per engine](#injection-per-engine).
 
-**Random ports.** The transfer engine binds ports nobody configured (one observed run took `15002`
-and `15995`, a second client `16566` and `16655`). **Any NetworkPolicy or port reservation must be
-written as a range, not a list.** The webhook cannot change this and does not try.
+**Random ports.** The transfer engine binds ports nobody configured. **Any NetworkPolicy or port
+reservation must be written as a range, not a list.** The webhook cannot change this and does not
+try.
 
 **A 30-second lease on cached blocks.** `kv_lease_duration` defaults to 30 seconds. It does not expire
 from long queueing, but it does expire when a Pod's heartbeat is interrupted (preemption, eviction,

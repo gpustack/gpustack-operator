@@ -71,9 +71,8 @@ gpustack-system` reports `NamespaceDeletionDiscoveryFailure`: the APIServices `v
 (ServiceNotFound)`. They are cluster-scoped and outlive their namespaced backing Services, and
 namespace GC cannot finish discovery while they do.
 
-Current releases remove all four themselves once the namespace is Terminating
-(`deregisterOnTeardown` in `pkg/worker/worker.go` deletes every APIService backed by the
-namespace, Kueue's pair included). On an older release (or wherever one is left) delete them
+Current releases remove the APIServices backed by the system namespace, including Kueue's pair,
+when that namespace is Terminating. On an older release, or if registrations remain, delete them
 by backing Service, not by name, and stop the worker first: its ensurer recreates them within
 ~30 seconds while it runs.
 

@@ -47,8 +47,8 @@ The kubelet does not reject a second device-plugin registration for a resource n
 it replaces the endpoint. Both plugins keep writing their own device sets, so node capacity oscillates
 between the two views, and a Pod can fail admission during the flap.
 
-An `Allocate` call can also arrive carrying the *other* plugin's device IDs — GPUStack's own responder
-rejects those outright (`ParseResourceToken` in `pkg/deviceplugin/server.go`, called from `Allocate`).
+Allocation can also fail when kubelet sends one plugin's device IDs to the other. Remove the duplicate
+plugin before submitting workloads.
 
 ## One Node Feature Discovery per cluster
 

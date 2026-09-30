@@ -1230,6 +1230,14 @@ docs/modules/kv-cache/injection.md   # the label/annotation contract, the inject
 docs/modules/devices/admission.md         # one paragraph: a Pod webhook outside the five gates
 ```
 
+### Arbitrary commands and the reuse domain
+
+The deployment take-over tier accepts an arbitrary program and its arguments. Refusing
+`MOONCAKE_TENANT_ID` in the role's environment or managed arguments cannot constrain an assignment
+inside a shell command or a script that program executes. Admission does not interpret those
+programs. The domain exposure also exists for workloads that contact the store directly; an
+arbitrary command is one example of the unauthenticated store boundary tracked by #168.
+
 ### Code Style
 
 The synthesis is a pure function over a value: no client, no context, no cluster types, so every case in

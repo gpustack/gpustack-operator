@@ -1,26 +1,30 @@
 # Node Model Store
 
-Node delivery replaces an engine's own download with a node-local cache. The `model-manager` plugin
-runs on every node as a CSI node plugin serving inline ephemeral volumes of the driver
-`model.csi.gpustack.ai`. On the first mount of a digest on a node it downloads the files, verifies
-every byte, publishes the tree in one step and bind-mounts it read-only; every later mount of that
-digest on that node is one `stat` and a bind mount.
+Use Node delivery to download model weights once and reuse the verified files across Pods on the
+same node. The `model-manager` CSI plugin downloads missing content, verifies it and mounts it
+read-only through the `model.csi.gpustack.ai` driver. Pods using the same digest share the cached
+files while those files remain on the node.
 
-Enabling it and operating it are on [Model Store Operations](operations.md).
+[Model Store Operations](operations.md) covers enabling and managing the cache.
 
 ## Contents
 
 - [The resource](#the-resource)
-- [Who writes what](#who-writes-what)
-- [The volume a consumer mounts](#the-volume-a-consumer-mounts)
+- [Configuration ownership](#configuration-ownership)
+- [Mounting cached weights](#mounting-cached-weights)
 - [Mount authorization](#mount-authorization)
-- [Materialization](#materialization)
+- [Download and verification](#download-and-verification)
 - [Failure reasons](#failure-reasons)
 - [References, restart and collection](#references-restart-and-collection)
 - [Metrics](#metrics)
 - [Requirements and limits](#requirements-and-limits)
 
 ## The resource
+
+The following shows a worker-managed object returned by `kubectl get nodemodelstore -o yaml`.
+Do not apply it as a manifest: the public API supports reads and deletion, and the worker and
+node plugin maintain its configuration and status. Configure the cache through
+[Model Store Operations](operations.md).
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -102,13 +106,13 @@ status:                                      # the plugin on that node: its fact
 | `CapacityLow=True` | `NothingToRemove` | usage is above the high watermark and every tree on the filesystem is in use |
 | `CapacityLow=False` | `WithinWatermarks` | collection can keep usage within the watermarks |
 
-## Who writes what
+## Configuration ownership
 
 | Part | Writer | Rule |
 | --- | --- | --- |
 | the object | worker | created when the node's `CSINode` lists `model.csi.gpustack.ai`; removed with the Node, and all of them while the `CSIDriver` object does not exist |
 | `spec` | worker | the merge of the configuration layers, rewritten within a minute of a Setting change; never a value that fails its check |
-| `spec.kubelet` | worker | the node's kubelet thresholds, read through `nodes/<node>/proxy/configz` when the object is written and every 30 minutes; a failed read keeps the last reading, and a node never read has none. The plugin gets no `nodes/proxy` access |
+| `spec.kubelet` | worker | the node's kubelet thresholds, read from kubelet's `configz` endpoint when the object is written and every 30 minutes; a failed read keeps the last reading, and a node never read has none. The plugin gets no `nodes/proxy` access |
 | `status` | the plugin on that node | admitted only through the status webhook below |
 
 The public [NodeModelStore API](views.md#resources) supports reads and deletion. Its configuration
@@ -137,7 +141,7 @@ learns it at startup with a `SelfSubjectReview`, or, where the API server does n
 1.28), with a `TokenReview` of its own token; with neither it does not start. Mount authorization trusts that status, so the guard is what keeps a
 tenant from making an artifact look resolved.
 
-## The volume a consumer mounts
+## Mounting cached weights
 
 A `ModelDeployment` under Node delivery and an `Instance` naming a Hugging Face or ModelScope artifact render:
 
@@ -176,16 +180,15 @@ has no resolved artifact naming it.
 
 A refusal is `PermissionDenied` with the failed rule in the message, which kubelet records on the Pod
 as a `FailedMount` event. An artifact that stops being resolved stops new mounts only; mounted Pods
-keep theirs. Artifacts are read from an informer, and mounts answer `Unavailable` until it has
-synced.
+keep theirs. For a short window after the plugin starts, before it has read the artifacts, mounts
+answer `Unavailable`.
 
-## Materialization
+## Download and verification
 
 The first authorized mount of a digest the node does not hold starts one background attempt and
 returns `Aborted` with the progress so far (`materializing sha256:0f3c…: 2.1 GiB of 15.2 GiB
-received`). kubelet retries with its backoff, 0.5 s doubling to at most 2 min 2 s, and the first
-call after publication mounts. After a download completes, a Pod starts at kubelet's next retry, up
-to about two minutes later.
+received`). kubelet retries the mount, and the first call after publication mounts. After a
+download completes, a Pod starts at kubelet's next retry, up to about two minutes later.
 
 1. **Manifest.** The tree at `status.resolved.revision` is listed with the mount's credential and
    filtered by the artifact's patterns; its canonical digest must equal `manifestDigest`. An
@@ -231,20 +234,18 @@ stay for a resume.
 | `InsufficientCapacity` | the reservation does not fit under the high watermark after collection | backoff |
 | `Canceled` | no mount asked for the digest for five minutes | resumes on the next mount |
 
-The mount's gRPC code is `InvalidArgument` for a malformed request, `PermissionDenied` for
-authorization, `Unavailable` before the informer syncs and during backoff, `Aborted` while
-materializing, `ResourceExhausted` for capacity and `Internal` otherwise. No message, event or log
-line carries a token, an `Authorization` header or a signed URL.
+A mount refused while materializing shows the attempt's progress in its message, and a failed
+attempt names its reason from this table. No message, event or log line carries a token, an
+`Authorization` header or a signed URL.
 
 ## References, restart and collection
 
-A reference is a mounted target. A mount records its reference before it binds, under the lock
-collection removes trees under, so a tree is never removed between the check that it is published
-and the mount; a reference that cannot be written fails the mount. Unmounting works from the target
-path alone and succeeds for a target it never mounted.
+A reference is a mounted target. A tree is never removed between the check that it is published and
+the mount that binds it, and a mount whose reference cannot be recorded fails. Unmounting works
+from the target path alone and succeeds for a target it never mounted.
 
-On start the plugin rebuilds its references from `/proc/self/mountinfo` and its ledger, removes
-partial directories that belong to no attempt, and rewrites `status`. A mounted Pod keeps running
+On start the plugin rebuilds its references from the node's live mounts, removes partial
+directories that belong to no attempt, and rewrites `status`. A mounted Pod keeps running
 while the plugin restarts or rolls: its mount is a kernel bind mount.
 
 Collection runs when usage passes the high watermark, when a reservation does not fit, and every
@@ -285,10 +286,8 @@ Served on the plugin's HTTPS port (`modelManager.securePort`, 32444), beside `/r
 
 No label carries a namespace, an artifact, a repository or a Pod.
 
-The same port serves `GET /model/downloads`: the running downloads, each a `digest`,
-`downloadedBytes`, `sizeBytes` and `source`. The ModelArtifact
-[progress](views.md#the-progress-subresource) subresource reads it for live bytes
-between the status thresholds.
+The ModelArtifact [progress](views.md#the-progress-subresource) subresource reads the running
+downloads from this port for live bytes between the status thresholds.
 
 ## Requirements and limits
 

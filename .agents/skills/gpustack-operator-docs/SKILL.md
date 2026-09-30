@@ -93,6 +93,14 @@ When formatting is requested, preserve field order, values, scalar types, quotin
 intentional invalid examples. Review the YAML diff field by field before finishing. A string whose
 consumer requires JSON and a captured JSON response keep that format.
 
+## Reader documentation and technical ownership
+
+Apply the reader boundary in `references/conventions.md` before adding implementation detail.
+User guides retain public configuration, operational behavior and constraints; the owning `specs/`
+document retains source analysis, internal routes and measured implementation evidence. Compare the
+actual spec contents before moving a fact, supplement missing material, and update skills that need
+that technical input. A guide must not become a source-file walkthrough.
+
 ## Site rendering
 
 Keep diagrams in fenced `mermaid` blocks so GitHub and the Hugo site render the same source.

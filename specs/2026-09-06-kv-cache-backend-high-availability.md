@@ -764,6 +764,30 @@ No new package. The flag rendering is in `leader_flags.go` and the workload shap
 `leader_workload.go`; the RBAC fits neither, since it renders three object kinds for two roles, so it
 lives in `ha_rbac.go` beside them.
 
+### Leader rollout and failover evidence retained from user guides
+
+These notes retain prior controller analysis and measurements removed from the leader guide. They
+are historical evidence, not a new run.
+
+At one replica, the Deployment default of 25% `maxSurge` rounds up to one additional Pod. That would
+run two unelected masters together during an update, so the non-HA shape uses `Recreate`. When
+raising the count while enabling election, the Deployment controller first scales the only active
+ReplicaSet before applying its strategy. Updating both at once can therefore start extra unelected
+masters. The operator rolls an elected template at one replica before adding standbys; its
+`RolloutComplete` condition reports the intervening wait.
+
+In one cluster comparison, the Service and Lease member-addressing forms first failed at
+31.41 seconds and converged around 60.6 seconds, differing by 0.13 seconds. That difference was
+within the noise of one run. Election dominated the observed result; the Service endpoint transition
+was inferred from it, not observed directly. Service still incurs endpoint propagation, while Lease
+requires the member to read the holder from the API server.
+
+A single-node test measured an approximately 16-second service gap during failover and approximately
+30 seconds for a single-leader restart. A disk failover run eventually recovered 1024/1024 keys,
+but did not time the first hit of each key. Service recovery is therefore not a bound on disk-key
+recovery. DRAM keys continue to miss until rewritten, and real-cluster scheduling and image pulls
+can add delay.
+
 ### Code Style
 
 Per `CLAUDE.md`. Comments state the result, not the path taken to it; long ones are broken into

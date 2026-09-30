@@ -881,6 +881,17 @@ pkg/worker/controllers/worker/
 docs/modules/kv-cache/backend.md               # F8
 ```
 
+### Bucket thresholds retained from user guides
+
+The operator renders `MemberBucketSizeLimit` as 16 MiB and `MemberBucketKeysLimit` as 64 in
+`pkg/worker/kvcache/mooncake/member_workload.go`. Either threshold closes a bucket. The upstream
+pair is 256 MiB and 500 objects, which can leave a modest backend's mounted tier empty indefinitely.
+The smaller pair trades more, smaller files for reaching a flush under smaller workloads.
+
+The constants also provide the admission floors for `capacityPerMember`, local-disk capacity and
+local-disk key limits. They are not API knobs, and `extraEnv` refuses the corresponding offload
+bucket variables rather than providing a second configuration path.
+
 ### Code Style
 
 **SUPERSEDED, one block below: `KVCacheBackendScaleIn.GracePeriodSeconds`.** The comment shown for it

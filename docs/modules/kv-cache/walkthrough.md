@@ -25,9 +25,8 @@ name in the manifests below, then apply them in that order.
 | `ModelDeployment` | namespace | user | a workload that attaches to the grant |
 
 The order is fixed because each object names the one above it, so creating them the other way round
-leaves references that resolve to nothing. The scope split is the one the scheduling chain already
-uses: a cluster-scoped object owns capacity, a namespaced object draws on it, and the namespaced one
-is what RBAC is written against.
+leaves references that resolve to nothing. Why the two scopes split this way is on
+[KV Cache Pool](pool.md#two-kinds-split-by-scope).
 
 **The Binding is the authorization point.** A namespace gets access to a store when an administrator
 creates a Binding in it. A user naming a pool is not a path this API has: `poolRef` is a

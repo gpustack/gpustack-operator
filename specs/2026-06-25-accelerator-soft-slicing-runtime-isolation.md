@@ -294,6 +294,51 @@ Each Ascend dir holds `lib/libvruntime.so` and `tools/enpu-monitor`. The allocat
 > Memory Limit quota=1024MB` for an `aicore-quota=20, memory-quota=1024` config, and ordinary container
 > processes are unaffected.
 
+### Ascend binding evidence retained from the discovery guide
+
+These notes preserve existing source analysis and hardware observations from the discovery guide;
+this documentation move did not repeat the measurements.
+
+`binding/dcmi` tries V1 initialization and falls back when the driver refuses that API, including
+a genuinely missing entry point. Symbol presence alone cannot select V1: a V2 driver exports
+V1 entry points that return `NOT_SUPPORT`. V2 enumerates flat device IDs without a card level.
+The binding presents `cardId == devId == logicId` with `deviceId = 0`; another second coordinate
+returns `INVALID_DEVICE_ID`. `PhysicalIndexes` remains `{physical id, device id, 0}`.
+
+Five optional detector readings lack V2 counterparts: driver version, PCIe topology distance,
+RoCE IP/gateway, `memory_info` v2/v3 structures, and multi-die injection policy. V2 memory comes
+from the HBM query. A5 identity tries the virtual die and then the vendor's `DDIE` UUID die type,
+which the public V2 header does not enumerate. An unreadable die drops the accelerator; a PCI BDF
+cannot substitute for a universally unique `Accelerator.ID`. Chip names with the `950` prefix
+share a family, including `Ascend950PR` and `Ascend950DT`, without enumerating suffixes.
+
+For container-share preflight, an enabled flag needs only a read. A missing entry point refuses
+without a command; a flag confirmed absent from the V2 generation allows allocation and logs the
+assumption. Other read failures still attempt the write, because success establishes the required
+state. Getter and setter symbols resolve independently, so missing-symbol refusal can also occur
+on write. A V2 library-load failure is not evidence that its flag is absent. The single-container
+guard was measured on a V1 910B2; whether V2 implements an equivalent guard remains unmeasured.
+
+Positional injection was measured against a simulated enumeration hole on a V1 910B2. Host-side
+allocator runs confirmed the driver index in `ASCEND_VISIBLE_DEVICES`, mounted `/dev/davinci<N>`,
+and sliced `npu_info.config` `physical-npu-id`. A real-kubelet run covered whole-accelerator
+environment and device-node injection only; sliced injection was not repeated in-cluster.
+The V2 physical ID comes from `dcmiv2_get_chip_phy_id_by_dev_id`; its relationship to device-node
+numbering remains unmeasured.
+
+### Injection-channel evidence retained from the discovery guide
+
+The automatic strategy leaves environment injection only on positive evidence that a CDI path
+can be served; falling back does not prove the environment path works. Vendor CDI specifications
+under `/etc/cdi` and `/var/run/cdi` are read for presence, never generated or rewritten by this
+allocator. Two writers for the same hardware would race over the engine's loaded description.
+
+The Ascend `ENPU_LOG_LEVEL`, AMD `LIBVROCM_LOG_LEVEL`, and T-Head `LIBHGGC_LOG_LEVEL` defaults
+are `1`: denials and errors, rather than every intercepted call. `0` hides refusal diagnostics.
+These levels differ from HAMi-core's scale; an explicit container value takes precedence.
+HAMi-core fills `CUDA_DEVICE_MEMORY_LIMIT_<i>` in NVML enumeration order but looks up limits
+by CUDA ordinal, so positional order is chosen at injection consumption rather than storage.
+
 ### Code Style
 
 ```go

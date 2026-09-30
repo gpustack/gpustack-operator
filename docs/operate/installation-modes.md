@@ -89,8 +89,8 @@ The worker applies three resources after their CRDs become available:
   fails outright: `resource mapping not found ... no matches for kind "NodeFeatureRule"`.
 
 Both AdmissionChecks are created in chart mode and image mode, including when applications are
-disabled. You do not create them manually. `pkg/worker/worker.go` installs them during `Prepare`;
-their controllers mark them `Active` before queues reference them.
+disabled. You do not create them manually. The worker installs them at startup; their controllers
+mark them `Active` before queues reference them.
 
 | AdmissionCheck | Purpose | Referencing queues |
 | --- | --- | --- |
@@ -98,14 +98,12 @@ their controllers mark them `Active` before queues reference them.
 | `gpustack-model-deployment-joint` | Coordinates admission across a ModelDeployment's roles | Every operator-managed queue, including CPU queues and queues for administrator-authored InstanceTypes |
 
 The joint check immediately passes workloads outside a multi-role ModelDeployment, including
-single-role deployments. Queue reference conditions are in `node_queue.go`; the checks are installed
-by `pkg/worker/kuberess/apps_kueue_admission_check.go`.
+single-role deployments. The table above describes when each queue references a check.
 
 The chart deploys workloads and configuration; the worker applies the custom resources whose CRDs
 the chart cannot order. The worker's own CRDs, aggregated APIServices and webhook configurations
-already sit on that side, in Go for the same reason. The cost: `helm template` shows none
-of them. All are *applied*, not created, so a repeat run only sets `spec` and never clobbers a
-controller-owned status.
+are also installed by the worker. `helm template` therefore does not show them. Repeated startup
+updates their desired configuration and preserves controller-owned status.
 
 No release owns them either, so `helm uninstall` leaves them behind. Both AdmissionChecks go with
 Kueue's CRDs; `files/cleanup.sh` deletes the NodeFeatureRule, but only while it carries the
@@ -117,6 +115,6 @@ Kueue's CRDs; `files/cleanup.sh` deletes the NodeFeatureRule, but only while it 
 transfer out of the pre-subchart layout) · [High Availability Operations](high-availability.md) (more
 than one replica per control-plane component) · [Topology-Aware Scheduling
 Operations](../modules/topology/operations.md) (Topograph and generic inventory) ·
-[Development](../contribute/development.md#vendored-subcharts)
+[Development](../contribute/development.md#vendored--patched-dependencies)
 
 **Next** → [Internals](../contribute/internals.md) — startup ordering and the invariants a contributor must keep.

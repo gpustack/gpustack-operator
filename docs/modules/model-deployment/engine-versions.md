@@ -108,31 +108,17 @@ On AWS the `RDMA` rows do not apply; [choose `EFA` or
   a store.** The prefill half opens a new connection for every transfer, to the decode half and to
   each store member, all from the same ephemeral ports of its container. Connections left in
   `TIME-WAIT` use them up; from then on every request through that pair fails and keeps failing
-  until the engine Pods are restarted.
+  until the engine Pods are restarted. On the measured pair without a store, the gateway then
+  answered `503` with `No available prefill workers`.
 
   **Turning on [`model-deployment-tcp-tw-reuse`](../../reference/settings.md#sglang-time-wait-port-reuse)
-  avoids it**, after a kubelet change on every node the prefill half can run on.
+  avoids it**, after a kubelet change on every node the prefill half can run on. Widening
+  `net.ipv4.ip_local_port_range` only delays the lock-up. Whether a fabric transport, which opens
+  no kernel TCP connection per transfer, avoids it is not verified.
 
-  An SGLang `0.5.18` pair with a `TCP` store, sent short chat requests one after another, locked
-  up after about 183 requests in one run and 940 in another. A pair with no store, behind
-  `sglang-gateway`, locked up after about 285, every `TIME-WAIT` socket pointing at the decode half;
-  the gateway then answered `503` with `No available prefill workers`.
-
-  With `net.ipv4.tcp_tw_reuse=1` set by hand in the prefill half's network namespace, the value the
-  setting renders there, the pair with a store answered 1905 requests with none failing, holding
-  about 19,500 sockets in `TIME-WAIT` against the 28,232 ports of the range. The pair without a
-  store has not been run with it.
-
-  Widening `net.ipv4.ip_local_port_range` only delays the lock-up. Whether a fabric transport,
-  which opens no kernel TCP connection per transfer, avoids it is not verified.
-
-  **vLLM is not this shape where it was measured**: its prefill half keeps its transfer connections
-  open. Over a direct leg with no store, it kept four open and held at most nine sockets in
-  `TIME-WAIT` across 729 requests.
-
-  With a `TCP` store beside the direct leg, on vLLM `0.29.0`, it kept four open to the decode half
-  and four to each of the two store members, and held at most 16 in `TIME-WAIT` across 720
-  requests with none failing. The decode half's count leveled off below 200.
+  **vLLM was not this shape where it was measured**: its prefill half keeps its transfer
+  connections open instead of opening one per transfer, and held at most nine sockets in
+  `TIME-WAIT` over a direct leg with no store and at most sixteen with a `TCP` store beside it.
 
 ---
 

@@ -51,28 +51,16 @@ spec:
 volumes, or a `ModelArtifact` named by `model.artifactRef`; see the
 [Model Artifact](../model-delivery/artifact.md).
 
-`poolRef` is a `LocalObjectReference` on purpose: naming another namespace, the cluster-scoped
-`KVCachePool`, or a bare endpoint URL is unrepresentable rather than merely rejected. The Binding is
-the authorization point: an admin creating one in a namespace is what grants that namespace access.
+`poolRef` names a `KVCachePoolBinding` in the deployment's namespace. An administrator must create
+that binding to grant the namespace access. A cluster-scoped pool name, another namespace or a bare
+endpoint URL cannot be used in this field.
 
-`connector` currently selects Mooncake, which supports heterogeneous prefill and decode. NIXL and ROCm NIXL stay reachable; nothing in this repository has run them, and the field's
-existence is not a claim that they would work.
+The only accepted `connector` value is `Mooncake`; it is defaulted and immutable. Current rendering
+derives the connector configuration from the engine, role kind and pool backend. The field reserves
+the API for future connector implementations; NIXL and ROCm NIXL have not been verified here.
 
-The enum reserves the **discriminator**: naming a second connector later widens the enum rather
-than adding a field. Widening it takes four things: a sub-package, an entry in the enum,
-a renderer, and the wiring that threads this value to a dispatch point that does not exist yet.
-
-Today the value reaching the renderer is synthesized from the engine, the role's `kind` and the
-pool's backend, and this field is read by nothing. It is also frozen after creation, so a widened
-enum reaches new deployments only.
-
-`roles` takes **1 to 10** entries, and the upper bound is this operator's own shape limit rather
-than an upstream one. Each replica composes a Workload of its own carrying a single PodSet, so no
-Kueue bound constrains how many roles a deployment declares; ten is what a prefill/decode deployment
-needs with room to spare, and raising it is a product decision.
-
-It lives in the validating webhook rather than in the schema so that the refusal can explain itself,
-and so that changing it is not a schema change every stored object must survive.
+A deployment supports 1 to 10 roles. Set `replicas` for the number of serving instances in each
+role, and `size` for the number of Pods in each instance.
 
 `replicas` counts **independent serving instances**: each one starts, serves and is replaced on its
 own. Changing the number adds or removes instances, and the ones that survive are not restarted:
@@ -108,9 +96,9 @@ refused. The index is read from a label so that every member of an instance carr
 container spec and only the label value differs.
 
 **What the engine does with those facts is yours.** The operator composes no
-`--tensor-parallel-size` or equivalent: the degrees do not decompose from `size` alone, and a
-formula missing an input is worse than no formula. Composing none is not seeing none: a degree
-the author declares on the role is read and validated, and [the transfer leg renders from
+`--tensor-parallel-size` or equivalent, because the degrees do not decompose from `size` alone and
+a formula missing an input would pass silently. A degree you declare on the role is another matter:
+it is read and validated, and [the transfer leg renders from
 it](prefill-decode.md#how-a-pair-is-wired).
 
 A whole instance is the unit of replacement at every size. That is Kueue's constraint rather than a
@@ -184,27 +172,25 @@ a role's own address.
 
 | Key | Value | Purpose |
 |---|---|---|
-| label `kueue.x-k8s.io/pod-group-name` | `gpustack-fnv64-<hash>` over the namespace, deployment, role and ordinal — always the hashed form, on every shape | membership: it is what makes a replica its own group. The name is unique, not parseable: the ordinal travels in its own label and the hash is never read back, so a sole role's replica names its group exactly as one role of several does |
-| label `modeldeployment.gpustack.ai/pod-ordinal` | the replica's slot within its role, from 0 up | the one per-replica identity the converger reads back: the group name is derived from it, the spec hash covers it, and a scale-down sheds the highest ordinals first |
-| label `modeldeployment.gpustack.ai/member-index` | which Pod of its instance this is, from 0 up — **present only above `size: 1`** | what tells two Pods of one instance apart, and what a `Service` selector matches to front only the leader. A container reads its own index through this label rather than from a rendered value, which is what keeps one Pod template per instance. Absent means member 0, which is what it would have said |
-| annotation `kueue.x-k8s.io/pod-group-total-count` | the role's `size` | how many Pods Kueue waits for before composing anything. The group is this replica and nobody else's, so a replica-count change moves no total any member carries — a resize is a trim, not a rebuild. It is safe for this to be `size` rather than a constant only because `size` is frozen at creation: a number that moved would be back under two writers |
-| annotation `kueue.x-k8s.io/role-hash` | the role's `name` | names the single PodSet the replica's group composes, which is what lets status attribute a Workload back to the role that asked for it. It carries the role and NOT the ordinal, so every replica of a role names the same PodSet |
+| label `kueue.x-k8s.io/pod-group-name` | `gpustack-fnv64-<hash>` over the namespace, deployment, role and ordinal — always the hashed form, on every shape | membership: it is what makes a replica its own group. The name is unique, not parseable; the ordinal travels in its own label |
+| label `modeldeployment.gpustack.ai/pod-ordinal` | the replica's slot within its role, from 0 up | the per-replica identity: the group name derives from it, and a scale-down sheds the highest ordinals first |
+| label `modeldeployment.gpustack.ai/member-index` | which Pod of its instance this is, from 0 up — **present only above `size: 1`** | what tells two Pods of one instance apart, and what a `Service` selector matches to front only the leader. A container reads its own index through this label rather than from a rendered value, which is what keeps one Pod template per instance. A Pod without the label is member 0 |
+| annotation `kueue.x-k8s.io/pod-group-total-count` | the role's `size` | how many Pods Kueue waits for before composing anything. A replica-count change moves no total any member carries — a resize is a trim, not a rebuild |
+| annotation `kueue.x-k8s.io/role-hash` | the role's `name` | names the single PodSet the replica's group composes, which is what lets status attribute a Workload back to the role that asked for it. Every replica of a role names the same PodSet |
 | annotation `kueue.x-k8s.io/pod-group-serving` | `"true"` | an inference deployment never finishes; without it Kueue reclaims the quota of a replica that exited |
-| label `kueue.x-k8s.io/queue-name` | the `status.entrance` **published by** the role's InstanceType | unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type rather than re-derived from its name, so this operator and the reconcile that creates the LocalQueue cannot disagree about the queue |
+| label `kueue.x-k8s.io/queue-name` | the `status.entrance` **published by** the role's InstanceType | unchanged; Kueue refuses a group whose Pods disagree on it. Read from the type so this operator and the LocalQueue it creates cannot disagree about the queue |
 | label `app.kubernetes.io/component` | the role's `name` | unchanged; what a `Service` selects on and what `status.roles[]` is attributed by |
-| label `modeldeployment.gpustack.ai/role-kind` | the role's effective kind mapped to the router's spelling, so `server` when the API field is unset | what something in front of the replicas selects on to tell a prefiller from a decoder. It is the resolved value rather than the field, because a selector matching the empty string would miss every replica of the default shape. Rendered for every deployment, a lone `server` included, so "no prefiller is running" and "this deployment does not label its roles" are different answers |
+| label `modeldeployment.gpustack.ai/role-kind` | the role's effective kind mapped to the router's spelling, so `server` when the API field is unset | what something in front of the replicas selects on to tell a prefiller from a decoder. Rendered for every deployment, a lone `server` included, so "no prefiller is running" and "this deployment does not label its roles" are different answers |
 | annotation `kueue.x-k8s.io/podset-required-topology` | `roles[].topology.requiredLevel`, when non-empty | asks Kueue to fit this replica's whole PodSet in one domain at the named hierarchy level |
 | `spec.nodeSelector` | no topology value is added | Kueue selects the concrete domain through the flavor's Topology and writes its assignment; the deployment requests a level, not a region, zone, rack, or host value |
 
-The `role-hash` annotation is load-bearing rather than cosmetic. Kueue takes it verbatim when present
-and otherwise derives a digest of the Pod spec's *shape*, which names the PodSet after nothing an
-operator wrote; status joins a Workload's PodSets to the roles by this name, so a digest breaks the
-join while nothing errors.
+The `role-hash` annotation is load-bearing: status joins a Workload's PodSets to the roles by this
+name. Without it Kueue names the PodSet after a digest of the Pod spec's *shape*, and that join
+breaks while nothing errors.
 
-> **`kueue.x-k8s.io/pod-group-fast-admission` must never be set.** That path composes the Workload
-> from the first runnable Pod alone and gives that single PodSet the whole group's total; with a total
-> of one it buys nothing, and it mis-composes the group the day one ever grows a second member. The
-> operator never sets it, and a test asserts its absence.
+> **`kueue.x-k8s.io/pod-group-fast-admission` must never be set.** It composes the group's Workload
+> from the first runnable Pod alone; with a declared total of one it buys nothing, and it
+> mis-composes the group the day an instance grows a second member. The operator never sets it.
 
 ## Topology placement
 
@@ -252,9 +238,9 @@ identifier. It does not inspect the engine image version or decide whether that 
 tenant isolation. The tenant variable is operator-owned, so supplying it in `env` or `extraArgs` is
 refused: it is a second path to a value [the API already refuses](#inherited-reuse-domain).
 
-**"A tenant was injected" is not "the workload is isolated."** The operator records what it
+A rendered tenant identifier does not by itself prove isolation. The operator records what it
 rendered, never what the container did with it: whether the build inside the image reads the value
-is not knowable at render time.
+is decided by the image, not by the render.
 
 Users who require tenant isolation must select a compatible engine image and verify it themselves; see
 [Tenant compatibility](../kv-cache/injection.md#tenant-compatibility) for what
@@ -273,15 +259,12 @@ Without one, users patch the rendered Pod and the reconcile loop silently overwr
 | overlay | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes`, `terminationGracePeriodSeconds` | the operator renders first, then merges this overlay on top |
 | take over | `roles[].command` | the user owns the whole argv; the operator synthesizes **no** engine argument and **no** client environment |
 
-Unlike the `Instance` that keeps its pod shape inside an `InstanceTemplate`, a role's Pod fields sit
-on the role itself and are **mutable**: the Instance's immutability is a rule its webhook enforces,
-not a property of the type, and dropping it here is what makes a rollout possible at all.
+A role's Pod fields sit on the role itself, unlike the `Instance` that keeps its pod shape inside an
+`InstanceTemplate`, and they are **mutable** — which is what makes a rollout possible at all.
 
-Arguments fold into `command`; there is deliberately no `args`. A second append tier beside
-`extraArgs` would have no defined precedence, and would make the take-over tier ambiguous, since
-`args` alone would be neither take-over nor append.
+Arguments fold into `command`; there is no `args` field.
 
-A take-over `command` is then the whole argv (the image's own entrypoint never participates), and an
+A take-over `command` is the whole argv (the image's own entrypoint never participates), and an
 `extraArgs` written beside it is inert: read by nobody, refused nothing, and invisible to the check
 that reads parallelism from the command line.
 
@@ -299,22 +282,16 @@ cache client for that role, so it does not report on one it did not render.
 
 ### Take-over roles and the reuse domain
 
-**A role that owns its whole argv can name any reuse domain, and this operator does not stop it.**
 `MOONCAKE_TENANT_ID` is refused in `roles[].env` on the engines that own it (the table under
-[Operator-owned keys](#operator-owned-keys) is the authority), but `roles[].command` is a
-program and its arguments, so the same value travels inside a shell assignment or inside the script
-the argv names, and admission has nothing to read either way.
+[Operator-owned keys](#operator-owned-keys) is the authority), but `roles[].command` is a program
+and its arguments: the same value can travel inside a shell assignment or inside the script the
+argv names, and admission has nothing to read either way.
 
-**This is a consequence of what the field is, not a protection waiting to be implemented.** Any check
-would have to recover intent from an argv the tier exists to let the user write however they like, so
-there is no version of the take-over tier that also bounds the domain.
-
-Where the operator does build the argv, that refusal is real enforcement: the user cannot interpose
+Where the operator builds the argv, that refusal is real enforcement: the user cannot interpose
 a shell, so the environment is the only path left. Why the key is owned at all is stated under
 [Operator-owned keys](#operator-owned-keys).
 
-Do not read the above as the boundary of the exposure: a take-over role is one instance of the
-mechanism, not the mechanism. The boundary is stated once, under
+That is one instance of a wider exposure, not its boundary. The boundary is stated once, under
 [Limitations](../kv-cache/pool.md#limitations), and tracked at
 [#168](https://github.com/gpustack/gpustack-operator/issues/168), whose own void conditions include a
 webhook-level one, so nothing here should be read as a claim about how that issue can be closed.
@@ -350,8 +327,7 @@ not in the table because it is conditional:
 
 **Defaulted** is the other case, and `MC_TE_METRIC` is the one that matters: the operator sets it to
 `1`, and a user's own value wins with no refusal. It turns on the transfer engine's metrics, without
-which the hit rate this design rests on cannot be measured at all. It is read by the transfer engine
-rather than by an engine's config class, so it does not depend on which keys that class accepts.
+which the hit rate this design rests on cannot be measured at all.
 
 So are `MC_FORCE_TCP` [on a `tcp` leg](prefill-decode.md#direct-transfer-transport) and
 [SGLang's two cache switches](../kv-cache/injection.md#sglang-host-memory-tier).
@@ -362,7 +338,7 @@ and the operator does not set either of them:
 - SGLang picks its configuration source in the order extra-config argument, then config-path file,
   then environment. The operator leaves both of the first two unset, and that is what **selects** the
   environment loader.
-- Each of the first two loaders falls back to a **compile-time literal** per key. So setting either
+- Each of the first two loaders falls back to built-in defaults per key. So setting either
   one does not override a value: it silently replaces the whole configuration with defaults (a 4 GiB
   segment and a `localhost` identity).
 
@@ -373,9 +349,9 @@ fixed when the object is admitted, when no Pod IP exists yet, so only an environ
 `MOONCAKE_CONFIG_PATH` is owned on `vllm` and not on `sglang`, while seven other
 `MOONCAKE_*` names are owned on `sglang` alone. The table is the authority; a name prefix is not.
 
-`MOONCAKE_TENANT_ID` is the one in that list whose ownership is a **security** property rather than a
-consistency one: it carries the reuse domain, and a workload able to set it could write into another
-Binding's domain. It is a second path to a value [the API already refuses](#inherited-reuse-domain).
+`MOONCAKE_TENANT_ID` is the one whose ownership is a security property: it carries the reuse domain,
+and a workload able to set it could write into another Binding's domain. It is a second path to a
+value [the API already refuses](#inherited-reuse-domain).
 
 On the vLLM family the operator mounts the rendered client JSON at
 `/etc/gpustack/kvcache/mooncake.json`, read-only. **There is no ConfigMap**: the file is a downwardAPI
@@ -387,8 +363,8 @@ When `spec.router` is present, a role that produces cache blocks also receives a
 publishes topic `kv@`.
 
 **That applies to the vLLM engine only.** A routed SGLang deployment renders no publisher arguments
-and reports `KVEventsPublishing=False/PublisherDisabled`. That is the accurate reading rather than a
-fault: nothing in that engine's rendering emits the stream.
+and reports `KVEventsPublishing=False/PublisherDisabled`. The condition reports configuration rather
+than live traffic, and SGLang's rendering carries no publisher configuration to report.
 
 The wildcard addresses are bind addresses only. The role's Service hostname with ports 5557 and
 5558 is the dialable form published in status, and both ports are declared on the producing
@@ -414,9 +390,8 @@ gpustack/runner:<backend><runtimeVersion>[-<variant>]-<engine><version>
 ```
 
 `gpustack/runner:cuda12.9-vllm0.29.0` on an NVIDIA pool; `gpustack/runner:cann9.0-910b-sglang0.5.18`
-on an Ascend 910B one. The shape is verified against the runner project's 338 published records with
-zero mismatches. The platform is not part of the tag: no published tag carries an architecture,
-and the 338 records collapse to 208 distinct names, the signature of one multi-arch manifest each.
+on an Ascend 910B one. The platform is not part of the tag: no published tag carries an
+architecture, which indicates one multi-arch manifest per tag.
 
 | This project's manufacturer | Runner backend |
 |---|---|
@@ -465,9 +440,9 @@ Such an edit **deletes and recreates** the role's replicas, one replica per role
 out. The role set itself cannot be edited at all; admission refuses it, so there is no role rename or
 addition to roll. There are no surge or unavailable knobs.
 
-The one-at-a-time cadence is a constraint rather than a choice: Kueue counts a group against its
-declared total, so a replacement created beside a member Kueue still counts active reads as one over,
-and Kueue's answer to the excess is to delete the newest un-finalized Pod, the replacement itself.
+The one-at-a-time cadence is a constraint: each replica's group declares a total — the role's
+`size` — and a replacement created beside its still-counted member reads as excess, which Kueue
+answers by deleting the newer Pod, the replacement itself.
 
 A replacement is a **fresh admission**, not a rider on the reservation the departed replica held:
 freeing the slot deletes that replica's Workload, and the reservation goes with it. The cadence guard
@@ -505,26 +480,24 @@ its own.
 
 A delete that lands on the Pod alone (a drain, a kubelet eviction, `kubectl delete pod`) leaves
 that replica's Workload standing, and the Workload is what holds the slot: the Pod stays readable on
-the API server and no replacement is created beside it. Deleting the departed replica's Workload
-releases the Pod and the quota, and the replacement follows on the terms the callout above states.
+the API server, and the slot is freed only when that Workload is deleted — which the deployment's
+controller does when it replaces the replica. The replacement is created once no Pod for that
+ordinal reads on the API server, on the terms the callout above states.
 
 The gate reads the ordinal and nothing else, which is why a scale-up is immediate: an ordinal nothing
 ever occupied has no Pod to wait out, so its replica is created on the first pass that sees it.
 
-The replacement carries a fresh name the API server assigns, never the departed Pod's name. What that
-means for anything that addresses replicas, and the selector to use instead, is below.
-
-On a cluster with preemption enabled, a replica going away is therefore **routine rather than an
-incident**, worth knowing before you chase one as a fault.
+On a cluster with preemption enabled, a replica going away is routine rather than an incident, worth
+knowing before you chase one as a fault.
 
 **A replica on a node that is NotReady but still registered is never replaced.** Its Pod keeps its
 `nodeName` and a Running phase, so its ordinal still reads occupied and no replacement is created.
 Force-deleting that Pod is how two processes end up holding one accelerator; deleting the Node object
 resolves it, which is what a cluster that replaces nodes already does.
 
-**A replica's name is assigned by the API server, so nothing can predict it.** A replacement is a new
-Pod under a new name rather than the departed one's name reused. Address replicas by label instead of
-by name:
+The replacement carries a fresh name the API server assigns, never the departed Pod's name — so
+nothing can predict a replica's name, and anything that addresses replicas should select by label
+instead:
 
 ```bash
 kubectl get pods -l app.kubernetes.io/name=model-deployment,app.kubernetes.io/instance=<deployment>
@@ -533,11 +506,8 @@ kubectl get pods -l app.kubernetes.io/name=model-deployment,app.kubernetes.io/in
 Add `,app.kubernetes.io/component=<role>` for one role's replicas, or
 `,modeldeployment.gpustack.ai/role-kind=prefill` for every prefiller regardless of what its role is
 called. A runbook that spells `<deployment>-<role>-0` breaks here and has no fixed name to move to.
-
-Changing `replicas` is not one of these departures either: it adds or sheds instances and leaves the
-survivors running. See [Rollout behavior](#rollout-behavior) for
-which edits replace every instance instead. The role set cannot be edited at all; admission refuses
-it.
+Changing `replicas` is none of these departures — see [Rollout behavior](#rollout-behavior) — and the
+role set cannot be edited at all; admission refuses it.
 
 ### Deployment identity fields
 
@@ -572,8 +542,8 @@ choosing its update rule.
 > that field rather than the one you meant to change.
 >
 > Change one field with a JSON patch (`--type=json`, `/spec/roles/0/replicas`), or send the whole
-> object with `kubectl apply` or `kubectl edit`. This is not a quirk of the freeze: omitting a value
-> in a merge patch IS setting it to null, and the rule is reading what you actually sent.
+> object with `kubectl apply` or `kubectl edit`. Omitting a value in a merge patch sets it to null,
+> and the rule reads what you actually sent.
 
 ### One group per replica
 
@@ -662,7 +632,7 @@ own message, because a pass that cannot build a replica aborts before writing an
 **Two notes apply to every workload on a pool, replicas included, and are stated once under**
 [Workload impact](../kv-cache/injection.md#workload-impact): the transfer engine binds ports nobody
 configured, so a NetworkPolicy or port reservation has to be a range rather than a list; and the
-`transfer_metadata.cpp` "Local segment descriptor not found" line at startup is an `ERROR` that is
+"Local segment descriptor not found" line the transfer engine logs at startup is an `ERROR` that is
 benign on a client mounting no segment of its own, which is what every replica here is.
 
 **A replica serves on port 8000** unless the role names its own container port. The

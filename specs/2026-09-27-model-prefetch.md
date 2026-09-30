@@ -256,7 +256,7 @@ counted in usage and capacity reporting.
 - `pkg/worker/webhooks/worker/model_store_binding.go`, `model_prefetch.go` — admission.
 - `pkg/modelstore/config.go` — nothing structural; Layer already supports field-level override.
 - `pkg/modelmanager/gc/gc.go` + `pkg/modelmanager/manager.go` — consume `spec.pinned`
-  (excluded from candidates, counted in usage).
+  through `gc.Collector.Pinned` (excluded from candidates, counted in usage).
 - `docs/` new page + `docs/README.md` index entry (routing per the docs skill).
 - `.agents/skills/gpustack-operator-e2e/cases/case-<NNN>.sh` — number taken at my-ship time as
   current main's max case number + 1.

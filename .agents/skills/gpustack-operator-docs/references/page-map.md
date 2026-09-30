@@ -3,6 +3,14 @@
 One page owns each fact. When two pages could plausibly carry it, the owner is the one whose **reader**
 needs it to finish their task; everyone else links.
 
+## Reader boundary
+
+The page ownership below covers the reader's configuration and operational questions. Source-file
+proofs, internal call chains, historical measurements and design alternatives are owned by the
+corresponding `specs/` document, even where an older entry below names those details. Preserve missing
+technical material in that spec before removing it from a guide. Contributor pages may retain source
+navigation because editing the implementation is their reader's task.
+
 ## `README.md` (project front page)
 
 **Owns** — the features, installation and uninstallation, capability Usage examples, accelerator support
@@ -24,8 +32,9 @@ release. A user who needs those follows a link.
 
 ## `docs/getting-started/architecture.md` (overview, ≤ ~200 lines)
 
-**Owns** — what the operator builds, the four subcommands, the four stages + the chain diagram, the
-*Life of a sliced-GPU request* trace, the vocabulary table, the map of deep pages.
+**Owns** — the four components, the capability diagram, device scheduling, optional model delivery
+and KV cache, request admission, vocabulary and the map of deep pages. The diagram shows how GPU
+Instances, model deployments, devices, RDMA and topology share the workload flow.
 
 **Never** — a new mechanism, a label table, a webhook rule, a measured failure story. It gains at most
 one clause and a link when a deep page grows.
@@ -129,7 +138,7 @@ of leader election -- `leader.electionBackend`, `leader.memberAddressing`, the L
 roles need, the per-role ServiceAccounts, and how a missing grant fails on each side.
 
 **Never** — the member groups, the transport, the status algebra. Those stay on `backend.md`, which
-links here. It was split out when that page hit both the line and the `##` cap.
+links here. The leader page owns the leader configuration and operational limits.
 
 ## `docs/modules/kv-cache/local-disk-tier.md`
 
@@ -139,8 +148,7 @@ eviction algebra and its four refusals, the five path rules and the host directo
 tier's immutability and its one exit, and the `hostPath` cost nothing accounts for.
 
 **Never** — the object the tier sits on. The leader, the member groups, the transport, the status
-algebra and the growing/shrinking rules are `backend.md`'s. It was split out of that page when it hit
-both the line and the `##` cap; the split is along the reader's question, not the subsystem.
+algebra and the growing/shrinking rules are `backend.md`'s.
 
 ## `docs/modules/kv-cache/disk-heavy-nodes.md`
 
@@ -149,9 +157,8 @@ group is disk alone and what that costs if attempted, the thin-segment/thick-tie
 one-bucket floor on `capacityPerMember` together with what that floor is and is not evidence of.
 
 **Never** — how the tier itself behaves. Its rendering table, its eviction algebra, its five path
-rules, its failure modes and the one exit that removes it are `backend.md`'s; this page links to
-each. It exists because `backend.md` sits at both the line and the `##` cap, and because the reader
-arriving with a disk-heavy machine is asking a configuration question rather than a mechanism one.
+rules, its failure modes and the one exit that removes it belong to `local-disk-tier.md`; this page
+links to that contract.
 
 ## `docs/modules/kv-cache/pool.md`
 
@@ -400,13 +407,18 @@ commit.
 
 **Rule** — these pages are exempt from the ten-`##` cap: a lookup page is meant to be flat.
 
-## `specs/` — not documentation
+## `specs/` — engineering records
 
 Decision records, motivation, alternatives, task breakdowns and build logs live there. Docs state the
 resulting rule. Never edit a spec to reflect a later change, and never update a spec's references when
 a doc moves — a spec is a record of what was true when it was written.
 
-The one exception is a **correction**, and `docs/contribute/development.md` defines it: an in-place edit is
+A reader-documentation cleanup may add missing implementation notes to the existing owning spec.
+Keep the original design, task status and historical evidence intact; identify source-confirmed
+behavior separately from measurements and proposals. This preserves technical material removed from
+a guide without rewriting the decision it records.
+
+A **correction** is another exception, and `docs/contribute/development.md` defines it: an in-place edit is
 allowed when evidence proves a claim wrong while the shipped design stands, and a bug fix's
 supersession is recorded that way because it has no new spec to be recorded in. Both are marked
 `**Corrected after shipping.**`. A spec naming another spec by file name is the case that forces one:

@@ -47,14 +47,13 @@ sole replica of an object whose bucket has not been flushed, is not renderable b
 object, so there is nothing to opt into.
 
 **A tier is a layer on a member group, never a group of its own.** See
-[The two axes](backend.md#the-two-axes) for why the shape has to be this way, and
+[Connection and medium](backend.md#connection-and-medium) for why the shape has to be this way, and
 [KV Cache on Disk-Heavy Nodes](disk-heavy-nodes.md) for what to write on a node that is mostly disk.
 
 **Every example on this page is a `DRAM` group, and that is not incidental.** What is and is not
 measured about pairing the tier with a `VRAM` group is stated once, beside the medium it belongs to,
 at [VRAM group accelerator access](backend.md#vram-group-accelerator-access). Read it before writing
-one. It is named there and not restated here on purpose: a second copy of a measurement is a second
-thing to keep true, and this page has already been wrong about it once.
+one.
 
 ## Contents
 
@@ -76,9 +75,7 @@ mount and reports objects deferred for offload, and `status.capacity` shows the 
 declared, because that figure is **capacity, not usage** (see
 [Status and conditions](backend.md#status-and-conditions)).
 
-This is what [issue #200](https://github.com/gpustack/gpustack-operator/issues/200) was filed for;
-the history of what was and was not observed on the way to finding it is in
-[the spec](../../../specs/2026-09-05-kv-cache-media-and-scaling.md#the-one-item-that-did-not-pass-no-byte-reached-the-disk).
+This is what [issue #200](https://github.com/gpustack/gpustack-operator/issues/200) tracks.
 
 **The operator renders a smaller pair of its own**, so a modest backend closes buckets. They are
 **not in the API** and `extraEnv` refuses them: moving them is a tuning decision that would need a
@@ -115,11 +112,10 @@ tier that cannot write at all.
 **The threshold that decides which reading applies is per member, while the gauge is not.** Each
 member client fills its own bucket, so traffic spread over four members has to reach four buckets'
 worth before every one of them closes (the figure the group's
-[`capacityPerMember` floor](disk-heavy-nodes.md) is taken from). Judge the two together:
+[`capacityPerMember` floor](disk-heavy-nodes.md) is taken from). Judge the two together: compare
+the data each member has been offered since the tier started with the gauge.
 
-Compare each member’s offered data since the tier started with a settled zero disk-usage reading:
-
-| Offered data | Zero usage |
+| Offered data | Gauge stays 0 |
 |---|---|
 | below one bucket | the expected reading; waiting does not change it, because nothing is due |
 | one bucket or more | **the tier is not taking writes** — this is the reading to act on |
@@ -185,12 +181,9 @@ Then create the directory on each node with that uid:
 $ install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
 ```
 
-There is **no switch that makes the operator create the directory for you.**
-
-> **Why** — an init container would have to name a single uid, and the command above is the evidence
-> against that: the uid is a property of the image, and `members[].image` can differ per group. The
-> decision and the alternative that was weighed against it are recorded in
-> `specs/2026-09-05-kv-cache-media-and-scaling.md`.
+There is **no switch that makes the operator create the directory for you.** An init container would
+have to name a single uid for every group, and the uid is a property of whichever image a group
+runs, so the command above is the preparation.
 
 That objection is about ownership, so it reaches creating the directory and not emptying it: removing
 content needs no uid. Emptying is a switch, and it is
@@ -315,13 +308,9 @@ gets a warning event, recorded **on the node** rather than on the backend, becau
 about to stop existing and the leftover data is not.
 
 **"In time" is five minutes, counted per node from that node's own cleanup Pod.** It is counted
-neither from the oldest Pod of the pass nor from the deletion.
-
-> **Why** — the Pods are not born together, since a create that failed transiently is retried on a
-> later pass; one clock taken from the oldest would report a young node as abandoned "after five
-> minutes" with a fraction of that elapsed. Starting at the deletion is worse: the deletion is held
-> while a pool still uses the backend, and then for each workload's own termination budget, so a slow
-> teardown would leave the cleanup nothing to spend.
+neither from the oldest Pod of the pass nor from the deletion: a Pod created on a later pass would
+otherwise be reported as abandoned with most of its five minutes unspent, and a clock started at the
+deletion would spend its budget on the teardown wait instead of the cleanup.
 
 **A cleanup still running at the deadline is stopped, not left to finish.** Emptying a very large
 tier can outlast the five minutes, and ending it there leaves the directory partly emptied. Leaving
@@ -345,11 +334,11 @@ nested inside another backend's tier counts, not only an identical path. Nothing
 naming one directory, and emptying it for the one being deleted would take the other one's live data
 with it. A removal already under way when the path becomes shared is **stopped**, not left to finish.
 
-> It is a check and not a lock, and it is re-run on every pass rather than only before the removal
-> starts. Stopping one is a delete, which asks the kubelet rather than cutting: the `rm` runs from
-> whenever the sharing began, until the check catches it, and on through that Pod's own termination.
-> Everything in that span can be lost, which is what the second event reports. Closing the window
-> entirely needs an atomic claim on the path, which this operator does not take.
+> It is a check and not a lock, re-run on every pass rather than only before the removal starts.
+> Stopping a removal only cancels the cleanup Pod; the `rm` keeps running until the check catches it
+> and on through that Pod's own termination, so everything deleted in that span is lost. That is
+> what the second event reports. Closing the window entirely needs an atomic claim on the path,
+> which this operator does not take.
 
 ```console
 $ kubectl describe node <node> | grep -E 'KVCacheTierNotCleaned|KVCacheTierSharedPath|KVCacheTierPartlyEmptied'

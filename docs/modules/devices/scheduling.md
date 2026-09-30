@@ -15,17 +15,17 @@ a workload then passes.
 
 ## Stage 3: capacity profiling
 
-Three Worker controllers turn Node + `Devices` signals into the capacity labels the chain consumes.
+The worker turns Node and `Devices` signals into the capacity labels the chain consumes, in three
+jobs:
 
-- **`NodeFeatureReconciler`** (`node_feature.go`) reports a NodeFeature `${NODE_NAME}-gpustack-worker`
-  per Node, stamping `gpustack.ai/managed=true`. Under `GPUSTACK_NODE_MANAGEMENT_MANUAL=true` (read
-  per-reconcile) it skips that injection, honoring only an admin-set `managed` label, so onboarding is
-  gated node-by-node.
-- **`NodeCapacityReconciler`** (`node_capacity.go`) builds them via
-  `nodefeature.ConstructNodeCapacityLabels` from the Node and its same-named `Devices` CR: the
-  general(CPU) presence marker plus both families' per-accelerator capacities.
-- **`NodeFitLabelReconciler`** (`node_fit_label.go`) keeps the [per-card fit
-  labels](#per-card-fit-labels) on each managed Node, from the same `Devices` ledger.
+- It reports a NodeFeature `${NODE_NAME}-gpustack-worker` per Node, stamping
+  `gpustack.ai/managed=true`. Under `GPUSTACK_NODE_MANAGEMENT_MANUAL=true` (read per-reconcile) it
+  skips that injection, honoring only an admin-set `managed` label, so onboarding is gated
+  node-by-node.
+- It builds the capacity labels from the Node and its same-named `Devices` resource: the general(CPU)
+  presence marker plus both families' per-accelerator capacities.
+- It keeps the [per-card fit labels](#per-card-fit-labels) on each managed Node, from the same
+  `Devices` ledger.
 
 ### Logical-slicing capacities
 
@@ -56,10 +56,11 @@ The per-profile key is geometry-aware and ledger-derived, not a static ceiling: 
 carved on an 80 GB accelerator, `…partitioned.mig-7g.80gb` reads 0 while `…partitioned.mig-3g.40gb`
 still reads 1 free instance.
 
-> **Why both terms** — the scheduler fits a Pod by subtracting the requests of the Pods already on the
-> node, so bare `remaining` would subtract every live instance twice. An accelerator whose ledger is not
-> published yet falls back to its static per-profile ceiling, not to zero, so a fresh node advertises
-> room instead of nothing.
+Reading a live instance twice is what the `allocated +` term prevents:
+the scheduler fits a Pod by subtracting the requests of the Pods already on the node, so a bare
+`remaining` count would count every live instance again. An accelerator whose ledger is not
+published yet falls back to its static per-profile ceiling, not to zero, so a fresh node advertises
+room instead of nothing.
 
 `<profile>` is the published name, not always what the manufacturer's CLI prints:
 
@@ -88,10 +89,9 @@ Operations](thead-mig.md#how-partition-profiles-are-discovered).
 | MThreads | 16 | not overcommittable — `cores%` is a best-effort relative weight, not a hard partition |
 | MetaX | 16 | not overcommittable |
 
-Each count is the maximum the Device Manager records on **each accelerator's** `Status.LogicalSliced`,
-bounded by the manufacturer runtime's per-device user-process limit (`pkg/devicemanager/detector`);
-`AcceleratorSlicedDetail` aggregates them per group. A MIG-enabled accelerator reports zero logical
-count and its physical MIG profiles instead.
+Each count is the maximum the Device Manager records on **each accelerator's** status, bounded by the
+manufacturer runtime's per-device user-process limit; the group aggregates them per model. A
+MIG-enabled accelerator reports zero logical count and its physical MIG profiles instead.
 
 An overcommittable manufacturer advertises `.sliced.cores-percentage = Σ slice count × 100`, each slice
 able to claim a full 100 %; the others cap it at `count × 100`.
@@ -156,11 +156,6 @@ under [Gate 3](admission.md#gate-3--the-per-accelerator-admissioncheck).
 The pin stays on the Workload and never reaches the Pod; why that must hold is under
 [Gate 3](admission.md#gate-3--the-per-accelerator-admissioncheck) too.
 
-> **Why a label under its own domain** — the key's name part is exactly `<aKey>`, so it is valid for
-> any accelerated device key, and the `fit.gpustack.ai` domains sit outside the `acceleratable.` and
-> `feature.` prefixes other controllers watch, so a value moving on every allocation wakes none of
-> them. The node-topology and topology-source watchers ignore an update that moved only fit labels.
-
 ## Unit spec defaults
 
 The unit spec (unitCPU / unitRAM / localStorage) is not derived from node capacity at all. The
@@ -174,10 +169,9 @@ API without touching any Node.
 
 ## Stage 4: the Kueue chain
 
-The capacity and topology-profile labels drive a Kueue chain built by
-`pkg/worker/controllers/worker`. One isolated ClusterQueue per pool: with exclusive / shared /
-sliced / partitioned in one queue there is no cross-queue borrowing to broker, so
-`spec.cohortName` stays empty.
+The capacity and topology-profile labels drive a Kueue chain built by the worker. One isolated
+ClusterQueue per pool: with exclusive / shared / sliced / partitioned in one queue there is no
+cross-queue borrowing to broker, so `spec.cohortName` stays empty.
 
 Kueue assigns a ResourceFlavor per PodSet, not per Workload. Each PodSet forms its own assignment
 group and a candidate flavor is evaluated against that PodSet's own `nodeSelector`, so one ClusterQueue
@@ -230,39 +224,36 @@ Two discriminators keep the pools clean, and one annotation carries the raw CPU 
 
 ## The controllers
 
+The worker keeps five sets of objects converged:
+
 ```mermaid
 flowchart LR
-    NODE["Node<br/>(general./acceleratable. capacity labels + gpustack.ai/managed)"]
-    DEV["Devices CR<br/>(per-accelerator AcceleratorAllocation ledger)"]
+    NODE["Node<br/>(capacity labels + gpustack.ai/managed)"]
+    DEV["Devices<br/>(per-accelerator allocation ledger)"]
 
-    subgraph controllers["WK controllers"]
-        NFR["NodeFlavorReconciler"]
-        ITR["InstanceTypeReconciler"]
-        NQR["NodeQueueReconciler"]
-        NQE["NodeQueueEntranceReconciler"]
-        AC["NodeDevicesAdmissionReconciler"]
+    subgraph controllers["worker controllers"]
+        RF["ResourceFlavor"]
+        IT["InstanceType"]
+        CQ["ClusterQueue<br/>(isolated, no cohort)"]
+        LQ["LocalQueue"]
+        AC["AdmissionCheck"]
     end
 
-    NODE --> NFR
-    NFR -- "one per (key,os,arch,count)<br/>capacity = nodes × count" --> RF["ResourceFlavor"]
-    NFR -- "authors (create-only)<br/>when derived-from-node" --> IT["InstanceType CRD"]
-    IT --> ITR
-    DEV --> ITR
-    ITR -- "owns: existence + schedule labels<br/>+ isolation + admin Hold↔None sync;<br/>Devices-driven .status; recreate-on-delete;<br/>delete-then-wait teardown" --> CQ["ClusterQueue<br/>(isolated, no cohort)"]
-    RF --> NQR
-    NQR -- "owns: resource groups + HoldAndDrain<br/>+ AdmissionCheck ref; drain-on-delete;<br/>drain/empty when no live flavors" --> CQ
-    CQ --> ITR
-    CQ --> NQE
-    NS["Namespace (non-system)"] --> NQE
-    NQE -- "one per Namespace<br/>named gpustack-fnv64-HASH" --> LQ["LocalQueue"]
-    DEV --> AC
-    AC -- "per-accelerator feasibility<br/>Retry when over-admitted" --> CQ
+    NODE -- "one flavor per<br/>(key, os, arch, count)" --> RF
+    RF -- "authors the pool's InstanceType,<br/>create-only" --> IT
+    DEV -- "drives the status" --> IT
+    IT -- "keeps the queue existing and<br/>stopped only as configured" --> CQ
+    RF -- "fills resource groups" --> CQ
+    CQ --> LQ
+    NS["Namespace (non-system)"] -- "one per namespace" --> LQ
+    DEV -- "per-accelerator feasibility" --> AC
+    AC --> CQ
 ```
 
-### `NodeFlavorReconciler` (`node_flavor.go`)
+### Capacity flavors
 
-Indexes managed nodes by `(key, os, arch, count, topology profile)`, one `ResourceFlavor` per group.
-`spec.nodeLabels` pins workloads — the feature key
+One controller indexes managed nodes by `(key, os, arch, count, topology profile)`, one
+`ResourceFlavor` per group. `spec.nodeLabels` pins workloads — the feature key
 `{general.|acceleratable.}feature.gpustack.ai/${key}=true`, full `kubernetes.io/os|arch`, and
 `topology.gpustack.ai/profile` — plus a blanket `{Operator: Exists}` toleration, eligibility being by
 nodeLabels, not taints. `spec.topologyName` references the generated Kueue Topology for that profile.
@@ -271,72 +262,59 @@ Labels carry the pool identity (`.count`, `.capacity = contributing nodes × cou
 `note.gpustack.ai/*` annotations the per-accelerator VRAM and device descriptors — device information
 only, no unit spec.
 
-A flavor whose group has **no** contributing node is deleted; there is no drain-tombstone anymore.
-Identity comes from the first contributing node — every contributor to a flavor name shares it — so
-there is no min-capacity-node selection.
+A flavor whose group has no contributing node is deleted. The name comes from the first contributing
+node, and every contributor to a flavor name shares it.
 
-After syncing a flavor, and only under `instance-type-derived-from-node=true` (default), it authors
-the pool's `InstanceType`, **create-only**, at the setting-correct name and identity
+After syncing a flavor, and only under `instance-type-derived-from-node=true` (default), the worker
+authors the pool's `InstanceType`, **create-only**, at the setting-correct name and identity
 (`generalGroup`/`acceleratorGroup`/`acceleratable`/`os`/`arch`; the CPU key is the `generic` sentinel
 when awareness is off) with the [default unit spec](#unit-spec-defaults).
 
-An existing type is untouched, admin- or operator-authored, leaving the `InstanceTypeReconciler` sole
-owner of an InstanceType's lifecycle. It also watches the types it authored and re-authors a deleted
-one, the safeguard the `InstanceTypeReconciler` applies to the backing queue.
+An existing type is untouched, admin- or operator-authored. The worker watches the types it authored
+and re-authors a deleted one.
 
-> **Why nothing else would** — its own inputs never change when an output is destroyed, and the periodic
-> informer resync is no fallback, since it re-delivers the flavor unchanged and the update filter drops
-> it. A definition lost at runtime deletes every derived type at once, exactly that case.
+### The InstanceType lifecycle
 
-### `InstanceTypeReconciler` (`instance_type.go`)
+A second controller keeps the backing `ClusterQueue` existing and the materialized `InstanceType`'s
+status fresh, but not its quota. It does not author InstanceTypes and never deletes one for lack of
+flavors.
 
-Owns the backing `ClusterQueue`'s existence and metadata and the materialized `InstanceType`'s
-status, but not its quota. It does **not** author InstanceTypes (the `NodeFlavorReconciler` does) and never
-deletes one for lack of flavors.
+- **Creation and identity.** A missing queue is created under the name-identical name, stamped at
+  creation with the pool's schedule labels (the `feature.gpustack.ai/acceleratable` boolean, the
+  feature key(s) selected by `instance-type-aware-cpu-manufacturer`, `kubernetes.io/os|arch` — all
+  from the InstanceType **spec** identity) and the fixed no-borrow **isolation** (empty cohort, no
+  reclaim/borrow preemption). A stale feature-key label is pruned when the group or acceleratable
+  changes, so the re-pointed queue's selectors match.
+- **The empty-plan hold.** The queue is created on `Hold`, marked
+  `topology.gpustack.ai/empty-plan-hold`, because the queue has no resource groups yet and
+  [a queue without them admits every Workload](admission.md#known-behavior-the-deployed-kueue-configuration).
+  The update that fills the groups drops the marker, and the hold is then released unless the type is
+  `Inactive`.
+- **Status and recreation.** The queue is watched to keep the type's `.status` fresh (the
+  [four-view](admission.md#four-view-status) / CPU projection + `status.entrance`), and to recreate a
+  queue an admin deleted while the InstanceType still lives.
+- **Teardown.** Deleting the type runs a delete-then-wait teardown: mark the type `Inactive`, delete
+  the queue once, and hold a `gpustack.ai/controlled` finalizer until Kueue has removed it. It does
+  not drain; the quota controller below sees the deletion and drives that.
+- **Inactive and the stop policy.** The type's `spec.inactive` is synced with the queue's
+  `StopPolicy`: `Hold` when `Inactive` (blocking new admission without evicting running workloads,
+  never `HoldAndDrain`), `None` when an admin reactivates, and `Inactive=true` backfilled one-way and
+  stickily whenever the queue is stopped by any means.
 
-`ensureClusterQueue` creates the name-identical queue when missing, stamping at creation the pool's
-schedule labels (`nodefeature.PoolScheduleLabels`: the `feature.gpustack.ai/acceleratable` boolean, the
-feature key(s) selected by `instance-type-aware-cpu-manufacturer`, `kubernetes.io/os|arch` — all from
-the InstanceType **spec** identity) and the fixed no-borrow **isolation** (empty cohort, no
-reclaim/borrow preemption).
+While the pool is in a drained state waiting for flavors (the marker below), this sync writes its
+`Hold`/`None` pair onto the stop policy the drain saved and later restores, and pauses the backfill:
+an `Inactive` change made while an emptied pool waits for a flavor is what the pool comes back with.
 
-It creates the queue on `Hold`, marked `topology.gpustack.ai/empty-plan-hold`, because the queue has
-no resource groups yet and
-[a queue without them admits every Workload](admission.md#known-behavior-the-deployed-kueue-configuration).
-The `NodeQueueReconciler` drops the marker in the update that fills the groups, and this reconciler
-then releases the `Hold` unless the type is `Inactive`.
 
-It never fills the resource groups or references the AdmissionCheck (the `NodeQueueReconciler` owns
-those), and prunes a stale feature-key label when the group/acceleratable changes so the re-pointed
-queue's selectors match.
+It neither releases a marked empty-plan `Hold` nor mirrors it into `Inactive`; once the marker is
+gone it treats the `Hold` like an admin's, released only while the type is not `Inactive`. Clearing
+`Inactive` on a queue that has no resource groups marks its `Hold` rather than releasing it.
 
-It watches the queue to keep `.status` fresh (the [four-view](admission.md#four-view-status) / CPU
-projection + `status.entrance`, DeepEqual-guarded) and to recreate a queue an admin deleted while
-the InstanceType still lives.
+### Queue quota and draining
 
-On delete, a `gpustack.ai/controlled` finalizer runs a delete-then-wait teardown: mark the type
-`Inactive`, delete the queue once, hold the finalizer until Kueue has removed it. It does not drain; the
-`NodeQueueReconciler` sees the deletion and drives that.
-
-It also syncs `it.Spec.Inactive` with the queue's `StopPolicy` for the admin `Inactive` path: `Hold`
-when `Inactive` (blocking new admission without evicting running workloads, never `HoldAndDrain`),
-`None` when an admin reactivates, and `Inactive=true` backfilled one-way and stickily whenever the queue
-is stopped by any means. So `Hold↔None` is owned here, `HoldAndDrain` by the `NodeQueueReconciler`.
-
-While the `NodeQueueReconciler` carries its migration marker it owns the live `StopPolicy`, so this
-sync writes the `Hold↔None` pair onto the stop policy the migration saved and later restores, and the
-backfill pauses. An `Inactive` change made while an emptied pool waits for a flavor is therefore what
-the pool comes back with.
-
-This sync neither releases a marked empty-plan `Hold` nor mirrors it into `Inactive`. Once the
-marker is gone it treats the `Hold` like an admin's, released only while the type is not `Inactive`.
-Clearing `Inactive` on a queue that has no resource groups marks its `Hold` rather than releasing it.
-
-### `NodeQueueReconciler` (`node_queue.go`)
-
-Owns the backing `ClusterQueue`'s quota and admission gating — resource groups, the `HoldAndDrain`
-drain policy (admin `Hold↔None` belongs to the `InstanceTypeReconciler`), the AdmissionCheck reference —
-resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
+A third controller fills the queue's quota and admission gating — resource groups, the `HoldAndDrain`
+drain policy (admin `Hold`/`None` belongs to the lifecycle controller above), the AdmissionCheck
+references — resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
 
 - **Groups** — from the live topology-aware flavors, smallest per-node count first so Kueue packs small nodes first. An
   accelerated queue advertises only `credits.gpustack.ai/${manufacturer}` (nominal `capacity × M`; one
@@ -345,9 +323,9 @@ resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
 - **AdmissionCheck** — `gpustack-node-devices`, referenced on an accelerated queue once Active, whoever
   authored its InstanceType, and only while [`instance-type-derived-from-node`](../../reference/settings.md#authoring-the-instancetype) is on.
   `gpustack-model-deployment-joint` is referenced on every queue once Active, whatever that setting says.
-- **Finalizing flavor** — **absent**. Its nodes left, so `NodeFlavorReconciler` deleted it, but Kueue
-  holds `resource-in-use` until no ClusterQueue references it, and dropping it from the groups is the
-  update Kueue waits for. A workload on a dropped *partial-pool* flavor is evicted and re-admitted on
+- **Finalizing flavor** — a flavor whose nodes left is deleted, but Kueue holds `resource-in-use`
+  until no ClusterQueue references it, and dropping it from the groups is the update Kueue waits
+  for. A workload on a dropped partial-pool flavor is evicted and re-admitted on
   the pool's remaining flavors — its node has left, so it must move regardless.
 - **Queue being deleted** (admin delete or InstanceType teardown) — `HoldAndDrain` unconditionally, so
   Kueue evicts the admitted workloads and can drop its own finalizer and remove the queue; Kueue never
@@ -358,8 +336,8 @@ resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
   `HoldAndDrain` until a flavor returns, so it never admits without resource groups.
 - **No resource groups yet** and not stopped — the pool has no flavor, or its flavors fail topology
   readiness: `Hold`, marked `topology.gpustack.ai/empty-plan-hold`. The update that fills the groups
-  drops the marker, and the `InstanceTypeReconciler` releases the `Hold` unless the type is
-  `Inactive`. It is `Hold`, not `HoldAndDrain`, so the type's Instances are not stopped; an admin
+  drops the marker, and the hold is released unless the type is `Inactive`. It is `Hold`,
+  not `HoldAndDrain`, so the type's Instances are not stopped; an admin
   `Hold` carries no marker and is left alone.
 - **Topology readiness** — refuse a partial queue plan when a flavor lacks its profile or Topology,
   selectors overlap, quota changes across the profile split, the same resource would occur in two
@@ -367,20 +345,18 @@ resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
 
 Once flavors return it switches the held queue to the new plan, and only then **restores** the stop
 policy the queue had before the drain (`None`, or an admin `Hold`, including one set or cleared while
-it waited). The queue carries its migration marker the whole time, and the `InstanceTypeReconciler`
-does not backfill `Inactive` while it is present, so a recovered pool admits again without an admin.
+it waited). A recovered pool admits again without an admin.
 A drained queue also stops its running Instances — see [Running-instance stop](admission.md#running-instance-stop).
 
-### `NodeQueueEntranceReconciler` (`node_queue_entrance.go`)
+### A LocalQueue in every namespace
 
-Watches ClusterQueues and Namespaces, creating a `LocalQueue` in every non-system Namespace so workloads
-can submit from anywhere.
+Every non-system Namespace gets one `LocalQueue`, so workloads can submit from anywhere.
 
 Workloads reference it through the `kueue.x-k8s.io/queue-name` **label** (63-char limit) while
 ClusterQueue names may be longer, so it is named `gpustack-fnv64-${fnv64a(ClusterQueue name)}` — always
 31 characters — and records the full name in the `schedule.gpustack.ai/queue` annotation.
 
-### `NodeDevicesAdmissionReconciler` (`node_devices_admission.go`)
+### The per-accelerator admission check
 
 The per-accelerator **AdmissionCheck**, third of the five gates; its behavior is in
 [Admission](admission.md#gate-3--the-per-accelerator-admissioncheck).

@@ -132,8 +132,7 @@ so InstanceTypes are never touched; neither are v0.6.x objects, your namespaces,
 The script is idempotent: a transient API error just means re-running it.
 
 If an old ClusterQueue still holds admitted workloads (a v0.5.x `Instance` ran across the upgrade),
-the script sets `HoldAndDrain` first (the graceful retirement the operator uses for an InstanceType,
-`pkg/worker/controllers/worker/instance_type.go`), so Kueue evicts them and releases the finalizer,
+the script sets `HoldAndDrain` first, so Kueue evicts the workloads and releases the finalizer,
 then deletes the drained queue; a queue with no workloads goes directly. The names changed, so
 **re-submit the evicted workloads against the new pool's `LocalQueue`**.
 

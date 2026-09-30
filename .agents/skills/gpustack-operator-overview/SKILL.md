@@ -94,5 +94,8 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 - Every command the binary offers, its flags and a runnable invocation → [reference/commands.md](../../../docs/reference/commands.md)
 - Checking a node can slice before it has to: the procedure → [operation/preflight.md](../../../docs/modules/devices/preflight.md)
 - Node delivery of weights: the plugin and `NodeModelStore` → [model-store/node-store.md](../../../docs/modules/model-delivery/node-store.md); running it → [model-store/operations.md](../../../docs/modules/model-delivery/operations.md); resource status and `progress` → [model-store/views.md](../../../docs/modules/model-delivery/views.md)
+- KV cache implementation, quotas and injection → [backend spec](../../../specs/2026-08-28-kv-cache-backend.md), [pool spec](../../../specs/2026-08-28-kv-cache-pool.md), [injection spec](../../../specs/2026-08-28-kv-cache-injection.md)
+- Model delivery implementation and evidence → [artifact spec](../../../specs/2026-09-25-model-artifact.md), [node cache spec](../../../specs/2026-09-25-node-model-store.md), [peer sync spec](../../../specs/2026-09-27-model-peer-sync.md)
+- Deployment replica/admission implementation → [role-replica spec](../../../specs/2026-09-19-role-replica-admission-unit.md); engine and router integration → [consolidation spec](../../../specs/2026-09-18-kvcache-and-model-deployment-consolidation.md)
 - Build / lint / test / codegen / vendored deps → [development.md](../../../docs/contribute/development.md)
 - Writing or updating any of the above → the `gpustack-operator-docs` skill

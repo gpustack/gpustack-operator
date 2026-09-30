@@ -68,31 +68,18 @@ Set `electionBackend: None` only for a single leader whose image cannot run the 
 backend. Switching between `None` and `Kubernetes` changes the leader and member Pod templates, so
 it restarts them and loses their DRAM cache contents.
 
-**Rising past one replica normally takes one update.** If a live Deployment still runs an unelected
-template, the controller first replaces it with an elected template at one replica, then adds
-standbys once that template has rolled out. `RolloutComplete` reads `False/ReplicasPending` while
-the second step waits. Falling back to one keeps the election on unless the field is set to `None`.
+Increasing the leader count normally takes one update. If the live Deployment still has an
+unelected template, the operator first enables election at one replica, then adds standbys after
+the template rolls out. Until that step completes, `RolloutComplete` reports
+`False/ReplicasPending`.
 
-> **Why** — the Deployment controller applies a replica change to the only active ReplicaSet before it
-> applies any strategy. In the update that also turns the election on, that is the old one, so a single
-> update would start extra masters that do not elect beside the one still serving.
+Returning to one replica leaves election enabled unless you set its backend to `None`.
 
 **The update strategy follows the replica count, and the two cases are opposites.** At one replica
 the Deployment uses `Recreate`: an update stops the old master before starting the new one, so expect
 a gap with no master on every image or flag change. Members keep their segments across it and
-re-register.
-
-> **Why** — `RollingUpdate`'s `maxSurge` defaults to 25% and rounds *up*, which against one replica
-> is one: the default strategy would run two masters at once on every update, which is exactly what
-> the single replica exists to prevent.
-
-Above one replica it rolls instead, with `maxSurge: 1` and `maxUnavailable: replicas`, because
-`Recreate` would take every standby down together with the leader and leave nothing to elect.
-
-> **Why `maxUnavailable` is not `replicas-1`** — the Deployment controller removes an old Pod only
-> while more replicas are available than `replicas - maxUnavailable`. Exactly one is ever available
-> here, so `replicas-1` makes that `1 > 1`: the old leader is never removed, the new replicas cannot
-> become ready until it releases the Lease, and the rollout stalls for good.
+re-register. Above one replica it rolls instead, with `maxSurge: 1` and `maxUnavailable: replicas`,
+because `Recreate` would take every standby down together with the leader and leave nothing to elect.
 
 **A rollout still has a window with no serving master**, and standby replicas can shorten it.
 A floor of zero available replicas is what lets the old leader go, so it can go before a replacement
@@ -157,15 +144,15 @@ selects `Kubernetes` and renders election flags that the image cannot use.
 
 A member group on `RDMA`, `ROCM` or `CANN` runs under high availability on the build that carries
 its transport: every `mirrored-mooncake` target (the default build and the `cuda`, `cann` and
-`rocm` variants alike) compiles the Lease backend in and proves it with the same four leadership
-probes at image build. The vendor axis and the leadership axis are orthogonal.
+`rocm` variants alike) compiles the Lease backend in. The vendor axis and the leadership axis are
+orthogonal.
 
 The matching rule is unchanged from [the backend page](backend.md#the-image): the default build
 covers `RDMA` over DRAM (the transport has no compile switch to leave off, and rdma-core is
 installed), and a `ROCM` or `CANN` group names its variant.
 
 What none of those three has is a real-machine run under an election: the Lease backend's
-presence is build-asserted per target, the fabric data path is not.
+presence is asserted per build target, the fabric data path is not.
 
 `MUSA` and `MACA` keep their own rule because this project builds no variant for either, by
 intent: a group on one of them runs an image you built, so whether it also carries the leadership
@@ -202,10 +189,11 @@ Service's endpoints, so an engine never connects to a process that cannot serve.
 context, `3/1` is what a broken Deployment looks like. `kubectl get deploy` during a healthy
 failover briefly shows `2` ready as the old leader steps down; both readings are normal.
 
-> **Why there is no "who is the leader" field** — the store labels its own Pod
-> `mooncake.io/store-role=leader` once it wins, so `kubectl get pod -l mooncake.io/store-role=leader`
-> answers it. This operator does not read the admin API to re-report it, because failover is the
-> client's business and a second opinion could disagree with the first.
+To see which Pod is serving, read the label the store itself sets when it wins:
+
+```console
+$ kubectl get pod -l mooncake.io/store-role=leader
+```
 
 **Both roles get a ServiceAccount, and they are different accounts.** The operator renders a
 `ServiceAccount`, `Role` and `RoleBinding` per role in its own namespace, and names them on the Pods:
@@ -228,10 +216,10 @@ election, both values render the Service address.
 | `Lease` | the Lease's coordinates, read by the client itself | the member must reach the API server, so its image must carry the leadership backend |
 | `Service` (default) | `<backend>-leader.<namespace>.svc:50051` | endpoint propagation after an election |
 
-In one cluster failover comparison the forms differed by 0.13 seconds, within the noise of one run.
-Both first failed at 31.41 seconds and converged around 60.6 seconds, so election dominated the
-result; retest if election timing changes. The Service endpoint transition was inferred from the
-result, not observed directly. Changing the value rolls every member group when HA is active.
+`Service` pays endpoint propagation after an election. `Lease` avoids it by having the member read
+the holder itself, which requires access to the API server. One failover comparison found no
+meaningful timing difference; the Service endpoint transition was inferred rather than observed.
+Retest if election timing changes. Changing this value rolls every member group when HA is active.
 
 **Standby leaders can shorten the outage; they do not keep the cache.** A standby holds no data. The
 replica that takes over, like a restarted single leader, rebuilds the members' segment list from
@@ -247,22 +235,18 @@ gets a new client ID, and a stale replica record from before the restart can blo
 registering its disk keys. Disk recovery is therefore conditional, even when the files survive.
 
 What a second replica buys is time. On a single-node test cluster a failover left the store
-unusable for about 16 seconds and a single-leader restart for about 30. Those measured service
-gaps are not a bound on when each disk key first becomes a hit; a disk failover test eventually
-returned 1024/1024 keys but did not time their first hits. DRAM keys continue to miss until
-rewritten. On a real cluster a single leader also waits for scheduling and image pulls.
+unusable for about 16 seconds and a single-leader restart for about 30. Neither figure is a bound on
+when each disk key first becomes a hit, and on a real cluster a single leader also waits for
+scheduling and image pulls.
 
 **Run one leader by default.** Add replicas when the shorter service gap justifies the standby
 processes. The default single leader already uses the Lease and the two accounts described above.
 
 **The store's snapshot is not offered, and its flags are refused in `leader.extraArgs`.** A
 snapshot records where each key sits in member memory, and restoring one does not check that the
-memory still holds that key. Once the memory has been reused, the restored index hands out another
-key's bytes instead of a miss. To an engine, that is a wrong KV block rather than a cold one.
-
-Two ordinary events reuse it. A forced remove, which is how an engine resets its cache, frees it
-before the next snapshot is taken. A standby loads the snapshot once at its own start, so by the time
-it takes over, another leader may have given that memory to other keys.
+memory still holds that key. An engine reset frees the memory, and a standby's startup snapshot
+can become stale before it takes over. Restoring that index can return another key's bytes to the
+engine, producing an incorrect KV block.
 
 `enable_snapshot` and `enable_snapshot_restore` are refused with that reason. Every other
 `snapshot_*` key is refused because it is read only under one of those two, and `memory_allocator`

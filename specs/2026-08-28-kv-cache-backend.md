@@ -1354,6 +1354,19 @@ docs/README.md                         # index entry
 over recorded inputs: keeping them out of the reconciler is what lets the whole flag surface and the
 whole status derivation be tested without a cluster.
 
+### Membership compatibility and shutdown evidence retained from the guide
+
+The source/compatibility reading recorded by the guide places `GET /get_segments_detail` at
+Mooncake 0.3.12. The 0.3.10 and 0.3.11 lines return 404 there while `/health` and `/metrics`
+serve; the worker publishes `Unknown/SegmentListingNotServed`, an empty member list, and Ready
+when the leader serves. Other failures retain the old list and report ListingFailed.
+
+For the example member image, the deregistration hook makes a key held only on that tier a
+clean miss immediately. Its wait is unconditional and gives the local member time to finish,
+not a continued remote-read window. A different `spec.image` can deregister or wait differently;
+the operator controls only the timeout it passes. Existing graceful-unmount and drain-job
+analysis above explains why selector narrowing or node removal does not migrate cached data.
+
 ### Code Style
 
 The API type, following the group's discipline — a doc comment states behaviour and the reason for it

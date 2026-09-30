@@ -12,7 +12,6 @@ stores nothing.
 - [Authorization](#authorization)
 - [Capability map for GPUStack server](#capability-map-for-gpustack-server)
 - [Requirements and limits](#requirements-and-limits)
-- [Table columns](#table-columns)
 
 ## Resources
 
@@ -65,10 +64,10 @@ failureReasons:
 
 - **It is computed on each request and never written.** The worker reads the artifact and the
   `NodeModelStore`s listing its digest; for each node downloading it, it reads that node's plugin
-  (`GET /model/downloads` on its HTTPS port) within 2 seconds, the fixed part within 5 seconds, the
-  whole answer within 13 seconds. Live reads cover at most 64 downloading nodes; a node past that
-  cap, or one that does not answer, contributes the bytes it last wrote and is not counted in
-  `live`.
+  for its running downloads. The request is bounded at 13 seconds. Live reads cover at most
+  64 downloading nodes; a node past that cap,
+  or one that does not answer within the request's budget, contributes the bytes it last wrote and
+  is not counted in `live`.
 - **It names no node.** It is namespaced and tenants read it; node names would give every tenant the
   cluster's topology. Read NodeModelStore for the node-level details.
 - **The mean covers the downloading nodes only**, each downloading a whole copy; a node starting a
@@ -137,12 +136,6 @@ column names what is missing and who owns it.
 - **Live bytes need the plugin's Pod reachable from the worker** on its HTTPS port. A NetworkPolicy
   that blocks it leaves the stored values, and `live` says how many nodes answered.
 - **No watch on `progress`**: it answers one request. Watch NodeModelStores for changes.
-
-## Table columns
-
-The aggregated API server renders the printer columns with its own `TableConvertor`
-(`NewJSONPathTemplateTableConvertor`, under `pkg/worker/extensionapis/worker/`). The columns in the
-resource table above describe the output of `kubectl get`.
 
 ---
 

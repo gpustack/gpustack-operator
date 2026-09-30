@@ -45,12 +45,7 @@ engine slow to stop after SIGTERM.
 split-role scheduler ignores the shutdown request SIGTERM leads to, and the engine waits a fixed 15 s
 for that scheduler before killing it.
 
-> **Why it is left alone** — SGLang checks for SIGTERM every 5 s in `sigterm_watchdog`
-> (`managers/tokenizer_manager.py`), then waits up to 15 s for its schedulers to exit. The loops in
-> `disaggregation/decode.py` and `disaggregation/prefill.py` never read the flag the shutdown request
-> sets, as the plain loop does (paths under `python/sglang/srt/`, v0.5.18). No flag shortens the
-> wait; `SGL_FORCE_SHUTDOWN` skips only the drain.
->
+> **Why it is left alone** — no flag shortens that wait; `SGL_FORCE_SHUTDOWN` skips only the drain.
 > A grace of 45 buys a clean exit rather than a kill, since the engine kills its scheduler itself
 > either way. The replica is idle by then, so the kill at 30 s cuts no request.
 

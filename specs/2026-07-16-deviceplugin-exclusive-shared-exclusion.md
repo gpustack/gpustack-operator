@@ -209,6 +209,16 @@ on unsupported/concurrent shapes, and neither is a regression against this fix's
   `TestResourceServer_Allocate_RollsBackReservationOnPatchFailure`.
 
 ## Design Details
+
+### Device ID parsing with duplicate plugins
+
+A second plugin registration for the same resource replaces kubelet's endpoint. Both plugins may
+continue publishing their own device sets, producing capacity changes and allocations whose IDs
+come from the other plugin. In `pkg/deviceplugin/server.go`, allocation parsing passes IDs through
+`ParseResourceToken` and returns its error when the IDs do not have GPUStack's token format. This
+is a source-confirmed parsing boundary, not a separate admission guarantee or a new measured run.
+The user-facing installation remedy is to register only one plugin for each resource name.
+
 ### Commands
 Environment is split across three targets:
 - **Unit-test iteration — local.** `pkg/deviceplugin` compiles and its tests run without a GPU:
@@ -240,6 +250,23 @@ pkg/deviceplugin/
   server_test.go   # table-driven tests (fake client) — new regression cases land here
 api/worker/v1alpha1/devices.go   # DeviceAllocationMode enum, AcceleratorAllocation (read-only here)
 ```
+### Identification and preference details retained from the discovery guide
+
+The feasibility test disambiguates candidate containers; an all-infeasible set falls back to
+the unfiltered oldest candidate rather than failing identification. Allocation still checks live
+room afterwards. The check reads other containers' reservations, falling back to annotations,
+and excludes the requesting container so a retry is not charged twice. Terminal-phase Pods
+count as free when kubelet has returned their tokens. The critical section already specified
+above covers identify, cross-mode check and reservation; annotation I/O remains outside it.
+
+`GetPreferredAllocation` orders candidates per DevicesGroup and must return the full offered
+`<group>:<accelerator>:<token>` IDs. An ID kubelet cannot match is discarded silently. The call
+is advisory, including under policy `none`; restrictive topology policies can pick an aligned
+set first. The logical / physical split spec already requires partition placement to publish
+its accelerator, profile and memory intervals before releasing the mutex. Visibility identifies
+the non-self workload allocation from reservation first, annotation second, so it can name the
+same accelerator despite a cross-mode hold.
+
 ### Code Style
 ```go
 // cardHeldInOtherMode reports whether the physical card is currently held in a mode different from this

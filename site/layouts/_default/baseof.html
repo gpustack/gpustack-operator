@@ -71,10 +71,24 @@
     </aside>
   </div>
   {{ if .Store.Get "hasMermaid" }}
-    {{ $mermaid := resources.GetRemote "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js" | fingerprint }}
-    {{ $license := resources.GetRemote "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/LICENSE" | resources.Copy "licenses/mermaid.txt" }}
-    <!-- Mermaid license: {{ $license.RelPermalink }} -->
-    <script src="{{ $mermaid.RelPermalink }}" integrity="{{ $mermaid.Data.Integrity }}" defer></script>
+    {{ range slice "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/LICENSE" "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js" }}
+      {{ $url := . }}
+      {{ with try (resources.GetRemote $url) }}
+        {{ with .Err }}
+          {{ errorf "Unable to download the pinned Mermaid resource %s: %s" $url . }}
+        {{ else with .Value }}
+          {{ if strings.HasSuffix $url "/LICENSE" }}
+            {{ $license := . | resources.Copy "licenses/mermaid.txt" }}
+            <!-- Mermaid license: {{ $license.RelPermalink }} -->
+          {{ else }}
+            {{ $mermaid := . | fingerprint }}
+            <script src="{{ $mermaid.RelPermalink }}" integrity="{{ $mermaid.Data.Integrity }}" defer></script>
+          {{ end }}
+        {{ else }}
+          {{ errorf "Pinned Mermaid resource not found: %s" $url }}
+        {{ end }}
+      {{ end }}
+    {{ end }}
   {{ end }}
   <script src="{{ (resources.Get "js/site.js" | fingerprint).RelPermalink }}" defer></script>
 </body>

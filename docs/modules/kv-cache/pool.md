@@ -218,7 +218,7 @@ recut below what the domain already holds, and is reported that way.
 ## Full-quota behavior
 
 **A quota is not an admission barrier. It is the point at which the store starts discarding this
-domain's own objects to make room for the next write.** Measured on a real store, not inferred:
+domain's own objects to make room for the next write.**
 
 - Writing eight 4 MiB objects into a 16 MiB grant produces **eight successful writes**, four
   surviving objects, and a charge of exactly 16 MiB. Nothing reports an error.
@@ -227,7 +227,7 @@ domain's own objects to make room for the next write.** Measured on a real store
 - A write **is** refused, with `TENANT_QUOTA_EXCEEDED`, when nothing can be discarded: reading an
   object puts it under a lease (five minutes as this operator renders the store, adjustable per
   backend through `extraArgs`; see [The leader](leader.md)), and a write while every object in a
-  filled grant holds one fails. The measurement above was taken at the store's own ten seconds.
+  filled grant holds one fails.
 
 **`status.overQuota` does not report this, and cannot.** The store computes it as *charge exceeds
 grant* while refusing any charge that would overshoot, so writing past a grant leaves it `false`
@@ -302,10 +302,9 @@ seconds and passes its readiness probe there (the probe reads the segment list, 
 then reports a **zero** effective quota until its segments have remounted.
 
 **How long depends on where the replacement Pod lands, and the slow case is the ordinary one.**
-Measured over seven restarts with no exceptions: **2.8–4.4 s** when the master keeps its address or
-returns to the node its member is on, and **about 32 seconds** when it changes address *and* lands
-elsewhere, which is what a deleted Pod does in any deployment whose leader and member are on
-separate nodes.
+When the master keeps its address or returns to the node its member is on, the window is a few
+seconds. When it changes address *and* lands elsewhere, which is what a deleted Pod does in any
+deployment whose leader and member are on separate nodes, it is around half a minute.
 
 **So expect the pool and every Binding on it to report `Error` for around half a minute after a
 master restarts.** That is the conditions working, not a fault to chase: the phase clears itself and

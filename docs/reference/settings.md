@@ -84,7 +84,7 @@ already authored; the derived marker is provenance, and nothing auto-removes a t
 
 No ClusterQueue gains a reference to the node-devices feasibility gate in this mode. That
 [AdmissionCheck](../modules/devices/admission.md#gate-3--the-per-accelerator-admissioncheck) has one
-writer, [`NodeQueueReconciler`](../modules/devices/scheduling.md#nodequeuereconciler-node_queuego),
+writer, [`NodeQueueReconciler`](../modules/devices/scheduling.md#queue-quota-and-draining),
 which reads this setting as a cluster-wide switch, not as "was this queue derived".
 
 So with the switch on, every accelerated queue carries the reference once the check reports `Active`,

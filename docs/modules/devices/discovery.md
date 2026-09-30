@@ -47,8 +47,6 @@ them as Resources.*
   ordinal (see [T-Head MIG Operations](thead-mig.md)).
 - **manufacturer** — the company. Its native code is *the manufacturer's library, SDK or binding*.
 
-The `pkg/device` package doc carries the same diagram.
-
 ## Stage 1: Node Feature Discovery (NFD)
 
 NFD comes from the `node-feature-discovery` subchart, or from the cluster itself (see [Installation Modes](../../operate/installation-modes.md)). It performs three jobs.
@@ -62,9 +60,9 @@ feature.node.kubernetes.io/pci-${PCI_VENDOR_ID}.present: "true"
 ```
 
 An NVIDIA device gives `feature.node.kubernetes.io/pci-10de.present: "true"`. The whitelisted classes
-are `02`, `03`, `0b` and `12`, from the chart's
-`node-feature-discovery.worker.config.sources.pci.deviceClassWhitelist`; the rule below matches the
-same classes from `pkg/nodefeature`, and the DM's sysfs scan reads `GPUSTACK_PCI_CLASS_PREFIXES` (see
+are `02`, `03`, `0b` and `12`, set in the chart's
+`node-feature-discovery.worker.config.sources.pci.deviceClassWhitelist`; the Device Manager's own
+scan reads the same classes, overridable through `GPUSTACK_PCI_CLASS_PREFIXES` (see
 [Settings](../../reference/settings.md)).
 
 ### Job 2 — CPU identity
@@ -97,33 +95,25 @@ feature.gpustack.ai/cpu-cache-l3:         "33554432"
 An annotation NFD cannot resolve keeps its `@cpu.model.*` template reference verbatim, so a value
 leading with `@` counts as unreported.
 
-The Worker normalizes these into the node's general(CPU) node key
-(`nodefeature.ExtractGeneralNodeKey`), never empty and always carrying the node's real CPU identity,
-as `${cpuManufacturer}-${id}`:
+The Worker normalizes these into the node's general(CPU) node key, never empty and always carrying
+the node's real CPU identity, as `${cpuManufacturer}-${id}`:
 
-- `cpuManufacturer` — the lowercased `cpu-model.vendor_id` label, a
-  [cpuid](https://github.com/klauspost/cpuid) vendor enum name (`Intel` → `intel`, `AMD` → `amd`);
-  `generic` when unknown or unreported.
+- `cpuManufacturer` — the lowercased `cpu-model.vendor_id` label; `generic` when unknown or
+  unreported.
 - `id` — the sanitized `feature.gpustack.ai/cpu-name` annotation: trademark markers and the trailing
   `" CPU @ …"` frequency part dropped, a leading manufacturer prefix deduplicated, truncated to the
   naming budget (e.g. `amd-epyc-7763`); unreported, the cpu-model family and id labels instead (e.g.
   `amd-25-1`).
 - The key degrades to `generic` only when NFD reports no CPU identity at all.
 
-Whether that manufacturer subdivides the pools is a separate runtime decision, taken at the
-aggregation layer by
-[`instance-type-aware-cpu-manufacturer`](../../reference/settings.md#online-adjustable-settings) (see [Scheduling
-Chain](scheduling.md#naming-and-grouping)); the key stays CPU-accurate so the finest-grained
-`ResourceFlavor`s regroup without rewriting.
+Whether that manufacturer subdivides the pools is a separate runtime decision, taken by
+[`instance-type-aware-cpu-manufacturer`](../../reference/settings.md#online-adjustable-settings) (see
+[Scheduling Chain](scheduling.md#naming-and-grouping)); the key stays CPU-accurate so the
+finest-grained `ResourceFlavor`s regroup without rewriting.
 
 The key deliberately does not encode os/arch. os/arch is appended in full to every ResourceFlavor,
 ClusterQueue and InstanceType name (`…-linux-arm64`, never abbreviated) and pinned on the
 ResourceFlavor's `spec.nodeLabels` (`kubernetes.io/os`, `kubernetes.io/arch`).
-
-> **Why** — cpu-model family/id are independent numbering spaces on x86 (CPUID) and arm64 (MIDR), so
-> `25-1` can legitimately appear on both, and amd64/arm64 binaries are not interchangeable: their
-> capacity must never pool into one flavor/queue. It also reclaims the label-length budget the old
-> abbreviated `-ln-x64` suffix consumed.
 
 ### Job 3 — the non-accelerated marker
 
@@ -138,52 +128,13 @@ corrects false negatives.
 
 ### The `gpustack-cpu-info` NodeFeatureRule
 
-Jobs 2 and 3 are the work of the `gpustack-cpu-info` **NodeFeatureRule**, applied by the worker at
-startup in every install mode (see [The chart deploys workloads, the worker applies the custom
-resources](../../operate/installation-modes.md#chart-deployed-and-worker-applied-resources)).
-Its two matcher lists come from facts that exist for other reasons:
+The worker applies the `gpustack-cpu-info` NodeFeatureRule at startup in every installation mode.
+It performs jobs 2 and 3 above; see [Installation
+Modes](../../operate/installation-modes.md#chart-deployed-and-worker-applied-resources).
 
-- the PCI vendor IDs of the manufacturers the worker manages — `--manufacturer`, filled by the chart
-  from `global.manufacturers`, the same map that drives the device-manager DaemonSets, so a
-  manufacturer added there is labelled, detected and given a device manager in one edit;
-- the PCI classes `pkg/nodefeature` calls acceleratable, which are the classes NFD publishes.
-
-Two Go tests hold the chart's `global.manufacturers` map and `deviceClassWhitelist` equal to
-`pkg/nodefeature`.
-
-The manufacturer map is where a manufacturer's whole identity lives, one row per manufacturer:
-
-| Field | Meaning |
-|---|---|
-| `pciVendorID` | the PCI vendor ID Job 1 labels the node with |
-| `resourceName` | the name this manufacturer's device-plugin advertises |
-| `runtimeName` | the runtime this manufacturer's workloads run under |
-| `partitionKind` | this manufacturer's hardware partitioning kind |
-| `runtimeInjectsDriver` | the user-space driver reaches a container only through the runtime |
-| `runtimeInjectsDevices` | the allocator contributes no device node, so only the runtime turns an allocation into `/dev` entries |
-
-The two `runtimeInjects*` fields say what a container misses without that manufacturer's container
-runtime, and answer for different consumers:
-
-- `runtimeInjectsDriver` is why the NVIDIA and MThreads **device-managers** run under a RuntimeClass,
-  while every other manufacturer's reads its management library from a hostPath mount.
-- `runtimeInjectsDevices` is the **workload's** need alone, for a manufacturer whose allocator
-  contributes no device node of its own — Ascend and Iluvatar, which emit `ASCEND_VISIBLE_DEVICES`
-  and `IX_VISIBLE_DEVICES` and nothing else. AMD used to be a third and no longer is: its allocator
-  injects `/dev/kfd` and the accelerator's DRM nodes itself.
-
-Either `runtimeInjects*` fact, never `runtimeName`, decides which RuntimeClasses the chart creates
-(`deviceManager.createRuntimeClasses`, and only where the class is absent or already this release's),
-so that set is narrower than the manufacturers merely stating a `runtimeName`.
-
-> **Why not `runtimeName`** — it is the class the operator will use, while either `runtimeInjects*`
-> fact lets the runtime's presence be inferred: a manufacturer missing what it names cannot work
-> unless the handler is registered.
->
-> A manufacturer with neither injects its own device nodes and needs no RuntimeClass — creating one
-> would break it, since the operator attaches a RuntimeClass whenever one exists and the kubelet
-> rejects a Pod naming an unconfigured runtime. A class the manufacturer's own operator created is
-> still used; the chart never conjures one.
+The rule marks PCI vendors managed by the worker as acceleratable. The chart's
+`global.manufacturers` map registers each manufacturer for labeling, detection and its Device
+Manager deployment.
 
 ## Stage 2: the Device Manager (DM)
 
@@ -199,11 +150,10 @@ where no chart deploys it, see [Installation Modes](../../operate/installation-m
 
 ### Detection and the accelerator feature labels
 
-The DM detect loop (`pkg/devicemanager/detector/detector.go`) periodically detects accelerators and
-reports a NodeFeature `${NODE_NAME}-gpustack-device-manager` (owned by the Node), its labels built by
-`nodefeature.ConstructAcceleratableNodeLabels`. Each model is keyed by the accelerated device key
-`${aKey} = ${manufacturer}-${id}`, `id` being the product name sanitized to Kubernetes label naming
-rules:
+The Device Manager periodically detects accelerators and reports a NodeFeature
+`${NODE_NAME}-gpustack-device-manager`, owned by the Node. Each model is keyed by the accelerated
+device key `${aKey} = ${manufacturer}-${id}`, `id` being the product name sanitized to Kubernetes
+label naming rules:
 
 | Label | Meaning |
 |---|---|
@@ -220,26 +170,21 @@ rules:
 | `acceleratable.${prefix}${aKey}.comcap=${cc}` | Compute capability (omitted when undetected) |
 
 `prefix` is `feature.gpustack.ai/`, so device labels live under the dedicated
-`acceleratable.feature.gpustack.ai/` key namespace. `manufacturer` is one supported by
-`pkg/devicemanager/detector`: NVIDIA, AMD, Ascend, Cambricon, Hygon, Iluvatar, MetaX, MThreads,
-T-Head — their PCI vendor IDs, resource names and runtime class names all overridable (see
+`acceleratable.feature.gpustack.ai/` key namespace. `manufacturer` is one of the nine supported:
+NVIDIA, AMD, Ascend, Cambricon, Hygon, Iluvatar, MetaX, MThreads, T-Head — their PCI vendor IDs,
+resource names and runtime class names all overridable (see
 [Settings](../../reference/settings.md#per-manufacturer-overrides)).
 
 ### The `Devices` ledger
 
-The NodeFeature is owned by the Node. The DM also reports a `Devices` custom resource named after
-the node, stamped with the accelerator flavors' selector labels (the feature key +
-`kubernetes.io/os|arch`) so the pool's queue can reverse-look-up its Devices.
+The NodeFeature is owned by the Node. The `Devices` custom resource is named after the node, stamped
+with the accelerator flavors' selector labels (the feature key +
+`kubernetes.io/os|arch`) so the pool's queue can reverse-look-up its Devices, and is
+garbage-collected with the Node it describes.
 
-> **Why owned by the Node** — a `Devices` is cluster-scoped, and the garbage collector resolves a
-> cluster-scoped dependent's owner in the empty namespace, so a namespaced owner like the NodeFeature
-> is unresolvable and would leave it uncollected. Cluster-scoped to cluster-scoped, it is collected
-> with the node it describes.
-
-> **Why the worker deletes it too** — the collector reaches `Devices` through the worker's aggregated
-> API, the group's preferred version. A worker that went down with the departed node leaves the
-> ledger counting that node's cards until the collector's backoff expires, many minutes after the
-> worker is back. So `NodeDevicesReconciler` deletes a `Devices` whose Node an uncached read finds gone.
+The worker also deletes it directly when an uncached
+read finds the Node gone, so a departed node's ledger stops counting its cards sooner than the
+collector's backoff would allow.
 
 Its `.status` holds the per-accelerator **`AcceleratorAllocation` ledger**: each accelerator's `mode`
 (free / exclusive / shared / sliced / partitioned) and `Remaining` credit budget, plus, for a
@@ -251,9 +196,9 @@ container. An accelerator hosts at most its `logicalSliced.count` of them — 4 
 InstanceType four-view display *and* feeding the per-accelerator AdmissionCheck (see
 [Admission](admission.md)).
 
-The DM re-detects whenever the device set or health changes. A separate `NodeDevicesReconciler` syncs
-the `gpustack.ai/managed` mark from the Node onto the same-named `Devices`, so the per-node DM never
-asserts a node-management decision it does not own.
+The Device Manager re-detects whenever the device set or health changes, and the worker syncs the
+`gpustack.ai/managed` mark from the Node onto the same-named `Devices`, so the per-node Device
+Manager never asserts a node-management decision it does not own.
 
 > **A pass that failed is not a manufacturer with no accelerators** — every detector answers an absent
 > driver, a library that will not initialise and a bus holding no card with an empty list and no error.
@@ -268,7 +213,8 @@ asserts a node-management decision it does not own.
 > as unmeasured so that its absence is not read as accelerators that went away — which would take the
 > loop round again on no evidence.
 
-> **Before the first detection, a DM asked for one manufacturer reports nothing at all**: no
+> **Before the first detection, a Device Manager asked for one manufacturer reports nothing at
+> all**: no
 > `Devices`, no NodeFeature, nothing published to the allocator. Its DaemonSet is scheduled by that
 > manufacturer's PCI vendor label, so a node that answers with no accelerators is one whose driver has
 > not answered yet, and the round is held back and repeated (loudly, every period) until it does. This
@@ -285,57 +231,30 @@ machine rather than to a manufacturer's accelerators) and it has its own page:
 
 ### Ascend: two DCMI API generations
 
-Ascend drivers serve one of two mutually exclusive DCMI APIs, and `binding/dcmi` absorbs the
-difference so that no caller enumerates or addresses devices differently. V1 is what every driver up
-to and including 910B/310P serves. V2 (`dcmiv2_*`) is what the A5/950 generation serves. `DCMI.Init`
-tries V1 and falls back to V2; `APIVersion()` reports which answered.
+Ascend drivers serve one of two mutually exclusive DCMI APIs. V1 is what every driver up to and
+including 910B/310P serves; V2 is what the A5/950 generation serves. The Device Manager tries V1 and
+falls back to V2, and one allocation-time decision reads which generation answered.
 
-One caller does read that accessor: the allocator, for the single decision below that turns on the
-generation itself rather than on a reading.
+On a V2 host the ledger simply lacks five detector readings that have no V2 counterpart: driver
+version, PCIe topology distance, RoCE IP and gateway, the detailed memory info (memory comes from
+the HBM query alone), and the multi-die injection policy. Each is optional, so their absence drops
+nothing else.
 
-The fallback keys on the driver refusing V1 rather than on `dlsym` finding no V1 symbol, because the
-absence is not what distinguishes the two: a V2 driver exports every V1 entry point and answers each
-with `NOT_SUPPORT`. An entry point that really is missing is treated as another refusal and falls back
-just the same. That refusal is also why the queries below need no code to fail — they pass through and
-the driver says no.
+The sixth absence is not optional: V2 declares no container-share query at all, so there is nothing
+to read, nothing to write and no `npu-smi` command to offer, and the allocation gate that depends on
+it behaves as described [below](#the-device-plugin-allocator).
 
-V2 has no card level. It enumerates devices flat, indexed by the number V1 calls the logic id, so
-the binding presents each V2 device id as a card holding exactly one device: `cardId == devId ==
-logicId`, and `deviceId` is always 0. Any other second coordinate is refused with
-`INVALID_DEVICE_ID` rather than resolved to the card, so a stale index cannot be served a whole
-accelerator's readings under another device's name.
-
-`PhysicalIndexes` therefore reads `{physical id, device id, 0}` on a V2 host, in the same three-entry
-shape the allocator already expects.
-
-Five detector readings have no V2 counterpart, so on a V2 host the ledger simply lacks them:
-driver version, PCIe topology distance, RoCE IP and gateway, the `memory_info` v2/v3 structs (memory
-comes from the HBM query alone), and the multi-die injection policy. The detector already treats each
-as optional, so their absence drops nothing else.
-
-The container-share flag is a sixth absent query, and the one absence that is not merely optional:
-it belongs to the allocator rather than the detector, and it gates admission instead of filling in a
-field. That is the decision the generation accessor exists for, and it is described with the rest of
-the share preflight [below](#the-device-plugin-allocator).
-
-The generation is also the one named by prefix. A 950 reports a chip name carrying an open-ended
-suffix (`Ascend950PR` and `Ascend950DT` ship today), so the detector folds every `950*` name onto one
-soc name, and therefore one family, exactly as every vendor reader of that name does. Listing the
-suffixes instead would leave the next one with no family at all, since no other fallback matches a
-name starting with 950.
-
-> **Why** — the uuid comes from a die read, and A5 uses a die type the public V2 header does not
-> enumerate: `DDIE`, which the vendor names as that chip's uuid. The V2 die query asks for the virtual
-> die and then `DDIE`. A device whose die cannot be read is dropped, never identified by its PCI
-> address: `Accelerator.ID` is universally unique by contract while a BDF repeats on every node, so
-> substituting it would make two nodes' accelerators collide on identity.
+A 950 reports a chip name carrying an open-ended suffix (`Ascend950PR` and `Ascend950DT` ship
+today), so the detector folds every `950*` name onto one soc name, and therefore one family, exactly
+as every vendor reader of that name does. A device whose identity die cannot be read is dropped
+rather than identified by its PCI address, which repeats on every node and would make two nodes'
+accelerators collide on identity.
 
 ## The device-plugin allocator
 
-Alongside detection the DM runs the **device-plugin allocator** (`pkg/devicemanager/allocator/<mfr>`,
-on `pkg/deviceplugin`): it registers per-mode resources (exclusive / shared / sliced / partitioned)
-with the kubelet and, on `Allocate`, returns the container injection and records the allocation into
-the `Devices` ledger.
+Alongside detection the Device Manager runs the **device-plugin allocator**: it registers per-mode
+resources (exclusive / shared / sliced / partitioned) with the kubelet and, on allocation, returns
+the container injection and records the allocation into the `Devices` ledger.
 
 An accelerator serves only the family its reported capability can back. An unpartitioned one
 advertises the exclusive, shared and logical-sliced token pools; one in a hardware partitioning mode
@@ -374,28 +293,28 @@ response carries the values below; the injection channel determines which compon
 
 The channel is chosen per manufacturer through
 [`GPUSTACK_${MANUFACTURER}_DEVICE_INJECTION_STRATEGY`](../../reference/settings.md#per-manufacturer-overrides).
-Its third value, `auto`, answers per container and only ever moves off the default on a positive
-fact — it keeps `envvar` at the first of these that holds, and logs which one:
+Its third value, `auto`, answers per container and falls back to the default `envvar` at the first
+of these that holds, logging which one:
 
 1. the Pod names a `runtimeClassName`, whose handler owns injection and whose configuration this
    cannot read;
 2. the container engine's configuration could not be read;
-3. the engine's default runtime handler is a vendor runtime — the variable already works there, and a
-   CDI request would be a second injection path for one container;
+3. the engine's default runtime handler is a vendor runtime — the variable already works there, and
+   a CDI request would be a second injection path for one container;
 4. the engine does not resolve CDI requests;
 5. the loaded specifications do not name every granted accelerator. A request naming one they do not
    carry fails the whole container, so a partial match is no better than none.
 
-The two halves are easy to conflate. The manufacturer's generator writes what a name means (device
-nodes, driver libraries, hooks) into `/etc/cdi` and `/var/run/cdi` on the node. This operator writes
-only the name of what one container was granted, onto that container.
+Only when none holds — the configuration readable, CDI resolvable, every granted accelerator named —
+does it request CDI.
 
-Those directories are read to check the name is there before requesting it, and never written to:
-two writers on a node's description of the same hardware is a race whose loser is whichever the
-engine loaded second.
+The two halves stay distinct: the manufacturer's generator writes what a CDI name means (device
+nodes, driver libraries, hooks) into `/etc/cdi` and `/var/run/cdi` on the node, and this operator
+writes only the name of what one container was granted, onto that container. Those directories are
+read to check the name is there before requesting it, and never written to.
 
-The `.partitioned` family never takes that channel: the instance below is materialized at allocation
-time, so no pre-generated specification names it.
+The `.partitioned` family never takes that channel: the instance is materialized at allocation time,
+so no pre-generated specification names it.
 
 ### Partitioned
 
@@ -427,26 +346,18 @@ interception noise. Each variable is injected only if the workload does not set 
 | `LIBHGGC_LOG_LEVEL` | the T-Head shim | `1` |
 | `LIBVROCM_LOG_LEVEL` | the AMD shim | `1` |
 
-> **Why the last three are `1`, not `0`** — their levels are not HAMi-core's: `1` logs a line per
-> denial, not per intercepted call, so `0` would hide the diagnostics of a slice refusing every
-> allocation. `1` is already the library default; naming it keeps the level a property of the
-> allocation.
+Ascend takes one more under the same never-overwrite rule, `ENPU_DSMI_HOOK=1`. It turns on a hook in
+the vendored Ascend slicing runtime, so the container's `npu-smi info` reports its HBM quota and the
+slice's usage instead of the whole accelerator — the mixed view NVIDIA gives, where `nvidia-smi`
+shows the virtual VRAM total while power and temperature stay accelerator-wide.
 
-Ascend takes one more under the same never-overwrite rule, `ENPU_DSMI_HOOK=1`. It turns on a vendored
-vcann-rt hook (`pack/gpustack-operator/external/ascend/vcann-rt/`), so the container's `npu-smi info`
-reports its HBM quota and the slice's usage instead of the whole accelerator — the mixed view
-NVIDIA gives, where `nvidia-smi` shows the virtual VRAM total while power and temperature stay
-accelerator-wide.
+NVIDIA takes one more under the same rule, `CUDA_DEVICE_ORDER=PCI_BUS_ID`. The memory-limit table is
+filled in one enumeration order and read back by CUDA ordinal, and the two coincide only under
+`PCI_BUS_ID` (CUDA's default orders by a performance heuristic). The same invariant governs any
+integer a workload derives from an NVML index and hands to CUDA, `CUDA_VISIBLE_DEVICES` included.
 
-NVIDIA takes one more under the same rule, `CUDA_DEVICE_ORDER=PCI_BUS_ID`. HAMi-core fills its limit
-table from the `CUDA_DEVICE_MEMORY_LIMIT_<i>` keys in NVML enumeration order but reads a limit back by
-CUDA ordinal, and the two coincide only under `PCI_BUS_ID` (CUDA's default orders by a performance
-heuristic). The same invariant governs any integer a workload derives from an NVML index and hands to
-CUDA, `CUDA_VISIBLE_DEVICES` included.
-
-> **NVML is unaffected by it** — NVML always enumerates by PCI bus id, so the `Index` the DM reports
-> matches `nvidia-smi` whether or not the variable is set. The ordering is stated where the injection
-> is consumed, not where accelerators are detected.
+> **NVML is unaffected by it** — NVML always enumerates by PCI bus id, so the `Index` the Device
+> Manager reports matches `nvidia-smi` whether or not the variable is set.
 
 > **Never-overwrite reads the container's own `env:` entries** — an `envFrom:`-sourced value is
 > invisible to the allocator, so opting out that way needs an explicit `env:`.
@@ -469,44 +380,29 @@ numbering:
 | Hygon | a `device_id` the operator itself writes into each `vdev<i>.conf` — meaning not yet established on hardware | positional, but **persisted**; see below |
 | Ascend, Cambricon, MetaX, MThreads | not by position at all — the number travels as a value, or the request is single-accelerator | immaterial |
 
-Where a number does travel as a value, it is the driver's index (dcmi's physical id, cnDev's
-enumeration position) — not the operator's logical one. The two coincide only while every accelerator
+Where a number does travel as a value, it is the driver's index (Ascend's physical id, Cambricon's
+enumeration position), not the operator's logical one. The two coincide only while every accelerator
 on the host was detected, so one failing a probe leaves every later accelerator carrying a logical
 index below its driver index.
 
-For Ascend the rule is **measured**, on a 910B2 against a simulated hole in the enumeration, the one
-condition that makes the difference observable. All three sites carry the driver index with the
-allocator driven directly on the host: `ASCEND_VISIBLE_DEVICES`, the `/dev/davinci<N>` the vendor
-runtime then mounts, and a slice's `npu_info.config` `physical-npu-id`.
+On Ascend the rule is **measured** on a 910B2 (V1 driver), driven on the host: all three sites —
+`ASCEND_VISIBLE_DEVICES`, the `/dev/davinci<N>` the vendor runtime then mounts, and a slice's
+`npu_info.config` `physical-npu-id` — carry the driver index.
 
-Through a device-manager DaemonSet under a real kubelet, the measurement covers the whole-accelerator
-path only — the env and the mounted device node, against the ledger's own record of the accelerator it
-allocated. The sliced site was not re-measured in-cluster; it rests on the host-side run, which drove
-the same responder.
+Through a device-manager DaemonSet
+under a real kubelet, the measurement covers the whole-accelerator path only; the sliced site was
+not re-measured in-cluster.
 
-That measurement is a **V1** one, on a V1 driver. On a [V2 host](#ascend-two-dcmi-api-generations) the
-physical id comes from a different entry point (`dcmiv2_get_chip_phy_id_by_dev_id`) and the rule is
-**unmeasured**: nothing establishes that the driver numbers `/dev/davinci<N>` by that id there.
-
-Two properties of the consuming side came out of the same runs: the container renumbers its
-accelerators by ascending physical id, not by the order they were named in, so the emission order
-stays immaterial even for a multi-accelerator claim; and an out-of-range value fails the container
-start outright, which is why naming the wrong accelerator is a silent misplacement.
+On a [V2 host](#ascend-two-dcmi-api-generations) the physical id comes
+from a different entry point and the rule is **unmeasured** there. The container itself renumbers its
+accelerators by ascending physical id, and an out-of-range value fails the container start outright,
+which is why naming the wrong accelerator is a silent misplacement.
 
 Hygon is the one whose position outlives the allocation: its figures go into `vdev<i>.conf` files on
 the host, and a slot is reused only when the file at that path already names the same accelerator. A
 sliced request is admitted for exactly one accelerator today, so the path is always `vdev0.conf` and
 the mapping cannot move; if that gate is ever lifted, the order becomes a migration concern rather
 than only a correctness one, because the files predate the allocation being retried.
-
-The `Devices` ledger cannot be walked for that order. It keeps one group per accelerator model, so a
-walk over groups is in enumeration order only within a group, and interleaves the models of a
-container holding two. The group order is not part of the API either — both lists are declared as
-maps keyed by identity.
-
-The reconcile still stores them canonically (accelerators by index, groups by manufacturer and then
-first accelerator), which keeps the stored list a function of the hardware rather than of which
-detection pass first saw each group. The allocators order what they read regardless.
 
 ### Preflight checks
 
@@ -564,23 +460,15 @@ answered at `simulated`: a measured one needs the owner's container still runnin
 container this starts is one-shot. A partition-backed accelerator is answered at `declared`:
 reaching its visibility response means driving the capability that also creates a partition.
 
-> **Why `simulated` is truthful** — several allocators write host state while serving an allocation,
-> so the pass substitutes the manufacturer's own driver seam and redirects the paths that
-> manufacturer alone knows it renders under. A manufacturer that serves an allocation out of paths
-> and a resource request writes none of it to begin with, so it reaches this depth with nothing to
-> substitute — all nine produce an injection, and the seam is only needed where producing one would
-> otherwise touch the node.
-
 It reaches the host by entering a bind-mounted host root with `chroot`, which gives it the host's own
-container CLI (sibling probe containers with no runtime socket mounted) and the host's own vendor
-CLI, which answers with no `/dev` mount in the container at all. That is what separates *this machine
-has no accelerators* from *this machine has eight and your container cannot see them*. Preflight's
-own code never runs in host context.
+container CLI and the host's own vendor CLI, which answers with no `/dev` mount in the container at
+all. That is what separates *this machine has no accelerators* from *this machine has eight and your
+container cannot see them*. Preflight's own code never runs in host context.
 
-> **Why it is not part of `detect`** — `detect` is a pure read no flag can turn into anything else,
-> while preflight starts containers that hold an accelerator and asks a driver to toggle a mode and
-> put it back. On a node carrying live workloads that difference is worth a command of its own. The
-> two cannot drift, because preflight reuses the detect pass rather than reimplementing it.
+> **Why it is not part of `detect`** — `detect` is a pure read, while preflight starts containers
+> that hold an accelerator and asks a driver to toggle a mode and put it back. On a node carrying
+> live workloads that difference is worth a command of its own. The two cannot drift, because
+> preflight reuses the detect pass rather than reimplementing it.
 
 ## Logical slicing per manufacturer
 
@@ -605,86 +493,49 @@ carry `runtimeClassName: iluvatar` — without it the preloaded `libvgpu.so` fin
 `libcuda.so.1` to hook. HAMi-core-on-corex is verified at symbol level against a real corex driver
 but **not on Iluvatar hardware**: the pairing is advertised and injected, and unvalidated in hardware.
 
-Ascend also turns on the driver's container-share mode for each accelerator about to take a second
-tenant: modes `sliced`, `shared` and `visibility`, never `exclusive`, which owns whole accelerators.
-The allocator reads the flag through `binding/dcmi`, writing only when off, so an accelerator already
-carrying a tenant costs one query. One whose flag cannot be set fails `Allocate` naming both
-accelerator and flag, rather than admitting a pod that cannot use its device.
+Ascend enables container-share mode for `sliced`, `shared` and `visibility` allocations, which
+can place a second tenant on an accelerator. Exclusive allocation leaves that flag alone.
+If the flag cannot be set, allocation fails with the accelerator and flag in the diagnostic.
 
-The read is classified into three outcomes, not treated as fatal on its own. A read reporting the dcmi
-entry point missing — or a libdcmi that never loaded — refuses the allocation without writing, since
-no `npu-smi` command adds an API the driver lacks, and that holds even for a device whose flag is
-already on.
+`npu-smi` warns that enabling sharing carries security risks and recommends one user per chip.
+On a measured 910B2, an exclusive container saw full VRAM and opened the device identically in
+both flag states. Slice isolation comes from GPUStack's [allocation
+ledger](#container-identification-and-cross-mode-exclusion) and vcann-rt's `memory-quota` limit.
 
-A driver whose DCMI generation declares no such flag is allowed through instead, in all three
-tenanted modes: refusing on a missing flag would refuse every co-tenant allocation on that
-generation over an entry point its API does not define.
+A missing container-share entry point refuses allocation; no `npu-smi` command can add that API.
+For the [V2 generation](#ascend-two-dcmi-api-generations), which declares no such flag, the
+allocator allows all three tenanted modes and logs the accelerator. Whether V2 enforces an
+equivalent guard by another mechanism remains unmeasured.
 
-The [V2 API](#ascend-two-dcmi-api-generations) has no container-share entry point at all, so there
-is nothing to read, nothing to write and no command to offer; the numbers such a command would
-print are the binding's V2 addressing, not numbers an operator can type.
-
-Each allowed allocation is logged with its accelerator.
-
-> **Why** — the flag's refusal of a second container was measured on a 910B2 running V1, and it is not
-> a universal rule. Whether the V2 generation enforces the same guard by other means is **unmeasured**;
-> until it is, the only honest reading of a missing flag is "allow, and log". The log line is the
-> record of every allocation that relied on this.
-
-Any other read failure still writes: the write is what makes the flag known, so a timeout cannot
-refuse an allocation the write completes — it is logged instead. dcmi resolves each symbol
-independently, so the absence can surface on the write rather than the read; that is refused the same
-way, without a command. A write that fails for any other reason carries both reasons and the remedy.
-
-Two properties of the flag:
-
-- **Whole-accelerator allocation is unaffected**: measured on a 910B2 in both flag states, an
-  exclusive container starts, sees full VRAM and opens the device identically.
-- **Its one real effect is that the driver stops refusing a second container**, which is why
-  `npu-smi` warns *"There are security risks when opening device sharing, Please ensure that only a
-  single user uses the chip"* before setting it. Multi-tenancy on one chip is what logical slicing is
-  for, and safety comes not from that guard but from GPUStack's own per-accelerator ledger (the
-  [cross-mode invariant](#container-identification-and-cross-mode-exclusion)) plus vcann-rt's
-  memory-quota enforcement, capping a slice at its `memory-quota` rather than the accelerator total.
+Other read failures still lead to an attempt to enable the flag. If that write also fails, the
+error reports both failures and the remedy.
 
 The flag persists in the driver, so an accelerator that has hosted a tenant stays shareable until the
 host reboots or an operator clears it with `npu-smi set -t device-share`.
 
-Cambricon needs the card in sMLU mode before a slice can exist on it, and the allocator turns it on
-(only for `sliced`, unlike Ascend's flag, since a whole-card tenant has no use for it). It reads
-through `binding/cndev` and writes only when the mode is off, so a card already carrying a slice costs
-one query, and it never turns the mode back off: that would strand the slices another pod is running.
+Cambricon logical slicing requires sMLU mode. The allocator enables it for `sliced` allocations
+and leaves it enabled until an administrator clears it with `cnmon`. Turning it off while other
+Pods have slices would strand those Pods.
 
-A card whose library or driver has no sMLU API at all is refused, and without a command being
-offered — none adds an API that is not there. The read normally reports it, so the card is never
-written to; but cnDev looks the getter and the setter up independently, so the absence can surface on
-the write instead, and that is refused the same way. Every other read failure still reaches the
-write, the write being what makes the mode known; the read that could not be trusted is logged.
+If the library or driver has no sMLU API, allocation fails without suggesting a command. Other
+write failures report the PCI address and cnDev index and suggest `cnmon set -c <index> -smlu on`.
+Confirm the ordinal with `cnmon` before using it: equality with the reported index is unverified.
 
-A write that fails for any other reason names the card by PCI address and cnDev index and hands over
-`cnmon set -c <index> -smlu on`, telling the operator to confirm the ordinal with `cnmon` because that
-equality is unverified. The mode then persists: once on, it stays on until an admin clears it with
-`cnmon`.
+Cambricon slice capacity is advertised even when sMLU mode is off, so allocation can enable it.
+It needs no slicing library from GPUStack's image. Advertised capacity alone does not establish
+that the driver can serve a slice; the mode and profile APIs are checked during allocation.
 
-Sliced Cambricon capacity is advertised on every card, whatever the host's driver or library can do.
-Unlike Ascend, whose count depends on a vcann-rt runtime the image either ships for that family or
-does not, Cambricon slicing needs nothing from GPUStack's own image, so there is nothing for the
-detector to gate on, and a card whose mode is merely off must be offered anyway, or the preflight
-that turns it on could never run; withholding a card is silent where an `Allocate` failure is loud.
-
-So an advertised card is not a promise it can slice: the mode API and the profile API are looked up
-independently, the `cntoolkit` userspace version is not readable from where the detector runs, and
-the mode's effect on a whole-card tenant is unmeasured (Ascend's flag was measured benign in both
-states, and no Cambricon equivalent exists). Each of those surfaces at `Allocate`, with the message
-above.
+The detector cannot read the `cntoolkit` userspace version from its container. The effect of
+sMLU mode on a whole-card tenant remains unmeasured; the Ascend observation above does not
+establish that behavior for Cambricon.
 
 AMD splits the two dimensions across two enforcers, alone among the manufacturers. Memory is a
 preload library like the others, accounting in a per-container region named by `VROCM_LEDGER_PATH`.
 Compute is no variable at all: ROCm enforces it in hardware through `HSA_CU_MASK`, which ROCr reads
 while initialising, before any preloaded code exists.
 
-So the operator derives the mask, closed-form over the accelerator's topology and branching on its
-GPU architecture family, and injects it; the library never sees it.
+So the operator derives the mask from the accelerator's topology and injects it; the library never
+sees it.
 
 A sliced AMD container gets its device nodes the same way the exclusive and shared paths do: the
 allocator injects `/dev/kfd` plus each granted accelerator's `/dev/dri/card<N>` and
@@ -746,34 +597,26 @@ error.
 
 ### Where the preload libraries come from
 
-They are compiled into the operator image per runtime version — cloned inline at pinned commits, no
-git submodule, in the `xbuild-nvidia-cuda-*` / `xbuild-ascend-cann-*` Dockerfile stages, scripts
-under `pack/gpustack-operator/external/{nvidia,ascend}` — and staged onto the host
-(`/var/lib/gpustack/operator/lib`) by a device-manager **init container**.
+The preload libraries are compiled into the operator image per runtime version and staged onto the
+host (`/var/lib/gpustack/operator/lib`) by a device-manager **init container**.
 
 The allocator mounts the matching library plus a per-pod working directory into each sliced
 container, reclaiming those directories once their pods are gone.
 
-**Iluvatar adds no build stage of its own**: its lib dir is filled by copying the
-`xbuild-nvidia-cuda-12` HAMi-core `/out` a second time (corex exposes a CUDA-compatible
-`libcuda.so.1`, so the same library serves), one flat directory, no runtime-version subdivision.
+**Iluvatar reuses the NVIDIA CUDA 12 HAMi-core build**: corex exposes a CUDA-compatible
+`libcuda.so.1`, so the same library serves, one flat directory, no runtime-version subdivision.
 
-**AMD needs exactly one build stage, a property of the library rather than a shortcut.**
-`libvrocm.so` links no ROCm object: every runtime entry point resolves at load time, not link time,
-so one artifact serves every ROCm version a workload container may bring, and
-`${GPUSTACK_LIB_DIR}/amd/` is flat where `nvidia/` and `ascend/` carry a subdirectory per runtime
-generation.
+**AMD's library is one artifact for every ROCm version**: `libvrocm.so` links no ROCm object, so
+every runtime entry point resolves at load time rather than link time, and its directory is flat
+where NVIDIA's and Ascend's carry a subdirectory per runtime generation. It ships the two readers
+(`rocm-monitor`, `rocm-cumask-check`) the allocator mounts beside it.
 
-It is built from this repository's own `csrc/amd/rocm-slicing-shim` tree, in a ROCm devel image
-chosen for its glibc floor rather than its ROCm version, and ships the two readers (`rocm-monitor`,
-`rocm-cumask-check`) the allocator mounts beside it. ROCm publishes no `aarch64` user space, so the
-**`arm64` operator image carries no AMD shim**, and no AMD node either: the detector's libraries do
-not load there.
+ROCm publishes no `aarch64`
+user space, so the **`arm64` operator image carries no AMD shim**, and no AMD node either: the
+detector's libraries do not load there.
 
-**T-Head's pair is the exception on both counts.** It is built from this repository's own sources
-(`csrc/thead/ppu-slicing-shim`, by the `xbuild-thead-ppu` stage inside the manufacturer's SDK image)
-rather than cloned from an upstream at a pinned commit, and carries no runtime-version subdirectory,
-the PPU SDK living in the workload container rather than ours.
+**T-Head's pair is built from this repository's own sources and carries no runtime-version
+subdirectory**, the PPU SDK living in the workload container rather than ours.
 
 That SDK is `x86_64`-only, so the **`arm64` operator image carries no PPU shim** — the detector does
 not check for one, on the ground that a PPU only exists in an `x86_64` host.
@@ -786,16 +629,13 @@ runtime-isolation artifacts go on `main`, where the workload runs, and where the
 `main`'s namespaces lands. `sshd` requests an internal-only
 `device.gpustack.ai/<manufacturer>.visibility` resource, quantity = `main`'s accelerator count.
 
-The allocator serves it from the same `ResourceServer` under an internal `Visibility` mode:
-`Allocate` selects no fresh device, reuses the physical device(s) `main` holds, and returns the same
-plain response the non-sliced modes do (the manufacturer's visible-devices env, and for those that
-inject their own nodes, [Exclusive and shared](#exclusive-and-shared), those nodes as well) with no
-slicing artifacts and no ledger consumption. It correlates the two calls in two steps:
+The SSH sidecar reuses the devices held by `main`, with the plain environment or device-node
+injection described in [Exclusive and shared](#exclusive-and-shared). It receives no slicing
+artifacts and consumes no additional accelerator ledger capacity.
 
-- the in-process, pod-keyed reservation recorded at `main`'s `Allocate` — the kubelet allocates
-  `main` before `sshd`, sequentially, in Pod spec order;
-- failing that, the Pod's durable `device.gpustack.ai/accelerator.allocated` annotation, so a
-  device-manager restart landing between the two calls no longer strands the sidecar.
+The allocator matches the sidecar to `main` through an in-process reservation, then the Pod's
+`device.gpustack.ai/accelerator.allocated` annotation. The kubelet allocates `main` first; the
+annotation lets the sidecar recover the same grant after a Device Manager restart.
 
 **What that env names follows the owner's family**: the accelerator(s) `main` holds for an
 exclusive/shared/sliced owner; for a **partition-backed** owner the partition itself, never the
@@ -810,17 +650,10 @@ responder serves this mode — AMD, Cambricon, Hygon and MetaX inject their cont
 the sidecar as they do for the owner. NVIDIA follows whichever channel its resolver settled on, so a
 CDI request appears here as well.
 
-The trigger is the owner container's own `.partitioned.<kind>-<profile>` request, in the Pod spec
-from the start.
-
-The identity comes from the manufacturer responder's partition capability
-(`PhysicalSlicedResponder` — the interface that materializes a partition, so a responder able to
-carve one can name it).
-
-It reads the owner's durable node-local ownership record and proves the recorded instance still live
-before naming it — see [NVIDIA MIG](nvidia-mig.md#requesting-a-partition), [T-Head
-MIG Operations](thead-mig.md#requesting-a-partition) and [Hygon MIG
-Operations](hygon-mig.md#requesting-a-partition).
+For a partition-backed owner, the allocator reads the owner's `.partitioned.<kind>-<profile>`
+request and verifies that its durable node-local ownership record still names a live partition.
+See [NVIDIA MIG](nvidia-mig.md#requesting-a-partition), [T-Head
+MIG](thead-mig.md#requesting-a-partition) and [Hygon MIG](hygon-mig.md#requesting-a-partition).
 
 A responder lacking that capability, or unable to substantiate the identity, fails the admission
 closed rather than widening the grant back to the accelerator.
@@ -836,39 +669,29 @@ slice against itself.
 
 ## Container identification and cross-mode exclusion
 
-`Allocate` carries the assigned device IDs but not the pod identity. The allocator asks the kubelet
-first, over its pod-resources API: the kubelet adds a pod before admitting it, admits one at a time,
-and records a container's devices only once its `Allocate` returns. So the container this call serves
-is the one the kubelet holds without a device of the resource yet.
+An `Allocate` call names the assigned device IDs but not the pod it serves, and the allocator has to
+know both. It asks the kubelet first, over its pod-resources API: the kubelet adds a Pod before
+admitting it and admits one at a time, so the container this call serves is the one the kubelet holds
+without a device of the resource yet.
 
-That answer outranks the order below. The kubelet admits pods in the order they reach it, and
-creation timestamps keep whole seconds only, so two slices created together and bound in the other
-order were recorded on each other: each annotation named the other Pod's accelerator, and each
-container got the other's memory limit.
+That answer outranks the allocator's own matching, because Pod creation timestamps keep whole
+seconds only: two slices created together and bound in the other order would be recorded on each
+other, each container getting the other Pod's memory limit.
 
-When the kubelet cannot be asked, names none of the candidates, or names several, the allocator
-matches the node's pending pods itself, among those the kubelet named if any. It drops candidates
-this call could not serve on the accelerators offered, skips a (pod, container) already holding a
-reservation, and takes the oldest survivor.
+When the kubelet cannot be asked, names
+none of the candidates, or names several, the allocator matches the node's pending pods itself —
+dropping candidates the call could not serve, skipping one already holding a reservation, taking the
+oldest survivor. A retried call is not charged twice.
 
-The feasibility test **disambiguates, it does not gate**: an all-infeasible set falls back to the
-unfiltered oldest rather than failing to identify. Once the container is known, a logical slice its
-accelerator cannot hold is **refused** with `FailedPrecondition`: one with no free slot, or without
-the units the slice needs. The kubelet fails that Pod with `UnexpectedAdmissionError`.
+Once the container is known, a logical slice its accelerator cannot hold is refused with
+`FailedPrecondition`: one with no free slot, or without the units the slice needs. The kubelet fails
+that Pod with `UnexpectedAdmissionError`. The refusal reads the same room the allocation hint does,
+so when it refuses, no candidate fits that accelerator.
 
-The refusal reads each other container's slice once — the in-process reservation, else the
-annotation — and not the container's own, so a retried `Allocate` is not charged twice. Pods in a
-terminal phase count as free: the kubelet has returned their tokens. The feasibility test and the
-allocation hint read the same room, so when it refuses, no candidate fits that accelerator.
-
-It is the one layer every path reaches, a Pod outside the scheduling chain or a hint the kubelet
-declined, and it fires exactly where the ledger used to clamp `Remaining` at zero. Both the kubelet
-lookup and the refusal have an off switch, `GPUSTACK_DEVICE_PLUGIN_IDENTIFY_BY_KUBELET` and
-`GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE` (see [Settings](../../reference/settings.md#general-variables)).
-
-All `Allocate`s of a node run in its single device-manager process, so a per-node mutex serializes
-each workload `Allocate`'s *identify → cross-mode check → reserve* section; the durable-annotation
-patch runs outside it.
+Both the kubelet lookup and the refusal have
+an off switch, `GPUSTACK_DEVICE_PLUGIN_IDENTIFY_BY_KUBELET` and
+`GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE` (see
+[Settings](../../reference/settings.md#general-variables)).
 
 Reservations key on **(Pod UID, container)** and the durable
 `device.gpustack.ai/accelerator.allocated` annotation is a **map keyed by container name**, so two
@@ -888,34 +711,27 @@ reservation both — because the kubelet does not start that container. A claim 
 held is restored rather than dropped, and a give-back that cannot reach the API is retried until it
 lands or the Pod is gone.
 
-One invariant this enforces is the per-accelerator exclusive/shared/sliced cross-mode rule. An
-accelerator kubelet assigned that another mode holds, per the ledger `Status` or the in-process
-reservation, is refused with `FailedPrecondition`: an exclusive tenant truly owns its accelerator on
-every path, Kueue or raw.
+The cross-mode invariant is what this layer enforces: an accelerator kubelet assigned that another
+mode holds, per the ledger status or the in-process reservation, is refused with
+`FailedPrecondition` — an exclusive tenant truly owns its accelerator on every path, Kueue or raw.
 
-Prevention runs a stage earlier. `ListAndWatch` keeps an accelerator held in another mode advertised
-— removing tokens would strand kubelet's checkpointed allocations — but reports its tokens
-**Unhealthy**, read from the ledger `Status` and the reservation and pushed on the same
-reservation/release instant, so the kubelet can never hand a held accelerator to an opposite-mode
-pod.
+`ListAndWatch` keeps tokens advertised while an accelerator is held in another mode, preserving
+kubelet's checkpointed allocations, but reports those tokens as Unhealthy. Health follows the
+ledger and reservations and is updated on reservation and release. The allocation check remains
+the final guard against conflicting modes.
 
-It picks tokens freely: `GetPreferredAllocation` does run under the default TopologyManager policy
-`none`, but is advisory and may be ignored. `Visibility` is exempt: the `sshd` sidecar's token must
-stay allocatable on the very accelerator its workload holds, whatever mode that hold is.
+The visibility resource remains allocatable for the SSH sidecar on its workload's accelerator,
+whatever mode the workload holds.
 
-It also maps a batch of identical GPU Pods admitted together (e.g. by Kueue) one-to-one to distinct
-pods, keeping annotations and the ledger correct instead of double-attributing one and losing
-another.
-
-The `sshd` visibility path re-finds its Pod's **non-self accelerator allocation** — reservation
-first, durable annotation second, both by the same owner pick — rather than the reservation-skip; the
-request rules confine a Pod's claims to one container group, so that owner is unambiguous.
+It also maps a batch of identical accelerator Pods admitted together (e.g. by Kueue) one-to-one to
+distinct Pods, keeping annotations and the ledger correct instead of double-attributing one and
+losing another. The `sshd` visibility path re-finds its Pod's **non-self** accelerator allocation,
+rather than skipping reservations, so the sidecar still resolves after a Device Manager restart.
 
 ## Placement preference
 
 For the accelerator-bound families, tokens name an accelerator, so the kubelet's pick of a token is
-the pick of an accelerator; the plugin only orders the candidates it offers back from
-`GetPreferredAllocation`.
+the pick of an accelerator; the plugin only orders the candidates it offers back.
 
 For a logical slice it offers the tokens of the most-occupied accelerator that still fits: one
 already serving slices beats a pristine one, ties broken by the accelerator's position within its
@@ -923,30 +739,19 @@ group, so identical requests against identical state place identically. Slices c
 each opening a fresh accelerator and stranding a node whose every accelerator is partly used but none
 can host one large claim.
 
-The ordering is computed per `DevicesGroup`, walking the groups in spec order, not across a node's
-groups at once.
-
-It stays a preference: the kubelet may take another accelerator. For a logical slice `Allocate` is
-the backstop — it refuses one short of a slot or of room, reading the same room the hint does (see
-[Container identification](#container-identification-and-cross-mode-exclusion)). A hint read from
-the ledger alone would miss slices reserved since its last rebuild. Two properties are load-bearing:
-
-- every id returned must be one the kubelet actually offered — the full
-  `<group>:<accelerator>:<token>` form, since an id the kubelet cannot match is discarded
-  **silently** and the accelerator choice degrades to arbitrary;
-- the call stays advisory by API contract, so under a restrictive TopologyManager policy the kubelet
-  allocates the NUMA-aligned set before consulting the plugin at all.
+It stays a preference: the kubelet may take another accelerator. For a logical slice allocation
+itself is the backstop — it refuses one short of a slot or of room, reading the same room the hint
+does (see [Container identification](#container-identification-and-cross-mode-exclusion)). The call
+is advisory by API contract, so under a restrictive TopologyManager policy the kubelet allocates the
+NUMA-aligned set before consulting the plugin at all.
 
 ### The partitioned family: fungible tokens
 
-The `Partitioned` family is the one exception to accelerator-bound tokens. Its `Allocate` treats
-the kubelet's device IDs as a *quantity* and chooses the accelerator itself, under the same mutex,
-against the live geometry — publishing the choice (accelerator, profile, intended memory-slice
-intervals) into the reservation before releasing the mutex, so a concurrent call selects against
-post-decision state.
+The `Partitioned` family is the one exception to accelerator-bound tokens. Its allocation treats the
+kubelet's device IDs as a *quantity* and chooses the accelerator itself, against the live geometry.
 
 Accelerators are **packed, not spread**: the most-occupied one that still fits wins, keeping a
-sibling whole for a later whole-accelerator profile. A retried `Allocate` for a container that
+sibling whole for a later whole-accelerator profile. A retried allocation for a container that
 already has an allocation reuses the accelerator it used, read from the reservation and then from the
 durable annotation.
 
@@ -961,21 +766,20 @@ annotation-derived key, so hand-carving on a managed node is unsupported (see
 
 ## One driver stack per node
 
-A node hosts a single driver/runtime stack per manufacturer, so every `DevicesGroup` of a given
-manufacturer on it shares one driver and runtime version. The per-runtime-version library subdir
-(`cuda-<major>` / `cann-<major>-<family>`) the allocator picks from the first allocated accelerator is
-therefore correct for every accelerator in a sliced allocation.
+A node hosts a single driver/runtime stack per manufacturer, so every accelerator group of a given
+manufacturer on it shares one driver and runtime version. The per-runtime-version library
+subdirectory (`cuda-<major>` / `cann-<major>-<family>`) the allocator picks from the first allocated
+accelerator is therefore correct for every accelerator in a sliced allocation.
 
-**Nothing below the detector re-checks that such a subdir was actually built.** So on Ascend the
-detector offers logical slicing only for the family/runtime-major pairs the image ships a vcann-rt
-for — one per `xbuild-ascend-cann-<major>-<family>` stage. A pair with no stage is not advertised at
-all, instead of being advertised and then failing to start the container on a missing directory.
-Adding a build stage widens that set.
+**Nothing below the detector re-checks that such a subdirectory was actually built.** So on Ascend
+the detector offers logical slicing only for the family/runtime-major pairs the image ships a
+vcann-rt for. A pair with no build stage is not advertised at all, instead of being advertised and
+then failing to start the container on a missing directory. Adding a build stage widens that set.
 
 The allocator still guards against a mismatch **defensively** (NVIDIA rejects a sliced allocation
 spanning different CUDA majors; Ascend rejects a multi-accelerator sliced allocation, since
 vcann-rt's `npu_info.config` models a single physical NPU), so any future regression fails the
-`Allocate` loudly instead of silently mounting an incompatible library.
+allocation loudly instead of silently mounting an incompatible library.
 
 ---
 

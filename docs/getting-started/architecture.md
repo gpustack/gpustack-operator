@@ -39,34 +39,27 @@ admission chain. Model delivery and KV cache are optional services alongside tha
 
 ```mermaid
 flowchart TB
-    subgraph control["Control plane"]
-        REQUEST["Instance / ModelDeployment / Pod"]
-        WORKER["Worker APIs and controllers"]
-        QUEUES["InstanceTypes and queues"]
-        KUEUE["Kueue admission and placement"]
-        TOPOLOGY["Topology inventory and profiles"]
-        ARTIFACT["ModelArtifact"]
-        CACHE["KV cache backends and pools"]
-    end
+    REQUEST["GPU Instances<br/>ModelDeployment / Pods"]
+    WORKER["Worker"]
+    DEVICES["Devices Manager<br/>Accelerators / RDMA"]
+    TOPOLOGY["Topology Aware"]
+    QUEUES["Kueue<br/>Pools and queues"]
+    ARTIFACT["Model Delivery<br/>ModelArtifact"]
+    MODELS["Model Manager<br/>Node cache"]
+    CACHE["KV Cache<br/>Backends and pools"]
+    STORE["Cache service"]
+    PODS["Workload Pods<br/>SSH / inference"]
 
-    subgraph nodes["Workload nodes"]
-        DISCOVERY["NFD and Device Manager"]
-        MODELS["Model Manager and node cache"]
-        PODS["GPU Instance and inference Pods"]
-    end
-
-    STORE["Shared KV cache · managed or external"]
     REQUEST --> WORKER
-    DISCOVERY -- "device capacity" --> QUEUES
-    WORKER -- "workload Pods" --> KUEUE
-    QUEUES --> KUEUE
-    TOPOLOGY -- "placement domains" --> KUEUE
-    KUEUE -- "admitted workloads" --> PODS
-    DISCOVERY -- "accelerator and RDMA allocation" --> PODS
+    WORKER --> QUEUES
+    DEVICES -- "capacity" --> QUEUES
+    TOPOLOGY -- "placement" --> QUEUES
+    QUEUES -- "admission" --> PODS
+    DEVICES -- "device access" --> PODS
     ARTIFACT -- "node delivery" --> MODELS
-    MODELS -- "mounted weights" --> PODS
-    ARTIFACT -- "Pod or claim delivery" --> PODS
-    CACHE -- "managed members or external service" --> STORE
+    MODELS -- "weights" --> PODS
+    ARTIFACT -- "Pod / claim delivery" --> PODS
+    CACHE --> STORE
     STORE -. "optional KV reuse" .-> PODS
 ```
 
@@ -107,15 +100,10 @@ containers and SSH access using the same accelerator allocation.
 
 ## Request admission
 
-For a workload requesting a GPU slice, admission proceeds through five gates:
-
-| Gate | Check | Details |
-|---|---|---|
-| Pod webhook | Validates resource combinations and calculates the scheduling units. | [Accelerator Requests](../modules/devices/requests.md) |
-| Kueue | Reserves pool quota and places the workload within compatible topology domains. | [Topology-Aware Scheduling](../modules/topology/scheduling.md) |
-| AdmissionCheck | Verifies that individual accelerators can satisfy the request; retries when they cannot. | [Admission](../modules/devices/admission.md) |
-| Scheduler and kubelet | Select a node and device tokens with enough remaining capacity. | [Device Discovery](../modules/devices/discovery.md) |
-| Device allocator | Checks conflicting allocations, configures device access and records the grant. | [Device Discovery](../modules/devices/discovery.md#the-device-plugin-allocator) |
+The Pod webhook validates an accelerator request before Kueue reserves quota. Admission checks
+confirm that devices can satisfy it, and the scheduler, kubelet and allocator complete the
+allocation. [Admission](../modules/devices/admission.md#the-five-gates) owns the gate sequence and
+its failure behavior.
 
 InstanceType status reports the remaining capacity as workloads allocate and release devices. Use
 `kubectl get instancetype -w` to watch those changes. The [Walkthrough](walkthrough.md) shows the

@@ -24,9 +24,7 @@ upstream default:
 | `llm-d-router` | A fixed scoring profile | The highest total of prefix-cache match (weight `3`, not scored on a decode half), queue depth (`2`) and KV-cache utilization (`2`) |
 
 Both `cache_aware` routers log the policy once at startup, as `policy: CacheAware { cache_threshold:
-0.3, … }`. Those two rows are read from `vllm-project/router@v0.1.15` and
-`sgl-project/sglang@gateway-v0.3.1`, the versions `pack/llm-router/Dockerfile` builds; the profile is
-what `pkg/worker/kvcache/router/router.go` renders.
+0.3, … }`.
 
 ## Prefix affinity
 

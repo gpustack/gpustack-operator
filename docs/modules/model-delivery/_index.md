@@ -7,6 +7,7 @@ a node cache, a PVC or an image.
 
 - [Sources and delivery](#sources-and-delivery)
 - [Cache operations](#cache-operations)
+- [Observing and syncing](#observing-and-syncing)
 
 ## Sources and delivery
 
@@ -18,6 +19,12 @@ choices. [Model Image Source](image-source.md) covers image-backed weights.
 [Model Store Operations](operations.md) covers configuration, watermarks and
 removal. [Model Prefetch](prefetch.md) covers warming weights before a Pod needs
 them. [Node Model Store](node-store.md) describes the per-node record and plugin.
+
+## Observing and syncing
+
+The [Model Artifact API](views.md) covers reading artifact progress and node
+caches from the API. [Node-to-Node Sync](peer-sync.md) covers how a node pulls
+weights from another node's cache.
 
 ---
 

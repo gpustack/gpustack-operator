@@ -213,7 +213,7 @@ means editing C, not a config.
 
 Kubernetes label *values* cap at 63 chars. Long names (ClusterQueue names, queue references) live in
 `schedule.gpustack.ai/*` **annotations**, not labels; LocalQueues are named `gpustack-fnv64-<hash>`
-(always 31 chars; see [Scheduling Chain](../modules/devices/scheduling.md#nodequeueentrancereconciler-node_queue_entrancego)).
+(always 31 chars; see [Scheduling Chain](../modules/devices/scheduling.md#a-localqueue-in-every-namespace)).
 Check this limit for any name that flows into a label value.
 
 ---

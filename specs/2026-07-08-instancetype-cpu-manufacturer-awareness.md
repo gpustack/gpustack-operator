@@ -324,6 +324,14 @@ the same CPU.
 - `pkg/worker/settings/value.go` — add `InstanceTypeAwareCPUManufacturer`.
 - `docs/getting-started/architecture.md`, `docs/reference/settings.md`, `docs/contribute/development.md`, `README.md`, e2e cases — updated.
 
+### CPU identity rationale retained from the discovery guide
+
+CPU family/model numbers are independent numbering spaces on x86 (CPUID) and arm64 (MIDR).
+A value such as `25-1` can occur in both; pooling also retains the architecture because their
+binaries are not interchangeable. The revised key removes the old abbreviated `-ln-x64` suffix
+and recovers its label-length budget. `nodefeature.ExtractGeneralNodeKey` owns key construction;
+the CPU-info discovery rule uses the `cpuid` library to report the readable model name.
+
 ### Code Style
 Editable setting, read per-reconcile (matches `value.go`):
 ```go

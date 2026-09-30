@@ -117,12 +117,32 @@ Two consequences worth stating:
 - **A tutorial shows real output.** Every command and result in a walkthrough is captured from a live
   cluster, with node names genericized. Never hand-write plausible output.
 
+## Reader and implementation detail
+
+User documentation explains how to configure, use and operate a capability. Keep public field
+contracts, commands, defaults, permissions, compatibility limits and observable failure behavior.
+A filename, method name or internal HTTP route is not evidence a reader needs to finish a task.
+Use a source path only in contributor documentation or when the task is editing that source.
+Keep public API routes when the reader calls them; explain a missing capability through its effect
+on the workload rather than a missing internal endpoint.
+
+Implementation rationale, source investigations, measured traces and rejected alternatives belong
+in the existing owning `specs/` document. Before removing such material from a guide, compare the
+actual spec section and preserve any missing fact there, including its evidence limits. Link to the
+spec for readers who need the engineering detail. Do not duplicate evidence across guides or erase
+uncertainty while shortening prose.
+
+A documentation review checks both sides of a move: the guide still gives the reader the correct
+operation and limits, and the spec retains the implementation information. Check referenced skills
+as well; a skill that needs source or measurement detail should read the owning spec explicitly.
+Existing docs lint checks structure and links; it does not prove that a moved contract is complete.
+
 ## Writing rules
 
 - **State the rule first, in the first sentence of the paragraph or section.** A reader who stops
   there must still be correct.
-- **Demote rationale into a `> **Why**` note.** The measured failure, the alternative rejected, the
-  race that forced the design — valuable, but not on the critical reading path:
+- **Keep decision-relevant rationale short.** Put source investigations, measured traces and rejected
+  alternatives in the owning spec; a brief note may explain a constraint the reader must act on:
 
   ```markdown
   The gate reads capacity rather than allocatable.
@@ -133,7 +153,8 @@ Two consequences worth stating:
 
 - **Delete some rationale rather than demoting it.** Before writing a `> **Why**` that names the error a
   step avoids, ask **who takes that step** — not which page you are on. One the operator performs
-  unconditionally leaves the reader nothing to decide, so its error is noise: delete the block, then
+  unconditionally leaves the reader nothing to decide: preserve the technical rationale in its owning
+  spec before removing the block, then
   re-read around it, since a removal orphans the pronouns and cross-references that pointed into it. One
   the reader takes keeps its error, which is what tells them what they are choosing. Either way keep the
   **boundary of a measurement** — which hardware, which driver generation, what is still unmeasured.
@@ -150,8 +171,8 @@ Two consequences worth stating:
 - **Prefer a table for anything enumerable** — modes, keys, vendors, gates, knobs.
 - **Keep table headers short.** Use a precise noun or short phrase, such as `Resource`, `Scope` or
   `Default`. Put conditions and explanations in the cells or adjacent prose. Preserve technical names.
-- **Name the code.** `pkg/nodefeature`, `node_queue.go`, `pkg/nodefeature/unit_resources_preset.yaml` — a reader
-  should be able to jump from the claim to the source. Do not paste code that will drift; name it.
+- **Name code in contributor guides.** Give a source path when the reader is editing that code.
+  User guides state the behavior and link to the owning spec for its implementation.
 - **No symbol-numbered cross-references** (`switch ①`, "gate-2 above"). Use the heading name and a
   link — the numbering breaks the moment a page is split.
 - **Wrap at about 100 columns**, and keep tables on one line each (a wrapped table row is unreadable in

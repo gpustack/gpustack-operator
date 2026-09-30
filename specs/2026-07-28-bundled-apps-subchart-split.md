@@ -1006,6 +1006,21 @@ pre-install/pre-upgrade hooks execute.
 
 ## Design Details
 
+### Runtime resource installation and teardown
+
+`pkg/worker/worker.go` applies the CPU NodeFeatureRule and both AdmissionChecks during `Prepare`,
+including when application installation is disabled. The apply helpers for the checks are in
+`pkg/worker/kuberess/apps_kueue_admission_check.go`; they wait for Kueue's CRD. The joint check's
+queue contract is described in the role-replica admission spec.
+
+On shutdown, `deregisterOnTeardown` checks the system namespace before removing registrations.
+A live namespace or an unreadable namespace leaves the registrations in place; a terminating or
+missing namespace permits cleanup. `apis.DeleteServicesBackedBy` removes every APIService whose
+backing Service is in that namespace, including Kueue's visibility registrations. This prevents
+stale aggregated discovery from blocking namespace deletion. These are source-confirmed behavior
+and ownership notes, not a new teardown measurement.
+
+
 ### Commands
 
 Build, lint and test run **locally on darwin** — the whole module, including the CGO vendor
@@ -1111,6 +1126,21 @@ Deleted: `apps_node_feature_discovery.go`, `apps_csi_driver_nfs.go`, `apps_csi_d
 and their tests. `apps_kueue.go` keeps only its reaper, renamed `apps_kueue_reap.go` to pair
 with the test that was already named for it. `apps_gpustack_device_manager.go` is generalised
 into `apps_gpustack_operator.go`.
+
+### RuntimeClass selection retained from the discovery guide
+
+The earlier vendor-list discussion describes the initial `runtimeInjectsDriver` rule. Current
+chart rows also carry `runtimeInjectsDevices`. RuntimeClass creation is gated on either flag,
+under `deviceManager.createRuntimeClasses`, and only adopts a class absent or owned by this release.
+`runtimeName` alone does not establish that its handler is installed. NVIDIA and MThreads need
+runtime driver injection for the device-manager; Ascend and Iluvatar workload allocators supply
+visibility environment variables without device nodes and need runtime device injection. AMD
+injects `/dev/kfd` and DRM nodes itself. A class supplied by a vendor operator can still be used.
+
+The chart's manufacturer-map and device-class tests compare their Go-backed identities with
+`pkg/nodefeature`; the runtime-injection flags describe deployment requirements rather than a
+new device identity. A device-manager matcher receives the chart's manufacturer list and the
+acceleratable PCI classes defined by `pkg/nodefeature`.
 
 ### Code Style
 

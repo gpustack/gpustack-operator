@@ -59,24 +59,24 @@ fragmentation.
 
 ### Gate 3 — the per-accelerator AdmissionCheck
 
-When Kueue reserves quota, `NodeDevicesAdmissionReconciler` (`node_devices_admission.go`) reads the
-`Devices` ledger of every node the assigned ResourceFlavor names and checks the fit per accelerator.
-The `credits` gate before it sees only a scalar total, so it cannot tell that eight accelerators
-sliced to 50 % each cannot serve a request for five whole accelerators. This check can, and holds
+When Kueue reserves quota, the `gpustack-node-devices` AdmissionCheck reads the `Devices` ledger of
+every node the assigned ResourceFlavor names and checks the fit per accelerator. The `credits` gate
+before it sees only a scalar total, so it cannot tell that eight accelerators sliced to 50 % each
+cannot serve a request for five whole accelerators. This check can, and holds
 the Workload with `Retry` when the fit fails.
 
-The worker's `Prepare()` applies the `gpustack-node-devices` AdmissionCheck at startup, retrying
+The worker applies the `gpustack-node-devices` AdmissionCheck at startup, retrying
 until Kueue's CRD is established — the chart cannot ship it, since Kueue templates its own CRDs and
 nothing orders them ahead of a custom resource in the same render (see [Install
 modes](../../operate/installation-modes.md#chart-deployed-and-worker-applied-resources)).
 
-This reconciler keeps it `Active`; the accelerated queue references it in `spec.admissionChecksStrategy`
-only once it is ([`NodeQueueReconciler`](scheduling.md#nodequeuereconciler-node_queuego)).
+The worker keeps it `Active`; an accelerated queue references it in `spec.admissionChecksStrategy`
+only once it is ([Queue quota and draining](scheduling.md#queue-quota-and-draining)).
 
 Once Kueue reserves quota, the check reads each node's `Devices` ledger for per-accelerator
 `Remaining ≥ demand`: a whole accelerator for exclusive, `.sliced.units` for sliced, an owner share for
 shared, a free placement of the profile for a partition. It rebuilds that ledger from the Pods bound to
-the node, one uncached list via `APIReader`, with the device manager's own aggregation.
+the node, one uncached read, with the device manager's own aggregation.
 
 **A Workload answered `Ready` holds its accelerators before its Pods do.** The ledger moves only when
 `Allocate` records a Pod, after Kueue admits the Workload, the scheduler binds its Pods and the kubelet
@@ -84,10 +84,9 @@ admits them. A second Workload judged in that window would see the first one's a
 
 - So the check first fits every other Workload on the node that is admitted or holds this check's
   `Ready`: the Pods its topology assignment puts there, minus those the rebuilt ledger already holds.
-- A Pod is held once its allocation record names every container asking for an accelerator. Kueue's
+- A Pod is held once its allocation record names every container asking for an accelerator. The
   `kueue.x-k8s.io/workload` annotation and `kueue.x-k8s.io/podset` label tie it to its Workload.
-- The ledger and the held Pods come from the same list, so no Pod is counted twice or missed. The
-  published `Devices` status is rebuilt later and would lag that list.
+- The ledger and the held Pods come from the same read, so no Pod is counted twice or missed.
 - A finished Pod, in phase `Succeeded` or `Failed`, still counts as held, while the ledger stops
   charging the cards the kubelet took back from it ([device discovery](discovery.md#container-identification-and-cross-mode-exclusion)).
   A replacement Pod its Workload creates is then counted by neither until `Allocate` records it.
@@ -139,9 +138,8 @@ shared request of `N >= 2` accelerators gets `shared-free-cards… Gt N-1`. `N` 
 any one container asks for.
 
 - It changes only a Workload whose LocalQueue points at a ClusterQueue carrying this operator's
-  InstanceType mark, with a same-named InstanceType naming an accelerator group. A `matchConditions`
-  expression on the operator's LocalQueue name prefix keeps other tenants' Workloads away from it in a
-  shared Kueue.
+  InstanceType mark, with a same-named InstanceType naming an accelerator group, so other tenants'
+  Workloads in a shared Kueue are out of its reach.
 - It acts on an UPDATE only while the old Workload holds no quota reservation, which is when Kueue
   rebuilds a suspended job's spec and still lets PodSets change.
 - It never denies. Its `failurePolicy` is `Ignore`, and the setting
@@ -193,16 +191,10 @@ The ledger seeds every accelerator at `M`, so an exclusive over-admit that coars
 through is caught exactly, held with `Retry`, and self-heals once Kueue re-admits after the backoff.
 The gate only checks: it never preempts and never answers `Rejected`.
 
-> **Why it skips an evicted Workload** — Kueue resets the checks to `Pending` and drops the quota
-> reservation in two separate writes. Between them an evicted Workload still reports a reservation, so
-> a verdict written there overwrites the reset — and whichever writer wins is final:
->
-> - Kueue stops resetting while the eviction condition is set;
-> - its scheduler will not reserve quota while a check is `Retry`;
-> - this reconciler stops evaluating without a reservation.
->
-> So the backoff loop deadlocks instead of self-healing. Re-reserving quota clears the eviction
-> condition and re-opens evaluation.
+The check never judges an evicted Workload: Kueue resets its checks and quota reservation in two
+separate writes, and a verdict written between them would overwrite the reset and deadlock the
+backoff loop instead of letting it self-heal. Re-reserving quota clears the eviction condition and
+re-opens evaluation.
 
 ### Gate 4 — default scheduler / kubelet
 
@@ -303,10 +295,9 @@ accelerator group (a node can carry several models) and joined to the ledger. An
 reported is never dropped for a missing ledger row, nor read as full for an empty one: it falls back to
 its catalog ceilings, as the node's per-profile capacity keys do.
 
-> **Why the status lives on a real CRD** — the reconciler watches the `Devices` CR and writes into a
-> real CRD's `.status`, so `kubectl get instancetype -w` observes capacity move as pods allocate and
-> free. A read-only projection over the ClusterQueue could not: it borrows the CQ `resourceVersion`,
-> unchanged on a `Devices`-only allocation.
+> **Why the status lives on a real CRD** — the worker watches the `Devices` resource and writes into
+> a real CRD's `.status`, so `kubectl get instancetype -w` observes capacity move as pods allocate
+> and free. A read-only projection over the ClusterQueue could not.
 
 The InstanceType API proxies the controller-managed resource and converts it to the public
 representation.
@@ -327,8 +318,8 @@ edit touches only the InstanceType, never a Node or the ClusterQueue notes.
   delete and re-create. Only immutability is re-checked, never the create-time shape, so a legacy type
   stored before a tightened rule can still be renamed or deactivated.
 - **InstanceType defaulting** — an empty `generalGroup` to the `generic` sentinel; the pool's schedule
-  labels (`nodefeature.PoolScheduleLabels`, grouped by `instance-type-aware-cpu-manufacturer`) and
-  `schedule.gpustack.ai/queue-entrance` (`nodefeature.FormatLocalQueueName(name)`); descriptors enriched
+  labels (grouped by `instance-type-aware-cpu-manufacturer`) and
+  `schedule.gpustack.ai/queue-entrance` (the LocalQueue name format); descriptors enriched
   from a matching ResourceFlavor; and when awareness is on, that flavor's `cpuDetail` note folded into
   `spec.cpu` (generic) or `spec.accelerator.cpu` (accelerated).
 - **Instance validating** — enforces the unit spec on **Create and Update**: a submission's RAM must not
@@ -353,7 +344,7 @@ A second mutating webhook on Pods writes the client configuration an inference e
   served by both entries, which is exactly what the next point is about.
 - Both entries live in the single `gpustack-worker-mutation` configuration, whose name sorts before
   Kueue's so that gate 1 folds a Pod's units before Kueue hashes its resources. Their order within it
-  is immaterial, which a test asserts by running both over one Pod in both orders.
+  is immaterial, and both run over one Pod whichever order the engine picks.
 - Before it adds connector arguments, the KV cache webhook removes the transparent launcher prefixes
   it knows and accepts only the entry point for the declared engine: `vllm` for the vLLM family or
   `python3 -m sglang.launch_server` for SGLang. An unrecognised launcher, launch form, or mismatched
@@ -373,44 +364,19 @@ A second mutating webhook on Pods writes the client configuration an inference e
 ## Update validation while an object is deleted
 
 An UPDATE is neither validated nor defaulted once its object carries a `metadata.deletionTimestamp`,
-unless the handler opts in. `ExecuteSetup` (`pkg/webhook/helper.go`) wraps each one in
-`deletionGuardedDefaulter` / `deletionGuardedValidator`, which return success without calling the
-handler. CREATE and DELETE validation are delegated unchanged in both states.
+unless the handler opts out. The guard exists because an update that clears a finalizer is an UPDATE,
+so a rule reading another object and refusing when it is absent could hold an object past its own
+teardown. Every handler of this operator except `Instance` opts out where its rules are safe, and
+those rules still validate during deletion.
 
-> **Why** — an update that clears a finalizer is an UPDATE, so a rule reading another object and
-> refusing when it is absent can hold an object past its own teardown.
-
-A handler opts out of the guard by implementing `webhook.ReceiveDeletionUpdate`, and the criterion is
-**per rule rather than per handler**: can this rule reject an update whose only change is
-`metadata.finalizers`? A cross-object read is compatible with opting out while it is gated on the field
-it answers for having moved, which a finalizer edit does not do.
-
-| Handler | Validates update while deleting | Reason |
-|---|---|---|
-| `KVCachePoolBinding` | yes | its pool read is gated on the quota ceiling having moved |
-| `KVCacheBackend` | yes | it reads the fallback-image setting only when `spec.image` moved |
-| `KVCachePool`, `InstanceType` | yes | every rule is answered from the old and new objects alone |
-| `ModelDeployment` | yes | every external read its validation makes is skipped for a deleting object, and its **defaulting** declines for one rather than keeping the guard |
-| `PodKVCache` | yes | a terminating Pod still serves, and the kubelet still reprojects its client configuration |
-| `Instance` | **no** | its **defaulting** reads the referenced `InstanceType` and refuses when it is gone |
-| `Pod` (accelerator) | not applicable | registered for CREATE only, and a create carries no deletion timestamp |
-
-`Instance` is the only handler that keeps the guard, and the reason is its mutating half rather than its
-validation: `ValidateUpdate` compares the two objects, but `Default` reads the `InstanceType` and is
-registered `failurePolicy: Fail` on UPDATE. An `InstanceType` deleted ahead of its Instances would
-leave each one undeletable.
-
-`ModelDeployment`'s defaulting reads the same object for the same reason, and reaches the same outcome
-by the other route: it opts out, because its validation is worth keeping during deletion, and then
-returns early for an object carrying a deletion timestamp. Either shape works; what does not work is
-opting out and reading anyway, since the marker cannot be applied to one half alone.
-
-The marker is one decision covering both halves, which is why those frozen fields cannot be recovered
-without putting that read back in the path of every release.
+`Instance` is the one that keeps the guard, so its UPDATE checks are skipped while it is being
+deleted. The reason is its mutating half rather than its validation: its defaulting reads the
+referenced `InstanceType` and is registered `failurePolicy: Fail` on UPDATE. An `InstanceType` deleted
+ahead of its Instances would leave each one undeletable.
 
 ## Running-instance stop
 
-Before (re)creating an Instance's Pod, the `InstanceReconciler` (`instance.go`) reads the backing
+Before (re)creating an Instance's Pod, the worker reads the backing
 `ClusterQueue`'s `StopPolicy` and **stops** the Instance (`spec.stop=true`) rather than recreate a Pod
 the queue can never admit. That covers a queue in `HoldAndDrain` (a pool drain, or a teardown evicting
 admitted workloads), an `InstanceType` being deleted, and an `InstanceType` already gone.
@@ -438,13 +404,13 @@ PodSet request described in [Topology-Aware Scheduling](../topology/scheduling.m
 
 It also sets `resources.quotaCheckStrategy: IgnoreUndeclared`, so a single-dimension queue (only `cpu`,
 or only the manufacturer `credits`) does not reject a Workload for the Pod resources it does not cover
-(`memory`/`ephemeral-storage`). Its `resources.transformations` list is generated from `pkg/nodefeature`
-by `make generate chart`.
+(`memory`/`ephemeral-storage`). Its `resources.transformations` list is generated from the worker's
+node-feature tables by `make generate chart`.
 
 The same strategy makes a queue with **no resource groups** admit every Workload: it declares no
 resource, so nothing is checked, the Workload gets no flavor, and with no flavor it carries no
-AdmissionCheck. The operator never leaves such a queue admitting — see the
-[`NodeQueueReconciler`](scheduling.md#nodequeuereconciler-node_queuego).
+AdmissionCheck. The operator never leaves such a queue admitting — see
+[Queue quota and draining](scheduling.md#queue-quota-and-draining).
 
 ---
 

@@ -254,6 +254,19 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
 - `pkg/worker/controllers/setup.go` — register `NodeQueueReconciler`.
 - `docs/getting-started/architecture.md`, `docs/reference/settings.md`, `docs/contribute/development.md`, `README.md`, e2e cases — updated.
 
+### Output recovery and empty-plan hold retained from the scheduling guide
+
+Output watches recover a deleted derived InstanceType: periodic informer resync re-delivers an
+unchanged flavor and its update predicate drops it. Losing a definition can remove all derived
+types without changing flavor inputs. Output deletion must enqueue reconciliation directly.
+Queue draining no longer requires a separate drain tombstone or minimum-capacity-node selection;
+flavor quotas retain their per-flavor capacity inputs.
+
+`topology.gpustack.ai/empty-plan-hold` marks a worker-imposed Hold when no live flavor plan remains.
+It distinguishes that hold from administrator inactivity. The InstanceType reconciler does not
+backfill `Inactive` while the marker exists; restoring the plan permits admission unless the
+administrator made the type inactive. No false inactive state needs to be cleared.
+
 ### Code Style
 Editable setting, read per-reconcile (matches `value.go`):
 ```go

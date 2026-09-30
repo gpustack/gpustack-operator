@@ -1,15 +1,14 @@
 # KV Cache Backend
 
-A `KVCacheBackend` declares a pooled KV cache for inference workloads. The operator runs a **leader**
-(one metadata process) and a **member** group (one store process per selected node), then reports what
-that backend is observed to be doing.
+A `KVCacheBackend` configures shared KV cache for inference workloads. With a managed backend,
+the operator runs a leader for metadata and a member group with one store process per selected
+node. An external backend connects to an existing service.
 
-Two vocabularies meet on this page. This API says **leader**; the artifact says **master**, and every
-rendered flag, environment variable and metric keeps the vendor's spelling.
+Mooncake calls the leader a master. Its flags, environment variables and metrics use that name.
 
 ## Contents
 
-- [The two axes](#the-two-axes)
+- [Connection and medium](#connection-and-medium)
 - [The image](#the-image)
 - [The metadata plane](#the-metadata-plane)
 - [The members](#the-members)
@@ -18,10 +17,10 @@ rendered flag, environment variable and metric keeps the vendor's spelling.
 - [The external mode](#the-external-mode)
 - [Operating notes](#operating-notes)
 
-## The two axes
+## Connection and medium
 
-A backend has a **connection** axis and a **medium** axis, and they are separate because they answer
-different questions: who runs the backend, and what it is made of.
+`connection` chooses whether the operator manages the backend or connects to an external service.
+For managed backends, `members[].medium` chooses host memory (`DRAM`) or accelerator memory (`VRAM`).
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -41,8 +40,9 @@ spec:
           capacityPerMember: 4Gi
 ```
 
-The example's `0.3.13` line fits vLLM's clients and not SGLang's. Pick `spec.image` from the
-[Engine Versions](../model-deployment/engine-versions.md) before copying it.
+The example uses Mooncake `0.3.13`, which is compatible with the documented vLLM client. SGLang
+requires a different version; check [Engine Versions](../model-deployment/engine-versions.md) before
+choosing `spec.image`.
 
 `connection.managed` and `connection.external` are both optional pointers and **exactly one** must be
 set; neither and both are refused at admission with a message naming the two. Several member groups
@@ -76,36 +76,21 @@ each is reached another way:
 > receive a single write. The object would say one thing, the running member another, and nothing
 > would report a fault.
 
-**Without ratcheting, an object still carrying one of the other four values can never be updated
-again, including by the controller removing its finalizer, so it cannot be deleted.** CRD validation
-runs on the **write** path only (`rest.BeforeCreate` / `rest.BeforeUpdate`): the object still reads
-back, and every update is refused. It is the shape of the Kueue upgrade finalizer deadlock.
+What an object written against that earlier shape can still do depends on the API server's
+`CRDValidationRatcheting` gate, which follows the cluster's **effective** Kubernetes version:
 
-**`CRDValidationRatcheting` is what decides that, and a version decides what the gate can be.** Where
-it is on, an update whose invalid field is **unchanged** is admitted, so removing a finalizer still
-works.
+- **v1.33 and later** — the gate is locked on. An update whose invalid field is **unchanged** is
+  admitted, so removing a finalizer works and the object deletes normally.
+- **v1.30 through v1.32** — the gate is on by default; a cluster that switches it off behaves like
+  an older one.
+- **v1.28 and v1.29** — the gate exists but is off by default; turned on, it admits the
+  unchanged-field update.
+- **Earlier** — the gate does not exist. Every write touching the object is refused, **finalizer
+  removal included**, so the object cannot be deleted either. Remove such an object **before**
+  applying a CRD that narrows the enum, not after.
 
-The gate is unavailable before v1.28, off by default from v1.28, on by default from v1.30, and
-**locked on** from v1.33.
-
-Those thresholds are read against the API server's **effective** version, not the version of its
-binary. `LockToDefault` is checked on the spec selected for the emulation version, so a newer server
-emulating an older one resolves to the older spec and can still be running with the gate off.
-
-By effective version, then, and against this chart's `kubeVersion: ">=1.23.0-0"`: the deadlock is
-**unavoidable** below v1.28, a matter of **configuration** from v1.28 through v1.32, and
-**foreclosed** from v1.33. Emulation does not move those boundaries: it is why the version printed
-by a server's binary does not tell you which of the three it is in.
-
-Reaching that state at all takes a cluster that installed the CRD, ran with **no webhook**, and
-created a member in one of the removed values in that window. That is a development cluster or
-nothing.
-`KVCacheBackend` is absent from every tag from `v0.8.0` through `v0.8.6`, checked per tag, and the
-commit adding it landed after `v0.8.6`.
-
-The narrowing was kept knowingly. The risk that was accepted, and the condition that closes it, are
-recorded in
-[the spec](../../../specs/2026-09-05-kv-cache-media-and-scaling.md#f2--the-medium-enum-collapses-to-what-runs-and-each-removed-value-is-placed).
+No released version of this API carried those values, so the question does not arise on a cluster
+that installed a release; this is a development-cluster shape.
 
 The object is **cluster-scoped**: it names nodes, claims host memory and host paths, and on the RDMA
 and EFA paths needs `hostNetwork` and a fabric device. Only a cluster administrator can legitimately
@@ -130,22 +115,13 @@ Setting says now. That includes the reconciler's own removal of the finalizer, w
 leave an object that owns nothing and cannot be deleted.
 
 > **Why** — the master's link-time dependencies differ per published vendor variant, so no single
-> derivation is correct. Measured with `readelf -d` on one CUDA-less host:
+> derivation is correct. On a CUDA-less host, for example, the base (CUDA 12) master build needs
+> `libcuda.so.1` and `libcudart.so.12` and cannot load, while the `-rocm` and `-npu` builds need no
+> accelerator library at all and load cleanly.
 
-| variant | accelerator libs in `DT_NEEDED` | unresolved |
-|---|---|---|
-| base (CUDA 12) | `libcuda.so.1` + `libcudart.so.12` + `libmlx5.so.1` + `libibverbs.so.1` | 2 |
-| `-rocm` | none — only `libibverbs.so.1`; not one ROCm/HIP library | 0 |
-| `-npu` | none — not even `libibverbs.so.1`; the leanest | 0 |
-
-The client side is where the vendor lives, and it lives in the published wheel rather than in a custom
-build:
-
-| variant | client layout | Transports |
-|---|---|---|
-| base (CUDA 12) | everything static in `store.so` (18.8 MB) | `RdmaTransport`, `TcpTransport` |
-| `-rocm` | `store.so` 19.3 MB | `HipTransport`, `RdmaTransport`, `TcpTransport` |
-| `-npu` | thin shims over `libmooncake_store.so`, plus a separate `ascend_transport.so` | plus Ascend |
+The client side is where the vendor lives, and it lives in the published engine wheel rather than in
+this image: which transports a client can drive is a property of the wheel the engine image carries,
+not of `spec.image`.
 
 **The master image needs no accelerator runtime; a member image needs the runtime of the transport it
 uses.** An `-npu`-built master on an all-NVIDIA cluster is legitimate, because the master is a pure
@@ -308,7 +284,7 @@ container.
 
 **`MOONCAKE_TE_META_DATA_SERVER` carries an underscore inside `META_DATA`.** It is not
 `MOONCAKE_TE_METADATA_SERVER`, and normalising it to the spelling that reads correctly **silently
-degrades the metadata plane** rather than erroring. It is asserted byte-for-byte by its own test.
+degrades the metadata plane** rather than erroring.
 
 **`MOONCAKE_DEVICE` is left unset on purpose, and the documented value `auto-discovery` is a trap.**
 The client splits that key on commas into a device filter and nothing special-cases the string, so
@@ -350,9 +326,9 @@ handed the protocol of the group it matched. An engine whose constraint no group
 satisfies is refused at admission rather than started.
 
 `CANN` is the one value an engine can **require**: vllm-ascend's store client currently raises on
-any other protocol (`MooncakeBackend.__init__`, verified at v0.23.0 and v0.26.0rc1; upstream state,
-not a contract, and it may change), so a pool serving Ascend engines declares `CANN` here, or on
-one member group, rather than settling for the `TCP` default.
+any other protocol (verified at vLLM-Ascend v0.23.0 and v0.26.0rc1; upstream state, not a contract,
+and it may change), so a pool serving Ascend engines declares `CANN` here, or on one member group,
+rather than settling for the `TCP` default.
 
 The member then needs a CANN-carrying image, per the variant table above. The project's own CPU
 build compiles no `ascend` transport.
@@ -394,11 +370,6 @@ those nodes first**, or the members roll and stay `Pending`.
 it never runs that member: the Pod stays `Pending`. That refusal is the intended one. A cluster
 whose nodes cannot serve the fabric is a cluster whose backend should say `TCP`, and an operator who
 wants it back says so in `protocol` rather than by leaving a field empty.
-
-> **Why the failure is loud** — it used to be silent. A member that asked for no device still
-> mounted `/dev/infiniband`, so the device node was visible, `open()` returned `EPERM` from the
-> device cgroup, and the store reported no error: it discovered zero HCAs and installed `TCP` while
-> the object still read `RDMA`. Nothing in the cluster said the fabric was not in use.
 
 **No member mounts `/dev/infiniband`.** Each fabric's plugin injects the verbs character device of
 every device it grants, so mounting the tree beside that grant would add every adapter the member
@@ -446,16 +417,13 @@ against the engine's own memory fraction**, and by nothing else. Give the engine
 `gpu_memory_utilization` that leaves `capacityPerMember` free, and expect whichever starts second to
 fail on allocation if you do not.
 
-A member group asks for **no** accelerator extended resource, because the claim would not be true.
-Measured upstream at `v0.3.13.post1`: a member allocates its segment with one `cudaMalloc` per split
-(`mooncake-store/src/client_buffer_allocation.cpp`), the splits stay under the transport's
-registration limit rather than spanning devices (`GetTransportRegistrationLimit`, `real_client.cpp`),
-and nothing on that path calls `cudaSetDevice`.
+A member group asks for **no** accelerator extended resource, because the claim would not be true: in the tested Mooncake v0.3.13.post1,
+a member allocates its whole segment on one device, so a resource request would take a whole
+accelerator away from inference to account for a slice of one.
 
-**One member's segment is therefore on one device**, whichever the container sees first. Requesting
-one accelerator would take a whole one away from inference to account for a fraction of one device's
-memory, on a node where the member cannot use the rest of what it took. An eight-accelerator node
-keeps all eight available to inference, and one member contributes a slice of the first.
+**One member's segment is therefore on one device**, whichever the container sees first. An
+eight-accelerator node keeps all eight available to inference, and one member contributes a slice of
+the first.
 
 ### VRAM group accelerator access
 
@@ -544,11 +512,10 @@ verified on NVIDIA and as unverified elsewhere, rather than as guaranteed everyw
 not caught up, not that the tier is full: the offload heartbeat runs on an interval, so a writer that
 abandons on first failure reads "eviction in progress" as "cannot write".
 
-**Reachability is a port range, never a list.** The transfer engine picks its data ports at random
-(one observed run bound `15002` and `15995`, a second client `16566` and `16655`, none of them
-configured), and the peer-to-peer plane is what binds them. Write firewall and NetworkPolicy rules
-between member nodes, and from engine clients, as a **range**. The rendered Pod declares no fixed
-data-plane `containerPort`, because a fixed list would be a false statement.
+**Reachability is a port range, never a list.** The transfer engine picks its data ports at random,
+and the peer-to-peer plane is what binds them. Write firewall and NetworkPolicy rules between member
+nodes, and from engine clients, as a **range**. The rendered Pod declares no fixed data-plane
+`containerPort`, because a fixed list would be a false statement.
 
 **The management port is fixed, and on a host fabric it lands on the node.** A member serves its HTTP
 API on `8080 + <group index>` (`8080` for the first group, `8081` for a second). A `TCP` group
@@ -560,16 +527,11 @@ member group.
 > two host-network Pods on it. On a single fixed port only the first binds; the second runs, never
 > passes readiness, and reports nothing about why.
 
-**A member advertises its pod IP, and that is what a client dials.** The address becomes the host
-half of the segment's `te_endpoint`, which `status.members[]` is joined against and which the engine
-hands to clients. Rules written for the data plane therefore target pod addresses, not node ones.
+Members advertise their Pod IPs for client connections. Target those addresses in data-plane
+network rules. With host networking, the Pod IP is the node address.
 
-> **Why not the node name** — the engine binds its data port inside the pod's network namespace.
-> Measured on a two-node cluster: advertising the node name, a client pod got `ECONNREFUSED` against
-> both that name and the node IP, and connected only on the pod IP. It costs no stability: a
-> segment's identity is minted fresh on every mount, a new id and a transfer port bound at random, so
-> nothing here survived a restart anyway. On the host-fabric paths the pod holds the host's network
-> namespace and this is the node's address regardless.
+Every segment mount gets a new identity and transfer port. After a member restarts, clients
+must discover its current endpoint rather than reuse a previous connection address.
 
 ## Status and conditions
 
@@ -679,15 +641,12 @@ scrape **clears** the figures. That asymmetry is deliberate: capacity is two poi
 "absent" that means *not observed*, while an empty list is a legible value meaning *no segments*, so
 clearing it would publish a falsehood.
 
-The only exception is a development object whose stored member rows predate the required segment and
-client IDs. Such rows cannot be written under the current list schema, so the operator omits the
-whole legacy listing, explains that migration in `MembersMounted`, and replaces it on the next
-successful leader read. No released version contained the former CRD shape.
+Mooncake masters before 0.3.12 do not report segment membership. They can serve requests and
+report `Ready` while `MembersMounted` is `Unknown/SegmentListingNotServed` and `status.members`
+is empty. Waiting does not add a capability missing from that version.
 
-**A master before 0.3.12 serves no segment listing, so membership reads `Unknown` on it.** Mooncake
-adds `GET /get_segments_detail` in 0.3.12; the 0.3.10 and 0.3.11 lines answer it with 404 while
-`/health` and `/metrics` serve normally. There `MembersMounted` is `Unknown` with reason
-`SegmentListingNotServed`, `status.members` is empty, and a serving leader reads `Ready`.
+Other listing failures, including server errors or an unreachable master, report `ListingFailed`
+and retain the previous member list.
 
 `PoolWrites` on such a leader is still `True` once it has seen a put end, since that counter is on
 `/metrics`; before that it is `Unknown` with the same reason, because its other verdicts read the
@@ -697,22 +656,13 @@ Two states still read `MembersMounted=False` and `Degraded` there: a member Pod 
 read from the Pod's own status, and a `status.capacity.total` of zero, reported as `NoSegments`
 (the gauge sums the mounted segments, so zero is every member unmounted).
 
-> **Why a 404 is not a failed scrape** — waiting does not change a version, so `False` would hold
-> such a backend at `Degraded` for as long as it runs. Any other failure (a 5xx, a timeout, nothing
-> answering) is a leader failing a route it serves, and still reads `ListingFailed` with the
-> previous list kept.
-
 ## Growing and shrinking a group
 
 **Widening `members[].nodeSelector` adds members without restarting the ones already running.** The
 DaemonSet places a Pod on each newly matching node; every existing Pod keeps its UID and its restart
-count, leader included.
-
-> **Why it needs `OnDelete`** — `nodeSelector` lives in the Pod template, so under the default update
-> strategy widening it would roll **every** member. The DaemonSet is therefore left on `OnDelete`, and
-> the operator decides restarts itself from a fingerprint over the whole template **except** the node
-> selector. A widening moves no fingerprint; an image, argv, environment, resource or fabric change
-> moves it and every member is recreated.
+count, leader included. The DaemonSet is left on `OnDelete`, and restarts are decided from a
+comparison over the whole Pod template except the node selector: a widening matches that comparison,
+while an image, argv, environment, resource or fabric change fails it and every member is recreated.
 
 **A Pod runs the template it was created from, so a setting cannot protect the same edit that
 removes it.** Anything rendered into the member Pod (the shutdown hook, its grace, the environment)
@@ -747,12 +697,9 @@ Two shapes reach it:
 
 **To take a group out of service without removing it, narrow its `nodeSelector` until it matches no
 node.** The group keeps its position, every later group keeps its DaemonSet, and nothing is rebuilt.
-
-> **Why not give a group a name** — a name independent of position would make reordering free, and
-> the price is paid once in full: a DaemonSet's `spec.selector` cannot be changed after creation, so
-> every existing member DaemonSet would have to be deleted and recreated and **the entire cache would
-> go with them**. Refusing the move costs nothing and rebuilds nothing. The decision, and what
-> evidence would reopen it, is recorded on the `members` field itself.
+Positions are used instead of names because a DaemonSet's selector cannot change after creation: a
+name free enough to make reordering possible would force every member DaemonSet to be deleted and
+recreated, and the entire cache would go with them.
 
 **The rule recognises a group that arrived unchanged at a position another group left; it does not
 recognise every reorder.** Without a name there is nothing else to recognise a group by, so two shapes
@@ -770,45 +717,22 @@ Both admitted shapes leave one trace: the resulting `members` holds **two identi
 the rule buys is that the mechanical reorder (the one a rewritten manifest produces) is reported
 instead of silently rebuilding members against another group's spec.
 
-**Shrinking a group discards the cache that member held.** Narrowing the selector, or removing a
-node, unmounts that member's segment **immediately**. There is no drain.
-
-> **Why it is not drained** — the member's own API does take a graceful unmount with a grace period,
-> and **it cannot be pointed at the segment this operator gives a member**. That segment is mounted by
-> the client's own startup, which files it in neither record set the unmount routes read, so both of
-> them refuse it: `/api/unmount` answers `500` with `segment_id not found in allocated records`, and
-> `/api/unmount_shm` answers `500` with `not found in mounted records`. Measured against the example
-> image above, at every grace period, **using the id the leader itself publishes for that segment** —
-> while the same `/api/unmount` returns `200` for a segment mounted through `/api/mount`.
-
-> **So this is not a matter of identifying the right member.** An earlier version of this page said a
-> transport-independent hook was waiting on upstream to expose a member's own `client_id`. A member
-> holding the exactly correct id is refused just the same, so nothing about telling members apart
-> reaches a hook that drains. Closing the gap needs the segment to become unmountable upstream.
-
-> **What would actually hand the keys back is a different operation on a different component.** The
-> leader offers `POST /api/v1/drain_jobs`, which **migrates** a segment's data to named targets rather
-> than unmounting it. It needs the remaining members to have room and it is a stateful orchestration
-> (create, poll, then scale), so it belongs to the control plane and not to a shutdown hook. The
-> `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its own shutdown; it
-> does not preserve the data.
+Shrinking a group discards the cache held by the removed members. Narrowing the selector or
+removing a node immediately unmounts its segment; the operator does not migrate its cached data.
+The termination grace period gives the process time to finish shutdown and does not preserve
+that data.
 
 **`scaleIn.gracePeriodSeconds` holds the process, not the tier.** A member with a
 [local disk tier](local-disk-tier.md) gets a `preStop` hook that deregisters the tier with the
 leader and then waits out the grace. A group with no tier renders no hook and the setting is inert.
 
-**With the example image above on a two-node cluster**, deregistration takes effect **at once**: a
-peer reading a key that lives only on that tier gets a clean miss for the whole window rather than at
-the end of it. Sizing this value so that in-flight peer reads can finish sizes it against something
-that does not happen.
+With the example image, deregistration takes effect when the hook runs. A key held only by that
+tier becomes a clean miss immediately, and the process waits for the full configured period even
+if no reads remain. Size the period for the departing member's local work.
 
-The same measurement shows the wait is unconditional rather than a drain. The process holds for the
-full value even when nothing is still reading. What it buys is local time for the departing member to
-finish what it is doing.
-
-Both readings are that image's behaviour, not this operator's guarantee. `spec.image` selects the
-backend, and another image may deregister later or wait differently; what the operator controls is
-the value it sends to the endpoint.
+This timing is specific to the example image. `spec.image` selects the backend implementation;
+other images may deregister later or wait differently. The operator controls the value sent to
+the endpoint.
 
 ```yaml
 spec:
@@ -824,11 +748,8 @@ set so the kubelet kills the container in the middle of the wait, and no validat
 impossible. It only makes it checkable.
 
 The upper bound of 3600 is the member endpoint's own; above it the call is refused with a `400`, so a
-larger value would render a hook that fails every time it runs.
-
-> **It does not make a shrink lossless.** The memory segment is still dropped, per the paragraph
-> above, and the disk tier stops answering as soon as the hook runs. A reader gets a clean miss
-> either way, which is the contract rather than a consolation.
+larger value would render a hook that fails every time it runs. None of it makes a shrink lossless:
+the memory segment is still dropped, and the disk tier stops answering as soon as the hook runs.
 
 Migrating a member's data before it leaves (the store's drain job API) is **not** offered here. It
 is stateful orchestration, and it reaches only the memory and NVMe-oF replicas: it cannot name the

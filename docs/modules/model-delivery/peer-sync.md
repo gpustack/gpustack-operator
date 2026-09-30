@@ -10,7 +10,7 @@ node can materialize a resolved artifact while the hub is unreachable.
 ## Contents
 
 - [The switch and the port](#the-switch-and-the-port)
-- [Peer endpoints](#peer-endpoints)
+- [Serving cached weights](#serving-cached-weights)
 - [Peer authentication](#peer-authentication)
 - [Cold-node pull](#cold-node-pull)
 - [Status and metrics](#status-and-metrics)
@@ -24,19 +24,19 @@ node can materialize a resolved artifact while the hub is unreachable.
 | chart (`L1`) | `modelManager.peerSync.maxServingStreams` / `streamsPerSource` | `8` / `4` | the serving and pulling concurrency limits |
 | Settings (`L2`) | `model-store-peer-sync` | `true` | whether a node's plugin may pull from peers; `false` keeps the listener but pulls from the hub only |
 
-## Peer endpoints
+## Serving cached weights
 
-`GET /peer/v1/trees/{hex}` answers a published tree's manifest (its digest and every file's
-path, size and digest, stored by the publish itself); `GET /peer/v1/trees/{hex}/files/{path}`
-answers one file by HTTP byte range. Trees published before manifests were stored are not
-listing sources. At most `maxServingStreams` file answers run at once.
+A serving plugin answers a published tree's manifest (its digest and every file's path, size and
+digest, stored by the publish itself) and answers one file per request by HTTP byte ranges. Trees
+published before manifests were stored are not listing sources. At most `maxServingStreams` file
+answers run at once.
 
 ## Peer authentication
 
 A request carries the pulling plugin's projected ServiceAccount token (audience
 `gpustack-model-peer`); the serving plugin checks it with a TokenReview and admits only the
-plugins' ServiceAccount, caching positives until the earlier of a short lifetime and the
-token's own expiry, never caching refusals.
+plugins' ServiceAccount. Accepted tokens are cached briefly, never past the token's own expiry;
+refusals are never cached.
 
 The NetworkPolicy the chart ships (default on) drops every other source: a tenant Pod's
 connection to the port times out rather than being answered. On CNIs where a `hostNetwork`
@@ -51,7 +51,7 @@ takes over.
 
 Bytes are hashed in the download stream and checkpointed every 64 MiB, so a peer dying
 mid-file resumes from the last checkpoint, and the hub fallback re-pulls only the bytes after it.
-One source at a time; scheduling segments across several peers is a deliberate extension point.
+A pull uses one peer at a time; it does not stripe a file across several peers.
 
 ## Status and metrics
 
