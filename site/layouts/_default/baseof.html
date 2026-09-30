@@ -4,6 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ffffff">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+      } catch {
+        document.documentElement.dataset.themeChoice = "system";
+      }
+    })();
+  </script>
   {{ $logo := resources.Get "images/logo.png" }}
   {{ $icon := $logo.Resize "32x32" | fingerprint }}
   <link rel="icon" type="image/png" sizes="32x32" href="{{ $icon.RelPermalink }}">
@@ -19,23 +30,30 @@
 <body class="{{ if .IsHome }}home{{ else }}docs-page{{ end }}">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
-    {{ $brandLogo := $logo.Resize "80x80" | fingerprint }}
-    <a class="brand" href="{{ .Site.Home.RelPermalink }}" aria-label="GPUStack Operator home"><img src="{{ $brandLogo.RelPermalink }}" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    {{ $brandLogo := $logo.Resize "64x64" | fingerprint }}
+    <a class="brand" href="{{ .Site.Home.RelPermalink }}" aria-label="GPUStack Operator home"><img src="{{ $brandLogo.RelPermalink }}" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
       <a class="top-docs-link" href="{{ "docs/" | relLangURL }}" {{ if hasPrefix (partial "page-key.html" .) "/docs/" }}aria-current="page"{{ end }}>Documentation</a>
+      <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
+        <span>Ask Devin</span>
+      </a>
+      <a class="top-github-link" href="https://github.com/gpustack/gpustack-operator" aria-label="GitHub repository">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
       {{ partial "site-selectors.html" . }}
-      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+      <form class="top-search" role="search" action="{{ "search/" | relLangURL }}" method="get">
+        <label class="visually-hidden" for="top-query">Search documentation</label>
+        <input id="top-query" name="q" type="search" placeholder="Search docs" autocomplete="off" spellcheck="false">
+        <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+      </form>
     </nav>
   </header>
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <form class="docs-search" action="{{ "search/" | relLangURL }}" role="search">
-          <label class="visually-hidden" for="docs-query">Search documentation</label>
-          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
-          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
-        </form>
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="{{ .Site.Home.RelPermalink }}" {{ if .IsHome }}aria-current="page"{{ end }}>Overview</a>
         {{ range .Site.Data.navigation.groups }}
