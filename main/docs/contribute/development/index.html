@@ -473,7 +473,7 @@ before changing the operator&rsquo;s behavior.</p>
 <ul>
 <li><code>make deps</code> — vendor patched k8s staging modules into <code>staging/</code> <strong>and</strong> upstream Helm charts into <code>deploy/gpustack-operator/chart/charts/</code>, then <code>go mod tidy &amp;&amp; go mod download</code>; <code>make deps update</code> adds <code>go get -u ./...</code>.</li>
 <li><code>make generate</code> — the <code>gen/api</code> generators: deepcopy, register, apiservice, CRDs, conversion, protobuf, webhooks. <code>make generate binding</code> regenerates the CGO bindings in <code>binding/</code> via c-for-go.</li>
-<li><code>make lint</code> — golangci-lint (<code>.golangci.yaml</code>); <code>make lint dirty</code> also fails on a dirty tree. <code>make lint docs</code> checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see <a href="https://github.com/gpustack/gpustack-operator/blob/c86e49201706fc844d87431b2a69763bad850c5b/.claude/skills/gpustack-operator-docs/SKILL.md">the docs skill</a>
+<li><code>make lint</code> — golangci-lint (<code>.golangci.yaml</code>); <code>make lint dirty</code> also fails on a dirty tree. <code>make lint docs</code> checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see <a href="https://github.com/gpustack/gpustack-operator/blob/ef4211568019199a0ebca99beea81e9b26310f6e/.claude/skills/gpustack-operator-docs/SKILL.md">the docs skill</a>
 .</li>
 <li><code>make build</code> — cross-build <code>cmd/gpustack-operator</code> into <code>.dist/build/</code>, version ldflag-injected into <code>pkg/utils/version</code>; <code>VERSION=vX.y.z+l.m make build</code> sets it, <code>BUILD_PLATFORMS=&quot;linux/amd64 linux/arm64&quot;</code> cross-compiles.</li>
 <li><code>make test</code> — <code>go test -v -failfast -race -cover -shuffle=on -timeout=30m ./...</code>, coverage to <code>.dist/test/coverage.out</code>. The order is shuffled on every run so an order-dependent test cannot hide behind the fixed one; a failure banner prints the seed, and <code>go test -shuffle=&lt;seed&gt;</code> reproduces that exact order. Trailing args are regexes of packages to <strong>exclude</strong>. <code>RACE=false make test</code> drops <code>-race</code> and changes nothing else.</li>
@@ -579,7 +579,7 @@ script and license are bundled under <code>site/assets/vendor/mermaid/</code>, s
 <p>Edit documentation under <code>docs/</code>, navigation labels and order in <code>site/data/navigation.yaml</code>, and
 layouts and styles under <code>site/</code>. Run <code>make lint docs</code> before committing to check source links,
 page structure, index entries and rendered site links. CI runs the same gate.</p>
-<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/c86e49201706fc844d87431b2a69763bad850c5b/docs/README.md#module-map">shared module map</a>
+<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/ef4211568019199a0ebca99beea81e9b26310f6e/docs/README.md#module-map">shared module map</a>
  connects guides, specs, code and skills for code
 changes. Update its routing in the same PR when those entry points or associations change.
 <code>make site</code> also generates <code>/llms.txt</code> from that index and <code>index.md</code> beside each article&rsquo;s HTML.
@@ -590,11 +590,16 @@ coverage, Markdown content and local links. These checks cannot establish whethe
 still describes the implementation; verify that against the relevant code and spec status.</p>
 <h3 id="publishing">Publishing</h3>
 <p>The Site workflow publishes <code>main</code> after merges and a separate site for each <code>v*</code> version tag.
-It writes documentation alongside the charts on <code>github-pages</code>, then deploys the complete branch
-through GitHub Pages. Chart publication and both deployment jobs share a queue so concurrent runs
-preserve each other&rsquo;s files. The documentation composer verifies that chart bytes stay unchanged.</p>
+For version tags, the same workflow publishes the Helm chart before composing documentation on
+<code>github-pages</code>. It deploys the complete branch once, under a shared publication queue. The Chart
+workflow retains generation, lint and installation checks. The documentation composer verifies
+that existing chart bytes stay unchanged.</p>
 <p>The publisher comes from <code>main</code>; the requested revision supplies all pages and Hugo layouts.
 Changes to publisher inputs and version metadata must remain compatible with existing published tags.</p>
+<p>Deployment uses the published content commit as its build identity, even when a tag and <code>main</code>
+share a source commit. The workflow verifies public version metadata, the chart index and the
+released package against the uploaded snapshot. A successful deployment status with stale public
+files fails publication.</p>
 <table>
   <thead>
       <tr>
@@ -641,6 +646,11 @@ Tags that predate the site sources cannot be rebuilt using future documentation.
 from the version menu, while keeping their direct URLs and source revisions for troubleshooting.
 Older stable versions remain available. Published tags cannot be moved to a different commit;
 <code>main</code> is the only site whose source revision changes over time.</p>
+<p>The Site workflow prepares documentation and release charts in one Pages checkout, then commits
+and deploys them together. It packages the tag&rsquo;s vendored chart dependencies without updating them.
+A retry of a published tag keeps its original chart package; a different source revision is rejected
+before chart changes. A chart without recorded source provenance requires verification before a
+site can be added for that version.</p>
 <p>To retry publication, run the Site workflow with <code>ref</code> set to <code>main</code> or an existing version tag.
 It uses the repository&rsquo;s <code>GITHUB_TOKEN</code> with contents, Pages and identity-token permissions;
 a separate personal access token is not required. The repository must use the GitHub Actions Pages
@@ -791,7 +801,7 @@ are under <code>hack/deploy/</code>.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/c86e49201706fc844d87431b2a69763bad850c5b/docs/contribute/development.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/ef4211568019199a0ebca99beea81e9b26310f6e/docs/contribute/development.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/contribute/development.md">Edit this page</a>
             

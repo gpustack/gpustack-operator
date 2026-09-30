@@ -29,7 +29,7 @@ component's `tolerations`.
 Earlier releases let the Kueue controller manager, the NFD master and the NFD gc tolerate every taint;
 an install that relied on that must set their three lists before upgrading. Upgrade with
 `--reset-then-reuse-values`, not `--reuse-values`, or the new lists never reach the release; see
-[Upgrading the Chart](https://github.com/gpustack/gpustack-operator/blob/c86e49201706fc844d87431b2a69763bad850c5b/deploy/gpustack-operator/chart/README.md#upgrading-the-chart).
+[Upgrading the Chart](https://github.com/gpustack/gpustack-operator/blob/ef4211568019199a0ebca99beea81e9b26310f6e/deploy/gpustack-operator/chart/README.md#upgrading-the-chart).
 
 ## Per-component settings
 
