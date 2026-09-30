@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -42,6 +43,15 @@ const (
 // behind its read path watches the client.
 func newTestCache(t *testing.T, cli *kubefake.Clientset) certs.Cache {
 	t.Helper()
+	return newTestCacheWithContext(t, cli, t.Context())
+}
+
+// newTestCacheWithContext is newTestCache with the context handed to the cache, so a test can
+// install its own contextual logger. That keeps the klog global untouched, which matters here
+// because the informer goroutines of earlier tests outlive their tests and read klog's global
+// logging state on every log call.
+func newTestCacheWithContext(t *testing.T, cli *kubefake.Clientset, ctx context.Context) certs.Cache {
+	t.Helper()
 
 	// A fake watch does not implement the initial-events bookmark the watch list protocol
 	// requires, so the informer would never report itself synced.
@@ -64,7 +74,7 @@ func newTestCache(t *testing.T, cli *kubefake.Clientset) certs.Cache {
 		return true, w, nil
 	})
 
-	c, err := NewK8sCache(t.Context(), testGroup, cli.CoreV1().Secrets(testNamespace))
+	c, err := NewK8sCache(ctx, testGroup, cli.CoreV1().Secrets(testNamespace))
 	require.NoError(t, err)
 
 	select {
@@ -326,22 +336,26 @@ func Test_k8sCache_Delete(t *testing.T) {
 // Test_k8sCache_TamperedSecretIsLoggedAsKeyValuePairs asserts a secret whose sums do not match
 // its content is reported with the key as a key-value pair, which is the only form a structured
 // logger renders.
+//
+// The capturing logger is installed as the cache's contextual logger instead of the klog
+// global: the informer goroutines of earlier tests outlive their tests, so no test may write
+// the global while they are still reading it.
 func Test_k8sCache_TamperedSecretIsLoggedAsKeyValuePairs(t *testing.T) {
 	var (
 		mu    sync.Mutex
 		lines []string
 	)
-	klog.SetLogger(funcr.New(func(prefix, args string) {
+	captured := funcr.New(func(prefix, args string) {
 		mu.Lock()
 		defer mu.Unlock()
 		lines = append(lines, args)
-	}, funcr.Options{}))
-	t.Cleanup(klog.ClearLogger)
+	}, funcr.Options{})
 
 	tampered := newLegacySecret(testKey, []byte("value"))
 	tampered.Name = secretName(testGroup, testKey)
 	tampered.Annotations[k8sManagedValueSumAnno] = sumValue([]byte("other"))
-	newTestCache(t, kubefake.NewSimpleClientset(tampered))
+	newTestCacheWithContext(t, kubefake.NewSimpleClientset(tampered),
+		klog.NewContext(t.Context(), captured))
 
 	wantMsg, wantKey := `"msg"="invalid key" `, `"key"="`+testKey+`"`
 	require.Eventually(t, func() bool {
