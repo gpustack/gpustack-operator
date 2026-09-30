@@ -108,7 +108,7 @@ Kubernetes: `>=1.23.0-0`
 |------------|------|---------|
 |  | csi-driver-nfs | 4.13.4 |
 |  | csi-driver-s3 | 0.43.7 |
-|  | kueue | 0.18.9 |
+|  | kueue | 0.18.10 |
 |  | node-feature-discovery | 0.19.0 |
 |  | topograph | 1.0.0 |
 
@@ -187,7 +187,7 @@ Kubernetes: `>=1.23.0-0`
 | modelManager.extraArgs | list | `[]` | Extra command-line arguments appended to the model-manager container args. |
 | migrate | object | `{"image":{}}` | Migration hook Jobs. A pre-install/pre-upgrade Job reaps a Kueue left stranded by an interrupted teardown, and on an upgrade applies the vendored subcharts' CRDs, which Helm itself applies on install only. A post-upgrade Job retires the release records of the per-application releases these subcharts replaced and prunes what they left behind. Both run the operator image, which bundles kubectl, helm and this chart; `helm upgrade --no-hooks` skips them. |
 | migrate.image | object | `{}` | Per-hook image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall back to the chart-level `image`. Overridable so an upgrade is never blocked by an operator tag that is not mirrored yet — at the cost that the CRDs the hook applies are then the ones vendored by the image it does run. |
-| kueue | object | see the `kueue.*` keys below | [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.9). |
+| kueue | object | see the `kueue.*` keys below | [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.10). |
 | kueue.enabled | bool | `true` | Deploy the bundled Kueue. |
 | kueue.fullnameOverride | string | `"kueue"` | Name the Kueue resources after a fixed "kueue" prefix instead of the release, so that this subchart and the runtime install render identical resource names. |
 | kueue.controllerManager.replicas | int | `1` | Number of Kueue controller manager replicas. `managerConfig` below elects a leader, so extra replicas stand by — but every one of them serves the admission webhook, and that is what a highly available install buys: with a single replica, losing its node blocks Pod creation in every namespace Kueue manages until it is rescheduled. |
@@ -196,7 +196,7 @@ Kubernetes: `>=1.23.0-0`
 | kueue.controllerManager.topologySpreadConstraints | list | `[]` | Topology spread constraints for the Kueue controller manager, rendered as given. Unlike the worker's, these carry no selector of their own, so a `DoNotSchedule` spread across nodes needs `labelSelector: {matchLabels: {app.kubernetes.io/name: kueue, control-plane: controller-manager}}` spelled out. |
 | kueue.controllerManager.tolerations | list | `[{"effect":"NoSchedule","key":"node-role.kubernetes.io/master","operator":"Exists"},{"effect":"NoSchedule","key":"node-role.kubernetes.io/controlplane","operator":"Exists"},{"effect":"NoSchedule","key":"node-role.kubernetes.io/control-plane","operator":"Exists"},{"effect":"NoSchedule","key":"CriticalAddonsOnly","operator":"Exists"}]` | Tolerations for the Kueue controller manager. Defaults tolerate only the control-plane taints, as the worker's do. A blanket `operator: "Exists"` would also tolerate `node.kubernetes.io/unschedulable`, sending an evicted pod straight back to the node being drained, and would opt out of the default five-minute eviction from an unreachable node. Where the only nodes left for it carry a taint of your own, add that taint here. |
 | kueue.controllerManager.manager.image.repository | string | `"docker.io/gpustack/mirrored-kueue"` | Kueue controller manager image repository. |
-| kueue.controllerManager.manager.image.tag | string | `"v0.18.9"` | Kueue controller manager image tag, stated rather than inherited so a subchart bump cannot move the image without the diff showing it. |
+| kueue.controllerManager.manager.image.tag | string | `"v0.18.10"` | Kueue controller manager image tag, stated rather than inherited so a subchart bump cannot move the image without the diff showing it. |
 | kueue.controllerManager.manager.image.pullPolicy | string | `"IfNotPresent"` | Kueue controller manager image pull policy. |
 | kueue.controllerManager.manager.podAnnotations | object | `{"gpustack.ai/managed":"true"}` | Annotations of the Kueue controller manager pods, marking them as managed by the operator. |
 | kueue.controllerManager.manager.resources | object | `{"limits":{"cpu":"2","memory":"4Gi"},"requests":{"cpu":"100m","memory":"128Mi"}}` | Resource requests and limits for the Kueue controller manager container. |

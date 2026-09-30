@@ -382,8 +382,9 @@ for sel in app.kubernetes.io/part-of=gpustack-operator-worker \
 done
 #    Directly: the worker writes topology.gpustack.ai/profile on every Node and the two fit labels
 #    on every managed one, sliced-max-free-units.fit.gpustack.ai/<accelerator> and
-#    shared-free-cards.fit.gpustack.ai/<accelerator>, and only the worker ever removes them. NFD has
-#    no record of either, so neither its prune nor the step above reaches them. The fit labels are
+#    shared-free-cards.fit.gpustack.ai/<accelerator>, plus model.csi.gpustack.ai/registered while
+#    kubelet lists the model-manager CSI driver. Only the worker removes them. NFD has no record
+#    of these labels, so neither its prune nor the step above reaches them. The fit labels are
 #    matched by those two prefixes, as the worker's own IsFitLabelKey matches them, and not by the
 #    whole fit.gpustack.ai domain, so a label some other tool put there is not taken for ours.
 #    Removed by key, and only these keys: the rest of the gpustack.ai domains may carry labels an
@@ -393,7 +394,7 @@ done
 kubectl get nodes \
   -o go-template='{{range .items}}{{$n := .metadata.name}}{{range $k, $v := .metadata.labels}}{{$n}} {{$k}}{{"\n"}}{{end}}{{end}}' \
   2>/dev/null \
-  | awk '$2 == "topology.gpustack.ai/profile" || $2 ~ /^(sliced-max-free-units|shared-free-cards)\.fit\.gpustack\.ai\// { keys[$1] = keys[$1] " " $2 "-" }
+  | awk '$2 == "topology.gpustack.ai/profile" || $2 == "model.csi.gpustack.ai/registered" || $2 ~ /^(sliced-max-free-units|shared-free-cards)\.fit\.gpustack\.ai\// { keys[$1] = keys[$1] " " $2 "-" }
          END { for (n in keys) print n keys[n] }' \
   | while read -r node keys; do
       echo "[cleanup] node ${node}: kubectl label ${keys}"
