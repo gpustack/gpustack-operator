@@ -68,5 +68,10 @@ node-to-node link is slower than each node's own hub path, all-hub finishes a si
 fan-out sooner. Serving costs CPU on the seed node (measured ≈ 0.25 vCPU per concurrent puller
 on 2-vCPU nodes, plus the link's bandwidth); on GPU nodes this shares headroom with inference.
 
+---
+
 **See also** — [Node Model Store](node-store.md) for the cache the trees live in, and
 [Model Artifact](artifact.md) for the manifest digest the listings are bound to.
+
+
+**Next** → [Model Store Operations](operations.md)

@@ -116,8 +116,8 @@ request and its resulting Kubernetes resources.
 | Pool | Nodes with compatible CPU, accelerator, operating system and architecture identities, served by an isolated queue. |
 | InstanceType | The resource configuration and available capacity offered by a pool. |
 | Allocation mode | Whole accelerators, shared accelerators, logical slices or hardware partitions. |
-| Credits | Integer units used by Kueue to account for accelerator quota, including fractional requests. |
-| Four capacity views | Exclusive, shared, sliced and partitioned capacity reported by an InstanceType. |
+| Credits | [Quota accounting units](../modules/devices/admission.md#gate-2--kueue-credits). |
+| Four capacity views | [Available allocation modes](../modules/devices/admission.md#four-view-status) reported by an InstanceType. |
 | `Devices` ledger | The per-node inventory and record of accelerator allocations. |
 | LocalQueue | The namespace queue through which a workload enters its pool. |
 

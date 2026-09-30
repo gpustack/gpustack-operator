@@ -112,9 +112,12 @@ On AWS the `RDMA` rows do not apply; [choose `EFA` or
   answered `503` with `No available prefill workers`.
 
   **Turning on [`model-deployment-tcp-tw-reuse`](../../reference/settings.md#sglang-time-wait-port-reuse)
-  avoids it**, after a kubelet change on every node the prefill half can run on. Widening
-  `net.ipv4.ip_local_port_range` only delays the lock-up. Whether a fabric transport, which opens
-  no kernel TCP connection per transfer, avoids it is not verified.
+  prevented failure in a measured SGLang 0.5.18 pair with a store**: it answered 1905 sequential
+  requests without failure, with about 19,500 `TIME-WAIT` sockets. It needs a kubelet change on
+  every eligible node.
+
+  The pair without a store was not tested with this setting. Widening `net.ipv4.ip_local_port_range`
+  only delays exhaustion; whether a fabric transport avoids it remains unverified.
 
   **vLLM was not this shape where it was measured**: its prefill half keeps its transfer
   connections open instead of opening one per transfer, and held at most nine sockets in

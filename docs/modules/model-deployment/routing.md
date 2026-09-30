@@ -15,7 +15,8 @@ on a server role; on a prefill/decode pair, where each half is chosen separately
 
 **`vllm-router` and `sglang-gateway` route by `cache_aware`, and `llm-d-router` scores every
 candidate for each request.** The operator renders no policy flag for the first two, so each runs its
-upstream default:
+upstream default. The table describes the bundled vLLM router `v0.1.15` and SGLang gateway
+`gateway-v0.3.1`; the llm-d row describes the operator's scoring profile.
 
 | `spec.router.name` | Default | Replica selection |
 |---|---|---|
