@@ -467,6 +467,10 @@ node can materialize a resolved artifact while the hub is unreachable.</p>
 </li>
 </ul>
 <h2 id="the-switch-and-the-port">The switch and the port</h2>
+<p>The Helm chart enables node-to-node sync on port <code>32445</code> when <code>modelManager.enabled</code> is <code>true</code>.
+Set <code>modelManager.port</code> to <code>0</code> to disable peer serving and pulling while keeping node delivery
+and the model cache enabled. The standalone <code>model-manager</code> command keeps peer sync disabled
+until its port and peer authentication are configured.</p>
 <table>
   <thead>
       <tr>
@@ -480,7 +484,7 @@ node can materialize a resolved artifact while the hub is unreachable.</p>
       <tr>
           <td>chart (<code>L1</code>)</td>
           <td><code>modelManager.port</code></td>
-          <td><code>0</code></td>
+          <td><code>32445</code></td>
           <td>the TCP port the peer endpoints answer on; <code>0</code> is off and is the master switch</td>
       </tr>
       <tr>
@@ -507,9 +511,15 @@ answers run at once.</p>
 <code>gpustack-model-peer</code>); the serving plugin checks it with a TokenReview and admits only the
 plugins&rsquo; ServiceAccount. Accepted tokens are cached briefly, never past the token&rsquo;s own expiry;
 refusals are never cached.</p>
+<p>Peer clients do not verify the serving plugin&rsquo;s TLS certificate. Use peer sync on a trusted Pod
+network: TokenReview authenticates requesters, and digest checks detect altered model bytes, but
+neither authenticates the server. Set <code>modelManager.port</code> to <code>0</code> if that network trust cannot be met.</p>
 <p>The NetworkPolicy the chart ships (default on) drops every other source: a tenant Pod&rsquo;s
 connection to the port times out rather than being answered. On CNIs where a <code>hostNetwork</code>
 tenant bypasses podSelector policies, the token check remains the gate.</p>
+<p>If a monitoring service scrapes the secure port, add its Pod and namespace selectors to
+<code>modelManager.networkPolicy.scrapers</code>. The default policy admits the worker and peer plugins;
+other ingress needs an explicit rule. The policy takes effect only on a CNI that enforces it.</p>
 <h2 id="cold-node-pull">Cold-node pull</h2>
 <p>Discovery lists the ready nodes holding the digest (and skips plugins without the peer port);
 the candidate&rsquo;s stored manifest is reassembled and bound to the artifact&rsquo;s resolved root digest
@@ -551,7 +561,7 @@ on 2-vCPU nodes, plus the link&rsquo;s bandwidth); on GPU nodes this shares head
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/cb1808236d687612b576fcacee78d64793460382/docs/modules/model-delivery/peer-sync.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/c86e49201706fc844d87431b2a69763bad850c5b/docs/modules/model-delivery/peer-sync.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/peer-sync.md">Edit this page</a>
             
