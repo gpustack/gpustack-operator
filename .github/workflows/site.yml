@@ -62,6 +62,7 @@ jobs:
         with:
           ref: ${{ steps.ref.outputs.ref }}
           path: source
+          lfs: true
           persist-credentials: false
       - name: Verify sources and record revision
         id: source

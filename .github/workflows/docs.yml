@@ -94,6 +94,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          lfs: true
           persist-credentials: false
       # Links and anchors, the "## Contents" list, each page's footer, the docs/README.md
       # index, the prose paragraph cap, the page line and "##" caps, every index label against its page's H1 -- and, over specs/,
