@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Topology-Aware Scheduling Operations · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/topology/operations/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+      data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/topology/operations/">
+      <option value="/gpustack-operator/main/">main</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/main/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" aria-current="page">Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/modules/topology/">Topology Management</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Topology-Aware Scheduling Operations</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="topology-aware-scheduling-operations">Topology-Aware Scheduling Operations</h1>
+<p>This runbook starts with fresh managed queues and also covers changes to their live topology profile.
+Queues created by a previously published version are outside that transition path.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#choose-the-inventory-path">Choose the inventory path</a>
+</li>
+<li><a href="#enable-topograph">Enable Topograph</a>
+</li>
+<li><a href="#observe-existing-node-labels">Observe existing Node labels</a>
+</li>
+<li><a href="#publish-a-configmap-snapshot">Publish a ConfigMap snapshot</a>
+</li>
+<li><a href="#publish-through-an-https-webhook">Publish through an HTTPS webhook</a>
+</li>
+<li><a href="#request-a-level-from-modeldeployment">Request a level from ModelDeployment</a>
+</li>
+<li><a href="#verify-the-scheduling-chain">Verify the scheduling chain</a>
+</li>
+<li><a href="#change-a-live-hierarchy">Change a live hierarchy</a>
+</li>
+<li><a href="#diagnose-pending-workloads">Diagnose Pending workloads</a>
+</li>
+<li><a href="#validate-on-a-temporary-eks-cluster">Validate on a temporary EKS cluster</a>
+</li>
+</ul>
+<h2 id="choose-the-inventory-path">Choose the inventory path</h2>
+<p>Use one source of truth for each selected Node. See <a href="/gpustack-operator/main/docs/modules/topology/scheduling/#hierarchy-profiles">profile selection</a>
+
+for how overlapping Ready sources are handled.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Situation</th>
+          <th>Inventory path</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Topograph supports the cloud, fabric, DRA, or on-premises source</td>
+          <td>Enable the bundled Topograph chart, then select its labels with a read-only <code>TopologySource</code></td>
+      </tr>
+      <tr>
+          <td>The cloud provider or administrator already labels Nodes</td>
+          <td>Use <code>nodeLabels</code></td>
+      </tr>
+      <tr>
+          <td>Inventory is exported as a versioned file</td>
+          <td>Store it in a ConfigMap and use <code>configMap</code></td>
+      </tr>
+      <tr>
+          <td>Inventory is maintained by an external service</td>
+          <td>Expose the snapshot through authenticated HTTPS and use <code>webhook</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>List only a real nested hierarchy. Region → zone → rack is valid when every rack value belongs to
+one zone and every zone value belongs to one region. Two independent dimensions, such as rack and
+accelerator partition, are not an ordered hierarchy merely because both are labels.</p>
+<h2 id="enable-topograph">Enable Topograph</h2>
+<p>Topograph is silently disabled by default: the chart renders no Topograph workload or ServiceAccount
+and pulls no Topograph image. A private deployment may stay in that state and use <code>TopologySource</code>;
+with no source at all, the <a href="/gpustack-operator/main/docs/modules/topology/scheduling/#hierarchy-profiles">default profile</a>
+
+applies. Enable Topograph only on
+Kubernetes 1.27 or later, with a production provider and the <code>k8s</code> engine:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">topograph</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">provider</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">aws</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">params</span><span class="p">:</span><span class="w"> </span>{}<span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">k8s</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">params</span><span class="p">:</span><span class="w"> </span>{}</span></span></code></pre></div>
+</div><p>The parent chart pins and vendors the dependency and defaults its image to the GPUStack Docker Hub
+mirror. Override <code>topograph.image.repository</code> and set <code>imagePullSecrets</code> when a private cluster uses
+an internal registry. Provider credentials may be supplied with
+<code>topograph.config.credentialsSecret</code>; the exact data is provider-specific.</p>
+<p>The Topograph API server and Node observer are shared control-plane workloads. The node-data-broker
+is a DaemonSet and can be restricted independently. For an NVIDIA-only broker path, use the NFD PCI
+presence label rather than scheduling every Topograph component onto accelerator Nodes:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">topograph</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeDataBroker</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">feature.node.kubernetes.io/pci-10de.present</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span></span></span></code></pre></div>
+</div><p>On AWS, the broker reads instance and region identity from node-local IMDSv2, so the EC2 metadata
+response hop limit must be at least 2. The API ServiceAccount, not the broker ServiceAccount, needs
+<code>ec2:DescribeInstanceTopology</code>; EKS Pod Identity can provide a separate role containing only that
+action. The test Terraform module enables both requirements with
+<code>topograph_aws_pod_identity_enabled=true</code>.</p>
+<p>After Topograph writes labels, create a read-only source that chooses the hierarchy to expose to
+Kueue. This example combines Kubernetes cloud labels with a Topograph fabric tier:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cloud-fabric</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w"> </span>{}<span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">levels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.kubernetes.io/region</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.kubernetes.io/zone</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">fabric.topograph.run/tier-2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">fabric.topograph.run/tier-1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeLabels</span><span class="p">:</span><span class="w"> </span>{}</span></span></code></pre></div>
+</div><p>Do not copy a tier list from another cluster; inspect the labels actually published on these Nodes.
+The <a href="/gpustack-operator/main/docs/modules/topology/scheduling/#hierarchy-profiles">profile rules</a>
+
+define tier normalization.</p>
+<h2 id="observe-existing-node-labels">Observe existing Node labels</h2>
+<p>Use <code>nodeLabels</code> when another trusted component already owns the values. It validates the hierarchy
+but never modifies those labels:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cloud-zones</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">node-role.kubernetes.io/worker</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">levels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.kubernetes.io/region</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.kubernetes.io/zone</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeLabels</span><span class="p">:</span><span class="w"> </span>{}</span></span></code></pre></div>
+</div><p><code>levels</code> takes 1 to 16 entries, each a label key named once: admission refuses a key listed twice,
+since a repeated level would describe one Node label as two tiers of the hierarchy.
+<code>kubernetes.io/hostname</code> is always appended and must not appear in <code>levels</code>. A Node may omit a fine
+suffix and receive a shorter profile, but it may not carry a child level without every declared
+parent.</p>
+<h2 id="publish-a-configmap-snapshot">Publish a ConfigMap snapshot</h2>
+<p>The ConfigMap and its <code>TopologySource</code> reference must be in the worker namespace. The snapshot key
+contains YAML or JSON with this schema:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">topology.gpustack.ai/v1alpha1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">revision</span><span class="p">:</span><span class="w"> </span><span class="l">inventory-42</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">nodes</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">worker-a</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topology.gpustack.ai/region</span><span class="p">:</span><span class="w"> </span><span class="l">region-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topology.gpustack.ai/zone</span><span class="p">:</span><span class="w"> </span><span class="l">zone-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topology.gpustack.ai/rack</span><span class="p">:</span><span class="w"> </span><span class="l">rack-01</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">worker-b</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topology.gpustack.ai/region</span><span class="p">:</span><span class="w"> </span><span class="l">region-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topology.gpustack.ai/zone</span><span class="p">:</span><span class="w"> </span><span class="l">zone-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topology.gpustack.ai/rack</span><span class="p">:</span><span class="w"> </span><span class="l">rack-02</span></span></span></code></pre></div>
+</div><p>Reference that key and declare the same ordered levels:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">data-center</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w"> </span>{}<span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">levels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.gpustack.ai/region</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.gpustack.ai/zone</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.gpustack.ai/rack</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">configMap</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">configMapRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-system</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">topology-inventory</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">snapshot.yaml</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxStaleness</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span></span></span></code></pre></div>
+</div><p>The snapshot is atomic: one unknown Node, undeclared level, invalid value, broken parent chain, or
+contradictory child rejects the whole revision. The source reconciles one NFD <code>NodeFeature</code> per
+described Node; NFD publishes its writable labels onto the Node. On read failure, the last valid
+<code>NodeFeature</code> remains until <code>maxStaleness</code>; after expiry it is removed.</p>
+<p>For a cloud cluster, use <code>nodeLabels</code> to consume the existing standard region and zone keys.
+If a snapshot includes those keys as parents of a private rack, follow the <a href="/gpustack-operator/main/docs/modules/topology/scheduling/#the-topologysource-contract">standard-label
+boundary</a>
+.
+Use the private region and zone keys above when the inventory itself owns those facts.</p>
+<p>Use <code>additionalWritePrefix</code> when the data center owns another DNS prefix. It must be one DNS prefix
+with a trailing slash, for example <code>topology.example.com/</code>. Reserved Kubernetes, GPUStack,
+Topograph, and device-feature prefixes cannot be delegated.</p>
+<h2 id="publish-through-an-https-webhook">Publish through an HTTPS webhook</h2>
+<p>The webhook is an authenticated <code>GET</code> that returns the same snapshot. It requires an absolute HTTPS
+URL, does not follow redirects or use proxy-derived destinations, accepts at most 1 MiB, and requires
+exactly one of bearer-token or client-certificate authentication.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">TopologySource</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">inventory-service</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w"> </span>{}<span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">levels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.gpustack.ai/rack</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">webhook</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l">https://topology-inventory.gpustack-system.svc/snapshot</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">pollInterval</span><span class="p">:</span><span class="w"> </span><span class="l">1m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l">10s</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxStaleness</span><span class="p">:</span><span class="w"> </span><span class="l">5m</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">caBundleConfigMapRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-system</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">topology-inventory-ca</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bearerTokenSecretRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-system</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">topology-inventory-token</span></span></span></code></pre></div>
+</div><p>The CA ConfigMap key is <code>ca.crt</code>; the bearer Secret key is <code>token</code>. For mTLS, replace the bearer
+reference with <code>tlsClientCertificateSecretRef</code>; that Secret uses <code>tls.crt</code> and <code>tls.key</code>. All
+references are restricted to the worker namespace.</p>
+<p>Only a cluster administrator should create a <code>TopologySource</code> or its credentials. Restrict RBAC for
+these objects, allow egress only to the intended endpoint and DNS path, and rotate referenced
+Secrets without embedding credentials in the URL. <code>timeout</code> must not exceed <code>pollInterval</code>, and all
+three durations must be positive.</p>
+<h2 id="request-a-level-from-modeldeployment">Request a level from ModelDeployment</h2>
+<p>Set <code>requiredLevel</code> on a role to require each replica&rsquo;s Pod group to fit in one domain at that level:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">topology</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">requiredLevel</span><span class="p">:</span><span class="w"> </span><span class="l">topology.kubernetes.io/zone</span></span></span></code></pre></div>
+</div><p>The value is a label key, not <code>region</code>, <code>zone</code>, or a concrete zone name. Valid examples include
+<code>topology.kubernetes.io/zone</code>, <code>topology.gpustack.ai/rack</code>, and a selected Topograph tier. Omit the
+field for unconstrained TAS placement; the <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#topology-placement">field contract</a>
+
+defines the implicit hostname level.</p>
+<p>Changing or removing the field participates in the existing render hash and replaces only affected
+replica groups. It does not move an admitted group in place.</p>
+<h2 id="verify-the-scheduling-chain">Verify the scheduling chain</h2>
+<p>Read the produced objects rather than inferring success from a Ready Node:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>sh</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">kubectl get topologysources.worker.gpustack.ai
+</span></span><span class="line"><span class="cl">kubectl get nodes -L topology.gpustack.ai/profile,topology.kubernetes.io/zone
+</span></span><span class="line"><span class="cl">kubectl get topologies.kueue.x-k8s.io
+</span></span><span class="line"><span class="cl">kubectl get resourceflavors.kueue.x-k8s.io -o yaml
+</span></span><span class="line"><span class="cl">kubectl get clusterqueues.kueue.x-k8s.io -o yaml</span></span></code></pre></div>
+</div><p>For a ConfigMap or webhook source, inspect its NFD output before checking the projected Node labels:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>sh</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="nv">source_uid</span><span class="o">=</span><span class="k">$(</span>kubectl get topologysource data-center -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.metadata.uid}&#39;</span><span class="k">)</span>
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-system get nodefeatures -l <span class="s2">&#34;topology.gpustack.ai/source-uid=</span><span class="nv">$source_uid</span><span class="s2">&#34;</span> -o yaml
+</span></span><span class="line"><span class="cl">kubectl get nodes -L topology.gpustack.ai/region,topology.gpustack.ai/zone,topology.gpustack.ai/rack</span></span></code></pre></div>
+</div><p>The <code>NodeFeature.spec.labels</code> map contains private inventory labels only. Standard cloud region and
+zone keys may be read as parents but must not appear there. Refresh the ConfigMap snapshot after
+changing selector labels on an existing Node; writing sources do not watch Node label drift.</p>
+<p>The source must be Ready, every managed Node must have one profile, every generated flavor must pin
+that profile and reference a Topology, and the ClusterQueue <code>TopologyReady</code> condition must be True.
+The Topology&rsquo;s final level must be <code>kubernetes.io/hostname</code>.</p>
+<p>For a submitted ModelDeployment, inspect the generated Workload rather than creating one by hand:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>sh</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">kubectl get workloads.kueue.x-k8s.io -A -o yaml
+</span></span><span class="line"><span class="cl">kubectl get modeldeployments.worker.gpustack.ai -A -o yaml</span></span></code></pre></div>
+</div><p>Confirm the Workload PodSet carries <code>topologyRequest.required</code> when requested and inspect its
+<code>topologyAssignment</code> after admission. Then compare assigned domain values with the Nodes on which
+the Pods actually run. An assignment may name the hostname level even when a one-Pod Workload
+requested zone; verify the request and the admitted ResourceFlavor&rsquo;s <code>topologyName</code> separately.</p>
+<h2 id="change-a-live-hierarchy">Change a live hierarchy</h2>
+<p>Publish a complete replacement hierarchy, such as region → zone → rack, through the selected
+<code>TopologySource</code>. Its ordered level keys produce a new profile and Topology. The Node and its
+<code>Devices</code> ledger must converge on the same <code>topology.gpustack.ai/profile</code> before accelerator
+admission can use the replacement flavor.</p>
+<p>Record the managed ClusterQueue&rsquo;s name, UID, stop policy, <code>status.reservingWorkloads</code>, and flavor
+references before and after the change. GPUStack creates replacement flavors first, sets
+<code>HoldAndDrain</code>, waits for zero reservations, switches the flavor set on the same queue, then restores
+the previous stop policy. Kueue evicts and later readmits affected Workloads, so plan for a service
+interruption. Old flavors and their Topology disappear only after references clear.</p>
+<p>If <code>TopologyReady=False</code>, read its reason and the queue&rsquo;s migration annotations before changing
+anything else. A missing replacement flavor, immutable object drift, too many required flavors,
+or quota that cannot be conserved leaves the last complete queue plan in place. An old non-TAS queue
+from a previous release is not adopted; use fresh managed objects.</p>
+<h2 id="diagnose-pending-workloads">Diagnose Pending workloads</h2>
+<p>Pending is the safe result when no single domain satisfies the full PodSet. Check in this order:</p>
+<ol>
+<li>Read the ModelDeployment progress message for the role and replica.</li>
+<li>Read the generated Workload conditions and topology request/assignment.</li>
+<li>Check the ClusterQueue <code>TopologyReady</code> condition and resource-group flavor count.</li>
+<li>Check every referenced ResourceFlavor&rsquo;s profile label and <code>topologyName</code>.</li>
+<li>Compare the requested level with each Kueue Topology and the actual Node labels.</li>
+<li>Count CPU, memory, and requested extended resources inside one domain, not cluster-wide.</li>
+</ol>
+<p>A four-node cluster with two Nodes per zone can admit a three-Pod request cluster-wide but cannot
+admit it at zone level. Likewise, capacity split between a zone profile and a hostname-only profile
+cannot satisfy one zone-constrained PodSet.</p>
+<p>A multi-role deployment can show one Workload with <code>QuotaReserved=True</code> and a topology assignment,
+counted in the queue&rsquo;s <code>status.reservingWorkloads</code>, while its joint check reads <code>Pending</code> and no role
+Pod is bound. That group fits and is <a href="/gpustack-operator/main/docs/modules/topology/scheduling/#per-replica-topology-requests">held for its set</a>
+;
+the other roles are the ones short of a domain. Free their capacity or delete the deployment.</p>
+<p>If the <a href="/gpustack-operator/main/docs/modules/topology/scheduling/#capacity-and-lifecycle-limits">flavor limit</a>
+
+is exceeded, reduce profile fragmentation or hardware identity variants, then let reconciliation
+retry the complete plan.</p>
+<h2 id="validate-on-a-temporary-eks-cluster">Validate on a temporary EKS cluster</h2>
+<p>The repository EKS fixture can create two CPU node groups pinned to different availability zones.
+Use two inexpensive Nodes per zone to prove both positive and negative placement: a size-two PodSet
+fits one zone, while a size-three PodSet remains Pending although total cluster capacity is four.</p>
+<p>Enabling <code>topograph_aws_pod_identity_enabled</code> also configures the broker&rsquo;s IMDSv2 hop limit and the
+minimal API Pod Identity permission. Verify four Ready Nodes, two distinct zone labels, broker and
+API readiness, source reconciliation, TAS assignments, and the negative Pending observation.</p>
+<p>This is paid infrastructure. Review current AWS prices, quotas, and instance availability before
+apply. Use fresh queues for every test. After validation, destroy the fixture and verify the state
+and charge-bearing resources are gone, or explicitly transfer the Terraform state to the next owner
+before leaving the cluster running. The test does not prove an upgrade of previously published queues.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/topology/scheduling/">Topology-Aware Scheduling</a>
+ (mechanism
+and boundaries)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment</a>
+ (field contract)</li><li><a href="/gpustack-operator/main/docs/operate/installation-modes/">Installation Modes</a>
+ (chart ownership)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment</a>
+ — configure the serving
+roles that consume topology-aware admission.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/docs/modules/topology/operations.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/topology/operations.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#choose-the-inventory-path">Choose the inventory path</a></li>
+    <li><a href="#enable-topograph">Enable Topograph</a></li>
+    <li><a href="#observe-existing-node-labels">Observe existing Node labels</a></li>
+    <li><a href="#publish-a-configmap-snapshot">Publish a ConfigMap snapshot</a></li>
+    <li><a href="#publish-through-an-https-webhook">Publish through an HTTPS webhook</a></li>
+    <li><a href="#request-a-level-from-modeldeployment">Request a level from ModelDeployment</a></li>
+    <li><a href="#verify-the-scheduling-chain">Verify the scheduling chain</a></li>
+    <li><a href="#change-a-live-hierarchy">Change a live hierarchy</a></li>
+    <li><a href="#diagnose-pending-workloads">Diagnose Pending workloads</a></li>
+    <li><a href="#validate-on-a-temporary-eks-cluster">Validate on a temporary EKS cluster</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

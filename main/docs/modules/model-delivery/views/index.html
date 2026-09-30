@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Model Artifact API · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-delivery/views/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+      data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/model-delivery/views/">
+      <option value="/gpustack-operator/main/">main</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/main/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" aria-current="page">API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/modules/model-delivery/">Model Delivery</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Artifact API</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-artifact-api">Model Artifact API</h1>
+<p>GPUStack server and consoles use <code>worker.gpustack.ai/v1</code> to manage model artifacts and inspect
+node caches. A node&rsquo;s download progress <a href="/gpustack-operator/main/docs/modules/model-delivery/node-store/#the-resource">is stored on
+thresholds</a>
+; <code>progress</code> answers between them, on request, and
+stores nothing.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#resources">Resources</a>
+</li>
+<li><a href="#the-progress-subresource">The progress subresource</a>
+</li>
+<li><a href="#authorization">Authorization</a>
+</li>
+<li><a href="#capability-map-for-gpustack-server">Capability map for GPUStack server</a>
+</li>
+<li><a href="#requirements-and-limits">Requirements and limits</a>
+</li>
+</ul>
+<h2 id="resources">Resources</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Resource</th>
+          <th>Scope</th>
+          <th>Verbs</th>
+          <th>Printer columns</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>modelartifacts.v1.worker.gpustack.ai</code></td>
+          <td>namespaced</td>
+          <td>create, get, list, watch, update, patch, delete; subresource <code>progress</code></td>
+          <td>Name, Source, Revision (12 characters), Size, Ready, Downloading, Resolved; Age with <code>-o wide</code></td>
+      </tr>
+      <tr>
+          <td><code>nodemodelstores.v1.worker.gpustack.ai</code></td>
+          <td>cluster</td>
+          <td><code>get</code>, <code>list</code>, <code>watch</code>, <code>delete</code></td>
+          <td>Name, Ready, Used, Models, Downloading; Age with <code>-o wide</code></td>
+      </tr>
+  </tbody>
+</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get modelartifacts.v1.worker.gpustack.ai -n team-a
+</span></span><span class="line"><span class="cl">kubectl get nodemodelstores.v1.worker.gpustack.ai</span></span></code></pre></div>
+</div><p><code>worker.gpustack.ai/v1</code> is the public API. A bare <code>kubectl get nms</code> or
+<code>kubectl get modelartifacts.worker.gpustack.ai</code> uses it.</p>
+<ul>
+<li>ModelArtifact exposes no writable <code>status</code> subresource. The worker owns its status, which is
+used to authorize model mounts. Updating the main resource preserves the stored status.</li>
+<li>NodeModelStore supports reads and deletion. The worker manages its <code>spec</code>, and each node&rsquo;s plugin
+reports <code>status</code>. Deletion supports Kubernetes garbage collection; the worker recreates the object
+while its node runs the plugin.</li>
+<li>Resource fields are described in <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#the-resource">Model Artifact</a>
+ and
+<a href="/gpustack-operator/main/docs/modules/model-delivery/node-store/#the-resource">Node Model Store</a>
+.</li>
+</ul>
+<h2 id="the-progress-subresource">The progress subresource</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get --raw <span class="s2">&#34;/apis/worker.gpustack.ai/v1/namespaces/&lt;ns&gt;/modelartifacts/&lt;name&gt;/progress&#34;</span></span></span></code></pre></div>
+</div><div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelArtifactProgress</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-72b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2026-09-26T00:00:00Z&#34;</span><span class="w">    </span><span class="c"># when it was computed</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">manifestDigest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">sizeBytes</span><span class="p">:</span><span class="w"> </span><span class="m">145424101604</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">ready</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">                             </span><span class="c"># nodes holding the content published</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">downloading</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">                       </span><span class="c"># nodes downloading it</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">failed</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">                            </span><span class="c"># nodes waiting to retry a failed attempt</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">downloadingPercent</span><span class="p">:</span><span class="w"> </span><span class="m">42</span><span class="w">               </span><span class="c"># the downloading nodes&#39; mean, whole percent</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">downloadingBytes</span><span class="p">:</span><span class="w"> </span><span class="m">123482472448</span><span class="w">       </span><span class="c"># what the downloading nodes hold, summed</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">live</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">                              </span><span class="c"># downloading nodes read from their plugin for this answer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">failureReasons</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">SourceUnavailable</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">count</span><span class="p">:</span><span class="w"> </span><span class="m">1</span></span></span></code></pre></div>
+</div><ul>
+<li><strong>It is computed on each request and never written.</strong> The worker reads the artifact and the
+<code>NodeModelStore</code>s listing its digest; for each node downloading it, it reads that node&rsquo;s plugin
+for its running downloads. The request is bounded at 13 seconds. Live reads cover at most
+64 downloading nodes; a node past that cap,
+or one that does not answer within the request&rsquo;s budget, contributes the bytes it last wrote and
+is not counted in <code>live</code>.</li>
+<li><strong>It names no node.</strong> It is namespaced and tenants read it; node names would give every tenant the
+cluster&rsquo;s topology. Read NodeModelStore for the node-level details.</li>
+<li><strong>The mean covers the downloading nodes only</strong>, each downloading a whole copy; a node starting a
+download does not pull the ready ones down. <code>downloadingPercent</code> is absent while none downloads.</li>
+<li><strong>Nothing to count</strong> answers zeros and a <code>reason</code>: the artifact is not resolved yet, or its claim
+source is mounted from its volume and never downloaded.</li>
+<li><strong>The counts describe the content.</strong> Artifacts with the same digest, in any namespace, see the same
+nodes; only numbers cross.</li>
+</ul>
+<h2 id="authorization">Authorization</h2>
+<p>The aggregated API server authorizes each request with Kubernetes RBAC through delegated
+authorization: <code>get</code> on <code>modelartifacts/progress</code> in the artifact&rsquo;s namespace. <code>get modelartifacts</code>
+alone does not grant it. The chart grants tenants nothing in this group; an administrator gives a
+tenant&rsquo;s subjects a Role such as:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">rbac.authorization.k8s.io/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Role</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">model-artifact-reader</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">rules</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">apiGroups</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">worker.gpustack.ai</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">modelartifacts</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">modelartifacts/progress</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">verbs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">get</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">list</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">watch</span></span></span></code></pre></div>
+</div><p>A subject with that Role in <code>team-a</code> reads <code>team-a</code>&rsquo;s progress and is refused another namespace&rsquo;s.
+<code>nodemodelstores</code> is cluster-scoped: grant it with a ClusterRole to administrators and GPUStack
+server only.</p>
+<h2 id="capability-map-for-gpustack-server">Capability map for GPUStack server</h2>
+<p>The table matches each GPUStack server capability to the API surface that covers it; the gap
+column names what is missing and who owns it.</p>
+<table>
+  <thead>
+      <tr>
+          <th>GPUStack server</th>
+          <th>This API</th>
+          <th>Gap and owner</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>A source: Hugging Face repository, ModelScope model, local path</td>
+          <td><code>ModelArtifact.spec.source</code>: <code>huggingFace</code> or <code>modelScope</code>; a local path is a <code>persistentVolumeClaim</code> source</td>
+          <td>none</td>
+      </tr>
+      <tr>
+          <td>One file of a repository (<code>huggingface_filename</code>, a GGUF)</td>
+          <td><code>allowPatterns</code> with a single <code>&lt;file&gt;</code> entry</td>
+          <td>none</td>
+      </tr>
+      <tr>
+          <td>A model file per worker, its <code>state</code> and <code>state_message</code></td>
+          <td>the node&rsquo;s <code>status.models[]</code> entry: <code>state</code>, <code>reason</code>, <code>message</code></td>
+          <td>none</td>
+      </tr>
+      <tr>
+          <td><code>download_progress</code> and <code>size</code></td>
+          <td>the entry&rsquo;s <code>downloadedBytes</code> and <code>sizeBytes</code>; live through <code>progress</code>; the artifact&rsquo;s <code>status.nodes</code></td>
+          <td>none</td>
+      </tr>
+      <tr>
+          <td><code>resolved_paths</code> on the worker</td>
+          <td>the fixed mount path in the consumer&rsquo;s container; host paths are never exposed</td>
+          <td>by design</td>
+      </tr>
+      <tr>
+          <td><code>local_dir</code></td>
+          <td>none: the plugin owns the cache layout</td>
+          <td>by design</td>
+      </tr>
+      <tr>
+          <td>Listing a worker&rsquo;s model files</td>
+          <td>NodeModelStore get, list, watch</td>
+          <td>none</td>
+      </tr>
+      <tr>
+          <td>Download to a worker ahead of use</td>
+          <td>a <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/">ModelPrefetch</a>
+ naming nodes</td>
+          <td>none</td>
+      </tr>
+      <tr>
+          <td>Delete with <code>cleanup_on_delete</code></td>
+          <td>delete the prefetch; collection after the last reference and its grace</td>
+          <td>none</td>
+      </tr>
+      <tr>
+          <td><code>reset</code> (retry now)</td>
+          <td>automatic backoff to <code>retryTime</code></td>
+          <td>not planned</td>
+      </tr>
+      <tr>
+          <td>One row per source per worker</td>
+          <td>one entry per digest per node, shared by artifacts with the same content</td>
+          <td>none</td>
+      </tr>
+      <tr>
+          <td>Prefer workers holding the files</td>
+          <td><a href="/gpustack-operator/main/docs/modules/topology/scheduling/#placement-of-node-delivered-models">placement preference</a>
+, compute first</td>
+          <td>none</td>
+      </tr>
+      <tr>
+          <td>LoRA and draft-model files</td>
+          <td>not in this batch</td>
+          <td>later</td>
+      </tr>
+      <tr>
+          <td>Tenant scope</td>
+          <td>the artifact&rsquo;s namespace; the node store names no tenant</td>
+          <td>none</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="requirements-and-limits">Requirements and limits</h2>
+<ul>
+<li><strong>The aggregated API</strong>, <code>apiregistration.k8s.io/v1</code>, and delegated authentication and
+authorization (<code>TokenReview</code>, <code>SubjectAccessReview</code>): available on every version the chart
+installs on.</li>
+<li><strong>Live bytes need the plugin&rsquo;s Pod reachable from the worker</strong> on its HTTPS port. A NetworkPolicy
+that blocks it leaves the stored values, and <code>live</code> says how many nodes answered.</li>
+<li><strong>No watch on <code>progress</code></strong>: it answers one request. Watch NodeModelStores for changes.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/">Model Artifact</a>
+ for the artifact itself</li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/node-store/">Node Model Store</a>
+ for each node&rsquo;s entries and the progress write rule</li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/">Node-to-Node Sync</a>
+ for where a node&rsquo;s bytes come from</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
+ for the other subresource built
+the same way.</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/model-delivery/node-store/">Node Model Store</a></div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/docs/modules/model-delivery/views.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/views.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#resources">Resources</a></li>
+    <li><a href="#the-progress-subresource">The progress subresource</a></li>
+    <li><a href="#authorization">Authorization</a></li>
+    <li><a href="#capability-map-for-gpustack-server">Capability map for GPUStack server</a></li>
+    <li><a href="#requirements-and-limits">Requirements and limits</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

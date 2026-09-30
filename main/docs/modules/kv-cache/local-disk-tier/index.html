@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>KV Cache Local Disk Tier · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+      data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/">
+      <option value="/gpustack-operator/main/">main</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/main/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" aria-current="page">Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/modules/kv-cache/">KV Cache</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">KV Cache Local Disk Tier</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="kv-cache-local-disk-tier">KV Cache Local Disk Tier</h1>
+<p>A member group may declare a directory on each of its nodes, which configures the store client&rsquo;s
+offload keys to point at it. <strong>Declaring the entry is the whole switch</strong>: the leader has no field of
+its own and takes its offload flags from this list&rsquo;s presence. The list holds one entry, keyed by
+<code>path</code> (<code>status.capacity</code> reports one pair of figures for the whole backend, so a second tier could
+not be attributed).</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kvcache</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">DRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">500Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">localDisks</span><span class="p">:</span><span class="w">                    </span><span class="c"># declaring an entry is what turns the tier on</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/var/lib/kvcache</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="l">4Ti             </span><span class="w"> </span><span class="c"># optional; unset means the store&#39;s own ceiling</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">keyLimit</span><span class="p">:</span><span class="w"> </span><span class="m">10000000</span><span class="w">         </span><span class="c"># optional; the same, on the key count</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">eviction</span><span class="p">:</span><span class="w">                  </span><span class="c"># optional; unset means the store&#39;s own behaviour</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">            </span><span class="c"># default; false fills the tier and then stops writing</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">LRU             </span><span class="w"> </span><span class="c"># FIFO | LRU; unset means the store&#39;s own, which is FIFO</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                </span><span class="nt">watermark</span><span class="p">:</span><span class="w">               </span><span class="c"># optional; percentages of capacity</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">high</span><span class="p">:</span><span class="w"> </span><span class="m">90</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">                  </span><span class="nt">low</span><span class="p">:</span><span class="w"> </span><span class="m">80</span></span></span></code></pre></div>
+</div><table>
+  <thead>
+      <tr>
+          <th>Rendered</th>
+          <th>Location</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>MOONCAKE_OFFLOAD_ENABLED</code> and <code>..._FILE_STORAGE_PATH</code>, plus <code>..._BUCKET_SIZE_LIMIT_BYTES</code> and <code>..._BUCKET_KEYS_LIMIT</code></td>
+          <td>the member container</td>
+      </tr>
+      <tr>
+          <td><code>..._TOTAL_SIZE_LIMIT_BYTES</code> <strong>and</strong> <code>..._BUCKET_MAX_TOTAL_SIZE</code>, both from <code>capacity</code>; <code>..._TOTAL_KEYS_LIMIT</code> from <code>keyLimit</code></td>
+          <td>the member container</td>
+      </tr>
+      <tr>
+          <td><code>..._BUCKET_EVICTION_POLICY</code>, <code>..._ENABLE_DISK_WATERMARK_EVICTION</code> and the two ratio variables, from <code>eviction</code></td>
+          <td>the member container</td>
+      </tr>
+      <tr>
+          <td>a <code>hostPath</code> volume and mount at <code>localDisks[].path</code></td>
+          <td>the member Pod</td>
+      </tr>
+      <tr>
+          <td><code>-enable_offload=true</code>, <code>-offload_on_evict=true</code></td>
+          <td>the leader&rsquo;s argv, derived from this declaration</td>
+      </tr>
+      <tr>
+          <td>a <code>preStop</code> hook, and a termination window derived from <code>scaleIn.gracePeriodSeconds</code></td>
+          <td>the member Pod</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>The mode is not selectable: the tier always runs deferred.</strong> The leader renders
+<code>-enable_offload=true -offload_on_evict=true</code> together, and only when a group declares a tier. The
+flags come from the declaration rather than any field, and <code>leader.extraArgs</code> refuses both keys so
+the leader cannot drift out of step with the members&rsquo; declaration.</p>
+<p>The store keeps an object queued for offload in memory until the disk write lands, which is the
+branch <code>-offload_on_evict</code> selects. The write-through alternative, where an eviction can destroy the
+sole replica of an object whose bucket has not been flushed, is not renderable by any shape of this
+object, so there is nothing to opt into.</p>
+<p><strong>A tier is a layer on a member group, never a group of its own.</strong> See
+<a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#connection-and-medium">Connection and medium</a>
+ for why the shape has to be this way, and
+<a href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/">KV Cache on Disk-Heavy Nodes</a>
+ for what to write on a node that is mostly disk.</p>
+<p><strong>Every example on this page is a <code>DRAM</code> group, and that is not incidental.</strong> What is and is not
+measured about pairing the tier with a <code>VRAM</code> group is stated once, beside the medium it belongs to,
+at <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#vram-group-accelerator-access">VRAM group accelerator access</a>
+. Read it before writing
+one.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#bucket-writes">Bucket writes</a>
+</li>
+<li><a href="#eviction">Eviction</a>
+</li>
+<li><a href="#directory-requirements">Directory requirements</a>
+</li>
+<li><a href="#cleanup-on-deletion">Cleanup on deletion</a>
+</li>
+<li><a href="#unaccounted-disk-usage">Unaccounted disk usage</a>
+</li>
+</ul>
+<h2 id="bucket-writes">Bucket writes</h2>
+<p>The store does not write an offloaded object on its own. It <strong>assembles objects into a bucket and
+writes nothing until that bucket is full</strong> (by bytes or by object count), and what is short of the
+threshold is carried to the next attempt, indefinitely.</p>
+<p><strong>The store&rsquo;s own thresholds are 256 MB and 500 objects, and a backend that never reaches either
+has a tier that holds nothing while looking healthy.</strong> The member Pods are Ready, the leader logs the
+mount and reports objects deferred for offload, and <code>status.capacity</code> shows the size the tier
+declared, because that figure is <strong>capacity, not usage</strong> (see
+<a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#status-and-conditions">Status and conditions</a>
+).</p>
+<p>This is what <a href="https://github.com/gpustack/gpustack-operator/issues/200">issue #200</a>
+ tracks.</p>
+<p><strong>The operator renders a smaller pair of its own</strong>, so a modest backend closes buckets. They are
+<strong>not in the API</strong> and <code>extraEnv</code> refuses them: moving them is a tuning decision that would need a
+field, not an escape hatch that silently defines the same variable twice.</p>
+<p>Three bounds follow from the bucket being the unit, all enforced at apply time, all naming the same
+figure:</p>
+<ul>
+<li><code>capacityPerMember</code> must hold <strong>one bucket</strong> on a group that declares a tier, because the bytes are
+held in the memory segment until the bucket is complete.</li>
+<li><code>localDisks[].capacity</code> and <code>localDisks[].keyLimit</code>, when set, must hold one bucket and one bucket&rsquo;s worth
+of keys.</li>
+</ul>
+<blockquote>
+<p><strong>Why a refusal rather than a default</strong> — the store stops taking offload work as soon as one more
+bucket would not fit under a declared ceiling, and it reports that by doing nothing. A tier below
+any of these is a configuration that cannot work under any workload.</p>
+</blockquote>
+<p><strong>Read <code>master_allocated_file_size_bytes</code> to see what the tier holds:</strong></p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl <span class="nb">exec</span> -n gpustack-system deploy/&lt;backend&gt;-leader -- <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="go">    python3 -c &#34;import urllib.request;print([l for l in \
+</span></span></span><span class="line"><span class="cl"><span class="go">    urllib.request.urlopen(&#39;http://127.0.0.1:9003/metrics&#39;).read().decode().splitlines() \
+</span></span></span><span class="line"><span class="cl"><span class="go">    if l.startswith(&#39;master_allocated_file_size_bytes&#39;)])&#34;
+</span></span></span></code></pre></div>
+</div><p><code>master_allocated_file_size_bytes</code> is <strong>bytes actually written to the tier</strong>. It moves when a bucket
+is closed and written, and it sums the whole backend.</p>
+<p><strong>A <code>0</code> is not on its own a verdict, and the section above is why.</strong> A backend that has not filled
+a bucket has written nothing <strong>legitimately</strong>, and that is indistinguishable at this gauge from a
+tier that cannot write at all.</p>
+<p><strong>The threshold that decides which reading applies is per member, while the gauge is not.</strong> Each
+member client fills its own bucket, so traffic spread over four members has to reach four buckets'
+worth before every one of them closes (the figure the group&rsquo;s
+<a href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/"><code>capacityPerMember</code> floor</a>
+ is taken from). Judge the two together: compare
+the data each member has been offered since the tier started with the gauge.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Offered data</th>
+          <th>Gauge stays 0</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>below one bucket</td>
+          <td>the expected reading; waiting does not change it, because nothing is due</td>
+      </tr>
+      <tr>
+          <td>one bucket or more</td>
+          <td><strong>the tier is not taking writes</strong> — this is the reading to act on</td>
+      </tr>
+  </tbody>
+</table>
+<p>The gauge updates when a bucket closes. An immediate read after a <code>put</code> can still show <code>0</code> on a
+working tier; it catches up within tens of seconds. If each member has received a bucket&rsquo;s worth
+of data and the gauge remains <code>0</code> past that delay, the tier is not taking writes.</p>
+<h2 id="eviction">Eviction</h2>
+<p><code>localDisks[].eviction</code> is one choice with two outcomes, not a set of knobs:</p>
+<table>
+  <thead>
+      <tr>
+          <th><code>eviction</code></th>
+          <th>Behavior when full</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>unset</td>
+          <td>whatever the store does by default</td>
+      </tr>
+      <tr>
+          <td><code>enabled: true</code> (the default when the block is present)</td>
+          <td>drops what it holds and goes on accepting writes</td>
+      </tr>
+      <tr>
+          <td><code>enabled: false</code></td>
+          <td>stops accepting writes; what is there stays and stays readable</td>
+      </tr>
+  </tbody>
+</table>
+<ul>
+<li><strong><code>policy</code></strong> is the order entries leave in: <code>FIFO</code> drops the oldest written, <code>LRU</code> the least
+recently read. Left unset, the store&rsquo;s own applies, which is <code>FIFO</code>.</li>
+<li><strong><code>watermark</code></strong> is when eviction runs: it starts once the tier passes <code>high</code> and stops once it is
+back under <code>low</code>, both <strong>percentages of <code>capacity</code></strong>. <code>low</code> must be below <code>high</code>.</li>
+</ul>
+<p>Four combinations are refused at apply time, each because the store would accept them and then not
+act on them:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Refused</th>
+          <th>Why</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>enabled: false</code> with a <code>policy</code></td>
+          <td>there is no order in which nothing leaves</td>
+      </tr>
+      <tr>
+          <td><code>enabled: false</code> with a <code>watermark</code></td>
+          <td>there is nothing for the marks to start and stop</td>
+      </tr>
+      <tr>
+          <td><code>watermark</code> with no <code>capacity</code></td>
+          <td>the marks are a percentage of it, and the store&rsquo;s own default for the quota they are taken against is a value its eviction path reads as switched off</td>
+      </tr>
+      <tr>
+          <td><code>low</code> at or above <code>high</code></td>
+          <td>every write past the mark would evict; the member&rsquo;s own startup check refuses the pair, inside a container log</td>
+      </tr>
+  </tbody>
+</table>
+<blockquote>
+<p><strong>Why the enum has only two values</strong> — the store maps a policy string it does not recognise onto
+<strong>no eviction at all</strong>, with no error, no warning and no failure to start. A neutral two-value enum
+is what keeps a typo from being a silently disabled cache. Turning eviction off is <code>enabled: false</code>
+rather than a third enum value, so there is exactly one way to say it.</p>
+</blockquote>
+<p><strong>Settings this API does not name are reachable through <code>members[].extraEnv</code></strong>, which <code>extraArgs</code>
+cannot reach: its entries render as the entrypoint&rsquo;s config-key overrides, and this family is read
+from the environment only. A name the operator already renders is refused there, because Kubernetes
+takes a container carrying one name twice and leaves the winner to the runtime. <strong>Every value is
+world-readable</strong>, on the cluster-scoped object and again in the Pod. No credential belongs there.</p>
+<h2 id="directory-requirements">Directory requirements</h2>
+<p><code>localDisks[].path</code> is mounted with <code>type: Directory</code>, so <strong>the directory must already exist on every
+node the group selects</strong>. This is deliberate: a directory the kubelet creates is owned by <code>root</code> with
+mode <code>0755</code>, while the published store image runs as <strong>uid 65532</strong>, and the member then starts and
+cannot write to it. <code>fsGroup</code> does not help, because it does not apply to <code>hostPath</code> volumes.</p>
+<p><strong>The uid depends on the image</strong>, since <code>members[].image</code> may put a different vendor&rsquo;s build on a
+group. Read it off the image you are using:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> docker run --rm --entrypoint id &lt;your-member-image&gt;
+</span></span><span class="line"><span class="cl"><span class="go">uid=65532 gid=0(root) groups=0(root)
+</span></span></span></code></pre></div>
+</div><p>Then create the directory on each node with that uid:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> install -d -o <span class="m">65532</span> -g <span class="m">0</span> -m <span class="m">0750</span> /var/lib/kvcache
+</span></span></code></pre></div>
+</div><p>There is <strong>no switch that makes the operator create the directory for you.</strong> An init container would
+have to name a single uid for every group, and the uid is a property of whichever image a group
+runs, so the command above is the preparation.</p>
+<p>That objection is about ownership, so it reaches creating the directory and not emptying it: removing
+content needs no uid. Emptying is a switch, and it is
+<a href="#cleanup-on-deletion">below</a>
+.</p>
+<p>Five rules the path has to satisfy, all enforced at apply time:</p>
+<ul>
+<li>It must be <strong>absolute</strong>.</li>
+<li>It must not be the <strong>root directory</strong>.</li>
+<li>It <strong>may not overlap <code>/dev/infiniband</code></strong> (equal to it, inside it, or containing it). A sibling such
+as <code>/dev/infiniband-cache</code> is fine.</li>
+<li>It <strong>may not contain a <code>..</code> component</strong>.</li>
+<li>It <strong>may not begin or end with whitespace</strong>, spaces and tabs alike.</li>
+</ul>
+<blockquote>
+<p><strong>Why</strong> — the root directory would mount the node&rsquo;s whole filesystem into a third-party container.
+A host fabric&rsquo;s device plugin injects the granted device nodes under <code>/dev/infiniband</code> in this
+same container; a tier on that path would shadow them or be shadowed, which nothing on the object
+would record. That rule holds whatever
+<code>spec.transport.protocol</code> says today, because the field is editable. The
+<code>..</code> rule mirrors the store&rsquo;s own, which refuses such a path before checking whether the directory
+exists. The whitespace rule exists because the path is mounted exactly as written, so a trailing
+space produces a different directory than the one an operator read on the screen.</p>
+</blockquote>
+<p><strong>The tier is frozen once a group has it: it cannot be added to a running group, removed from one,
+or moved to another <code>path</code>.</strong> Members would have to restart to mount the directory, and whatever they
+already wrote would stay on their nodes with nothing addressing it. <strong>What the tier may hold is not
+frozen</strong>: <code>capacity</code>, <code>keyLimit</code> and <code>eviction</code> each move either way, re-rendering the variables in
+the table above, and the tier&rsquo;s contents survive the restart that follows.</p>
+<p><strong>There is exactly one exit, and it needs the tier on the last group.</strong> The immutability rule reads
+the list <strong>by position</strong> (the position identifies a group everywhere else, so it identifies the
+tier here too), and an update that drops the <strong>last</strong> group takes its tier with it.</p>
+<p>Dropping an earlier group is refused: every position after it would be compared against a different
+group&rsquo;s spec, which is also why reordering <code>members</code> is refused. The refusal message is unambiguous
+about which group it means.</p>
+<p><strong>A backend whose only group carries a tier has no exit but deletion.</strong> <code>members</code> requires at least
+one entry, so that group cannot be removed, and replacing it in place is the forbidden edit. Deleting
+the <code>KVCacheBackend</code> is what is left, and it takes the leader and every member with it. Put a tier on
+the last group if you want to be able to take it off.</p>
+<p><strong>Three failure modes, all loud:</strong></p>
+<table>
+  <thead>
+      <tr>
+          <th>Symptom</th>
+          <th>Cause</th>
+          <th>Fix</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Refused at <code>kubectl apply</code></td>
+          <td>the path breaks one of the five rules above, or the tier was added, removed or repathed on a running group</td>
+          <td>fix the path, or leave the tier alone; the message names which rule</td>
+      </tr>
+      <tr>
+          <td>Member Pod stuck, event says <code>FailedMount ... hostPath type check failed</code></td>
+          <td>the directory does not exist on that node</td>
+          <td>create it as above</td>
+      </tr>
+      <tr>
+          <td>Member Pod runs but never becomes Ready; container log carries <code>FileStorageConfig: no write permission on directory: &lt;path&gt;</code> and <code>Store startup failed (attempt N): Invalid FileStorage configuration</code></td>
+          <td>the directory exists but the image&rsquo;s user cannot write to it</td>
+          <td><code>chown</code> it to the uid above</td>
+      </tr>
+  </tbody>
+</table>
+<p>The last one never reaches a Ready state (the member&rsquo;s REST port opens only after the store mounts,
+so the readiness probe never passes), and <code>MembersMounted</code> reports the shortfall rather than the
+backend looking healthy.</p>
+<h2 id="cleanup-on-deletion">Cleanup on deletion</h2>
+<p>Deleting a <code>KVCacheBackend</code> leaves the tier directory exactly as it was. Set
+<code>members[].localDisks[].cleanAfterDelete: true</code> and the operator empties it as part of the deletion, on
+every node that group&rsquo;s <code>nodeSelector</code> picks at the moment you delete it.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">DRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">64Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">localDisks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/var/lib/kvcache</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="l">512Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">cleanAfterDelete</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span></span></span></code></pre></div>
+</div><p><strong>It defaults to <code>false</code>, which is how every release before it behaved.</strong> What is on that disk is
+yours; removing it is not a decision this operator takes on your behalf. Turned on, the decision is
+still yours and the operator only carries it out.</p>
+<p><strong>The content goes, the directory stays.</strong> You created it, gave it an owner, and may have mounted a
+filesystem there.</p>
+<p><strong>Declaring a tier requires a shell in the group&rsquo;s image.</strong> An init container surveys the directory
+before the member starts, and it runs <code>sh -c</code>; an image without a shell keeps the member from
+starting. The store images this project ships have one.</p>
+<h3 id="when-cleanup-is-disabled">When cleanup is disabled</h3>
+<p>A later backend pointed at the same <code>path</code> starts on whatever the previous one left. The store
+claims those buckets, so a key the new backend has written can read back as the <strong>old backend&rsquo;s
+bytes</strong> instead of as a miss, which is the part that makes it hard to spot.</p>
+<p>The operator reports this rather than acting on it. A backend whose tier directory is not empty when
+it first starts records it in <code>status.conditions</code> as <code>TierWasEmpty=False</code>, naming each node and the
+number of entries found, and emits one warning event beside it. Nothing is removed and nothing is
+blocked.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get kvcachebackend &lt;name&gt; -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.conditions[?(@.type==&#34;TierWasEmpty&#34;)]}&#39;</span>
+</span></span></code></pre></div>
+</div><p><strong>The condition is written once and then left alone</strong>, unlike everything else in that status. After
+the first write the question stops being answerable: the backend&rsquo;s own data on that disk is
+indistinguishable from what it found there, so a member restarting later cannot be told apart from a
+fresh reuse.</p>
+<p>Because that write is permanent, <code>TierWasEmpty=True</code> waits until <strong>every</strong> node carrying the tier has
+reported. <code>False</code> does not: one node holding content settles it whatever the others say. So the
+condition being <strong>absent</strong> means the question is still open: a member still starting, or one whose
+survey cannot run at all. Absent is not a clean tier.</p>
+<p>Only a backend&rsquo;s <strong>first</strong> member Pods are believed. A Pod replaced later (a node reboot, an
+eviction, an image change) re-runs the same survey against a tier this backend has since filled, and
+its entries are not evidence about what the backend found. Such readings are ignored, so a backend
+whose condition was never settled early does not end up accusing a predecessor of its own content.</p>
+<p>&ldquo;Every node&rdquo; means every node the member DaemonSet wants a Pod on, not every Pod that happens to
+exist yet. A node still scheduling or still pulling holds the <code>True</code> verdict open rather than
+being skipped over. A node whose only reading came from a replacement counts as one that has not
+answered, which is why a backend can end up with no verdict at all.</p>
+<h3 id="cleanup-limitations">Cleanup limitations</h3>
+<p><strong>A node it cannot reach in time keeps its content.</strong> The deletion is not held open for it: a
+deletion waiting on a node that is gone is an object nobody can delete. The node is left as it is and
+gets a warning event, recorded <strong>on the node</strong> rather than on the backend, because the backend is
+about to stop existing and the leftover data is not.</p>
+<p><strong>&ldquo;In time&rdquo; is five minutes, counted per node from that node&rsquo;s own cleanup Pod.</strong> It is counted
+neither from the oldest Pod of the pass nor from the deletion: a Pod created on a later pass would
+otherwise be reported as abandoned with most of its five minutes unspent, and a clock started at the
+deletion would spend its budget on the teardown wait instead of the cleanup.</p>
+<p><strong>A cleanup still running at the deadline is stopped, not left to finish.</strong> Emptying a very large
+tier can outlast the five minutes, and ending it there leaves the directory partly emptied. Leaving
+it running is worse: it keeps deleting from a path this backend no longer holds, and nothing stops a
+new backend claiming that directory the moment the deletion completes, so its fresh data would be
+deleted the same way.</p>
+<p><strong>A node the group has stopped selecting is not cleaned, and not reported either.</strong> The spec is the
+only record of which nodes a group covered. Nothing keeps the selector&rsquo;s history, and the members
+are gone by the time the cleanup runs, so a node dropped by narrowing <code>nodeSelector</code>, or by
+removing the <code>localDisks</code> entry, cannot be named, let alone reached. <strong>Delete the backend first and
+edit afterwards</strong>; editing first silently takes those nodes out of the cleanup.</p>
+<p><strong>A tier with no image to empty it is given up on immediately</strong>, with the same event. When neither
+the member group nor the backend names an image and the operator has no default, there is nothing to
+run and no clock to start; waiting would hold the backend open for as long as that stays true. The
+event names the image as the reason rather than the node.</p>
+<p><strong>A path another backend&rsquo;s tier overlaps is skipped</strong>, with the same kind of event: a directory
+nested inside another backend&rsquo;s tier counts, not only an identical path. Nothing refuses two backends
+naming one directory, and emptying it for the one being deleted would take the other one&rsquo;s live data
+with it. A removal already under way when the path becomes shared is <strong>stopped</strong>, not left to finish.</p>
+<blockquote>
+<p>It is a check and not a lock, re-run on every pass rather than only before the removal starts.
+Stopping a removal only cancels the cleanup Pod; the <code>rm</code> keeps running until the check catches it
+and on through that Pod&rsquo;s own termination, so everything deleted in that span is lost. That is
+what the second event reports. Closing the window entirely needs an atomic claim on the path,
+which this operator does not take.</p>
+</blockquote>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl describe node &lt;node&gt; <span class="p">|</span> grep -E <span class="s1">&#39;KVCacheTierNotCleaned|KVCacheTierSharedPath|KVCacheTierPartlyEmptied&#39;</span>
+</span></span></code></pre></div>
+</div><h2 id="unaccounted-disk-usage">Unaccounted disk usage</h2>
+<p>The <code>hostPath</code> is <strong>not</strong> counted into any resource request, and it cannot be: the kubelet&rsquo;s
+ephemeral-storage accounting covers the container filesystem, <code>emptyDir</code> volumes and logs, never a
+<code>hostPath</code>. A request against it would reserve a figure nothing polices and would keep the member off
+the very node that has the disk.</p>
+<p><strong>Watching that filesystem is yours.</strong> <code>localDisks[].capacity</code> renders the store&rsquo;s own ceiling, which is
+the only bound on what the tier writes; nothing in Kubernetes will evict or throttle the member when
+the node&rsquo;s disk fills.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/kv-cache/backend/">KV Cache Backend</a>
+ (the object this tier is a layer on, and where its
+leader, members and status are documented)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/">KV Cache on Disk-Heavy Nodes</a>
+ (the
+configuration guide for a node whose capacity is disk rather than memory)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/pool/">KV Cache
+Pool</a>
+ (how a namespace is granted a quota on the store this tier belongs to)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/">KV Cache on Disk-Heavy Nodes</a>
+ — the thin-segment shape and the
+memory floor that makes this tier reachable.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/docs/modules/kv-cache/local-disk-tier.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/local-disk-tier.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#bucket-writes">Bucket writes</a></li>
+    <li><a href="#eviction">Eviction</a></li>
+    <li><a href="#directory-requirements">Directory requirements</a></li>
+    <li><a href="#cleanup-on-deletion">Cleanup on deletion</a>
+      <ul>
+        <li><a href="#when-cleanup-is-disabled">When cleanup is disabled</a></li>
+        <li><a href="#cleanup-limitations">Cleanup limitations</a></li>
+      </ul>
+    </li>
+    <li><a href="#unaccounted-disk-usage">Unaccounted disk usage</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Upgrading to an Enforced Binding Dtype · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+      data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/">
+      <option value="/gpustack-operator/main/">main</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/main/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" open>
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" aria-current="page">Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/operate/migration/">Upgrades</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Upgrading to an Enforced Binding Dtype</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="upgrading-to-an-enforced-binding-dtype">Upgrading to an Enforced Binding Dtype</h1>
+<p>From this release, a Binding&rsquo;s <code>spec.domain.dtype</code> stops being a declaration and becomes the engine&rsquo;s
+<code>--kv-cache-dtype</code>, changing objects a running cluster already holds. The rule itself is stated once,
+under
+<a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#engine-dtype">The dtype is handed to the engine</a>
+.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#changes-on-upgrade">Changes on upgrade</a>
+</li>
+<li><a href="#check-every-binding-first">Check every Binding first</a>
+</li>
+<li><a href="#find-roles-that-pass-the-flag-themselves">Find roles that pass the flag themselves</a>
+</li>
+<li><a href="#if-new-pods-fail-argument-parsing">If new Pods fail argument parsing</a>
+</li>
+<li><a href="#verify">Verify</a>
+</li>
+</ul>
+<h2 id="changes-on-upgrade">Changes on upgrade</h2>
+<ul>
+<li>Every pool-attached <code>ModelDeployment</code> rolls once. Its replicas gain an argument, which moves
+their spec hash, so each is replaced at the deployment&rsquo;s first reconcile after the upgrade.</li>
+<li>The <code>dtype</code> reaches the engine verbatim. A spelling that engine rejects (<code>bf16</code> on vLLM,
+<code>fp8</code> or <code>float16</code> on SGLang) makes every new Pod fail argument parsing, so each replica the
+rollout replaces stops serving.</li>
+<li>A role&rsquo;s own <code>--kv-cache-dtype</code> is refused while it attaches a pool. A deployment already
+stored with one keeps running on its own value, which wins because it comes later on the command
+line, until its next update is refused.</li>
+<li>A Pod opting into injection is refused when its container passes the flag itself, so its
+owner reports <code>FailedCreate</code> until the flag is removed.</li>
+<li>A new Binding may not declare <code>auto</code>. One stored with it keeps working and stays updatable.</li>
+</ul>
+<h2 id="check-every-binding-first">Check every Binding first</h2>
+<p>List every Binding&rsquo;s dtype, then compare each with the engines of the deployments that name it:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get kvcachepoolbindings -A <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o custom-columns<span class="o">=</span>NAMESPACE:.metadata.namespace,NAME:.metadata.name,DTYPE:.spec.domain.dtype</span></span></code></pre></div>
+</div><p>Each engine&rsquo;s accepted spellings are listed once, under
+<a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#engine-dtype">The dtype is handed to the engine</a>
+. A
+Binding whose deployments run both engines needs a value in both rows there. A spelling its engine
+does not accept is what the next two sections recover from, and fixing it before upgrading is
+cheaper.</p>
+<h2 id="find-roles-that-pass-the-flag-themselves">Find roles that pass the flag themselves</h2>
+<p>These deployments keep their own value after the upgrade, and their next edit is refused until the
+flag is gone from <code>extraArgs</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get modeldeployments -A -o json <span class="p">|</span> jq -r <span class="s1">&#39;.items[]
+</span></span></span><span class="line"><span class="cl"><span class="s1">  | select(.spec.kvCache != null) | . as $md | .spec.roles[]
+</span></span></span><span class="line"><span class="cl"><span class="s1">  | select((.command // []) == [] and ((.extraArgs // []) | any(test(&#34;^--kv[-_]cache[-_]dtype&#34;))))
+</span></span></span><span class="line"><span class="cl"><span class="s1">  | &#34;\($md.metadata.namespace)/\($md.metadata.name) role \(.name)&#34;&#39;</span></span></span></code></pre></div>
+</div><p>Remove the flag once the Binding&rsquo;s dtype is the one the role should run.</p>
+<h2 id="if-new-pods-fail-argument-parsing">If new Pods fail argument parsing</h2>
+<p>The dtype is immutable, so the Binding cannot be corrected in place. Turn the Setting off first,
+which renders and refuses nothing and recreates the replicas without the flag:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-deployment-kv-cache-dtype-owned <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;false&#34;}}&#39;</span></span></span></code></pre></div>
+</div><p>Then move the workloads to a Binding with a spelling the engine accepts, and turn the Setting back on:</p>
+<ol>
+<li>Create a new Binding on the same pool with the corrected <code>dtype</code> and a new <code>domain.name</code>; the old
+name stays claimed until the old Binding is gone.</li>
+<li>Recreate each deployment with <code>spec.kvCache.poolRef.name</code> naming the new Binding. <code>kvCache</code> is an
+identity field, so it is a new deployment rather than an edit.</li>
+<li>Delete the old deployments; the old Binding&rsquo;s deletion completes once none of them holds it.</li>
+<li>Patch the Setting back to <code>&quot;true&quot;</code>.</li>
+</ol>
+<p>The cache under the old domain is not carried over. It was written without a binding dtype, so it
+is not worth keeping.</p>
+<h2 id="verify">Verify</h2>
+<p>Every replica of a pool-attached role carries the Binding&rsquo;s value as two entries of its <code>command</code>,
+because the operator owns that role&rsquo;s whole argv and folds every argument into it:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n &lt;namespace&gt; get pods -l app.kubernetes.io/instance<span class="o">=</span>&lt;deployment&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.metadata.name}{&#34;\t&#34;}{.spec.containers[0].command}{&#34;\n&#34;}{end}&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> grep -o -- <span class="s1">&#39;--kv-cache-dtype&#34;,&#34;[^&#34;]*&#39;</span></span></span></code></pre></div>
+</div><p>An injected Pod carries the same two entries at the end of its <code>args</code>, where the webhook appends.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/kv-cache/pool/">KV Cache Pool</a>
+ (the dtype rule)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#operator-owned-keys">ModelDeployment</a>
+ (what the operator owns)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/injection/">KV Cache Injection</a>
+ (the Pod path)</li><li><a href="/gpustack-operator/main/docs/reference/settings/">Settings</a>
+ (the escape switch)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/operate/migration/troubleshooting/">Migration Troubleshooting</a>
+ — when an upgrade wedges for another reason.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/docs/operate/migration/kv-cache-dtype.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/operate/migration/kv-cache-dtype.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#changes-on-upgrade">Changes on upgrade</a></li>
+    <li><a href="#check-every-binding-first">Check every Binding first</a></li>
+    <li><a href="#find-roles-that-pass-the-flag-themselves">Find roles that pass the flag themselves</a></li>
+    <li><a href="#if-new-pods-fail-argument-parsing">If new Pods fail argument parsing</a></li>
+    <li><a href="#verify">Verify</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Migrating from v0.5.x · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+      data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/operate/migration/from-v0.5/">
+      <option value="/gpustack-operator/main/">main</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/main/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" open>
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" aria-current="page">From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/operate/migration/">Upgrades</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Migrating from v0.5.x</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="migrating-from-v05x">Migrating from v0.5.x</h1>
+<p>Versions after v0.5.x rename and restructure the scheduling objects the operator creates.
+The first, v0.6.x (&ldquo;unified-pool refactor&rdquo;,
+<a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/specs/2026-06-29-instancetype-unified-pool-refactor.md"><code>specs/2026-06-29-instancetype-unified-pool-refactor.md</code></a>
+),
+renames nearly every Kueue/NFD object it manages and drops the <code>Cohort</code> layer; later versions may
+reshape v0.5.x structures further.</p>
+<p>Each is <strong>breaking</strong> for the scheduling objects yet backward compatible for your <strong>workloads</strong>
+(running Pods are never touched), so a plain <code>helm upgrade</code> leaves the entire v0.5.x object set
+behind as orphans. v0.6.x is the worked example throughout; substitute your target version.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#changes-from-v05x-to-v06x">Changes from v0.5.x to v0.6.x</a>
+</li>
+<li><a href="#orphaned-objects-after-helm-upgrade">Orphaned objects after helm upgrade</a>
+</li>
+<li><a href="#kueue-finalizer-deadlock">Kueue finalizer deadlock</a>
+</li>
+<li><a href="#path-a--uninstall-then-reinstall-recommended">Path A — uninstall then reinstall (recommended)</a>
+</li>
+<li><a href="#path-b--in-place-upgrade-then-remove-the-orphans">Path B — in-place upgrade, then remove the orphans</a>
+</li>
+<li><a href="#verify">Verify</a>
+</li>
+<li><a href="#notes">Notes</a>
+</li>
+</ul>
+<h2 id="changes-from-v05x-to-v06x">Changes from v0.5.x to v0.6.x</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Object</th>
+          <th>v0.5.x</th>
+          <th>v0.6.x</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><strong>ResourceFlavor</strong></td>
+          <td><code>gpustack--generic-ln-x64-4c-16g-98g--nvidia-tesla-t4-1d</code> — <strong>double dash</strong>, abbreviated <code>ln-x64</code>, CPU+device <strong>composite</strong>, unit-spec (<code>-4c-16g-98g</code>) baked into the name</td>
+          <td><strong>double dash</strong>, full <code>os</code>/<code>arch</code>, CPU and device <strong>split</strong> into two flavors, <code>count</code>-suffixed: CPU <code>gpustack--&lt;cpu&gt;-linux-amd64-4c</code>, device <code>gpustack--&lt;cpu&gt;--nvidia-tesla-t4-linux-amd64-1d</code></td>
+      </tr>
+      <tr>
+          <td><strong>ClusterQueue</strong></td>
+          <td>composite name; up to two per pool; joined by <code>spec.cohortName</code></td>
+          <td><code>gpustack--&lt;key&gt;-&lt;os&gt;-&lt;arch&gt;</code>; <strong>one isolated CQ per pool</strong>, <code>spec.cohortName</code> empty (<strong>zero Cohort</strong>)</td>
+      </tr>
+      <tr>
+          <td><strong>Cohort</strong></td>
+          <td>one per pool</td>
+          <td><strong>removed</strong> — the <code>CohortReconciler</code> is gone</td>
+      </tr>
+      <tr>
+          <td><strong>AdmissionCheck</strong></td>
+          <td>— (did not exist)</td>
+          <td><code>gpustack-node-devices</code> (per-accelerator feasibility gate)</td>
+      </tr>
+      <tr>
+          <td><strong>InstanceType</strong></td>
+          <td>aggregated <strong>virtual</strong> API (projected from ClusterQueues; nothing stored)</td>
+          <td>a real <strong>CRD</strong> <code>instancetypes.worker.gpustack.ai</code> with a <code>.status</code> subresource; <code>spec.group</code> renamed <code>spec.acceleratorGroup</code>, <code>spec.generalGroup</code> added</td>
+      </tr>
+      <tr>
+          <td><strong>Node feature labels</strong></td>
+          <td><code>general.feature.gpustack.ai/generic-ln-x64</code> + <code>.z-flavor</code>/<code>.z-queue</code>/<code>.z-cohort</code> + per-unit <code>.cpu</code>/<code>.ram</code>/<code>.storage</code></td>
+          <td>real per-CPU key <code>general.feature.gpustack.ai/&lt;cpu&gt;</code> + <code>.count</code>/<code>.capacity</code>; the <code>feature.gpustack.ai/acceleratable</code> boolean; <code>.z-*</code> and <code>.cpu</code>/<code>.ram</code>/<code>.storage</code> <strong>dropped</strong></td>
+      </tr>
+  </tbody>
+</table>
+<p><code>Devices</code> and <code>Instance</code> keep their per-node / same names (the <code>Devices</code> schema only grows a
+per-accelerator allocation ledger), so they update in place and leave nothing orphaned.</p>
+<h2 id="orphaned-objects-after-helm-upgrade">Orphaned objects after <code>helm upgrade</code></h2>
+<p>The v0.6.x operator indexes objects by their new names, so it never sees the v0.5.x-named
+ResourceFlavors, ClusterQueues, Cohorts and LocalQueues, and it neither reconciles nor
+garbage-collects them.
+No hook cleans them: the chart&rsquo;s post-delete <code>cleanup.sh</code> fires only on <code>helm uninstall</code>, and the
+upgrade&rsquo;s own migration hooks address the pre-subchart release layout (<a href="/gpustack-operator/main/docs/operate/migration/to-subcharts/">Migrating to Bundled Subcharts</a>
+), not v0.5.x names.</p>
+<p>An in-place upgrade therefore leaves both sets: the working v0.6.x one plus a leaked v0.5.x one of
+dead ResourceFlavors, ClusterQueues, Cohorts, a LocalQueue in every namespace, and Cohorts nothing
+ever cleans.</p>
+<p>Stale node labels are the one exception: the same-named <code>&lt;node&gt;-gpustack-worker</code> NodeFeature is
+overwritten on upgrade and NFD drops the removed labels.</p>
+<h2 id="kueue-finalizer-deadlock">Kueue finalizer deadlock</h2>
+<p>A v0.5.x <code>Instance</code> runs on an <code>InstanceType</code>-backed <code>ClusterQueue</code>, and Kueue stamps every
+ClusterQueue with the <code>kueue.x-k8s.io/resource-in-use</code> finalizer. Tearing Kueue down while that
+finalizer is held (the destructive <code>helm uninstall</code> path removes the controller) wedges the
+ClusterQueue <strong>and its CRD</strong> <code>Terminating</code> with nothing left to clear it: Kueue can never recreate
+the CRD, and the worker, which gates startup on installing its applications, never starts.</p>
+<p>Nor can the finalizer be stripped by hand: Kueue&rsquo;s validating webhook (<code>failurePolicy: Fail</code>) is
+still registered with no Service endpoints, so every ClusterQueue update is rejected.</p>
+<p>Higher-version operators self-heal this before Kueue is deployed, so the upgrade needs no manual
+work:</p>
+<ul>
+<li>A <code>pre-install</code>/<code>pre-upgrade</code> hook Job detects a Kueue CRD stuck <code>Terminating</code>, deletes the Kueue
+admission-webhook configurations <strong>first</strong> (so the finalizer strip is not rejected), strips the
+orphaned <code>resource-in-use</code> finalizers, and lets the CRDs drain for recreation. It is a no-op on a
+healthy cluster, and it runs on fresh installs too, which is the only way onto a cluster left in
+this state. (Before the
+subchart layout, the worker&rsquo;s Kueue installer did this.)</li>
+<li>Kueue is then repaired by <code>helm upgrade</code>, not a destructive <code>helm uninstall</code>+install, so the
+controller stays alive to clear finalizers and no CRD is stranded.</li>
+</ul>
+<p>If an operator predating the fix has already wedged a Kueue CRD or ClusterQueue in <code>Terminating</code>,
+recover with Path A below: <code>cleanup.sh</code> deletes the Kueue webhook configurations before stripping
+finalizers (the same load-bearing order), and a fresh install then comes up cleanly.</p>
+<h2 id="path-a--uninstall-then-reinstall-recommended">Path A — uninstall then reinstall (recommended)</h2>
+<p>The cleanest path, and the only one with <strong>zero residue</strong> by construction. Use it when a short
+scheduling gap is tolerable: running Pods keep running, and only new admissions pause until v0.6.x
+is up.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">NS</span><span class="o">=</span>gpustack-system
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 1. Remove v0.5.x completely, including the runtime-installed Kueue/NFD/CSI sub-releases,</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#    their CRDs/finalizers, and the aggregated APIServices/webhooks. cleanup.sh ships in the</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#    chart under files/; run it against your active context. A copy from v0.8.6 or earlier</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#    leaves the gpustack-kueue CRDs Terminating; run it as</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#    `cleanup.sh &#34;$NS&#34; gpustack-operator-worker-cert gpustack-kueue` instead, see</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#    Migration Troubleshooting.</span>
+</span></span><span class="line"><span class="cl">bash deploy/gpustack-operator/chart/files/cleanup.sh <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># (or, if you enabled it, the gated post-delete hook: helm uninstall with cleanupOnUninstall=true)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 2. Fresh install of v0.6.x.</span>
+</span></span><span class="line"><span class="cl">helm install gpustack-operator gpustack/gpustack-operator -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> --create-namespace --version 0.6.0</span></span></code></pre></div>
+</div><p>Deleting the CRDs deletes all their CRs, every v0.5.x-named object included, so nothing is left to
+orphan; the v0.6.x worker re-materializes the chain from the nodes.</p>
+<h2 id="path-b--in-place-upgrade-then-remove-the-orphans">Path B — in-place upgrade, then remove the orphans</h2>
+<p>Use this when the release must stay in place, to preserve custom <code>values</code>. Upgrade normally, then
+run the cleanup script to strip the leaked v0.5.x objects.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">NS</span><span class="o">=</span>gpustack-system
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 1. Upgrade in place. The chart README&#39;s &#34;Upgrading the Chart&#34; says why this flag.</span>
+</span></span><span class="line"><span class="cl">helm upgrade gpustack-operator gpustack/gpustack-operator -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> --version 0.6.0 --reset-then-reuse-values
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 2. Wait for the v0.6.x worker to be healthy.</span>
+</span></span><span class="line"><span class="cl">kubectl -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> rollout status deploy/gpustack-operator-worker
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 3. Preview what the cleanup will remove (changes nothing), then run it.</span>
+</span></span><span class="line"><span class="cl">bash docs/operate/migration/cleanup-v0.5-orphans.sh --dry-run
+</span></span><span class="line"><span class="cl">bash docs/operate/migration/cleanup-v0.5-orphans.sh</span></span></code></pre></div>
+</div><p><a href="/gpustack-operator/main/docs/operate/migration/cleanup-v0.5-orphans.sh"><code>cleanup-v0.5-orphans.sh</code></a>
+ removes <strong>only</strong> the v0.5.x orphans. v0.6.x
+names are double-dash too, so a bare <code>gpustack--</code> match would take the healthy chain; the v0.5.x-only
+signal is the CPU/RAM <strong>unit-spec</strong> in every v0.5.x flavor/queue/cohort name: a <code>-&lt;n&gt;c-&lt;n&gt;g</code> pair
+(e.g. <code>-4c-16g</code>). v0.6.x names carry only a trailing <code>-&lt;n&gt;c</code> (CPU) or <code>-&lt;n&gt;d</code> (device)
+<strong>count</strong>, never <code>-&lt;n&gt;g</code>.</p>
+<p>Deletion follows dependency order (LocalQueue → ClusterQueue → Cohort → ResourceFlavor, so Kueue
+releases the finalizer before the flavors go). v0.5.x <code>InstanceType</code>s were virtual (nothing stored),
+so InstanceTypes are never touched; neither are v0.6.x objects, your namespaces, Pods or <code>Instance</code>s.
+The script is idempotent: a transient API error just means re-running it.</p>
+<p>If an old ClusterQueue still holds admitted workloads (a v0.5.x <code>Instance</code> ran across the upgrade),
+the script sets <code>HoldAndDrain</code> first, so Kueue evicts the workloads and releases the finalizer,
+then deletes the drained queue; a queue with no workloads goes directly. The names changed, so
+<strong>re-submit the evicted workloads against the new pool&rsquo;s <code>LocalQueue</code></strong>.</p>
+<h2 id="verify">Verify</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># Nothing is wedged Terminating (the DELETING column is &lt;none&gt; for every kueue CRD — see the</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># finalizer-deadlock section; a timestamp on an older operator needs the Path A recovery):</span>
+</span></span><span class="line"><span class="cl">kubectl get crd -o custom-columns<span class="o">=</span>NAME:.metadata.name,DELETING:.metadata.deletionTimestamp <span class="p">|</span> grep kueue
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># No v0.5.x orphans remain (expect empty) — match the v0.5.x-only &#34;-&lt;n&gt;c-&lt;n&gt;g&#34; unit-spec, NOT a bare</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># &#34;gpustack--&#34; (which would also list the healthy v0.6.x objects):</span>
+</span></span><span class="line"><span class="cl">kubectl get resourceflavor,clusterqueue,cohort -A -o name <span class="p">|</span> grep -E <span class="s1">&#39;gpustack--.*-[0-9]+c-[0-9]+g&#39;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># The v0.6.x chain is healthy: one isolated CQ per pool, zero Cohort, InstanceTypes Active:</span>
+</span></span><span class="line"><span class="cl">kubectl get clusterqueue -o custom-columns<span class="o">=</span><span class="s1">&#39;NAME:.metadata.name,COHORT:.spec.cohortName&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl get cohort -A                       <span class="c1"># expect: No resources found</span>
+</span></span><span class="line"><span class="cl">kubectl get instancetype -o custom-columns<span class="o">=</span><span class="s1">&#39;NAME:.metadata.name,PHASE:.status.phase&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl get admissioncheck                  <span class="c1"># expect: gpustack-node-devices</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># Node labels self-healed (expect empty):</span>
+</span></span><span class="line"><span class="cl">kubectl get nodes -o json <span class="p">|</span> grep -oE <span class="s1">&#39;&#34;[^&#34;]*(\.z-[a-z]+|generic-ln-x64)[^&#34;]*&#34;&#39;</span> <span class="p">|</span> sort -u</span></span></code></pre></div>
+</div><h2 id="notes">Notes</h2>
+<ul>
+<li>Workloads still on a v0.5.x queue are drained, not silently abandoned: the eviction is clean and
+leaves no orphaned accounting behind still-running Pods. Path A sidesteps the question by stopping
+everything up front.</li>
+<li>Prefer Path A unless you must keep the release in place, since it leaves no orphan class to
+reason about.</li>
+<li>Validated on a live v0.6.x cluster: a hand-created v0.5.x set (double-dash composite
+ResourceFlavors, a ClusterQueue, a Cohort, a LocalQueue) was removed with zero residue, and the
+healthy v0.6.x chain was left byte-for-byte identical.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/operate/migration/to-subcharts/">Migrating to Bundled Subcharts</a>
+ (the other one-time upgrade, from
+v0.7.x or earlier)</li><li><a href="/gpustack-operator/main/docs/modules/devices/scheduling/#naming-and-grouping">Scheduling Chain</a>
+ (the
+object names this upgrade moves to)</li><li><a href="/gpustack-operator/main/docs/operate/migration/troubleshooting/">Migration Troubleshooting</a>
+ (recovering from
+a wedged upgrade or a stuck namespace)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/getting-started/architecture/">Architecture</a>
+ — what the new object set means.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/docs/operate/migration/from-v0.5.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/operate/migration/from-v0.5.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#changes-from-v05x-to-v06x">Changes from v0.5.x to v0.6.x</a></li>
+    <li><a href="#orphaned-objects-after-helm-upgrade">Orphaned objects after <code>helm upgrade</code></a></li>
+    <li><a href="#kueue-finalizer-deadlock">Kueue finalizer deadlock</a></li>
+    <li><a href="#path-a--uninstall-then-reinstall-recommended">Path A — uninstall then reinstall (recommended)</a></li>
+    <li><a href="#path-b--in-place-upgrade-then-remove-the-orphans">Path B — in-place upgrade, then remove the orphans</a></li>
+    <li><a href="#verify">Verify</a></li>
+    <li><a href="#notes">Notes</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

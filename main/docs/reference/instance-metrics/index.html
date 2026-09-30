@@ -1,0 +1,1252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Instance Metrics Reference · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/reference/instance-metrics/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+      data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/reference/instance-metrics/">
+      <option value="/gpustack-operator/main/">main</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/main/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" aria-current="page">Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/reference/">Reference</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Instance Metrics Reference</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="instance-metrics-reference">Instance Metrics Reference</h1>
+<p>The <code>instances/&lt;name&gt;/metrics</code> subresource returns utilization for one Instance. The Device
+Manager&rsquo;s Prometheus exporter publishes it for every Instance on a node. Both use the same
+calculation code.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#the-subresource">The subresource</a>
+</li>
+<li><a href="#the-sample">The sample</a>
+</li>
+<li><a href="#one-entry-per-grant">One entry per grant</a>
+</li>
+<li><a href="#data-sources">Data sources</a>
+</li>
+<li><a href="#measured-figures-by-manufacturer">Measured figures by manufacturer</a>
+</li>
+<li><a href="#reasons-for-absent-figures">Reasons for absent figures</a>
+</li>
+<li><a href="#scoping-and-authorization">Scoping and authorization</a>
+</li>
+<li><a href="#degradation-rules">Degradation rules</a>
+</li>
+<li><a href="#the-node-exporter">The node exporter</a>
+</li>
+<li><a href="#metric-families">Metric families</a>
+</li>
+<li><a href="#querying-the-metrics">Querying the metrics</a>
+</li>
+<li><a href="#scraping-the-exporter">Scraping the exporter</a>
+</li>
+<li><a href="#restricting-scrape-access">Restricting scrape access</a>
+</li>
+<li><a href="#limits">Limits</a>
+</li>
+</ul>
+<h2 id="the-subresource">The subresource</h2>
+<p>The worker&rsquo;s aggregated API serves a read-only <code>metrics</code> subresource per Instance:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get --raw <span class="s2">&#34;/apis/worker.gpustack.ai/v1/namespaces/&lt;ns&gt;/instances/&lt;name&gt;/metrics&#34;</span></span></span></code></pre></div>
+</div><p>One <strong>current sample</strong>, not a history; nothing is stored. CPU, memory and storage are read live
+per request; accelerator figures come from the Device Manager&rsquo;s latest sample.</p>
+<h2 id="the-sample">The sample</h2>
+<p><code>InstanceMetrics</code> carries the Instance&rsquo;s identity and one <code>sample</code>. Every figure is a
+<strong><code>Total</code>/<code>Used</code> pair</strong>, so a percentage can be computed from the response alone:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Field</th>
+          <th>Unit</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>sample.timestamp</code></td>
+          <td>RFC 3339</td>
+          <td>when the CPU/memory/storage figures were measured</td>
+      </tr>
+      <tr>
+          <td><code>sample.cpuTotalMilliCores</code></td>
+          <td>milli-cores</td>
+          <td>the Instance&rsquo;s CPU limit</td>
+      </tr>
+      <tr>
+          <td><code>sample.cpuUsedMilliCores</code></td>
+          <td>milli-cores</td>
+          <td>pod CPU usage, averaged over the kubelet&rsquo;s sample window</td>
+      </tr>
+      <tr>
+          <td><code>sample.memoryTotalMiB</code></td>
+          <td>MiB</td>
+          <td>the Instance&rsquo;s memory limit</td>
+      </tr>
+      <tr>
+          <td><code>sample.memoryUsedMiB</code></td>
+          <td>MiB</td>
+          <td>pod working-set memory</td>
+      </tr>
+      <tr>
+          <td><code>sample.storageTotalMiB</code></td>
+          <td>MiB</td>
+          <td>the Instance&rsquo;s ephemeral-storage limit</td>
+      </tr>
+      <tr>
+          <td><code>sample.storageUsedMiB</code></td>
+          <td>MiB</td>
+          <td>pod ephemeral-storage usage: writable layers, logs and disk-backed <code>emptyDir</code></td>
+      </tr>
+      <tr>
+          <td><code>sample.accelerators[]</code></td>
+          <td>—</td>
+          <td>one entry per allocated accelerator</td>
+      </tr>
+  </tbody>
+</table>
+<p>A <strong>total is the Instance&rsquo;s declaration</strong> (the sum of its containers&rsquo; limits, init containers
+excluded) and is always present. A <strong>used figure is a measurement</strong>, and is <strong>absent rather
+than zero</strong> when no source could measure it: zero means measured-and-idle.</p>
+<p>Memory and storage are in <strong>MiB</strong> throughout: the kubelet measures bytes, the manufacturers'
+libraries MiB, so the coarser unit is reported rather than mixed in one response. Byte figures
+are <strong>rounded up</strong>: a sub-1 MiB working set reads <code>1</code>, never <code>0</code>.</p>
+<p>An <code>accelerators[]</code> entry carries <code>id</code>, <code>mode</code>, <code>memoryTotalMiB</code>, <code>memoryUsedMiB</code>,
+<code>memoryUtilizationPercent</code>, <code>coresUtilizationPercent</code>, <code>temperatureCelsius</code>, <code>powerUsageWatts</code>
+and <code>unhealthy</code>. Every figure is <strong>the Instance&rsquo;s own</strong>, whatever the allocation did to the card;
+see <a href="#one-entry-per-grant">One entry per grant</a>
+.</p>
+<p>Two caveats come with the pairs:</p>
+<ul>
+<li><strong>A percentage can exceed 100.</strong> The <code>sshd</code> sidecar of an SSH-enabled Instance declares no CPU
+or memory of its own but does consume some, while the totals count only what was declared. The
+denominator is deliberately what the user asked for.</li>
+<li><strong><code>storageTotalMiB</code> is not exactly the eviction point.</strong> Kubernetes counts writable layers,
+logs and disk-backed <code>emptyDir</code> toward the pod&rsquo;s ephemeral-storage limit, but does not enforce
+it on every filesystem layout, counts tmpfs-backed <code>emptyDir</code> as memory instead, and can evict
+for node disk pressure independently of any pod limit.</li>
+</ul>
+<blockquote>
+<p><strong>Why</strong> there is no <code>rootfs</code> figure — an earlier revision reported the containers&rsquo; writable
+layer alone against the Instance&rsquo;s storage limit, which put two different quantities on the two
+sides of one percentage. The kubelet evicts on the pod-level aggregate, so that aggregate is
+the only numerator the limit can be read against, and it is the one <code>storageUsedMiB</code> carries.</p>
+</blockquote>
+<h2 id="one-entry-per-grant">One entry per grant</h2>
+<p>Every mode reports the same fields with the same meaning. An Instance holding a whole device
+reads the device&rsquo;s own figures, because the device is what it was granted; one holding a <strong>logical
+slice</strong> (<code>Sliced</code>) or a <strong>hardware partition</strong> (<code>Partitioned</code>) reads that share&rsquo;s quota and that
+share&rsquo;s usage. So &ldquo;how much memory is this Instance using, and how close is it to its ceiling&rdquo; is the
+same two fields whatever the allocation did, and a consumer never has to know.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Field</th>
+          <th>Unit</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>id</code></td>
+          <td>—</td>
+          <td>what the Instance holds: the device&rsquo;s identifier, or under <code>Partitioned</code> the <strong>partition&rsquo;s own</strong> — a MIG UUID rather than the parent card&rsquo;s</td>
+      </tr>
+      <tr>
+          <td><code>mode</code></td>
+          <td>—</td>
+          <td>how the grant was made: <code>Exclusive</code>, <code>Shared</code>, <code>Sliced</code>, <code>Partitioned</code> or <code>Visibility</code>. The <strong>name</strong>, spelled the same here and on the <code>mode</code> label of every exporter family</td>
+      </tr>
+      <tr>
+          <td><code>memoryTotalMiB</code></td>
+          <td>MiB</td>
+          <td>the memory granted: the device&rsquo;s own, a slice&rsquo;s quota, or a partition&rsquo;s own capacity</td>
+      </tr>
+      <tr>
+          <td><code>memoryUsedMiB</code></td>
+          <td>MiB</td>
+          <td>the memory measured held <strong>of that grant</strong></td>
+      </tr>
+      <tr>
+          <td><code>memoryUtilizationPercent</code></td>
+          <td>0–100</td>
+          <td><code>memoryUsedMiB</code> over <code>memoryTotalMiB</code></td>
+      </tr>
+      <tr>
+          <td><code>coresUtilizationPercent</code></td>
+          <td>0–100</td>
+          <td>how much of the Instance&rsquo;s <strong>own compute allowance</strong> it was measured using</td>
+      </tr>
+      <tr>
+          <td><code>temperatureCelsius</code></td>
+          <td>°C</td>
+          <td>the <strong>whole device&rsquo;s</strong> — a share has none of its own</td>
+      </tr>
+      <tr>
+          <td><code>powerUsageWatts</code></td>
+          <td>W</td>
+          <td>the whole device&rsquo;s</td>
+      </tr>
+      <tr>
+          <td><code>unhealthy</code></td>
+          <td>bool</td>
+          <td>the whole device&rsquo;s — an unhealthy card carries every share of it down</td>
+      </tr>
+  </tbody>
+</table>
+<blockquote>
+<p><strong>One entry per grant, not per card.</strong> A card serves one grant in every mode but <code>Partitioned</code>,
+where an Instance may hold several of its partitions at once (one per container). Each is its own
+entry, keyed by its own <code>id</code>, because collapsing them would report one tenant of a card as the card.
+Two <em>logical</em> slices of one card cannot be two entries: a slice has no identity of its own, so both
+would carry the parent card&rsquo;s <code>id</code>. An Instance in that shape reports the card once, with no figures
+of its own.</p>
+</blockquote>
+<p>A <strong>total comes from the allocation</strong> and is present whenever the allocation can state it. A <strong>used
+figure is a measurement</strong>, and is <strong>absent rather than zero</strong> when nothing on this node could measure
+it. A carved share whose usage could not be measured therefore reports <strong>no usage at all</strong> rather
+than the device&rsquo;s, whose figure counts every other tenant on the card.</p>
+<p>Before reading a number from an entry, check the following:</p>
+<ul>
+<li><strong>A used figure may exceed its total, and is not clamped.</strong> It measures the hardware while the
+total is the quota, so an overshoot is an anomaly to investigate (a leaking quota, a floor in the
+quota&rsquo;s unit conversion, or driver accounting overhead), and clamping it would present every
+leaking quota as a perfectly enforced one.</li>
+<li><strong><code>coresUtilizationPercent</code> is against the Instance&rsquo;s own allowance, so it may exceed 100 too.</strong> A
+slice capped at a fifth of a card and saturating that fifth reads <code>100</code>, not <code>20</code>; one whose shim
+let it burst past its cap reads above <code>100</code>, which is the cap not being enforced and exactly what
+clamping would hide.</li>
+<li><strong>That same denominator makes it coarse under a small cap.</strong> The manufacturers measure the card in
+whole percent, so a 5% cap can only ever yield multiples of 20 here.</li>
+<li><strong>A partition names and sizes itself.</strong> Its identity and its capacity are read on the partition&rsquo;s
+<strong>own</strong> device handle, so a <code>1g.10gb</code> of an H100 reports 9856 MiB (what the driver says) rather
+than the 10240 the profile name rounds to, or an eighth of the card folded out of the allocation&rsquo;s
+units. An idle partition reports <code>0</code>, measured, rather than an absence.</li>
+<li><strong>A partition&rsquo;s compute is its own or it is absent.</strong> It is reported where the vendor answers for
+the partition&rsquo;s handle and absent where none does (the matrix below says which is which), and it
+is never restated against a cap, because a partition makes no compute request to be capped by.</li>
+</ul>
+<blockquote>
+<p><strong>Why</strong> the card&rsquo;s own figures are not reported beside the share&rsquo;s — they answer a different
+question (&ldquo;is this card hot&rdquo;), and putting both in one entry is what made the earlier revision hard
+to consume: a reader had to know the mode to know which of two places held its own number. The
+card-wide view belongs to a node- or device-scoped surface, not to the per-Instance one.</p>
+</blockquote>
+<h2 id="data-sources">Data sources</h2>
+<ul>
+<li>CPU / memory / storage: the kubelet&rsquo;s stats summary, read through the API-server node
+proxy (<code>/api/v1/nodes/&lt;node&gt;/proxy/stats/summary</code>); no Prometheus or metrics-server needed. The
+caller therefore needs <code>nodes/proxy</code>, which the worker&rsquo;s and Device Manager&rsquo;s bindings already
+carry.</li>
+<li>One read per node, not per Instance: a node&rsquo;s summary is cached for the caller&rsquo;s freshness
+bound (15 s for the subresource) and concurrent readers of one node share a single in-flight
+read, so a console polling many Instances of a node still costs the kubelet one request. The
+exporter below reads afresh instead: it already samples on a period, and a cache on top of a
+fixed cadence only serves the previous round back.</li>
+<li>CPU / memory fallback: if that read fails, or the kubelet does not know the pod yet,
+<code>metrics.k8s.io</code> answers where a metrics-server is deployed. It has no storage figures, so
+<code>storageUsedMiB</code> is absent; an entry predating the pod is rejected.</li>
+<li>Accelerator figures: the node&rsquo;s Device Manager samples the manufacturer&rsquo;s libraries every
+monitor period (default 15 s) and serves only the latest snapshot at <code>/monitor/snapshot</code>; one
+older than three periods is dropped as a failing monitor. A Device Manager holds only its own
+manufacturer&rsquo;s accelerators, so an allocation spanning two is read from both, never
+substituted. Only accelerators in the pod&rsquo;s allocation annotation are returned.</li>
+</ul>
+<h2 id="measured-figures-by-manufacturer">Measured figures by manufacturer</h2>
+<p>A carved share&rsquo;s usage exists only where the manufacturer&rsquo;s own library answers a <strong>per-process</strong>
+query. So the totals are available on every backend that can carve a share, while the measurements
+vary by what the vendor exposes, and by whether we have been able to run it against real hardware.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Manufacturer</th>
+          <th><code>memoryUsedMiB</code></th>
+          <th><code>coresUtilizationPercent</code></th>
+          <th>On hardware</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>NVIDIA</td>
+          <td>Yes</td>
+          <td>Yes</td>
+          <td>Yes logical · Yes MIG partition</td>
+      </tr>
+      <tr>
+          <td>AMD</td>
+          <td>Yes</td>
+          <td>Driver-dependent</td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>T-Head</td>
+          <td>Yes</td>
+          <td>Yes logical · — MIG partition</td>
+          <td>Yes logical · — MIG partition</td>
+      </tr>
+      <tr>
+          <td>Ascend</td>
+          <td>Yes</td>
+          <td>—</td>
+          <td>Yes</td>
+      </tr>
+      <tr>
+          <td>Hygon</td>
+          <td>Yes</td>
+          <td>Driver-dependent logical · Yes MIG partition</td>
+          <td>Yes logical · Yes MIG partition</td>
+      </tr>
+      <tr>
+          <td>Cambricon</td>
+          <td>Yes</td>
+          <td>Yes</td>
+          <td>—</td>
+      </tr>
+      <tr>
+          <td>Iluvatar</td>
+          <td>Yes</td>
+          <td>—</td>
+          <td>—</td>
+      </tr>
+      <tr>
+          <td>Metax</td>
+          <td>Yes</td>
+          <td>—</td>
+          <td>Yes</td>
+      </tr>
+  </tbody>
+</table>
+<ul>
+<li><strong>A <code>—</code> in one of the first two columns is a capability, not a fault.</strong> The vendor&rsquo;s library
+offers no entry point for that figure on that backend, so the field is permanently absent there and
+the <a href="#metric-families">capability gauge</a>
+ says <code>unsupported</code> rather than leaving it unexplained.
+Ascend is the sharpest case: its per-vNPU compute is not reachable from either published header, so
+its partitioned NPUs report memory alone.</li>
+<li><strong>Driver-dependent means the entry point exists and your hardware decides.</strong> AMD and Hygon read compute from
+<code>cu_occupancy</code>, which a GFX revision may not measure at all: an RDNA3 GPU returned the invalidation
+sentinel for every process while reporting memory normally. The figure is then absent per process,
+with its reason, and the memory beside it is unaffected. It is never a zero, because a zero would
+read as idle.</li>
+<li><strong>The last column is about evidence, not code.</strong> Every backend is covered by unit tests over
+recorded vendor payloads; the ones marked <code>—</code> have never been run against a driver, because the
+project has no such card. Read their figures as untested rather than as wrong.</li>
+<li>On Hygon, memory was cross-checked against other tools and compute could not be. On a BW
+card (gfx936, DTK 25.04) holding a quarter-card slice, this page&rsquo;s <code>memoryUsedMiB</code> read 4236,
+the same figure the vendor&rsquo;s <code>hy-smi --showpids</code> and the kernel&rsquo;s <code>vram_&lt;gpuid&gt;</code> reported for
+that same process: three sources, one number.</li>
+<li><strong>The vendor&rsquo;s own tool publishes no per-process compute figure</strong>, so compute gets one comparison
+where memory got two: <code>hy-smi --showpids</code> prints VRAM and SDMA only. The kernel&rsquo;s <code>cu_occupancy</code>
+does publish one, and it read a steady 10 while the 44 reported here implies the library measured
+11; the cap-relative restatement above turns 11 into <code>ceil(11 × 100 / 25) = 44</code> for a 25 % slice,
+where 10 would give 40. The one comparison available therefore disagrees by one, with no third
+source to settle it.</li>
+<li><strong>What the run does settle is that the figure follows the work.</strong> It read 0 while the process
+merely held its allocation, 44 once that same process ran a kernel, and board power moved from
+93 W to 223 W with it. Read it as a measurement of the right quantity rather than as the
+kernel&rsquo;s own number.</li>
+<li><strong>Hygon is the one vendor that measures a partition&rsquo;s compute</strong>, and it does so on the partition&rsquo;s
+own handle rather than by attributing the card&rsquo;s processes: an instance running a kernel read 85%
+while its idle siblings on the same card read 0. That is why its <code>coresUtilizationPercent</code> is a
+plain <code>Yes</code> under partitioning while the logical column beside it stays hardware-dependent; the two
+come from different entry points, and the partition&rsquo;s does not go through <code>cu_occupancy</code>.</li>
+<li>On MetaX, memory was cross-checked against the vendor&rsquo;s own tool. A MACA sample process
+holding an allocation on a C600-A read <code>memoryUsedMiB</code> 16 here, the same figure the vendor&rsquo;s
+<code>mx-smi --show-process</code> reported for that PID. Compute has no second source to check against:
+MXSML serves no per-process utilization query at all, the same gap Ascend&rsquo;s compute has, so
+<code>coresUtilizationPercent</code> reports <code>unsupported</code> rather than a number nobody measured.</li>
+<li><strong>A partition is addressed by the identifier its allocation recorded</strong>, and by nothing else, on
+every partitioning manufacturer. The alternative is translating the recorded profile name back into
+a driver profile id, which walks the vendor&rsquo;s whole profile catalog (17 ids on NVIDIA, 85 on
+T-Head) on every card of every monitor period. A partition allocated by a Device Manager older
+than that field therefore reports an absence with a reason until its Pod is allocated again; the
+parent card&rsquo;s figures are every tenant&rsquo;s, so reporting them as this Instance&rsquo;s would be worse.</li>
+</ul>
+<h2 id="reasons-for-absent-figures">Reasons for absent figures</h2>
+<p>An absent figure always has a reason, and the reason is discoverable: on the exporter&rsquo;s
+<a href="#metric-families">capability gauge</a>
+ and in the Device Manager&rsquo;s log under
+<code>instance-accelerator-metrics</code>. The entry itself carries no reason field, which keeps the response
+minimal.</p>
+<p>The device&rsquo;s own query decides most of it:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Reason</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>unsupported</code></td>
+          <td>the library serves no such query on this backend — permanent</td>
+      </tr>
+      <tr>
+          <td><code>permission</code></td>
+          <td>the driver refused the query to the Device Manager&rsquo;s user</td>
+      </tr>
+      <tr>
+          <td><code>transient_driver_error</code></td>
+          <td>the query failed this pass; the next one tries again</td>
+      </tr>
+      <tr>
+          <td><code>truncated</code></td>
+          <td>the driver reported more rows than the read accepted; a partial list is never published as a complete one</td>
+      </tr>
+      <tr>
+          <td><code>invalid_data</code></td>
+          <td>the vendor&rsquo;s own rows contradict the card — a figure above its physical capacity</td>
+      </tr>
+      <tr>
+          <td><code>bounded</code></td>
+          <td>the node&rsquo;s records exceeded the snapshot&rsquo;s size bound, so this device&rsquo;s were dropped whole</td>
+      </tr>
+      <tr>
+          <td><code>version_skew</code></td>
+          <td>the Device Manager predates this consumer&rsquo;s schema, so its section cannot be read as what it is</td>
+      </tr>
+  </tbody>
+</table>
+<p>The rest is attribution. The vendor libraries report <strong>host</strong> process ids, which the Device Manager
+maps to a Pod and container through <code>/proc/&lt;pid&gt;/cgroup</code>. A row it cannot place (a process that
+exited mid-read, a host process, a mediating daemon, a Pod the node&rsquo;s index does not carry) makes
+every figure of <strong>that whole device</strong> absent for that sample, with <code>no_pod_component</code>, <code>mediated</code>,
+<code>unknown_pod</code>, <code>exited</code> or one of their siblings as the reason.</p>
+<blockquote>
+<p><strong>Why</strong> one unplaceable row costs the whole device rather than only itself — dropping the row would
+publish a partial sum as a complete one, and if the dropped row was the Instance&rsquo;s only process, it
+would publish a plausible measured zero. A number that is quietly wrong is worse than no number.</p>
+</blockquote>
+<h2 id="scoping-and-authorization">Scoping and authorization</h2>
+<ul>
+<li>Only the named Instance&rsquo;s data is returned: the backing pod matches by name, namespace and the
+<code>app.kubernetes.io/part-of</code> UID label, kubelet entries by pod UID; a deleted-and-recreated
+Instance never reads its previous incarnation&rsquo;s figures.</li>
+<li>Callers need <code>get</code> on the <code>instances/metrics</code> subresource in group <code>worker.gpustack.ai</code>; <code>get instances</code> alone does not grant it. The worker&rsquo;s calls are covered by its existing binding.</li>
+</ul>
+<h2 id="degradation-rules">Degradation rules</h2>
+<ul>
+<li>An Instance <strong>none of whose containers has ever started</strong> → <code>200</code> with its declared totals and
+every measurement zero. Unscheduled, no pod rendered yet, stopped, or holding only a previous
+incarnation&rsquo;s pod are all this same state: nothing has run, so nothing has been used, and that is
+an answer rather than a failure. It replaces the <code>503</code> responses this surface used to return, so a
+console needs no branch for an Instance that is merely starting up or stopped.</li>
+<li>The gate is <strong>&ldquo;has started&rdquo;, not &ldquo;is ready&rdquo;</strong>. A pod can be running with a failing readiness
+probe, an unready sidecar, or a termination already begun while its main container still holds
+accelerator memory; reporting zero for that would fabricate an idle measurement. Every trace a
+container leaves opens the gate: a restart, a previous termination, an init or ephemeral container.</li>
+<li>Kubelet unreachable and no metrics-server → <code>503 ServiceUnavailable</code>, the message naming which
+source failed and how, so &ldquo;not served here&rdquo; is never confused with &ldquo;returned an error&rdquo;. This is the
+one condition still served as unavailable: something did start, so its usage is a measurement, and
+no source could take it.</li>
+<li>Device Manager unreachable, no Ready Device Manager pod for the allocated manufacturer, or a
+stale snapshot → the sample still returns CPU/memory/storage, <code>accelerators</code> simply absent; the
+worker logs the reason under <code>instance-metrics</code>.</li>
+</ul>
+<h2 id="the-node-exporter">The node exporter</h2>
+<p>Every Device Manager publishes the Instances of <strong>its own node</strong> as Prometheus gauges on the
+<code>/metrics</code> route of its secure port (<code>32443</code> by default, HTTPS):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl <span class="nb">exec</span> -n gpustack-system &lt;device-manager-pod&gt; -- <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  curl -sk https://127.0.0.1:32443/metrics <span class="p">|</span> grep gpustack_instance_</span></span></code></pre></div>
+</div><p>The figures are sampled by a <strong>background loop on the monitor period</strong>, never at scrape time: a
+scrape must not perform I/O it can block or fail on, and the kubelet&rsquo;s summary is cached on
+roughly the same cadence anyway, so scrape-time reads would buy no freshness. A scrape reads
+memory only.</p>
+<p>These rules determine which series exist:</p>
+<ul>
+<li><strong>One exporter per node.</strong> A node carrying two vendors runs two Device Managers, and both see
+all of its Instances. The manufacturer sorting first among the node&rsquo;s <strong>Ready</strong> Device Manager
+pods publishes the pod-level families; the others publish none. The role hands over by itself
+when that pod stops being Ready, with no lease and no shared state.</li>
+<li><strong>Every Device Manager publishes its own accelerators.</strong> Device IDs are disjoint across
+manufacturers, so the accelerator families never collide and are not subject to the rule above.</li>
+<li><strong>A node with no accelerators has no series here.</strong> It runs no Device Manager, so its Instances
+appear on this surface at all only once one is rolled out; the subresource still answers for
+them. This is the exporter&rsquo;s one gap, and it is deliberate: the exporter lives where the
+accelerators are.</li>
+</ul>
+<p>The collector reports on itself, so a degraded exporter is visible in Prometheus rather than only
+in a log:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Labels</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>gpustack_instance_metrics_collector_success</code></td>
+          <td><code>source=&quot;kubelet&quot;</code>, <code>source=&quot;snapshot&quot;</code></td>
+          <td>whether that source&rsquo;s last sampling round succeeded</td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_metrics_collector_duration_seconds</code></td>
+          <td><code>source=&quot;kubelet&quot;</code></td>
+          <td>how long the last poll took, whether it succeeded or not</td>
+      </tr>
+  </tbody>
+</table>
+<p>One failed source never blanks the other. A round whose kubelet read failed still publishes the
+accelerator families and the declared totals: the allocations come from the Pod and the readings
+from the monitor loop, neither of which the kubelet touches. Only the measured pod-level figures
+go absent, beside <code>success{source=&quot;kubelet&quot;} 0</code>.</p>
+<p>What such a round never does is carry the previous one&rsquo;s measurements forward: reporting the
+figures of several periods ago as current is worse than reporting none.</p>
+<p>A round that failed outright publishes its verdict and <strong>no figures at all</strong>. Without a successful
+round the exporter has no list of this node&rsquo;s Instances, and every family here is labelled by one.</p>
+<h2 id="metric-families">Metric families</h2>
+<p>Pod-level families carry <code>namespace</code>, <code>instance_name</code>, <code>instance_uid</code> and <code>node</code>. Accelerator
+families carry those plus <code>id</code>, <code>index</code>, <code>manufacturer</code> and <code>mode</code> — <code>index</code> being the ordinal the
+manufacturer&rsquo;s own tools name the device by, so a figure here lines up with what <code>nvidia-smi</code> or
+<code>rocm-smi</code> shows on the host. All are gauges.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Unit</th>
+          <th>Sample field</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>gpustack_instance_cpu_total_millicores</code></td>
+          <td>milli-cores</td>
+          <td><code>cpuTotalMilliCores</code></td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_cpu_used_millicores</code></td>
+          <td>milli-cores</td>
+          <td><code>cpuUsedMilliCores</code></td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_memory_total_mib</code></td>
+          <td>MiB</td>
+          <td><code>memoryTotalMiB</code></td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_memory_used_mib</code></td>
+          <td>MiB</td>
+          <td><code>memoryUsedMiB</code></td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_storage_total_mib</code></td>
+          <td>MiB</td>
+          <td><code>storageTotalMiB</code></td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_storage_used_mib</code></td>
+          <td>MiB</td>
+          <td><code>storageUsedMiB</code></td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_accelerator_memory_total_mib</code></td>
+          <td>MiB</td>
+          <td><code>accelerators[].memoryTotalMiB</code></td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_accelerator_memory_used_mib</code></td>
+          <td>MiB</td>
+          <td><code>accelerators[].memoryUsedMiB</code></td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_accelerator_memory_utilization_percent</code></td>
+          <td>0–100</td>
+          <td><code>accelerators[].memoryUtilizationPercent</code></td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_accelerator_cores_utilization_percent</code></td>
+          <td>0–100</td>
+          <td><code>accelerators[].coresUtilizationPercent</code></td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_accelerator_temperature_celsius</code></td>
+          <td>°C</td>
+          <td><code>accelerators[].temperatureCelsius</code></td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_accelerator_power_usage_watts</code></td>
+          <td>W</td>
+          <td><code>accelerators[].powerUsageWatts</code></td>
+      </tr>
+      <tr>
+          <td><code>gpustack_instance_accelerator_unhealthy</code></td>
+          <td>0 or 1</td>
+          <td><code>accelerators[].unhealthy</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>An unmeasured <code>used</code> figure is <strong>not published</strong>, exactly as it is absent from the sample. A <code>total</code>
+is published whenever the allocation can state it.</p>
+<p>One more family explains the absences, and is the only one here that carries <strong>no Instance labels</strong>:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Family</th>
+          <th>Labels</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>gpustack_accelerator_process_capability</code></td>
+          <td><code>node</code>, <code>manufacturer</code>, <code>id</code>, <code>entry_point</code>, <code>reason</code></td>
+          <td>whether the per-process query answered on this node&rsquo;s driver, <code>1</code> or <code>0</code></td>
+      </tr>
+  </tbody>
+</table>
+<p><code>entry_point</code> is <code>memory</code> or <code>cores</code>, because a driver commonly serves process memory while refusing
+process utilization; <code>reason</code> is empty when the query answered and otherwise one of the
+<a href="#reasons-for-absent-figures">reasons above</a>
+. It is a property of the node&rsquo;s driver and one of its
+cards rather than of any tenant, so two Instances sharing a card have one answer between them;
+giving it Instance labels would publish that one answer twice.</p>
+<blockquote>
+<p><strong>Why</strong> an absent measurement publishes no sample at all rather than a zero — a Prometheus gauge
+cannot say &ldquo;unknown&rdquo;, and a zero would read as idle. <code>rate()</code> and <code>avg_over_time()</code> over a series
+that disappears are honest about the gap; over a fabricated zero they are not.</p>
+</blockquote>
+<p>The Instance is labeled <code>instance_name</code>, <strong>not <code>instance</code></strong>: Prometheus attaches its own
+<code>instance</code> target label, and under the default <code>honor_labels: false</code> a colliding exposed label is
+renamed to <code>exported_instance</code>, so a query grouping by <code>instance</code> would silently group by scrape
+target.</p>
+<blockquote>
+<p><strong>Why</strong> the units are <code>_mib</code>, <code>_millicores</code> and <code>_percent</code> rather than Prometheus&rsquo;s base-unit
+idiom (bytes, cores, ratios) — they mirror the API fields above one for one, so the two
+surfaces reporting the same figure can never disagree by a rounding step. The unit is in every
+name, so nothing is ambiguous, only unidiomatic.</p>
+</blockquote>
+<h2 id="querying-the-metrics">Querying the metrics</h2>
+<p>&ldquo;What is this Instance using&rdquo; is <strong>one metric name</strong>, in every mode:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>promql</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-promql" data-lang="promql"><span class="line"><span class="cl"><span class="nv">gpustack_instance_accelerator_memory_used_mib</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nv">gpustack_instance_accelerator_cores_utilization_percent</span></span></span></code></pre></div>
+</div><p>and &ldquo;how close is it to its ceiling&rdquo; uses the utilization percentage:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>promql</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-promql" data-lang="promql"><span class="line"><span class="cl"><span class="nv">gpustack_instance_accelerator_memory_utilization_percent</span></span></span></code></pre></div>
+</div><p>Nothing branches on how the Instance holds the card. <code>mode</code> is there to <strong>group or filter</strong> by, not
+to choose a metric with:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>promql</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-promql" data-lang="promql"><span class="line"><span class="cl"><span class="c1"># The busiest logical slices on the fleet.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="k">topk</span><span class="o">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="nv">gpustack_instance_accelerator_cores_utilization_percent</span><span class="p">{</span><span class="nl">mode</span><span class="o">=</span><span class="p">&#34;</span><span class="s">Sliced</span><span class="p">&#34;}</span><span class="o">)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="c1"># Slices whose compute cap is not being enforced.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nv">gpustack_instance_accelerator_cores_utilization_percent</span><span class="p">{</span><span class="nl">mode</span><span class="o">=</span><span class="p">&#34;</span><span class="s">Sliced</span><span class="p">&#34;}</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">100</span></span></span></code></pre></div>
+</div><p><code>Shared</code> is the one mode with no quota to read a ceiling against: the device is granted whole to
+several holders with nothing dividing it, so its entry reports the device&rsquo;s own figures and
+<code>memoryUtilizationPercent</code> is a share of the device rather than of anything that Instance was
+promised.</p>
+<blockquote>
+<p><strong>Why</strong> <code>mode</code> is a label rather than a family of its own — every series in these families is one
+quantity, &ldquo;what this Instance was granted and is using&rdquo;, so a label partitions it correctly and
+<code>sum by (mode)</code> is meaningful. Splitting into <code>…_slice_*</code> families was the earlier revision&rsquo;s
+mistake: it made the metric name depend on the allocation, so every dashboard needed a fallback
+and every <code>sum()</code> risked counting a carved Instance twice.</p>
+</blockquote>
+<h2 id="scraping-the-exporter">Scraping the exporter</h2>
+<p>The Device Manager Service carries the conventional annotations: <code>prometheus.io/scrape</code>,
+<code>prometheus.io/port</code> (the <strong>secure port</strong>, not the Service&rsquo;s 443), <code>prometheus.io/path</code> and
+<code>prometheus.io/scheme</code>. An annotation-driven configuration needs nothing per cluster:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">scrape_configs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">job_name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-instances</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes_sd_configs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l">endpoints</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">namespaces</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">names</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="l">gpustack-system</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># The serving certificate is self-signed unless the Device Manager is given --cert-dir,</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># so either skip verification or supply that CA here.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">tls_config</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">insecure_skip_verify</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">relabel_configs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">source_labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="l">__meta_kubernetes_service_annotation_prometheus_io_scrape</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l">keep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">source_labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="l">__meta_kubernetes_service_annotation_prometheus_io_scheme</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">target_label</span><span class="p">:</span><span class="w"> </span><span class="l">__scheme__</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="l">(https?)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">source_labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="l">__meta_kubernetes_service_annotation_prometheus_io_path</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">target_label</span><span class="p">:</span><span class="w"> </span><span class="l">__metrics_path__</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="l">(.+)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">source_labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="l">__address__</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span>- <span class="l">__meta_kubernetes_service_annotation_prometheus_io_port</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">target_label</span><span class="p">:</span><span class="w"> </span><span class="l">__address__</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="l">([^:]+)(?::\d+)?;(\d+)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">replacement</span><span class="p">:</span><span class="w"> </span><span class="l">$1:$2</span></span></span></code></pre></div>
+</div><p>Two things are worth knowing before adapting it:</p>
+<ul>
+<li><strong>Leave <code>honor_labels</code> at its default.</strong> The exposed label set is chosen to avoid the target
+labels; turning it on would let a series overwrite <code>instance</code> or <code>job</code>.</li>
+<li><strong>Scrape endpoints, not the Service.</strong> <code>role: endpoints</code> yields one target per Device Manager
+pod, which is what the per-node series need; a Service-level scrape would land on one pod at
+random per request, since the Service load-balances across every node&rsquo;s Device Managers.</li>
+</ul>
+<h2 id="restricting-scrape-access">Restricting scrape access</h2>
+<p><code>/metrics</code> is <strong>unauthenticated</strong>, and it lists every Instance running on the node (names,
+namespaces, declared sizes, live usage and accelerator IDs) to anything that can reach port
+32443. The chart ships an opt-in NetworkPolicy for it:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">deviceManager</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">networkPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">scrapers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">namespaceSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kubernetes.io/metadata.name</span><span class="p">:</span><span class="w"> </span><span class="l">monitoring</span></span></span></code></pre></div>
+</div><p>It selects every manufacturer&rsquo;s Device Manager DaemonSet, is <code>Ingress</code>-only, and admits the
+worker plus each <code>scrapers</code> peer on the secure port. <strong>The default is <code>false</code></strong>, so an upgrade
+changes no existing behaviour; enabling it is recommended on a multi-tenant cluster.</p>
+<p>These properties determine whether it does what you expect:</p>
+<ul>
+<li>
+<p><strong>It guards a port, not a route.</strong> NetworkPolicy is L3/L4, and <code>/metrics</code>, <code>/monitor/snapshot</code>,
+<code>/readyz</code>, <code>/livez</code> and <code>/debug/*</code> all share 32443, so admitting a scraper admits it to the
+snapshot too. Since per-slice reporting landed, the snapshot carries <strong>more</strong> than <code>/metrics</code> does:
+one record per (Pod UID, container, device) for every carved share on the node, plus the
+diagnostics behind each figure.</p>
+<p>It carries no process ids (those never leave the producer) but it does name which Pod holds
+which share of which card. Enabling the policy is recommended on a multi-tenant cluster for that
+reason, and the recommendation is stronger than it was before this surface existed.</p>
+</li>
+<li>
+<p><strong>It has no peer for &ldquo;the node&rdquo;.</strong> <code>ingress.from</code> accepts only <code>podSelector</code>,
+<code>namespaceSelector</code> and <code>ipBlock</code>, while the kubelet&rsquo;s probes come from the node&rsquo;s host network
+namespace, and upstream leaves node-to-pod traffic implementation-defined.</p>
+<p>Verified end to end on a cluster whose CNI enforces NetworkPolicy: a pod matching no peer was
+refused on the secure port, the worker&rsquo;s and a configured scraper&rsquo;s peers were admitted, and
+the Device Manager stayed Ready across its readiness and liveness probes without a restart.
+That CNI exempts the kubelet.</p>
+</li>
+<li>
+<p><strong>On a CNI that does not exempt it, admit the nodes yourself.</strong> The Device Manager probes
+are HTTP GETs on 32443, so a policy that cuts them takes every Device Manager NotReady. Put the
+node address range in <code>extraIngress</code>, whose rules are appended verbatim:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get nodes -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.status.addresses[?(@.type==&#34;InternalIP&#34;)].address}{&#34;\n&#34;}{end}&#39;</span></span></span></code></pre></div>
+</div></li>
+</ul>
+<p>A CNI that does not implement NetworkPolicy at all makes the object inert rather than an error:
+it is accepted and never enforced, so the port stays open.</p>
+<h2 id="limits">Limits</h2>
+<ul>
+<li><strong>No history.</strong> Both surfaces report the current sample; charting means polling.</li>
+<li><strong>A shared allocation has no ceiling to report.</strong> <code>Shared</code> hands a whole card to several Instances
+with no per-Instance quota, so its entry reports the card&rsquo;s own figures and its utilization is a
+share of the card rather than of anything that Instance was promised.</li>
+<li><strong>An accelerator two containers of one Pod were separately granted reports no figures of its own.</strong>
+One <code>accelerators[]</code> entry cannot hold two grants, and picking one or summing them would report a
+quota nobody was granted; the card&rsquo;s temperature, power and health still publish. A <code>Visibility</code>
+sidecar is not a second grant (it sees what its sibling holds) and does not trigger this.</li>
+<li><strong>An Instance on a node with no accelerators has no accelerator series on the exporter</strong> — the
+exporter lives where the accelerators are. The subresource still answers for it, and for a
+stopped Instance: the exporter publishes nothing at all for one, rather than a row of zeros.</li>
+<li><strong>Pod-IP networking.</strong> The worker dials the Device Manager pod directly with TLS verification
+skipped, accepted for the self-signed serving certificate. Neither surface is reachable from an
+out-of-cluster worker.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/getting-started/architecture/">Architecture</a></li><li><a href="/gpustack-operator/main/docs/modules/devices/discovery/">Device
+Discovery</a>
+ for how the Device Manager samples accelerators</li><li><a href="/gpustack-operator/main/docs/contribute/internals/">Internals</a>
+ for the Device Manager&rsquo;s subcommands and flags.</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/devices/requests/">Accelerator Requests</a></div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/docs/reference/instance-metrics.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/reference/instance-metrics.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#the-subresource">The subresource</a></li>
+    <li><a href="#the-sample">The sample</a></li>
+    <li><a href="#one-entry-per-grant">One entry per grant</a></li>
+    <li><a href="#data-sources">Data sources</a></li>
+    <li><a href="#measured-figures-by-manufacturer">Measured figures by manufacturer</a></li>
+    <li><a href="#reasons-for-absent-figures">Reasons for absent figures</a></li>
+    <li><a href="#scoping-and-authorization">Scoping and authorization</a></li>
+    <li><a href="#degradation-rules">Degradation rules</a></li>
+    <li><a href="#the-node-exporter">The node exporter</a></li>
+    <li><a href="#metric-families">Metric families</a></li>
+    <li><a href="#querying-the-metrics">Querying the metrics</a></li>
+    <li><a href="#scraping-the-exporter">Scraping the exporter</a></li>
+    <li><a href="#restricting-scrape-access">Restricting scrape access</a></li>
+    <li><a href="#limits">Limits</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

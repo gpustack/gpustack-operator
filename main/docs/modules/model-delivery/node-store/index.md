@@ -1,0 +1,318 @@
+# Node Model Store
+
+Use Node delivery to download model weights once and reuse the verified files across Pods on the
+same node. The `model-manager` CSI plugin downloads missing content, verifies it and mounts it
+read-only through the `model.csi.gpustack.ai` driver. Pods using the same digest share the cached
+files while those files remain on the node.
+
+[Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md) covers enabling and managing the cache.
+
+## Contents
+
+- [The resource](#the-resource)
+- [Configuration ownership](#configuration-ownership)
+- [Mounting cached weights](#mounting-cached-weights)
+- [Mount authorization](#mount-authorization)
+- [Download and verification](#download-and-verification)
+- [Failure reasons](#failure-reasons)
+- [References, restart and collection](#references-restart-and-collection)
+- [Metrics](#metrics)
+- [Requirements and limits](#requirements-and-limits)
+
+## The resource
+
+The following shows a worker-managed object returned by `kubectl get nodemodelstore -o yaml`.
+Do not apply it as a manifest: the public API supports reads and deletion, and the worker and
+node plugin maintain its configuration and status. Configure the cache through
+[Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md).
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: NodeModelStore                         # cluster-scoped, short name nms, category gpustack
+metadata:
+  name: gpu-node-01                          # the Node's name
+  ownerReferences:
+    - apiVersion: v1
+      kind: Node
+      name: gpu-node-01
+spec:                                        # the worker: this node's effective configuration
+  watermarks:
+    highPercent: 80
+    lowPercent: 70
+  download: # 0 is unlimited
+    concurrency: 8
+    bytesPerSecond: 0
+  hub:
+    huggingFaceEndpoint: https://huggingface.co
+    httpsProxy: ""
+    noProxy: ""
+    caBundleConfigMap: ""                    # a ConfigMap in the operator namespace, key ca.crt
+  kubelet:                                   # the node's effective kubelet thresholds, from its configz
+    nodefsAvailable: "10%"                   # evictionHard["nodefs.available"]; empty = kubelet sets none
+    imagefsAvailable: ""                     # evictionHard["imagefs.available"]
+    imageGCHighThresholdPercent: 85
+status:                                      # the plugin on that node: its facts
+  observedGeneration: 3                      # the spec generation the plugin applies
+  capacity:
+    totalBytes: 999641755648                 # the cache filesystem's size
+    storedBytes: 15231233024                 # published trees and partial downloads
+    usedPercent: 40                          # the filesystem's usage, rounded down to a multiple of 5
+  models:                                    # keyed by digest, at most 256 entries
+    - digest: sha256:0f3c...
+      state: Ready                           # Downloading, Ready or Failed
+      sizeBytes: 15231233024
+      referenced: true                       # some Pod mounts it
+      lastUsedTime: "2026-09-25T06:00:00Z"   # truncated to the hour
+      reason: ""                             # Failed: see Failure reasons
+      message: ""
+      retryTime: null                        # Failed: the earliest next attempt
+      source: Hub                            # where its bytes came from; none on older trees
+    - digest: sha256:7a1e...
+      state: Downloading
+      sizeBytes: 145424101604                # set once the manifest is listed
+      downloadedBytes: 61741236224           # what the attempt holds, a resume's checkpoints included
+      source: Hub
+  conditions:
+    - type: Ready
+      status: "True"
+      reason: Serving
+    - type: CapacityLow
+      status: "False"
+      reason: WithinWatermarks
+```
+
+`kubectl get nms` prints Ready, Used (`usedPercent`) and Age.
+
+- **It never names a tenant.** It is cluster-scoped, so it carries a digest and sizes and never a
+  namespace, an artifact, a Pod or a repository; those would leak across tenants. A failure's
+  `message` says what its reason means and a detail such as the hub's HTTP status; the full error,
+  with the file and the URL, is in the plugin's log.
+- **`status` is rebuilt from the node**, never from the previous status: from what is on disk and
+  what is mounted. A plugin restart rewrites it.
+- **Download progress is written on thresholds.** The progress fields, `downloadedBytes` and,
+  while a download runs, `storedBytes`, are written only once 30 seconds passed since the last write
+  and some download moved by 5% of its size: at most twenty progress writes per download, and at
+  most two a minute.
+- **Everything else is written on change**, at once and with the current progress: an entry's state,
+  `referenced`, the hour of `lastUsedTime`, `usedPercent`, a condition, `observedGeneration`. The
+  plugin's own writes never trigger its next report, and a quiet node writes nothing.
+- **More content than 256 entries**: the referenced ones are kept, then the most recently used; the
+  `Ready` message counts what was left out.
+
+| Condition | Reason | Meaning |
+| --- | --- | --- |
+| `Ready=True` | `Serving` | the plugin serves mounts and applies `observedGeneration`; the message says when the high watermark is capped |
+| `Ready=False` | `InvalidConfiguration` | `spec` or its CA ConfigMap fails the plugin's own check; no download starts and nothing is collected, not under the previous `spec` either; mounts of published content still work |
+| `CapacityLow=True` | `NothingToRemove` | usage is above the high watermark and every tree on the filesystem is in use |
+| `CapacityLow=False` | `WithinWatermarks` | collection can keep usage within the watermarks |
+
+## Configuration ownership
+
+| Part | Writer | Rule |
+| --- | --- | --- |
+| the object | worker | created when the node's `CSINode` lists `model.csi.gpustack.ai`; removed with the Node, and all of them while the `CSIDriver` object does not exist |
+| `spec` | worker | the merge of the configuration layers, rewritten within a minute of a Setting change; never a value that fails its check |
+| `spec.kubelet` | worker | the node's kubelet thresholds, read from kubelet's `configz` endpoint when the object is written and every 30 minutes; a failed read keeps the last reading, and a node never read has none. The plugin gets no `nodes/proxy` access |
+| `status` | the plugin on that node | admitted only through the status webhook below |
+
+The public [NodeModelStore API](/gpustack-operator/main/docs/modules/model-delivery/views/index.md#resources) supports reads and deletion. Its configuration
+and status are maintained by the worker and node plugin. The worker recreates a deleted object
+while its node runs the plugin.
+
+The worker does not delete an object when the driver leaves `CSINode`, because every plugin
+restart unregisters it for a moment. A node the plugin no longer runs on keeps a stale object whose
+`Ready` condition stops changing.
+
+A validating webhook on `nodemodelstores/status`, `failurePolicy: Fail`, admits an update only
+when every rule holds, and names the rule it refused by:
+
+| Rule | Refusal message begins |
+| --- | --- |
+| the requester is the plugin's ServiceAccount (`--model-manager-service-account` of the worker) | `only the model-manager plugin writes a NodeModelStore's status` |
+| its token is bound to a Pod: `authentication.kubernetes.io/pod-name` and `pod-uid` are in the request's extra | `the plugin's token must be bound to its Pod` |
+| that Pod exists in the operator namespace with that UID and runs on the object's node | `the plugin writes only the status of the node its Pod runs on` |
+
+On Kubernetes 1.30 and later the token also carries `authentication.kubernetes.io/node-name`, and the
+node comparison reads it without looking the Pod up. The guarantee is the same on 1.29.
+
+`ModelArtifact` status has the same kind of guard: only the worker's own identity may update
+`modelartifacts/status` (refusal: `only the worker writes a ModelArtifact's status`). The worker
+learns it at startup with a `SelfSubjectReview`, or, where the API server does not serve one (before
+1.28), with a `TokenReview` of its own token; with neither it does not start. Mount authorization trusts that status, so the guard is what keeps a
+tenant from making an artifact look resolved.
+
+## Mounting cached weights
+
+A `ModelDeployment` under Node delivery and an `Instance` naming a Hugging Face or ModelScope artifact render:
+
+```yaml
+volumes:
+  - name: gpustack-model
+    csi:
+      driver: model.csi.gpustack.ai
+      readOnly: true
+      volumeAttributes:                      # hints; the plugin checks each against the API
+        artifact: qwen-7b
+        artifactUID: 3f0c...
+        manifestDigest: sha256:0f3c...
+      nodePublishSecretRef: # the artifact's secretRef; absent without one
+        name: hf-token
+```
+
+A hand-written Pod may mount the same volume; it is held to the same rules. The CSIDriver has
+`attachRequired: false`, `podInfoOnMount: true`, an `Ephemeral` entry in `volumeLifecycleModes`, and
+`fsGroupPolicy: None`, so the tree keeps the plugin's ownership and is readable by any user.
+
+## Mount authorization
+
+On every mount, before touching the disk, the plugin requires all of:
+
+1. an inline ephemeral volume (`csi.storage.k8s.io/ephemeral=true`) with a mount capability and a
+   target under the kubelet directory;
+2. a `ModelArtifact` named `artifact` in the Pod's namespace, `csi.storage.k8s.io/pod.namespace`;
+3. its UID equal to `artifactUID`, a Hugging Face or ModelScope source, `Resolved=True`, and
+   `status.resolved.manifestDigest` equal to `manifestDigest`.
+
+The namespace is the one kubelet adds, and kubelet writes its Pod keys over the Pod's own attributes,
+so a tenant who sets `csi.storage.k8s.io/pod.namespace` is still judged in their own namespace.
+**The digest is never authorization**: content already on the node is refused to a namespace that
+has no resolved artifact naming it.
+
+A refusal is `PermissionDenied` with the failed rule in the message, which kubelet records on the Pod
+as a `FailedMount` event. An artifact that stops being resolved stops new mounts only; mounted Pods
+keep theirs. For a short window after the plugin starts, before it has read the artifacts, mounts
+answer `Unavailable`.
+
+## Download and verification
+
+The first authorized mount of a digest the node does not hold starts one background attempt and
+returns `Aborted` with the progress so far (`materializing sha256:0f3c…: 2.1 GiB of 15.2 GiB
+received`). kubelet retries the mount, and the first call after publication mounts. After a
+download completes, a Pod starts at kubelet's next retry, up to about two minutes later.
+
+1. **Manifest.** The tree at `status.resolved.revision` is listed with the mount's credential and
+   filtered by the artifact's patterns; its canonical digest must equal `manifestDigest`. An
+   artifact whose `digestSource` is `Expected` resolved to its anchor without the hub and has no
+   commit to list at: the manifest comes from a peer's published listing instead, reassembled and
+   bound to the digest before it is trusted, and the chain is peers only; there is no hub to fall
+   back to.
+2. **Capacity.** The rest of the manifest's size, together with what every other running download
+   has yet to write, is reserved against the high watermark, collecting first when it does not fit;
+   two downloads that each fit and together do not are never both admitted. The reservation is held
+   until the attempt ends.
+3. **Download.** From `{endpoint}/{repository}/resolve/{commit}/{path}`, redirects followed, through
+   `spec.hub`'s proxy and CA. At most `download.concurrency` requests run on the node across every
+   download, under one `bytesPerSecond` limit, and large files are fetched as parallel byte ranges.
+   A range that makes no progress for 30 seconds is retried from its last byte.
+4. **Verification while downloading.** Each file is hashed in byte order as it arrives, `sha256` for
+   an LFS file and the git blob SHA-1 otherwise, and its size must match. Nothing is read back from
+   disk to verify, and a resumed file continues from a saved hash state.
+5. **Publication.** Every file and a marker naming the digest are synced, then the directory is
+   renamed to its published name in one step. A tree without its marker is never mounted.
+
+Concurrent mounts of one digest join the running attempt. A credential is used only for the
+repository of the artifact that presented it, kept in memory for the attempt, never written
+anywhere, and never sent on a redirect to another host or from `https` to `http`.
+
+**Backoff.** A failed attempt puts the digest in `Failed` with a `retryTime`: one minute after the
+first failure, doubling to one hour, reset by a success and kept across a plugin restart. Until then
+mounts of it return at once, `Unavailable`, without downloading. `AccessDenied` backs off too; the
+next call brings the Secret again. `InvalidRequest` and `Canceled` do not back off: the next mount
+starts again at once.
+
+**Cancellation.** An attempt no mount has asked for in five minutes is canceled; its partial files
+stay for a resume.
+
+## Failure reasons
+
+| Reason | Meaning | What happens |
+| --- | --- | --- |
+| `InvalidRequest` | the configuration cannot be executed: an invalid endpoint, proxy or CA | waits for the configuration to change |
+| `AccessDenied` | the Hub refused the credential | backoff |
+| `SourceUnavailable` | the Hub is unreachable, answers 5xx or 429, a file's ranges keep failing, or no node holds an anchored artifact's digest | backoff |
+| `IntegrityMismatch` | a file's hash or size, or the manifest's digest, does not match | the file is discarded; backoff |
+| `InsufficientCapacity` | the reservation does not fit under the high watermark after collection | backoff |
+| `Canceled` | no mount asked for the digest for five minutes | resumes on the next mount |
+
+A mount refused while materializing shows the attempt's progress in its message, and a failed
+attempt names its reason from this table. No message, event or log line carries a token, an
+`Authorization` header or a signed URL.
+
+## References, restart and collection
+
+A reference is a mounted target. A tree is never removed between the check that it is published and
+the mount that binds it, and a mount whose reference cannot be recorded fails. Unmounting works
+from the target path alone and succeeds for a target it never mounted.
+
+On start the plugin rebuilds its references from the node's live mounts, removes partial
+directories that belong to no attempt, and rewrites `status`. A mounted Pod keeps running
+while the plugin restarts or rolls: its mount is a kernel bind mount.
+
+Collection runs when usage passes the high watermark, when a reservation does not fit, and every
+five minutes. It removes, oldest `lastUsedTime` first and down to the low watermark:
+
+- published trees no Pod references, unreferenced for at least ten minutes;
+- partial downloads with no running attempt that no mount has asked for in 24 hours;
+- failure records whose digest is neither published, partly on disk nor being materialized, 24 hours
+  after the last failure, so `status.models` stops listing them.
+
+It never removes a referenced tree or a partial being written, and it reads references from the
+node's own mounts, never from the API.
+
+A digest listed in `spec.pinned` is never a candidate at all; the pins arrive from
+[`ModelPrefetch`](/gpustack-operator/main/docs/modules/model-delivery/prefetch/index.md) retention and survive collection until the pin is withdrawn,
+though it still counts toward the usage the watermarks read.
+
+How the watermarks are capped when the cache shares kubelet's filesystem is under [the capacity
+rule](operations.md#the-capacity-rule).
+
+When the references cannot be read, no configuration has been applied yet, or the node's `spec`
+fails its check, a collection removes nothing, a stale partial included, and the `Ready` message
+says `collection skipped` and why. A `spec` that fails after an earlier one applied does not leave
+the earlier watermarks in force.
+
+## Metrics
+
+Served on the plugin's HTTPS port (`modelManager.securePort`, 32444), beside `/readyz` and `/livez`:
+
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `gpustack_model_manager_download_bytes_total` | `source="hub"` | bytes received |
+| `gpustack_model_manager_mounts_total` | `result`: `hit`, `materialized`, `denied`, `pending` | mount calls |
+| `gpustack_model_manager_materializations_total` | `result`: `published` or a failure reason | finished attempts |
+| `gpustack_model_manager_publish_duration_seconds` | — | from an attempt's start to its publication |
+| `gpustack_model_manager_gc_removed_bytes_total` | — | bytes collection removed |
+| `gpustack_model_manager_stored_bytes`, `gpustack_model_manager_capacity_bytes` | — | the cache's bytes and its filesystem's size |
+
+No label carries a namespace, an artifact, a repository or a Pod.
+
+The ModelArtifact [progress](/gpustack-operator/main/docs/modules/model-delivery/views/index.md#the-progress-subresource) subresource reads the running
+downloads from this port for live bytes between the status thresholds.
+
+## Requirements and limits
+
+- **Kubernetes 1.29** for node delivery, the floor the ModelArtifact reference states, though the
+  chart itself admits older clusters. The status guard needs the Pod extras bound service-account
+  tokens carry since 1.22, and the worker learns its own identity with a `SelfSubjectReview` (GA in
+  1.28) or, before that, a `TokenReview`.
+- **A Hugging Face or ModelScope source.** A claim artifact is always mounted directly.
+- **kubelet's configz**, served while its debugging handlers are enabled (the default). Without it
+  a node has no `spec.kubelet` and its cap assumes kubelet's defaults, which the `Ready` message
+  says.
+- **A preference, not a filter.** A Pod prefers the nodes holding its digest while they have room;
+  one placed on a node without it downloads it there. See
+  [a node-delivered model prefers the nodes holding
+  it](../topology/scheduling.md#placement-of-node-delivered-models).
+- **A download comes from the Hub**, directly or through the proxy, or, when
+  [node-to-node sync](/gpustack-operator/main/docs/modules/model-delivery/peer-sync/index.md) is on, from a peer node that already holds
+  the tree.
+
+---
+
+**See also** — [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md) for the artifact and its other
+deliveries · [Model Artifact API](/gpustack-operator/main/docs/modules/model-delivery/views/index.md) for resource status and
+`progress` · [Node-to-Node Sync](/gpustack-operator/main/docs/modules/model-delivery/peer-sync/index.md) for where a node's bytes come from ·
+[Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md) for enabling, configuring and upgrading ·
+[Settings](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) for the Settings `spec` is built from.
+
+**Next** → [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md)

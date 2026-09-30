@@ -1,0 +1,457 @@
+# Model Artifact
+
+A `ModelArtifact` records where model weights come from and which credential reads them. A
+`ModelDeployment` refers to it through `spec.model.artifactRef`; an `Instance` uses a `model` volume.
+Neither workload needs its own URI, revision or token.
+
+## Contents
+
+- [The resource](#the-resource)
+- [Resolution and revalidation](#resolution-and-revalidation)
+- [The manifest digest](#the-manifest-digest)
+- [Referencing it from a ModelDeployment](#referencing-it-from-a-modeldeployment)
+- [Engine delivery](#engine-delivery)
+- [Claim delivery and placement](#claim-delivery-and-placement)
+- [The KV reuse domain](#the-kv-reuse-domain)
+- [Status](#status)
+- [Instance model volumes](#instance-model-volumes)
+- [Requirements and limits](#requirements-and-limits)
+
+## The resource
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelArtifact                      # namespaced, short name mart
+metadata:
+  name: qwen-7b
+  namespace: team-a
+spec:                                    # immutable after creation
+  source:                                # exactly one member
+    huggingFace:
+      repository: Qwen/Qwen2.5-7B-Instruct
+      revision: main                     # branch, tag or commit; defaults to main
+      secretRef: # optional; this namespace; key "token"
+        name: hf-token
+    # modelScope:
+    #   repository: qwen/Qwen2.5-7B-Instruct
+    #   revision: master                 # branch, tag or commit; defaults to master
+    #   secretRef: # optional; this namespace; key "token"
+    #     name: ms-token
+    # persistentVolumeClaim:
+    #   claimName: models                # this namespace
+    #   path: qwen                       # directory inside the volume; empty is the root
+    # image:
+    #   reference: registry.example.com/team/qwen@sha256:669ed7b1...48   # digest-pinned
+  allowPatterns: # optional; hub sources only
+    - "*.safetensors"
+    - "*.json"
+    - "tokenizer*"
+  ignorePatterns: # optional; wins over allowPatterns
+    - "original/"
+  expectedDigest: sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448
+  # optional; hub sources only — the digest the source must resolve to
+status:
+  resolved:
+    revision: 7ae557604adf67be50417f59c2c2f167def9a775
+    manifestDigest: sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448
+    digestSource: Hub                    # Hub, the hub's listing | Expected, the spec's anchor
+    fileCount: 10
+    sizeBytes: 999604126
+  nodes:                                 # hub sources only; where the content is across nodes
+    ready: 3
+    downloading: 1
+    failed: 0
+    downloadingPercent: 45               # the downloading nodes' mean, in steps of 5
+  conditions:
+    - type: Resolved
+      status: "True"
+      reason: Resolved
+    - type: Degraded
+      status: "False"
+      reason: Healthy
+```
+
+- **The spec is immutable.** An artifact is an identity: other weights, or another revision, are a
+  new artifact. That is also what lets a deployment's frozen reference pin anything.
+- **The Secret and the claim need not exist yet.** Admission does not read them; their absence is a
+  reason in status (`SecretNotFound`, `ClaimNotFound`).
+- **A `modelScope` member is a second hub.** Its repository and revision rules are the Hugging Face
+  ones, the revision defaults to `master`, and the patterns apply to it the same way. What differs
+  is [how it resolves](#resolution-and-revalidation) and the [engine
+  environment](#engine-delivery) an Engine download reads.
+- **An `image` member delivers weights already in a registry.** A digest-pinned reference is the
+  artifact's whole identity; kubelet pulls and mounts it through an image volume, outside the node
+  cache. The digest contract, the build, the floors and the costs are on the
+  [Model Image Source](/gpustack-operator/main/docs/modules/model-delivery/image-source/index.md).
+- **Patterns select the files.** They follow Python's `fnmatch.fnmatchcase`: case-sensitive, `*`
+  and `?` cross `/`, a trailing `/` means everything under it, an empty allow list keeps every file,
+  and an ignored file is dropped even when allowed. At most 32 per list, 1 to 256 characters each,
+  refused on claim and image sources. A filter that keeps no file is `Resolved=False`,
+  `EmptyManifest`, and a filtered artifact needs
+  [Node delivery](#referencing-it-from-a-modeldeployment).
+- **`expectedDigest` asserts what must resolve.** Optional, immutable with the spec, `"sha256:"` and
+  64 lowercase hex: the manifest digest, exactly what `status.resolved.manifestDigest`
+  carries. Admission accepts it on a hub source only. A claim's content is whatever the volume
+  holds at mount time (dynamically provisioned claims differ per provisioning), and its identity is
+  the claim itself, which the user confirms; an image's identity is its reference's digest. What the
+  assertion does is under [Resolution and revalidation](#resolution-and-revalidation).
+- **`status.nodes` counts the nodes reporting the digest.** Nodes whose `NodeModelStore` lists the
+  digest `Ready`, `Downloading` or `Failed`; artifacts with the same digest see the same nodes, and
+  only numbers cross namespaces. The mean covers the downloading nodes only, each a whole copy. It
+  is written on the [thresholds](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md#the-resource) the nodes store progress on. The
+  [progress](/gpustack-operator/main/docs/modules/model-delivery/views/index.md#the-progress-subresource) answers the same at full
+  precision.
+- **Deletion waits for the last reference.** The finalizer `worker.gpustack.ai/model-artifact-protection`
+  holds a referenced artifact in `Terminating` until no `ModelDeployment` or `Instance` in the
+  namespace names it. Running Pods are never affected.
+
+## Resolution and revalidation
+
+A Hugging Face source is resolved **once**, with the namespace's own token: the revision is pinned
+to the commit it names at resolution time, an annotated tag is peeled to that commit, and the
+commit's file listing becomes the manifest. Nothing follows the branch afterwards.
+
+| `Resolved` reason | Cause |
+| --- | --- |
+| `RevisionNotFound` | the revision, branch or tag does not exist |
+| `AccessDenied` | the repository does not exist, is private and the token cannot read it, or is gated without a grant |
+| `SourceUnavailable` | the hub is unreachable, erroring or rate-limiting |
+
+A repository that does not exist and a private one the token cannot read answer alike, so the
+message says "does not exist or is not accessible". A gated repository is the subtle case: its
+listing answers as if readable and only masks the files' digests, and that masked listing is
+refused as `AccessDenied`.
+
+**A ModelScope source resolves the same way, against its own API.** A full commit is taken as is; a
+branch or tag is resolved and cross-checked against the repository's git refs, and a hub index
+that disagrees with its own git refuses the resolution as `SourceUnavailable`. That disagreement,
+often caused by a misspelled parameter, is what would silently resolve the wrong revision.
+
+The file listing the ModelScope API returns truncates silently at 3000 entries, so the operator
+re-lists large directories itself, and a directory with 3000 or more direct children refuses
+(`SourceUnavailable`): the API cannot enumerate it, and a partial manifest would be a silent wrong
+answer. Every file must carry the hub's `sha256`, so a ModelScope manifest's digest lines are all
+`sha256`.
+
+Access failures map to the same reasons: a ref that answers no commit, or a listing with no file
+tree at the revision, is `RevisionNotFound`; a refusal of the content's accessibility (a missing,
+private or gated repository, or a token the hub rejects) is `AccessDenied`; a hub that cannot
+answer at all, answers a server error, or cannot enumerate a directory is `SourceUnavailable`.
+
+ModelScope has no distinct 401 or 403, and "no access" covers private-without-token,
+gated-without-grant and valid-token-without-grant alike; the message says "does not exist or is
+not accessible" as on Hugging Face. A mistyped token is silent in the same way, so the operator
+probes each new token against the hub and emits an `InvalidToken` Warning when the hub rejects it.
+
+Access is revalidated every `model-artifact-revalidate-interval` (default `24h`) and whenever the
+Secret changes, with one `HEAD` of a file at the resolved commit, redirects not followed:
+
+- a refusal sets `Degraded=True` and is checked again a minute later; the same refusal then sets
+  `Resolved=False`;
+- `SourceUnavailable` sets only `Degraded` and is retried every minute, so a Hub outage never
+  revokes pinned weights; an unreadable Secret is treated the same way;
+- a deleted Secret, or one without its `token` key, sets `Resolved=False` at once;
+- a later pass restores `Resolved=True`, with the commit and digest unchanged.
+
+The check is one request for one file at the resolved commit, on either hub: a 200 (an LFS file's
+too) confirms access and a 404 is an access refusal.
+
+**An `expectedDigest` turns both passes into assertions.** At resolution the digest is compared
+with the anchor; a mismatch refuses with `DigestMismatch`, both digests in the message. At
+revalidation an anchored artifact does not stop at the one-file `HEAD`: the tree is re-listed at
+the resolved commit, so a hub or mirror that stops serving the pinned content fails the same
+staircase, first `Degraded`, then `Resolved=False`. Unanchored artifacts keep the two-request check.
+
+**The anchor takes over when the hub stays unreachable.** One
+`SourceUnavailable` is not a verdict; the artifact asks again a minute later. When the second pass
+fails the same way, the anchor becomes the resolution: `Resolved=True`, `manifestDigest` = the
+anchor, `digestSource: Expected`, no revision, file count or size, and the hub is never contacted
+again.
+
+A hub that answered, even with a refusal, is never anchored around; only a hub that does not
+answer at all falls back.
+
+| `digestSource` | Meaning |
+| --- | --- |
+| `Hub` | the digest came from the hub's own listing, checked against the anchor when one is set |
+| `Expected` | the digest is the spec's anchor, written after the hub's absence was confirmed |
+
+**Delivery under an `Expected` identity.** No commit exists, so [Engine
+delivery](#engine-delivery) is refused (`AnchorNeedsNodeDelivery`) and
+[Node delivery](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md#download-and-verification) draws the manifest and the bytes from the other
+nodes; with no peer holding the tree the mount fails naming the digest nothing holds. Seed one
+node while the hub is reachable, and the identity stands without it.
+
+Anchor verification narrows what an `Expected` identity promises. Integrity is never at risk: only
+anchor-named, verified bytes enter a published set or a mount. What relaxes is secrecy: an
+artifact whose anchor names a digest already published on a node can mount that tree with no
+credential, and digests are visible cluster-wide on `NodeModelStore` status. Private content must
+not rely on digest secrecy; hub-verified identities keep resolving with the namespace's token.
+
+`Resolved=False` stops new consumption: no new replica, replacement or scale-up. It never
+deletes a running Pod. A claim source is resolved by the claim existing; the operator never reads
+its content, so it has no revision and no digest.
+
+## The manifest digest
+
+The digest is the content address of a hub artifact: the SHA-256 of a canonical manifest,
+one line per file of the commit. The format is `gpustack-manifest v1`:
+
+```text
+gpustack-manifest v1
+gitsha1:4ff64fe5… 807 config.json
+sha256:8111d5af… 453864 model.safetensors
+```
+
+- A line is `<algorithm>:<hex> <size> <path>`, sorted by the path, every line ending in LF. An LFS
+  file uses its `sha256`, any other file its git blob `gitsha1`; a ModelScope artifact's manifest
+  is all `sha256` lines, the hub giving no other digest.
+- The source, the repository, the commit and the patterns are not part of it, so the same files
+  have the same digest wherever they live. A filter changes the digest only through the files it
+  keeps, and an artifact without patterns has the digest it always had.
+
+Two consequences follow:
+
+- **The digest is never evidence of access.** A public and a private repository holding the same
+  files have the same digest; authorization always comes from resolving with the namespace's token.
+- The same files on Hugging Face and ModelScope have different digests, because non-LFS files are
+  hashed differently there. Content is not deduplicated across hubs.
+
+## Referencing it from a ModelDeployment
+
+```yaml
+spec:
+  model:
+    name: qwen-7b                        # the served name, unchanged
+    artifactRef: # a ModelArtifact in this namespace
+      name: qwen-7b
+```
+
+`artifactRef` is frozen with the rest of `spec.model`: other weights are another deployment. A
+reference to an artifact that does not exist or has not resolved is admitted, and the deployment
+creates no Pod until it resolves.
+
+A claim source is always mounted directly. A hub source (Hugging Face or ModelScope) takes the
+delivery the
+`model-artifact-delivery-mode` Setting names, `Engine` by default and `Node` where the chart deploys
+the node plugin ([switching it](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#switch-delivery) rolls each such
+deployment once):
+
+| | Claim source (`Pvc`) | Hub source, `Engine` | Hub source, `Node` | Image source (`Image`) |
+| --- | --- | --- | --- | --- |
+| Weights | the claim, read-only, at `/var/lib/gpustack/model`, `subPath` = `path` | downloaded by the engine into `/var/lib/gpustack/model-cache` | the node's verified copy, read-only, at `/var/lib/gpustack/model` | the image, read-only, at `/var/lib/gpustack/model` |
+| vLLM | `vllm serve /var/lib/gpustack/model` | `vllm serve <repository> --revision <commit>` | as a claim | as a claim |
+| SGLang | `--model-path /var/lib/gpustack/model` | `--model-path <repository> --revision <commit>` | as a claim | as a claim |
+| Both | `--served-model-name <spec.model.name>`, unless the role states it | same | same | same |
+
+An image source takes `Image` whatever the Setting says, and kubelet pulls the pinned image on the
+node that needs it; see [Model Image Source](/gpustack-operator/main/docs/modules/model-delivery/image-source/index.md).
+
+`--revision` pins the weights and the tokenizer together on both engines. A take-over role (one
+with `command`) gets the claim or node mount and nothing else, and nothing at all under `Engine`.
+
+**Node delivery** mounts an inline CSI volume of the driver `model.csi.gpustack.ai`: the node's
+`model-manager` plugin downloads the digest once per node, verifies every byte against the manifest
+before anything is mounted, and mounts only for a resolved artifact in the Pod's own namespace. The
+plugin and its resource are on the [Node Model Store](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md).
+
+No Hub variable and no cache `emptyDir` is rendered under Node delivery, and the ephemeral-storage
+limit is not raised: the volume's bytes are not the Pod's.
+
+While `artifactRef` is set, admission refuses:
+
+- on vLLM `--model`, `--revision`, `--tokenizer-revision` and `--download-dir`, on SGLang
+  `--model-path`, `--revision` and `--download-dir`, and `HF_TOKEN`, `HF_ENDPOINT`, `HF_HOME`,
+  `MODELSCOPE_API_TOKEN`, `MODELSCOPE_DOMAIN`, `MODELSCOPE_CACHE` and the engine's
+  `VLLM_USE_MODELSCOPE` / `SGLANG_USE_MODELSCOPE` in
+  `env`, whatever the source (a later value would silently replace the artifact's);
+- a role volume at, inside or around `/var/lib/gpustack/model` or `/var/lib/gpustack/model-cache`.
+
+On every managed role, with or without an artifact, `--served-model-name` must be exactly
+`spec.model.name`. Any other name was measured to fail silently: requests by `spec.model.name`
+answer 404 through the router, and requests by the other name succeed while the router's
+prefix-cache scoring falls to zero, with the deployment reporting `Ready`.
+
+## Engine delivery
+
+Under `Engine`, the engine downloads the pinned commit itself, with:
+
+| Variable | Value | Owned |
+| --- | --- | --- |
+| `HF_HOME` | `/var/lib/gpustack/model-cache` | yes |
+| `HF_ENDPOINT` | the `model-artifact-huggingface-endpoint` Setting | yes |
+| `HF_TOKEN` | a `secretKeyRef` to the artifact's Secret, key `token`; the value never enters the Pod spec | yes |
+| `MODELSCOPE_CACHE` | `/var/lib/gpustack/model-cache` | yes |
+| `MODELSCOPE_DOMAIN` | the `model-artifact-modelscope-endpoint` Setting's bare host — the runners' SDK prefixes the scheme itself | yes |
+| `MODELSCOPE_API_TOKEN` | a `secretKeyRef` to the artifact's Secret, key `token` | yes |
+| `VLLM_USE_MODELSCOPE` / `SGLANG_USE_MODELSCOPE` | `true`, routing the engine's own download through its bundled ModelScope SDK; each engine reads only its own | yes |
+| `HTTPS_PROXY`, `NO_PROXY` | the proxy Settings, when set | no — a role's own value wins |
+
+A ModelScope artifact renders the `MODELSCOPE_*` rows; a Hugging Face artifact the `HF_*` rows.
+The ModelScope rows reach the engine through the runner's bundled SDK, whose version decides
+whether a commit is accepted; see [Requirements](#requirements-and-limits).
+
+The cache is an `emptyDir` with a `sizeLimit` of the manifest's size plus a tenth, and at least
+1 GiB more. The manifest is the whole commit, so it bounds whatever subset the engine downloads (vLLM
+skips `.bin` files when `.safetensors` exist).
+
+**The container's ephemeral-storage limit is raised by the same amount; its request is not.**
+Kubelet counts an `emptyDir` toward the Pod's ephemeral-storage limit as well as its own
+`sizeLimit`, so a model larger than the InstanceType's local storage would otherwise be evicted
+mid-download. Kueue and the scheduler read the request, which stays the InstanceType's.
+
+A namespace `LimitRange` whose maximum is below the raised limit makes the API server refuse the Pod,
+which the deployment reports as a create failure.
+
+A download that still outgrows the cache is evicted; the Pod ends `Succeeded`, and the deployment's
+phase message carries the kubelet's own reason, which is the only place it survives.
+
+- **Changing an endpoint or proxy Setting rolls every Engine-delivered deployment**, because the
+  values are rendered into the Pods. It does not re-resolve an artifact. For the same reason the
+  proxy Setting accepts no credentials ([Settings](/gpustack-operator/main/docs/reference/settings/index.md)).
+- **The CA bundle Setting is not given to engine Pods.** They run in tenant namespaces, which cannot
+  mount a ConfigMap from the worker's. Mount your own ConfigMap and set `REQUESTS_CA_BUNDLE`.
+- A `trust_remote_code` model writes its code under `$HF_HOME/modules`, which is on the cache.
+
+## Claim delivery and placement
+
+Kueue's topology-aware scheduling does not read a Pod's volumes. A claim bound to a PV with node
+affinity was measured to fail silently without help: the Pod was assigned elsewhere and stayed
+Pending, while its Workload stayed Admitted holding quota. So:
+
+| Claim state | Operator action |
+| --- | --- |
+| Bound | adds the PV's required node affinity to every Pod at creation, outside the Pod fingerprint |
+| Pending, `WaitForFirstConsumer` with a provisioner | creates the Pods; the first one's node decides the binding |
+| Pending, a class with `kubernetes.io/no-provisioner`, or immediate binding | creates nothing: `ClaimNotBound` |
+| Mounted by more than one Pod, with neither `ReadOnlyMany` nor `ReadWriteMany` | creates nothing: `AccessModeConflict` |
+
+With the affinity, the Workload waits before quota when the PV's node is full and admits itself when
+room appears. For a static local volume, bind the claim to its PV first (`spec.volumeName`). The
+static-class row is inferred from the binding order rather than measured.
+
+Measured throughput, for choosing a claim (one node with one 48 GB accelerator and a 1000 GiB network
+SSD boot disk; object-storage and NFS servers on CPU nodes with 2 TiB network disks of the default
+class; page caches dropped before every read):
+
+| Source | Cold read, 7B | Weight loading, vLLM 7B | Warm read |
+| --- | --- | --- | --- |
+| S3 CSI (geesefs) | 467 MB/s | 32.6 s | about 455 MB/s: no page-cache benefit |
+| The node's boot disk | 479 MB/s | 34.8–35.7 s | 7.4–7.8 GB/s |
+| NFS CSI | about 312 MB/s | 40.2 s | page-cached |
+
+Both S3 and the boot disk sat at the network disk's ceiling, so the S3 CSI driver's own ceiling was
+not reached; performance is not a reason to avoid an S3 claim. Every restart on the same node reads
+object storage again. That disk class's throughput grows with its size, so any figure you quote
+needs the disk's type and size.
+
+Point an S3 PV's endpoint at a ClusterIP, not an in-cluster DNS name: the default geesefs mount
+runs as a systemd unit on the host and resolves with the host's resolver, which does not know
+`*.svc.cluster.local`.
+
+## The KV reuse domain
+
+Neither engine's store key names the weights: vLLM's carries the last path segment of `--model`,
+SGLang's the served name. Two deployments of different commits under one Binding were measured to
+read each other's KV blocks, and a claim delivery names every model `model`.
+
+With `artifactRef` and `spec.kvCache`, the operator prefixes the keys with the weight identity:
+vLLM's `kv_connector_extra_config.cache_prefix` on its store connector, and SGLang's
+`extra_backend_tag` in `--hicache-storage-backend-extra-config`. The identity is `m-` and 32
+hexadecimal digits of the manifest digest, or of the SHA-256 of the artifact's UID for a claim.
+
+- Deployments of one identity share blocks; deployments of two never do.
+- **A claim's identity is the artifact, not its content.** Replacing the files under one artifact
+  keeps the identity, and new replicas would read blocks of the old files. Put new weights in a new
+  `ModelArtifact`.
+- The vLLM-Ascend store connector gets no prefix: its key layout was not read.
+- The Binding's `blockSize` and `dtype` are not part of either key. The `dtype` is
+  [handed to the engine](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#engine-dtype) instead.
+
+## Status
+
+`status.model` echoes the artifact, its `revision` and `manifestDigest`, and the `delivery`, `PVC`,
+`Engine`, `Node` or `Image`; an image source echoes neither a revision nor a digest, its reference
+being the identity. `WeightsReady` says whether every engine role's weights are there:
+
+| Status | Reason | Meaning |
+| --- | --- | --- |
+| True | `NotApplicable` | the deployment names no artifact |
+| False | `ArtifactNotFound`, `ArtifactNotResolved` | no new Pod is created; the message carries the artifact's reason |
+| False | `ClaimNotBound`, `AccessModeConflict` | no new Pod is created; see the placement table |
+| False | `NodeDeliveryUnavailable` | `Node` delivery, and the CSIDriver `model.csi.gpustack.ai` does not exist; no new Pod is created |
+| False | `FilterNeedsNodeDelivery` | an artifact with patterns under `Engine` delivery, which cannot honor them; no new Pod is created |
+| False | `AnchorNeedsNodeDelivery` | an artifact carrying `expectedDigest` under `Engine` delivery: the engine downloads by repository and revision and cannot anchor-verify what it fetched, and an `Expected` identity has no resolved commit to pin; no new Pod is created |
+| False | `Materializing` | a node Pod is not mounted yet and its node lists the digest `Downloading` |
+| False | `MaterializationFailed` | the same, and the node lists it `Failed`; the message carries the node's reason and retry time |
+| False | `WeightsNotMounted` | a claim, node or image Pod's `PodReadyToStartContainers` is not True yet; for an image Pod the Pod's events carry the pull error |
+| False | `Downloading` | an engine Pod is not Ready yet; the engine reports no progress of its own |
+| True | `Mounted`, `Downloaded` | every Pod has its weights |
+
+While nothing is created, the phase message is the `WeightsReady` message. A blocked deployment
+also holds its rollouts: an edited replica is not deleted while its replacement could not be made,
+and `ReplicasUpToDate` reports that hold with reason `RolloutHeldByWeights`.
+
+If Kueue's `waitForPodsReady` is enabled (the chart leaves it off), a download that outlasts its
+timeout evicts and requeues the replica.
+
+## Instance model volumes
+
+```yaml
+spec:
+  additionalVolumes:
+    - mountPath: /models/qwen
+      model:
+        artifactRef:
+          name: qwen-7b
+```
+
+The volume is always read-only and takes no `subPath`. A claim artifact's `path` is the sub-path and
+the claim placement rules above apply. A hub artifact is mounted through the node plugin
+whatever `model-artifact-delivery-mode` says, since an Instance has no engine to download it; while
+the CSIDriver does not exist the Instance creates no Pod and says so in its phase message.
+
+An image artifact mounts through an image volume, needing no plugin. An Instance pinned to a node
+waits instead when that node cannot run one, naming the node and the floor
+([Model Image Source](/gpustack-operator/main/docs/modules/model-delivery/image-source/index.md#delivery)).
+
+## Requirements and limits
+
+- **Kubernetes 1.29**, the floor the bundled Kueue already sets. `PodReadyToStartContainers` (beta,
+  on by default since 1.29) feeds `WeightsReady`; with it off, a claim deployment's `WeightsReady`
+  stays `WeightsNotMounted` while its replicas run.
+- **A downgrade window weakens the anchor's admission.** An old webhook cannot see
+  `expectedDigest`, so an update changing it is not refused while the old webhook serves, and an
+  old worker drops `digestSource` from the status it writes. The CRD serves the field throughout,
+  and re-upgrading recomputes the status on the next pass.
+- **A ModelScope Engine download needs the runner's ModelScope SDK at 1.39.1 or later**, the
+  version that accepts a commit as the revision. The operator renders the environment whatever the
+  runner holds and cannot see into it: on a runner below the floor the engine fails with the SDK's
+  own `NotExistError`.
+- **The floor was measured against the published runners.** The Ascend `cann9.1-*-vllm0.23.0` line
+  and the SGLang 0.5.18 line meet it; the current CUDA `vllm0.25.1` and `vllm0.29.0` lines do not.
+  For those, name a runner image of your own that bundles a conforming SDK, as any role may. Node
+  delivery needs no runner at all.
+- **Image sources need image volumes** and floors above Kubernetes's own; creation is refused
+  below them. The full line is on the
+  [Model Image Source](/gpustack-operator/main/docs/modules/model-delivery/image-source/index.md#versions-and-prerequisites).
+- **`sglang-gateway` fetches a tokenizer by the worker's `model_path`.** With a claim that path is
+  local, so it logs one 404 warning and routes by text; with Engine delivery it would fetch `main`
+  without a token (not measured).
+- **vLLM 0.29.0 needs `--enforce-eager` for InternLM2** with `trust_remote_code`, an engine defect.
+- **Node delivery downloads from the Hub on every cold node.** A Pod prefers the nodes already
+  holding the digest, but only while they have room; placed anywhere else, its node downloads. See
+  [a node-delivered model prefers the nodes holding
+  it](../topology/scheduling.md#placement-of-node-delivered-models).
+- Settings: [Settings & Environment Variables](/gpustack-operator/main/docs/reference/settings/index.md#online-adjustable-settings) carries the
+  two hub endpoints, proxy, no-proxy, CA bundle, revalidation interval, delivery mode and the node
+  cache's watermarks and download limits.
+
+---
+
+**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) for the rest of the deployment
+contract · [Node Model Store](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md) for Node delivery ·
+[Model Artifact API](/gpustack-operator/main/docs/modules/model-delivery/views/index.md) for resource status and `progress` · [KV Cache Injection Reference](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md) for the store connector this
+prefixes · [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md) for the other conditions.
+
+**Next** → [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md)

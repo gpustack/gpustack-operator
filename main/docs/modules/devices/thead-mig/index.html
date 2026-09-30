@@ -1,0 +1,821 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>T-Head MIG Operations · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/devices/thead-mig/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+      data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/devices/thead-mig/">
+      <option value="/gpustack-operator/main/">main</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/main/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" aria-current="page">T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/modules/devices/">Heterogeneous Devices</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">T-Head MIG Operations</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="t-head-mig-operations">T-Head MIG Operations</h1>
+<p>An administrator sets the node&rsquo;s partitioning mode. The Device Manager reads the geometry and
+publishes it in <code>Devices</code>; GPUStack does not change the mode. When a workload is scheduled, GPUStack
+creates its GPU and Compute Instance pair and removes the pair when the Pod exits.</p>
+<p>T-Head calls the feature MIG. Its <code>hgml</code> and <code>ppu-smi mig</code> interfaces mirror NVIDIA&rsquo;s NVML and
+<code>nvidia-smi mig</code>, so both manufacturers use <code>mig</code> in the resource key. See <a href="/gpustack-operator/main/docs/modules/devices/requests/#two-families-two-accelerator-populations">Accelerator
+Requests</a>
+.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#prerequisites">Prerequisites</a>
+</li>
+<li><a href="#how-partition-profiles-are-discovered">How partition profiles are discovered</a>
+</li>
+<li><a href="#requesting-a-partition">Requesting a partition</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+<li><a href="#enabling-partitioning-on-a-node">Enabling partitioning on a node</a>
+</li>
+<li><a href="#disabling-partitioning-on-a-node">Disabling partitioning on a node</a>
+</li>
+<li><a href="#node-reboot-recovery">Node reboot recovery</a>
+</li>
+<li><a href="#operator-boundaries">Operator boundaries</a>
+</li>
+</ul>
+<h2 id="prerequisites">Prerequisites</h2>
+<p><strong>Change the mode only on a node free of accelerator workloads, device manager included.</strong> The driver
+refuses it on a PPU with any active process, and a process that merely opens the driver can hold <em>every</em>
+PPU node — so one PPU&rsquo;s workload blocks another&rsquo;s change. Stop every Pod using the node&rsquo;s accelerators,
+and the device-manager Pod.</p>
+<p>The kernel log names the holders, <code>ppu-smi</code> does not: the PPU and its active-process count, one line per
+holder, then a failure line, while the command prints its own busy error. On a 16-PPU host, redacted:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">[alixpu] PPU00&lt;N&gt; contains 3 active process, please try reset later ...
+</span></span><span class="line"><span class="cl">[alixpu] Process[&lt;comm&gt;], pid:&lt;pid&gt;, uki_version:&lt;n&gt;
+</span></span><span class="line"><span class="cl">[alixpu] Process[&lt;comm&gt;], pid:&lt;pid&gt;, uki_version:&lt;n&gt;
+</span></span><span class="line"><span class="cl">[alixpu] PPU00&lt;N&gt; set MIG mode failed</span></span></code></pre></div>
+</div><p>and its own output:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">MIG resources are in use, please destroy related GPU instances and try again
+</span></span><span class="line"><span class="cl">Failed to Enable MIG mode for PPU &lt;bus-id&gt;: An operation cannot be performed because the PPU is currently in use.</span></span></code></pre></div>
+</div><p>Two notes:</p>
+<ul>
+<li><strong>The count is not the list length</strong>: three processes reported, two holder lines printed. Treat it as
+a lower bound and go to the file descriptors.</li>
+<li><strong><code>PPU00&lt;N&gt;</code> names the card ordinal</strong> (what <code>ppu-smi -i &lt;N&gt;</code> takes, the <code>&lt;N&gt;</code> in <code>/dev/alixpu_ppu&lt;N&gt;</code>),
+not the reported minor number, a different value (see <a href="#requesting-a-partition">Requesting a
+partition</a>
+).</li>
+</ul>
+<p>That advice to &ldquo;destroy related GPU instances&rdquo; applies only when instances exist; with none it fails for
+holders alone, and <strong>needs no device reset</strong>.</p>
+<p><strong>Count the operator&rsquo;s control plane among the holders.</strong> The worker Pod was observed opening every PPU
+node briefly at startup, then releasing them, so a change attempted seconds after a control-plane restart
+can fail for a holder on its way out. Re-check the descriptors.</p>
+<p><strong>Diagnose from the kernel log and the holders&rsquo; open file descriptors, never from <code>ppu-smi</code> alone</strong>, which
+reports the mode and carvable profiles, not who holds a PPU open:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> <span class="k">for</span> p in /proc/<span class="o">[</span>0-9<span class="o">]</span>*<span class="p">;</span> <span class="k">do</span> <span class="nv">pid</span><span class="o">=</span><span class="si">${</span><span class="nv">p</span><span class="p">#/proc/</span><span class="si">}</span><span class="p">;</span> <span class="nv">n</span><span class="o">=</span><span class="k">$(</span>ls -l <span class="s2">&#34;</span><span class="nv">$p</span><span class="s2">&#34;</span>/fd 2&gt;/dev/null <span class="p">|</span> grep -c alixpu<span class="k">)</span><span class="p">;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="go">    [ &#34;$n&#34; -gt 0 ] 2&gt;/dev/null &amp;&amp; echo &#34;pid=$pid fds=$n $(tr -d &#39;\0&#39; &lt; &#34;$p&#34;/cmdline)&#34;; done
+</span></span></span></code></pre></div>
+</div><p>Empty output is the precondition; anything printed is a process to stop. A holder typically has one
+descriptor per PPU plus the shared control nodes — hence the cross-PPU blocking.</p>
+<p><strong>A mode change is not noticed until the device manager restarts.</strong> The re-detect trigger watches the
+device set and health, not the mode, so <code>ppu-smi mig</code> never reaches the cluster by itself. This is
+pre-existing in the shared detector, already true for <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/">NVIDIA MIG</a>
+; restart the node&rsquo;s
+device-manager DaemonSet.</p>
+<h2 id="how-partition-profiles-are-discovered">How partition profiles are discovered</h2>
+<p><strong>Profiles are discovered from the driver, never computed.</strong> Where <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#how-partition-profiles-are-discovered">NVIDIA&rsquo;s are a fixed per-product
+set</a>
+, the detector here offers exactly the
+GPU-instance profiles the driver reports for the PPU in front of it.</p>
+<ul>
+<li><strong>A profile is offered only if its name round-trips.</strong> The published key is the profile&rsquo;s name, resolved
+back to a driver profile id by probing every id and matching the driver&rsquo;s own name — so a nameless
+profile is dropped with a warning naming the PPU and the id, never renamed, and a name that cannot
+become a valid resource-name segment is excluded by the normalization (feature-name prefix and
+whitespace, applied by both the detector and the driver seam) that also drops NVIDIA&rsquo;s <code>+me</code> / <code>+gfx</code>
+variants.</li>
+<li><strong>A memory-slice span is read from the driver&rsquo;s placement records</strong>, never divided out of a hardcoded
+per-PPU slice count; a profile with no legal placement is not offered, since the span could only be
+guessed, and the ledger being placement-derived, such a key could never allocate. The PPU names it in
+a warning.</li>
+<li><strong>A partition is one whole GPU instance; subdividing it is not supported.</strong> Every profile is created as a
+GPU instance plus a single compute instance covering all of it. GPUStack addresses a partition by one
+device id, and a GPU instance subdivided into several compute instances has several (a share of the
+compute each, all on the same memory), so it is refused rather than half-addressed.</li>
+</ul>
+<p>All three rules are shared with NVIDIA.</p>
+<p>What a PPU offers:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi mig -i &lt;N&gt; -lgip     <span class="c1"># the profiles, with Instances Free/Total and memory per instance</span>
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi mig -i &lt;N&gt; -lgipp    <span class="c1"># the legal placements per profile, as {Start,Start...}:Size</span>
+</span></span></code></pre></div>
+</div><p><strong><code>-lgipp</code> does not tell you what is free.</strong> It lists every <em>legal</em> placement irrespective of occupancy: a
+PPU carved to capacity still lists every start, and lists placements for a profile that can no longer be
+created. Occupancy lives in <code>-lgip</code>&rsquo;s <code>Instances Free/Total</code> and in <code>-lgi</code>.</p>
+<p>The ledger relies on that: it sizes capacity from the placement count because that count does not move
+with occupancy, so an occupancy-sensitive <code>-lgipp</code> would be a defect to report, not a behaviour to adapt
+to.</p>
+<p>One PPU observed: <code>MIG 4g48gb</code> (id 5, two instances of four memory slices) and <code>MIG 8g96gb</code> (id 3, one
+spanning all eight), creating either taking the other to zero free; those sparse ids are why nothing
+indexes profiles by position.</p>
+<p><strong>The published name carries a separator the manufacturer&rsquo;s does not.</strong> Display names carry a <code>MIG </code>
+prefix and a space, dropped by normalization, and spell the geometry with no separator between its
+two numbers where NVIDIA writes one.</p>
+<p>So both read alike in a Pod spec once the operator publishes it: <code>MIG 4g48gb</code> is advertised and
+requested as <code>&lt;base&gt;.partitioned.mig-4g.48gb</code>, and <code>MIG 8g96gb</code> as <code>&lt;base&gt;.partitioned.mig-8g.96gb</code>.</p>
+<p>The InstanceType&rsquo;s offered inventory and per-profile ledgers carry that name too, so the name you read is
+the name you write. Below that boundary the driver&rsquo;s spelling stays — <code>ppu-smi</code>, the <code>Devices</code> record and
+the on-disk ownership markers all say <code>4g48gb</code>. A name outside this two-number shape is published as the
+driver reports it.</p>
+<h2 id="requesting-a-partition">Requesting a partition</h2>
+<p>With the mode on, a workload asks for <strong>one hardware instance of a named profile</strong>, as for NVIDIA: the
+same <code>&lt;base&gt;.partitioned</code> / <code>&lt;base&gt;.partitioned.&lt;kind&gt;-&lt;profile&gt;</code> key pair and the same <a href="/gpustack-operator/main/docs/modules/devices/requests/#the-request-rules">request
+rules</a>
+ (one PPU, one profile shape, one container group,
+<code>.units</code> webhook-derived, exclusive of every other family):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">alibabacloud.com/ppu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">             </span><span class="c"># always exactly 1 PPU</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">alibabacloud.com/ppu.partitioned.mig-&lt;profile&gt;</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># always exactly 1 instance of this profile</span></span></span></code></pre></div>
+</div><p>Or through the <code>Instance</code> API, as with <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#requesting-a-partition">NVIDIA&rsquo;s
+<code>acceleratorPartitionedProfile</code></a>
+:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;a T-Head InstanceType from your pool&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratorPartitionedProfile</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;profile&gt;</span></span></span></code></pre></div>
+</div><p><strong>One partition per allocated PPU</strong>, on the PPU the device plugin picks itself — never a pair split across
+two PPUs, never two partitions in one container.</p>
+<p><strong>The container receives device nodes, not an environment variable.</strong> T-Head has no runtime hook for
+injecting visibility, so the allocation response carries the device specifications: the two shared control
+nodes, the parent PPU&rsquo;s node, and the capability nodes of the GPU Instance and its Compute Instance. Each
+is required — missing, not a character device, or the wrong number fails the allocation and rolls back
+rather than handing over an incomplete set.</p>
+<p><strong>Two numbers name a PPU, and only one names a path.</strong> The device node and the capability subtree both
+carry the <strong>card ordinal</strong> — what <code>ppu-smi -i &lt;N&gt;</code> takes, the <code>&lt;N&gt;</code> in <code>/dev/alixpu_ppu&lt;N&gt;</code>, the <code>ppu&lt;N&gt;</code> in
+the procfs capability tree. The ordinal keeps the word card: it addresses a PPU rather than identifying
+one.</p>
+<p>The <strong>minor number</strong> the driver reports is a different value: the shared <code>/dev/alixpu</code> control node
+takes minor 0 of the same character-device major, so a PPU&rsquo;s minor is its ordinal plus one on the host
+measured (ordinal 14 → minor 15, across all sixteen PPUs). Contradicting the manufacturer documentation&rsquo;s
+<code>/dev/alixpu_ppu[minor number]</code>, a path built from the minor addresses <strong>the next PPU</strong>.</p>
+<p>The operator builds both paths from the ordinal and reads the minor only to confirm the ordinal still
+addresses the PPU the detector measured: it stats the node and refuses the allocation on a mismatch.</p>
+<p><strong>The capability minors are read, never computed.</strong> Each comes from the driver&rsquo;s live procfs record at
+allocation time — <code>/proc/driver/alixpu/capabilities/ppu&lt;N&gt;/mig/gi&lt;G&gt;/access</code>, and <code>.../gi&lt;G&gt;/ci&lt;C&gt;/access</code>
+for its Compute Instance — naming <code>/dev/alixpu-caps/alixpu-cap&lt;minor&gt;</code>, created with the instance. They are
+large and unlike the instance ids (229632, its compute instance 229633), deterministic on one host but
+promised by no contract; a read costs one file.</p>
+<p>PPU selection, the fungible-token <code>Partitioned</code> family, the placement-aware <code>Remaining</code> ledger, <code>credits</code> quota
+and reclaim on Pod deletion work as for NVIDIA — see <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#requesting-a-partition">Requesting a partition</a>
+
+and <a href="/gpustack-operator/main/docs/modules/devices/discovery/#the-partitioned-family-fungible-tokens">Device Discovery</a>
+, including
+the SSH sidecar seeing the partition rather than the parent PPU, and the reclaim race a same-profile
+replacement can hit.</p>
+<p>Device-node injection is the one place T-Head&rsquo;s response differs in shape from NVIDIA&rsquo;s.</p>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li>
+<p><strong>GPUStack never enables, disables or reconfigures partition mode</strong>, and never evicts Pods on a mode
+change: the administrator owns the mode lifecycle, as for <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#limitations">NVIDIA</a>
+.</p>
+</li>
+<li>
+<p><strong>A profile whose name the driver did not report, or cannot be normalized into a valid resource-name
+segment, never appears in the inventory</strong> and cannot be requested (see <a href="#how-partition-profiles-are-discovered">How partition profiles are
+discovered</a>
+).</p>
+</li>
+<li>
+<p><strong>One partition per allocated PPU.</strong> A multi-partition workload asks for several Pods, the scope decision
+NVIDIA makes too (see <a href="/gpustack-operator/main/docs/modules/devices/requests/#rule-3--basepartitioned-is-exactly-1">Rule 3</a>
+).</p>
+</li>
+<li>
+<p><strong>Hand-carving a partition outside GPUStack is unsupported on a managed node</strong>: every node-level number
+derives from the allocation annotations the device plugin writes, and a hand-carved instance produces
+none; see <a href="/gpustack-operator/main/docs/modules/devices/requests/#limitations">Accelerator Requests</a>
+. It is deleted as an orphan once
+its PPU is idle. An instance with something <strong>running on it</strong> is the exception: it is left alone and
+re-checked each cycle, so one you carved by hand survives for as long as you are using it.</p>
+</li>
+<li>
+<p><strong>A hand-subdivided GPU instance stops the sweep for the whole node.</strong> One carrying more than one compute
+instance cannot be addressed by a single device id, so its PPU is refused — and the reclaim pass, which
+lists every PPU before deciding anything, ends there. Nothing is reclaimed on any PPU of that node, with
+an error each pass, until that instance is back to one compute instance.</p>
+</li>
+<li>
+<p><strong>A same-profile replacement submitted the instant its predecessor is deleted can fail to start</strong>, the
+reclaim-debounce reason documented for <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#limitations">NVIDIA</a>
+; T-Head runs the same reclaim
+loop and bounded busy-destroy retry.</p>
+<p>The retry is narrower than its name: merely holding the PPU&rsquo;s device node does <strong>not</strong> block a destroy
+(with the device manager holding all sixteen nodes, one succeeded first try). What blocks a destroy is
+a condition — a GPU Instance refuses it while a live Compute Instance is under it, which the reclaim
+handles by destroying compute instances first. A busy destroy that survives the retry is a real fault,
+not a window to widen.</p>
+</li>
+<li>
+<p><strong>Whether the mode persists across a host reboot is not yet confirmed on real hardware.</strong> Until your own
+testing says otherwise, re-apply it after any reboot, and restart the device-manager DaemonSet
+regardless. A mode switch needs <strong>no</strong> device reset: on a PPU free of instances and holders, enabling and
+disabling complete in place, despite the driver&rsquo;s busy message.</p>
+</li>
+</ul>
+<h2 id="enabling-partitioning-on-a-node">Enabling partitioning on a node</h2>
+<p>The mode switch itself is T-Head&rsquo;s procedure, not this operator&rsquo;s: the PPU MIG chapter of <a href="https://developer.t-head.cn/docs_center/doc_detail/index.html?projectId=33&amp;chapterId=117">T-Head&rsquo;s
+developer documentation</a>
+
+is the authority on <code>ppu-smi mig</code> and on what the driver requires around it. The steps below are that
+procedure with the GPUStack-side steps it does not know about, and with the traps measured on real
+hardware called out where they bite.</p>
+<ol>
+<li>
+<p>Satisfy the <a href="#prerequisites">Prerequisites</a>
+: no accelerator workloads, no device-manager Pod.</p>
+</li>
+<li>
+<p>Enable the mode. <strong><code>-mig</code> is a top-level flag, not a <code>ppu-smi mig</code> subcommand flag</strong>: the subcommand
+carries the instance operations (<code>-lgip</code>, <code>-cgi</code>, <code>-dgi</code>, …) and rejects <code>-mig</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">#</span> one PPU by card ordinal
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi -i &lt;N&gt; -mig <span class="m">1</span>
+</span></span><span class="line"><span class="cl"><span class="go">Enable MIG mode for PPU &lt;bus-id&gt;.
+</span></span></span><span class="line"><span class="cl"><span class="go">All done.
+</span></span></span></code></pre></div>
+</div><p><strong>One PPU per invocation.</strong> <code>-i</code> takes no PPU list for this flag: a comma-separated form answers <code>No devices were found</code> and changes nothing, which reads like missing hardware rather than a rejected
+argument. A node with several PPUs to flip therefore takes several calls.</p>
+<p>Then confirm, because a successful call is not an applied mode:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi -q -i &lt;N&gt; <span class="p">|</span> grep -i -A2 <span class="s2">&#34;MIG Mode&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="go">    MIG Mode
+</span></span></span><span class="line"><span class="cl"><span class="go">        Current                             : Enabled
+</span></span></span><span class="line"><span class="cl"><span class="go">        Pending                             : Enabled
+</span></span></span></code></pre></div>
+</div></li>
+<li>
+<p>Restart the node&rsquo;s Device Manager pod (<code>gpustack-operator-device-manager-thead</code>) to re-detect. As with
+NVIDIA, you need neither to delete the node&rsquo;s <code>Devices</code> object — the detector rewrites the group&rsquo;s
+capability in place — nor to pre-create instances: the operator materializes them on demand.</p>
+</li>
+<li>
+<p>Verify the <code>Devices</code> capability now reports the PPU&rsquo;s partition profiles. Unlike NVIDIA, an
+unpartitioned T-Head PPU reports <strong>no</strong> slicing capability at all (there is no logical slicing to fall
+back to), so nothing has to go to zero — only the profiles have to appear.</p>
+</li>
+</ol>
+<h2 id="disabling-partitioning-on-a-node">Disabling partitioning on a node</h2>
+<p>Run the inverse: let every Pod using the PPU&rsquo;s partitions go and reclaim, then remove any instance that
+remains and flip the mode back.</p>
+<p><strong>Destroy the Compute Instance before its GPU Instance.</strong> The driver refuses otherwise — <code>GPU instance &lt;G&gt; is in use, please destory related compute instances then try again</code> (the manufacturer&rsquo;s own spelling), with
+a non-zero exit. The reclaim does this in order; by hand it is two steps:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi mig -i &lt;N&gt; -gi &lt;G&gt; -ci &lt;C&gt; -dci
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi mig -i &lt;N&gt; -gi &lt;G&gt; -dgi
+</span></span></code></pre></div>
+</div><p><strong><code>-dgi</code> without <code>-gi</code> destroys every GPU Instance on the PPU</strong>, not the one you were looking at:
+convenient for a PPU you own outright, a hazard on a managed node, where other partitions may belong to
+running Pods.</p>
+<p>Then, with the PPU free of instances <strong>and</strong> of holders — the same <a href="#prerequisites">Prerequisites</a>
+ as
+enabling, since the mode cannot be flipped back while a process holds the driver:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi -i &lt;N&gt; -mig <span class="m">0</span>
+</span></span></code></pre></div>
+</div><p>then restart the Device Manager pod so the ledger returns the PPU to unpartitioned capability.</p>
+<p><strong>Stale capability device nodes are expected and are not live partitions.</strong> The driver creates
+<code>/dev/alixpu-caps/alixpu-cap&lt;minor&gt;</code> with an instance and does <strong>not</strong> remove it on destroy, so a node that
+has hosted partitions accumulates entries. They are harmless: the minor is deterministic and reused when
+the instance is recreated, and the operator never reads them as evidence — it takes each allocation&rsquo;s minor
+from the live procfs record, which disappears with the instance.</p>
+<p><strong>Do not read <code>/dev/alixpu-caps/</code> to find out what is partitioned</strong> — those nodes outlive the instances.
+Read <code>ppu-smi mig -i &lt;N&gt; -lgi</code>.</p>
+<h2 id="node-reboot-recovery">Node reboot recovery</h2>
+<p>Partitions do not survive a Device Manager restart that finds different hardware state underneath them,
+and (per <a href="#limitations">Limitations</a>
+) whether the mode survives a host reboot is unconfirmed. Treat a
+reboot as if it did not:</p>
+<ol>
+<li>Re-run <a href="#enabling-partitioning-on-a-node">Enabling partitioning on a node</a>
+.</li>
+<li>Restart the node&rsquo;s Device Manager pod whether or not the mode needed re-enabling — it realigns the
+<code>Devices</code> ledger to the post-reboot hardware either way.</li>
+<li><strong>Resubmit</strong> any partition workloads running before the reboot (delete and re-create the Pod/workload):
+the operator materializes a fresh instance on admission. A pre-reboot Pod that lingers with its on-disk
+ownership record but no live instance fails its device allocation closed until recreated.</li>
+</ol>
+<h2 id="operator-boundaries">Operator boundaries</h2>
+<ul>
+<li>Enable, disable or reconfigure partition mode — those are <code>ppu-smi mig</code> operations you run. (It does
+create and destroy the Instances backing scheduled workloads.)</li>
+<li>Trigger on nodeconfig or labels, flip the mode automatically, or rewrite the geometry.</li>
+<li>Deschedule or evict Pods when the mode changes.</li>
+<li>Account for an instance you carved by hand. (It does delete it: an instance no allocation accounts for
+is reclaimed as an orphan once its PPU is idle and nothing is running on it.)</li>
+<li>Hand out a subdivided instance, or subdivide one itself — it creates a GPU instance with a single
+compute instance covering all of it, and refuses one somebody else subdivided (<a href="#how-partition-profiles-are-discovered">How partition profiles
+are discovered</a>
+).</li>
+</ul>
+<p>A capability change reaches the cluster <strong>only</strong> through Device Manager restart or re-detection.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
+ (the sibling runbook)</li><li><a href="/gpustack-operator/main/docs/modules/devices/requests/">Accelerator Requests</a>
+ (the full key set and request rules)</li><li><a href="/gpustack-operator/main/docs/modules/devices/discovery/#the-partitioned-family-fungible-tokens">Device Discovery</a>
+ (how a
+partition is placed and reclaimed)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/devices/requests/">Accelerator Requests</a>
+ — the normative request contract.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/docs/modules/devices/thead-mig.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/thead-mig.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#prerequisites">Prerequisites</a></li>
+    <li><a href="#how-partition-profiles-are-discovered">How partition profiles are discovered</a></li>
+    <li><a href="#requesting-a-partition">Requesting a partition</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+    <li><a href="#enabling-partitioning-on-a-node">Enabling partitioning on a node</a></li>
+    <li><a href="#disabling-partitioning-on-a-node">Disabling partitioning on a node</a></li>
+    <li><a href="#node-reboot-recovery">Node reboot recovery</a></li>
+    <li><a href="#operator-boundaries">Operator boundaries</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

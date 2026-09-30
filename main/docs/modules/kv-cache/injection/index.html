@@ -1,0 +1,1184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>KV Cache Injection Reference · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/kv-cache/injection/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+      data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/kv-cache/injection/">
+      <option value="/gpustack-operator/main/">main</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/main/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" aria-current="page">Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/modules/kv-cache/">KV Cache</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">KV Cache Injection Reference</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="kv-cache-injection-reference">KV Cache Injection Reference</h1>
+<p>A <code>KVCachePool</code> is usable by any Pod, not only by workloads this operator renders. A mutating
+admission webhook watches for one label, reads the <code>KVCachePoolBinding</code> the Pod names, and writes the
+client configuration its inference engine expects. Nothing else about the Pod changes.</p>
+<p>A Pod that does not carry the label is left untouched <strong>by this webhook</strong>. It is not byte-identical
+after admission, since the API server still defaults fields such as the service-account volume, and
+other webhooks may write too.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#the-contract">The contract</a>
+</li>
+<li><a href="#injection-per-engine">Injection per engine</a>
+</li>
+<li><a href="#refusals-and-fixes">Refusals and fixes</a>
+</li>
+<li><a href="#tenant-compatibility">Tenant compatibility</a>
+</li>
+<li><a href="#verify-the-vllm-file-vehicle">Verify the vLLM file vehicle</a>
+</li>
+<li><a href="#the-injection-record">The injection record</a>
+</li>
+<li><a href="#transport-compatibility-at-binding">Transport compatibility at binding</a>
+</li>
+<li><a href="#workload-impact">Workload impact</a>
+</li>
+<li><a href="#engine-prefix-caching">Engine prefix caching</a>
+</li>
+</ul>
+<h2 id="the-contract">The contract</h2>
+<p>A Pod opts in with a <strong>label</strong> and configures the injection with <strong>annotations</strong>. The trigger is a
+label because a webhook&rsquo;s <code>objectSelector</code> can only match labels; a label value is capped at 63
+characters, so everything of unbounded length is an annotation.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Kind</th>
+          <th>Key</th>
+          <th>Value</th>
+          <th>Required</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>label</td>
+          <td><code>kvcache.gpustack.ai/inject</code></td>
+          <td><code>&quot;true&quot;</code></td>
+          <td>yes — the trigger</td>
+      </tr>
+      <tr>
+          <td>annotation</td>
+          <td><code>kvcache.gpustack.ai/binding</code></td>
+          <td>a <code>KVCachePoolBinding</code> name, in this Pod&rsquo;s namespace</td>
+          <td>yes</td>
+      </tr>
+      <tr>
+          <td>annotation</td>
+          <td><code>kvcache.gpustack.ai/engine</code></td>
+          <td><code>vLLM</code> | <code>SGLang</code></td>
+          <td>yes</td>
+      </tr>
+      <tr>
+          <td>annotation</td>
+          <td><code>kvcache.gpustack.ai/manufacturer</code></td>
+          <td><code>ascend</code></td>
+          <td>no — only with <code>engine: vLLM</code>; selects the vLLM-Ascend runtime</td>
+      </tr>
+      <tr>
+          <td>annotation</td>
+          <td><code>kvcache.gpustack.ai/role</code></td>
+          <td><code>Prefill</code> | <code>Decode</code>; omitted for a plain server</td>
+          <td>no — <strong>read by the vLLM family only</strong>; an SGLang Pod carrying one is admitted and injected exactly as without it</td>
+      </tr>
+      <tr>
+          <td>annotation</td>
+          <td><code>kvcache.gpustack.ai/container</code></td>
+          <td>a container name</td>
+          <td>only when the Pod has more than one container</td>
+      </tr>
+      <tr>
+          <td>annotation</td>
+          <td><code>kvcache.gpustack.ai/launch-args-forwarded</code></td>
+          <td><code>&quot;true&quot;</code></td>
+          <td>no — only when an unrecognised launcher, script, or image ENTRYPOINT forwards appended arguments to the declared engine</td>
+      </tr>
+  </tbody>
+</table>
+<p>For a plain server, one that is not half of a prefill/decode split, leave the role annotation off.
+<code>Server</code> is not in its value domain and a Pod carrying it is refused, while the same arrangement is
+spelled <code>Server</code> on <code>ModelDeployment.spec.roles[].kind</code>, which even defaults to it. The value that
+is correct there turns a Pod away here. An absent annotation renders the read-and-write
+configuration a shared cache wants.</p>
+<p><strong>On an SGLang Pod the role changes nothing.</strong> That engine&rsquo;s store client does not distinguish
+roles, and the prefill/decode split is rendered only for a <code>ModelDeployment</code>, so a Pod with the
+annotation and one without get the same injection.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">apps/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">chat</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">template</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kvcache.gpustack.ai/inject</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">annotations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kvcache.gpustack.ai/binding</span><span class="p">:</span><span class="w"> </span><span class="l">chat</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kvcache.gpustack.ai/engine</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">vllm/vllm-openai:v0.29.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="s2">&#34;vllm&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">args</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="s2">&#34;serve&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="s2">&#34;--model&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="s2">&#34;Qwen/Qwen3-8B&#34;</span></span></span></code></pre></div>
+</div><p>A bare Pod follows the same contract. The label opts it in, and the optional annotations select the
+role and the container:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/inject</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">          </span><span class="c"># the opt-in; a LABEL, not an annotation</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">annotations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/binding</span><span class="p">:</span><span class="w"> </span><span class="l">team-a        </span><span class="w"> </span><span class="c"># a KVCachePoolBinding in this namespace</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/engine</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/role: Decode            # optional</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill or Decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/container</span><span class="p">:</span><span class="w"> </span><span class="l">server      </span><span class="w"> </span><span class="c"># required with more than one container</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">vllm/vllm-openai:v0.29.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;vllm&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">args</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;serve&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;--model&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;Qwen/Qwen2.5-72B-Instruct&#34;</span></span></span></code></pre></div>
+</div><p>The engine is <strong>declared, never guessed from the image</strong>. Engines take entirely different flags, and a
+wrong guess about a renamed or vendored image produces a container that starts normally and caches
+nothing.</p>
+<p>There is deliberately <strong>no domain annotation</strong>. The reuse domain comes from the Binding, because the
+Binding is the object that registers a domain and carries its ceiling. Every domain this operator
+provisions therefore has something accounting for it. <code>kvcache.gpustack.ai/domain</code> is refused rather
+than ignored, so a manifest written against an escape hatch that does not exist fails where its author
+can see it.</p>
+<p>That is a provisioning contract, <strong>not an isolation boundary</strong>. What a Binding does and does not
+bound is stated in <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#limitations">Limitations</a>
+, with
+issue #168 for the gap. The tenant value is Binding-owned too: on SGLang the webhook replaces every
+container declaration of <code>MOONCAKE_TENANT_ID</code> with the Binding&rsquo;s domain.</p>
+<h2 id="injection-per-engine">Injection per engine</h2>
+<p>Each engine receives its values through a different vehicle, and the choice turns on <em>when</em> the
+value becomes known, not on which keys the engine accepts. <code>local_hostname</code> is an address, and a
+mutating webhook runs before a Pod has an IP. vLLM computes its own at startup; SGLang reads it from
+configuration, and only its environment path consults the process environment, where Kubernetes can
+supply the Pod&rsquo;s IP through a <code>fieldRef</code> the kubelet resolves at container start.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Engine</th>
+          <th>Vehicle</th>
+          <th>Injected values</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>vLLM</code></td>
+          <td>a projected file</td>
+          <td>arg <code>--kv-transfer-config</code> selecting <code>MooncakeStoreConnector</code> and the role; env <code>MOONCAKE_CONFIG_PATH</code>; a read-only volume and mount at <code>/etc/gpustack/kvcache</code></td>
+      </tr>
+      <tr>
+          <td><code>vllm-ascend</code></td>
+          <td>a projected file</td>
+          <td>the same, except the connector is <code>AscendStoreConnector</code> — the two engines share the vehicle and the file&rsquo;s keys, but not a connector registry</td>
+      </tr>
+      <tr>
+          <td><code>SGLang</code></td>
+          <td>environment variables</td>
+          <td>arg <code>--hicache-storage-backend mooncake</code> and <a href="#sglang-host-memory-tier"><code>--enable-hierarchical-cache</code></a>
+; the <code>MOONCAKE_*</code> variables below; <strong>no</strong> volume and <strong>no</strong> mount</td>
+      </tr>
+  </tbody>
+</table>
+<p>Every engine is also given <code>--kv-cache-dtype</code> with the Binding&rsquo;s <code>dtype</code>, verbatim. Why, and which
+spellings each engine accepts, is under
+<a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#engine-dtype">Engine dtype</a>
+.</p>
+<p>The file is a <code>downwardAPI</code> projection of the Pod&rsquo;s own <code>kvcache.gpustack.ai/client-config</code>
+annotation. No ConfigMap is created, so the configuration&rsquo;s lifetime is exactly the Pod&rsquo;s.</p>
+<p>The values are the same on every engine; only the spellings differ. Both vLLM-family engines read
+the same file with the same key names. Where they differ is the connector selected alongside it,
+and which keys their readers know.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>vLLM file key</th>
+          <th>SGLang variable</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>the pool&rsquo;s <code>status.clientEndpoint</code></td>
+          <td><code>master_server_address</code></td>
+          <td><code>MOONCAKE_MASTER</code></td>
+      </tr>
+      <tr>
+          <td>the metadata plane, always the literal <code>P2PHANDSHAKE</code></td>
+          <td><code>metadata_server</code></td>
+          <td><code>MOONCAKE_TE_META_DATA_SERVER</code></td>
+      </tr>
+      <tr>
+          <td>the transport of the pool group the engine matched, always written</td>
+          <td><code>protocol</code></td>
+          <td><code>MOONCAKE_PROTOCOL</code></td>
+      </tr>
+      <tr>
+          <td>the RDMA device filter, always empty</td>
+          <td><code>device_name</code></td>
+          <td><code>MOONCAKE_DEVICE</code></td>
+      </tr>
+      <tr>
+          <td>the contributed storage segment, always <code>0</code></td>
+          <td><code>global_segment_size</code></td>
+          <td><code>MOONCAKE_GLOBAL_SEGMENT_SIZE</code></td>
+      </tr>
+      <tr>
+          <td>the pure-client topology</td>
+          <td><code>mode: standalone-store</code></td>
+          <td>no key — SGLang has none</td>
+      </tr>
+      <tr>
+          <td>the client staging buffer</td>
+          <td><code>local_buffer_size: 128 MiB</code></td>
+          <td>no key — SGLang hardcodes 16 MiB</td>
+      </tr>
+      <tr>
+          <td>the Pod&rsquo;s own address</td>
+          <td>no key — vLLM computes it</td>
+          <td><code>MOONCAKE_LOCAL_HOSTNAME</code>, a <code>fieldRef</code> to <code>status.podIP</code></td>
+      </tr>
+      <tr>
+          <td>the Binding&rsquo;s reuse domain</td>
+          <td><code>tenant_id</code></td>
+          <td><code>MOONCAKE_TENANT_ID</code></td>
+      </tr>
+  </tbody>
+</table>
+<blockquote>
+<p><strong>Why</strong> — every key is written explicitly rather than left to a default, because two of the
+defaults are GiB of host memory: 4 GiB per key on vLLM, 1 GiB on vLLM-Ascend. An absent
+<code>global_segment_size</code> makes the engine container a store member of that size; an absent
+<code>local_buffer_size</code> holds that much staging. Neither appears in the container&rsquo;s <code>resources</code>, and
+the symptom is an OOM pointing at no field anybody wrote.</p>
+</blockquote>
+<p><code>device_name</code> is empty on <strong>every</strong> path, RDMA and EFA included. Empty means &ldquo;use every device found&rdquo;,
+which is the only value correct for every host in one pool. A device is named per host, <code>mlx5_0</code> on
+one and <code>erdma_0</code> on the next. The documented string <code>auto-discovery</code> is not special-cased anywhere in
+the client: it is parsed as a filter naming a device no host has.</p>
+<p>Nothing injected here grants the Pod a fabric device. These values <strong>name</strong> a transport; a Pod
+using this opt-in webhook must request the appropriate device-plugin resource itself. A managed
+<code>ModelDeployment</code> can instead request a positive <code>spec.roles[].resources.interface</code> count, which
+renders an RDMA or EFA resource limit on its engine Pod according to the effective transport.
+The backend&rsquo;s member Pods configure their own host network and device access separately.</p>
+<p>The one exception is the Ascend prefill/decode leg, whose engine Pods mount a host driver
+tree read-only. See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#how-a-pair-is-wired">How a pair is wired</a>
+.</p>
+<p>Two observability variables, <code>MC_TE_METRIC</code> and <code>MC_STORE_CLIENT_METRIC_BANDWIDTH</code>, are set to <code>1</code>
+when the container does not already set them. A value you set yourself is left alone.</p>
+<h3 id="sglang-host-memory-tier">SGLang host-memory tier</h3>
+<p>An SGLang container also gets <code>--enable-hierarchical-cache</code>, after the injected arguments, unless its
+own arguments already name that flag. The storage backend hangs off the hierarchical cache&rsquo;s host
+tier: naming the backend alone enables storage prefetch over a plain radix cache, and the first
+request fails with an <code>AttributeError</code> (measured at SGLang v0.5.18).</p>
+<p>That tier is a pinned host pool of <code>hicache_ratio</code> (default 2.0) times the device KV pool. SGLang
+refuses to build it unless the node&rsquo;s available memory (read host-wide, not from the container&rsquo;s
+limit) exceeds a fixed 10 GiB reserve plus the pool, so size the node for it. The container&rsquo;s
+memory limit still has to hold the engine and the pool, or the result is an OOM kill.</p>
+<p>A <code>ModelDeployment</code> renders the same switch on every SGLang role with a store except a decode half,
+where SGLang forces its radix cache off and refuses the two together. A decode half gets
+<code>--disaggregation-decode-retraction-backup cpu_tensor</code> instead: left unset, SGLang infers a host
+pool for retraction and meets the same check with no store at all. A role&rsquo;s own <code>extraArgs</code> naming
+either flag drops the operator&rsquo;s.</p>
+<p><strong>An injected variable overrules one you declared yourself.</strong> Injection is opt-in and its opt-out
+is explicit, so a Pod that asked for it and then declares a Mooncake variable has given two answers
+to a question the Binding already answered; the injected value is written <strong>in place</strong>, leaving one
+entry per name rather than two.</p>
+<p>The two observability toggles above are the exception: they change no result, so a value you set is
+kept.</p>
+<p>Two kinds of key are <strong>refused at admission</strong> instead of overwritten, because overwriting them
+would not help.</p>
+<p><code>MOONCAKE_CONFIG_PATH</code> and <code>--kv-transfer-config</code> select the <strong>mechanism</strong>. A second one is an
+ambiguity nothing reports. <code>SGLANG_HICACHE_MOONCAKE_CONFIG_PATH</code> and
+<code>--hicache-storage-backend-extra-config</code> select the configuration <strong>source</strong>, which leaves the
+injected variables present and unread. Each key, the engine it applies to and why it is refused are
+under <a href="#refusals-and-fixes">Refusals and fixes</a>
+.</p>
+<p>A flag is refused in every spelling the engine&rsquo;s own parser reads as it (a unique prefix, and on
+the vLLM family an underscored or dotted form) by the rule under
+<a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#operator-owned-keys">Operator-owned keys</a>
+.</p>
+<p>This applies only to <code>env</code>: a value supplied through <code>envFrom</code> is invisible to the check and <strong>will
+be overwritten with no symptom</strong>, so declare Mooncake variables in <code>env</code>.</p>
+<h2 id="refusals-and-fixes">Refusals and fixes</h2>
+<p>The webhook fails closed and refuses rather than guessing, because every case below produces a
+container that starts normally and does not use the cache. That result is invisible from outside the Pod.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Refusal</th>
+          <th>Reason</th>
+          <th>Fix</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>the <code>binding</code> annotation</td>
+          <td>it is required; it selects the pool and the declared reuse domain to resolve — not necessarily the Binding the writes are charged to</td>
+          <td>set it to a <code>KVCachePoolBinding</code> in this Pod&rsquo;s namespace</td>
+      </tr>
+      <tr>
+          <td>a <code>/</code> in the binding value</td>
+          <td>there is no cross-namespace form; a Binding is resolved in the Pod&rsquo;s own namespace</td>
+          <td>use a plain name</td>
+      </tr>
+      <tr>
+          <td>a Binding that does not exist, and the namespace</td>
+          <td>without it there is nothing to resolve the provisioned domain and endpoint from</td>
+          <td>create the Binding, or fix the name</td>
+      </tr>
+      <tr>
+          <td>a pool or backend that does not exist</td>
+          <td>the Binding points at something missing</td>
+          <td>fix the <code>poolRef</code>, or create the pool</td>
+      </tr>
+      <tr>
+          <td>the pool and <code>QuotaLedgerAvailable</code>, with the controller&rsquo;s own reason</td>
+          <td>the pool has not reported the condition, reports it <code>Unknown</code>, or reports it <code>False</code> for a reason other than <code>MultiTenancyDisabled</code> — <code>LedgerUnreachable</code>, for one, means a request to the master failed, which is an outage rather than a setting. <code>False</code> with <code>MultiTenancyDisabled</code> is <strong>not</strong> refused: it is a declared single-tenant store, and the Pod is injected with no tenant id — see <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#limitations">Limitations</a>
+</td>
+          <td>restore the master, or wait if the condition is not reported yet or is <code>Unknown</code></td>
+      </tr>
+      <tr>
+          <td>the <code>engine</code> or <code>manufacturer</code> annotation</td>
+          <td>the engine is required and never guessed from an image; <code>manufacturer</code> selects the Ascend vLLM runtime</td>
+          <td>set <code>vLLM</code> or <code>SGLang</code>; for vLLM-Ascend, set <code>engine: vLLM</code> and <code>manufacturer: ascend</code></td>
+      </tr>
+      <tr>
+          <td>the container count and their names</td>
+          <td>several containers and none named; the first is never chosen</td>
+          <td>set <code>kvcache.gpustack.ai/container</code></td>
+      </tr>
+      <tr>
+          <td>a named container that is an init container</td>
+          <td>it finishes before the workload starts, so configuring it caches nothing</td>
+          <td>name an app container</td>
+      </tr>
+      <tr>
+          <td>a key <strong>this Pod&rsquo;s own engine</strong> would be given — <code>MOONCAKE_CONFIG_PATH</code> or <code>--kv-transfer-config</code> on the vLLM family, <code>--hicache-storage-backend</code> on SGLang</td>
+          <td>the container already has a KV cache configured, and two sources for one setting is undiagnosable</td>
+          <td>remove yours, or drop the inject label</td>
+      </tr>
+      <tr>
+          <td><code>--kv-cache-dtype</code>, in any spelling the engine reads as it</td>
+          <td>the dtype comes from the Binding, and engines writing two dtypes into one domain read each other&rsquo;s blocks wrong</td>
+          <td>remove yours and name a Binding declaring the dtype you want; the Setting <code>model-deployment-kv-cache-dtype-owned</code> off admits it as before</td>
+      </tr>
+      <tr>
+          <td>a Binding that exists but is being deleted</td>
+          <td>its reuse domain is being withdrawn from the ledger, so the Pod would be injected and then fail every write with <code>TENANT_NOT_REGISTERED</code>, and waiting does not heal it</td>
+          <td>wait for the deletion to finish and create a new Binding, or point the Pod at one that is not terminating</td>
+      </tr>
+      <tr>
+          <td>a pool that has published no client endpoint yet</td>
+          <td>there is no address to point the engine at</td>
+          <td>wait for the pool to report <code>status.clientEndpoint</code></td>
+      </tr>
+      <tr>
+          <td>a volume name or mount path the webhook owns</td>
+          <td>the same collision, in the Pod&rsquo;s storage</td>
+          <td>rename yours</td>
+      </tr>
+      <tr>
+          <td>a container declaring <strong>neither</strong> <code>command</code> nor <code>args</code></td>
+          <td>appending would not append: Kubernetes then reads <code>args</code> as the whole command line and discards the image&rsquo;s <code>CMD</code></td>
+          <td>put the engine executable in <code>command</code> and the image&rsquo;s launch arguments in <code>args</code></td>
+      </tr>
+      <tr>
+          <td>a container declaring <code>args</code> but no <code>command</code></td>
+          <td>admission cannot inspect the image <code>ENTRYPOINT</code>, so it cannot show that appended arguments reach the engine</td>
+          <td>put the engine executable in <code>command</code>, or declare <code>kvcache.gpustack.ai/launch-args-forwarded: &quot;true&quot;</code> only when the image ENTRYPOINT forwards them</td>
+      </tr>
+      <tr>
+          <td>the launcher, when nothing follows it: <code>command</code> runs <code>tini --</code> with <code>args</code> empty</td>
+          <td>the container names no program at all, so the appended connector flag becomes the command that launcher executes</td>
+          <td>put the engine executable and its arguments after the launcher, or in <code>command</code> and <code>args</code> directly</td>
+      </tr>
+      <tr>
+          <td>an unrecognised launch program or a program for another engine</td>
+          <td>the webhook would otherwise inject one engine&rsquo;s configuration into another program, or silently trust an unknown launcher</td>
+          <td>launch the engine named by the <code>engine</code> annotation directly, or declare forwarding only for an unrecognised launcher that passes appended arguments through</td>
+      </tr>
+      <tr>
+          <td>a container launched through a shell&rsquo;s <code>-c</code></td>
+          <td>an appended flag becomes the shell&rsquo;s <code>$0</code>, so it never reaches the engine and the Pod is stamped as injected anyway</td>
+          <td>launch the engine directly — its executable in <code>command</code>, its arguments in <code>args</code> — or add the connector flag to the script yourself</td>
+      </tr>
+      <tr>
+          <td>a command line hidden inside one argument — <code>env -S &quot;…&quot;</code> and its <code>--split-string</code> spellings</td>
+          <td>there is nothing on the command line to test: the launcher splits that string itself, so admission cannot tell whether a shell is inside it</td>
+          <td>launch the engine directly, add the connector flag inside that argument, or declare that it forwards appended arguments</td>
+      </tr>
+      <tr>
+          <td>a program whose name ends in <code>.sh</code> — <code>./run.sh</code>, and <code>sh /app/run.sh</code> alike</td>
+          <td>whether an appended argument reaches the engine depends on whether the script forwards <code>&quot;$@&quot;</code>, which is a file inside the image rather than a token on the command line</td>
+          <td>launch the engine directly, add the connector flag inside the script, or declare that it forwards appended arguments</td>
+      </tr>
+      <tr>
+          <td>an unrecognised <code>kvcache.gpustack.ai/</code> key</td>
+          <td>a typo would otherwise be ignored, leaving the Pod configured differently from its manifest</td>
+          <td>fix the key</td>
+      </tr>
+      <tr>
+          <td><code>kvcache.gpustack.ai/client-config</code> or <code>.../injected</code></td>
+          <td>these record what the webhook decided; a submitted value would be a record of a decision nobody made</td>
+          <td>remove them</td>
+      </tr>
+  </tbody>
+</table>
+<blockquote>
+<p><strong>Why</strong> the <code>command</code> warning — putting the launch arguments in <code>command</code> overrides the image&rsquo;s
+<code>ENTRYPOINT</code> as well, and on this project&rsquo;s accelerator images that entrypoint initializes the vendor
+runtime. The resulting failure is further from its cause than the discarded <code>CMD</code> the refusal exists
+to prevent.</p>
+</blockquote>
+<p>The script-specific refusal keys off the <strong><code>.sh</code> suffix</strong>, which is a convention rather than a
+guarantee. The general launch check also refuses a suffix-less wrapper named <code>entrypoint</code> or <code>run</code>
+unless its author declares that it forwards appended arguments. Admission cannot open the file, so
+the declaration is the only way to admit that uncertainty.</p>
+<p><strong>A key that selects where the engine reads its store configuration from is refused</strong>, per engine:
+<code>SGLANG_HICACHE_MOONCAKE_CONFIG_PATH</code> and <code>--hicache-storage-backend-extra-config</code> on SGLang,
+<code>MOONCAKE_CONFIG_PATH</code> on vLLM. None of them collides with anything this operator writes, and that
+is what makes them worth refusing: the engine selects one source out of three, so either key leaves
+every injected variable present on the Pod and read by nothing.</p>
+<p>The same key on an engine that does not read it is <strong>not</strong> refused. SGLang&rsquo;s variable means nothing
+to vLLM, and a refusal there would have nothing behind it.</p>
+<p>To take future Pods back over, set <code>kvcache.gpustack.ai/inject: &quot;false&quot;</code> on the workload&rsquo;s <strong>Pod
+template</strong>, or drop the label there. It does not undo an existing Pod: the injected args, env and
+volume stay, and most of a running Pod&rsquo;s spec is immutable. The change takes effect when the
+workload rolls.</p>
+<blockquote>
+<p><strong>The label and the two written annotations are frozen once the Pod exists</strong>, which is why the
+paragraph above says <em>template</em>. Editing <code>kvcache.gpustack.ai/inject</code>, <code>.../injected</code> or
+<code>.../client-config</code> on a live Pod is refused, and so is removing one. Injection runs at CREATE and
+only there, so a label added afterwards would leave a Pod carrying the label that says it uses a
+cache and none of the configuration; an edited <code>injected</code> would be a record of a decision nobody
+made; and an edited <code>client-config</code> would swap the master address, transport and segment sizes under
+a running container, since the file at <code>/etc/gpustack/kvcache/mooncake.json</code> is a <code>downwardAPI</code>
+projection of that annotation. Every other metadata edit is left alone, finalizers included.</p>
+<p><strong>The freeze covers a terminating Pod too</strong>, which is where it matters most: a Pod keeps serving
+through its termination grace period, and the kubelet keeps reprojecting that file, so a master
+address swapped after the delete call would still reach the running container.</p>
+<p>That guard is a validating webhook on UPDATE with <code>failurePolicy: Ignore</code>, so it does <strong>not</strong> hold
+while the webhook is unreachable. The direction is deliberate: it keeps a record honest, and it must
+never be the reason a live Pod cannot be updated or finished. Under <code>Fail</code>, an unreachable webhook
+would block finalizer removal on every opted-in Pod, and a pool&rsquo;s own teardown waits behind exactly
+that. Clearing a finalizer touches none of the three keys, so it is admitted whether the webhook is
+reachable or not.</p>
+</blockquote>
+<h2 id="tenant-compatibility">Tenant compatibility</h2>
+<p><strong>Use an engine image that reads and forwards the injected tenant when the Binding&rsquo;s domain must
+isolate cache reuse.</strong> The webhook always writes a non-empty domain and never inspects or rejects the
+image version. Verify the image you deploy: the vLLM family must consume <code>tenant_id</code> from the
+projected file, while SGLang must consume <code>MOONCAKE_TENANT_ID</code> from its environment.</p>
+<p>Keep the Mooncake library bundled by the engine unless that engine documents another compatible
+combination. A mismatched library may reject the tenant even when the engine reads it.</p>
+<p>An older engine is allowed. It may ignore the injected value and use Mooncake&rsquo;s literal <code>default</code>
+tenant instead, without any admission error. Such a pool needs a <code>KVCachePoolBinding</code> whose domain is
+<code>default</code>, which is also what a Binding that leaves <code>spec.domain.name</code> out registers; its quota is
+then shared by every client that falls back to that tenant.</p>
+<p><code>tenantInjected</code> records only that the webhook wrote the value. It does not prove the image read it
+or that isolation took effect.</p>
+<h2 id="verify-the-vllm-file-vehicle">Verify the vLLM file vehicle</h2>
+<p><strong>On an older vLLM the file is projected, mounted, and read by nothing.</strong> No error is logged, because
+no code looks for it.</p>
+<p>Some vLLM images have no reader for <code>MOONCAKE_CONFIG_PATH</code>. On those images the projected file is
+inert.</p>
+<p>This is not validated, and it cannot be: admission never inspects the container image, so the webhook
+does not know which build will run. The check is yours, against the image you are actually running:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl <span class="nb">exec</span> chat-0 -- python3 -c <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="go">    &#34;import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print(&#39;reader present&#39;)&#34;
+</span></span></span></code></pre></div>
+</div><p>An <code>ImportError</code> means the injection is inert on that image. Note the symptom is different from the
+one in the previous section, and calls for a different fix: an unregistered tenant fails loudly with
+<code>TENANT_NOT_REGISTERED</code> on every write, while a missing reader fails silently. The workload runs
+correctly, just with no cache at all.</p>
+<h2 id="the-injection-record">The injection record</h2>
+<p>An injected Pod carries <code>kvcache.gpustack.ai/injected</code>, a JSON object recording what was decided:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get pod chat-0 -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.metadata.annotations.kvcache\.gpustack\.ai/injected}&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="go">{&#34;binding&#34;:&#34;chat&#34;,&#34;engine&#34;:&#34;vllm&#34;,&#34;vehicle&#34;:&#34;file&#34;,&#34;domain&#34;:&#34;team-a-chat&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go"> &#34;tenantInjected&#34;:true,&#34;launchProgram&#34;:&#34;vllm&#34;,&#34;launchArgsForwarded&#34;:false}
+</span></span></span></code></pre></div>
+</div><table>
+  <thead>
+      <tr>
+          <th>Field</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>binding</code></td>
+          <td>which Binding this Pod named and the webhook resolved — <strong>not</strong> necessarily the one its writes are charged to; see <a href="#tenant-compatibility">tenant compatibility</a>
+</td>
+      </tr>
+      <tr>
+          <td><code>engine</code></td>
+          <td>what was configured</td>
+      </tr>
+      <tr>
+          <td><code>vehicle</code></td>
+          <td><code>file</code> or <code>environment</code></td>
+      </tr>
+      <tr>
+          <td><code>domain</code></td>
+          <td>the reuse domain the Binding declared</td>
+      </tr>
+      <tr>
+          <td><code>tenantInjected</code></td>
+          <td>whether a tenant was written into the container — an <strong>action</strong>, not an outcome</td>
+      </tr>
+      <tr>
+          <td><code>launchProgram</code></td>
+          <td>the executable left after transparent launcher prefixes were removed; empty only where there was no executable to read and forwarding was declared anyway — an image <code>ENTRYPOINT</code>, or a command line hidden in one argument</td>
+      </tr>
+      <tr>
+          <td><code>launchArgsForwarded</code></td>
+          <td>whether the author&rsquo;s <code>kvcache.gpustack.ai/launch-args-forwarded: &quot;true&quot;</code> declaration admitted a launch the webhook could not identify as an engine entry point</td>
+      </tr>
+  </tbody>
+</table>
+<p>Pods admitted by an older operator may also carry <code>engineVersion</code>. New records omit it because it
+described the upstream source used when the injector was written, not the image in the Pod. Readers
+must ignore that legacy field and must not infer image compatibility from it.</p>
+<p><code>vehicle</code> is on the record so a reader can tell which shape was written without decoding the
+container: <code>&quot;file&quot;</code> means a projected configuration document plus its volume, <code>&quot;environment&quot;</code> means
+variables alone.</p>
+<h2 id="transport-compatibility-at-binding">Transport compatibility at binding</h2>
+<p>An engine configured with one transport cannot safely bind to a pool whose member groups offer
+different protocols. The client reads each target segment&rsquo;s protocol; a block on a group using a
+transport the engine did not install fails with <code>NotSupportedTransport</code>. Pod injection refuses that
+binding and names every effective offer. Make the groups use one protocol or choose another pool;
+the mixed pool itself remains valid for consumers that can use it.</p>
+<p><strong>A pool whose groups offer no <code>ascend</code> transport makes a vLLM-Ascend container fail to start</strong>, and
+the injection is what triggers it. That engine accepts one transport and raises on the rest:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NotImplementedError: MooncakeBackend does not support protocol &#39;tcp&#39;.</span></span></code></pre></div>
+</div><p>The engine&rsquo;s own file reader defaults <code>protocol</code> to <code>ascend</code>, so a file that said nothing would have
+worked. This project writes the resolved pool transport explicitly on every path; that value
+overwrites the engine default.</p>
+<p>It is <strong>refused, not left to the container</strong>. The shared transport check rejects an injected Pod at
+admission. A <code>ModelDeployment</code> checks a new binding in its own validating webhook, since its
+controller path does not use Pod injection.</p>
+<p><strong>The transport has two spellings and the message uses both.</strong> What the pool offers and what the
+engine accepts are reported as the artifact spells them, because that is the value the container was
+handed: <code>tcp</code> against <code>ascend</code>. The value to set is the API&rsquo;s, <strong><code>CANN</code></strong>, because
+<code>spec.transport.protocol</code> is a case-sensitive enum.</p>
+<p><strong>The failing backend is not one somebody misconfigured.</strong> <code>spec.transport.protocol</code> defaults to
+<code>Auto</code>, which resolves to the store&rsquo;s <code>tcp</code>. A backend left entirely at its defaults is precisely the
+one this engine cannot use. Pair vLLM-Ascend with a pool that offers <code>CANN</code>: declared on the backend&rsquo;s
+<code>spec.transport.protocol</code>, or on one member group&rsquo;s <code>transport.protocol</code> when only one group serves
+the fabric.</p>
+<p><strong>A backend may also mix vendors across member groups</strong> (one group offering <code>rdma</code> to NVIDIA nodes,
+another <code>ascend</code> to Ascend nodes) through the same per-group <code>transport.protocol</code> override.
+Admission imposes no rule on that combination; the per-engine check above is untouched. Whether
+cross-vendor <em>sharing</em> then works is a property of the engine&rsquo;s cache key, not of the transport:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Engine</th>
+          <th>Cross-vendor sharing</th>
+          <th>Why</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>SGLang</code></td>
+          <td>possible in principle</td>
+          <td>its Mooncake key is vendor-neutral — no vendor, dtype, device or engine id in the key, and no platform branch in the <code>mooncake</code> backend</td>
+      </tr>
+      <tr>
+          <td><code>vLLM</code></td>
+          <td>not applicable</td>
+          <td>the key embeds <code>model</code>, <code>tp_rank</code>, <code>pcp</code>, <code>dcp</code> and <code>pp_rank</code>, so the key itself is heterogeneous across two vendors</td>
+      </tr>
+  </tbody>
+</table>
+<p>&ldquo;Cross-vendor sharing is meaningless&rdquo; is a statement about vLLM only. For SGLang the one remaining
+precondition is that both sides lay a block&rsquo;s payload bytes out identically, and that has never been
+measured: the experiment is one model, one <code>page_size</code> and one TP/PP shape, SGLang on NVIDIA against
+SGLang on Ascend pointed at one pool, checking whether the second side hits the first&rsquo;s entries and
+reads back the correct bytes.</p>
+<p>The transport is not the limit: the HIXL wiki documents Mooncake&rsquo;s <code>rdma</code> transport moving buffers
+directly between an NVIDIA GPU and an Ascend NPU (<a href="https://gitcode.com/cann/hixl/wiki/Mooncake%EF%BC%88NPU%20%E7%89%88%EF%BC%89%E5%AE%8C%E6%95%B4%E6%8C%87%E5%8D%97.md">Mooncake NPU guide, appendix 2</a>
+).</p>
+<p>The operator&rsquo;s <code>applyMemberFabric</code> grants host network and device access to backend member groups
+only for <code>rdma</code> and <code>efa</code>. An <code>ascend</code> group receives none of those grants. This rendering alone
+does not establish whether that member starts or can transfer bytes on a particular Ascend node;
+verify both before relying on cross-vendor sharing.</p>
+<blockquote>
+<p><strong>Why a page instead of an admission rule</strong> — a rule becomes API semantics, and an upstream
+improvement on either side would then force an incompatible removal; a documented note only gets
+edited. Treat this section as temporary: it records where the engines and this operator stand, and
+upstream work on either side can obsolete it.</p>
+</blockquote>
+<h2 id="workload-impact">Workload impact</h2>
+<p>Joining a pool changes three things about a Pod that are easy to file as bugs.</p>
+<p><strong>Host memory the Pod never asked for (on the vLLM family only).</strong> The injected <code>local_buffer_size</code>
+is <code>128 MiB</code> of staging the client registers with the transfer engine. It is charged to the
+container&rsquo;s memory and appears in no <code>resources</code> field, so <strong>add 128 MiB to both the request and the
+limit of any <code>vllm</code> or <code>vllm-ascend</code> container you inject into</strong>.</p>
+<p>Raise both, and not only the limit. The limit alone keeps one container off a cgroup OOM, but the scheduler
+places Pods by their <em>requests</em>. Raising only the limit therefore lets a node be filled to its request
+capacity while every injected Pod on it consumes 128 MiB more than that arithmetic accounted for.
+The result is node memory pressure and kubelet eviction, on a node whose bookkeeping says it is
+within budget.</p>
+<p>SGLang is not given one: the injection writes no <code>local_buffer_size</code> in any spelling, and that engine
+uses a 16 MiB default. Budget those 16 MiB the same way, in the request as well as the limit.</p>
+<blockquote>
+<p><strong>Why</strong> that number, and why it is written at all — it is the value the store&rsquo;s own reference uses,
+and it is a constant here rather than a field because it is transfer-layer staging, not a resource
+grant. What an absent key costs instead is under
+<a href="#injection-per-engine">Injection per engine</a>
+.</p>
+</blockquote>
+<p><strong>Random ports.</strong> The transfer engine binds ports nobody configured. <strong>Any NetworkPolicy or port
+reservation must be written as a range, not a list.</strong> The webhook cannot change this and does not
+try.</p>
+<p><strong>A 30-second lease on cached blocks.</strong> <code>kv_lease_duration</code> defaults to 30 seconds. It does not expire
+from long queueing, but it does expire when a Pod&rsquo;s heartbeat is interrupted (preemption, eviction,
+restart), and the default failure policy then fails the request outright. Anything that kills an
+injected Pod destroys cache its peers may be waiting on.</p>
+<p>One benign line appears in every client&rsquo;s startup log and is not an error to chase:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <pre tabindex="0"><code>E transfer_metadata.cpp:991] Local segment descriptor not found</code></pre>
+</div><p>The projected client configuration is readable by anyone who can read the Pod. It carries addresses, a
+protocol and a domain name, and no credential.</p>
+<h2 id="engine-prefix-caching">Engine prefix caching</h2>
+<p><strong>Injection does not touch the engine&rsquo;s own prefix caching, and switching that off is not a
+workaround for anything.</strong> vLLM&rsquo;s <code>enable_prefix_caching</code> defaults on and reuses blocks in GPU HBM;
+SGLang&rsquo;s radix cache does the same.</p>
+<p>What the transfer engine registers is that same memory, so the network card can map it. Nothing is
+copied and nothing is allocated twice, so the two are not competing. Disabling prefix caching buys
+no memory back and loses the engine&rsquo;s own reuse.</p>
+<p>Host DRAM is where an overlap could happen, and neither engine puts KV there unless asked. vLLM&rsquo;s
+<code>--swap-space</code> is deprecated and ignored, and <code>kv_offloading_size</code> defaults off, so on vLLM the only
+host DRAM this injection adds is the staging buffer above. SGLang&rsquo;s host tier needs
+<code>--enable-hierarchical-cache</code>, which this injection renders because the store hangs off that tier.
+Its <a href="#sglang-host-memory-tier">host pool</a>
+ is the one host allocation it adds there.</p>
+<blockquote>
+<p><strong>Never set <code>kv_offloading_size</code> on a container this injects into.</strong> Setting it makes vLLM
+overwrite <code>kv_connector</code> with <code>OffloadingConnector</code>, unconditionally and with no conflict check,
+because <code>kv_connector</code> holds one value. The connector this operator rendered is simply gone.</p>
+<p>The container then starts, serves, and uses no shared cache, with nothing in it saying so. The two
+are alternative second-tier caches (one on the node&rsquo;s own DRAM, one on the cluster&rsquo;s pool), so
+choose between them rather than configuring both.</p>
+</blockquote>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/kv-cache/pool/">KV Cache Pool</a>
+ (the grant and the reuse domain this page consumes)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/backend/">KV Cache Backend</a>
+ (the store the pool draws from)</li><li><a href="/gpustack-operator/main/docs/modules/devices/admission/">Admission</a>
+ (where this webhook sits relative to the five gates)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/devices/requests/">Accelerator Requests</a>
+ — the other thing a Pod asks this
+operator for.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/docs/modules/kv-cache/injection.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/injection.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#the-contract">The contract</a></li>
+    <li><a href="#injection-per-engine">Injection per engine</a>
+      <ul>
+        <li><a href="#sglang-host-memory-tier">SGLang host-memory tier</a></li>
+      </ul>
+    </li>
+    <li><a href="#refusals-and-fixes">Refusals and fixes</a></li>
+    <li><a href="#tenant-compatibility">Tenant compatibility</a></li>
+    <li><a href="#verify-the-vllm-file-vehicle">Verify the vLLM file vehicle</a></li>
+    <li><a href="#the-injection-record">The injection record</a></li>
+    <li><a href="#transport-compatibility-at-binding">Transport compatibility at binding</a></li>
+    <li><a href="#workload-impact">Workload impact</a></li>
+    <li><a href="#engine-prefix-caching">Engine prefix caching</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

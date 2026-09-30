@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://docs.gpustack.ai/gpustack-operator/main/sitemap.xml

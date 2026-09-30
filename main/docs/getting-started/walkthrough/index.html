@@ -1,0 +1,1187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Walkthrough · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/getting-started/walkthrough/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+      data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/getting-started/walkthrough/">
+      <option value="/gpustack-operator/main/">main</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/main/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" aria-current="page">Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/getting-started/">Getting started</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Walkthrough</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="walkthrough">Walkthrough</h1>
+<p>This page records a real session: every <code>kubectl</code> invocation and its real output, objects as YAML
+trimmed to <code>metadata.labels</code> / <code>spec</code> / <code>status</code>, and a before / after <code>kubectl get instancetypes</code>
+per operation. Node names are genericized (<code>node-cpu</code>, <code>node-a10g</code>, <code>node-t4-a</code>, <code>node-t4-b</code>).</p>
+<p>The run uses the defaults: <code>instance-type-derived-from-node=true</code> auto-derives the pool objects,
+<code>instance-type-aware-cpu-manufacturer=false</code> keeps the CPU manufacturer out of the aggregation layer
+until section 5 flips it on.</p>
+<p>Watch three columns: <strong>UNIT(CPU/RAM)/STORAGE</strong>, the per-unit request the InstanceType charges; <strong>CPU</strong>,
+the collapsed CPU pool&rsquo;s <code>remaining/capacity</code> cores; <strong>ACCELERATOR(EX/SH/SL/PT)</strong>, the
+<code>onceMaxRequest/remaining</code> of each <a href="/gpustack-operator/main/docs/modules/devices/admission/#four-view-status">four-view</a>
+
+projection. This run predates the shared card-count reading, so its <code>SH</code> once-max figures are
+shares, not accelerators (<a href="/gpustack-operator/main/docs/modules/devices/requests/#pre-release-breaks">Pre-release breaks</a>
+).</p>
+<p>Each accelerator counts in exactly one of <code>EX</code>/<code>SH</code>/<code>SL</code> (unpartitioned) or <code>PT</code> (partitioned), so
+<code>0/0</code> under <code>PT</code> throughout means none is in a partitioning mode. For the all-partitioned and <strong>mixed</strong>
+configurations see the <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#walkthrough-three-mig-configurations-on-one-node">three-configuration
+walkthrough</a>
+.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#the-cluster">The cluster</a>
+</li>
+<li><a href="#1-initial-state">1. Initial state</a>
+</li>
+<li><a href="#2-removing-a-node-from-management">2. Removing a node from management</a>
+</li>
+<li><a href="#3-requesting-a-logical-sliced-gpu">3. Requesting a logical sliced GPU</a>
+</li>
+<li><a href="#4-managing-a-custom-instancetype">4. Managing a custom InstanceType</a>
+</li>
+<li><a href="#5-enabling-cpu-manufacturer-awareness">5. Enabling CPU-manufacturer awareness</a>
+</li>
+<li><a href="#6-pinning-an-instance-to-a-node-and-adding-volumes">6. Pinning an Instance to a node and adding volumes</a>
+</li>
+</ul>
+<h2 id="the-cluster">The cluster</h2>
+<p>Four <code>linux/amd64</code> nodes, all operator-managed:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Node</th>
+          <th>CPU (<code>gKey</code>)</th>
+          <th>Cores</th>
+          <th>Accelerator (<code>aKey</code>)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>node-cpu</code></td>
+          <td><code>amd-epyc-7r13</code></td>
+          <td>16</td>
+          <td>—</td>
+      </tr>
+      <tr>
+          <td><code>node-a10g</code></td>
+          <td><code>amd-epyc-7r32</code></td>
+          <td>4</td>
+          <td>1 × NVIDIA A10G (<code>nvidia-a10g</code>)</td>
+      </tr>
+      <tr>
+          <td><code>node-t4-a</code></td>
+          <td><code>intel-xeon-platinum-8259cl</code></td>
+          <td>4</td>
+          <td>1 × NVIDIA Tesla T4 (<code>nvidia-tesla-t4</code>)</td>
+      </tr>
+      <tr>
+          <td><code>node-t4-b</code></td>
+          <td><code>intel-xeon-platinum-8259cl</code></td>
+          <td>48</td>
+          <td>4 × NVIDIA Tesla T4 (<code>nvidia-tesla-t4</code>)</td>
+      </tr>
+  </tbody>
+</table>
+<hr>
+<h2 id="1-initial-state">1. Initial state</h2>
+<p>With <code>instance-type-derived-from-node</code> on, the operator materializes the finest-grain <code>ResourceFlavor</code>s
+and one collapsed pool per accelerator plus a generic CPU pool:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get resourceflavor
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                                                   AGE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--amd-epyc-7r13-linux-amd64-16c                                5h19m
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64-1d                    9m26s
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--amd-epyc-7r32-linux-amd64-4c                                 9m26s
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4-linux-amd64-1d   5h19m
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4-linux-amd64-4d   5h19m
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--intel-xeon-platinum-8259cl-linux-amd64-48c                   5h19m
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--intel-xeon-platinum-8259cl-linux-amd64-4c                    5h19m
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl get clusterqueue
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                    COHORT   PENDING WORKLOADS
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic-linux-amd64                    0
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-a10g-linux-amd64                0
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-tesla-t4-linux-amd64            0
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl get instancetype
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl get instancetypeflavor
+</span></span><span class="line"><span class="cl"><span class="go">NAME                        GENERALGROUP   ACCELERATORGROUP   ACCELERATABLE   MANUFACTURER   PRODUCT       MEMORY   CORES   SLICEABLE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic           generic                          false           generic
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-a10g                      nvidia-a10g        true            nvidia         NVIDIA-A10G   24Gi     10240   true
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-tesla-t4                  nvidia-tesla-t4    true            nvidia         Tesla-T4      16Gi     2560    true
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl get devices
+</span></span><span class="line"><span class="cl"><span class="go">NAME
+</span></span></span><span class="line"><span class="cl"><span class="go">node-t4-a
+</span></span></span><span class="line"><span class="cl"><span class="go">node-a10g
+</span></span></span><span class="line"><span class="cl"><span class="go">node-t4-b
+</span></span></span></code></pre></div>
+</div><ul>
+<li><strong>7 ResourceFlavors</strong>, one per <code>(gKey, [aKey,] os, arch, count)</code> — <code>node-t4-b</code> (48 cores, 4×T4)
+yields both <code>…-48c</code> and <code>…--nvidia-tesla-t4-…-4d</code>.</li>
+<li><strong>3 ClusterQueues / InstanceTypes</strong>, collapsed — <strong>A10G</strong> <code>1/1 10/10 100/100 0/0</code> (1 accelerator),
+<strong>T4</strong> <code>4/5 40/50 100/500 0/0</code> (5 = <code>node-t4-a</code>&rsquo;s 1 + <code>node-t4-b</code>&rsquo;s 4, none partitioned).</li>
+<li><strong>No <code>Devices</code> for <code>node-cpu</code></strong> — it carries no accelerator.</li>
+</ul>
+<p>One of each kind, from the A10G node:</p>
+<h3 id="node">Node</h3>
+<p>Labeled by two NodeFeatures: <code>node-a10g-gpustack-worker</code> (the <code>general.*</code> CPU keys + <code>managed</code>) and
+<code>node-a10g-gpustack-device-manager</code> (the <code>acceleratable.*</code> device keys):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Node</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">node-a10g</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/arch</span><span class="p">:</span><span class="w"> </span><span class="l">amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">gpustack.ai/managed</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">general.feature.gpustack.ai/amd</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">general.feature.gpustack.ai/amd-epyc-7r32</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">general.feature.gpustack.ai/amd-epyc-7r32.count</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;4&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g.count</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g.memory</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;24Gi&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g.cores</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10240&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g.family</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;Ampere&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g.product</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;NVIDIA-A10G&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g.comcap</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;8.6&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia.driver-version</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;580.159.03&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia.runtime-version</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;13.0&#34;</span></span></span></code></pre></div>
+</div><h3 id="devices">Devices</h3>
+<p>Cluster-scoped, named after the node: the worker stamps <code>gpustack.ai/managed</code> + the real CPU key, the
+Device Manager the accelerator key and the <code>.status</code> ledger:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Devices</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">node-a10g</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/arch</span><span class="p">:</span><span class="w"> </span><span class="l">amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">gpustack.ai/managed</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">general.feature.gpustack.ai/amd-epyc-7r32</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">groups</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">a10g</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">accelerators</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">GPU-e0587d2e-127c-4fb8-e2c1-6e517529f575</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">index</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">remaining</span><span class="p">:</span><span class="w"> </span><span class="m">1600000</span><span class="w">        </span><span class="c"># per-accelerator credit ledger the AdmissionCheck reads</span></span></span></code></pre></div>
+</div><h3 id="resourceflavor">ResourceFlavor</h3>
+<p>The finest, setting-independent grain, <code>gpustack--${gKey}[--${aKey}]-${os}-${arch}-${count}{c|d}</code>. An
+<strong>accelerated</strong> one carries <code>feature.gpustack.ai/acceleratable=true</code>, both the CPU (<code>general.</code>) and
+device (<code>acceleratable.</code>) keys, and pins nodes via <code>spec.nodeLabels</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ResourceFlavor</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64-1d</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/arch</span><span class="p">:</span><span class="w"> </span><span class="l">amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">feature.gpustack.ai/acceleratable</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">general.feature.gpustack.ai/amd-epyc-7r32</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g.count</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">       </span><span class="c"># per-node accelerator count</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g.capacity</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">    </span><span class="c"># pooled capacity (nodes × count)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">resource.gpustack.ai/type</span><span class="p">:</span><span class="w"> </span><span class="l">nodes                              </span><span class="w"> </span><span class="c"># operator-owned marker</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/arch</span><span class="p">:</span><span class="w"> </span><span class="l">amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">gpustack.ai/managed</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">general.feature.gpustack.ai/amd-epyc-7r32</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g.count</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div><p>A <strong>non-accelerated</strong> (CPU) flavor carries <code>feature.gpustack.ai/acceleratable=false</code>, its capacity the
+node&rsquo;s CPU-core count:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ResourceFlavor</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--amd-epyc-7r13-linux-amd64-16c</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/arch</span><span class="p">:</span><span class="w"> </span><span class="l">amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">feature.gpustack.ai/acceleratable</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;false&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">general.feature.gpustack.ai/amd-epyc-7r13</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">general.feature.gpustack.ai/amd-epyc-7r13.count</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;16&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">general.feature.gpustack.ai/amd-epyc-7r13.capacity</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;16&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">resource.gpustack.ai/type</span><span class="p">:</span><span class="w"> </span><span class="l">nodes</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/arch</span><span class="p">:</span><span class="w"> </span><span class="l">amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">gpustack.ai/managed</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">general.feature.gpustack.ai/amd-epyc-7r13</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">general.feature.gpustack.ai/amd-epyc-7r13.count</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;16&#34;</span></span></span></code></pre></div>
+</div><h3 id="clusterqueue">ClusterQueue</h3>
+<p>One isolated pool per accelerator, covering the manufacturer&rsquo;s <code>credits</code> and gating admission with the
+per-accelerator <code>AdmissionCheck</code>. With awareness off its labels carry <strong>no</strong> <code>general.</code> key, so it
+aggregates the A10G across every CPU:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ClusterQueue</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-a10g-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/arch</span><span class="p">:</span><span class="w"> </span><span class="l">amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">feature.gpustack.ai/acceleratable</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">resource.gpustack.ai/type</span><span class="p">:</span><span class="w"> </span><span class="l">instancetypes</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">admissionChecksStrategy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">admissionChecks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-node-devices</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resourceGroups</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">coveredResources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">credits.gpustack.ai/nvidia</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">flavors</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64-1d</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">credits.gpustack.ai/nvidia</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">nominalQuota</span><span class="p">:</span><span class="w"> </span><span class="l">1600k</span></span></span></code></pre></div>
+</div><h3 id="instancetype">InstanceType</h3>
+<p>The schedulable pool: webhook-stamped labels (schedule discriminators, <code>derived-from-node</code> provenance,
+the fronting <code>queue-entrance</code>), <code>spec</code> enriched from the matching flavor, <code>status</code> the reconciled
+four-view:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">InstanceType</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-a10g-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/arch</span><span class="p">:</span><span class="w"> </span><span class="l">amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">feature.gpustack.ai/acceleratable</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">schedule.gpustack.ai/derived-from-node</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">schedule.gpustack.ai/queue-entrance</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-fnv64-c4680bb149644f1c</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">acceleratable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">acceleratorGroup</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia-a10g</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">generalGroup</span><span class="p">:</span><span class="w"> </span><span class="l">generic         </span><span class="w"> </span><span class="c"># collapsed — awareness is off</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">arch</span><span class="p">:</span><span class="w"> </span><span class="l">amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">product</span><span class="p">:</span><span class="w"> </span><span class="l">NVIDIA-A10G</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">family</span><span class="p">:</span><span class="w"> </span><span class="l">Ampere</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l">24Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">cores</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10240&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">feature</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">logicalSliced</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxSize</span><span class="p">:</span><span class="w"> </span><span class="m">128</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">coresPercentageOvercommit</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">memoryPercentageStep</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">physicalSliced</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxSize</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">unitResources</span><span class="p">:</span><span class="w">            </span><span class="c"># the nvidia-a10g preset, not a fixed default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;8&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ram</span><span class="p">:</span><span class="w"> </span><span class="l">64Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">localStorage</span><span class="p">:</span><span class="w"> </span><span class="l">100Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">phase</span><span class="p">:</span><span class="w"> </span><span class="l">Active</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">accelerator</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">onceMaxRequest</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">remaining</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">acceleratorShared</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">onceMaxRequest</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">remaining</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">acceleratorSliced</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;100&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">onceMaxRequest</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;100&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">remaining</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;100&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">acceleratorPartitioned</span><span class="p">:</span><span class="w">          </span><span class="c"># no accelerator here is in a partitioning mode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">onceMaxRequest</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">remaining</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">entrance</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-fnv64-c4680bb149644f1c</span></span></span></code></pre></div>
+</div><h3 id="instancetypeflavor">InstanceTypeFlavor</h3>
+<p>An os/arch-agnostic catalog view aggregated read-only from the flavors, with <strong>no
+<code>metadata.labels</code></strong> — its grouping identity lives in <code>spec</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">InstanceTypeFlavor</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-a10g</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">acceleratable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">acceleratorGroup</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia-a10g</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">product</span><span class="p">:</span><span class="w"> </span><span class="l">NVIDIA-A10G</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l">24Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">cores</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10240&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">sliceable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span></span></span></code></pre></div>
+</div><hr>
+<h2 id="2-removing-a-node-from-management">2. Removing a node from management</h2>
+<p>A node stays in a pool only while it carries <code>gpustack.ai/managed=true</code>, required by the flavor&rsquo;s
+<code>spec.nodeLabels</code> and stamped through the node&rsquo;s worker NodeFeature.</p>
+<p><strong>Before</strong> — <code>node-a10g</code> managed:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get instancetypes
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+</span></span></span></code></pre></div>
+</div><p>Flip that label off:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl -n gpustack-system patch nodefeature node-a10g-gpustack-worker <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="go">    --type=merge -p &#39;{&#34;spec&#34;:{&#34;labels&#34;:{&#34;gpustack.ai/managed&#34;:&#34;false&#34;}}}&#39;
+</span></span></span><span class="line"><span class="cl"><span class="go">nodefeature.nfd.k8s-sigs.io/node-a10g-gpustack-worker patched
+</span></span></span></code></pre></div>
+</div><p><strong>After</strong> — NFD propagates it; the operator retires the now-nodeless A10G flavor:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get instancetypes
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/68   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            0/0 0/0 0/0 0/0            0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+</span></span></span></code></pre></div>
+</div><p>Two rows move: the A10G to <code>0/0 0/0 0/0</code> (its ResourceFlavor is deleted), and the generic <strong>CPU</strong>
+<code>48/72</code> → <code>48/68</code>, as <code>node-a10g</code>&rsquo;s 4 cores leave the pool.</p>
+<p>Re-admit it and one reconcile rebuilds the flavor and restores the counts:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl -n gpustack-system patch nodefeature node-a10g-gpustack-worker <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="go">    --type=merge -p &#39;{&#34;spec&#34;:{&#34;labels&#34;:{&#34;gpustack.ai/managed&#34;:&#34;true&#34;}}}&#39;
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl get instancetypes
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+</span></span></span></code></pre></div>
+</div><hr>
+<h2 id="3-requesting-a-logical-sliced-gpu">3. Requesting a logical sliced GPU</h2>
+<p>A sliceable InstanceType — the A10G reports logical slicing in its status detail — admits
+fractional-accelerator workloads. Request 20 % of an accelerator&rsquo;s VRAM with
+<code>acceleratorSlicedMemoryPercentage</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sliced-demo</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-a10g-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;86400&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratorSlicedMemoryPercentage</span><span class="p">:</span><span class="w"> </span><span class="m">20</span><span class="w">      </span><span class="c"># 20% of the accelerator&#39;s VRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratorSlicedCoresPercentage</span><span class="p">:</span><span class="w"> </span><span class="m">100</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">volume</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ephemeral</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="l">1Gi</span></span></span></code></pre></div>
+</div><p><strong>Before</strong>, the A10G shows <code>1/1 10/10 100/100</code>. Apply it and wait for <code>Ready</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl apply -f sliced-demo.yaml
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> kubectl get instancetypes
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            0/0 0/0 80/80 0/0          0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+</span></span></span></code></pre></div>
+</div><p>The A10G row moves <code>1/1 10/10 100/100 0/0</code> → <code>0/0 0/0 80/80 0/0</code>: <strong>SL</strong> gives up the 20 % slice;
+<strong>EX</strong> and <strong>SH</strong> fall to <code>0/0</code> because a partly-sliced accelerator is neither whole nor a shared
+unit; <strong>PT</strong> stays <code>0/0</code>, since no partitioning mode means no hardware partition.</p>
+<p>Inside the Instance, the logical-slicing runtime caps visible VRAM to the slice, ≈ 20 % of 24 GiB:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl <span class="nb">exec</span> sliced-demo -- nvidia-smi --query-gpu<span class="o">=</span>name,memory.total --format<span class="o">=</span>csv,noheader
+</span></span><span class="line"><span class="cl"><span class="go">NVIDIA A10G, 4912 MiB
+</span></span></span></code></pre></div>
+</div><p>Deleting the Instance releases the slice: the row returns to <code>1/1 10/10 100/100 0/0</code>.</p>
+<blockquote>
+<p><strong>Physical partitioning (MIG).</strong> The A10G slices logically: a runtime caps a shared accelerator, and
+the <code>SL</code> view above tracks the per-accelerator credit budget. A MIG-capable accelerator (A100 / H100)
+instead hard-partitions into fixed hardware instances the operator materializes on demand:</p>
+<ul>
+<li>a different resource family (<code>.partitioned*</code>, reported under <code>PT</code>), with a different request shape —
+keys and rules in <a href="/gpustack-operator/main/docs/modules/devices/requests/">Accelerator Requests</a>
+;</li>
+<li>MIG <em>mode</em> is the administrator&rsquo;s, driven with <code>nvidia-smi</code>, so it has its own runbook and a recorded
+enable → request → reclaim → disable walkthrough in
+<a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
+.</li>
+</ul>
+</blockquote>
+<hr>
+<h2 id="4-managing-a-custom-instancetype">4. Managing a custom InstanceType</h2>
+<p>A derived pool is sized from a <strong>per-product preset</strong>: 8 CPU / 64 GiB for this A10G, 4 CPU / 16 GiB for
+an unrecognised accelerator (<a href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/">preset reference</a>
+). For
+another size, an admin authors an InstanceType referencing a catalog flavor by its <code>acceleratorGroup</code>,
+with a unit spec of its own:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">InstanceType</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">a10g-12c128g</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">acceleratable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">acceleratorGroup</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia-a10g         </span><span class="w"> </span><span class="c"># references the gpustack--nvidia-a10g catalog flavor</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">arch</span><span class="p">:</span><span class="w"> </span><span class="l">amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">unitResources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;12&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ram</span><span class="p">:</span><span class="w"> </span><span class="l">128Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">localStorage</span><span class="p">:</span><span class="w"> </span><span class="l">200Gi</span></span></span></code></pre></div>
+</div><p>Apply it: the defaulting webhook enriches its descriptors from the matching flavor, and it lands as a
+<strong>sibling</strong> of the derived A10G pool, on the one physical accelerator:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl apply -f a10g-12c128g.yaml
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> kubectl get instancetypes
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">a10g-12c128g                            gpustack-fnv64-8cf5b3114035c84a   12/128Gi/200Gi          1/1 10/10 100/100 0/0      0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+</span></span></span></code></pre></div>
+</div><p>The new row shows <code>12/128Gi/200Gi</code> against the derived <code>8/64Gi/100Gi</code>, and both siblings <code>1/1</code>: one
+accelerator, two views of it.</p>
+<p>Deploy an Instance onto the custom type, whole accelerator:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">custom-demo</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">a10g-12c128g</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;86400&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">volume</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ephemeral</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="l">1Gi</span></span></span></code></pre></div>
+</div><p>Once <code>custom-demo</code> is <code>Ready</code>, both siblings drop to <code>0/0 0/0 0/0</code>, consistent across the
+accelerator&rsquo;s two views:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl apply -f custom-demo.yaml
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> kubectl get instancetypes
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">a10g-12c128g                            gpustack-fnv64-8cf5b3114035c84a   12/128Gi/200Gi          0/0 0/0 0/0 0/0            0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            0/0 0/0 0/0 0/0            0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+</span></span></span></code></pre></div>
+</div><p>Deleting it retires in order: the operator drains the Instance (<code>HoldAndDrain</code>), the Instance stops,
+and the type plus its ClusterQueue go:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl delete instancetype a10g-12c128g
+</span></span><span class="line"><span class="cl"><span class="go">instancetype.worker.gpustack.ai &#34;a10g-12c128g&#34; deleted
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl -n default get instance custom-demo -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.phase}&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="go">Stopped
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl get instancetypes
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+</span></span></span></code></pre></div>
+</div><p><code>a10g-12c128g</code> is gone, <code>custom-demo</code> is <code>Stopped</code> (kept for section 5), and the released accelerator
+returns the derived pool to <code>1/1 10/10 100/100</code>.</p>
+<hr>
+<h2 id="5-enabling-cpu-manufacturer-awareness">5. Enabling CPU-manufacturer awareness</h2>
+<p>Flipping <code>instance-type-aware-cpu-manufacturer</code> on makes the aggregation layer split every pool by
+the CPU key. <code>ResourceFlavor</code>s are never rewritten; only queues, types and catalog re-group.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl -n gpustack-system patch secret gpustack-settings --type<span class="o">=</span>merge <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="go">    -p &#39;{&#34;data&#34;:{&#34;instance-type-aware-cpu-manufacturer&#34;:&#34;&#39;&#34;$(printf true | base64)&#34;&#39;&#34;}}&#39;
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="gp">$</span> kubectl -n gpustack-system rollout restart deploy/gpustack-operator-worker
+</span></span></code></pre></div>
+</div><p><strong>Before</strong>, 3 InstanceTypes; <strong>after</strong> the re-derive, CPU-aware types appear (create-only)
+<strong>alongside</strong> the old collapsed ones:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get instancetypes
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                                                ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--amd-epyc-7r13-linux-amd64                                 gpustack-fnv64-8dde992f64a17a2f   1/2Gi/100Gi             0/0 0/0 0/0 0/0            16/16   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64                    gpustack-fnv64-029fd9550e0c70bd   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--amd-epyc-7r32-linux-amd64                                 gpustack-fnv64-d3390f10cd57a632   1/2Gi/100Gi             0/0 0/0 0/0 0/0            4/4     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic-linux-amd64                                       gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-5b59e508edc027b7   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--intel-xeon-platinum-8259cl-linux-amd64                    gpustack-fnv64-c6aee2b7b5c4dc6b   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/52   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-a10g-linux-amd64                                   gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-tesla-t4-linux-amd64                               gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+</span></span></span></code></pre></div>
+</div><ul>
+<li>Per-CPU pools split the generic 72 cores: <code>amd-epyc-7r13</code> <code>16/16</code>, <code>amd-epyc-7r32</code> <code>4/4</code>,
+<code>intel-xeon-platinum-8259cl</code> <code>48/52</code>.</li>
+<li>Per-<code>(gKey,aKey)</code> accelerated pools appear: <code>…amd-epyc-7r32--nvidia-a10g…</code>,
+<code>…intel-xeon-platinum-8259cl--nvidia-tesla-t4…</code>.</li>
+<li>The old collapsed rows remain, create-only and not garbage-collected.</li>
+</ul>
+<blockquote>
+<p><strong>Cleanup hint.</strong> An admin may delete the stale ones:
+<code>kubectl delete instancetype gpustack--generic-linux-amd64 gpustack--nvidia-a10g-linux-amd64 gpustack--nvidia-tesla-t4-linux-amd64</code>.</p>
+</blockquote>
+<p>Re-purpose the <code>custom-demo</code> Instance stopped in section 4: a drained Instance carries operator-set
+<code>spec.stop: true</code>, so repoint its <code>type</code> at a CPU-aware pool and clear the stop:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl -n default patch instance custom-demo --type<span class="o">=</span>merge <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="go">    -p &#39;{&#34;spec&#34;:{&#34;type&#34;:&#34;gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64&#34;,&#34;stop&#34;:false}}&#39;
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl get instancetypes
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                               ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64   gpustack-fnv64-029fd9550e0c70bd   8/64Gi/100Gi            0/0 0/0 0/0 0/0            0/0   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-a10g-linux-amd64                  gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            0/0 0/0 0/0 0/0            0/0   Active
+</span></span></span></code></pre></div>
+</div><p><code>custom-demo</code> goes <code>Ready</code> on the aware pool, which drops to <code>0/0 0/0 0/0</code>, and the collapsed
+<code>gpustack--nvidia-a10g-linux-amd64</code> also drops: one accelerator, two consistent views.</p>
+<p>The aware ClusterQueue&rsquo;s labels now <strong>carry the CPU key</strong>, the difference from section 1:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ClusterQueue</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kubernetes.io/arch</span><span class="p">:</span><span class="w"> </span><span class="l">amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">feature.gpustack.ai/acceleratable</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratable.feature.gpustack.ai/nvidia-a10g</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">general.feature.gpustack.ai/amd-epyc-7r32</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">     </span><span class="c"># &lt;-- CPU key added when aware</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">resource.gpustack.ai/type</span><span class="p">:</span><span class="w"> </span><span class="l">instancetypes</span></span></span></code></pre></div>
+</div><p>The InstanceTypeFlavor catalog re-groups to per-<code>(gKey,aKey)</code> + per-<code>gKey</code>, replacing the collapsed
+rows:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get instancetypeflavor
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                                    GENERALGROUP                 ACCELERATORGROUP   ACCELERATABLE   MANUFACTURER   PRODUCT                                          MEMORY   CORES   SLICEABLE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--amd-epyc-7r13                                 amd-epyc-7r13                                   false           amd            AMD EPYC 7R13 Processor
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--amd-epyc-7r32                                 amd-epyc-7r32                                   false           amd            AMD EPYC 7R32
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--intel-xeon-platinum-8259cl                    intel-xeon-platinum-8259cl                      false           intel          Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--amd-epyc-7r32--nvidia-a10g                    amd-epyc-7r32                nvidia-a10g        true            nvidia         NVIDIA-A10G                                      24Gi     10240   true
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4   intel-xeon-platinum-8259cl   nvidia-tesla-t4    true            nvidia         Tesla-T4                                         16Gi     2560    true
+</span></span></span></code></pre></div>
+</div><p>The <code>ResourceFlavor</code> set is byte-for-byte unchanged, the same 7 as section 1: the flip re-grouped
+only the aggregation layer.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get resourceflavor --no-headers <span class="p">|</span> wc -l
+</span></span><span class="line"><span class="cl"><span class="go">7
+</span></span></span></code></pre></div>
+</div><p>Turning it back off collapses the layer again, still without touching a flavor.</p>
+<hr>
+<h2 id="6-pinning-an-instance-to-a-node-and-adding-volumes">6. Pinning an Instance to a node and adding volumes</h2>
+<p>An Instance normally lets the scheduler pick any node its pool covers. <code>spec.nodeName</code> narrows that to
+one, and <code>spec.additionalVolumes</code> mounts paths beside the workspace — a shared dataset, one ConfigMap
+key, a directory on the node itself:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">pinned-demo</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-tesla-t4-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeName</span><span class="p">:</span><span class="w"> </span><span class="l">node-t4-b                         </span><span class="w"> </span><span class="c"># pin to this node</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;86400&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">volume</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ephemeral</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="l">1Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">volumeMount</span><span class="p">:</span><span class="w"> </span><span class="l">/workspace                     </span><span class="w"> </span><span class="c"># the workspace, as always</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">additionalVolumes</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/mnt/datasets                </span><span class="w"> </span><span class="c"># a shared dataset, read-write</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">persistent</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">datasets</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/etc/model/config.json       </span><span class="w"> </span><span class="c"># one ConfigMap key, as a file</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">subPath</span><span class="p">:</span><span class="w"> </span><span class="l">config.json</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">configMap</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">model-config</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/mnt/host-cache              </span><span class="w"> </span><span class="c"># a directory on node-t4-b itself</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">hostPath</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/var/lib/gpustack-cache</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">DirectoryOrCreate</span></span></span></code></pre></div>
+</div><ul>
+<li><strong>The pin is a <code>nodeSelector</code>, never a direct assignment.</strong> The Pod gets one selector entry,
+<code>kubernetes.io/hostname: &lt;the node's own hostname label&gt;</code>, read from the Node because a provider may
+set it to something other than the Node&rsquo;s name. <code>pod.spec.nodeName</code> stays with the scheduler, so the
+Pod still queues through Kueue&rsquo;s <code>ClusterQueue</code> quota and the <code>node-devices</code> AdmissionCheck&rsquo;s
+per-accelerator feasibility gate; an unsatisfiable pin goes Pending with the scheduler&rsquo;s own reason
+instead of running elsewhere.</li>
+<li><strong>The node only has to exist</strong>, checked at <em>creation</em>. It need not be managed by the operator nor
+belong to the pinned type&rsquo;s pool: an accelerator-less Instance that only downloads a model must
+still land on a specific accelerated node.</li>
+<li><strong>Pool membership stays the scheduler&rsquo;s business.</strong> A <code>type</code>&rsquo;s pool and a pin&rsquo;s node are decided
+independently, so a pin into a heterogeneous pool can be admitted by Kueue and then stay Pending
+because the chosen flavor&rsquo;s labels do not match that node.</li>
+<li><strong>Each additional volume needs an absolute, canonical <code>mountPath</code></strong> duplicating neither another
+entry&rsquo;s path nor <code>spec.volumeMount</code>, and <strong>exactly one</strong> source: <code>persistent</code> (an
+<code>InstancePersistentVolume</code> in the same namespace), <code>configMap</code>, <code>secret</code> or <code>hostPath</code>. <code>readOnly</code>
+and <code>subPath</code> behave as on any Pod volume mount.</li>
+<li><strong>They mount into the workload container only.</strong> The SSH sidecar needs no change: it enters that
+container&rsquo;s mount namespace per session, so every mount is visible over SSH too.</li>
+<li><strong>A persistent claim places the Instance where it can attach.</strong> The workspace claim and every
+<code>persistent</code> entry follow the <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#claim-delivery-and-placement">claim placement rules</a>
+:
+a node-local volume pins the Instance to its node and that node&rsquo;s capacity; network or <code>ReadWriteMany</code>
+storage avoids the pin. A claim nothing binds creates no Pod and says why in <code>status.phaseMessage</code>;
+<a href="/gpustack-operator/main/docs/reference/settings/#online-adjustable-settings"><code>instance-persistent-volume-placement</code></a>
+ turns this off.</li>
+<li><strong>Both new fields are immutable while the Instance runs</strong>, editable while stopped — the rule the rest
+of <code>spec</code> follows.</li>
+</ul>
+<p>Two cross the host boundary, so each has its own administrator Setting, both <code>false</code> by default and
+kept separate so node-path mounts can be allowed without a container escape:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Setting</th>
+          <th>Gates</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>instance-privileged-allowed</code></td>
+          <td><code>spec.privileged</code> — escapes the container boundary, exposing the node&rsquo;s devices and kernel surface.</td>
+      </tr>
+      <tr>
+          <td><code>instance-host-path-volume-allowed</code></td>
+          <td><code>spec.additionalVolumes[*].hostPath</code> — reaches the node&rsquo;s filesystem, but not its devices or kernel.</td>
+      </tr>
+  </tbody>
+</table>
+<p>Each gates taking its escape, so turning one off stops new grants without stranding an Instance
+that already holds one; <a href="/gpustack-operator/main/docs/reference/settings/#online-adjustable-settings">Settings</a>
+ has the exact terms.</p>
+<p>Both govern the <strong>node</strong> boundary, not the namespace one: a <code>persistent</code>, <code>configMap</code> or <code>secret</code>
+source names an object in the Instance&rsquo;s own namespace and may always be mounted, the same reach a Pod
+there has. Namespaces stay the tenancy boundary: put Instances whose authors should not read each
+other&rsquo;s Secrets in their own.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/devices/requests/">Accelerator Requests</a>
+ (the contract behind step 3)</li><li><a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#walkthrough-three-mig-configurations-on-one-node">NVIDIA MIG Operations</a>
+
+(hardware partitioning)</li><li><a href="/gpustack-operator/main/docs/reference/settings/#online-adjustable-settings">Settings</a>
+ (the two gates)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
+ — hardware partitioning, from enabling
+the mode to reclaiming the instance.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/docs/getting-started/walkthrough.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/getting-started/walkthrough.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#the-cluster">The cluster</a></li>
+    <li><a href="#1-initial-state">1. Initial state</a>
+      <ul>
+        <li><a href="#node">Node</a></li>
+        <li><a href="#devices">Devices</a></li>
+        <li><a href="#resourceflavor">ResourceFlavor</a></li>
+        <li><a href="#clusterqueue">ClusterQueue</a></li>
+        <li><a href="#instancetype">InstanceType</a></li>
+        <li><a href="#instancetypeflavor">InstanceTypeFlavor</a></li>
+      </ul>
+    </li>
+    <li><a href="#2-removing-a-node-from-management">2. Removing a node from management</a></li>
+    <li><a href="#3-requesting-a-logical-sliced-gpu">3. Requesting a logical sliced GPU</a></li>
+    <li><a href="#4-managing-a-custom-instancetype">4. Managing a custom InstanceType</a></li>
+    <li><a href="#5-enabling-cpu-manufacturer-awareness">5. Enabling CPU-manufacturer awareness</a></li>
+    <li><a href="#6-pinning-an-instance-to-a-node-and-adding-volumes">6. Pinning an Instance to a node and adding volumes</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

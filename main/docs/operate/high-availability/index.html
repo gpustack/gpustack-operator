@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>High Availability Operations · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/operate/high-availability/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+      data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/operate/high-availability/">
+      <option value="/gpustack-operator/main/">main</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/main/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" aria-current="page">High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/operate/">Operations</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">High Availability Operations</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="high-availability-operations">High Availability Operations</h1>
+<p>Every control-plane component the chart deploys elects a leader, so extra replicas stand by. They buy
+failover, not throughput. A highly available install raises each replica count and turns on its
+disruption budget; everything else is one pod per node (device managers, NFD worker, both CSI node
+DaemonSets).</p>
+<p>Configure it in <code>values.yaml</code>: no HA values file ships. Every knob below sits at its chart&rsquo;s default,
+and the caveats are inline.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#node-count-prerequisites">Node count prerequisites</a>
+</li>
+<li><a href="#per-component-settings">Per-component settings</a>
+</li>
+<li><a href="#the-non-redundant-topology">The non-redundant topology</a>
+</li>
+<li><a href="#verify">Verify</a>
+</li>
+</ul>
+<h2 id="node-count-prerequisites">Node count prerequisites</h2>
+<p>A <code>DoNotSchedule</code> spread needs <strong>at least as many schedulable nodes as your largest replica count</strong>; below
+that, surplus replicas stay <code>Pending</code> forever. This page assumes three replicas on three nodes; with
+fewer, lower the counts or use <code>ScheduleAnyway</code>, a preference. The components tolerate control-plane
+taints, so three control-plane nodes spread fine.</p>
+<p>They tolerate <strong>those taints and no others</strong>, a cordon&rsquo;s included, so a pod evicted by a drain never
+lands back on the node being drained. Where your nodes carry a taint of your own, add it to each
+component&rsquo;s <code>tolerations</code>.</p>
+<p>Earlier releases let the Kueue controller manager, the NFD master and the NFD gc tolerate every taint;
+an install that relied on that must set their three lists before upgrading. Upgrade with
+<code>--reset-then-reuse-values</code>, not <code>--reuse-values</code>, or the new lists never reach the release; see
+<a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/deploy/gpustack-operator/chart/README.md#upgrading-the-chart">Upgrading the Chart</a>
+.</p>
+<h2 id="per-component-settings">Per-component settings</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Component</th>
+          <th>Replicas</th>
+          <th>PodDisruptionBudget</th>
+          <th>Node spread</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Worker (control plane)</td>
+          <td><code>worker.replicas</code></td>
+          <td><code>worker.podDisruptionBudget.enabled</code> + <code>.minAvailable</code></td>
+          <td><code>worker.topologySpreadConstraints</code>, or <code>worker.affinity</code></td>
+      </tr>
+      <tr>
+          <td>Kueue controller manager</td>
+          <td><code>kueue.controllerManager.replicas</code></td>
+          <td><code>kueue.controllerManager.podDisruptionBudget.enabled</code> + <code>.minAvailable</code></td>
+          <td><code>kueue.controllerManager.topologySpreadConstraints</code></td>
+      </tr>
+      <tr>
+          <td>NFD master</td>
+          <td><code>node-feature-discovery.master.replicaCount</code></td>
+          <td><code>node-feature-discovery.master.podDisruptionBudget.enable</code> + <code>.minAvailable</code></td>
+          <td><code>node-feature-discovery.master.affinity</code> only</td>
+      </tr>
+      <tr>
+          <td>NFS CSI controller</td>
+          <td><code>csi-driver-nfs.controller.replicas</code></td>
+          <td>— none —</td>
+          <td><code>csi-driver-nfs.controller.topologySpreadConstraints</code> (vendored patch)</td>
+      </tr>
+      <tr>
+          <td>S3 CSI controller</td>
+          <td><code>csi-driver-s3.controller.replicas</code></td>
+          <td>— none —</td>
+          <td>— none —</td>
+      </tr>
+  </tbody>
+</table>
+<p>Those &ldquo;none&rdquo; and &ldquo;only&rdquo; cells are upstream chart limitations: each changes what three replicas get
+you, and each is spelled out below.</p>
+<h3 id="example-values">Example values</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">worker</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">podDisruptionBudget</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">minAvailable</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">topologySpreadConstraints</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">maxSkew</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">topologyKey</span><span class="p">:</span><span class="w"> </span><span class="l">kubernetes.io/hostname</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">whenUnsatisfiable</span><span class="p">:</span><span class="w"> </span><span class="l">DoNotSchedule</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kueue</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">controllerManager</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">podDisruptionBudget</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minAvailable</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topologySpreadConstraints</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">maxSkew</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">topologyKey</span><span class="p">:</span><span class="w"> </span><span class="l">kubernetes.io/hostname</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">whenUnsatisfiable</span><span class="p">:</span><span class="w"> </span><span class="l">DoNotSchedule</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">labelSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">app.kubernetes.io/name</span><span class="p">:</span><span class="w"> </span><span class="l">kueue</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">control-plane</span><span class="p">:</span><span class="w"> </span><span class="l">controller-manager</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">node-feature-discovery</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">master</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicaCount</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">podDisruptionBudget</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minAvailable</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">csi-driver-nfs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">strategyType</span><span class="p">:</span><span class="w"> </span><span class="l">RollingUpdate</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topologySpreadConstraints</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">maxSkew</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">topologyKey</span><span class="p">:</span><span class="w"> </span><span class="l">kubernetes.io/hostname</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">whenUnsatisfiable</span><span class="p">:</span><span class="w"> </span><span class="l">DoNotSchedule</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">labelSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l">csi-nfs-controller</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">csi-driver-s3</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">strategyType</span><span class="p">:</span><span class="w"> </span><span class="l">RollingUpdate</span></span></span></code></pre></div>
+</div><div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm upgrade gpustack-operator gpustack/gpustack-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --namespace gpustack-system --reset-then-reuse-values --values ha.yaml</span></span></code></pre></div>
+</div><h3 id="worker-control-plane">Worker (control plane)</h3>
+<p>The worker runs the aggregated extension API server and the scheduling-chain controllers in one
+process. Only one replica reconciles, because leader election is always on. Every replica serves the
+extension API and the admission webhooks, so with one, losing its node takes <code>kubectl get instancetypes</code>
+and Pod admission down until it reschedules.</p>
+<p>Node spread belongs in <code>worker.topologySpreadConstraints</code>. Its default <code>preferred</code> pod anti-affinity is
+deliberate: replicas stay off one node without any becoming unschedulable, so three still come up on two
+nodes. An entry omitting <code>labelSelector</code> gets the worker&rsquo;s own; <code>worker.affinity</code> <strong>replaces</strong> the
+default rather than adding to it.</p>
+<h3 id="kueue-controller-manager">Kueue controller manager</h3>
+<p>Kueue&rsquo;s <code>managerConfig</code> elects a leader, so standbys do not reconcile. Each replica still serves Kueue&rsquo;s
+admission webhook, whose <code>failurePolicy: Fail</code> means one replica losing its node <strong>blocks Pod creation in
+every namespace Kueue manages</strong> until it reschedules. HA buys the most here.</p>
+<ul>
+<li>The spread constraints carry no selector of their own. Unlike the worker&rsquo;s, they render as given, so
+a <code>DoNotSchedule</code> spread needs <code>labelSelector</code> spelled out: <code>app.kubernetes.io/name: kueue</code> plus
+<code>control-plane: controller-manager</code>, as in the example. Omit it and the spread counts every pod in
+the namespace.</li>
+<li>The Kueue chart has no affinity key, so spread constraints are its only placement control.</li>
+</ul>
+<h3 id="nfd-master">NFD master</h3>
+<p>The NFD master turns detections into node labels: while it is down, no node is (re)classified and the
+chain stalls for new or changed nodes. Labelled nodes and admitted workloads are unaffected.</p>
+<ul>
+<li>NFD spells the budget key <code>enable</code>, not <code>enabled</code>: a stray <code>enabled: true</code> is schema-valid and
+does nothing.</li>
+<li>Above one replica, NFD&rsquo;s chart adds <code>-enable-leader-election</code> for you. Standbys watch without
+writing.</li>
+<li>NFD&rsquo;s templates render no topology spread constraints, so spreading the master means
+<code>node-feature-discovery.master.affinity</code>, which <strong>replaces</strong> NFD&rsquo;s preference for control-plane nodes;
+re-state it if wanted.</li>
+</ul>
+<p>The garbage collector stays at one replica: a stalled GC only delays cleanup of a departed node&rsquo;s
+objects, which nothing reads.</p>
+<h3 id="the-two-csi-controllers">The two CSI controllers</h3>
+<p>Losing a CSI controller delays volume provisioning, resizing and snapshotting; volumes already mounted
+keep working, because the mounting side is the node DaemonSet. These are the least urgent of the four,
+with the weakest chart support.</p>
+<p>Both charts render no PodDisruptionBudget, and honour <code>controller.affinity</code> <strong>only when it carries
+<code>nodeSelectorTerms</code></strong>: a pod anti-affinity is schema-valid, then silently dropped.</p>
+<p>The S3 chart renders no topology spread at all, so two replicas may land on one node and a drain can
+take both. Raise its count for process-level failover; it gives no node-level redundancy.</p>
+<p>The NFS chart renders <code>controller.topologySpreadConstraints</code> through a vendored patch, and above one
+replica the spread is <strong>required, not just prudent</strong>: its pods run on the host network and bind the
+liveness health port there, so two pods on one node leave the second crash-looping on the bind and the
+Deployment never fully ready. As with Kueue, the example&rsquo;s <code>labelSelector</code> must be spelled out.</p>
+<p>Also set <code>strategyType: RollingUpdate</code>: both default to <code>Recreate</code>, which takes every replica down
+before the new one starts and gives up, at every upgrade, the failover the replica was added for.</p>
+<h2 id="the-non-redundant-topology">The non-redundant topology</h2>
+<p>When the worker runs <strong>outside</strong> the cluster it manages but near it (image mode, <code>!LoopbackKubeInside &amp;&amp; LoopbackKubeNearby</code>), its admission webhooks register against one node IP URL instead of a Service.
+That URL is a single endpoint, so extra replicas receive no traffic; the source calls this &ldquo;launch
+multiple instances, only one takes working&rdquo;. <strong>Keep that topology at one replica.</strong> Chart mode is
+unaffected: its webhooks are always in-cluster and Service-backed.</p>
+<h2 id="verify">Verify</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">NS</span><span class="o">=</span>gpustack-system
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># Every control-plane Deployment reports its full replica count Ready.</span>
+</span></span><span class="line"><span class="cl">kubectl -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> get deploy
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># The budgets exist and are satisfied (ALLOWED DISRUPTIONS ≥ 1).</span>
+</span></span><span class="line"><span class="cl">kubectl -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> get pdb
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># Replicas really are on distinct nodes — one line per pod, node in the second column.</span>
+</span></span><span class="line"><span class="cl">kubectl -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> get pods -o wide <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --field-selector status.phase<span class="o">=</span>Running <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o custom-columns<span class="o">=</span><span class="s1">&#39;POD:.metadata.name,NODE:.spec.nodeName&#39;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># The NFD master elected a leader (only above one replica).</span>
+</span></span><span class="line"><span class="cl">kubectl -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> logs deploy/node-feature-discovery-master <span class="p">|</span> grep -i <span class="s2">&#34;leader&#34;</span></span></span></code></pre></div>
+</div><p>Then the failover: drain the node running the worker&rsquo;s leader; a standby takes over:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl drain &lt;node&gt; --ignore-daemonsets --delete-emptydir-data
+</span></span><span class="line"><span class="cl">kubectl -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> rollout status deploy/gpustack-operator-worker
+</span></span><span class="line"><span class="cl">kubectl get instancetypes          <span class="c1"># served throughout by the surviving replicas</span>
+</span></span><span class="line"><span class="cl">kubectl uncordon &lt;node&gt;</span></span></code></pre></div>
+</div><nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/operate/installation-modes/">Installation Modes</a>
+ (these knobs need chart mode; image
+mode has no user-values channel)</li><li><a href="/gpustack-operator/main/docs/contribute/internals/#worker-startup-order">Internals</a></li><li><a href="/gpustack-operator/main/docs/reference/settings/">Settings</a></li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/leader/#high-availability">KV Cache Backend</a>
+ — a <code>KVCacheBackend</code>&rsquo;s leader elects the
+same way but is <strong>not</strong> a chart component: it is a custom resource, so its replica count is a field on
+the object rather than a value here</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/">NVIDIA MIG Operations</a>
+.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/docs/operate/high-availability.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/operate/high-availability.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#node-count-prerequisites">Node count prerequisites</a></li>
+    <li><a href="#per-component-settings">Per-component settings</a>
+      <ul>
+        <li><a href="#example-values">Example values</a></li>
+        <li><a href="#worker-control-plane">Worker (control plane)</a></li>
+        <li><a href="#kueue-controller-manager">Kueue controller manager</a></li>
+        <li><a href="#nfd-master">NFD master</a></li>
+        <li><a href="#the-two-csi-controllers">The two CSI controllers</a></li>
+      </ul>
+    </li>
+    <li><a href="#the-non-redundant-topology">The non-redundant topology</a></li>
+    <li><a href="#verify">Verify</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

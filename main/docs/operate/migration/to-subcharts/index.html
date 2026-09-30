@@ -1,0 +1,799 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Migrating to Bundled Subcharts · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+      data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/operate/migration/to-subcharts/">
+      <option value="/gpustack-operator/main/">main</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/main/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" open>
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" aria-current="page">Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/operate/migration/">Upgrades</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Migrating to Bundled Subcharts</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="migrating-to-bundled-subcharts">Migrating to Bundled Subcharts</h1>
+<p>Through v0.7.x the chart deployed only the worker and device managers; the worker installed
+Kueue, Node Feature Discovery and the two CSI drivers at runtime, each its own Helm release:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Runtime release</th>
+          <th>Becomes</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>gpustack-kueue</code></td>
+          <td>the <code>kueue</code> subchart of the operator release</td>
+      </tr>
+      <tr>
+          <td><code>gpustack-node-feature-discovery</code></td>
+          <td>the <code>node-feature-discovery</code> subchart</td>
+      </tr>
+      <tr>
+          <td><code>gpustack-csi-driver-nfs</code></td>
+          <td>the <code>csi-driver-nfs</code> subchart</td>
+      </tr>
+      <tr>
+          <td><code>gpustack-csi-driver-s3</code></td>
+          <td>the <code>csi-driver-s3</code> subchart</td>
+      </tr>
+  </tbody>
+</table>
+<p>They are now subcharts of the operator release, sharing its <code>values.yaml</code>; the worker installs
+nothing at runtime by default (<code>worker.disableApplications</code> contains only <code>*</code>).</p>
+<p>Nothing is torn down: Helm&rsquo;s ownership transfer adopts those objects in place, so your
+ClusterQueues, Workloads, ResourceFlavors, node labels and mounted volumes survive.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#the-one-time-upgrade">The one-time upgrade</a>
+</li>
+<li><a href="#upgrade-hooks">Upgrade hooks</a>
+</li>
+<li><a href="#automatic-migration-in-image-mode">Automatic migration in image mode</a>
+</li>
+<li><a href="#if-kueue-or-nfd-was-not-installed-by-helm">If Kueue or NFD was not installed by Helm</a>
+</li>
+<li><a href="#permanent-changes">Permanent changes</a>
+</li>
+<li><a href="#do-not-roll-back-with-helm-rollback">Do not roll back with helm rollback</a>
+</li>
+<li><a href="#verify">Verify</a>
+</li>
+</ul>
+<h2 id="the-one-time-upgrade">The one-time upgrade</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm repo add gpustack https://docs.gpustack.ai/gpustack-operator/charts
+</span></span><span class="line"><span class="cl">helm repo update
+</span></span><span class="line"><span class="cl">helm upgrade gpustack-operator gpustack/gpustack-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --namespace gpustack-system <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --take-ownership</span></span></code></pre></div>
+</div><p><code>--take-ownership</code> legalizes the adoption: Helm otherwise refuses every object carrying another
+release&rsquo;s ownership metadata. Needed <strong>once</strong>: drop it afterwards, since it adopts <em>any</em> live
+object the render names, hand-created ones included.</p>
+<p>Helm 3.21+ only: that is the version this migration was validated with, the one <code>hack/lib/helm.sh</code>
+pins, and older clients have no such flag.</p>
+<h3 id="keep-the-release-name-and-the-namespace">Keep the release name and the namespace</h3>
+<p>Keep the install instructions&rsquo; release name <strong><code>gpustack-operator</code></strong> and namespace
+<strong><code>gpustack-system</code></strong>. Both are load-bearing:</p>
+<ul>
+<li>The release name bases <code>gpustack-operator-worker</code> and
+<code>gpustack-operator-device-manager-&lt;manufacturer&gt;</code>, which the docs, the chart&rsquo;s <code>files/cleanup.sh</code>
+fallback and the e2e suites assume; the subcharts pin their own through <code>fullnameOverride</code>.
+Renaming the release renames the worker and its device managers, which is a rollout rather than
+an adoption.</li>
+<li>The namespace is where your install is, and an upgrade cannot move a release. Nothing in the
+chart requires this one: Kueue&rsquo;s <code>managedJobsNamespaceSelector</code>, which keeps Kueue off the
+operator&rsquo;s own Jobs (migration hooks included), renders from the release namespace, so a fresh
+install can go anywhere. The only rule is Kueue&rsquo;s own: it refuses to start when it matches its
+own namespace.</li>
+</ul>
+<h2 id="upgrade-hooks">Upgrade hooks</h2>
+<p>Two hook Jobs run the operator image, which bundles <code>helm</code>, <code>kubectl</code>, <code>jq</code> and the packaged chart.
+Both are idempotent and no-ops on a healthy cluster.</p>
+<p><strong>Before</strong> the upgrade (<code>pre-upgrade</code>, and <code>pre-install</code> too):</p>
+<ol>
+<li>Reap a stranded Kueue. Custom resources still holding <code>kueue.x-k8s.io/resource-in-use</code> when
+their controller is torn down strand Kueue&rsquo;s CRDs <code>Terminating</code> forever, failing every install of
+this chart. The Job deletes the Kueue webhook configurations first (<code>failurePolicy: Fail</code> would
+reject the finalizer-clearing patch), strips the finalizers, and drains the CRDs. It runs on
+fresh installs too, which is the only way onto such a cluster.</li>
+<li>Apply the subcharts&rsquo; <code>crds/</code>. Helm applies <code>crds/</code> on install only; without this NFD&rsquo;s CRD
+schema changes never land and a newly enabled NFD has no CRD for the chart&rsquo;s <code>NodeFeatureRule</code>.</li>
+</ol>
+<p><strong>After</strong> it (<code>post-upgrade</code>, upgrades only):</p>
+<ol start="3">
+<li>Retire the four legacy release records (<code>kubectl delete secret -l owner=helm,name=&lt;release&gt;</code>),
+and never <code>helm uninstall</code> them: that deletes the objects just adopted. Left in place, a later
+<code>helm uninstall gpustack-kueue</code> destroys them.</li>
+<li>Prune what the legacy releases created and the new render does not contain. Adoption rewrites
+<code>app.kubernetes.io/instance</code> on everything the render resolves, so a surviving legacy instance
+label marks what the render never mentions: unowned, and invisible to <code>helm uninstall</code>. Excluded:
+CRDs (a deleted CRD takes its custom resources), PersistentVolumes, PersistentVolumeClaims.</li>
+</ol>
+<p><code>helm upgrade --no-hooks</code> skips both, to do this by hand. Afterwards <code>helm list</code> must show one
+release, not five:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm list -n gpustack-system     <span class="c1"># expect: gpustack-operator only</span></span></span></code></pre></div>
+</div><h2 id="automatic-migration-in-image-mode">Automatic migration in image mode</h2>
+<p>Installing the bundled chart from inside its own image, the worker detects its own legacy release
+and sets the transfer for that install only, never unconditionally, so there is nothing to run.</p>
+<h2 id="if-kueue-or-nfd-was-not-installed-by-helm">If Kueue or NFD was not installed by Helm</h2>
+<p>Everything above assumes Helm releases. Kueue and NFD also come from raw manifests, kustomize, or
+another operator bundling them; nothing adopts those, and image-mode detection (a Secret labelled
+<code>owner=helm,name=…</code>) never sees them.</p>
+<ul>
+<li><strong>Kueue collides, on its CRDs.</strong> This chart templates them under API-group names, not
+release-derived ones, and Helm refuses <em>missing</em> ownership metadata as firmly as another release&rsquo;s:
+<code>invalid ownership metadata</code>, for the absent <code>app.kubernetes.io/managed-by: Helm</code> label and
+<code>meta.helm.sh/release-name</code> annotation.</li>
+<li><strong>NFD&rsquo;s CRDs do not collide.</strong> Its <code>crds/</code> are applied on install, skipped when present, never
+recorded: no ownership metadata, never checked.</li>
+<li><strong>The namespaced objects not colliding is the real hazard.</strong> A manifest-installed Kueue lives in
+<code>kueue-system</code>, this chart&rsquo;s in the release namespace: no conflict, no error, and a forced install
+then leaves two Kueue controllers reconciling the same Workloads cluster-wide.</li>
+</ul>
+<p><code>--take-ownership</code> gets past that error, but adopting a foreign Kueue that way leaves the
+two-controllers hazard above. Pick a
+starting point instead.</p>
+<p>Keep what you have when something else depends on that Kueue:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm upgrade --install gpustack-operator gpustack/gpustack-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --namespace gpustack-system --create-namespace <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set kueue.enabled<span class="o">=</span><span class="nb">false</span> --set node-feature-discovery.enabled<span class="o">=</span>false</span></span></code></pre></div>
+</div><p>Both switches are supported paths, not workarounds; NFD off still leaves the <code>gpustack-cpu-info</code>
+<code>NodeFeatureRule</code> the scheduling chain starts from, applied unconditionally by the worker against
+whichever NFD is present. You then keep both at operator-compatible versions.</p>
+<p>Or hand them over: delete the non-Helm install&rsquo;s workloads, Services, RBAC and, importantly,
+its webhook configurations, whose <code>failurePolicy: Fail</code> would reject every Workload write once their
+Service is gone. Leave the CRDs alone (deleting one deletes every custom resource of that kind) and
+give them the ownership Helm looks for:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="k">for</span> crd in <span class="k">$(</span>kubectl get crd -o name <span class="p">|</span> grep <span class="s1">&#39;kueue\.x-k8s\.io&#39;</span><span class="k">)</span><span class="p">;</span> <span class="k">do</span>
+</span></span><span class="line"><span class="cl">  kubectl label    <span class="s2">&#34;</span><span class="nv">$crd</span><span class="s2">&#34;</span> app.kubernetes.io/managed-by<span class="o">=</span>Helm --overwrite
+</span></span><span class="line"><span class="cl">  kubectl annotate <span class="s2">&#34;</span><span class="nv">$crd</span><span class="s2">&#34;</span> meta.helm.sh/release-name<span class="o">=</span>gpustack-operator <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>                          meta.helm.sh/release-namespace<span class="o">=</span>gpustack-system --overwrite
+</span></span><span class="line"><span class="cl"><span class="k">done</span></span></span></code></pre></div>
+</div><p>then install normally: this is <code>--take-ownership</code>&rsquo;s adoption, narrowed to what needs it. Read <a href="#do-not-roll-back-with-helm-rollback">Do not roll
+back</a>
+ first, because the release then owns those CRDs.</p>
+<h2 id="permanent-changes">Permanent changes</h2>
+<h3 id="manufacturers-moved-to-globalmanufacturers"><code>manufacturers</code> moved to <code>global.manufacturers</code></h3>
+<p>The top-level <code>manufacturers</code> map is now <code>global.manufacturers</code>, each entry carrying
+a manufacturer&rsquo;s whole identity, not only its PCI vendor ID:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">global</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">manufacturers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">pciVendorID</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10de&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resourceName</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia.com/gpu</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">runtimeName</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">runtimeInjectsDriver</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">partitionKind</span><span class="p">:</span><span class="w"> </span><span class="l">mig</span></span></span></code></pre></div>
+</div><p>The bundled Kueue subchart reads the value too, so it moved under <code>global</code> to share it with both
+charts. If you left it unset, no change is needed; the defaults moved with it. Convert an override
+to a row and remove the old key: nothing reads top-level <code>manufacturers</code> any more, so leaving it
+there makes the device managers fall back to the default vendor IDs.</p>
+<p>The chart now creates <strong><code>ascend</code>, <code>iluvatar</code>, <code>mthreads</code> and <code>nvidia</code></strong>, and no longer <code>amd</code>, whose
+allocator injects its own device nodes. Neither is a consequence of this migration.</p>
+<p>Creation still happens only where the class is absent or already belongs to this release.
+<code>runtimeName</code>, which most rows state, names the class the operator will <em>use</em>; creating one is gated
+on the narrower <code>runtimeInjectsDriver</code> or <code>runtimeInjectsDevices</code>, where the runtime is certainly
+installed. <code>deviceManager.createRuntimeClasses=false</code> remains the opt-out.</p>
+<h3 id="workercertmanager-moved-to-globalcertmanager"><code>worker.certmanager</code> moved to <code>global.certmanager</code></h3>
+<p>The block that sat under <code>worker</code> is <code>global.certmanager</code>, same keys, same <code>auto</code> default:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">global</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">certmanager</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l">auto</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">issuer</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Issuer</span></span></span></code></pre></div>
+</div><p>It moved for the reason <code>manufacturers</code> did: the bundled Kueue reads it, ending a split where the
+worker decided cert-manager for itself while Kueue, defaulting off upstream, never saw <code>auto</code>&rsquo;s CRD
+detection.</p>
+<p>On a cluster that has cert-manager, this upgrade therefore moves Kueue onto it. Kueue stops
+generating and rotating its own webhook certificate and consumes a <code>Certificate</code> this chart creates,
+and cainjector fills the CA bundles its webhooks and CRD conversion carry.</p>
+<p>Decide before upgrading, and pass it <strong>in the same <code>helm upgrade</code></strong>: <code>--set global.certmanager.enabled=false</code> keeps every component, worker included, self-managing. A
+<code>worker.certmanager</code> left in your values is ignored.</p>
+<p>Naming an existing issuer (<code>global.certmanager.issuer.name</code>) now covers Kueue&rsquo;s certificates as well
+as the worker&rsquo;s, and no self-signed Issuer is created for either.</p>
+<h4 id="disabling-cert-manager-after-the-migration">Disabling cert-manager after the migration</h4>
+<p>Turning it on later needs no flags: everything that <code>--set global.certmanager.enabled=auto</code> (or
+<code>true</code>) once changed (<code>insecureSkipTLSVerify</code> on the visibility APIServices, Kueue&rsquo;s self-managed
+Secret) was written by Helm and is known to Helm, which removes it.</p>
+<p>The other way unwinds what cert-manager wrote, which Helm never recorded, and fails twice:</p>
+<ul>
+<li><code>Secret &quot;kueue-webhook-server-cert&quot; ... cannot be imported into the current release: invalid ownership metadata</code>. Kueue&rsquo;s chart templates that Secret when self-managing, cert-manager creates
+it otherwise: same name, no Helm ownership. Checked <strong>before</strong> any hook runs, and deleting it by
+hand fails too, because the live <code>Certificate</code> is reissued within seconds.</li>
+<li>Past that, <code>spec.insecureSkipTLSVerify: Invalid value: true: may not be true if caBundle is present</code> on both <code>visibility.kueue.x-k8s.io</code> APIServices: self-management sets that field while
+the live object carries cainjector&rsquo;s CA bundle. <strong>Not atomic</strong>: the release lands in <code>failed</code>
+with the visibility API <code>FailedDiscoveryCheck</code>.</li>
+</ul>
+<p>The sequence that completes cleanly, verified on a cluster:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># 1. Drop the two APIServices carrying cert-manager&#39;s CA bundle. The release recreates them.</span>
+</span></span><span class="line"><span class="cl">kubectl delete apiservice v1beta1.visibility.kueue.x-k8s.io v1beta2.visibility.kueue.x-k8s.io
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 2. --take-ownership lets Helm adopt the Secret cert-manager owns (Helm 3.21+).</span>
+</span></span><span class="line"><span class="cl">helm upgrade gpustack-operator &lt;chart&gt; --namespace gpustack-system --reset-then-reuse-values <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set global.certmanager.enabled<span class="o">=</span><span class="nb">false</span> --take-ownership --wait</span></span></code></pre></div>
+</div><p>It also recovers the release if you have already hit the second failure.</p>
+<p>The same happens if cert-manager is uninstalled while <code>global.certmanager.enabled</code> is <code>auto</code>:
+the answer flips with nobody editing a value, and the next upgrade, even an image bump, fails
+identically. Where cert-manager comes and goes, state <code>&quot;true&quot;</code> or <code>&quot;false&quot;</code> rather than <code>auto</code>.</p>
+<h3 id="helm-uninstall-removes-kueue"><code>helm uninstall</code> removes Kueue</h3>
+<p>Kueue used to be its own release and outlived an operator uninstall. The release now owns Kueue
+and its CRDs, and a deleted CRD takes every custom resource of that kind, so
+<code>helm uninstall gpustack-operator</code> deletes <strong>every ClusterQueue, LocalQueue, ResourceFlavor,
+AdmissionCheck and Workload in the cluster</strong>, not only the operator&rsquo;s.</p>
+<p>If something else depends on Kueue, keep it and disable the subcharts with
+<code>--set kueue.enabled=false</code>,
+whether or not your Kueue came from Helm (<a href="#if-kueue-or-nfd-was-not-installed-by-helm">the not-installed-by-Helm
+case</a>
+ needs extra steps). The chart prints the uninstall
+notes at install time, so you need not remember this.</p>
+<h3 id="leftover-certificate-secrets">Leftover certificate Secrets</h3>
+<p>Older workers cached certificates in Secrets named by <code>generateName: gpustack-cert-</code>, one per
+restart. The cache is now a fixed <code>gpustack-cert-&lt;hash&gt;</code> derived from content, so the churn stops
+and the randomly named ones go unread. They are inert, never Helm-owned, and nothing removes them:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># Inspect first — these are Secrets, and a hand-created one could match.</span>
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-system get secret <span class="p">|</span> grep <span class="s1">&#39;^gpustack-cert-&#39;</span></span></span></code></pre></div>
+</div><p>The live one has a 16-character hex hash; the others carry Kubernetes&rsquo; 5-character random suffix.
+Delete them at your leisure, or leave them.</p>
+<h2 id="do-not-roll-back-with-helm-rollback">Do not roll back with <code>helm rollback</code></h2>
+<p><code>helm rollback</code> is destructive here, more so than the upgrade was. It deletes every resource the
+current revision contains and the target does not, and the target, predating the subchart layout,
+contains no Kueue. So the Kueue objects just adopted go, <strong>including Kueue&rsquo;s CRDs</strong> (shipped
+as templates, not under <code>crds/</code>), and with them every ClusterQueue, LocalQueue, ResourceFlavor,
+AdmissionCheck and Workload. The legacy release records are gone, so nothing hands them back.</p>
+<p>To return to the split-release layout, do it deliberately: uninstall and reinstall the version you
+want, following Path A of <a href="/gpustack-operator/main/docs/operate/migration/from-v0.5/">Migrating from v0.5.x</a>
+ unchanged.</p>
+<p>So snapshot the chain first; it is the only thing that makes a mistake recoverable:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get clusterqueues,resourceflavors,admissionchecks,instancetypes,localqueues -A -o yaml <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  &gt; gpustack-chain.yaml</span></span></code></pre></div>
+</div><p>Running Pods are never touched. A bad rollback costs the chain&rsquo;s own objects; the worker
+re-materializes most from the nodes on its next reconcile, but not <code>InstanceType</code>s an administrator
+authored or edited by hand, nor any queued (not yet admitted) <code>Workload</code>.</p>
+<h2 id="verify">Verify</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nv">NS</span><span class="o">=</span>gpustack-system
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># One release, and the four runtime ones are gone.</span>
+</span></span><span class="line"><span class="cl">helm list -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># The worker is up on the new version.</span>
+</span></span><span class="line"><span class="cl">kubectl -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> rollout status deploy/gpustack-operator-worker
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># Kueue, NFD and the CSI drivers now belong to the operator release.</span>
+</span></span><span class="line"><span class="cl">kubectl -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> get deploy,daemonset <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l app.kubernetes.io/instance<span class="o">=</span>gpustack-operator -o name
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># Nothing still carries a legacy release&#39;s instance label (expect empty for both).</span>
+</span></span><span class="line"><span class="cl"><span class="nv">LEGACY</span><span class="o">=</span><span class="s1">&#39;app.kubernetes.io/instance in (gpustack-kueue,gpustack-node-feature-discovery,gpustack-csi-driver-nfs,gpustack-csi-driver-s3)&#39;</span>
+</span></span><span class="line"><span class="cl">kubectl get deploy,daemonset,svc,sa,cm,role,rolebinding -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> -o name -l <span class="s2">&#34;</span><span class="nv">$LEGACY</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl">kubectl get clusterrole,clusterrolebinding,csidriver,storageclass -o name -l <span class="s2">&#34;</span><span class="nv">$LEGACY</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># The scheduling chain survived: same counts as before the upgrade.</span>
+</span></span><span class="line"><span class="cl">kubectl get clusterqueues,resourceflavors,instancetypes
+</span></span><span class="line"><span class="cl">kubectl get admissioncheck                    <span class="c1"># expect: gpustack-node-devices</span>
+</span></span><span class="line"><span class="cl">kubectl get workloads -A                       <span class="c1"># admitted workloads still admitted</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># NFD node labels survived.</span>
+</span></span><span class="line"><span class="cl">kubectl get nodes -o json <span class="p">|</span> grep -c <span class="s1">&#39;feature.gpustack.ai/&#39;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># No Kueue CRD is wedged Terminating (DELETING is &lt;none&gt; for every row).</span>
+</span></span><span class="line"><span class="cl">kubectl get crd -o custom-columns<span class="o">=</span>NAME:.metadata.name,DELETING:.metadata.deletionTimestamp <span class="p">|</span> grep kueue</span></span></code></pre></div>
+</div><nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/operate/installation-modes/">Installation Modes</a>
+ (what the two modes own after the
+transfer)</li><li><a href="/gpustack-operator/main/docs/operate/high-availability/">High Availability Operations</a>
+ (the replica knobs now live in one
+<code>values.yaml</code>)</li><li><a href="/gpustack-operator/main/docs/operate/migration/from-v0.5/">Migrating from v0.5.x</a></li><li><a href="/gpustack-operator/main/docs/operate/migration/troubleshooting/">Migration Troubleshooting</a>
+
+(when the transfer wedges)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/reference/settings/">Settings</a>
+ — the configuration surface the transfer unifies.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/docs/operate/migration/to-subcharts.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/operate/migration/to-subcharts.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#the-one-time-upgrade">The one-time upgrade</a>
+      <ul>
+        <li><a href="#keep-the-release-name-and-the-namespace">Keep the release name and the namespace</a></li>
+      </ul>
+    </li>
+    <li><a href="#upgrade-hooks">Upgrade hooks</a></li>
+    <li><a href="#automatic-migration-in-image-mode">Automatic migration in image mode</a></li>
+    <li><a href="#if-kueue-or-nfd-was-not-installed-by-helm">If Kueue or NFD was not installed by Helm</a></li>
+    <li><a href="#permanent-changes">Permanent changes</a>
+      <ul>
+        <li><a href="#manufacturers-moved-to-globalmanufacturers"><code>manufacturers</code> moved to <code>global.manufacturers</code></a></li>
+        <li><a href="#workercertmanager-moved-to-globalcertmanager"><code>worker.certmanager</code> moved to <code>global.certmanager</code></a></li>
+        <li><a href="#helm-uninstall-removes-kueue"><code>helm uninstall</code> removes Kueue</a></li>
+        <li><a href="#leftover-certificate-secrets">Leftover certificate Secrets</a></li>
+      </ul>
+    </li>
+    <li><a href="#do-not-roll-back-with-helm-rollback">Do not roll back with <code>helm rollback</code></a></li>
+    <li><a href="#verify">Verify</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

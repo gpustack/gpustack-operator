@@ -1,0 +1,19 @@
+{
+  "latest": "main",
+  "versions": [
+    {
+      "name": "main",
+      "path": "main/",
+      "commit": "aa96eb413a868585d700368f3bc26cfb22541723",
+      "kind": "development"
+    }
+  ],
+  "published": [
+    {
+      "name": "main",
+      "path": "main/",
+      "commit": "aa96eb413a868585d700368f3bc26cfb22541723",
+      "kind": "development"
+    }
+  ]
+}

@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/main/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Model Deployment Routing · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/routing/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/main/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
+      data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/modules/model-deployment/routing/">
+      <option value="/gpustack-operator/main/">main</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/main/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/main/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/main/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/main/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/main/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/main/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/main/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/main/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/main/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/main/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/main/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/main/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/main/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/main/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/main/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/main/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/main/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/main/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/main/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/main/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/main/docs/modules/model-deployment/routing/" aria-current="page">Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/main/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/main/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/main/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/main/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/main/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/main/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/main/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/main/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/main/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Deployment Routing</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-deployment-routing">Model Deployment Routing</h1>
+<p>A router only chooses when a role has more than one replica. Every routing choice measured here ran
+on a server role; on a prefill/decode pair, where each half is chosen separately, none has been run.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#each-routers-default">Each router&rsquo;s default</a>
+</li>
+<li><a href="#prefix-affinity">Prefix affinity</a>
+</li>
+<li><a href="#switching-to-round-robin">Switching to round robin</a>
+</li>
+<li><a href="#llm-d-router-takes-no-policy-flag">llm-d-router takes no policy flag</a>
+</li>
+<li><a href="#per-worker-routing-metrics">Per-worker routing metrics</a>
+</li>
+</ul>
+<h2 id="each-routers-default">Each router&rsquo;s default</h2>
+<p><strong><code>vllm-router</code> and <code>sglang-gateway</code> route by <code>cache_aware</code>, and <code>llm-d-router</code> scores every
+candidate for each request.</strong> The operator renders no policy flag for the first two, so each runs its
+upstream default. The table describes the bundled vLLM router <code>v0.1.15</code> and SGLang gateway
+<code>gateway-v0.3.1</code>; the llm-d row describes the operator&rsquo;s scoring profile.</p>
+<table>
+  <thead>
+      <tr>
+          <th><code>spec.router.name</code></th>
+          <th>Default</th>
+          <th>Replica selection</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>vllm-router</code></td>
+          <td><code>cache_aware</code></td>
+          <td>The replica whose past requests share the longest prefix with this one, when that share is above <code>--cache-threshold</code> (<code>0.3</code>); below it, the replica with the smallest record. Once the busiest replica has more than <code>--balance-abs-threshold</code> (<code>64</code>) requests over the idlest and more than <code>--balance-rel-threshold</code> (<code>1.5</code>) times as many, the least-loaded replica instead</td>
+      </tr>
+      <tr>
+          <td><code>sglang-gateway</code></td>
+          <td><code>cache_aware</code></td>
+          <td>The same algorithm, with the same three defaults</td>
+      </tr>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td>A fixed scoring profile</td>
+          <td>The highest total of prefix-cache match (weight <code>3</code>, not scored on a decode half), queue depth (<code>2</code>) and KV-cache utilization (<code>2</code>)</td>
+      </tr>
+  </tbody>
+</table>
+<p>Both <code>cache_aware</code> routers log the policy once at startup, as <code>policy: CacheAware { cache_threshold: 0.3, … }</code>.</p>
+<h2 id="prefix-affinity">Prefix affinity</h2>
+<p><strong>Under <code>cache_aware</code>, requests that share a long prefix and arrive one after another all go to one
+replica, and the others stay idle.</strong> That is the policy working, not a fault: the replica that served
+the prefix holds it in its prefix cache, so the next request sharing it does not recompute it.</p>
+<p>Such a request only goes elsewhere once the load gap above opens, and traffic that sends one
+request at a time never has more than one in flight to open it.</p>
+<p>Measured on two server replicas, each on its own GPU, with serial chat requests that open with the
+same text of about 500 characters and end in a question of their own, streaming and non-streaming in
+turn. No request failed:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Router</th>
+          <th>Engine</th>
+          <th>Requests on each replica</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>vllm-router</code></td>
+          <td>vLLM <code>0.29.0</code></td>
+          <td>354 and 0</td>
+      </tr>
+      <tr>
+          <td><code>sglang-gateway</code></td>
+          <td>SGLang <code>0.5.18</code></td>
+          <td>406 and 0</td>
+      </tr>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td>vLLM <code>0.29.0</code></td>
+          <td>187 and 170</td>
+      </tr>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td>SGLang <code>0.5.18</code></td>
+          <td>375 and 0</td>
+      </tr>
+  </tbody>
+</table>
+<p>How any of the three spreads concurrent traffic is not measured.</p>
+<h2 id="switching-to-round-robin">Switching to round robin</h2>
+<p><strong>Add <code>--policy round_robin</code> to <code>spec.router.extraArgs</code> on <code>vllm-router</code> or <code>sglang-gateway</code></strong> to
+send each request to the next replica in turn, whatever it shares with earlier ones:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vllm-router                   </span><span class="w"> </span><span class="c"># or sglang-gateway</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- --<span class="l">policy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">round_robin</span></span></span></code></pre></div>
+</div><p><code>--policy</code> is in neither router&rsquo;s <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#the-router-block">refused list</a>
+, so admission
+passes it and the operator appends it to the command line it renders. The router then logs
+<code>Starting router … | policy: RoundRobin</code>.</p>
+<p>Measured on the same two replicas and the same kind of traffic, with the flag set at creation:
+under each router, 120 requests with none failing, 60 on each replica. <code>vllm-router</code> counted them
+in <code>vllm_router_policy_decisions_total{policy=&quot;round_robin&quot;}</code>, 60 per replica, and <code>sglang-gateway</code>
+in <code>smg_worker_selection_total{policy=&quot;round_robin&quot;}</code>, 120 in all.</p>
+<p><code>router.extraArgs</code> is <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#deployment-identity-fields">editable</a>
+, so a
+running deployment can switch as well. The router Pod is then replaced, and the new one starts with
+no record of earlier prefixes. Only a flag set at creation has been run.</p>
+<p><strong>The value is each project&rsquo;s own, and the router checks it, not admission</strong>, so a misspelled one
+stops the router at startup:</p>
+<table>
+  <thead>
+      <tr>
+          <th><code>spec.router.name</code></th>
+          <th><code>--policy</code> values</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>vllm-router</code></td>
+          <td><code>random</code>, <code>round_robin</code>, <code>cache_aware</code>, <code>power_of_two</code>, <code>consistent_hash</code>, <code>rendezvous_hash</code></td>
+      </tr>
+      <tr>
+          <td><code>sglang-gateway</code></td>
+          <td><code>random</code>, <code>round_robin</code>, <code>cache_aware</code>, <code>power_of_two</code>, <code>prefix_hash</code>, <code>manual</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>Only <code>round_robin</code> has been run. The three <code>cache_aware</code> thresholds pass through <code>extraArgs</code> the same
+way, as do both routers&rsquo; <code>--prefill-policy</code> and <code>--decode-policy</code> for a prefill/decode pair; none of
+those has been run either.</p>
+<h2 id="llm-d-router-takes-no-policy-flag">llm-d-router takes no policy flag</h2>
+<p><strong><code>llm-d-router</code> cannot be switched through <code>extraArgs</code>.</strong> Its scorers and their weights are in the
+configuration document the operator renders and mounts, and <code>--config-file</code>, which would point the
+router at another one, is refused there. No field sets them either.</p>
+<h2 id="per-worker-routing-metrics">Per-worker routing metrics</h2>
+<p>The deployment&rsquo;s <a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">metrics snapshot</a>
+ does not say which replica served a
+request. Each router&rsquo;s own <code>/metrics</code> does, for the series below, all seen exported in runs. A
+<code>worker</code> label is the worker&rsquo;s URL, which carries its Pod address.</p>
+<table>
+  <thead>
+      <tr>
+          <th><code>spec.router.name</code></th>
+          <th>Series</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>vllm-router</code></td>
+          <td><code>vllm_router_processed_requests_total{worker}</code></td>
+          <td>requests sent to each worker, in both modes</td>
+      </tr>
+      <tr>
+          <td><code>vllm-router</code></td>
+          <td><code>vllm_router_policy_decisions_total{policy,worker}</code></td>
+          <td>picks each policy made, per worker</td>
+      </tr>
+      <tr>
+          <td><code>vllm-router</code></td>
+          <td><code>vllm_router_pd_prefill_requests_total{worker}</code>, <code>vllm_router_pd_decode_requests_total{worker}</code></td>
+          <td>in P/D mode, requests sent to each prefill and each decode worker</td>
+      </tr>
+      <tr>
+          <td><code>sglang-gateway</code></td>
+          <td><code>smg_worker_requests_active{worker}</code></td>
+          <td>requests in flight to each worker at the scrape</td>
+      </tr>
+      <tr>
+          <td><code>sglang-gateway</code></td>
+          <td><code>smg_worker_selection_total{worker_type,policy}</code></td>
+          <td>picks per policy and per <code>regular</code>, <code>prefill</code> or <code>decode</code> worker type, not per worker</td>
+      </tr>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td><code>llm_d_epp_per_endpoint_queue_size{model_server_endpoint}</code></td>
+          <td>requests queued at each endpoint at the scrape</td>
+      </tr>
+      <tr>
+          <td><code>llm-d-router</code></td>
+          <td><code>llm_d_epp_disagg_decision_total{decision_type}</code></td>
+          <td>requests sent through a prefill replica (<code>prefill-decode</code>) or straight to decode (<code>decode-only</code>)</td>
+      </tr>
+  </tbody>
+</table>
+<p>Neither <code>sglang-gateway</code> nor <code>llm-d-router</code> keeps a running count per replica. Behind them, compare
+the engine Pods&rsquo; own counts instead, such as each Pod&rsquo;s TTFT histogram <code>_count</code>.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Model Deployment Prefill and Decode</a>
+
+for <code>spec.router</code> and the flags each router refuses</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
+ for the router
+counters a deployment&rsquo;s snapshot reads.</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/main/docs/modules/model-deployment/status/">Model Deployment Status</a></div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/aa96eb413a868585d700368f3bc26cfb22541723/docs/modules/model-deployment/routing.md">View page source</a>
+            
+            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/routing.md">Edit this page</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#each-routers-default">Each router&rsquo;s default</a></li>
+    <li><a href="#prefix-affinity">Prefix affinity</a></li>
+    <li><a href="#switching-to-round-robin">Switching to round robin</a></li>
+    <li><a href="#llm-d-router-takes-no-policy-flag">llm-d-router takes no policy flag</a></li>
+    <li><a href="#per-worker-routing-metrics">Per-worker routing metrics</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/main/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>
