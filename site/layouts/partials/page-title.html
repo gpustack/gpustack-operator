@@ -5,6 +5,10 @@
   {{- if $headings -}}
     {{- replaceRE `^# ` "" (index $headings 0) | plainify -}}
   {{- else -}}
-    {{- .File.BaseFileName | humanize -}}
+    {{- with .File -}}
+      {{- .BaseFileName | humanize -}}
+    {{- else -}}
+      {{- .Site.Title -}}
+    {{- end -}}
   {{- end -}}
 {{- end -}}

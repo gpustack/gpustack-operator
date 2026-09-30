@@ -54,7 +54,7 @@ disableLanguages = ["zh"]
     noClasses = false
   [markup.goldmark]
     [markup.goldmark.renderer]
-      # Reader tables use raw <br/> markup. Keep executable HTML out of Markdown.
+      # Reader tables use <br/>; agent-index.py rejects other raw HTML in published Markdown.
       unsafe = true
     [markup.goldmark.renderHooks.link]
       useEmbedded = "auto"
