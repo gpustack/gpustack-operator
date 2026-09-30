@@ -30,9 +30,12 @@ together, or browse the [documentation](./docs/README.md).
 
 ## Installation
 
-Use Kubernetes 1.29 or newer for the scheduling and model-delivery features, Helm 3.8 or newer, and
-cluster-admin access. Install the manufacturer's driver on each accelerator node. Some devices also
-need a container toolkit; see [Vendor Prerequisites](./docs/getting-started/vendor-prerequisites.md).
+Use Kubernetes 1.29 or newer for scheduling and node model delivery, Helm 3.8 or newer, and
+cluster-admin access. The chart accepts Kubernetes 1.23 and newer, but simple allocation on
+1.23–1.28 is untested; see [version requirements](./docs/operate/installation-modes.md#kubernetes-requirements).
+
+Install the manufacturer's driver on each accelerator node. Some devices also need a container
+toolkit; see [Vendor Prerequisites](./docs/getting-started/vendor-prerequisites.md).
 
 ```bash
 helm repo add gpustack https://docs.gpustack.ai/gpustack-operator/charts

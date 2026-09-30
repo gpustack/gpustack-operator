@@ -6,10 +6,18 @@ the operator chart's `values.yaml`.
 
 ## Contents
 
+- [Kubernetes requirements](#kubernetes-requirements)
 - [Chart mode and image mode](#chart-mode-and-image-mode)
 - [The two modes are exclusive](#the-two-modes-are-exclusive)
 - [Notable switches](#notable-switches)
 - [Chart-deployed and worker-applied resources](#chart-deployed-and-worker-applied-resources)
+
+## Kubernetes requirements
+
+The Helm chart accepts Kubernetes 1.23 and newer. Use Kubernetes 1.29 or newer for the Kueue
+scheduling chain and node model delivery. Simple allocation on 1.23–1.28 is untested.
+[Image-based model delivery](../modules/model-delivery/image-source.md#versions-and-prerequisites) has a higher
+version requirement for Kubernetes and the container runtime.
 
 ## Chart mode and image mode
 
