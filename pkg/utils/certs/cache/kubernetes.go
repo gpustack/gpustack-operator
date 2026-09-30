@@ -43,7 +43,10 @@ type k8sCache struct {
 
 // NewK8sCache creates a new k8sCache instance with the given client.
 func NewK8sCache(ctx context.Context, group string, cli certs.SecretInterface) (certs.Cache, error) {
-	lg := klog.Background().WithName("certs").WithName("k8s")
+	// Resolve the logger from the context so a caller can capture this cache's logging
+	// without mutating the klog global, which is not safe to change while the informer
+	// goroutine started below keeps logging.
+	lg := klog.FromContext(ctx).WithName("certs").WithName("k8s")
 
 	lw := func() *cache.ListWatch {
 		labelSelector := labels.FormatLabels(map[string]string{
