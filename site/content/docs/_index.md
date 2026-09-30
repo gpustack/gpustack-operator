@@ -26,4 +26,3 @@ Install the operator, configure a capability, or find the reference for a runnin
 
 - [Operations](operate/) covers installation, availability and upgrades.
 - [Reference](reference/) lists commands, settings and resource presets.
-- [Contributing](contribute/) covers development and implementation details.

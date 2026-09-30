@@ -19,8 +19,6 @@ groups:
     path: /docs/operate/
   - name: Reference
     path: /docs/reference/
-  - name: Contributing
-    path: /docs/contribute/
 order:
   /docs/getting-started/:
     - architecture

@@ -7,6 +7,7 @@ before changing the operator's behavior.
 ## Contents
 
 - [Commands](#commands)
+- [Documentation site](#documentation-site)
 - [Checks that can report false success](#checks-that-can-report-false-success)
 - [Shipped specification corrections](#shipped-specification-corrections)
 - [Runtime log verbosity](#runtime-log-verbosity)
@@ -24,14 +25,6 @@ before changing the operator's behavior.
 - `make build` — cross-build `cmd/gpustack-operator` into `.dist/build/`, version ldflag-injected into `pkg/utils/version`; `VERSION=vX.y.z+l.m make build` sets it, `BUILD_PLATFORMS="linux/amd64 linux/arm64"` cross-compiles.
 - `make test` — `go test -v -failfast -race -cover -shuffle=on -timeout=30m ./...`, coverage to `.dist/test/coverage.out`. The order is shuffled on every run so an order-dependent test cannot hide behind the fixed one; a failure banner prints the seed, and `go test -shuffle=<seed>` reproduces that exact order. Trailing args are regexes of packages to **exclude**. `RACE=false make test` drops `-race` and changes nothing else.
 - `make package` — images via `docker buildx` from `pack/*/Dockerfile` (Linux only).
-
-### Documentation site
-
-Run `make site` to install pinned Hugo into `.sbin/` and render `docs/` into `site/public/`.
-Use `make site-serve` to preview the site. Hugo mounts the
-Markdown files directly; edit the pages under `docs/` and use `make lint docs` to check their links,
-index entries and page shape. CI also builds the site and checks links and anchors in the rendered
-HTML. The files under `site/` provide the layout and navigation.
 
 CI (`hack/ci.sh`) runs `make generate && make deps && make lint && make build` inside the image build. The unit tests run
 separately, in `test.yml`, as `RACE=false make test` on linux/amd64 and linux/arm64.
@@ -129,6 +122,27 @@ lands there, not in this document. Verify a rule change before committing: `npx 
 GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/nodefeature/...
 GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -run TestExtractGeneralNodeKey ./pkg/nodefeature/
 ```
+
+## Documentation site
+
+Build the site or start a live preview from the repository root:
+
+```bash
+make site
+make site-serve
+```
+
+`make site` renders the Markdown under `docs/` into `site/public/` and checks the rendered site's
+links and anchors. `make site-serve` opens the preview at `http://localhost:1313/` and rebuilds it
+as you edit pages, navigation or styles. Stop the preview with Ctrl-C.
+
+Both commands validate the pinned Hugo version. When needed, the installer builds extended Hugo
+into `.sbin/`, using Go and a C compiler; its first installation needs network access. The Mermaid
+script and license are bundled under `site/assets/vendor/mermaid/`, so site builds do not fetch them.
+
+Edit documentation under `docs/`, navigation labels and order in `site/data/navigation.yaml`, and
+layouts and styles under `site/`. Run `make lint docs` before committing to check source links,
+page structure, index entries and rendered site links. CI runs the same gate.
 
 ## Checks that can report false success
 
