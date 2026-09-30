@@ -1,0 +1,701 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0-rc2/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Internals · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0-rc2/docs/contribute/internals/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0-rc2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0-rc2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0-rc2/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0-rc2/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0-rc2"
+      data-home="/gpustack-operator/v0.9.0-rc2/" data-page="/gpustack-operator/v0.9.0-rc2/docs/contribute/internals/">
+      <option value="/gpustack-operator/v0.9.0-rc2/">v0.9.0-rc2</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/v0.9.0-rc2/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0-rc2/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0-rc2/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0-rc2/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0-rc2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0-rc2/docs/contribute/">Contributing</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Internals</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="internals">Internals</h1>
+<p>Startup ordering, the worker-gateway API mirror and the device-plugin registration loop constrain
+changes to the operator&rsquo;s services. Vendor libraries and object names have their own constraints.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#operator-subcommands">Operator subcommands</a>
+</li>
+<li><a href="#worker-startup-order">Worker startup order</a>
+</li>
+<li><a href="#worker-gateway">Worker gateway</a>
+</li>
+<li><a href="#device-plugin-re-registration">Device plugin re-registration</a>
+</li>
+<li><a href="#per-manufacturer-device-support">Per-manufacturer device support</a>
+</li>
+<li><a href="#cgo-bindings-binding">CGO bindings (<code>binding/</code>)</a>
+</li>
+<li><a href="#63-character-limits">63-character limits</a>
+</li>
+</ul>
+<h2 id="operator-subcommands">Operator subcommands</h2>
+<p><code>cmd/gpustack-operator/main.go</code> wires one binary with the four cobra subcommands
+<a href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/architecture/#components">Architecture</a>
+ tabulates. Beyond that table:</p>
+<ul>
+<li><strong><code>worker</code></strong> (alias <code>w</code>) runs an aggregated extension API server <em>and</em> a controller-runtime manager in
+one process, plus the scheduling-chain controllers (<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/">Scheduling Chain</a>
+). It can
+install the bundled operator chart itself (<a href="/gpustack-operator/v0.9.0-rc2/docs/operate/installation-modes/">Installation Modes</a>
+), but does not by
+default.</li>
+<li><strong><code>device-manager</code></strong> has subcommands <code>serve</code> / <code>detect</code> / <code>monitor</code>: it detects and monitors local
+accelerators, reports a <code>NodeFeature</code> + <code>Devices</code> CR, and runs the device-plugin allocator.</li>
+<li><strong><code>model-manager</code></strong> (alias <code>mm</code>) is a CSI node plugin on every node, not tied to a manufacturer:
+it materializes and mounts model weights and writes only its own node&rsquo;s <code>NodeModelStore</code>
+status (<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/">Node Model Store</a>
+).</li>
+</ul>
+<h2 id="worker-startup-order">Worker startup order</h2>
+<p><code>pkg/worker/worker.go</code> runs <code>Prepare</code> (system namespace → CRDs → extension API services → webhook
+configs → settings → applications → the <code>gpustack-cpu-info</code> NodeFeatureRule → the
+<code>gpustack-node-devices</code> AdmissionCheck → the <code>gpustack-model-deployment-joint</code> AdmissionCheck).</p>
+<p>In <code>Start</code>, the controller manager starts only after the extension API services report ready, so
+controllers can index extension-API resources. Preserve this ordering when adding steps.</p>
+<p>The last three steps each retry for up to 5 minutes while their CRD becomes available. A worker
+starting alongside NFD and Kueue can reach these steps before their CRDs are served. The worker
+applies the resources in both installation modes; see <a href="/gpustack-operator/v0.9.0-rc2/docs/operate/installation-modes/#chart-deployed-and-worker-applied-resources">Installation
+Modes</a>
+.</p>
+<h3 id="every-prepare-step-runs-in-every-replica">Every <code>Prepare</code> step runs in every replica</h3>
+<p>Every step of <code>Prepare</code> runs in <strong>all</strong> replicas, before leader election, so each is conflict-tolerant
+or idempotent by construction. Keep it that way when adding a step: a rolling update overlaps two
+replicas even where <code>worker.replicas</code> is 1.</p>
+<h3 id="crd-and-apiservice-maintenance">CRD and APIService maintenance</h3>
+<p><code>Prepare</code>&rsquo;s installation cannot outlive the boot, so <code>Start</code> also runs <code>pkg/api</code>&rsquo;s <code>EnsureCRDs</code> and
+<code>EnsureServices</code> beside the controller manager, deliberately <strong>not</strong> behind the services-ready wait.</p>
+<blockquote>
+<p><strong>Why</strong> — a CRD or extension API service deleted later would stay gone for the life of the process,
+and a deleted CRD takes down every controller watching it until a restart. Beside the controllers is
+also the only place they fit: a terminating definition drains only once the controllers release its
+resources&rsquo; finalizers, so waiting in <code>Prepare</code> would block the release it waits on.</p>
+</blockquote>
+<p>Both repair <strong>absence only</strong>, never the spec of an object that is there; aligning the spec stays with
+<code>InstallCRDs</code> / <code>InstallServices</code>, on the boot of the replica carrying that version. Neither reviews a
+permission of its own, and neither may return except on context done: returning early leaves the process
+with no repair loop and no way to report that.</p>
+<blockquote>
+<p><strong>Why absence only</strong> — in that overlap an outgoing replica would otherwise push its own version of
+every object back over the incoming one, once per interval, for as long as it lives.</p>
+</blockquote>
+<blockquote>
+<p><strong>The one residual risk, taken deliberately</strong> — an object deleted <strong>inside</strong> the overlap is recreated
+by whichever replica notices first, so if that is the outgoing one the incoming replica keeps the older
+version until some replica boots again. It takes an out-of-band delete in that window, because nothing
+in the chart deletes there:</p>
+<ul>
+<li>Helm never deletes CRDs on upgrade, and the operator&rsquo;s own come from Go rather than <code>crds/</code>;</li>
+<li>the migration hooks prune only what carries a legacy sub-release&rsquo;s Helm labels, which the worker&rsquo;s
+APIServices lack;</li>
+<li><code>drain.sh</code>, <code>drain-kueue.sh</code> and <code>cleanup.sh</code> run only on uninstall, behind <code>cleanupOnUninstall</code>
+(default false), as <code>pre-delete</code> and <code>post-delete</code> hooks. Neither event fires on an upgrade or a
+rollback, and an uninstall has no incoming replica to inherit anything.</li>
+</ul>
+<p>Realigning the spec every tick would instead have the outgoing replica fight the incoming one through
+<em>every</em> rolling update: likelier, and worse.</p>
+</blockquote>
+<h3 id="application-installation-lock">Application installation lock</h3>
+<p>Installing the applications is the one step for which neither property was available, so it holds a
+<code>coordination.k8s.io</code> Lease (<code>applications.worker.gpustack.ai</code> in the system namespace, via
+<code>pkg/kubeapp</code>&rsquo;s <code>Lock</code>) for its whole duration: exactly one replica installs at a time. The lock is a
+last resort, not a pattern to copy; reach for it only where idempotence is out of reach, and read
+<code>pkg/kubeapp/lock.go</code> for what it does and does not guarantee.</p>
+<blockquote>
+<p><strong>Why</strong> — Helm&rsquo;s release storage is a compare-and-create, not a mutex, and two Helm actions on one
+release can leave it pending where no later attempt gets past.</p>
+</blockquote>
+<h2 id="worker-gateway">Worker gateway</h2>
+<p><code>pkg/workergateway/service</code> folds many clusters&rsquo; <code>InstanceType</code>s into one fleet-wide
+<code>AggregatedInstanceType</code>: candidates (one per cluster) group into tiers by accelerator <code>OnceMaxRequest</code>,
+and each level carries an overview bundle (one achievable allocation copied from the winning member)
+plus a <code>Remaining</code> that is the per-dimension sum.</p>
+<p>Those overview types re-declare the cluster <code>InstanceTypeStatus</code>&rsquo;s resource views field by field
+rather than embedding them, and no generator maintains them. A view added to the CRD therefore still
+compiles while the gateway never ingests, sums or serves it, and the fleet reads as having no capacity
+there.</p>
+<p>Adding one means touching <code>types.go</code> and every aggregation site in <code>helper.go</code> (<code>newAggregatedTier</code>,
+<code>newAggregatedCandidate</code>, both <code>Recompute</code> methods, <code>overviewResourceIsZero</code>).
+<code>TestAggregatedInstanceTypeMirrorsEveryStatusView</code> fails while the field sets differ, but cannot see a
+missed aggregation site; walk them.</p>
+<h2 id="device-plugin-re-registration">Device plugin re-registration</h2>
+<p>kubelet&rsquo;s device-plugin registration server unlinks <strong>every socket</strong> in
+<code>/var/lib/kubelet/device-plugins</code> each time it starts, and only then listens on a fresh
+<code>kubelet.sock</code>. That directory is a hostPath in the device-manager, so the unlink takes the plugin&rsquo;s
+own socket with it while the plugin&rsquo;s process carries on untouched.</p>
+<p><code>serving.Start</code> (<code>pkg/deviceplugin/serving.go</code>) therefore serves in <strong>generations</strong> (a socket, a
+gRPC server on it, and a registration naming the two to kubelet) and loops over them. The socket
+going missing is the level-based signal that kubelet restarted, so the next generation listens and
+registers again.</p>
+<p>That loop is the one every device-plugin server in this repository runs: <code>ResourceServer</code>
+(<code>pkg/deviceplugin/server.go</code>) embeds it for the per-manufacturer resources, and the four RDMA
+servers (<code>pkg/deviceplugin/rdma_server.go</code>) drive the same one. A kubelet wipe therefore strands
+the RDMA resource keys on exactly the terms above, and recovers them on the same terms.</p>
+<p>A generation ending because its server stopped serving is a second, separate signal. Unlinking the
+socket belongs to the <em>start</em> of a generation, so that a retiring one cannot unlink whatever holds
+the path by then, which, once a replacement allocator has taken over, is the replacement&rsquo;s socket.
+The path therefore outlives its listener, and a listener that died under one is invisible to the
+socket check.</p>
+<p>A generation retries its registration for as long as it lives, because right after the wipe
+<code>kubelet.sock</code> is not back yet. Listening again is not optional either: kubelet dials the endpoint
+back, blocking, from inside <code>Register</code>, and refuses a registration whose socket it cannot reach.</p>
+<blockquote>
+<p><strong>The invariant</strong> — kubelet&rsquo;s checkpoint restores a forgotten resource with an <em>empty</em> healthy set,
+so the Node reports it at <strong>zero capacity</strong>, not merely zero allocatable, and drops the key outright
+once the stopped endpoint&rsquo;s grace period expires. A zero pool key fails <code>poolAdvertised</code>, so
+<code>NodeCapacityReconciler</code> reverse-patches that family&rsquo;s whole <code>.sliced.*</code> / <code>.partitioned.*</code> counting
+set off the Node too — the flavor and InstanceType views move, not just allocatability.</p>
+</blockquote>
+<p>Nothing about the <em>process</em> looks wrong while that lasts, and its Pod stays Ready, so the plugin-side
+signal is the allocator&rsquo;s <code>registering to kubelet, retrying</code> error (visible at the DaemonSet&rsquo;s
+shipped <code>-v=2</code>, because <code>Error</code> is not gated by V level the way <code>Info</code> is). The cluster-side signal is
+louder and comes first: the family&rsquo;s keys leave the Node.</p>
+<p><code>Stop</code> ends the serving loop rather than one generation of it, and reports nothing for having been
+asked to.</p>
+<p>The layer above it draws the same distinction through the <code>gox.Lifecycle</code>
+(<code>pkg/utils/gox/lifecycle.go</code>) a vendor allocator runs its tasks under: its <code>Stop</code> cancels the context
+every task its <code>Start</code> launched runs under, and waits for them. The device manager&rsquo;s own <code>Start</code> needs
+none of that (nothing stops it but its caller), so its detector, allocator, exporter and controller
+manager run under a plain <code>gox.GroupWithContextIn</code> group.</p>
+<blockquote>
+<p><strong>The invariant</strong> — the tasks under one of these groups are not interchangeable. A per-vendor
+reclaim loop watches nothing but its context, so a <code>Stop</code> that cancelled nothing would leave it, its
+resync ticker and its broadcast subscription running for the life of the process — one more of each
+per detect/undetect cycle, on a set the reconciler walks in full on every broadcast, some of them
+synchronously on the allocate path. And because nothing can be reported until every task has
+returned, such a task also swallows a <em>sibling&rsquo;s</em> failure: before this shape, a device plugin that
+could not establish a generation of service left the node advertising nothing for that manufacturer,
+and the only trace was that server&rsquo;s own log line. The failure never reached the allocator, so
+nothing acted on it; the signal to look for is the missing process-level one, not a missing log.</p>
+<p>So a task that <em>fails</em> ends its siblings: the group cancels the context they share on any task&rsquo;s
+error, which is also what lets that failure be reported at all. At the manager&rsquo;s level that is
+what ends the process, rather than leaving a Pod passing its liveness probe with a dead subsystem
+inside it. A task that merely <em>finishes</em> is left to have finished: the metrics exporter serves no
+Instance gauges on a node whose name it cannot read and says so by returning, and ending the run
+there would take the node&rsquo;s device plugin down over one missing environment variable.</p>
+<p>Being stopped is not an outcome to report either. The device manager treats <strong>any</strong> error from an
+allocator&rsquo;s <code>Start</code> as fatal to the node (<code>pkg/devicemanager/allocator/allocator.go</code>), so reporting
+<code>context.Canceled</code> for an ordinary undetect would take the node down. A <code>Stop</code> that arrives before
+its run does is kept, not lost: an allocator&rsquo;s <code>Start</code> is submitted to a pool, so it can reach the
+<code>Lifecycle</code> after the undetect that retired it, and a run that began then is one nothing holds the
+cancel of, which is the leak reproduced by the teardown meant to end it.</p>
+</blockquote>
+<h2 id="per-manufacturer-device-support">Per-manufacturer device support</h2>
+<p>Detection (<code>pkg/devicemanager/detector/&lt;mfr&gt;</code>) and allocation (<code>pkg/devicemanager/allocator/&lt;mfr&gt;</code>) have
+one subpackage per manufacturer: nvidia, amd, ascend, cambricon, hygon, iluvatar, metax, mthreads, thead.
+Platform-specific code splits into <code>_linux.go</code> / <code>_other.go</code> build-constrained files.</p>
+<p>The supported manufacturers and their PCI vendor IDs / resource names live in <code>pkg/nodefeature</code>,
+overridable via <code>GPUSTACK_*</code> env vars that the chart fans out from <code>global.manufacturers</code>. What each row
+of that map decides is in <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/discovery/#the-gpustack-cpu-info-nodefeaturerule">Device Discovery</a>
+.</p>
+<h2 id="cgo-bindings-binding">CGO bindings (<code>binding/</code>)</h2>
+<p>Generated Go bindings to the manufacturers&rsquo; GPU runtime/management libraries (nvml,
+rsmi/amdsmi/amdgpu, cndev, dcmi, hgml, ixml, mtml/mxsml, hsa, dl). The generators read
+<code>gen/binding/&lt;runtime&gt;/config.yaml</code> and emit into <code>binding/&lt;runtime&gt;/</code> via <code>make generate binding</code>
+(c-for-go is vendored in <code>.sbin/</code>). The top-level <code>binding/helper*.go</code> files are hand-written CPU/NUMA
+topology helpers — <em>not</em> generated.</p>
+<p>The <code>dcmi</code> binding is the one that does not follow the shape above. Its entry points are
+hand-transcribed into a <code>.def</code> macro list rather than read from a vendor header, and it opens its
+library from a hand-written C wrapper instead of through <code>binding/dl</code>. Adding an entry point there
+means editing C, not a config.</p>
+<blockquote>
+<p><strong>Why</strong> — <code>dl.DynamicLibrary</code> pins <code>dlopen</code> and the <code>dlerror</code> that reads its reason to one OS
+thread, because that reason is thread-local. The dcmi wrapper needs the same pinning arranged by
+hand (<code>binding/dcmi</code>&rsquo;s <code>Init</code> documents it), and it is the kind of thing that has to be
+rediscovered rather than inherited. Every other binding calls <code>binding.Library.Load</code>; dcmi calls
+only <code>Path()</code>.</p>
+</blockquote>
+<h2 id="63-character-limits">63-character limits</h2>
+<p>Kubernetes label <em>values</em> cap at 63 chars. Long names (ClusterQueue names, queue references) live in
+<code>schedule.gpustack.ai/*</code> <strong>annotations</strong>, not labels; LocalQueues are named <code>gpustack-fnv64-&lt;hash&gt;</code>
+(always 31 chars; see <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/#a-localqueue-in-every-namespace">Scheduling Chain</a>
+).
+Check this limit for any name that flows into a label value.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0-rc2/docs/contribute/development/">Development</a>
+ (build, lint, test, code generation)</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/operate/installation-modes/">Installation Modes</a></li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/">Scheduling Chain</a></li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0-rc2/docs/contribute/development/">Development</a>
+ — how to build and test what you just changed.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/3947d8e1e0b39f9574e2fc67bb8ca3e4b6531ebc/docs/contribute/internals.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#operator-subcommands">Operator subcommands</a></li>
+    <li><a href="#worker-startup-order">Worker startup order</a>
+      <ul>
+        <li><a href="#every-prepare-step-runs-in-every-replica">Every <code>Prepare</code> step runs in every replica</a></li>
+        <li><a href="#crd-and-apiservice-maintenance">CRD and APIService maintenance</a></li>
+        <li><a href="#application-installation-lock">Application installation lock</a></li>
+      </ul>
+    </li>
+    <li><a href="#worker-gateway">Worker gateway</a></li>
+    <li><a href="#device-plugin-re-registration">Device plugin re-registration</a></li>
+    <li><a href="#per-manufacturer-device-support">Per-manufacturer device support</a></li>
+    <li><a href="#cgo-bindings-binding">CGO bindings (<code>binding/</code>)</a></li>
+    <li><a href="#63-character-limits">63-character limits</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0-rc2/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

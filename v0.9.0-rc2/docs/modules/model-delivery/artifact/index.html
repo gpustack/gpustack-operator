@@ -1,0 +1,1127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0-rc2/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Model Artifact · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0-rc2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0-rc2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0-rc2/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0-rc2/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0-rc2"
+      data-home="/gpustack-operator/v0.9.0-rc2/" data-page="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/">
+      <option value="/gpustack-operator/v0.9.0-rc2/">v0.9.0-rc2</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/v0.9.0-rc2/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0-rc2/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/" aria-current="page">Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0-rc2/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0-rc2/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0-rc2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/">Model Delivery</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Artifact</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-artifact">Model Artifact</h1>
+<p>A <code>ModelArtifact</code> records where model weights come from and which credential reads them. A
+<code>ModelDeployment</code> refers to it through <code>spec.model.artifactRef</code>; an <code>Instance</code> uses a <code>model</code> volume.
+Neither workload needs its own URI, revision or token.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#the-resource">The resource</a>
+</li>
+<li><a href="#resolution-and-revalidation">Resolution and revalidation</a>
+</li>
+<li><a href="#the-manifest-digest">The manifest digest</a>
+</li>
+<li><a href="#referencing-it-from-a-modeldeployment">Referencing it from a ModelDeployment</a>
+</li>
+<li><a href="#engine-delivery">Engine delivery</a>
+</li>
+<li><a href="#claim-delivery-and-placement">Claim delivery and placement</a>
+</li>
+<li><a href="#the-kv-reuse-domain">The KV reuse domain</a>
+</li>
+<li><a href="#status">Status</a>
+</li>
+<li><a href="#instance-model-volumes">Instance model volumes</a>
+</li>
+<li><a href="#requirements-and-limits">Requirements and limits</a>
+</li>
+</ul>
+<h2 id="the-resource">The resource</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelArtifact                     </span><span class="w"> </span><span class="c"># namespaced, short name mart</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">                                    </span><span class="c"># immutable after creation</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w">                                </span><span class="c"># exactly one member</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">huggingFace</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">repository</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-7B-Instruct</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">revision</span><span class="p">:</span><span class="w"> </span><span class="l">main                    </span><span class="w"> </span><span class="c"># branch, tag or commit; defaults to main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">secretRef</span><span class="p">:</span><span class="w"> </span><span class="c"># optional; this namespace; key &#34;token&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">hf-token</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># modelScope:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   repository: qwen/Qwen2.5-7B-Instruct</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   revision: master                 # branch, tag or commit; defaults to master</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   secretRef: # optional; this namespace; key &#34;token&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#     name: ms-token</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># persistentVolumeClaim:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   claimName: models                # this namespace</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   path: qwen                       # directory inside the volume; empty is the root</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># image:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   reference: registry.example.com/team/qwen@sha256:669ed7b1...48   # digest-pinned</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">allowPatterns</span><span class="p">:</span><span class="w"> </span><span class="c"># optional; hub sources only</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;*.safetensors&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;*.json&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;tokenizer*&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ignorePatterns</span><span class="p">:</span><span class="w"> </span><span class="c"># optional; wins over allowPatterns</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;original/&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">expectedDigest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># optional; hub sources only — the digest the source must resolve to</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resolved</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">revision</span><span class="p">:</span><span class="w"> </span><span class="l">7ae557604adf67be50417f59c2c2f167def9a775</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">manifestDigest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">digestSource</span><span class="p">:</span><span class="w"> </span><span class="l">Hub                   </span><span class="w"> </span><span class="c"># Hub, the hub&#39;s listing | Expected, the spec&#39;s anchor</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">fileCount</span><span class="p">:</span><span class="w"> </span><span class="m">10</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sizeBytes</span><span class="p">:</span><span class="w"> </span><span class="m">999604126</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w">                                 </span><span class="c"># hub sources only; where the content is across nodes</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ready</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">downloading</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">failed</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">downloadingPercent</span><span class="p">:</span><span class="w"> </span><span class="m">45</span><span class="w">               </span><span class="c"># the downloading nodes&#39; mean, in steps of 5</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">conditions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Resolved</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;True&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">Resolved</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Degraded</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;False&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">Healthy</span></span></span></code></pre></div>
+</div><ul>
+<li><strong>The spec is immutable.</strong> An artifact is an identity: other weights, or another revision, are a
+new artifact. That is also what lets a deployment&rsquo;s frozen reference pin anything.</li>
+<li><strong>The Secret and the claim need not exist yet.</strong> Admission does not read them; their absence is a
+reason in status (<code>SecretNotFound</code>, <code>ClaimNotFound</code>).</li>
+<li><strong>A <code>modelScope</code> member is a second hub.</strong> Its repository and revision rules are the Hugging Face
+ones, the revision defaults to <code>master</code>, and the patterns apply to it the same way. What differs
+is <a href="#resolution-and-revalidation">how it resolves</a>
+ and the <a href="#engine-delivery">engine
+environment</a>
+ an Engine download reads.</li>
+<li><strong>An <code>image</code> member delivers weights already in a registry.</strong> A digest-pinned reference is the
+artifact&rsquo;s whole identity; kubelet pulls and mounts it through an image volume, outside the node
+cache. The digest contract, the build, the floors and the costs are on the
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/image-source/">Model Image Source</a>
+.</li>
+<li><strong>Patterns select the files.</strong> They follow Python&rsquo;s <code>fnmatch.fnmatchcase</code>: case-sensitive, <code>*</code>
+and <code>?</code> cross <code>/</code>, a trailing <code>/</code> means everything under it, an empty allow list keeps every file,
+and an ignored file is dropped even when allowed. At most 32 per list, 1 to 256 characters each,
+refused on claim and image sources. A filter that keeps no file is <code>Resolved=False</code>,
+<code>EmptyManifest</code>, and a filtered artifact needs
+<a href="#referencing-it-from-a-modeldeployment">Node delivery</a>
+.</li>
+<li><strong><code>expectedDigest</code> asserts what must resolve.</strong> Optional, immutable with the spec, <code>&quot;sha256:&quot;</code> and
+64 lowercase hex: the manifest digest, exactly what <code>status.resolved.manifestDigest</code>
+carries. Admission accepts it on a hub source only. A claim&rsquo;s content is whatever the volume
+holds at mount time (dynamically provisioned claims differ per provisioning), and its identity is
+the claim itself, which the user confirms; an image&rsquo;s identity is its reference&rsquo;s digest. What the
+assertion does is under <a href="#resolution-and-revalidation">Resolution and revalidation</a>
+.</li>
+<li><strong><code>status.nodes</code> counts the nodes reporting the digest.</strong> Nodes whose <code>NodeModelStore</code> lists the
+digest <code>Ready</code>, <code>Downloading</code> or <code>Failed</code>; artifacts with the same digest see the same nodes, and
+only numbers cross namespaces. The mean covers the downloading nodes only, each a whole copy. It
+is written on the <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/#the-resource">thresholds</a>
+ the nodes store progress on. The
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/views/#the-progress-subresource">progress</a>
+ answers the same at full
+precision.</li>
+<li><strong>Deletion waits for the last reference.</strong> The finalizer <code>worker.gpustack.ai/model-artifact-protection</code>
+holds a referenced artifact in <code>Terminating</code> until no <code>ModelDeployment</code> or <code>Instance</code> in the
+namespace names it. Running Pods are never affected.</li>
+</ul>
+<h2 id="resolution-and-revalidation">Resolution and revalidation</h2>
+<p>A Hugging Face source is resolved <strong>once</strong>, with the namespace&rsquo;s own token: the revision is pinned
+to the commit it names at resolution time, an annotated tag is peeled to that commit, and the
+commit&rsquo;s file listing becomes the manifest. Nothing follows the branch afterwards.</p>
+<table>
+  <thead>
+      <tr>
+          <th><code>Resolved</code> reason</th>
+          <th>Cause</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>RevisionNotFound</code></td>
+          <td>the revision, branch or tag does not exist</td>
+      </tr>
+      <tr>
+          <td><code>AccessDenied</code></td>
+          <td>the repository does not exist, is private and the token cannot read it, or is gated without a grant</td>
+      </tr>
+      <tr>
+          <td><code>SourceUnavailable</code></td>
+          <td>the hub is unreachable, erroring or rate-limiting</td>
+      </tr>
+  </tbody>
+</table>
+<p>A repository that does not exist and a private one the token cannot read answer alike, so the
+message says &ldquo;does not exist or is not accessible&rdquo;. A gated repository is the subtle case: its
+listing answers as if readable and only masks the files&rsquo; digests, and that masked listing is
+refused as <code>AccessDenied</code>.</p>
+<p><strong>A ModelScope source resolves the same way, against its own API.</strong> A full commit is taken as is; a
+branch or tag is resolved and cross-checked against the repository&rsquo;s git refs, and a hub index
+that disagrees with its own git refuses the resolution as <code>SourceUnavailable</code>. That disagreement,
+often caused by a misspelled parameter, is what would silently resolve the wrong revision.</p>
+<p>The file listing the ModelScope API returns truncates silently at 3000 entries, so the operator
+re-lists large directories itself, and a directory with 3000 or more direct children refuses
+(<code>SourceUnavailable</code>): the API cannot enumerate it, and a partial manifest would be a silent wrong
+answer. Every file must carry the hub&rsquo;s <code>sha256</code>, so a ModelScope manifest&rsquo;s digest lines are all
+<code>sha256</code>.</p>
+<p>Access failures map to the same reasons: a ref that answers no commit, or a listing with no file
+tree at the revision, is <code>RevisionNotFound</code>; a refusal of the content&rsquo;s accessibility (a missing,
+private or gated repository, or a token the hub rejects) is <code>AccessDenied</code>; a hub that cannot
+answer at all, answers a server error, or cannot enumerate a directory is <code>SourceUnavailable</code>.</p>
+<p>ModelScope has no distinct 401 or 403, and &ldquo;no access&rdquo; covers private-without-token,
+gated-without-grant and valid-token-without-grant alike; the message says &ldquo;does not exist or is
+not accessible&rdquo; as on Hugging Face. A mistyped token is silent in the same way, so the operator
+probes each new token against the hub and emits an <code>InvalidToken</code> Warning when the hub rejects it.</p>
+<p>Access is revalidated every <code>model-artifact-revalidate-interval</code> (default <code>24h</code>) and whenever the
+Secret changes, with one <code>HEAD</code> of a file at the resolved commit, redirects not followed:</p>
+<ul>
+<li>a refusal sets <code>Degraded=True</code> and is checked again a minute later; the same refusal then sets
+<code>Resolved=False</code>;</li>
+<li><code>SourceUnavailable</code> sets only <code>Degraded</code> and is retried every minute, so a Hub outage never
+revokes pinned weights; an unreadable Secret is treated the same way;</li>
+<li>a deleted Secret, or one without its <code>token</code> key, sets <code>Resolved=False</code> at once;</li>
+<li>a later pass restores <code>Resolved=True</code>, with the commit and digest unchanged.</li>
+</ul>
+<p>The check is one request for one file at the resolved commit, on either hub: a 200 (an LFS file&rsquo;s
+too) confirms access and a 404 is an access refusal.</p>
+<p><strong>An <code>expectedDigest</code> turns both passes into assertions.</strong> At resolution the digest is compared
+with the anchor; a mismatch refuses with <code>DigestMismatch</code>, both digests in the message. At
+revalidation an anchored artifact does not stop at the one-file <code>HEAD</code>: the tree is re-listed at
+the resolved commit, so a hub or mirror that stops serving the pinned content fails the same
+staircase, first <code>Degraded</code>, then <code>Resolved=False</code>. Unanchored artifacts keep the two-request check.</p>
+<p><strong>The anchor takes over when the hub stays unreachable.</strong> One
+<code>SourceUnavailable</code> is not a verdict; the artifact asks again a minute later. When the second pass
+fails the same way, the anchor becomes the resolution: <code>Resolved=True</code>, <code>manifestDigest</code> = the
+anchor, <code>digestSource: Expected</code>, no revision, file count or size, and the hub is never contacted
+again.</p>
+<p>A hub that answered, even with a refusal, is never anchored around; only a hub that does not
+answer at all falls back.</p>
+<table>
+  <thead>
+      <tr>
+          <th><code>digestSource</code></th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Hub</code></td>
+          <td>the digest came from the hub&rsquo;s own listing, checked against the anchor when one is set</td>
+      </tr>
+      <tr>
+          <td><code>Expected</code></td>
+          <td>the digest is the spec&rsquo;s anchor, written after the hub&rsquo;s absence was confirmed</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Delivery under an <code>Expected</code> identity.</strong> No commit exists, so <a href="#engine-delivery">Engine
+delivery</a>
+ is refused (<code>AnchorNeedsNodeDelivery</code>) and
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/#download-and-verification">Node delivery</a>
+ draws the manifest and the bytes from the other
+nodes; with no peer holding the tree the mount fails naming the digest nothing holds. Seed one
+node while the hub is reachable, and the identity stands without it.</p>
+<p>Anchor verification narrows what an <code>Expected</code> identity promises. Integrity is never at risk: only
+anchor-named, verified bytes enter a published set or a mount. What relaxes is secrecy: an
+artifact whose anchor names a digest already published on a node can mount that tree with no
+credential, and digests are visible cluster-wide on <code>NodeModelStore</code> status. Private content must
+not rely on digest secrecy; hub-verified identities keep resolving with the namespace&rsquo;s token.</p>
+<p><code>Resolved=False</code> stops new consumption: no new replica, replacement or scale-up. It never
+deletes a running Pod. A claim source is resolved by the claim existing; the operator never reads
+its content, so it has no revision and no digest.</p>
+<h2 id="the-manifest-digest">The manifest digest</h2>
+<p>The digest is the content address of a hub artifact: the SHA-256 of a canonical manifest,
+one line per file of the commit. The format is <code>gpustack-manifest v1</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">gpustack-manifest v1
+</span></span><span class="line"><span class="cl">gitsha1:4ff64fe5… 807 config.json
+</span></span><span class="line"><span class="cl">sha256:8111d5af… 453864 model.safetensors</span></span></code></pre></div>
+</div><ul>
+<li>A line is <code>&lt;algorithm&gt;:&lt;hex&gt; &lt;size&gt; &lt;path&gt;</code>, sorted by the path, every line ending in LF. An LFS
+file uses its <code>sha256</code>, any other file its git blob <code>gitsha1</code>; a ModelScope artifact&rsquo;s manifest
+is all <code>sha256</code> lines, the hub giving no other digest.</li>
+<li>The source, the repository, the commit and the patterns are not part of it, so the same files
+have the same digest wherever they live. A filter changes the digest only through the files it
+keeps, and an artifact without patterns has the digest it always had.</li>
+</ul>
+<p>Two consequences follow:</p>
+<ul>
+<li><strong>The digest is never evidence of access.</strong> A public and a private repository holding the same
+files have the same digest; authorization always comes from resolving with the namespace&rsquo;s token.</li>
+<li>The same files on Hugging Face and ModelScope have different digests, because non-LFS files are
+hashed differently there. Content is not deduplicated across hubs.</li>
+</ul>
+<h2 id="referencing-it-from-a-modeldeployment">Referencing it from a ModelDeployment</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b                       </span><span class="w"> </span><span class="c"># the served name, unchanged</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w"> </span><span class="c"># a ModelArtifact in this namespace</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b</span></span></span></code></pre></div>
+</div><p><code>artifactRef</code> is frozen with the rest of <code>spec.model</code>: other weights are another deployment. A
+reference to an artifact that does not exist or has not resolved is admitted, and the deployment
+creates no Pod until it resolves.</p>
+<p>A claim source is always mounted directly. A hub source (Hugging Face or ModelScope) takes the
+delivery the
+<code>model-artifact-delivery-mode</code> Setting names, <code>Engine</code> by default and <code>Node</code> where the chart deploys
+the node plugin (<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/#switch-delivery">switching it</a>
+ rolls each such
+deployment once):</p>
+<table>
+  <thead>
+      <tr>
+          <th></th>
+          <th>Claim source (<code>Pvc</code>)</th>
+          <th>Hub source, <code>Engine</code></th>
+          <th>Hub source, <code>Node</code></th>
+          <th>Image source (<code>Image</code>)</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Weights</td>
+          <td>the claim, read-only, at <code>/var/lib/gpustack/model</code>, <code>subPath</code> = <code>path</code></td>
+          <td>downloaded by the engine into <code>/var/lib/gpustack/model-cache</code></td>
+          <td>the node&rsquo;s verified copy, read-only, at <code>/var/lib/gpustack/model</code></td>
+          <td>the image, read-only, at <code>/var/lib/gpustack/model</code></td>
+      </tr>
+      <tr>
+          <td>vLLM</td>
+          <td><code>vllm serve /var/lib/gpustack/model</code></td>
+          <td><code>vllm serve &lt;repository&gt; --revision &lt;commit&gt;</code></td>
+          <td>as a claim</td>
+          <td>as a claim</td>
+      </tr>
+      <tr>
+          <td>SGLang</td>
+          <td><code>--model-path /var/lib/gpustack/model</code></td>
+          <td><code>--model-path &lt;repository&gt; --revision &lt;commit&gt;</code></td>
+          <td>as a claim</td>
+          <td>as a claim</td>
+      </tr>
+      <tr>
+          <td>Both</td>
+          <td><code>--served-model-name &lt;spec.model.name&gt;</code>, unless the role states it</td>
+          <td>same</td>
+          <td>same</td>
+          <td>same</td>
+      </tr>
+  </tbody>
+</table>
+<p>An image source takes <code>Image</code> whatever the Setting says, and kubelet pulls the pinned image on the
+node that needs it; see <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/image-source/">Model Image Source</a>
+.</p>
+<p><code>--revision</code> pins the weights and the tokenizer together on both engines. A take-over role (one
+with <code>command</code>) gets the claim or node mount and nothing else, and nothing at all under <code>Engine</code>.</p>
+<p><strong>Node delivery</strong> mounts an inline CSI volume of the driver <code>model.csi.gpustack.ai</code>: the node&rsquo;s
+<code>model-manager</code> plugin downloads the digest once per node, verifies every byte against the manifest
+before anything is mounted, and mounts only for a resolved artifact in the Pod&rsquo;s own namespace. The
+plugin and its resource are on the <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/">Node Model Store</a>
+.</p>
+<p>No Hub variable and no cache <code>emptyDir</code> is rendered under Node delivery, and the ephemeral-storage
+limit is not raised: the volume&rsquo;s bytes are not the Pod&rsquo;s.</p>
+<p>While <code>artifactRef</code> is set, admission refuses:</p>
+<ul>
+<li>on vLLM <code>--model</code>, <code>--revision</code>, <code>--tokenizer-revision</code> and <code>--download-dir</code>, on SGLang
+<code>--model-path</code>, <code>--revision</code> and <code>--download-dir</code>, and <code>HF_TOKEN</code>, <code>HF_ENDPOINT</code>, <code>HF_HOME</code>,
+<code>MODELSCOPE_API_TOKEN</code>, <code>MODELSCOPE_DOMAIN</code>, <code>MODELSCOPE_CACHE</code> and the engine&rsquo;s
+<code>VLLM_USE_MODELSCOPE</code> / <code>SGLANG_USE_MODELSCOPE</code> in
+<code>env</code>, whatever the source (a later value would silently replace the artifact&rsquo;s);</li>
+<li>a role volume at, inside or around <code>/var/lib/gpustack/model</code> or <code>/var/lib/gpustack/model-cache</code>.</li>
+</ul>
+<p>On every managed role, with or without an artifact, <code>--served-model-name</code> must be exactly
+<code>spec.model.name</code>. Any other name was measured to fail silently: requests by <code>spec.model.name</code>
+answer 404 through the router, and requests by the other name succeed while the router&rsquo;s
+prefix-cache scoring falls to zero, with the deployment reporting <code>Ready</code>.</p>
+<h2 id="engine-delivery">Engine delivery</h2>
+<p>Under <code>Engine</code>, the engine downloads the pinned commit itself, with:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Variable</th>
+          <th>Value</th>
+          <th>Owned</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>HF_HOME</code></td>
+          <td><code>/var/lib/gpustack/model-cache</code></td>
+          <td>yes</td>
+      </tr>
+      <tr>
+          <td><code>HF_ENDPOINT</code></td>
+          <td>the <code>model-artifact-huggingface-endpoint</code> Setting</td>
+          <td>yes</td>
+      </tr>
+      <tr>
+          <td><code>HF_TOKEN</code></td>
+          <td>a <code>secretKeyRef</code> to the artifact&rsquo;s Secret, key <code>token</code>; the value never enters the Pod spec</td>
+          <td>yes</td>
+      </tr>
+      <tr>
+          <td><code>MODELSCOPE_CACHE</code></td>
+          <td><code>/var/lib/gpustack/model-cache</code></td>
+          <td>yes</td>
+      </tr>
+      <tr>
+          <td><code>MODELSCOPE_DOMAIN</code></td>
+          <td>the <code>model-artifact-modelscope-endpoint</code> Setting&rsquo;s bare host — the runners&rsquo; SDK prefixes the scheme itself</td>
+          <td>yes</td>
+      </tr>
+      <tr>
+          <td><code>MODELSCOPE_API_TOKEN</code></td>
+          <td>a <code>secretKeyRef</code> to the artifact&rsquo;s Secret, key <code>token</code></td>
+          <td>yes</td>
+      </tr>
+      <tr>
+          <td><code>VLLM_USE_MODELSCOPE</code> / <code>SGLANG_USE_MODELSCOPE</code></td>
+          <td><code>true</code>, routing the engine&rsquo;s own download through its bundled ModelScope SDK; each engine reads only its own</td>
+          <td>yes</td>
+      </tr>
+      <tr>
+          <td><code>HTTPS_PROXY</code>, <code>NO_PROXY</code></td>
+          <td>the proxy Settings, when set</td>
+          <td>no — a role&rsquo;s own value wins</td>
+      </tr>
+  </tbody>
+</table>
+<p>A ModelScope artifact renders the <code>MODELSCOPE_*</code> rows; a Hugging Face artifact the <code>HF_*</code> rows.
+The ModelScope rows reach the engine through the runner&rsquo;s bundled SDK, whose version decides
+whether a commit is accepted; see <a href="#requirements-and-limits">Requirements</a>
+.</p>
+<p>The cache is an <code>emptyDir</code> with a <code>sizeLimit</code> of the manifest&rsquo;s size plus a tenth, and at least
+1 GiB more. The manifest is the whole commit, so it bounds whatever subset the engine downloads (vLLM
+skips <code>.bin</code> files when <code>.safetensors</code> exist).</p>
+<p><strong>The container&rsquo;s ephemeral-storage limit is raised by the same amount; its request is not.</strong>
+Kubelet counts an <code>emptyDir</code> toward the Pod&rsquo;s ephemeral-storage limit as well as its own
+<code>sizeLimit</code>, so a model larger than the InstanceType&rsquo;s local storage would otherwise be evicted
+mid-download. Kueue and the scheduler read the request, which stays the InstanceType&rsquo;s.</p>
+<p>A namespace <code>LimitRange</code> whose maximum is below the raised limit makes the API server refuse the Pod,
+which the deployment reports as a create failure.</p>
+<p>A download that still outgrows the cache is evicted; the Pod ends <code>Succeeded</code>, and the deployment&rsquo;s
+phase message carries the kubelet&rsquo;s own reason, which is the only place it survives.</p>
+<ul>
+<li><strong>Changing an endpoint or proxy Setting rolls every Engine-delivered deployment</strong>, because the
+values are rendered into the Pods. It does not re-resolve an artifact. For the same reason the
+proxy Setting accepts no credentials (<a href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/">Settings</a>
+).</li>
+<li><strong>The CA bundle Setting is not given to engine Pods.</strong> They run in tenant namespaces, which cannot
+mount a ConfigMap from the worker&rsquo;s. Mount your own ConfigMap and set <code>REQUESTS_CA_BUNDLE</code>.</li>
+<li>A <code>trust_remote_code</code> model writes its code under <code>$HF_HOME/modules</code>, which is on the cache.</li>
+</ul>
+<h2 id="claim-delivery-and-placement">Claim delivery and placement</h2>
+<p>Kueue&rsquo;s topology-aware scheduling does not read a Pod&rsquo;s volumes. A claim bound to a PV with node
+affinity was measured to fail silently without help: the Pod was assigned elsewhere and stayed
+Pending, while its Workload stayed Admitted holding quota. So:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Claim state</th>
+          <th>Operator action</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Bound</td>
+          <td>adds the PV&rsquo;s required node affinity to every Pod at creation, outside the Pod fingerprint</td>
+      </tr>
+      <tr>
+          <td>Pending, <code>WaitForFirstConsumer</code> with a provisioner</td>
+          <td>creates the Pods; the first one&rsquo;s node decides the binding</td>
+      </tr>
+      <tr>
+          <td>Pending, a class with <code>kubernetes.io/no-provisioner</code>, or immediate binding</td>
+          <td>creates nothing: <code>ClaimNotBound</code></td>
+      </tr>
+      <tr>
+          <td>Mounted by more than one Pod, with neither <code>ReadOnlyMany</code> nor <code>ReadWriteMany</code></td>
+          <td>creates nothing: <code>AccessModeConflict</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>With the affinity, the Workload waits before quota when the PV&rsquo;s node is full and admits itself when
+room appears. For a static local volume, bind the claim to its PV first (<code>spec.volumeName</code>). The
+static-class row is inferred from the binding order rather than measured.</p>
+<p>Measured throughput, for choosing a claim (one node with one 48 GB accelerator and a 1000 GiB network
+SSD boot disk; object-storage and NFS servers on CPU nodes with 2 TiB network disks of the default
+class; page caches dropped before every read):</p>
+<table>
+  <thead>
+      <tr>
+          <th>Source</th>
+          <th>Cold read, 7B</th>
+          <th>Weight loading, vLLM 7B</th>
+          <th>Warm read</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>S3 CSI (geesefs)</td>
+          <td>467 MB/s</td>
+          <td>32.6 s</td>
+          <td>about 455 MB/s: no page-cache benefit</td>
+      </tr>
+      <tr>
+          <td>The node&rsquo;s boot disk</td>
+          <td>479 MB/s</td>
+          <td>34.8–35.7 s</td>
+          <td>7.4–7.8 GB/s</td>
+      </tr>
+      <tr>
+          <td>NFS CSI</td>
+          <td>about 312 MB/s</td>
+          <td>40.2 s</td>
+          <td>page-cached</td>
+      </tr>
+  </tbody>
+</table>
+<p>Both S3 and the boot disk sat at the network disk&rsquo;s ceiling, so the S3 CSI driver&rsquo;s own ceiling was
+not reached; performance is not a reason to avoid an S3 claim. Every restart on the same node reads
+object storage again. That disk class&rsquo;s throughput grows with its size, so any figure you quote
+needs the disk&rsquo;s type and size.</p>
+<p>Point an S3 PV&rsquo;s endpoint at a ClusterIP, not an in-cluster DNS name: the default geesefs mount
+runs as a systemd unit on the host and resolves with the host&rsquo;s resolver, which does not know
+<code>*.svc.cluster.local</code>.</p>
+<h2 id="the-kv-reuse-domain">The KV reuse domain</h2>
+<p>Neither engine&rsquo;s store key names the weights: vLLM&rsquo;s carries the last path segment of <code>--model</code>,
+SGLang&rsquo;s the served name. Two deployments of different commits under one Binding were measured to
+read each other&rsquo;s KV blocks, and a claim delivery names every model <code>model</code>.</p>
+<p>With <code>artifactRef</code> and <code>spec.kvCache</code>, the operator prefixes the keys with the weight identity:
+vLLM&rsquo;s <code>kv_connector_extra_config.cache_prefix</code> on its store connector, and SGLang&rsquo;s
+<code>extra_backend_tag</code> in <code>--hicache-storage-backend-extra-config</code>. The identity is <code>m-</code> and 32
+hexadecimal digits of the manifest digest, or of the SHA-256 of the artifact&rsquo;s UID for a claim.</p>
+<ul>
+<li>Deployments of one identity share blocks; deployments of two never do.</li>
+<li><strong>A claim&rsquo;s identity is the artifact, not its content.</strong> Replacing the files under one artifact
+keeps the identity, and new replicas would read blocks of the old files. Put new weights in a new
+<code>ModelArtifact</code>.</li>
+<li>The vLLM-Ascend store connector gets no prefix: its key layout was not read.</li>
+<li>The Binding&rsquo;s <code>blockSize</code> and <code>dtype</code> are not part of either key. The <code>dtype</code> is
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/pool/#engine-dtype">handed to the engine</a>
+ instead.</li>
+</ul>
+<h2 id="status">Status</h2>
+<p><code>status.model</code> echoes the artifact, its <code>revision</code> and <code>manifestDigest</code>, and the <code>delivery</code>, <code>PVC</code>,
+<code>Engine</code>, <code>Node</code> or <code>Image</code>; an image source echoes neither a revision nor a digest, its reference
+being the identity. <code>WeightsReady</code> says whether every engine role&rsquo;s weights are there:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Status</th>
+          <th>Reason</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>True</td>
+          <td><code>NotApplicable</code></td>
+          <td>the deployment names no artifact</td>
+      </tr>
+      <tr>
+          <td>False</td>
+          <td><code>ArtifactNotFound</code>, <code>ArtifactNotResolved</code></td>
+          <td>no new Pod is created; the message carries the artifact&rsquo;s reason</td>
+      </tr>
+      <tr>
+          <td>False</td>
+          <td><code>ClaimNotBound</code>, <code>AccessModeConflict</code></td>
+          <td>no new Pod is created; see the placement table</td>
+      </tr>
+      <tr>
+          <td>False</td>
+          <td><code>NodeDeliveryUnavailable</code></td>
+          <td><code>Node</code> delivery, and the CSIDriver <code>model.csi.gpustack.ai</code> does not exist; no new Pod is created</td>
+      </tr>
+      <tr>
+          <td>False</td>
+          <td><code>FilterNeedsNodeDelivery</code></td>
+          <td>an artifact with patterns under <code>Engine</code> delivery, which cannot honor them; no new Pod is created</td>
+      </tr>
+      <tr>
+          <td>False</td>
+          <td><code>AnchorNeedsNodeDelivery</code></td>
+          <td>an artifact carrying <code>expectedDigest</code> under <code>Engine</code> delivery: the engine downloads by repository and revision and cannot anchor-verify what it fetched, and an <code>Expected</code> identity has no resolved commit to pin; no new Pod is created</td>
+      </tr>
+      <tr>
+          <td>False</td>
+          <td><code>Materializing</code></td>
+          <td>a node Pod is not mounted yet and its node lists the digest <code>Downloading</code></td>
+      </tr>
+      <tr>
+          <td>False</td>
+          <td><code>MaterializationFailed</code></td>
+          <td>the same, and the node lists it <code>Failed</code>; the message carries the node&rsquo;s reason and retry time</td>
+      </tr>
+      <tr>
+          <td>False</td>
+          <td><code>WeightsNotMounted</code></td>
+          <td>a claim, node or image Pod&rsquo;s <code>PodReadyToStartContainers</code> is not True yet; for an image Pod the Pod&rsquo;s events carry the pull error</td>
+      </tr>
+      <tr>
+          <td>False</td>
+          <td><code>Downloading</code></td>
+          <td>an engine Pod is not Ready yet; the engine reports no progress of its own</td>
+      </tr>
+      <tr>
+          <td>True</td>
+          <td><code>Mounted</code>, <code>Downloaded</code></td>
+          <td>every Pod has its weights</td>
+      </tr>
+  </tbody>
+</table>
+<p>While nothing is created, the phase message is the <code>WeightsReady</code> message. A blocked deployment
+also holds its rollouts: an edited replica is not deleted while its replacement could not be made,
+and <code>ReplicasUpToDate</code> reports that hold with reason <code>RolloutHeldByWeights</code>.</p>
+<p>If Kueue&rsquo;s <code>waitForPodsReady</code> is enabled (the chart leaves it off), a download that outlasts its
+timeout evicts and requeues the replica.</p>
+<h2 id="instance-model-volumes">Instance model volumes</h2>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">additionalVolumes</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/models/qwen</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b</span></span></span></code></pre></div>
+</div><p>The volume is always read-only and takes no <code>subPath</code>. A claim artifact&rsquo;s <code>path</code> is the sub-path and
+the claim placement rules above apply. A hub artifact is mounted through the node plugin
+whatever <code>model-artifact-delivery-mode</code> says, since an Instance has no engine to download it; while
+the CSIDriver does not exist the Instance creates no Pod and says so in its phase message.</p>
+<p>An image artifact mounts through an image volume, needing no plugin. An Instance pinned to a node
+waits instead when that node cannot run one, naming the node and the floor
+(<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/image-source/#delivery">Model Image Source</a>
+).</p>
+<h2 id="requirements-and-limits">Requirements and limits</h2>
+<ul>
+<li><strong>Kubernetes 1.29</strong>, the floor the bundled Kueue already sets. <code>PodReadyToStartContainers</code> (beta,
+on by default since 1.29) feeds <code>WeightsReady</code>; with it off, a claim deployment&rsquo;s <code>WeightsReady</code>
+stays <code>WeightsNotMounted</code> while its replicas run.</li>
+<li><strong>A downgrade window weakens the anchor&rsquo;s admission.</strong> An old webhook cannot see
+<code>expectedDigest</code>, so an update changing it is not refused while the old webhook serves, and an
+old worker drops <code>digestSource</code> from the status it writes. The CRD serves the field throughout,
+and re-upgrading recomputes the status on the next pass.</li>
+<li><strong>A ModelScope Engine download needs the runner&rsquo;s ModelScope SDK at 1.39.1 or later</strong>, the
+version that accepts a commit as the revision. The operator renders the environment whatever the
+runner holds and cannot see into it: on a runner below the floor the engine fails with the SDK&rsquo;s
+own <code>NotExistError</code>.</li>
+<li><strong>The floor was measured against the published runners.</strong> The Ascend <code>cann9.1-*-vllm0.23.0</code> line
+and the SGLang 0.5.18 line meet it; the current CUDA <code>vllm0.25.1</code> and <code>vllm0.29.0</code> lines do not.
+For those, name a runner image of your own that bundles a conforming SDK, as any role may. Node
+delivery needs no runner at all.</li>
+<li><strong>Image sources need image volumes</strong> and floors above Kubernetes&rsquo;s own; creation is refused
+below them. The full line is on the
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/image-source/#versions-and-prerequisites">Model Image Source</a>
+.</li>
+<li><strong><code>sglang-gateway</code> fetches a tokenizer by the worker&rsquo;s <code>model_path</code>.</strong> With a claim that path is
+local, so it logs one 404 warning and routes by text; with Engine delivery it would fetch <code>main</code>
+without a token (not measured).</li>
+<li><strong>vLLM 0.29.0 needs <code>--enforce-eager</code> for InternLM2</strong> with <code>trust_remote_code</code>, an engine defect.</li>
+<li><strong>Node delivery downloads from the Hub on every cold node.</strong> A Pod prefers the nodes already
+holding the digest, but only while they have room; placed anywhere else, its node downloads. See
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/scheduling/#placement-of-node-delivered-models">a node-delivered model prefers the nodes holding
+it</a>
+.</li>
+<li>Settings: <a href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/#online-adjustable-settings">Settings &amp; Environment Variables</a>
+ carries the
+two hub endpoints, proxy, no-proxy, CA bundle, revalidation interval, delivery mode and the node
+cache&rsquo;s watermarks and download limits.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/deployment/">Model Deployment</a>
+ for the rest of the deployment
+contract</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/">Node Model Store</a>
+ for Node delivery</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/views/">Model Artifact API</a>
+ for resource status and <code>progress</code></li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/injection/">KV Cache Injection Reference</a>
+ for the store connector this
+prefixes</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/status/">Model Deployment Status</a>
+ for the other conditions.</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/status/">Model Deployment Status</a></div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/3947d8e1e0b39f9574e2fc67bb8ca3e4b6531ebc/docs/modules/model-delivery/artifact.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#the-resource">The resource</a></li>
+    <li><a href="#resolution-and-revalidation">Resolution and revalidation</a></li>
+    <li><a href="#the-manifest-digest">The manifest digest</a></li>
+    <li><a href="#referencing-it-from-a-modeldeployment">Referencing it from a ModelDeployment</a></li>
+    <li><a href="#engine-delivery">Engine delivery</a></li>
+    <li><a href="#claim-delivery-and-placement">Claim delivery and placement</a></li>
+    <li><a href="#the-kv-reuse-domain">The KV reuse domain</a></li>
+    <li><a href="#status">Status</a></li>
+    <li><a href="#instance-model-volumes">Instance model volumes</a></li>
+    <li><a href="#requirements-and-limits">Requirements and limits</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0-rc2/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,1171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0-rc2/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Command Reference · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0-rc2/docs/reference/commands/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0-rc2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0-rc2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0-rc2/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0-rc2/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0-rc2"
+      data-home="/gpustack-operator/v0.9.0-rc2/" data-page="/gpustack-operator/v0.9.0-rc2/docs/reference/commands/">
+      <option value="/gpustack-operator/v0.9.0-rc2/">v0.9.0-rc2</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/v0.9.0-rc2/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0-rc2/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0-rc2/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0-rc2/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/commands/" aria-current="page">Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0-rc2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0-rc2/docs/reference/">Reference</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Command Reference</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="command-reference">Command Reference</h1>
+<p>The <code>gpustack-operator</code> binary provides long-running services and one-shot commands. The services are what a
+deployment runs; the one-shots are what you run by hand on a node, and the first two sections choose
+between them.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#command-summary">Command summary</a>
+</li>
+<li><a href="#choosing-a-one-shot-command">Choosing a one-shot command</a>
+</li>
+<li><a href="#global-flags">Global flags</a>
+</li>
+<li><a href="#worker">worker</a>
+</li>
+<li><a href="#worker-gateway">worker-gateway</a>
+</li>
+<li><a href="#device-manager-serve">device-manager serve</a>
+</li>
+<li><a href="#model-manager">model-manager</a>
+</li>
+<li><a href="#device-manager-detect">device-manager detect</a>
+</li>
+<li><a href="#device-manager-monitor">device-manager monitor</a>
+</li>
+<li><a href="#device-manager-preflight">device-manager preflight</a>
+</li>
+</ul>
+<h2 id="command-summary">Command summary</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Command</th>
+          <th>Alias</th>
+          <th>Shape</th>
+          <th>Who runs it</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>worker</code></td>
+          <td><code>w</code></td>
+          <td>service</td>
+          <td>the operator Deployment, one per cluster</td>
+      </tr>
+      <tr>
+          <td><code>worker-gateway</code></td>
+          <td><code>wg</code></td>
+          <td>service</td>
+          <td>a sidecar beside <code>worker</code></td>
+      </tr>
+      <tr>
+          <td><code>device-manager serve</code></td>
+          <td><code>dm serve</code></td>
+          <td>service</td>
+          <td>the Device Manager DaemonSet, one per node</td>
+      </tr>
+      <tr>
+          <td><code>model-manager</code></td>
+          <td><code>mm</code></td>
+          <td>service</td>
+          <td>the Model Manager DaemonSet, one per node</td>
+      </tr>
+      <tr>
+          <td><code>device-manager detect</code></td>
+          <td><code>dm detect</code></td>
+          <td>one-shot</td>
+          <td>a person, on a node</td>
+      </tr>
+      <tr>
+          <td><code>device-manager monitor</code></td>
+          <td><code>dm monitor</code></td>
+          <td>one-shot</td>
+          <td>a person, on a node</td>
+      </tr>
+      <tr>
+          <td><code>device-manager preflight</code></td>
+          <td><code>dm preflight</code></td>
+          <td>one-shot</td>
+          <td>a person, on a node</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="choosing-a-one-shot-command">Choosing a one-shot command</h2>
+<p>The one-shot commands answer different questions; only <code>preflight</code> changes node state.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Question</th>
+          <th>Command</th>
+          <th>Node effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>What accelerators are here, in full?</td>
+          <td><code>detect</code></td>
+          <td>nothing — a pure read</td>
+      </tr>
+      <tr>
+          <td>What are they doing right now?</td>
+          <td><code>monitor</code></td>
+          <td>nothing — a pure read</td>
+      </tr>
+      <tr>
+          <td>Can they actually be sliced, and managed while sliced?</td>
+          <td><code>preflight</code></td>
+          <td>starts containers, stages libraries, asks a driver mode on</td>
+      </tr>
+  </tbody>
+</table>
+<p><code>detect</code> and <code>monitor</code> are reads no flag can turn into an action. <code>preflight</code> is the one that acts:
+it starts probe containers, stages the injected libraries onto the host, and, where a
+manufacturer&rsquo;s sharing mode is off, asks the driver to turn it on to see whether it takes, putting
+it back either way. <code>--dry-run</code> is how it is made a read.</p>
+<p>The probe containers it starts are themselves <strong>not</strong> privileged: they get the allocator&rsquo;s injection
+and nothing more, because the isolation that injection establishes is the thing being measured.</p>
+<blockquote>
+<p><strong>Why <code>detect</code> is not folded into <code>preflight</code></strong> — <code>detect</code> emits the whole ledger, typed as the
+<code>Devices</code> CRD&rsquo;s own <code>spec.groups</code>, so it can be diffed against what the cluster recorded.
+<code>preflight</code>&rsquo;s detection block is a verdict and a count, deliberately not a second ledger. A reader
+who wants both runs both.</p>
+</blockquote>
+<h2 id="global-flags">Global flags</h2>
+<p>Every command accepts these. They come from klog and are omitted from the per-command tables below.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Flag</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>-v</code></td>
+          <td>log verbosity, <code>0</code> unless you pass one. The DaemonSet runs at <code>-v=2</code>; <code>-v=3</code> adds the per-decision lines, including why a container runtime did or did not resolve</td>
+      </tr>
+      <tr>
+          <td><code>--vmodule</code></td>
+          <td>per-file verbosity, <code>pattern=N</code> comma separated</td>
+      </tr>
+      <tr>
+          <td><code>--logtostderr</code></td>
+          <td>log to standard error rather than files (default true)</td>
+      </tr>
+      <tr>
+          <td><code>--add_dir_header</code>, <code>--skip_headers</code>, <code>--log_backtrace_at</code></td>
+          <td>log line shape</td>
+      </tr>
+      <tr>
+          <td><code>--print-cmdline</code></td>
+          <td>print the effective command line, including what was read from the environment</td>
+      </tr>
+      <tr>
+          <td><code>--version</code></td>
+          <td>the binary&rsquo;s version</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="worker">worker</h2>
+<p>It is the control plane: it profiles node capacity, runs the controllers that materialize the
+Kueue scheduling chain, serves the aggregated extension APIs and the admission webhooks, and installs
+the applications a cluster needs.</p>
+<p>Runs as the operator Deployment. Flags below are the ones that change behaviour rather than tune a
+connection; see <a href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/">Settings</a>
+ for what is configured through the <code>Setting</code> CR instead.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Flag</th>
+          <th>Default</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--manufacturer</code></td>
+          <td>all manufacturers</td>
+          <td>which manufacturers to detect</td>
+      </tr>
+      <tr>
+          <td><code>--disable-applications</code></td>
+          <td>none</td>
+          <td>applications to skip installing, or <code>*</code> for all. See <a href="/gpustack-operator/v0.9.0-rc2/docs/operate/installation-modes/">Installation Modes</a>
+</td>
+      </tr>
+      <tr>
+          <td><code>--secure-port</code></td>
+          <td><code>31443</code></td>
+          <td>the HTTPS port</td>
+      </tr>
+      <tr>
+          <td><code>--bind-address</code></td>
+          <td><code>0.0.0.0</code></td>
+          <td>the address to serve on</td>
+      </tr>
+      <tr>
+          <td><code>--cert-dir</code></td>
+          <td>—</td>
+          <td>where <code>tls.crt</code> and <code>tls.key</code> are</td>
+      </tr>
+      <tr>
+          <td><code>--disable-auths</code></td>
+          <td><code>false</code></td>
+          <td>skip authentication and authorization</td>
+      </tr>
+      <tr>
+          <td><code>--kube-leader-election</code></td>
+          <td><code>true</code></td>
+          <td>leader election, for multi-instance deployments</td>
+      </tr>
+      <tr>
+          <td><code>--kube-leader-election-id</code></td>
+          <td><code>worker.gpustack.ai</code></td>
+          <td>the election&rsquo;s unique ID</td>
+      </tr>
+      <tr>
+          <td><code>--kube-leader-lease</code>, <code>--kube-leader-renew-timeout</code></td>
+          <td><code>15s</code>, <code>10s</code></td>
+          <td>how long leadership is held and renewed within</td>
+      </tr>
+      <tr>
+          <td><code>--kube-conn-qps</code>, <code>--kube-conn-burst</code>, <code>--kube-conn-timeout</code></td>
+          <td><code>200</code>, <code>400</code>, <code>5m</code></td>
+          <td>loopback API client limits</td>
+      </tr>
+      <tr>
+          <td><code>--informer-cache-resync-period</code></td>
+          <td><code>1h</code></td>
+          <td>informer resync period</td>
+      </tr>
+      <tr>
+          <td><code>--gopool-worker-factor</code></td>
+          <td><code>100</code></td>
+          <td>goroutine pool size, per CPU core</td>
+      </tr>
+      <tr>
+          <td><code>--audit-log-path</code>, <code>--audit-policy-file</code>, <code>--audit-webhook-config-file</code></td>
+          <td>—</td>
+          <td>request auditing</td>
+      </tr>
+      <tr>
+          <td><code>--cors-allowed-origins</code></td>
+          <td>all</td>
+          <td>allowed cross-domain origins, as anchored regular expressions</td>
+      </tr>
+      <tr>
+          <td><code>--model-manager-service-account</code></td>
+          <td><code>gpustack-operator-model-manager</code></td>
+          <td>the ServiceAccount, in the operator namespace, the model-manager plugin runs as; only it may write a <code>NodeModelStore</code>&rsquo;s status</td>
+      </tr>
+  </tbody>
+</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">gpustack-operator worker --secure-port<span class="o">=</span><span class="m">31443</span> --disable-applications<span class="o">=</span>kueue</span></span></code></pre></div>
+</div><h2 id="worker-gateway">worker-gateway</h2>
+<p>Aggregates resources from upstream clusters and mirrors them for <code>worker</code> to read. Runs beside
+<code>worker</code>; by default the two speak over a unix socket rather than a port.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Flag</th>
+          <th>Default</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--bind-unix-path</code></td>
+          <td><code>/var/lib/gpustack/gpustack-operator-worker-gateway.sock</code></td>
+          <td>the socket to serve on. When set, <code>--bind-address</code> and <code>--secure-port</code> are ignored</td>
+      </tr>
+      <tr>
+          <td><code>--worker-conn-mode</code></td>
+          <td><code>gpustack-api</code></td>
+          <td>how the worker is reached: <code>gpustack-api</code> or <code>loopback</code></td>
+      </tr>
+      <tr>
+          <td><code>--worker-conn-gpustack-api-port</code></td>
+          <td><code>30080</code></td>
+          <td>the GPUStack server&rsquo;s port in <code>gpustack-api</code> mode</td>
+      </tr>
+      <tr>
+          <td><code>--worker-conn-gpustack-api-scheme</code></td>
+          <td>derived from the port</td>
+          <td><code>http</code> or <code>https</code></td>
+      </tr>
+      <tr>
+          <td><code>--worker-readiness-check-timeout</code></td>
+          <td><code>30s</code></td>
+          <td>one readiness check of a worker&rsquo;s API services. Must not exceed <code>--kube-conn-timeout</code>, which otherwise bounds it</td>
+      </tr>
+      <tr>
+          <td><code>--secure-port</code>, <code>--bind-address</code>, <code>--cert-dir</code></td>
+          <td>—</td>
+          <td>serving, when not on a socket</td>
+      </tr>
+      <tr>
+          <td><code>--kube-conn-*</code>, <code>--informer-cache-resync-period</code>, <code>--gopool-worker-factor</code></td>
+          <td>as <code>worker</code></td>
+          <td>client and cache tuning</td>
+      </tr>
+  </tbody>
+</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">gpustack-operator worker-gateway --worker-conn-mode<span class="o">=</span>loopback</span></span></code></pre></div>
+</div><h2 id="device-manager-serve">device-manager serve</h2>
+<p>It is the per-node agent: it detects accelerators, keeps the <code>Devices</code> ledger current, samples
+utilization, registers with the kubelet as a device plugin and injects the vendor runtime into
+allocated containers.</p>
+<p>Runs as the Device Manager DaemonSet. The <code>--no-*</code> mode flags are how a node is restricted to a
+subset of the allocation modes its hardware would otherwise offer.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Flag</th>
+          <th>Default</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--manufacturer</code></td>
+          <td>all manufacturers</td>
+          <td>which manufacturers to detect</td>
+      </tr>
+      <tr>
+          <td><code>--no-sliced</code></td>
+          <td><code>false</code></td>
+          <td>do not create logically sliced devices</td>
+      </tr>
+      <tr>
+          <td><code>--no-partitioned</code></td>
+          <td><code>false</code></td>
+          <td>do not create hardware-partitioned devices</td>
+      </tr>
+      <tr>
+          <td><code>--no-shared</code></td>
+          <td><code>false</code></td>
+          <td>do not create shared devices</td>
+      </tr>
+      <tr>
+          <td><code>--no-pci-check</code></td>
+          <td><code>false</code></td>
+          <td>skip the PCI check the detect pass makes</td>
+      </tr>
+      <tr>
+          <td><code>--no-fast-failed</code></td>
+          <td><code>false</code></td>
+          <td>publish a first pass that found nothing rather than holding it back and detecting again. Only applies when <code>--manufacturer</code> names exactly one</td>
+      </tr>
+      <tr>
+          <td><code>--monitor-period</code></td>
+          <td><code>15s</code></td>
+          <td>how often utilization is sampled; only the latest sample is kept</td>
+      </tr>
+      <tr>
+          <td><code>--kube-socket</code></td>
+          <td><code>/var/lib/kubelet/device-plugins/kubelet.sock</code></td>
+          <td>the kubelet socket to register on</td>
+      </tr>
+      <tr>
+          <td><code>--secure-port</code></td>
+          <td><code>32443</code></td>
+          <td>the HTTPS port</td>
+      </tr>
+      <tr>
+          <td><code>--bind-address</code>, <code>--cert-dir</code>, <code>--kube-conn-*</code>, <code>--informer-cache-resync-period</code>, <code>--gopool-worker-factor</code></td>
+          <td>as <code>worker</code></td>
+          <td>serving, client and cache tuning</td>
+      </tr>
+  </tbody>
+</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">gpustack-operator device-manager serve --manufacturer<span class="o">=</span>nvidia --no-partitioned</span></span></code></pre></div>
+</div><h2 id="model-manager">model-manager</h2>
+<p>The per-node model cache. A CSI node plugin serving inline ephemeral volumes of the driver
+<code>model.csi.gpustack.ai</code>: it authorizes each mount against the Pod&rsquo;s namespace, downloads and
+verifies a Hugging Face artifact&rsquo;s files once per node, and writes that node&rsquo;s <code>NodeModelStore</code>
+status. See <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/">Node Model Store</a>
+.</p>
+<p>Runs as the Model Manager DaemonSet beside the <code>node-driver-registrar</code> sidecar. Its configuration
+comes from its node&rsquo;s <code>NodeModelStore.spec</code>, not from flags.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Flag</th>
+          <th>Default</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--node-name</code></td>
+          <td>—</td>
+          <td>the node it runs on, also its <code>NodeModelStore</code>&rsquo;s name</td>
+      </tr>
+      <tr>
+          <td><code>--kubelet-dir</code></td>
+          <td><code>/var/lib/kubelet</code></td>
+          <td>kubelet&rsquo;s root directory, whose pods directory holds the mount targets</td>
+      </tr>
+      <tr>
+          <td><code>--cache-root</code></td>
+          <td><code>/var/lib/gpustack/models</code></td>
+          <td>the node&rsquo;s cache directory</td>
+      </tr>
+      <tr>
+          <td><code>--csi-socket</code></td>
+          <td><code>&lt;kubelet-dir&gt;/plugins/model.csi.gpustack.ai/csi.sock</code></td>
+          <td>the Unix socket the CSI services listen on</td>
+      </tr>
+      <tr>
+          <td><code>--secure-port</code></td>
+          <td><code>32444</code></td>
+          <td>the HTTPS port: metrics, readiness and liveness</td>
+      </tr>
+      <tr>
+          <td><code>--bind-address</code>, <code>--cert-dir</code>, <code>--kube-conn-*</code>, <code>--informer-cache-resync-period</code>, <code>--gopool-worker-factor</code></td>
+          <td>as <code>worker</code></td>
+          <td>serving, client and cache tuning</td>
+      </tr>
+  </tbody>
+</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">gpustack-operator model-manager --node-name<span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>hostname<span class="k">)</span><span class="s2">&#34;</span> --cache-root<span class="o">=</span>/mnt/models</span></span></code></pre></div>
+</div><h2 id="device-manager-detect">device-manager detect</h2>
+<p>Runs one detect pass and prints the result. It is a pure read: nothing is written, nothing is
+started, and no flag changes that.</p>
+<p>The output is the <code>Devices</code> CRD&rsquo;s own <code>spec.groups</code>, so it can be compared directly against what the
+cluster recorded; <code>kubectl get devices &lt;node&gt; -o yaml</code> beside it is a diff.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Flag</th>
+          <th>Default</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--manufacturer</code></td>
+          <td>all manufacturers</td>
+          <td>which manufacturers to detect</td>
+      </tr>
+      <tr>
+          <td><code>--no-pci-check</code></td>
+          <td><code>false</code></td>
+          <td>skip the PCI check</td>
+      </tr>
+      <tr>
+          <td><code>--no-fast-failed</code></td>
+          <td><code>false</code></td>
+          <td>publish a first pass that found nothing rather than detecting again</td>
+      </tr>
+  </tbody>
+</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager detect --manufacturer<span class="o">=</span>amd</span></span></code></pre></div>
+</div><div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">radeon-rx-7800-xt</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l">amd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">AMD Radeon RX 7800 XT</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="m">16368</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">cores</span><span class="p">:</span><span class="w"> </span><span class="m">60</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">driverVersion</span><span class="p">:</span><span class="w"> </span><span class="m">6.16.13</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">runtimeVersion</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;7.2&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">computeCapability</span><span class="p">:</span><span class="w"> </span><span class="l">gfx1101</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">family</span><span class="p">:</span><span class="w"> </span><span class="l">GC 11.0.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">accelerators</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">GPU-5c88007d760374f3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">index</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">physicalIndexes</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="m">128</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">topology</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">pciBusId</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0000:04:00.0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">numaAffinity</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">cpuAffinity</span><span class="p">:</span><span class="w"> </span><span class="m">0-13</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">unhealthy</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">logicalSliced</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">coresPercentageOvercommit</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">count</span><span class="p">:</span><span class="w"> </span><span class="m">128</span></span></span></code></pre></div>
+</div><blockquote>
+<p><strong>A vendor&rsquo;s user-space libraries have to be reachable.</strong> AMD has no container runtime that
+injects them, so a run without <code>/opt/rocm</code> mounted finds no accelerator on a node that has two.
+<code>preflight</code>&rsquo;s host cross-check is what tells that apart from a node with none; see
+<a href="#device-manager-preflight">below</a>
+.</p>
+</blockquote>
+<h2 id="device-manager-monitor">device-manager monitor</h2>
+<p>Takes one utilization sample and prints it. A pure read, like <code>detect</code>, and it accepts the same
+flags.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager monitor --manufacturer<span class="o">=</span>amd</span></span></code></pre></div>
+</div><div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l">amd</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="ld">2026-08-29T08:01:43.565038175</span><span class="m">+08</span><span class="p">:</span><span class="m">00</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">accelerators</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">GPU-5c88007d760374f3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="m">16368</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">memoryUsage</span><span class="p">:</span><span class="w"> </span><span class="m">174</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">memoryUtilization</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">coresUtilization</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="m">44</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">powerUsage</span><span class="p">:</span><span class="w"> </span><span class="m">8</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">unhealthy</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span></span></span></code></pre></div>
+</div><p>The same figures reach a cluster through the Instance metrics surfaces; see <a href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-metrics/">Instance
+Metrics</a>
+.</p>
+<h2 id="device-manager-preflight">device-manager preflight</h2>
+<p>It answers whether the allocation modes this node&rsquo;s allocators offer actually work here. <code>detect</code>
+cannot answer that question, because a capability can be declared and still not work.</p>
+<p>This is the only command an operator runs by hand that acts on the node. See
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/preflight/">Preflight</a>
+ for the procedure (what to mount, what it starts and
+removes, how to read each row).</p>
+<table>
+  <thead>
+      <tr>
+          <th>Flag</th>
+          <th>Default</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--manufacturer</code></td>
+          <td>all manufacturers</td>
+          <td>which manufacturers to ask about. Every one asked about is reported, including those nothing is read for</td>
+      </tr>
+      <tr>
+          <td><code>--dry-run</code></td>
+          <td><code>false</code></td>
+          <td>print the container steps instead of taking them, and write nothing to the host. Each answer reports the complete invocation — and, because nothing was written, names the staging it would have done: the library tree, and whatever the manufacturer&rsquo;s responder renders. Both have to exist before the printed command runs</td>
+      </tr>
+      <tr>
+          <td><code>--probe-image</code></td>
+          <td>derived per family</td>
+          <td>the image the probe containers run. Required for a family with no default, and the way to run in an air-gapped environment</td>
+      </tr>
+      <tr>
+          <td><code>--host-root</code></td>
+          <td><code>/host</code></td>
+          <td>where the host&rsquo;s root filesystem is mounted into this container</td>
+      </tr>
+      <tr>
+          <td><code>--runtime</code></td>
+          <td>resolved</td>
+          <td>the host runtime to drive, overriding what was resolved. One of <code>docker</code>, <code>nerdctl</code>, <code>ctr</code>; anything else is refused before the pass starts. An escape hatch: a runtime that the host does not carry drops every container step to being emitted</td>
+      </tr>
+      <tr>
+          <td><code>--no-pci-check</code></td>
+          <td><code>false</code></td>
+          <td>skip the PCI check</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="row-states-and-depths">Row states and depths</h3>
+<p>Each row carries a state, a depth and, where a container ran, the evidence it ran on.</p>
+<table>
+  <thead>
+      <tr>
+          <th>State</th>
+          <th>Meaning</th>
+          <th>Exit code</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ok</code></td>
+          <td>the capability works, at the depth stated</td>
+          <td>0</td>
+      </tr>
+      <tr>
+          <td><code>not-declared</code></td>
+          <td>the accelerator does not offer it, so there is nothing to check</td>
+          <td>0</td>
+      </tr>
+      <tr>
+          <td><code>unavailable</code></td>
+          <td>it is offered and this pass did not establish it</td>
+          <td><strong>non-zero</strong></td>
+      </tr>
+  </tbody>
+</table>
+<table>
+  <thead>
+      <tr>
+          <th>Depth</th>
+          <th>Method</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>declared</code></td>
+          <td>read from the driver</td>
+      </tr>
+      <tr>
+          <td><code>simulated</code></td>
+          <td>the allocator produced the injection, and it was not run</td>
+      </tr>
+      <tr>
+          <td><code>measured</code></td>
+          <td>a container ran with that injection and its output was read</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="a-measured-example">A measured example</h3>
+<p>Taken from a run on two RX 7800 XT cards:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="l">GPU-5c88007d760374f3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">capability</span><span class="p">:</span><span class="w"> </span><span class="l">sliced-runtime-loaded</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l">ok</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">depth</span><span class="p">:</span><span class="w"> </span><span class="l">measured</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">detail</span><span class="p">:</span><span class="w"> </span><span class="l">the slicing runtime the injection mounts is loaded in the container</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/sbin/chroot /host docker run --rm --label gpustack.ai/preflight=true … ubuntu:24.04 …</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">evidence</span><span class="p">:</span><span class="w"> </span><span class="p">|</span><span class="sd">
+</span></span></span><span class="line"><span class="cl"><span class="sd">    gpustack-preflight-maps-begin
+</span></span></span><span class="line"><span class="cl"><span class="sd">    …
+</span></span></span><span class="line"><span class="cl"><span class="sd">    7205a176b000-7205a176d000 r--p 00000000 fc:00 13006695   /usr/local/vrocm/libvrocm.so</span></span></span></code></pre></div>
+</div><p>The verdict is the mapping line, not the shim&rsquo;s own greeting: a library that failed to load prints a
+message naming the same path, so only <code>/proc/self/maps</code> says it is actually there.</p>
+<p>The same row under <code>--dry-run</code> carries the <code>command</code> and no <code>evidence</code>, and its depth is
+<code>simulated</code>: the allocator&rsquo;s intent, proven, with nothing run to confirm it took.</p>
+<p><strong>Not every row on that node reaches <code>measured</code>.</strong> <code>sliced-quota-in-force</code> on the same two cards is
+<code>simulated</code>, because the vendor reader there reports nothing until an allocation has been charged and
+the probe allocates nothing: the injection sets a cap and no container was observed under it. A row
+is <code>measured</code> only where something was read back, never where the intent alone is known.</p>
+<h3 id="runtime-resolution">Runtime resolution</h3>
+<p>Resolved from the kubelet&rsquo;s own CRI endpoint wherever the host names one, because that is what
+starts a container on this node in production. A host that names none (a bare machine, or a
+distribution keeping that configuration elsewhere) falls through to probing <code>docker</code>, <code>nerdctl</code>,
+<code>ctr</code>.</p>
+<p>The sources are ordered, and the first that names an endpoint answers, so a standard kubelet
+configuration wins over a distribution drop-in rather than conflicting with it. The conflict that
+does stop a run is <strong>within one source</strong>: a glob matching two directories that disagree, where
+neither is the kubelet&rsquo;s own by position. The steps are emitted instead, naming the endpoints in
+conflict, and <code>--runtime</code> is how you settle it.</p>
+<p><code>ctr</code> is never driven: <code>ctr run</code> has no <code>--device</code>, and its only alternative grants every device, so
+what it measured would not be the isolation the injection established. A node resolving to it gets
+the step emitted for <code>nerdctl</code> instead, against the socket and namespace <code>ctr</code> resolved, or for
+<code>docker</code> where <code>nerdctl</code> cannot pass this manufacturer&rsquo;s vendor runtime either.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host --runtime nvidia <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -e <span class="nv">NVIDIA_VISIBLE_DEVICES</span><span class="o">=</span>all <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>nvidia --dry-run</span></span></code></pre></div>
+</div><p><code>--network=host</code> is not optional: the host&rsquo;s CLI is entered through a chroot, which changes the root
+and not the network namespace, so an image pull would read the host&rsquo;s resolver and find nothing
+answering.</p>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/preflight/">Preflight</a>
+ for the procedure and the per-manufacturer
+tables</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/">Settings</a>
+ for what is configured through the <code>Setting</code> CR</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/contribute/internals/">Internals</a>
+ for startup order and the invariants these commands rest
+on.</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/preflight/">Preflight</a></div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/3947d8e1e0b39f9574e2fc67bb8ca3e4b6531ebc/docs/reference/commands.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#command-summary">Command summary</a></li>
+    <li><a href="#choosing-a-one-shot-command">Choosing a one-shot command</a></li>
+    <li><a href="#global-flags">Global flags</a></li>
+    <li><a href="#worker">worker</a></li>
+    <li><a href="#worker-gateway">worker-gateway</a></li>
+    <li><a href="#device-manager-serve">device-manager serve</a></li>
+    <li><a href="#model-manager">model-manager</a></li>
+    <li><a href="#device-manager-detect">device-manager detect</a></li>
+    <li><a href="#device-manager-monitor">device-manager monitor</a></li>
+    <li><a href="#device-manager-preflight">device-manager preflight</a>
+      <ul>
+        <li><a href="#row-states-and-depths">Row states and depths</a></li>
+        <li><a href="#a-measured-example">A measured example</a></li>
+        <li><a href="#runtime-resolution">Runtime resolution</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0-rc2/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,1430 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0-rc2/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>NVIDIA MIG Operations · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/nvidia-mig/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0-rc2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0-rc2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0-rc2/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0-rc2/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0-rc2"
+      data-home="/gpustack-operator/v0.9.0-rc2/" data-page="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/nvidia-mig/">
+      <option value="/gpustack-operator/v0.9.0-rc2/">v0.9.0-rc2</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/v0.9.0-rc2/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0-rc2/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/nvidia-mig/" aria-current="page">NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0-rc2/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0-rc2/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0-rc2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/">Heterogeneous Devices</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">NVIDIA MIG Operations</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="nvidia-mig-operations">NVIDIA MIG Operations</h1>
+<p>You drive MIG <strong>mode</strong> with <code>nvidia-smi</code>; GPUStack catches up when the node&rsquo;s Device Manager re-detects.
+NVIDIA <strong>MIG</strong> (Multi-Instance GPU) mode is a <strong>manually managed</strong> node property: the operator observes
+the geometry into the <code>Devices</code> ledger and the advertised partitioning capability, but never enables,
+disables or reconfigures it. It does dynamically allocate the instances that back scheduled workloads;
+see <a href="#requesting-a-partition">Requesting a partition</a>
+.</p>
+<p>A capability change enters the cluster <strong>only</strong> through Device Manager re-detection, and the detect loop&rsquo;s
+trigger watches the device set and health, not the partitioning mode, so a mode toggle needs a <strong>DaemonSet
+restart</strong> (see <a href="#operator-boundaries">Operator boundaries</a>
+).</p>
+<p>MIG is GPUStack&rsquo;s one implemented <strong>physical partitioning</strong> backend, a resource family of its own
+(<code>nvidia.com/gpu.partitioned*</code>) disjoint from the logical (software) slicing family <code>nvidia.com/gpu.sliced*</code>:
+a MIG-enabled GPU serves only partition requests, and an unpartitioned GPU only whole-GPU, shared and
+logical-slice requests. The full key set and request rules live in
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/requests/">Accelerator Requests</a>
+.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#prerequisites">Prerequisites</a>
+</li>
+<li><a href="#how-partition-profiles-are-discovered">How partition profiles are discovered</a>
+</li>
+<li><a href="#requesting-a-partition">Requesting a partition</a>
+</li>
+<li><a href="#limitations">Limitations</a>
+</li>
+<li><a href="#enabling-partitioning-on-a-node">Enabling partitioning on a node</a>
+</li>
+<li><a href="#disabling-partitioning-on-a-node">Disabling partitioning on a node</a>
+</li>
+<li><a href="#node-reboot-recovery">Node reboot recovery</a>
+</li>
+<li><a href="#operator-boundaries">Operator boundaries</a>
+</li>
+<li><a href="#walkthrough-three-mig-configurations-on-one-node">Walkthrough: three MIG configurations on one node</a>
+</li>
+</ul>
+<h2 id="prerequisites">Prerequisites</h2>
+<p>The Device Manager Pod must be processed by the <strong>NVIDIA container runtime</strong>, which the chart&rsquo;s
+<code>runtimeClassName</code> plus its <code>NVIDIA_MIG_CONFIG_DEVICES</code> / <code>NVIDIA_MIG_MONITOR_DEVICES</code> declarations
+arrange. Without them that runtime hides the driver&rsquo;s MIG capabilities from the Pod: carving fails with
+<code>NO_PERMISSION</code>, and an instance carved outside the Pod is invisible to it.</p>
+<p>Overriding either variable through <code>deviceManager.env</code>, or pointing the <code>nvidia</code> RuntimeClass handler
+elsewhere, brings that back (<a href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/vendor-prerequisites/#nvidia">NVIDIA prerequisites</a>
+).</p>
+<p>Before switching a GPU&rsquo;s MIG mode (enable or disable):</p>
+<ul>
+<li>The GPU&rsquo;s instances must be <strong>idle</strong>: stop the using Pod first and let no process hold the GPU. A family&rsquo;s
+tokens exist only while the GPU&rsquo;s capability reports it, so flipping the mode <em>removes</em> the old family&rsquo;s
+tokens.</li>
+<li>All daemons holding a driver handle (DCGM, <code>nvsm</code>, exporters, …) must be <strong>stopped first</strong>, or the switch
+hangs pending.</li>
+<li>The <code>nvidia_drm</code> kernel module must <strong>not</strong> be loaded, or the GPU reset fails.</li>
+<li>The operation requires <strong><code>CAP_SYS_ADMIN</code></strong>.</li>
+<li><strong>Ampere (A100/A30)</strong> requires a <strong>GPU reset</strong> after the mode switch. <strong>Hopper and newer</strong> need no reset.</li>
+</ul>
+<p>Once the mode is on, instance (GI/CI) create/destroy is dynamic and online: destroying one returns <code>IN_USE</code>
+only when <em>that</em> instance has active processes; sibling workloads are unaffected.</p>
+<h2 id="how-partition-profiles-are-discovered">How partition profiles are discovered</h2>
+<p><strong>Profiles come from a fixed per-product set, not from the driver&rsquo;s own answer</strong> — the one place NVIDIA
+differs from <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/thead-mig/#how-partition-profiles-are-discovered">T-Head</a>
+ and
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/hygon-mig/#how-partition-profiles-are-discovered">Hygon</a>
+, whose detectors ask the card.</p>
+<p>A profile&rsquo;s name states its geometry: <code>3g.40gb</code> is three of the GPU&rsquo;s compute slices and 40 GB of its
+memory, and one shape is named for the memory the product carries — <code>3g.20gb</code> on an A100-40GB is the
+<code>3g.40gb</code> of an H100-80GB.</p>
+<p><strong>Which profiles your GPU offers is NVIDIA&rsquo;s table to publish, not ours</strong>, and it covers every MIG-capable
+product and memory variant: <a href="https://docs.nvidia.com/datacenter/tesla/mig-user-guide/supported-mig-profiles.html">Supported MIG
+Profiles</a>
+. Read the
+&ldquo;GPU Instance Profiles&rdquo; table for your product before planning a node: its <code>Instances</code> column is the
+maximum a GPU can host, and its placement column is what the rules below act on.</p>
+<p>Three rules govern what reaches GPUStack from that set, and all three are shared with the other two
+partitioning manufacturers:</p>
+<blockquote>
+<p><strong>The <code>+me</code> / <code>+me.all</code> / <code>+gfx</code> variants are not supported.</strong> A Kubernetes resource name may not contain
+<code>+</code>, and GPUStack never rewrites a name to make it key-safe: one that is not already a valid resource-name
+segment is <strong>excluded</strong> from the inventory, so a key always maps back by a plain prefix strip. They reach
+no <code>Devices</code> ledger, capacity key or <code>InstanceType</code> inventory, and cannot be requested.</p>
+</blockquote>
+<blockquote>
+<p><strong>A partition is one whole GPU instance; subdividing it is not supported.</strong> Every profile is created
+as a GPU instance plus a single compute instance covering all of it. GPUStack addresses a partition by one
+device id, and a GPU instance you subdivide by hand (<code>nvidia-smi mig -cci</code>) has several — a share of the
+compute each, all on the same memory — so it is refused rather than half-addressed.</p>
+</blockquote>
+<blockquote>
+<p><strong>A profile with no legal placement is not offered.</strong> Its span could only be guessed, and the ledger being
+placement-derived, such a key could never allocate.</p>
+</blockquote>
+<p><strong>Placement is what makes the inventory move.</strong> Instances occupy hardcoded slots, in memory-slice units,
+and a combination is legal only when the occupied intervals do not overlap — so a profile&rsquo;s maximum per GPU
+is the length of its start list, and <strong>two profiles covering the same slices need not get the same placement
+freedom</strong>. On an A100/H100 a <code>4g</code> covers four slices as a <code>3g</code> does yet gets only one slot, and a <code>2g</code>
+covers two as the same-size <code>1g</code> does yet gets three slots to its four.</p>
+<p>A live instance therefore removes slots from <em>other</em> profiles: a <code>3g</code> at 0–3 takes the GPU&rsquo;s only <code>4g</code> slot
+with it, while leaving room for a second <code>3g</code> at 4–7. That is why the <code>Devices</code> ledger reports each MIG
+GPU&rsquo;s inventory as static per-profile counts (the maximum it could host) plus a <strong>placement-aware
+<code>Remaining</code></strong>, how many still fit (see <a href="#requesting-a-partition">Requesting a partition</a>
+).</p>
+<h2 id="requesting-a-partition">Requesting a partition</h2>
+<p>A workload asks for <strong>one hardware instance of a named profile</strong>. GPUStack materializes it and injects
+only the MIG device: no logical-slicing runtime (<code>libvgpu.so</code>), no fractional translation. The
+<strong>request shape</strong>: one partitioned GPU plus the profile, one instance per Pod:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">              </span><span class="c"># always exactly 1 GPU</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia.com/gpu.partitioned.mig-1g.10gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># always exactly 1 instance of this profile</span></span></span></code></pre></div>
+</div><ul>
+<li><code>mig</code> is NVIDIA&rsquo;s name for hardware partitioning, carried as <code>&lt;kind&gt;</code>; another manufacturer registers its
+own under the same <code>.partitioned.&lt;kind&gt;-&lt;profile&gt;</code> shape.</li>
+<li><strong>Name the exact profile</strong> from <a href="#how-partition-profiles-are-discovered">How partition profiles are discovered</a>
+ (e.g. <code>1g.10gb</code>). There is no
+memory→profile translation: you request <code>mig-&lt;profile&gt;</code>, not a fraction or a MiB amount.</li>
+<li>Both keys <strong>must be exactly <code>1</code></strong> (a scope decision, not a hardware limit); a multi-partition workload
+asks for several Pods.</li>
+<li>The partition family is <strong>mutually exclusive</strong> with every other accelerator family Pod-wide (a Pod also
+asking for a whole GPU, a shared unit or a logical slice is rejected at admission), it is <strong>one profile
+shape per Pod</strong>, and the accelerator claims must sit in <strong>one container group</strong>. The full rule set, with an
+accepted and a rejected example, is in <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/requests/#the-request-rules">Accelerator Requests</a>
+.</li>
+<li><strong><code>nvidia.com/gpu.partitioned.units</code> is webhook-derived</strong>: do not set it. The webhook folds the profile&rsquo;s
+VRAM into it, and quota is charged on the manufacturer&rsquo;s <code>credits</code> resource folded from it, so a <code>3g.40gb</code>
+and a logical <code>40Gi</code> slice cost the same.</li>
+<li>A MIG request must go through <strong>Kueue</strong> — a Pod (or workload) on a <code>LocalQueue</code>, or an <code>Instance</code> (below).
+Rules and folds bind only Pods carrying the <code>kueue.x-k8s.io/queue-name</code> label.</li>
+</ul>
+<p><strong>Through the <code>Instance</code> API.</strong> <code>spec.resources.acceleratorPartitionedProfile</code> names the profile, and the
+controller shapes it into the two keys above:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mig-instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;sleep&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;86400&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">                       </span><span class="c"># a partition is always one GPU</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratorPartitionedProfile</span><span class="p">:</span><span class="w"> </span><span class="l">3g.40gb</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">volume</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ephemeral</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="l">1Gi</span></span></span></code></pre></div>
+</div><ul>
+<li>The profile is validated at admission against the pool&rsquo;s inventory: one it does not offer is rejected with
+the offered set in the message, never left Pending.</li>
+<li>It excludes <code>acceleratorSlicedMemoryPercentage</code> / <code>acceleratorSlicedCoresPercentage</code> — the two cannot both
+apply to one GPU.</li>
+<li>Host CPU and RAM are sized by the profile&rsquo;s share of the GPU&rsquo;s VRAM, so a <code>1g</code> partition does not ask for
+a whole GPU&rsquo;s worth.</li>
+</ul>
+<p><strong>GPU selection is the plugin&rsquo;s, not the kubelet&rsquo;s.</strong> A <code>.partitioned</code> token is a fungible count, unlike the
+three GPU-bound families: the plugin picks the GPU against the live partition geometry and records it. It
+<strong>packs</strong> (the most-occupied GPU that still fits wins, keeping a sibling whole for a later whole-GPU
+profile), so a rejection from <code>Allocate</code> means the node has no room, not a wrong GPU from the kubelet.</p>
+<p><strong>Scheduling and the <code>Remaining</code> ledger.</strong> Each MIG GPU advertises <code>allocated + remaining</code> per profile,
+mirrored onto the node as <code>nvidia.com/gpu.partitioned.mig-&lt;profile&gt;</code>. Admission is placement-aware: the
+per-GPU AdmissionCheck admits a Pod only while the requested profile has a free slot, and <strong>retries</strong> (never
+hard-rejects) while the ledger is unpopulated.</p>
+<blockquote>
+<p><strong>Why both terms</strong> — publishing only what is free would make the scheduler subtract every live
+instance twice; see <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/#hardware-partitioning-capacities">Scheduling Chain</a>
+.</p>
+</blockquote>
+<p><strong>Reclaim.</strong> When the Pod exits, the operator destroys its compute instance then its GPU instance, and the
+profile&rsquo;s <code>Remaining</code> restores within one reclaim cycle. A destroy racing a residual process returns
+<code>NVML_ERROR_IN_USE</code>; the operator retries with bounds, never blocking siblings or other GPUs&rsquo; allocations,
+and logs a straggler past the bound. The node key frees on <strong>Pod deletion</strong>, ahead of the
+hardware; see <a href="#limitations">Limitations</a>
+.</p>
+<p><strong>An SSH-enabled <code>Instance</code> sees its partition, not the GPU.</strong> The workload runs in <code>main</code>, the SSH server in
+an <code>sshd</code> sidecar that <code>nsenter</code>s into <code>main</code>: the sidecar&rsquo;s device allocation is a device-cgroup grant and
+nothing else, and the session inherits <code>main</code>&rsquo;s environment. That grant is <strong>the MIG instance <code>main</code> holds</strong>,
+never the parent GPU, which would expose every other partition on it.</p>
+<p>The identity comes from the on-disk ownership marker the allocator writes with the instance — the record that
+drives reuse and reclaim and survives a Device Manager restart. The read is <strong>liveness-checked under the GPU
+lock</strong> before injection: the recorded GPU instance must still exist <em>and</em> carry the recorded MIG UUID, since
+a destroyed instance&rsquo;s id can be reassigned.</p>
+<p>A marker that is missing, names a different GPU, records a profile the GPU no longer offers, or whose instance
+is gone or recreated fails the sidecar&rsquo;s allocation closed — no fallback to the GPU.</p>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li>
+<p>The administrator owns the <em>mode</em> lifecycle; GPUStack drives none of it, and evicts nothing when the mode
+changes (see <a href="#operator-boundaries">Operator boundaries</a>
+).</p>
+</li>
+<li>
+<p><strong>Carving an instance out of band is unsupported on a managed node</strong>: let GPUStack materialize them, and
+it reuses any already on a GPU it manages. Every node-level number (per-profile capacity key, partition
+token health, AdmissionCheck) derives from the allocation annotations the device plugin writes, and
+<code>nvidia-smi mig -cgi</code> by hand produces none.</p>
+<p>So while a GPUStack workload holds the GPU the node advertises room it does not have, and that
+<strong>never converges</strong>: placement reads live NVML and will not double-book it, but the accounting above
+stays wrong. Once the GPU is drained the reverse happens: after its debounce the reclaimer <strong>destroys</strong>
+an instance no allocation accounts for as an orphan, including one it never created.</p>
+<p>An instance with something <strong>running on it</strong> is the exception: it is left alone and re-checked each
+cycle, so one you carved by hand survives for as long as you are using it.</p>
+</li>
+<li>
+<p><strong>A same-profile replacement submitted the instant its predecessor is deleted can fail to start.</strong> Leave a
+gap between the delete and the replacement, or let the replacement&rsquo;s own restart handle it.</p>
+<p>Node accounting is rebuilt from Pod annotations, so a deleted Pod&rsquo;s slot reappears in the per-profile key
+and the healthy token count <strong>immediately</strong>, while the reclaimer destroys the hardware on its own
+debounce. A replacement admitted in that gap is handed the outgoing instance and fails to create
+(<code>failed to get device handle from UUID: Not Found</code>) or ends in <code>UnexpectedAdmissionError</code> — a startup
+failure, not corruption; a resubmit after the reclaim succeeds.</p>
+</li>
+<li>
+<p><strong>A managed provider may health-check the GPUs and reboot the node for you.</strong> Some managed Kubernetes
+offerings probe the NVLink topology matrix for <code>N × (N-1)</code> healthy pairs; a partitioning-mode GPU drops out
+of it, the probe reads short, and the provider&rsquo;s node agent can cordon and restart the node. Check the
+provider&rsquo;s node conditions before blaming the operator, and note that anything you merely <em>stopped</em> during
+preparation (a telemetry service holding driver handles) returns on that reboot.</p>
+</li>
+<li>
+<p>On <strong>Ampere</strong> the mode persists across reboots (stored in InfoROM); on <strong>Hopper and newer</strong> it does not.</p>
+</li>
+<li>
+<p>MIG <strong>instances never survive a reboot</strong> on any generation; after re-enabling mode and restarting the
+Device Manager, <strong>resubmit</strong> the workloads that were running
+(<a href="#node-reboot-recovery">Node reboot recovery</a>
+).</p>
+</li>
+<li>
+<p>In a <strong>passthrough VM</strong> the hypervisor may forbid the GPU reset entirely — reboot the node/VM instead.</p>
+</li>
+<li>
+<p>The per-profile node keys are independently subtracted scalars, so two Pods asking for mutually exclusive
+<a href="#how-partition-profiles-are-discovered">placements</a>
+ can both land on a node that hosts only one of them; the second fails
+its allocation closed and is retried.</p>
+</li>
+<li>
+<p>The <code>+me</code> / <code>+me.all</code> / <code>+gfx</code> profile variants are excluded from the inventory (see
+<a href="#how-partition-profiles-are-discovered">How partition profiles are discovered</a>
+).</p>
+</li>
+<li>
+<p><strong>A hand-subdivided GPU instance stops the sweep for the whole node.</strong> One carrying more than one compute
+instance (<code>nvidia-smi mig -cci</code>) cannot be addressed by a single device id, so its GPU is refused — and the
+reclaim pass, which lists every GPU before deciding anything, ends there. Nothing is reclaimed on any GPU
+of that node, with an error each pass, until that instance is back to one compute instance.</p>
+</li>
+<li>
+<p><strong>A profile the driver enumerates no legal placement for is excluded too</strong>, as is one whose placement query
+failed; the GPU and profile ids are named in a warning. A profile&rsquo;s memory-slice span has no source but its
+placement records, and that span is what matches an instance&rsquo;s identity. Nothing is lost: such a profile
+would be a key whose allocation could never succeed.</p>
+</li>
+<li>
+<p><strong>The old per-profile key is gone.</strong> A MIG profile used to be a <code>mig-&lt;profile&gt;</code> segment on the <em>logical</em>
+<code>nvidia.com/gpu.sliced</code>; it is now <code>nvidia.com/gpu.partitioned.mig-&lt;profile&gt;</code>, with no translation and not
+even a rejection by name — a Pod carrying the old shape never schedules. See
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/requests/#pre-release-breaks">Pre-release breaks</a>
+, which also explains why a node must be
+<strong>drained before its device manager is upgraded</strong>.</p>
+</li>
+</ul>
+<h2 id="enabling-partitioning-on-a-node">Enabling partitioning on a node</h2>
+<p>The mode switch itself is NVIDIA&rsquo;s procedure, not this operator&rsquo;s: <a href="https://docs.nvidia.com/datacenter/tesla/mig-user-guide/getting-started-with-mig.html">Getting Started with
+MIG</a>
+ is the
+authority on the reset requirement and on what differs between GPU generations. The steps below are that
+procedure with the two GPUStack-side steps it does not know about — the re-detect, and what to check
+afterwards.</p>
+<ol>
+<li>
+<p>Satisfy the <a href="#prerequisites">Prerequisites</a>
+ — stop the using Pod and the driver-handle daemons.</p>
+</li>
+<li>
+<p>Enable the mode with <code>nvidia-smi</code>, per GPU or for all GPUs:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">#</span> one GPU by index
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> nvidia-smi -i &lt;id&gt; -mig <span class="m">1</span>
+</span></span><span class="line"><span class="cl"><span class="gp">#</span> all GPUs
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> nvidia-smi -mig <span class="m">1</span>
+</span></span></code></pre></div>
+</div></li>
+<li>
+<p><strong>Ampere:</strong> perform the GPU reset; if <code>nvidia_drm</code> is loaded or a passthrough VM blocks it, reboot the
+node/VM instead. <strong>Hopper and newer:</strong> no reset.</p>
+</li>
+<li>
+<p>Restart the node&rsquo;s Device Manager pod to re-detect. You need <strong>not</strong> delete the node&rsquo;s <code>Devices</code> object
+(the detector rewrites the group&rsquo;s capability in place), nor pre-create instances with
+<code>nvidia-smi mig -cgi</code> — the operator materializes them as workloads are admitted, reusing any you made.</p>
+</li>
+<li>
+<p>Verify the <code>Devices</code> capability now reports those GPUs&rsquo; MIG profiles and <strong>zero logical slicing</strong> — a
+hardware-partitioned GPU offers no software slicing.</p>
+</li>
+</ol>
+<h3 id="across-a-fleet-with-the-nvidia-gpu-operator">Across a fleet, with the NVIDIA GPU Operator</h3>
+<p>The steps above are per node and go through SSH. The NVIDIA GPU Operator ships a <strong>MIG Manager</strong> that does
+the same job declaratively: each node carries an <code>nvidia.com/mig.config</code> label naming a profile, and the
+manager makes that node&rsquo;s cards match it.</p>
+<p><a href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/vendor-prerequisites/#nvidia">Vendor Prerequisites</a>
+ has that component off, because every other
+profile hands it the instances as well and those are this operator&rsquo;s to create. Turning it back on with
+<code>--set migManager.enabled=true</code> is what this section asks for, and the profile below is what keeps the
+division of labour intact.</p>
+<p>Use the profile named <strong><code>all-enabled</code></strong>. It turns MIG mode on and creates <em>no</em> instances — exactly the
+division of labour this page describes, where the mode is yours and the instances are GPUStack&rsquo;s. Every
+other shipped profile (<code>all-balanced</code>, <code>all-1g.5gb</code>, …) pre-creates a fixed geometry instead, and takes
+that job away.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl label node &lt;node&gt; nvidia.com/mig.config<span class="o">=</span>all-enabled --overwrite
+</span></span></code></pre></div>
+</div><p>The label is per node, so a fleet can mix freely: nodes labelled <code>all-enabled</code> serve partitions, nodes
+labelled <code>all-disabled</code> (or carrying no label at all) stay whole-card.</p>
+<p><strong>Restarting the Device Manager is still yours to do</strong>, on every node whose label you changed, exactly as
+in step 4 above. The MIG Manager restarts the GPU clients it owns, and this operator&rsquo;s Device Manager is
+not one of them, so until it restarts the node keeps advertising the capability it detected before the
+switch.</p>
+<p>Three things to know before reaching for it:</p>
+<ul>
+<li><strong>Its default is <code>all-disabled</code></strong>, and the operator writes that label itself when the manager first
+runs. Arriving on a node whose cards you had already enabled by hand, it turns them back off.</li>
+<li><strong>It is placed only on nodes labelled <code>nvidia.com/mig.capable=true</code></strong>, which GPU Feature Discovery
+publishes. Without that component the DaemonSet exists but schedules nowhere; setting the label by hand
+is enough to place it.</li>
+<li><strong>It restarts the node&rsquo;s GPU clients, the kubelet included</strong>, to apply a change, and marks
+<code>nvidia.com/mig.config.state=failed</code> when a service it wants to restart is masked — which is the state
+the readiness steps above deliberately leave DCGM in. Read the cards&rsquo; own modes before believing that
+label.</li>
+</ul>
+<h2 id="disabling-partitioning-on-a-node">Disabling partitioning on a node</h2>
+<p>Run the inverse: with no Pod using the GPU&rsquo;s instances, destroy them, then</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> nvidia-smi -i &lt;id&gt; -mig <span class="m">0</span>   <span class="c1"># or `-mig 0` for all GPUs</span>
+</span></span></code></pre></div>
+</div><p>apply the same reset rules (Ampere reset or reboot; Hopper none), and restart the node&rsquo;s Device Manager pod
+so the ledger returns the GPU to its whole-GPU / logical-slice capability.</p>
+<h2 id="node-reboot-recovery">Node reboot recovery</h2>
+<p>If you did <strong>not</strong> reset MIG before a reboot (<a href="#limitations">Limitations</a>
+ says what persists):</p>
+<ul>
+<li>On the way back up the instances are gone (and, on Hopper+, so is the mode).</li>
+<li>Redo the <a href="#enabling-partitioning-on-a-node">enable sequence</a>
+, <strong>including the Device Manager DaemonSet restart</strong>
+— nothing else makes the post-reboot hardware reach the cluster.</li>
+</ul>
+<p>A workload running before the reboot lost its instance, so <strong>resubmit it</strong> — delete and re-create the
+Pod/workload, and the operator materializes a fresh instance on admission. A lingering pre-reboot Pod keeps
+its ownership record but has no live instance, so its device allocation fails closed until it is recreated.</p>
+<h2 id="operator-boundaries">Operator boundaries</h2>
+<ul>
+<li>Enable, disable or reconfigure MIG mode — <code>nvidia-smi</code> operations you run.</li>
+<li>Trigger on nodeconfig or labels, flip the mode automatically, rewrite its geometry, or deschedule and
+evict Pods on a mode change.</li>
+<li>Account for an instance you carved by hand — though it does delete it as an orphan once its GPU is
+idle and nothing is running on it (<a href="#limitations">Limitations</a>
+).</li>
+<li>Hand out a subdivided instance, or subdivide one itself — it creates a GPU instance with a single
+compute instance covering all of it, and refuses one somebody else subdivided
+(<a href="#how-partition-profiles-are-discovered">How partition profiles are discovered</a>
+).</li>
+</ul>
+<p>It does create and destroy the instances backing scheduled workloads
+(<a href="#requesting-a-partition">Requesting a partition</a>
+).</p>
+<h2 id="walkthrough-three-mig-configurations-on-one-node">Walkthrough: three MIG configurations on one node</h2>
+<p>A recorded run on a live Kubernetes cluster, in the style of the
+<a href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/walkthrough/">scheduling-chain walkthrough</a>
+: every command is the real <code>kubectl</code> (or on-node
+<code>nvidia-smi</code>) invocation and its real output, on <code>node-h100</code>, a genericized node of <strong>eight</strong> H100-80GB GPUs
+running operator defaults. Eight is the point: the families are served by <strong>disjoint GPU populations</strong>, so
+partitioning <em>some</em> GPUs moves exactly those.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Step</th>
+          <th>Configuration</th>
+          <th>Partitioned GPUs</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><strong>1</strong></td>
+          <td><a href="#1-all-logical--every-gpu-mig-off">All-logical</a>
+</td>
+          <td>none</td>
+      </tr>
+      <tr>
+          <td><strong>2</strong></td>
+          <td><a href="#2-all-physical--every-gpu-mig-on">All-physical</a>
+</td>
+          <td>all 8</td>
+      </tr>
+      <tr>
+          <td><strong>3</strong></td>
+          <td><a href="#3-mixed--part-logical-part-physical">Mixed</a>
+</td>
+          <td>3 of 8</td>
+      </tr>
+  </tbody>
+</table>
+<p>One column to keep in mind: <code>kubectl get instancetypes</code> shows the accelerator four-view
+<strong>EX</strong>clusive / <strong>SH</strong>ared / <strong>SL</strong>iced (logical) / <strong>PT</strong> (physically partitioned) as
+<code>onceMaxRequest/remaining</code> groups. A GPU feeds one side of that split, so partitioning it <strong>moves</strong> capacity
+from the first three groups to the fourth rather than adding to it. The first three are credit-based (each
+GPU&rsquo;s credit budget); <code>PT</code> counts hardware instances the GPUs can still host.</p>
+<h3 id="1-all-logical--every-gpu-mig-off">1. All-logical — every GPU MIG off</h3>
+<p>Every GPU offers logical slicing and none offers partitions: three logical views populated, partition view
+empty:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get instancetypes
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU       PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic-linux-amd64                 gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            128/132   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          8/8 80/80 100/800 0/0      0/0       Active
+</span></span></span></code></pre></div>
+</div><p>The accelerated row reads <strong>8</strong> whole GPUs, <strong>80</strong> shares (10 per GPU), <strong>800 %</strong> of logical slice budget
+(100 % per GPU), <strong>no</strong> partition capacity. The node advertises the logical key family, and
+<code>nvidia.com/gpu.partitioned</code> at 0 keeps every <code>.partitioned.*</code> counting key absent:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get node node-h100 -o json <span class="p">|</span> jq <span class="s1">&#39;.status.allocatable | with_entries(select(.key|test(&#34;nvidia.com/gpu&#34;)))&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="go">{
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu&#34;: &#34;8&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned&#34;: &#34;0&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.shared&#34;: &#34;80&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.sliced&#34;: &#34;1024&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.sliced.cores-percentage&#34;: &#34;102400&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.sliced.memory-mib&#34;: &#34;655360&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.sliced.memory-percentage&#34;: &#34;800&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.sliced.units&#34;: &#34;12800k&#34;
+</span></span></span><span class="line"><span class="cl"><span class="go">}
+</span></span></span></code></pre></div>
+</div><p>Every number is per-GPU × 8: <code>1024 = 8 × 128</code> logical slices, <code>12800k = 8 × 1600k</code> credits,
+<code>655360 MiB = 8 × 81920</code>. The <code>Devices</code> capability (in <code>spec</code>; the runtime ledger is in <code>status</code>) says the
+same, GPU by GPU:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get devices node-h100 -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.groups[0].accelerators[*].status}&#39;</span> <span class="p">|</span> jq -c
+</span></span><span class="line"><span class="cl"><span class="go">group NVIDIA H100 80GB HBM3: 8 GPU(s); logically sliceable indices [0, 1, 2, 3, 4, 5, 6, 7]; partitioned indices -
+</span></span></span><span class="line"><span class="cl"><span class="go">  GPU 0 logicalSliced: {&#34;coresPercentageOvercommit&#34;: true, &#34;count&#34;: 128}
+</span></span></span><span class="line"><span class="cl"><span class="go">  …                    (GPUs 1-7 identical)
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64 -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.detail.slicedDetail}&#39;</span> <span class="p">|</span> jq
+</span></span><span class="line"><span class="cl"><span class="go">{
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;logical&#34;: { &#34;coresPercentageOvercommit&#34;: true, &#34;count&#34;: 1024 },
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;physical&#34;: {}
+</span></span></span><span class="line"><span class="cl"><span class="go">}
+</span></span></span></code></pre></div>
+</div><h3 id="2-all-physical--every-gpu-mig-on">2. All-physical — every GPU MIG on</h3>
+<h4 id="21-enable-the-mode-then-re-detect">2.1 Enable the mode, then re-detect</h4>
+<p>Following the <a href="#enabling-partitioning-on-a-node">runbook</a>
+, flip the mode with <code>nvidia-smi</code> on the node itself (Hopper
+needs no reset). GPUStack never runs this:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">#</span> On node-h100 <span class="o">(</span>via SSH<span class="o">)</span>, the GPUs idle and driver-handle daemons stopped:
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> <span class="k">for</span> i in <span class="k">$(</span>seq <span class="m">0</span> 7<span class="k">)</span><span class="p">;</span> <span class="k">do</span> sudo nvidia-smi -i <span class="s2">&#34;</span><span class="nv">$i</span><span class="s2">&#34;</span> -mig 1<span class="p">;</span> <span class="k">done</span>
+</span></span><span class="line"><span class="cl"><span class="go">Enabled MIG Mode for GPU 00000000:8D:00.0
+</span></span></span><span class="line"><span class="cl"><span class="go">All done.
+</span></span></span><span class="line"><span class="cl"><span class="go">…                                                    (GPUs 1-7 identical)
+</span></span></span></code></pre></div>
+</div><p>The cluster does <strong>not</strong> react yet. Restart the DaemonSet pod; deleting the node&rsquo;s <code>Devices</code> object is
+<strong>not</strong> required (it was, in earlier builds):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl -n gpustack-system rollout restart ds/gpustack-operator-device-manager-nvidia
+</span></span><span class="line"><span class="cl"><span class="go">daemonset.apps/gpustack-operator-device-manager-nvidia restarted
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl -n gpustack-system rollout status ds/gpustack-operator-device-manager-nvidia
+</span></span><span class="line"><span class="cl"><span class="go">daemon set &#34;gpustack-operator-device-manager-nvidia&#34; successfully rolled out
+</span></span></span></code></pre></div>
+</div><blockquote>
+<p><strong>Wait for the device plugin to re-register, not just for the rollout.</strong> The operator republishes the
+node&rsquo;s capacity keys as soon as the ledger changes, <em>earlier</em> than the kubelet has the plugin&rsquo;s new token
+set, so a Pod admitted in that gap is allocated against the old registration and dies with
+<code>UnexpectedAdmissionError</code>. Wait for the new pod to be Ready <strong>and</strong> the <code>.partitioned</code> key to appear,
+then give the kubelet a moment.</p>
+</blockquote>
+<h4 id="22-the-whole-node-changes-families">2.2 The whole node changes families</h4>
+<p>All three logical views drop to zero and the partition view takes over. Not cosmetic: an exclusive tenant on
+a MIG-mode GPU would get a device CUDA cannot use, so the views report what is servable.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get instancetypes
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU       PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--generic-linux-amd64                 gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            128/132   Active
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          0/0 0/0 0/0 1/56           0/0       Active
+</span></span></span></code></pre></div>
+</div><p><code>PT 1/56</code> reads: <strong>1</strong> is the most one request can ask for, <strong>56</strong> what the node can still host (<code>8 × 7</code>).
+Read <code>1</code> as &ldquo;there is room&rdquo;, <code>0</code> as &ldquo;none&rdquo;; <a href="#25-where-those-numbers-come-from">2.5</a>
+ explains both.</p>
+<p>The keys flip families wholesale: every <code>.sliced.*</code> key is gone, and one <code>partitioned.mig-&lt;profile&gt;</code> key
+appears per profile alongside <code>.partitioned.units</code>, which values a partitioned GPU at a whole GPU&rsquo;s credits
+just as <code>.sliced.units</code> valued a logically sliceable one:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get node node-h100 -o json <span class="p">|</span> jq <span class="s1">&#39;.status.allocatable | with_entries(select(.key|test(&#34;nvidia.com/gpu&#34;)))&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="go">{
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu&#34;: &#34;0&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned&#34;: &#34;56&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-1g.10gb&#34;: &#34;56&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-1g.20gb&#34;: &#34;32&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-2g.20gb&#34;: &#34;24&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-3g.40gb&#34;: &#34;16&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-4g.40gb&#34;: &#34;8&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-7g.80gb&#34;: &#34;8&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.units&#34;: &#34;12800k&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.shared&#34;: &#34;0&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.sliced&#34;: &#34;0&#34;
+</span></span></span><span class="line"><span class="cl"><span class="go">}
+</span></span></span></code></pre></div>
+</div><p>Each per-profile key is 8 × that profile&rsquo;s count in the <a href="#how-partition-profiles-are-discovered">profile table</a>
+: <code>56 = 8 × 7</code>
+one-slice instances, <code>8 = 8 × 1</code> whole-GPU ones. <code>nvidia.com/gpu</code>, <code>.shared</code> and <code>.sliced</code> read <code>0</code> rather
+than disappearing — a device-plugin pool key zeroes out, never gets removed.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get devices node-h100 -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.groups[0].accelerators[*].status}&#39;</span> <span class="p">|</span> jq -c
+</span></span><span class="line"><span class="cl"><span class="go">group NVIDIA H100 80GB HBM3: 8 GPU(s); logically sliceable indices -; partitioned indices [0, 1, 2, 3, 4, 5, 6, 7]
+</span></span></span><span class="line"><span class="cl"><span class="go">  GPU 0 partitioned: count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
+</span></span></span><span class="line"><span class="cl"><span class="go">  …                  (GPUs 1-7 identical)
+</span></span></span></code></pre></div>
+</div><h4 id="23-request-a-mig-instance">2.3 Request a MIG instance</h4>
+<p>Submit a Pod on the pool&rsquo;s entrance <code>LocalQueue</code> (an <code>Instance</code> with
+<code>acceleratorPartitionedProfile: 3g.40gb</code> gives the same two keys):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mig-demo</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-fnv64-e4768a65ca0ce96b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">runtimeClassName</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">restartPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">Never</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">main</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;sleep&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;86400&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">              </span><span class="c"># one partitioned GPU</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu.partitioned.mig-3g.40gb</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># one 3g.40gb instance on it</span></span></span></code></pre></div>
+</div><p>Kueue admits it, the node-devices AdmissionCheck confirms a free <code>3g.40gb</code> placement, and the plugin
+<strong>materializes</strong> the GPU/compute instance pair on a GPU it selects, injecting only that device:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get pod mig-demo
+</span></span><span class="line"><span class="cl"><span class="go">NAME       READY   STATUS    RESTARTS   AGE
+</span></span></span><span class="line"><span class="cl"><span class="go">mig-demo   1/1     Running   0          8s
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl <span class="nb">exec</span> mig-demo -- nvidia-smi -L
+</span></span><span class="line"><span class="cl"><span class="go">GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-950792bf-a01c-3f1a-e122-3473e67f54b2)
+</span></span></span><span class="line"><span class="cl"><span class="go">  MIG 3g.40gb     Device  0: (UUID: MIG-b3061c09-2a4c-5026-a575-79f86a5bb12c)
+</span></span></span></code></pre></div>
+</div><h4 id="24-what-one-instance-costs-the-node">2.4 What one instance costs the node</h4>
+<p>One <code>3g.40gb</code> occupies memory slices 0–3 of <strong>one</strong> GPU, so only that GPU&rsquo;s arithmetic changes, per profile:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          0/0 0/0 0/0 7/52   0/0   Active
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl get node node-h100 -o json <span class="p">|</span> jq <span class="s1">&#39;.status.allocatable | with_entries(select(.key|test(&#34;gpu\\.partitioned&#34;)))&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="go">{
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned&#34;: &#34;53&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-1g.10gb&#34;: &#34;52&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-1g.20gb&#34;: &#34;30&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-2g.20gb&#34;: &#34;22&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-3g.40gb&#34;: &#34;16&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-4g.40gb&#34;: &#34;7&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-7g.80gb&#34;: &#34;7&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.units&#34;: &#34;12800k&#34;
+</span></span></span><span class="line"><span class="cl"><span class="go">}
+</span></span></span></code></pre></div>
+</div><p>Every number is <code>Σ over GPUs of (allocated + remaining)</code>, which makes them subtract correctly
+(<a href="#requesting-a-partition">why both terms</a>
+):</p>
+<table>
+  <thead>
+      <tr>
+          <th>Profile</th>
+          <th>7 untouched GPUs</th>
+          <th>Carved GPU</th>
+          <th>Total</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>1g.10gb</code></td>
+          <td><code>7 × 7 = 49</code></td>
+          <td>slices 4–7 free → 3</td>
+          <td><strong>52</strong></td>
+      </tr>
+      <tr>
+          <td><code>1g.20gb</code></td>
+          <td><code>7 × 4 = 28</code></td>
+          <td>slots <code>{4,2}</code>, <code>{6,2}</code> → 2</td>
+          <td><strong>30</strong></td>
+      </tr>
+      <tr>
+          <td><code>2g.20gb</code></td>
+          <td><code>7 × 3 = 21</code></td>
+          <td>slot <code>{4,2}</code> → 1</td>
+          <td><strong>22</strong></td>
+      </tr>
+      <tr>
+          <td><code>3g.40gb</code></td>
+          <td><code>7 × 2 = 14</code></td>
+          <td>1 allocated + 1 remaining</td>
+          <td><strong>16</strong></td>
+      </tr>
+      <tr>
+          <td><code>4g.40gb</code></td>
+          <td><code>7 × 1 = 7</code></td>
+          <td>its one slot is taken → 0</td>
+          <td><strong>7</strong></td>
+      </tr>
+      <tr>
+          <td><code>7g.80gb</code></td>
+          <td><code>7 × 1 = 7</code></td>
+          <td>needs all 8 slices → 0</td>
+          <td><strong>7</strong></td>
+      </tr>
+  </tbody>
+</table>
+<p>Read the <code>3g.40gb</code> row as <code>allocated (1) + remaining (1)</code>: the scheduler subtracts <code>mig-demo</code>&rsquo;s request and
+sees <strong>one</strong> more fitting there. <code>7g.80gb</code> and <code>4g.40gb</code> each lost exactly the carved GPU; <code>3g.40gb</code> lost
+nothing; <a href="#25-where-those-numbers-come-from">2.5</a>
+ walks why.</p>
+<p>Deleting the Pod releases the credits immediately; the hardware and the profile keys follow within one
+<a href="#requesting-a-partition">reclaim cycle</a>
+.</p>
+<blockquote>
+<p><strong>Do not re-request the freed slot instantly.</strong> The accounting frees on Pod deletion while the hardware
+dies on the reclaimer&rsquo;s debounce, so a replacement submitted in that gap can be handed an instance about
+to disappear — see <a href="#limitations">Limitations</a>
+.</p>
+</blockquote>
+<h4 id="25-where-those-numbers-come-from">2.5 Where those numbers come from</h4>
+<p>Four kinds of number count that one carved GPU, and they disagree, deliberately.</p>
+<p><strong>Per GPU it is interval overlap, nothing more.</strong> A profile may only start at one of its
+<a href="#how-partition-profiles-are-discovered">hardcoded slots</a>
+, and an instance fits when its interval overlaps nothing already
+taken — no device access, no driver call:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">the carved GPU&#39;s 8 memory slices
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  [0][1][2][3]  taken by the live 3g.40gb          [4][5][6][7]  free</span></span></code></pre></div>
+</div><p>Every profile is re-counted against the slots occupied by the live <code>3g.40gb</code> instance:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Profile</th>
+          <th>Slot size</th>
+          <th>Legal starts</th>
+          <th>Blocked slots</th>
+          <th>Free slots</th>
+          <th>Key addition</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>1g.10gb</code></td>
+          <td>1</td>
+          <td>0 1 2 3 4 5 6</td>
+          <td>0, 1, 2, 3</td>
+          <td>4, 5, 6</td>
+          <td>3</td>
+      </tr>
+      <tr>
+          <td><code>1g.20gb</code></td>
+          <td>2</td>
+          <td>0 2 4 6</td>
+          <td>0, 2</td>
+          <td>4, 6</td>
+          <td>2</td>
+      </tr>
+      <tr>
+          <td><code>2g.20gb</code></td>
+          <td>2</td>
+          <td>0 2 4</td>
+          <td>0, 2</td>
+          <td>4</td>
+          <td>1</td>
+      </tr>
+      <tr>
+          <td><code>3g.40gb</code></td>
+          <td>4</td>
+          <td>0 4</td>
+          <td>— (start 0 <em>is</em> the live one)</td>
+          <td>4</td>
+          <td>1 allocated + 1 free</td>
+      </tr>
+      <tr>
+          <td><code>4g.40gb</code></td>
+          <td>4</td>
+          <td>0</td>
+          <td>0</td>
+          <td>—</td>
+          <td>0</td>
+      </tr>
+      <tr>
+          <td><code>7g.80gb</code></td>
+          <td>8</td>
+          <td>0</td>
+          <td>0</td>
+          <td>—</td>
+          <td>0</td>
+      </tr>
+  </tbody>
+</table>
+<p>One row is easy to misread: <code>4g.40gb</code> contributes <strong>0 allocated</strong>, not 1, since the ledger keys an
+allocation by the profile actually built.</p>
+<p><strong>The four numbers, and what each sums</strong> over the node&rsquo;s seven untouched GPUs plus the carved one:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Number</th>
+          <th>Value</th>
+          <th>Aggregation</th>
+          <th>Rationale</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>…partitioned.mig-&lt;profile&gt;</code></td>
+          <td>the table above</td>
+          <td>that profile&rsquo;s <code>allocated + remaining</code></td>
+          <td>the scheduler subtracts existing requests, so the key must include them</td>
+      </tr>
+      <tr>
+          <td><code>nvidia.com/gpu.partitioned</code></td>
+          <td><code>53</code></td>
+          <td><code>allocated +</code> the GPU&rsquo;s <strong>largest</strong> per-profile free count</td>
+          <td>one pool key for the family, same scheduler-fit reason</td>
+      </tr>
+      <tr>
+          <td><code>InstanceType</code> <code>PT</code> remaining</td>
+          <td><code>52</code></td>
+          <td>that largest free count alone, <strong>no allocated term</strong></td>
+          <td>a user-facing &ldquo;how many more can I start&rdquo;</td>
+      </tr>
+      <tr>
+          <td><code>InstanceType</code> <code>PT</code> onceMaxRequest</td>
+          <td><code>1</code></td>
+          <td>not a sum: <code>1</code> while any GPU can host an instance, else <code>0</code></td>
+          <td>one request builds one instance on one GPU, and both ingress paths reject any other count</td>
+      </tr>
+  </tbody>
+</table>
+<p><code>53</code> and <code>52</code> differ by exactly the one live instance, which only the pool key carries. And <code>onceMaxRequest</code>
+is <code>1</code>, not <code>52</code>, because no single request could consume the node&rsquo;s remainder, nor even two instances.</p>
+<p><strong>A GPU&rsquo;s contribution is a maximum, never a sum.</strong> The carved GPU contributes <code>3</code> to those last three
+numbers, not <code>3 + 2 + 1 + 1 = 7</code>: its profiles compete for the same slices, so creating one consumes
+placements of the others. One GPU holds three <code>1g.10gb</code>, or fewer larger ones, never both.</p>
+<p><strong>The capability snapshot does not move at all.</strong> <code>status.detail.slicedDetail</code> still reports
+<code>physical.count: 56</code> and <code>4g.40gb: 8</code> after the carve, unchanged from
+<a href="#22-the-whole-node-changes-families">step 2.2</a>
+: it derives only from the <code>Devices</code> <strong>spec</strong>, the detector&rsquo;s
+record of what these GPUs could host when empty, and never reads the runtime ledger. Every number in the
+table above joins that spec capability with the <code>Devices</code> <strong>status</strong> ledger.</p>
+<p>So read <code>slicedDetail</code> as &ldquo;what is this pool made of&rdquo;, never as a remainder; the node keys and <code>PT</code> answer
+&ldquo;what is still free&rdquo;.</p>
+<h3 id="3-mixed--part-logical-part-physical">3. Mixed — part logical, part physical</h3>
+<p>Disabling MIG on five of the eight leaves three partitioned: the configuration where <strong>both</strong> families are
+advertised at once.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">#</span> On node-h100 <span class="o">(</span>via SSH<span class="o">)</span>:
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> <span class="k">for</span> i in <span class="m">3</span> <span class="m">4</span> <span class="m">5</span> <span class="m">6</span> 7<span class="p">;</span> <span class="k">do</span> sudo nvidia-smi -i <span class="s2">&#34;</span><span class="nv">$i</span><span class="s2">&#34;</span> -mig 0<span class="p">;</span> <span class="k">done</span>
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> kubectl -n gpustack-system rollout restart ds/gpustack-operator-device-manager-nvidia
+</span></span><span class="line"><span class="cl"><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> sudo nvidia-smi --query-gpu<span class="o">=</span>index,mig.mode.current --format<span class="o">=</span>csv
+</span></span><span class="line"><span class="cl"><span class="go">index, mig.mode.current
+</span></span></span><span class="line"><span class="cl"><span class="go">0, Enabled
+</span></span></span><span class="line"><span class="cl"><span class="go">1, Enabled
+</span></span></span><span class="line"><span class="cl"><span class="go">2, Enabled
+</span></span></span><span class="line"><span class="cl"><span class="go">3, Disabled
+</span></span></span><span class="line"><span class="cl"><span class="go">4, Disabled
+</span></span></span><span class="line"><span class="cl"><span class="go">5, Disabled
+</span></span></span><span class="line"><span class="cl"><span class="go">6, Disabled
+</span></span></span><span class="line"><span class="cl"><span class="go">7, Disabled
+</span></span></span></code></pre></div>
+</div><div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          5/5 50/50 100/500 7/21   0/0   Active
+</span></span></span></code></pre></div>
+</div><p><code>5/5 50/50 100/500</code> covers the <strong>five</strong> whole GPUs, <code>7/21</code> the <strong>three</strong> partitioned ones (<code>3 × 7</code>); no GPU
+is counted twice or missing:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get node node-h100 -o json <span class="p">|</span> jq <span class="s1">&#39;.status.allocatable | with_entries(select(.key|test(&#34;nvidia.com/gpu&#34;)))&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="go">{
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu&#34;: &#34;5&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned&#34;: &#34;21&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-1g.10gb&#34;: &#34;21&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-1g.20gb&#34;: &#34;12&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-2g.20gb&#34;: &#34;9&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-3g.40gb&#34;: &#34;6&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-4g.40gb&#34;: &#34;3&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-7g.80gb&#34;: &#34;3&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.units&#34;: &#34;4800k&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.shared&#34;: &#34;50&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.sliced&#34;: &#34;640&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.sliced.cores-percentage&#34;: &#34;64k&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.sliced.memory-mib&#34;: &#34;409600&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.sliced.memory-percentage&#34;: &#34;500&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.sliced.units&#34;: &#34;8M&#34;
+</span></span></span><span class="line"><span class="cl"><span class="go">}
+</span></span></span></code></pre></div>
+</div><p>Every logical number is now <strong>five</strong> GPUs&rsquo; worth (<code>640 = 5 × 128</code>, <code>8M = 5 × 1600k</code>,
+<code>409600 MiB = 5 × 81920</code>), every partition number <strong>three</strong> (<code>21 = 3 × 7</code>, <code>4800k = 3 × 1600k</code>). The
+<code>Devices</code> capability names which GPU is in which:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get devices node-h100 -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.groups[0].accelerators[*].status}&#39;</span> <span class="p">|</span> jq -c
+</span></span><span class="line"><span class="cl"><span class="go">group NVIDIA H100 80GB HBM3: 8 GPU(s); logically sliceable indices [3, 4, 5, 6, 7]; partitioned indices [0, 1, 2]
+</span></span></span><span class="line"><span class="cl"><span class="go">  GPU 0 partitioned:     count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
+</span></span></span><span class="line"><span class="cl"><span class="go">  GPU 1 partitioned:     count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
+</span></span></span><span class="line"><span class="cl"><span class="go">  GPU 2 partitioned:     count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
+</span></span></span><span class="line"><span class="cl"><span class="go">  GPU 3 logicalSliced:   {&#34;coresPercentageOvercommit&#34;: true, &#34;count&#34;: 128}
+</span></span></span><span class="line"><span class="cl"><span class="go">  …                      (GPUs 4-7 identical)
+</span></span></span></code></pre></div>
+</div><h4 id="31-both-kinds-of-workload-side-by-side">3.1 Both kinds of workload, side by side</h4>
+<p>A partition request and a logical-slice request submitted together land on <strong>different</strong> GPUs: their
+resource names come from disjoint populations, and the scheduler cannot consider a GPU that lacks the key:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get pods
+</span></span><span class="line"><span class="cl"><span class="go">NAME                  READY   STATUS    RESTARTS   AGE
+</span></span></span><span class="line"><span class="cl"><span class="go">mixed-logical         1/1     Running   0          5s
+</span></span></span><span class="line"><span class="cl"><span class="go">mixed-partition       1/1     Running   0          9s
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl <span class="nb">exec</span> mixed-partition -- nvidia-smi -L
+</span></span><span class="line"><span class="cl"><span class="go">GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-950792bf-a01c-3f1a-e122-3473e67f54b2)
+</span></span></span><span class="line"><span class="cl"><span class="go">  MIG 3g.40gb     Device  0: (UUID: MIG-b3061c09-2a4c-5026-a575-79f86a5bb12c)
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl <span class="nb">exec</span> mixed-logical -- nvidia-smi -L
+</span></span><span class="line"><span class="cl"><span class="go">GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-4e24fa00-9f4f-68c4-bfcd-581cd3cb7de6)
+</span></span></span></code></pre></div>
+</div><p>The partition workload sees <strong>only its MIG device</strong>, the logical-slice workload a <strong>whole GPU</strong> (capped at
+runtime by the preload library, not by <code>nvidia-smi -L</code>). The allocation record names each GPU:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get pod &lt;name&gt; -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.metadata.annotations.device\.gpustack\.ai/accelerator\.allocated}&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="go">mixed-partition  -&gt; index=0  id=GPU-950792bf-…  profile=3g.40gb     # a PARTITIONED GPU
+</span></span></span><span class="line"><span class="cl"><span class="go">mixed-logical    -&gt; index=5  id=GPU-4e24fa00-…  profile=-           # a WHOLE GPU
+</span></span></span></code></pre></div>
+</div><p>Both views move independently, in their own family:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          4/4 40/40 100/450 7/17   0/0   Active
+</span></span></span></code></pre></div>
+</div><ul>
+<li><code>EX 5→4</code> and <code>SH 50→40</code>: the logical slice put GPU 5 in use, leaving one fewer whole GPU to claim.</li>
+<li><code>SL 500→450</code>: the slice took 50 % of GPU 5; <code>450 = 4 × 100 + 50</code>.</li>
+<li><code>PT 21→17</code>: GPU 0 now holds a <code>3g.40gb</code>, leaving three <code>1g.10gb</code> slots; <code>17 = 2 × 7 + 3</code>.</li>
+</ul>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get node node-h100 -o json <span class="p">|</span> jq <span class="s1">&#39;.status.allocatable | with_entries(select(.key|test(&#34;gpu\\.partitioned&#34;)))&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="go">{
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned&#34;: &#34;18&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-1g.10gb&#34;: &#34;17&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-1g.20gb&#34;: &#34;10&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-2g.20gb&#34;: &#34;7&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-3g.40gb&#34;: &#34;6&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-4g.40gb&#34;: &#34;2&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.mig-7g.80gb&#34;: &#34;2&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="go">  &#34;nvidia.com/gpu.partitioned.units&#34;: &#34;4800k&#34;
+</span></span></span><span class="line"><span class="cl"><span class="go">}
+</span></span></span></code></pre></div>
+</div><p>Only the partitioned GPUs&rsquo; keys moved: the <code>3g.40gb</code> was carved outside the whole GPUs&rsquo; population, so their
+<code>.sliced.*</code> keys are untouched. The placement is not luck. A partition token exists only on a
+partitioned GPU, a <code>.sliced</code> token only on a whole one, so the resource name rules out the wrong population
+before the kubelet is involved.</p>
+<blockquote>
+<p><strong>Why the split exists</strong> — a single pool used to let the kubelet hand a partition request a token from a
+GPU that could not host one, and the Pod died with a terminal <code>UnexpectedAdmissionError</code>.</p>
+</blockquote>
+<h3 id="4-back-to-all-logical">4. Back to all-logical</h3>
+<p>Reverse the runbook (<a href="#disabling-partitioning-on-a-node">Disabling MIG on a node</a>
+): with the GPUs idle, flip the
+remaining modes off and re-detect. The <code>partitioned</code> keys go to zero, the logical keys return, and the pool
+is back at <a href="#1-all-logical--every-gpu-mig-off">step 1</a>
+:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">#</span> On node-h100 <span class="o">(</span>via SSH<span class="o">)</span>:
+</span></span><span class="line"><span class="cl"><span class="gp">$</span> <span class="k">for</span> i in <span class="m">0</span> <span class="m">1</span> 2<span class="p">;</span> <span class="k">do</span> sudo nvidia-smi -i <span class="s2">&#34;</span><span class="nv">$i</span><span class="s2">&#34;</span> -mig 0<span class="p">;</span> <span class="k">done</span>
+</span></span><span class="line"><span class="cl"><span class="go">Disabled MIG Mode for GPU 00000000:8D:00.0
+</span></span></span><span class="line"><span class="cl"><span class="go">All done.
+</span></span></span><span class="line"><span class="cl"><span class="go">…
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl -n gpustack-system rollout restart ds/gpustack-operator-device-manager-nvidia
+</span></span><span class="line"><span class="cl"><span class="go">daemonset.apps/gpustack-operator-device-manager-nvidia restarted
+</span></span></span><span class="line"><span class="cl"><span class="go"></span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="gp">$</span> kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+</span></span><span class="line"><span class="cl"><span class="go">NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
+</span></span></span><span class="line"><span class="cl"><span class="go">gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          8/8 80/80 100/800 0/0   0/0   Active
+</span></span></span></code></pre></div>
+</div><nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/requests/">Accelerator Requests</a>
+ (keys and request rules)</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/admission/#capability-versus-availability">Admission</a>
+ (which status field answers
+&ldquo;what can I still get&rdquo;)</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/discovery/#the-partitioned-family-fungible-tokens">Device Discovery</a>
+
+(how a partition is placed and reclaimed)</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/walkthrough/">Walkthrough</a>
+ — the logical-slicing counterpart on a live cluster.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/3947d8e1e0b39f9574e2fc67bb8ca3e4b6531ebc/docs/modules/devices/nvidia-mig.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#prerequisites">Prerequisites</a></li>
+    <li><a href="#how-partition-profiles-are-discovered">How partition profiles are discovered</a></li>
+    <li><a href="#requesting-a-partition">Requesting a partition</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+    <li><a href="#enabling-partitioning-on-a-node">Enabling partitioning on a node</a>
+      <ul>
+        <li><a href="#across-a-fleet-with-the-nvidia-gpu-operator">Across a fleet, with the NVIDIA GPU Operator</a></li>
+      </ul>
+    </li>
+    <li><a href="#disabling-partitioning-on-a-node">Disabling partitioning on a node</a></li>
+    <li><a href="#node-reboot-recovery">Node reboot recovery</a></li>
+    <li><a href="#operator-boundaries">Operator boundaries</a></li>
+    <li><a href="#walkthrough-three-mig-configurations-on-one-node">Walkthrough: three MIG configurations on one node</a>
+      <ul>
+        <li><a href="#1-all-logical--every-gpu-mig-off">1. All-logical — every GPU MIG off</a></li>
+        <li><a href="#2-all-physical--every-gpu-mig-on">2. All-physical — every GPU MIG on</a></li>
+        <li><a href="#3-mixed--part-logical-part-physical">3. Mixed — part logical, part physical</a></li>
+        <li><a href="#4-back-to-all-logical">4. Back to all-logical</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0-rc2/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

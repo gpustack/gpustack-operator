@@ -1,0 +1,974 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0-rc2/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Model Deployment Status · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/status/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0-rc2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0-rc2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0-rc2/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0-rc2/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0-rc2"
+      data-home="/gpustack-operator/v0.9.0-rc2/" data-page="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/status/">
+      <option value="/gpustack-operator/v0.9.0-rc2/">v0.9.0-rc2</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/v0.9.0-rc2/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0-rc2/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/status/" aria-current="page">Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0-rc2/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0-rc2/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0-rc2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/">Model Deployment</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Model Deployment Status</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="model-deployment-status">Model Deployment Status</h1>
+<p>A <code>ModelDeployment</code> reports its phase, ready replicas and serving endpoint in <code>status</code>. Use these
+fields and its conditions to diagnose a deployment that is still starting or has lost capacity.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#status">Status</a>
+</li>
+</ul>
+<h2 id="status">Status</h2>
+<p><code>status.phase</code> is the field to read first: <code>Starting</code>, <code>Ready</code>, <code>Degraded</code> or <code>Deleting</code>. <code>Degraded</code>
+means some required serving capacity is ready and some is not: either some role replicas are down, or
+all role replicas are ready but a declared router has no ready replica.
+<code>status.roles[]</code> carries <code>name</code>, <code>kind</code>, <code>desired</code>, <code>ready</code>, <code>quotaReserved</code>, <code>unmanaged</code> and
+<code>assignedFlavors</code> per role.</p>
+<p><code>kubectl get modeldeployments</code> shows <code>status.roleSummary</code> in its <code>ROLES</code> column. It counts current
+Ready instances by kind: <code>R</code> is managed router Pods, <code>S</code> is ordinary servers, <code>P</code> is prefillers,
+and <code>D</code> is decoders. For example, <code>1R2S</code> means one Ready router and two Ready servers; <code>1R3P4D</code>
+means one Ready router, three Ready prefillers and four Ready decoders.</p>
+<p>Without a router, the <code>R</code> part is absent; a declared kind with nothing Ready shows zero. Several
+roles of the same kind are summed. A serving instance made of several Pods still counts once; use
+<code>status.roles[].desired</code> to see the requested count.</p>
+<p>Without a router, <code>status.endpoint</code> is the address the deployment-wide Service serves on, in the form
+<code>&lt;scheme&gt;://&lt;name&gt;.&lt;namespace&gt;.svc:&lt;port&gt;</code>. The scheme is read from the same role the port is (the
+first one), and is <code>https</code> only where that role passes <code>--ssl-certfile</code> or <code>--ssl-keyfile</code>. With a
+router it is absent until the router is ready, then uses the router Service&rsquo;s own <code>http</code> transport.</p>
+<p><code>status.router</code> publishes the contract used to render the router: its implementation and address,
+the cache pool&rsquo;s client endpoint, the metrics names and port, and one entry for every role containing
+the effective kind, selector, direct endpoint and any dialable KV-event endpoints. The event entries
+are absent when the corresponding rendered Pods do not carry publisher configuration.</p>
+<p>This router contract names metrics sources for routing; it is not a live utilization sample.
+The separate <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
+ subresource reads the current
+router and engine Pod endpoints and reports partial coverage explicitly.</p>
+<p>Only <code>--ssl-certfile</code> or <code>--ssl-keyfile</code> turn the scheme to <code>https</code>. The rest of the <code>--ssl-*</code>
+family does not: both engines enable TLS for those two alone, so any other ssl argument passed by
+itself leaves an ordinary HTTP server.</p>
+<p><strong><code>ready</code> counts replicas whose engine answered, not replicas whose process started</strong>, except on the
+three shapes listed below, which carry no gates and keep the weaker meaning. One still loading its
+model counts as not ready for as long as that takes.</p>
+<p><strong>Both figures count replicas, which is the same as counting Pods only while a replica is one Pod.</strong>
+A role at <code>size: 2</code> with <code>replicas: 2</code> runs four Pods and reports <code>desired: 2</code>. A replica of several
+Pods is ready only when <strong>every</strong> member it declares is, so a role showing <code>1/2</code> with three of its
+four Pods running is reporting one whole instance, not three quarters of the role.</p>
+<p>A gated replica carries a startup gate, a readiness gate and a liveness gate, all reading the
+engine&rsquo;s own <code>GET /health</code> on the port the Service targets, so <code>ready == desired</code> and &ldquo;the endpoint
+answers&rdquo; are one fact rather than two.</p>
+<p>The KV cache store&rsquo;s leader answers a route of the same name that is deliberately <strong>not</strong> a readiness
+signal; see <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/leader/">KV Cache Leader</a>
+. They are different programs, and only the
+engine&rsquo;s route is read here.</p>
+<p><strong>The startup gate allows thirty minutes per attempt, not in total.</strong> A replica that has not
+answered by then is restarted and gets the same budget again, so a model that never finishes loading
+is a restart loop rather than a replica stuck at not-ready.</p>
+<p><strong>The liveness gate never sees that window</strong>, because the kubelet suppresses liveness and readiness
+alike until the startup gate succeeds.</p>
+<p><strong>A replica that stops answering loses readiness first, and is restarted only if it stays quiet
+for longer.</strong> The liveness gate&rsquo;s failure threshold is wider than the readiness gate&rsquo;s.</p>
+<blockquote>
+<p>Readiness withdraws a replica from the Service and is undone by answering again; a restart throws
+away a model that took the startup budget to load. Different thresholds keep those two events
+different, and the liveness gate is what gives a quiet replica a way back, since this operator
+deletes a replica only to shed one the spec no longer declares or to turn over an outdated one.</p>
+</blockquote>
+<p><strong>The operator tells the engine where to listen.</strong> It renders <code>--host 0.0.0.0</code> and <code>--port &lt;the port the Service targets&gt;</code> into the engine&rsquo;s own command line, so the address traffic is sent to and the
+address the engine opens are one decision. The two engines do not agree on a default (vLLM opens
+every interface on 8000, SGLang opens <code>127.0.0.1:30000</code>), and an engine left on its own would be
+unreachable on one of them.</p>
+<p><strong>Both flags are filled when missing.</strong> A role that passes either through <code>extraArgs</code> keeps its own
+value, and the operator adds only the one that is absent.</p>
+<p><strong>A role that enables TLS is still gated</strong>, over HTTPS, on the criterion above. Only the transport
+moved (the address is still the operator&rsquo;s own), and the kubelet does not verify the server
+certificate on a probe, so a self-signed pair is graded like any other.</p>
+<p><strong>Three shapes carry no gates at all</strong>: a role that replaces the command through
+<code>roles[].command</code>; a role that moves where its engine listens, with <code>--host</code> or <code>--port</code>, or that
+demands a client certificate a probe has none to present, with <code>--ssl-cert-reqs</code> set to anything but
+<code>0</code> or <code>1</code> <strong>alongside a certificate or key</strong>; and a role declaring its port as <code>UDP</code> or <code>SCTP</code>.</p>
+<p>The <code>--ssl-cert-reqs</code> values: that flag is an integer, and only <code>0</code> (<code>CERT_NONE</code>, the default) and
+<code>1</code> (<code>CERT_OPTIONAL</code>) let a certificate-less probe through, so a role passing either keeps all three
+gates. Everything else withdraws them: <code>2</code>, a value outside that enum, one that is not a number,
+and the flag with no value at all. Losing a gate costs a signal, while fitting one to a listener
+that refuses it restarts a replica that is serving.</p>
+<p>The first two fail one way and the third the other. Gating an address the operator does not know
+would restart a replica answering every request; an HTTP engine speaks TCP whatever the declaration
+says, so a gate would <strong>pass</strong> while the published endpoint forwards a protocol nothing answers.
+Replicas of all three are Ready as soon as their process starts.</p>
+<p><code>quotaReserved</code> is how many of the role&rsquo;s replicas hold a quota reservation. Each replica is its own
+Workload and reserves on its own, so a role sits anywhere between zero and <code>desired</code> while capacity
+arrives; a role that shared one Workload passed all-or-nothing, and this figure could not exist.</p>
+<p>The field is always present once written, and its zero is an observed zero: it is counted from Pod
+and Workload lists that succeeded, and a failed list writes no status at all rather than a zero. The
+two readings call for opposite actions: a visible 0 means the pass read everything and no replica
+holds quota, so investigate capacity; a field that is not there means the pass could not see, so wait,
+or look at the operator rather than the pool.</p>
+<p><code>assignedFlavors</code> answers <em>which accelerator models did this role&rsquo;s replicas actually get</em>, read from
+each replica&rsquo;s own Workload&rsquo;s per-PodSet assignment. It is a <strong>deduplicated, sorted</strong> list, because
+each replica is its own Workload and Kueue assigns a flavor per Workload, so two replicas of one role
+can land on different flavors.</p>
+<p>It is <strong>absent</strong> rather than empty while no assignment exists, and absent does not only mean &ldquo;not
+admitted yet&rdquo;. The field reports the flavor of a replica&rsquo;s <em>accelerator</em> credits: a role admitted onto
+a pool carrying no accelerator at all reports nothing here while being perfectly healthy: its
+Workloads hold assignments, naming a flavor for <code>cpu</code>.</p>
+<p>One entry means every assigned replica of the role names it. Several entries mean the replicas were
+assigned different flavors, the signal to investigate and not a degraded form of one answer.</p>
+<p>Which replica carries which flavor is deliberately not here: the ordinal such an answer would key
+on is the converger&rsquo;s internal slotting rather than a promise this API makes, and a reader who
+needs the mapping reads the replicas&rsquo; own Pods. A flavor reported here is read through the same
+lens the per-accelerator admission gate uses, so the two cannot disagree.</p>
+<p>Eight conditions carry the axes a single phase cannot. They are independent: &ldquo;quota reserved but
+cache not attached&rdquo; is a real and actionable state. Seven are described below; <code>WeightsReady</code> is
+described with the artifact it reports on, in <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/#status">Model Artifact</a>
+.</p>
+<p><strong><code>DomainRegistered</code></strong> — whether the referenced Binding resolved and its domain was read.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Reason</th>
+          <th>Action</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>Registered</code></td>
+          <td>nowhere; the domain in <code>status.kvCache</code> is current</td>
+      </tr>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>NotApplicable</code></td>
+          <td>nowhere; the deployment declares no <code>kvCache</code>, so there is no Binding to resolve</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>BindingNotFound</code></td>
+          <td>create the Binding — an admin doing so is what grants access</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>BindingNotReady</code></td>
+          <td>wait for it, or look at the pool it points at</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>BindingDeleting</code></td>
+          <td>find who deleted it; the replicas keep writing to the domain they attached to</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong><code>QuotaReserved</code></strong> — whether <strong>every one of</strong> the deployment&rsquo;s Workloads holds Kueue quota. Every
+replica is its own group with its own Workload, so a deployment of N replicas is N Workloads. <code>True</code>
+is therefore an answer about the whole set and not about whichever Workload sorts first, because half
+a deployment holding quota is not the deployment holding quota.</p>
+<p>A message that names groups names them <strong>by role</strong>, never by <code>instanceType</code>: two roles can name one
+type, so a type would point at two roles&rsquo; groups at once while a role names exactly the set that
+waits. The queue an operator has to free follows from the named role&rsquo;s own <code>instanceType</code>.</p>
+<p>It mirrors the Workloads&rsquo; own conditions, so it stays current after admission rather than
+reporting only the moment a Workload was admitted.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Reason</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>Reserved</code></td>
+          <td>every replica has quota reserved; with one role the message names its cluster queue</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>Pending</code></td>
+          <td>at least one replica is waiting for quota; the message names how many, and where they wait</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>PodGroupIncomplete</code></td>
+          <td>fewer replicas exist than a role declares, so Kueue composes <strong>no Workload at all</strong> for the missing ones; the message carries <code>&lt;have&gt;/&lt;want&gt;</code> and the role&rsquo;s cluster queue</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>PreemptedInPart</code></td>
+          <td>a higher-priority workload reclaimed some replicas&rsquo; quota while others are still admitted; the message says whether any role kind has no admitted replica left, and so whether the loss is of capacity or of a whole role</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>Parked</code></td>
+          <td>the set failed to assemble for long enough that the joint check deactivated its Workloads; an identical re-apply does not clear it</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>NoQueueInReservedNamespace</code></td>
+          <td>the deployment is in a reserved namespace, which has no LocalQueue, so it will never be scheduled</td>
+      </tr>
+      <tr>
+          <td><code>Unknown</code></td>
+          <td><code>AdmissionInFlight</code></td>
+          <td>a group is complete and has no Workload yet — Kueue composes it asynchronously, so absence is admission in flight, not refusal</td>
+      </tr>
+      <tr>
+          <td><code>Unknown</code></td>
+          <td><code>NoReplicas</code></td>
+          <td>no replica has been created yet</td>
+      </tr>
+      <tr>
+          <td><code>Unknown</code></td>
+          <td><code>AllReplicasTerminating</code></td>
+          <td>every replica is on its way out, so none holds quota to report on</td>
+      </tr>
+  </tbody>
+</table>
+<p><code>PodGroupIncomplete</code>, <code>NoQueueInReservedNamespace</code> and <code>AdmissionInFlight</code> all observe no Workload
+but mean different things. The first clears when the missing replica exists; the second is permanent
+because reserved namespaces deliberately have no LocalQueue; the third clears when Kueue composes the
+Workload. Telling them apart is why the reason exists.</p>
+<p><code>Pending</code>, <code>PreemptedInPart</code> and <code>Parked</code> all say the set does not hold quota, and they are separate
+because the action differs. <code>Pending</code> resolves itself when capacity appears. <code>Parked</code> is over already:
+those workloads were deactivated and no longer ask for anything. <code>PreemptedInPart</code> is the one to act
+on, and the replicas that kept their quota hold accelerators until either the reclaimed replicas are
+admitted again or the deployment is deleted.</p>
+<blockquote>
+<p>How long the wait is worth making depends on what preempted the deployment, which is outside this
+object and this operator. The condition reports the state and leaves that decision with you.</p>
+</blockquote>
+<p>The cost of the wait lands on the queue, not on this deployment. The replicas that kept their quota
+hold accelerators while the set cannot serve in full, and Kueue accounts that quota as used: the
+next workload drawing from the same ClusterQueue is refused with <code>insufficient unused quota</code>. A
+deployment preempted in part starves whatever is queued behind it.</p>
+<p>What to do about it:</p>
+<ul>
+<li><strong>Add capacity.</strong> The reclaimed replicas are admitted again on their own once capacity returns.
+The state self-heals but is UNBOUNDED: no timeout, no give-up, nothing makes the holder yield, so
+capacity that never comes back leaves it standing.</li>
+<li><strong>Delete and recreate the deployment.</strong> Deleting is the other release for the quota the kept
+replicas hold.</li>
+<li><strong>Move the roles apart.</strong> Each role draws from the ClusterQueue its own <code>instanceType</code> resolves
+to; giving the roles different types keeps one preemption from reclaiming both halves out of the
+same queue.</li>
+</ul>
+<p><strong><code>CacheAttached</code></strong> — whether the cache is observed to be in effect, which is a different question
+from whether it was configured. It is judged downstream of the engine and <strong>never</strong> on a rendered flag
+or a log line.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Reason</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>NotApplicable</code></td>
+          <td>the deployment declares no <code>kvCache</code>, so there is no cache to attach</td>
+      </tr>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>CacheActive</code></td>
+          <td>a ready replica reports succeeding store operations</td>
+      </tr>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>CacheActive</code></td>
+          <td>no replica gave an account, and the reuse domain holds data — this attributes to the domain, which is shared by every deployment on its Binding</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>CacheOperationsFailing</code></td>
+          <td>a ready replica reports store operations of which <strong>none</strong> succeeded; the engine is serving without the cache</td>
+      </tr>
+      <tr>
+          <td><code>Unknown</code></td>
+          <td><code>Unmanaged</code></td>
+          <td>a role took over its command line, so the operator rendered no cache client</td>
+      </tr>
+      <tr>
+          <td><code>Unknown</code></td>
+          <td><code>NoReplicaReady</code></td>
+          <td>no replica is ready, so no engine has an account to give</td>
+      </tr>
+      <tr>
+          <td><code>Unknown</code></td>
+          <td><code>NoObservationAvailable</code></td>
+          <td>ready replicas gave no account and the domain reports nothing held</td>
+      </tr>
+  </tbody>
+</table>
+<p><code>NoObservationAvailable</code> is <code>Unknown</code> rather than <code>False</code> because an attached deployment that is
+simply idle looks exactly like an unread one: no supported engine signals &ldquo;the connector
+initialized&rdquo; before any traffic, so silence is the most common steady state. A connector that
+cannot come up keeps its replica from ever becoming Ready, which is reported there.</p>
+<p><strong><code>ReplicasUpToDate</code></strong> — whether the running replicas match what the convergence renders for them now.
+It is not a statement about <code>spec</code> alone: the comparison includes the rendered KV cache connector,
+so a replica carrying the current <code>spec</code> can still differ from the render once that connector stops
+resolving — the state behind <code>RolloutHeldByCache</code>, which the other conditions do not describe.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Reason</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>UpToDate</code></td>
+          <td>every replica matches what the pass rendered</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>RolloutInProgress</code></td>
+          <td>replicas differ from the render and turn over <strong>one per role per pass</strong>; this pass deleted at most one replica per role, and the pass that finds it gone creates the replacement</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>ReplacementInProgress</code></td>
+          <td>every surviving replica matches the render but the declared count is short — what removed them is not this condition&rsquo;s to say, and a preemption reports itself on the quota condition; the pass creates each replacement once the departed replica&rsquo;s ordinal reads empty</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>RolloutHeldByCache</code></td>
+          <td>replicas that differed from the render were <strong>left in place</strong>: no connection resolved this pass, and recreating them on that alone would rebuild every replica whenever the store blinks</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>RolloutHeldByWeights</code></td>
+          <td>replicas that differed from the render were <strong>left in place</strong>: the model weights their replacements need are blocked, so deleting them would only remove serving replicas; <code>WeightsReady</code> says what blocks them</td>
+      </tr>
+      <tr>
+          <td><code>Unknown</code></td>
+          <td><code>RolloutNotObserved</code></td>
+          <td>the pass accounted for no replica at all, so it established nothing either way</td>
+      </tr>
+  </tbody>
+</table>
+<p>A pass answers only for the replicas it read or created from the render it just performed; one that
+could account for none reports <code>Unknown</code>, rather than a zero indistinguishable from &ldquo;all up to
+date&rdquo;. This happens in ordinary operation — a teardown, and the pass between a rollout&rsquo;s delete and
+the create that answers it, both write status this way.</p>
+<p><code>ReplacementInProgress</code> and <code>RolloutInProgress</code> answer opposite questions — whether an edit landed,
+and why capacity moved when nothing was edited. While a replacement waits, watch the departed Pod:
+the replacement is created once no Pod for that ordinal reads on the API server.</p>
+<blockquote>
+<p>The answer is not left standing between passes. After a steady deployment it would keep reporting
+<code>True</code> while every replica is on its way out, because a pass that finds every replica departing
+accounts for none of them.</p>
+</blockquote>
+<p><code>RolloutHeldByCache</code> is the condition to read when an edit appears to have no effect; it is the only
+condition on the object that names a held rollout.</p>
+<blockquote>
+<p>The state does not imply an edit is waiting. During an outage the render carries no connector, so
+every attached replica differs from it whether or not anyone changed the deployment, and an
+ordinary store blink puts every deployment on the pool into this state. The message names what
+<em>would</em> be delayed, never that something is.</p>
+<p>Not every change waits: a <code>replicas</code> change proceeds during an outage — the ordinals it adds do
+not exist yet and are created without a connector, and the ordinals it sheds leave on the ordinary
+path. An edit that changes a running replica&rsquo;s rendered Pod is what waits. Scaling out does not
+release it: replicas added during the outage turn over once more when the store returns, and the
+running replicas still wait. The store&rsquo;s own recovery bounds the wait.</p>
+<p>The stall is deliberate: the alternative — recreating every replica whose render lost its
+connector — deletes every replica of every deployment on a pool for a few seconds of store
+unavailability. Measured, a withheld edit lands within seconds of the store returning.</p>
+</blockquote>
+<p><strong><code>RoleKindsReady</code></strong> — whether every role <strong>kind</strong> the deployment declares has at least one ready
+replica. It is deliberately <strong>not</strong> replica completeness: &ldquo;every role has all the replicas it asked
+for&rdquo; is what <code>phase</code> answers, by summing every role&rsquo;s counts before judging.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Reason</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>AllKindsReady</code></td>
+          <td>every kind present has at least one ready replica</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>KindsNotReady</code></td>
+          <td>at least one kind has none; the message names the kinds</td>
+      </tr>
+      <tr>
+          <td><code>Unknown</code></td>
+          <td><code>NoRoleStatuses</code></td>
+          <td>the pass accounted for no role at all, so there is nothing to judge</td>
+      </tr>
+  </tbody>
+</table>
+<p>A deployment whose roles all share one kind (the shape you get when no role names a <code>kind</code>, since it
+defaults to <code>Server</code>) reports <code>True</code> as soon as any replica is ready. That is not a blind spot. The
+degradation is real and <code>phase</code> reports it as <code>Degraded</code>; this condition answers a different question
+and is silent on that shape by design.</p>
+<p>A role that took over its command line counts toward its kind like any other. Such a role gets no
+readiness probe, so its <code>Ready</code> says its containers started rather than that anything answered on the
+serving path. <code>status.roles[].unmanaged</code> is published per role for a reader who needs the stronger
+reading.</p>
+<p>Read this condition alongside <code>phase</code>: it reports readiness by role kind, while <code>phase</code> reports
+replica completeness. Neither guarantees that an inference request succeeds; that also depends on
+the engine and Service connectivity.</p>
+<p><strong><code>KVEventsPublishing</code></strong> — whether every role that produces cache blocks has publisher configuration
+in its rendered Pods. It reports configuration, not live traffic: a configured publisher that later
+crashes remains <code>True</code>.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Reason</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>Publishing</code></td>
+          <td>every producing role is configured to publish</td>
+      </tr>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>NotApplicable</code></td>
+          <td>an unrouted deployment declares only <code>Server</code> roles</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>PublisherDisabled</code></td>
+          <td>a producing role&rsquo;s rendered Pods do not enable publishing</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>NoRouter</code></td>
+          <td>a prefill/decode pair has no router to consume events</td>
+      </tr>
+      <tr>
+          <td><code>Unknown</code></td>
+          <td><code>RoleUnmanaged</code></td>
+          <td>a producing role replaced its command line, so the operator cannot inspect what it does</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong><code>RouterReady</code></strong> — whether the managed router rendered and has a ready replica. A render refusal is
+reported here rather than returned as an error, so the rest of the status (phase, the other
+conditions, the role counts) keeps computing with the cause named.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Reason</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>Ready</code></td>
+          <td>the router&rsquo;s Deployment has ready replicas</td>
+      </tr>
+      <tr>
+          <td><code>True</code></td>
+          <td><code>NotApplicable</code></td>
+          <td>the deployment declares no <code>spec.router</code></td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>RenderFailed</code></td>
+          <td>the router&rsquo;s object set could not be rendered; the message carries the refusal</td>
+      </tr>
+      <tr>
+          <td><code>False</code></td>
+          <td><code>NoReadyReplicas</code></td>
+          <td>the router&rsquo;s Deployment exists but no replica is ready</td>
+      </tr>
+      <tr>
+          <td><code>Unknown</code></td>
+          <td><code>NotDeployed</code></td>
+          <td>the router&rsquo;s Deployment has not been created yet</td>
+      </tr>
+  </tbody>
+</table>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/deployment/">Model Deployment</a>
+ for the contract this status
+reports on</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/leader/">KV Cache Leader</a>
+ for the leader process the conditions
+distinguish from the operator&rsquo;s own.</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/deployment/">Model Deployment</a></div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/3947d8e1e0b39f9574e2fc67bb8ca3e4b6531ebc/docs/modules/model-deployment/status.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#status">Status</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0-rc2/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

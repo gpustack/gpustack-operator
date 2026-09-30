@@ -1,0 +1,1311 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0-rc2/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Settings & Environment Variables · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0-rc2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0-rc2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0-rc2/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0-rc2/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0-rc2"
+      data-home="/gpustack-operator/v0.9.0-rc2/" data-page="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/">
+      <option value="/gpustack-operator/v0.9.0-rc2/">v0.9.0-rc2</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/v0.9.0-rc2/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0-rc2/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/" >Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0-rc2/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0-rc2/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/" aria-current="page">Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0-rc2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0-rc2/docs/reference/">Reference</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Settings & Environment Variables</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="settings--environment-variables">Settings &amp; Environment Variables</h1>
+<p>GPUStack Operator reads configuration from two places: the <code>Setting</code> resource, which you can change
+at runtime, and environment variables, which the process reads once at startup.</p>
+<blockquote>
+<p><strong>First-deploy seeding vs. runtime changes.</strong> On first deploy, <code>settings.Initialize</code> creates the delegated
+Secret <code>gpustack-settings</code> in the system namespace and seeds every Setting from
+<code>GPUSTACK_&lt;UPPER_SNAKE_NAME&gt;</code>, or the built-in default when that variable is unset. Later restarts only
+<strong>backfill missing</strong> Settings and <strong>never overwrite</strong> a stored value: a <code>GPUSTACK_*</code> variable is an
+<em>initial seed only</em>, so after the first deploy change the <code>Setting</code> resource, not the environment.</p>
+</blockquote>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#online-adjustable-settings">Online-adjustable settings</a>
+</li>
+<li><a href="#deploy-time-environment-variables">Deploy-time environment variables</a>
+</li>
+</ul>
+<h2 id="online-adjustable-settings">Online-adjustable settings</h2>
+<p>A fixed catalog of named values, served as the namespaced <code>Setting</code> aggregated API resource
+(<code>gpustack.ai/v1</code>, short name <code>set</code>, category <code>gpustack</code>) and read at runtime with <code>kubectl</code>; the operator
+picks a new value up on its next reconcile. Fixed means the resource serves
+<code>get,list,watch,apply,update,patch</code> and no create/delete: you edit a Setting&rsquo;s <strong>value</strong>, not its existence.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># List every setting and its current value</span>
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-system get settings          <span class="c1"># or: kubectl -n gpustack-system get set</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># Inspect / change one</span>
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-system get setting node-management-manual -o yaml
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-system edit setting node-management-manual
+</span></span><span class="line"><span class="cl">kubectl -n gpustack-system patch setting instance-type-derived-from-node --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;false&#34;}}&#39;</span></span></span></code></pre></div>
+</div><table>
+  <thead>
+      <tr>
+          <th>Setting</th>
+          <th>Env seed</th>
+          <th>Default</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>container-registry</code></td>
+          <td><code>GPUSTACK_CONTAINER_REGISTRY</code></td>
+          <td><em>(blank)</em></td>
+          <td>Registry to pull images from, for all built-in applications&rsquo; deployments.</td>
+      </tr>
+      <tr>
+          <td><code>container-namespace</code></td>
+          <td><code>GPUSTACK_CONTAINER_NAMESPACE</code></td>
+          <td><em>(blank)</em></td>
+          <td>Namespace to pull images from, for all built-in applications&rsquo; deployments.</td>
+      </tr>
+      <tr>
+          <td><code>image-pull-secrets</code></td>
+          <td><code>GPUSTACK_IMAGE_PULL_SECRETS</code></td>
+          <td><em>(blank)</em></td>
+          <td>Image pull secret for pulling images, for all built-in applications&rsquo; deployments — the subcharts the chart or the worker installs. It does NOT reach a workload a controller renders from a custom resource: a <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/backend/">KV cache backend</a>
+ names its own <code>spec.imagePullSecrets</code>.</td>
+      </tr>
+      <tr>
+          <td><code>image-pull-policy</code></td>
+          <td><code>GPUSTACK_IMAGE_PULL_POLICY</code></td>
+          <td><code>IfNotPresent</code></td>
+          <td>Image pull policy for all built-in applications&rsquo; deployments, on the same boundary as the secret above: a controller-rendered workload carries its own.</td>
+      </tr>
+      <tr>
+          <td><code>instance-general-resources-overcommit</code></td>
+          <td><code>GPUSTACK_INSTANCE_GENERAL_RESOURCES_OVERCOMMIT</code></td>
+          <td><code>true</code></td>
+          <td>Overcommit an Instance&rsquo;s general resources: when enabled, a general unit requests 800m CPU / 128Mi RAM and one-eighth local storage, an accelerated unit 100m CPU / 128Mi RAM and one-eighth local storage — so e.g. a 1C/4Gi + 128Gi type requesting 2 accelerators and 64Gi storage resolves to 200m/256Mi + 8Gi. A CPU limit whose whole cores cost more than the limit itself (e.g. <code>100m</code>, or <code>1500m</code> whose half core rounds up) requests the limit instead — a request may never exceed its limit.</td>
+      </tr>
+      <tr>
+          <td><code>instance-ssh-server-image</code></td>
+          <td><code>GPUSTACK_INSTANCE_SSH_SERVER_IMAGE</code></td>
+          <td><code>gpustack/ssh-server:v1.3.0</code></td>
+          <td>Image of the SSH server used when deploying Instances.</td>
+      </tr>
+      <tr>
+          <td><code>kv-cache-backend-image</code></td>
+          <td><code>GPUSTACK_KV_CACHE_BACKEND_IMAGE</code></td>
+          <td><code>gpustack/mirrored-mooncake:0.3.13.post1-cpu</code></td>
+          <td>Image every role of a <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/backend/">KV cache backend</a>
+ runs when the object does not name one itself. The default is this project&rsquo;s own build — a CPU build carrying TCP and EFA over DRAM, and the only image that can run <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/leader/#high-availability"><code>leader.electionBackend</code></a>
+. The per-vendor variant builds, their tags and which one a VRAM group needs are under <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/backend/#the-projects-own-build-variants">The project&rsquo;s own build variants</a>
+. <strong>It does not fit every backend</strong>: a backend on another transport or runtime names its own <code>spec.image</code>, which always wins over this. <strong>Clearing this Setting restores the admission refusal</strong> for a backend naming no image anywhere. Why one default cannot fit every backend, and what having one costs, is under <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/backend/#the-image">The image</a>
+.</td>
+      </tr>
+      <tr>
+          <td><code>model-deployment-kv-cache-dtype-owned</code></td>
+          <td><code>GPUSTACK_MODEL_DEPLOYMENT_KV_CACHE_DTYPE_OWNED</code></td>
+          <td><code>true</code></td>
+          <td>Hand every <code>KVCachePoolBinding</code>&rsquo;s <code>spec.domain.dtype</code> to the engines attached through it as <code>--kv-cache-dtype</code>, verbatim, and refuse a pool-attached role or injected Pod naming that flag itself, and a new Binding declaring <code>auto</code> — see <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/pool/#engine-dtype">The dtype is handed to the engine</a>
+. <strong>It is the escape from a Binding whose spelling the engine rejects</strong>, which makes every new Pod fail argument parsing: <code>false</code> renders and refuses nothing, as before the flag was owned. Flipping it recreates every pool-attached replica at its next reconcile. The recovery is under <a href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/kv-cache-dtype/">Upgrading to an enforced Binding dtype</a>
+.</td>
+      </tr>
+      <tr>
+          <td><code>model-deployment-router-image</code></td>
+          <td><code>GPUSTACK_MODEL_DEPLOYMENT_ROUTER_IMAGE</code></td>
+          <td><code>gpustack/llm-router:v0.1.0</code></td>
+          <td>Image a managed router runs when the <code>ModelDeployment</code> does not name one in <code>spec.router.image</code>. <strong>It carries every router this operator supports, and which binary runs is decided by the rendered command rather than by the image</strong> — <code>spec.router.name</code> picks the binary, and this setting only says where the binaries come from. Its default is safe for every cluster at once in a way <code>kv-cache-backend-image</code>&rsquo;s is not: it runs no model, so it links no accelerator runtime and cannot be paired with the wrong one. The default is this project&rsquo;s own build rather than an upstream tag, because the three routers are compiled from three separate sources and one of them carries a patch this repository ships, so no upstream image holds them together. An image named on the object is used verbatim and is never redirected to the cluster mirror, because it is the user&rsquo;s own reference.</td>
+      </tr>
+      <tr>
+          <td><code>model-deployment-router-proxy-image</code></td>
+          <td><code>GPUSTACK_MODEL_DEPLOYMENT_ROUTER_PROXY_IMAGE</code></td>
+          <td><code>gpustack/mirrored-envoy:distroless-v1.33.2</code></td>
+          <td>Proxy fronting a managed router&rsquo;s endpoint picker. It has <strong>no field on the API</strong> to override it: this operator renders the proxy&rsquo;s configuration against one proxy&rsquo;s configuration schema, so swapping the binary would mean swapping that configuration too. The setting exists for registry redirection and for pinning a release back, not for running a different proxy.</td>
+      </tr>
+      <tr>
+          <td><code>model-deployment-routing-sidecar-image</code></td>
+          <td><code>GPUSTACK_MODEL_DEPLOYMENT_ROUTING_SIDECAR_IMAGE</code></td>
+          <td><code>gpustack/mirrored-llm-d-router-disagg-sidecar:v0.10.0</code></td>
+          <td>Sidecar a decoder runs to accept a remote prefill handoff. Same terms as the proxy above: this operator renders its arguments, so the setting is for redirection and pinning rather than for a different implementation.</td>
+      </tr>
+      <tr>
+          <td><code>model-deployment-tcp-tw-reuse</code></td>
+          <td><code>GPUSTACK_MODEL_DEPLOYMENT_TCP_TW_REUSE</code></td>
+          <td><code>false</code></td>
+          <td>Render <code>net.ipv4.tcp_tw_reuse=1</code> on the prefill half of every SGLang prefill/decode pair, which otherwise <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/engine-versions/#known-failures-at-the-minimum">runs out of local ports</a>
+ under sustained load. <strong>Allow the sysctl on the kubelet of every node that can run such a Pod before turning it on</strong>: without that the Pod fails with <code>SysctlForbidden</code>, and so does every replacement. The steps, which Pods it reaches and how to confirm the refusal are under <a href="#sglang-time-wait-port-reuse">SGLang TIME-WAIT port reuse</a>
+.</td>
+      </tr>
+      <tr>
+          <td><code>model-prefetch-warmup-image</code></td>
+          <td><code>GPUSTACK_MODEL_PREFETCH_WARMUP_IMAGE</code></td>
+          <td><code>gpustack/mirrored-python:3.12-alpine</code></td>
+          <td>Image the <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/prefetch/"><code>ModelPrefetch</code></a>
+ warm-up pod runs on each target node. The pod mounts the artifact&rsquo;s volume, verifies every file reads back and exits, so the image needs only a shell, <code>find</code> and <code>sha256sum</code> — it never runs a model. It is a setting because the one thing it must guarantee is that the node can pull it, which only the cluster&rsquo;s own registry arrangement decides; an air-gapped cluster points it at its mirror.</td>
+      </tr>
+      <tr>
+          <td><code>model-artifact-huggingface-endpoint</code></td>
+          <td><code>GPUSTACK_MODEL_ARTIFACT_HUGGINGFACE_ENDPOINT</code></td>
+          <td><code>https://huggingface.co</code></td>
+          <td>The Hugging Face Hub a <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/"><code>ModelArtifact</code></a>
+ resolves and revalidates against, and the <code>HF_ENDPOINT</code> an engine downloading the weights is given; the node plugin downloads from it too. What changing it does is under <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/#engine-delivery">Engine delivery</a>
+.</td>
+      </tr>
+      <tr>
+          <td><code>model-artifact-modelscope-endpoint</code></td>
+          <td><code>GPUSTACK_MODEL_ARTIFACT_MODELSCOPE_ENDPOINT</code></td>
+          <td><code>https://www.modelscope.cn</code></td>
+          <td>The ModelScope hub a <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/"><code>ModelArtifact</code></a>
+ resolves and revalidates against and the node plugin downloads from; an engine downloading the weights gets its host as <code>MODELSCOPE_DOMAIN</code> — the runners&rsquo; SDK takes a bare host. What changing it does is under <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/#engine-delivery">Engine delivery</a>
+.</td>
+      </tr>
+      <tr>
+          <td><code>model-artifact-https-proxy</code></td>
+          <td><code>GPUSTACK_MODEL_ARTIFACT_HTTPS_PROXY</code></td>
+          <td><em>(blank)</em></td>
+          <td>HTTPS proxy for resolution, revalidation and the node plugin&rsquo;s downloads, and the <code>HTTPS_PROXY</code> given to an engine downloading the weights, where a role&rsquo;s own value wins. Blank keeps the worker&rsquo;s own environment and renders nothing. Only an <code>http</code> or <code>https</code> URL without credentials is accepted, because the value reaches tenant Pods; a value from the environment that is not refuses the worker&rsquo;s start.</td>
+      </tr>
+      <tr>
+          <td><code>model-artifact-no-proxy</code></td>
+          <td><code>GPUSTACK_MODEL_ARTIFACT_NO_PROXY</code></td>
+          <td><em>(blank)</em></td>
+          <td>Comma-separated hosts that bypass <code>model-artifact-https-proxy</code>, for the node plugin too, given to engines as <code>NO_PROXY</code> on the same terms.</td>
+      </tr>
+      <tr>
+          <td><code>model-artifact-ca-bundle</code></td>
+          <td><code>GPUSTACK_MODEL_ARTIFACT_CA_BUNDLE</code></td>
+          <td><em>(blank)</em></td>
+          <td>Name of a ConfigMap in the worker&rsquo;s namespace whose <code>ca.crt</code> the resolution and the node plugin trust beside the system pool. <strong>It is not given to engine Pods</strong>: they run in tenant namespaces, which cannot mount it.</td>
+      </tr>
+      <tr>
+          <td><code>model-artifact-revalidate-interval</code></td>
+          <td><code>GPUSTACK_MODEL_ARTIFACT_REVALIDATE_INTERVAL</code></td>
+          <td><code>24h</code></td>
+          <td>How often a resolved hub artifact&rsquo;s access is checked again, at least <code>1m</code>; a Secret change checks it at once. What a refusal does is under <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/#resolution-and-revalidation">Resolution and revalidation</a>
+.</td>
+      </tr>
+      <tr>
+          <td><code>model-artifact-delivery-mode</code></td>
+          <td><code>GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE</code></td>
+          <td><code>Engine</code></td>
+          <td>How a hub artifact&rsquo;s weights reach a <code>ModelDeployment</code>: <code>Engine</code>, the engine downloads them, or <code>Node</code>, the node&rsquo;s <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/"><code>model-manager</code> plugin</a>
+ mounts a verified copy. The chart seeds <code>Node</code> when it deploys the plugin, and a seed never overrides a stored value. <code>Node</code> is refused while the CSIDriver <code>model.csi.gpustack.ai</code> does not exist. <strong>Changing it rolls every deployment using a hub artifact once</strong>; see <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/#switch-delivery">Switch delivery</a>
+.</td>
+      </tr>
+      <tr>
+          <td><code>model-store-high-watermark</code></td>
+          <td><code>GPUSTACK_MODEL_STORE_HIGH_WATERMARK</code></td>
+          <td><code>80</code></td>
+          <td>The node cache filesystem&rsquo;s usage percent above which the plugin removes content no Pod mounts; above the low watermark, at most <code>95</code>. On a filesystem shared with kubelet the plugin caps it below kubelet&rsquo;s thresholds (<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/#the-capacity-rule">the capacity rule</a>
+).</td>
+      </tr>
+      <tr>
+          <td><code>model-store-low-watermark</code></td>
+          <td><code>GPUSTACK_MODEL_STORE_LOW_WATERMARK</code></td>
+          <td><code>70</code></td>
+          <td>The usage percent a collection removes down to; at least <code>1</code>, below the high watermark.</td>
+      </tr>
+      <tr>
+          <td><code>model-store-download-concurrency</code></td>
+          <td><code>GPUSTACK_MODEL_STORE_DOWNLOAD_CONCURRENCY</code></td>
+          <td><code>8</code></td>
+          <td>Concurrent HTTP requests the plugin makes per node, across every download; <code>1</code> to <code>64</code>.</td>
+      </tr>
+      <tr>
+          <td><code>model-store-peer-sync</code></td>
+          <td><code>GPUSTACK_MODEL_STORE_PEER_SYNC</code></td>
+          <td><code>true</code></td>
+          <td>Whether a node&rsquo;s plugin may pull a model&rsquo;s content from the plugins of other nodes that hold it published, instead of the hub.</td>
+      </tr>
+      <tr>
+          <td><code>model-store-download-bandwidth</code></td>
+          <td><code>GPUSTACK_MODEL_STORE_DOWNLOAD_BANDWIDTH</code></td>
+          <td><code>0</code></td>
+          <td>Per-node download rate limit, a quantity of bytes per second (<code>200Mi</code>); <code>0</code> is unlimited.</td>
+      </tr>
+      <tr>
+          <td><code>instance-access-static-address</code></td>
+          <td><code>GPUSTACK_INSTANCE_ACCESS_STATIC_ADDRESS</code></td>
+          <td><em>(blank)</em></td>
+          <td>Static access address for all Instances; when unset, the access address is generated from host IPs.</td>
+      </tr>
+      <tr>
+          <td><code>instance-access-wildcard-dns</code></td>
+          <td><code>GPUSTACK_INSTANCE_ACCESS_WILDCARD_DNS</code></td>
+          <td><em>(blank)</em></td>
+          <td>Wildcard DNS for all Instances (e.g. <code>traefik.me</code>), used to build a per-Instance domain <code>&lt;instance-host-ip&gt;.&lt;wildcard-dns&gt;</code>. Only effective when <code>instance-access-static-address</code> is not set.</td>
+      </tr>
+      <tr>
+          <td><code>instance-privileged-allowed</code></td>
+          <td><code>GPUSTACK_INSTANCE_PRIVILEGED_ALLOWED</code></td>
+          <td><code>false</code></td>
+          <td>Whether an Instance may request privileged mode (<code>spec.privileged</code>), which escapes the container boundary and exposes the node&rsquo;s devices and kernel surface. Enforced by the Instance admission webhook whenever an Instance <strong>takes</strong> privileged mode — at creation, or through a later change, including one made while it is stopped. An Instance that already runs privileged keeps it: with this off it stays updatable, editable while stopped, and restartable. Like every setting here, a change takes up to 30s to reach the webhook, so an Instance created in that window is judged against the previous value.</td>
+      </tr>
+      <tr>
+          <td><code>instance-host-path-volume-allowed</code></td>
+          <td><code>GPUSTACK_INSTANCE_HOST_PATH_VOLUME_ALLOWED</code></td>
+          <td><code>false</code></td>
+          <td>Whether an Instance may mount a hostPath volume (<code>spec.additionalVolumes[*].hostPath</code>), which reaches the node&rsquo;s filesystem. Kept separate from <code>instance-privileged-allowed</code> because it grants strictly less — the filesystem, but not the node&rsquo;s devices or kernel — so an admin can allow node-path mounts without allowing a container escape. Enforced whenever an Instance <strong>takes</strong> a hostPath mount, on the same terms; a mount it already has is matched by value, so reordering the list is not a new grant while repointing an entry at a different node path is.</td>
+      </tr>
+      <tr>
+          <td><code>instance-persistent-volume-placement</code></td>
+          <td><code>GPUSTACK_INSTANCE_PERSISTENT_VOLUME_PLACEMENT</code></td>
+          <td><code>true</code></td>
+          <td>Whether an Instance&rsquo;s persistent claims (<code>spec.volume.persistent</code>, <code>spec.additionalVolumes[*].persistent</code>) decide where its Pod runs, by the <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/#claim-delivery-and-placement">claim placement rules</a>
+: a bound claim adds its PV&rsquo;s required node affinity, and a claim nothing binds holds the Pod back with the reason in <code>status.phaseMessage</code>. <strong><code>false</code> is the escape path</strong>: the Pod is built from the claim names alone, as before, and Kueue&rsquo;s topology-aware scheduling may then assign a node the volume cannot reach, leaving the Pod Pending while its Workload holds quota. Read when a Pod is created, so a change never moves a running Instance; stop and start one to apply it.</td>
+      </tr>
+      <tr>
+          <td><code>workload-fit-affinity</code></td>
+          <td><code>GPUSTACK_WORKLOAD_FIT_AFFINITY</code></td>
+          <td><code>true</code></td>
+          <td>Whether the Workload webhook pins a logical slice, or a shared request of two or more accelerators, on an operator queue to nodes whose <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/#per-card-fit-labels">fit labels</a>
+ show that one accelerator can still host it. When <code>true</code>, Kueue&rsquo;s topology-aware scheduling skips a fragmented node; when <code>false</code>, Workloads pass unchanged while the fit labels are still published, so the pin can be switched off on its own. Read on every webhook call, so a change takes up to 30s to reach it, and it applies to Workloads created or updated after that.</td>
+      </tr>
+      <tr>
+          <td><code>node-management-manual</code></td>
+          <td><code>GPUSTACK_NODE_MANAGEMENT_MANUAL</code></td>
+          <td><code>false</code></td>
+          <td>Skip auto-managing nodes. When <code>false</code>, the operator auto-onboards discovered nodes by injecting the <code>gpustack.ai/managed=true</code> label; when <code>true</code>, an administrator must opt nodes in manually. Read per-reconcile.</td>
+      </tr>
+      <tr>
+          <td><code>instance-type-mixed-on-node</code></td>
+          <td><code>GPUSTACK_INSTANCE_TYPE_MIXED_ON_NODE</code></td>
+          <td><code>true</code></td>
+          <td>Whether one node may surface both a GPU and a CPU-only InstanceType. When <code>true</code>, a node is summarized into every type it can serve; when <code>false</code>, a node with accelerators yields only a GPU InstanceType and a CPU-only node only a general one. Read per-reconcile.</td>
+      </tr>
+      <tr>
+          <td><code>instance-type-derived-from-node</code></td>
+          <td><code>GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE</code></td>
+          <td><code>true</code></td>
+          <td>Whether the operator auto-derives the InstanceType (and its backing ClusterQueue) from node hardware. When <code>true</code>, the <code>NodeFlavorReconciler</code> authors the derived InstanceType (create-only); when <code>false</code>, it only aligns the ResourceFlavor and the administrator defines the InstanceType via the API, and owns feasibility with it — see <a href="#authoring-the-instancetype">Authoring the InstanceType</a>
+. Read per-reconcile.</td>
+      </tr>
+      <tr>
+          <td><code>instance-type-drain-when-no-flavors</code></td>
+          <td><code>GPUSTACK_INSTANCE_TYPE_DRAIN_WHEN_NO_FLAVORS</code></td>
+          <td><code>true</code></td>
+          <td>Whether a ClusterQueue whose pool has lost all its ResourceFlavors is drained (<code>HoldAndDrain</code>, so Kueue evicts admitted workloads) before its resource groups are emptied. When <code>true</code>, the queue is drained first; when <code>false</code>, the operator waits for the reservations to clear on their own, then empties. Either way the groups are emptied only once every reservation is zero, so Kueue&rsquo;s counters never go negative. Read per-reconcile.</td>
+      </tr>
+      <tr>
+          <td><code>instance-type-aware-cpu-manufacturer</code></td>
+          <td><code>GPUSTACK_INSTANCE_TYPE_AWARE_CPU_MANUFACTURER</code></td>
+          <td><code>false</code></td>
+          <td>Whether the derived ClusterQueue/InstanceType/InstanceTypeFlavor aggregation splits by CPU manufacturer. When <code>false</code>, non-accelerated flavors collapse into one <code>generic</code> pool per os/arch and accelerated flavors pool per accelerator (CPU ignored); when <code>true</code>, every pool splits by the CPU key (<code>gpustack--${gKey}-…</code> / <code>gpustack--${gKey}--${aKey}-…</code>) and the InstanceType records the raw CPU detail. The <code>ResourceFlavor</code>s themselves are unaffected — they always carry the CPU key, so a flip only re-groups the aggregation layer. Read per-reconcile.</td>
+      </tr>
+  </tbody>
+</table>
+<p>These settings (<code>node-management-manual</code>, <code>instance-type-mixed-on-node</code>, <code>instance-type-derived-from-node</code>,
+<code>instance-type-drain-when-no-flavors</code>, <code>instance-type-aware-cpu-manufacturer</code>) are read <strong>per-reconcile</strong>
+(<code>ShouldValueBool(ctx)</code>): flipping one re-converges the scheduling chain on the next reconcile, with no
+restart.</p>
+<h3 id="authoring-the-instancetype">Authoring the InstanceType</h3>
+<p>With <code>instance-type-derived-from-node=false</code> the operator authors no InstanceType, so the
+administrator owns both halves of a pool: which InstanceTypes exist, and whether what their queue
+admits can actually be placed. Flipping the setting off does not retire the types the operator
+already authored; the derived marker is provenance, and nothing auto-removes a type.</p>
+<p>No ClusterQueue gains a reference to the node-devices feasibility gate in this mode. That
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/admission/#gate-3--the-per-accelerator-admissioncheck">AdmissionCheck</a>
+ has one
+writer, <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/#queue-quota-and-draining"><code>NodeQueueReconciler</code></a>
+,
+which reads this setting as a cluster-wide switch, not as &ldquo;was this queue derived&rdquo;.</p>
+<p>So with the switch on, every accelerated queue carries the reference once the check reports <code>Active</code>,
+whoever authored its InstanceType; with it off none is added, and a queue that already carries one
+drops it the next time its resource groups are refilled, not at the moment of the flip.</p>
+<blockquote>
+<p><strong>Why it is not attached in this mode anyway</strong> — the gate changes what a queue admits, and in the
+mode where the administrator authors every InstanceType that is theirs to decide.</p>
+</blockquote>
+<p>The failure shape to expect: without that gate, a Workload is admitted on quota alone and its Pods
+then sit <code>Pending</code>, which reads as a full cluster while the usual truth is a request no node can
+place, because quota is a scalar total and cannot see per-accelerator fragmentation. When the Pods
+of an admitted Workload stay <code>Pending</code>, compare the request against the per-accelerator ledger
+(<code>kubectl get devices &lt;node&gt; -o yaml</code>) before adding capacity.</p>
+<p>The joint-admission check is attached in both modes. Every queue backing an InstanceType
+references <code>gpustack-model-deployment-joint</code> once it reports <code>Active</code>, whoever authored the type and
+whatever this setting says.</p>
+<p>It answers <code>Ready</code> at once for every Workload that is not a replica of a multi-role ModelDeployment,
+so the only thing it changes in this mode is that such a deployment is admitted as a set; see
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/deployment/#prefill-and-decode">Prefill and decode</a>
+, and
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/status/#status">Status</a>
+ for a set that stays short of quota.</p>
+<p>Write the InstanceType against the <code>InstanceTypeFlavor</code> catalog. It is the read-only,
+os/arch-agnostic view of the pools that actually exist (one entry per grouping the settings above
+produce), and its <code>spec</code> carries the identity fields an InstanceType is built from:
+<code>acceleratorGroup</code>, <code>generalGroup</code>, <code>acceleratable</code>, <code>manufacturer</code>, <code>product</code>, <code>family</code>, <code>memory</code>,
+<code>cores</code>.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get instancetypeflavors                               <span class="c1"># short name: instypeflavor</span>
+</span></span><span class="line"><span class="cl">kubectl get instancetypeflavor gpustack--nvidia-a10g -o yaml</span></span></code></pre></div>
+</div><p>An InstanceType whose identity matches no entry there backs a ClusterQueue that selects no
+<code>ResourceFlavor</code>, so the queue is left with empty resource groups and admits nothing.</p>
+<h3 id="sglang-time-wait-port-reuse">SGLang TIME-WAIT port reuse</h3>
+<p><code>model-deployment-tcp-tw-reuse</code> renders <code>net.ipv4.tcp_tw_reuse=1</code> into the Pod
+<code>securityContext.sysctls</code> of the prefill half of every SGLang prefill/decode pair, and of no other
+Pod. The sysctl lets the kernel reuse ports held by <code>TIME-WAIT</code> sockets for new outgoing
+connections, in that Pod&rsquo;s own network namespace only.</p>
+<p>The prefill half opens a new TCP connection for every transfer, so over <code>TCP</code>, with or without a
+store, its <code>TIME-WAIT</code> sockets <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/engine-versions/#known-failures-at-the-minimum">use up its local
+ports</a>
+ under sustained load.</p>
+<p>It does not reach the decode half, which accepts transfers rather than opening them; a vLLM role,
+which keeps its transfer connections open; or the members of a <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/backend/">KV cache backend</a>
+.
+A role that replaced its <code>command</code> gets nothing either, since the operator did not build what runs
+there. Whether an SGLang server with a store runs out of ports is not measured, and the setting
+does not reach it.</p>
+<ol>
+<li>Allow the sysctl on the kubelet of every node that can run such a Pod. It is not on the
+Kubernetes <a href="https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/#safe-and-unsafe-sysctls">safe list</a>
+,
+so a kubelet refuses it until told otherwise. Add it to the kubelet configuration and restart the
+kubelet:</li>
+</ol>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># KubeletConfiguration</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">allowedUnsafeSysctls</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="l">net.ipv4.tcp_tw_reuse</span></span></span></code></pre></div>
+</div><p>The command-line form is <code>--allowed-unsafe-sysctls=net.ipv4.tcp_tw_reuse</code>. It is one list, so keep
+any name already on it.</p>
+<p><strong>On a managed cluster, set it where the node pool&rsquo;s kubelet configuration comes from</strong>, so a node
+added or replaced later keeps it; an edit made on a running node leaves with that node. On each of
+these it takes effect on newly created nodes:</p>
+<ul>
+<li><strong>EKS on Amazon Linux 2023</strong> — the launch template&rsquo;s <code>nodeadm</code> <code>NodeConfig</code>, under
+<code>spec.kubelet.config</code> as above or as the flag under <code>spec.kubelet.flags</code>; see the <a href="https://awslabs.github.io/amazon-eks-ami/nodeadm/doc/api/"><code>nodeadm</code>
+API</a>
+. On Amazon Linux 2, pass the flag
+through the bootstrap script&rsquo;s <code>--kubelet-extra-args</code>.</li>
+<li><strong>AKS</strong> — <code>allowedUnsafeSysctls</code> in the kubelet configuration a node pool is created with; see
+<a href="https://learn.microsoft.com/en-us/azure/aks/custom-node-configuration">custom node configuration</a>
+.</li>
+<li><strong>GKE</strong> — <code>kubeletConfig.allowedUnsafeSysctls</code> in the node system configuration of a node pool;
+see <a href="https://docs.cloud.google.com/kubernetes-engine/docs/how-to/node-system-config">node system
+configuration</a>
+.</li>
+<li>A platform that exposes no kubelet configuration cannot run this setting; leave it off there.</li>
+</ul>
+<ol start="2">
+<li>Turn the setting on.</li>
+</ol>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-deployment-tcp-tw-reuse --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;true&#34;}}&#39;</span></span></span></code></pre></div>
+</div><p><strong>Flipping it recreates the prefill replicas it reaches</strong>, in either direction, because the sysctl
+is part of the Pod spec their fingerprint covers. Each deployment picks the value up on its next
+reconcile, and a setting change does not wake one. To apply it at once, delete one of the
+deployment&rsquo;s prefill Pods: the reconcile that replaces it renders the new value, and the rollout
+replaces the other prefill replicas. A pair that has already locked up recovers the same way.</p>
+<p>If the kubelet was not changed, the prefill replica never starts. The node&rsquo;s kubelet refuses the
+Pod, which ends in phase <code>Failed</code> with reason <code>SysctlForbidden</code>; the operator deletes it and logs
+<code>removing replica that failed</code> with that reason, and the replacement is refused the same way, over
+and over. The events outlive the Pods, and their message names the sysctl:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n &lt;namespace&gt; get events --field-selector <span class="nv">reason</span><span class="o">=</span>SysctlForbidden
+</span></span><span class="line"><span class="cl">kubectl -n &lt;namespace&gt; get pods -w <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l app.kubernetes.io/instance<span class="o">=</span>&lt;deployment&gt;,app.kubernetes.io/component<span class="o">=</span>&lt;prefill-role&gt;</span></span></code></pre></div>
+</div><p>The second command shows the prefill Pods cycling through <code>SysctlForbidden</code>. Allow the sysctl on
+those nodes or turn the setting off; either ends the loop at the next replacement.</p>
+<p>A namespace enforcing the <code>baseline</code> or <code>restricted</code> Pod Security Standard refuses the Pod at
+creation instead, since the sysctl is not on that standard&rsquo;s allowed list either: no Pod appears,
+and the operator logs the refusal.</p>
+<h2 id="deploy-time-environment-variables">Deploy-time environment variables</h2>
+<p>Read <strong>once at process startup</strong>, so changing one means restarting or redeploying the affected component.
+The Worker (WK) copies every <code>GPUSTACK_</code>-prefixed variable from its own Pod spec onto the Device Manager
+(DM) DaemonSets, so setting one on the Worker Deployment reaches the DMs automatically.</p>
+<h3 id="general-variables">General variables</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Variable</th>
+          <th>Default</th>
+          <th>Component</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>GPUSTACK_DATA_DIR</code></td>
+          <td><code>/var/lib/gpustack</code></td>
+          <td>all</td>
+          <td>Root directory for data storage.</td>
+      </tr>
+      <tr>
+          <td><code>GPUSTACK_CONF_DIR</code></td>
+          <td><code>/etc/gpustack</code></td>
+          <td>all</td>
+          <td>Root directory for configuration and metadata, e.g. bundled Helm charts.</td>
+      </tr>
+      <tr>
+          <td><code>GPUSTACK_PCI_CLASS_PREFIXES</code></td>
+          <td><code>02,03,0b,12</code></td>
+          <td>DM</td>
+          <td>Comma-separated PCI class prefixes treated as display/accelerator devices (see the <a href="https://admin.pci-ids.ucw.cz/read/PD">PCI class registry</a>
+). Applied to the DM&rsquo;s local sysfs PCI scan, and to nothing else. The same list appears twice more, and neither reads this variable: the chart value <code>node-feature-discovery.worker.config.sources.pci.deviceClassWhitelist</code> decides which classes NFD labels, and <code>pkg/nodefeature</code> is what the <code>gpustack-cpu-info</code> NodeFeatureRule matches (a Go test holds those two equal). Change one and change all three.</td>
+      </tr>
+      <tr>
+          <td><code>GPUSTACK_DEVICES_GROUP_ID_WITH_MEMORY</code></td>
+          <td><code>false</code></td>
+          <td>DM</td>
+          <td>When <code>true</code>, the devices group ID gains a memory-size suffix (e.g. <code>nvidia-tesla-t4-16g</code> instead of <code>nvidia-tesla-t4</code>), so same-model devices with different VRAM sizes form distinct groups.</td>
+      </tr>
+      <tr>
+          <td><code>GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE</code></td>
+          <td><code>true</code></td>
+          <td>DM</td>
+          <td>Whether <code>Allocate</code> refuses a logical slice its accelerator cannot hold: one with no free slot, or without the units the slice needs. The Pod fails with <code>UnexpectedAdmissionError</code> and its controller recreates it. <code>false</code> allocates it anyway and clamps the ledger at zero, as before the refusal existed; see <a href="#disabling-an-allocator-safeguard">Disabling an allocator safeguard</a>
+.</td>
+      </tr>
+      <tr>
+          <td><code>GPUSTACK_DEVICE_PLUGIN_IDENTIFY_BY_KUBELET</code></td>
+          <td><code>true</code></td>
+          <td>DM</td>
+          <td>Whether <code>Allocate</code> asks the kubelet&rsquo;s pod-resources API which container it serves. <code>false</code> identifies it by the pending-Pod heuristic alone, as before the lookup existed; a node whose kubelet cannot be reached falls back to that heuristic by itself. See <a href="#disabling-an-allocator-safeguard">Disabling an allocator safeguard</a>
+.</td>
+      </tr>
+      <tr>
+          <td><code>GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS</code></td>
+          <td><code>true</code></td>
+          <td>WK, DM</td>
+          <td>Whether the accelerator ledger stops charging a Pod in phase <code>Succeeded</code> or <code>Failed</code> for the exclusive cards, shared cards and logical slices kubelet has taken back from it, so a finished Job that nobody deletes no longer keeps its card from the fit labels, the InstanceType views and the node-devices check. A hardware partition, and a MetaX or Cambricon slice, stay charged until the Pod object is gone, because only then are they destroyed. <code>false</code> charges every finished Pod until its object is gone, as before, and makes the sliced <code>Allocate</code> gate charge it too, which it did not do before; set it through the chart value <code>ledgerReleaseTerminatedPods</code>, which renders it on the worker and every device-manager so the two sides agree.</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="disabling-an-allocator-safeguard">Disabling an allocator safeguard</h3>
+<p>Two device-plugin safeguards default on, and each has a switch for the case where it misjudges a
+node. Set it through the chart, which renders <code>deviceManager.env</code> onto every device-manager DaemonSet:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm upgrade gpustack-operator &lt;chart&gt; --namespace gpustack-system --reset-then-reuse-values <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set-string deviceManager.env.GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE<span class="o">=</span>false</span></span></code></pre></div>
+</div><ul>
+<li><code>GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE=false</code> is for a slice refused although its accelerator
+has room: the Pod keeps coming back <code>UnexpectedAdmissionError</code> naming that accelerator. With it
+off, the slice is allocated and the ledger clamps that accelerator&rsquo;s <code>Remaining</code> at zero.</li>
+<li><code>GPUSTACK_DEVICE_PLUGIN_IDENTIFY_BY_KUBELET=false</code> is for allocations recorded on the wrong Pod while
+the kubelet is reachable. With it off, the device manager picks the oldest pending Pod the request
+could be for, which can record two Pods bound together on each other.</li>
+</ul>
+<p>The change rolls the device-manager Pods, one node at a time. Running workloads are not touched: a
+device-manager restart does not reach a started container, and its allocation records live on the
+Pods, where the restarted process reads them. A Pod admitted while its node&rsquo;s device manager is
+restarting can fail admission, as across any device-manager restart, and its controller recreates it.</p>
+<p>To switch the safeguard back on, remove the value. Set it to <code>null</code> with <code>--set</code>, not <code>--set-string</code>,
+which would store the string <code>&quot;null&quot;</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm upgrade gpustack-operator &lt;chart&gt; --namespace gpustack-system --reset-then-reuse-values <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set deviceManager.env.GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE<span class="o">=</span>null</span></span></code></pre></div>
+</div><h3 id="per-manufacturer-overrides">Per-manufacturer overrides</h3>
+<p>Override patterns expand for every known manufacturer (<code>amd</code>, <code>ascend</code>, <code>cambricon</code>, <code>hygon</code>,
+<code>iluvatar</code>, <code>metax</code>, <code>mthreads</code>, <code>nvidia</code>, <code>thead</code>); both the WK and the DM read them, so the propagation
+above keeps the two sides consistent.</p>
+<p><strong>Installed by the chart, set the <code>global.manufacturers</code> row, not these variables.</strong> The overrides
+here are fields of that row (<code>pciVendorID</code>, <code>resourceName</code>, <code>runtimeName</code>, <code>partitionKind</code>), which the
+chart fans out as the matching variable to the worker <em>and</em> the device-managers, along with what a variable
+cannot reach: the DaemonSet node selectors, the RuntimeClasses it creates, Kueue&rsquo;s credits mapping. The
+variable alone leaves those stale; the next render overwrites it.</p>
+<ul>
+<li><code>GPUSTACK_${MANUFACTURER}_PCI_VENDOR_ID</code> — the PCI vendor ID used for NFD node selection and device scanning. Accepts <code>${vendor}</code> or <code>${class}_${vendor}</code>.</li>
+<li><code>GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RESOURCE_NAME</code> — the extended resource name the scheduling chain allocates against.</li>
+<li><code>GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RUNTIME_NAME</code> — the container runtime class name used for accelerated workloads. A RuntimeClass of that name is attached only when one exists in the cluster; the chart creates one only where the <code>global.manufacturers</code> row sets a <code>runtimeInjectsDriver</code> or <code>runtimeInjectsDevices</code> fact (see <code>global.manufacturers</code>) — never for a manufacturer setting neither, whose default below holds only if something else created the class.</li>
+</ul>
+<p>Defaults:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Manufacturer</th>
+          <th>PCI vendor ID</th>
+          <th>Resource name</th>
+          <th>Runtime name</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>amd</code></td>
+          <td><code>1002</code></td>
+          <td><code>amd.com/gpu</code></td>
+          <td><code>amd</code></td>
+      </tr>
+      <tr>
+          <td><code>ascend</code></td>
+          <td><code>19e5</code></td>
+          <td><code>huawei.com/npu</code></td>
+          <td><code>ascend</code></td>
+      </tr>
+      <tr>
+          <td><code>cambricon</code></td>
+          <td><code>cabc</code></td>
+          <td><code>cambricon.com/mlu</code></td>
+          <td><code>cambricon</code></td>
+      </tr>
+      <tr>
+          <td><code>hygon</code></td>
+          <td><code>1d94</code></td>
+          <td><code>hygon.com/dcu</code></td>
+          <td><code>hygon</code></td>
+      </tr>
+      <tr>
+          <td><code>iluvatar</code></td>
+          <td><code>1e3e</code></td>
+          <td><code>iluvatar.com/gpu</code></td>
+          <td><code>iluvatar</code></td>
+      </tr>
+      <tr>
+          <td><code>metax</code></td>
+          <td><code>9999</code></td>
+          <td><code>metax-tech.com/gpu</code></td>
+          <td><code>metax</code></td>
+      </tr>
+      <tr>
+          <td><code>mthreads</code></td>
+          <td><code>1ed5</code></td>
+          <td><code>mthreads.com/gpu</code></td>
+          <td><code>mthreads</code></td>
+      </tr>
+      <tr>
+          <td><code>nvidia</code></td>
+          <td><code>10de</code></td>
+          <td><code>nvidia.com/gpu</code></td>
+          <td><code>nvidia</code></td>
+      </tr>
+      <tr>
+          <td><code>thead</code></td>
+          <td><code>1ded</code></td>
+          <td><code>alibabacloud.com/ppu</code></td>
+          <td>— (none)</td>
+      </tr>
+  </tbody>
+</table>
+<blockquote>
+<p>T-Head has no default runtime name, but <code>GPUSTACK_THEAD_ACCELERATABLE_RUNTIME_NAME</code> is still honored and can supply one.</p>
+</blockquote>
+<p>A fourth override applies only to a manufacturer that has hardware partitioning at all:</p>
+<ul>
+<li><code>GPUSTACK_${MANUFACTURER}_PARTITION_KIND</code> — the manufacturer&rsquo;s own name for hardware partitioning, which becomes the segment prefix of its per-profile resource key.</li>
+</ul>
+<p><code>nvidia</code> is the only one with a default: <code>mig</code>, giving <code>nvidia.com/gpu.partitioned.mig-${profile}</code>.
+Elsewhere the variable does nothing: without hardware partitioning there is no <code>.partitioned</code> family, so
+no key segment to rename.</p>
+<p>A fifth override is per manufacturer, and today only NVIDIA reads it:</p>
+<ul>
+<li><code>GPUSTACK_${MANUFACTURER}_DEVICE_INJECTION_STRATEGY</code> — which channel that manufacturer&rsquo;s allocator
+uses to make a granted accelerator reach a container: <code>envvar</code> (<strong>default</strong>, today&rsquo;s
+<code>*_VISIBLE_DEVICES</code> behavior, byte-identical), <code>cdi-annotations</code> (the granted accelerator is
+requested as a <code>cdi.k8s.io/*</code> device-plugin annotation), or <code>auto</code> (opt-in detection, falling back to
+<code>envvar</code> with the reason logged whenever it cannot confirm CDI is safe on that node).</li>
+</ul>
+<p>A manufacturer whose allocator injects <code>/dev</code> nodes itself, or that ships no CDI generator, has nothing
+for the CDI channel to resolve, so the variable does nothing there. The partitioned (MIG) family and
+partition-backed visibility always use <code>envvar</code>, whatever the strategy names, since a MIG instance is
+materialized at <code>Allocate</code> time and no pre-generated specification names it.</p>
+<p>Prefer <code>auto</code> over naming the CDI channel yourself. The CDI channel needs a container engine that
+resolves CDI requests (containerd 2.x does; containerd 1.7 only with <code>enable_cdi = true</code>). Ask for it on
+an engine that does not and the request is simply ignored: no variable is set either, and the container
+starts with no accelerator and no error, which is the failure this setting exists to remove. <code>auto</code> reads
+the engine first and keeps the variable when the answer is no.</p>
+<p>Two independent questions decide which value a runtime wants: does the engine resolve CDI
+requests at all, and can <code>auto</code> tell that it does? <code>auto</code> reads both answers out of containerd&rsquo;s
+<code>config.toml</code>, so a runtime that keeps them anywhere else is invisible to it. That file is where the
+detection looks; it is not something the channel itself needs.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Container runtime</th>
+          <th>Resolves CDI</th>
+          <th>Detectable by <code>auto</code></th>
+          <th>Recommended</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>containerd 2.x (configuration version 3)</td>
+          <td>Yes, always</td>
+          <td>Yes, from the version</td>
+          <td><code>auto</code></td>
+      </tr>
+      <tr>
+          <td>containerd 1.7 with <code>enable_cdi = true</code></td>
+          <td>Yes</td>
+          <td>Yes, from the key</td>
+          <td><code>auto</code></td>
+      </tr>
+      <tr>
+          <td>containerd 1.7, <code>enable_cdi</code> unset</td>
+          <td>No</td>
+          <td>Yes</td>
+          <td><code>auto</code>, which keeps the variable. Naming <code>cdi-annotations</code> here is the silent no-accelerator case above</td>
+      </tr>
+      <tr>
+          <td>CRI-O</td>
+          <td>Yes, natively</td>
+          <td><strong>No</strong> — it has no <code>config.toml</code></td>
+          <td><code>cdi-annotations</code></td>
+      </tr>
+  </tbody>
+</table>
+<p><code>cdi-annotations</code> is the answer on exactly one row: a runtime that does resolve CDI requests but that
+<code>auto</code> has no way to see. Everywhere else <code>auto</code> reaches the same channel by itself, or correctly
+declines to; naming the channel where the engine ignores it is how a container ends up running
+with nothing.</p>
+<p>Where to set it: the name embeds the manufacturer in upper case, so it is not a literal you will
+find spelled out anywhere. Pass it through the chart&rsquo;s <code>deviceManager.env</code>, which lands on every
+device-manager DaemonSet:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm upgrade ... --set deviceManager.env.GPUSTACK_NVIDIA_DEVICE_INJECTION_STRATEGY<span class="o">=</span>auto</span></span></code></pre></div>
+</div><p>It is read once, when that manufacturer&rsquo;s allocator is constructed, so a change takes effect only when
+the DaemonSet restarts. A value that is not one of the supported choices is reported and the node keeps <code>envvar</code>:
+refusing to start the allocator over it would take the node&rsquo;s accelerators with it.</p>
+<p><code>auto</code> also keeps the variable when the engine&rsquo;s own default runtime is already the vendor runtime.
+That is the usual shape on a distribution that ships the GPU toolkit for you. There every Pod runs under
+that runtime whether it asks to or not, so the variable works and a CDI request would only add a second
+injection path. <code>auto</code> doing nothing on such a node is the correct answer, not a misconfiguration.</p>
+<p>Which channel a node settled on, and why, is logged once per answer, but at the allocator&rsquo;s own
+verbosity, above what the DaemonSet ships with. <a href="/gpustack-operator/v0.9.0-rc2/docs/contribute/development/#runtime-log-verbosity">Runtime log
+verbosity</a>
+ raises it on a running Pod.</p>
+<p>One node-level variable feeds the same decision:</p>
+<ul>
+<li><code>GPUSTACK_CONTAINERD_CONFIG_DIR</code> — the directory holding the container engine&rsquo;s <code>config.toml</code>, from
+the chart&rsquo;s <code>deviceManager.containerdConfigDir</code> (default <code>/etc/containerd</code>). <code>auto</code> reads it to learn
+whether the engine resolves CDI requests and which runtime handler a Pod naming no
+<code>runtimeClassName</code> runs under; unreadable keeps the node on <code>envvar</code>.</li>
+</ul>
+<h3 id="manufacturer-toolkit-paths">Manufacturer toolkit paths</h3>
+<p>The DM device bindings locate manufacturer libraries through conventional toolkit-home variables, each
+falling back to the listed default when unset.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Variable</th>
+          <th>Default</th>
+          <th>Manufacturer</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ROCM_HOME</code>, then <code>ROCM_PATH</code></td>
+          <td><code>/opt/rocm</code></td>
+          <td>AMD</td>
+          <td>ROCm root, searched for <code>librocm_smi64.so</code> / <code>libamd_smi.so</code> / <code>libhsa-runtime64.so</code>.</td>
+      </tr>
+      <tr>
+          <td><code>ROCM_SMI_LIB_PATH</code></td>
+          <td>—</td>
+          <td>AMD</td>
+          <td>Extra directory searched for <code>librocm_smi64.so</code> before the ROCm root.</td>
+      </tr>
+      <tr>
+          <td><code>AMD_SMI_LIB_PATH</code></td>
+          <td>—</td>
+          <td>AMD</td>
+          <td>Extra directory searched for <code>libamd_smi.so</code> before the ROCm root.</td>
+      </tr>
+      <tr>
+          <td><code>CANN_HOME</code></td>
+          <td><code>/usr/local/Ascend</code></td>
+          <td>Ascend</td>
+          <td>Driver root, searched for <code>libdcmi.so</code>.</td>
+      </tr>
+      <tr>
+          <td><code>ASCEND_TOOLKIT_HOME</code></td>
+          <td><code>/usr/local/Ascend/cann</code>, falling back to <code>/usr/local/Ascend/ascend-toolkit/latest/runtime</code></td>
+          <td>Ascend</td>
+          <td>CANN toolkit root used by the Ascend detector.</td>
+      </tr>
+      <tr>
+          <td><code>NEUWARE_HOME</code></td>
+          <td><code>/usr/local/neuware</code></td>
+          <td>Cambricon</td>
+          <td>Neuware root, searched for <code>libcndev.so</code>.</td>
+      </tr>
+      <tr>
+          <td><code>PPU_HOME</code></td>
+          <td><code>/usr/local/PPU_SDK</code></td>
+          <td>T-Head</td>
+          <td>PPU SDK root, searched for <code>libhgml.so</code>.</td>
+      </tr>
+      <tr>
+          <td><code>COREX_HOME</code></td>
+          <td><code>/usr/local/corex</code></td>
+          <td>Iluvatar</td>
+          <td>CoreX root, searched for <code>libixml.so</code>.</td>
+      </tr>
+      <tr>
+          <td><code>MACA_HOME</code></td>
+          <td><code>/opt/maca</code></td>
+          <td>MetaX</td>
+          <td>MACA root, searched for <code>libmxsml.so</code>.</td>
+      </tr>
+      <tr>
+          <td><code>LD_LIBRARY_PATH</code></td>
+          <td>—</td>
+          <td>all</td>
+          <td>Standard library search path, consulted as an additional source of candidate library directories.</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="kubernetes-injected-variables">Kubernetes-injected variables</h3>
+<p>Populated by the Pod specs GPUStack Operator renders (Downward API or Service environment); not
+user-facing knobs, listed for completeness.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Variable</th>
+          <th>Default</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>KUBERNETES_NODE_NAME</code></td>
+          <td>— (required)</td>
+          <td>Name of the node the Pod runs on; the DM uses it to name its NodeFeature/Devices objects.</td>
+      </tr>
+      <tr>
+          <td><code>KUBERNETES_POD_NAME</code></td>
+          <td>—</td>
+          <td>The WK&rsquo;s own Pod name, used to read back its container spec (image, pull policy, <code>GPUSTACK_*</code> env) for rendering the DM DaemonSets.</td>
+      </tr>
+      <tr>
+          <td><code>KUBERNETES_POD_NAMESPACE</code></td>
+          <td><code>gpustack-system</code></td>
+          <td>System namespace where managed resources live.</td>
+      </tr>
+      <tr>
+          <td><code>KUBERNETES_POD_IP</code></td>
+          <td>—</td>
+          <td>Overrides the auto-detected primary host IP in topology discovery.</td>
+      </tr>
+      <tr>
+          <td><code>KUBERNETES_SERVICE_NAME</code></td>
+          <td><code>gpustack-operator-worker</code></td>
+          <td>Service name used for system routing.</td>
+      </tr>
+      <tr>
+          <td><code>KUBERNETES_SERVICE_HOST</code></td>
+          <td>—</td>
+          <td>Standard in-cluster marker; its presence tells the embedded runner it is inside a cluster.</td>
+      </tr>
+  </tbody>
+</table>
+<h3 id="proxy-and-internal-flags">Proxy and internal flags</h3>
+<table>
+  <thead>
+      <tr>
+          <th>Variable</th>
+          <th>Default</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>ALL_PROXY</code> / <code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code> / <code>NO_PROXY</code></td>
+          <td>—</td>
+          <td>Standard proxy settings, passed through to the embedded Kubernetes installer.</td>
+      </tr>
+      <tr>
+          <td><code>NO_PROXY</code> / <code>no_proxy</code></td>
+          <td>—</td>
+          <td>Also parsed (hosts, IPs, CIDRs) to bypass the proxy on direct HTTP calls.</td>
+      </tr>
+      <tr>
+          <td><code>_RUNNING_INSIDE_CONTAINER_</code></td>
+          <td><code>false</code></td>
+          <td>Internal marker baked into the container image; switches data/conf paths to their absolute in-container locations. Not intended to be set by users.</td>
+      </tr>
+  </tbody>
+</table>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/architecture/">Architecture</a>
+ (what each setting regroups)</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/operate/installation-modes/">Installation Modes</a>
+ (which flags a mode sets for you)</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/operate/high-availability/">High Availability Operations</a></li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/walkthrough/">Walkthrough</a>
+ — a setting flipped on a live cluster, before and after.</div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/3947d8e1e0b39f9574e2fc67bb8ca3e4b6531ebc/docs/reference/settings.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#online-adjustable-settings">Online-adjustable settings</a>
+      <ul>
+        <li><a href="#authoring-the-instancetype">Authoring the InstanceType</a></li>
+        <li><a href="#sglang-time-wait-port-reuse">SGLang TIME-WAIT port reuse</a></li>
+      </ul>
+    </li>
+    <li><a href="#deploy-time-environment-variables">Deploy-time environment variables</a>
+      <ul>
+        <li><a href="#general-variables">General variables</a></li>
+        <li><a href="#disabling-an-allocator-safeguard">Disabling an allocator safeguard</a></li>
+        <li><a href="#per-manufacturer-overrides">Per-manufacturer overrides</a></li>
+        <li><a href="#manufacturer-toolkit-paths">Manufacturer toolkit paths</a></li>
+        <li><a href="#kubernetes-injected-variables">Kubernetes-injected variables</a></li>
+        <li><a href="#proxy-and-internal-flags">Proxy and internal flags</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0-rc2/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>

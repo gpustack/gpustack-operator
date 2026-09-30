@@ -6,6 +6,12 @@
       "path": "main/",
       "commit": "3947d8e1e0b39f9574e2fc67bb8ca3e4b6531ebc",
       "kind": "development"
+    },
+    {
+      "name": "v0.9.0-rc2",
+      "path": "v0.9.0-rc2/",
+      "commit": "3947d8e1e0b39f9574e2fc67bb8ca3e4b6531ebc",
+      "kind": "prerelease"
     }
   ],
   "published": [
@@ -14,6 +20,12 @@
       "path": "main/",
       "commit": "3947d8e1e0b39f9574e2fc67bb8ca3e4b6531ebc",
       "kind": "development"
+    },
+    {
+      "name": "v0.9.0-rc2",
+      "path": "v0.9.0-rc2/",
+      "commit": "3947d8e1e0b39f9574e2fc67bb8ca3e4b6531ebc",
+      "kind": "prerelease"
     }
   ]
 }

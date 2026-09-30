@@ -1,0 +1,917 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  
+  
+  <link rel="icon" type="image/png" sizes="32x32" href="/gpustack-operator/v0.9.0-rc2/images/logo_hu_28ea0a02134a155a.6ae14a5b979fa529bc1727cdc4589168733ca1951660a9bc5b0cc66b0d696c50.png">
+  <meta name="robots" content="noindex, follow">
+  <title>Node Model Store · GPUStack Operator</title>
+  
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/index.md">
+  
+  <link rel="describedby" href="/gpustack-operator/v0.9.0-rc2/llms.txt">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/site.1aefc53ce641786060469ca9cbfe377adf91552eefc9b1e67b406c8b56c6a20b.css">
+  <link rel="stylesheet" href="/gpustack-operator/v0.9.0-rc2/css/code.f2fc7905e458d9537fef7b838f83e14fe6faf517af1f7db4bd50154b360c5e0f.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    
+    <a class="brand" href="/gpustack-operator/v0.9.0-rc2/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/v0.9.0-rc2/images/logo_hu_d1ec8da57a0af42a.785fb98920ca744cf17eb993c8caa86c41023c261f0c44c4b45a249decad2ecd.png" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
+    <nav class="top-links" aria-label="Main navigation">
+      <a class="top-docs-link" href="/gpustack-operator/v0.9.0-rc2/docs/" aria-current="page">Documentation</a>
+      
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="v0.9.0-rc2"
+      data-home="/gpustack-operator/v0.9.0-rc2/" data-page="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/">
+      <option value="/gpustack-operator/v0.9.0-rc2/">v0.9.0-rc2</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+
+
+
+      <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="/gpustack-operator/v0.9.0-rc2/search/" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
+        <div class="nav-title">Documentation</div>
+        <a class="nav-home" href="/gpustack-operator/v0.9.0-rc2/" >Overview</a>
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Getting started">Getting started</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Architecture" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/architecture/" >Architecture</a>
+      
+    
+      
+      
+        <a title="Vendor Prerequisites" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/vendor-prerequisites/" >Prerequisites</a>
+      
+    
+      
+      
+        <a title="Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/getting-started/walkthrough/" >Walkthrough</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Heterogeneous Devices">Devices Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/" >Overview</a>
+    
+    
+      
+      
+        <a title="Preflight Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/preflight/" >Preflight</a>
+      
+    
+      
+      
+        <a title="Device Discovery" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/discovery/" >Discovery</a>
+      
+    
+      
+      
+        <a title="Accelerator Requests" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/requests/" >Resource requests</a>
+      
+    
+      
+      
+        <a title="Scheduling Chain" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Admission" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/admission/" >Admission</a>
+      
+    
+      
+      
+        <a title="NVIDIA MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/nvidia-mig/" >NVIDIA MIG</a>
+      
+    
+      
+      
+        <a title="Hygon MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/hygon-mig/" >Hygon MIG</a>
+      
+    
+      
+      
+        <a title="T-Head MIG Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/devices/thead-mig/" >T-Head MIG</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="RDMA Networking">RDMA Manager</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/" >Overview</a>
+    
+    
+      
+      
+        <a title="Network Topology" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/network-topology/" >Interface discovery</a>
+      
+    
+      
+      
+        <a title="RDMA Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/rdma/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Topology Management">Topology Aware</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/" >Overview</a>
+    
+    
+      
+      
+        <a title="Topology-Aware Scheduling" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/scheduling/" >Scheduling</a>
+      
+    
+      
+      
+        <a title="Topology-Aware Scheduling Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/operations/" >Operations</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="KV Cache">KV Cache</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/" >Overview</a>
+    
+    
+      
+      
+        <a title="KV Cache Walkthrough" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/walkthrough/" >Walkthrough</a>
+      
+    
+      
+      
+        <a title="KV Cache Backend" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/backend/" >Backends</a>
+      
+    
+      
+      
+        <a title="KV Cache Pool" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/pool/" >Pools and bindings</a>
+      
+    
+      
+      
+        <a title="KV Cache Injection Reference" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/injection/" >Pod injection</a>
+      
+    
+      
+      
+        <a title="KV Cache Leader" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/leader/" >Leader</a>
+      
+    
+      
+      
+        <a title="KV Cache Local Disk Tier" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/local-disk-tier/" >Local disk tier</a>
+      
+    
+      
+      
+        <a title="KV Cache on Disk-Heavy Nodes" href="/gpustack-operator/v0.9.0-rc2/docs/modules/kv-cache/disk-heavy-nodes/" >Disk-heavy nodes</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" open>
+  <summary title="Model Delivery">Model Delivery</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Artifact" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/" >Artifacts</a>
+      
+    
+      
+      
+        <a title="Model Image Source" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/image-source/" >Image sources</a>
+      
+    
+      
+      
+        <a title="Model Prefetch" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/prefetch/" >Prefetch and quotas</a>
+      
+    
+      
+      
+        <a title="Node Model Store" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/node-store/" aria-current="page">Node cache</a>
+      
+    
+      
+      
+        <a title="Node-to-Node Sync" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/peer-sync/" >Peer sync</a>
+      
+    
+      
+      
+        <a title="Model Store Operations" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/" >Operations</a>
+      
+    
+      
+      
+        <a title="Model Artifact API" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/views/" >API reference</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Model Deployment">Model Deployment</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/" >Overview</a>
+    
+    
+      
+      
+        <a title="Model Deployment Configuration" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/deployment/" >Configuration</a>
+      
+    
+      
+      
+        <a title="Engine Versions" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/engine-versions/" >Engine versions</a>
+      
+    
+      
+      
+        <a title="Model Deployment Prefill and Decode" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/prefill-decode/" >Prefill and decode</a>
+      
+    
+      
+      
+        <a title="Model Deployment Routing" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/routing/" >Routing</a>
+      
+    
+      
+      
+        <a title="Model Deployment Metrics" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/metrics/" >Metrics</a>
+      
+    
+      
+      
+        <a title="Model Deployment Status" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/status/" >Status</a>
+      
+    
+      
+      
+        <a title="Model Deployment Shutdown" href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-deployment/shutdown/" >Shutdown</a>
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Accelerated Instances">GPU Instances</summary>
+  <div class="nav-children">
+    
+      <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/instances/" >Overview</a>
+    
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Operations">Operations</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Installation Modes" href="/gpustack-operator/v0.9.0-rc2/docs/operate/installation-modes/" >Installation</a>
+      
+    
+      
+      
+        <a title="High Availability Operations" href="/gpustack-operator/v0.9.0-rc2/docs/operate/high-availability/" >High availability</a>
+      
+    
+      
+      
+        
+
+
+<details class="nav-section" >
+  <summary title="Upgrades">Upgrades</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Migrating from v0.5.x" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/from-v0.5/" >From v0.5</a>
+      
+    
+      
+      
+        <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/to-subcharts/" >Subchart migration</a>
+      
+    
+      
+      
+        <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/kv-cache-dtype/" >Cache data types</a>
+      
+    
+      
+      
+        <a title="Migration Troubleshooting" href="/gpustack-operator/v0.9.0-rc2/docs/operate/migration/troubleshooting/" >Troubleshooting</a>
+      
+    
+  </div>
+</details>
+
+      
+    
+  </div>
+</details>
+
+        
+          
+
+
+<details class="nav-section" >
+  <summary title="Reference">Reference</summary>
+  <div class="nav-children">
+    
+    
+      
+      
+        <a title="Command Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/commands/" >Commands</a>
+      
+    
+      
+      
+        <a title="Settings & Environment Variables" href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/" >Settings</a>
+      
+    
+      
+      
+        <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-type-unit-resources/" >Resource presets</a>
+      
+    
+      
+      
+        <a title="Instance Metrics Reference" href="/gpustack-operator/v0.9.0-rc2/docs/reference/instance-metrics/" >Instance metrics</a>
+      
+    
+  </div>
+</details>
+
+        
+      </nav>
+    </aside>
+    <main id="main-content">
+      
+      <div class="breadcrumbs">
+        <a href="/gpustack-operator/v0.9.0-rc2/docs/">Docs</a><span aria-hidden="true">/</span>
+        
+          
+            <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/">Model Delivery</a><span aria-hidden="true">/</span>
+          
+        
+        <span aria-current="page">Node Model Store</span>
+      </div>
+      
+      <article>
+        
+  <h1 id="node-model-store">Node Model Store</h1>
+<p>Use Node delivery to download model weights once and reuse the verified files across Pods on the
+same node. The <code>model-manager</code> CSI plugin downloads missing content, verifies it and mounts it
+read-only through the <code>model.csi.gpustack.ai</code> driver. Pods using the same digest share the cached
+files while those files remain on the node.</p>
+<p><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/">Model Store Operations</a>
+ covers enabling and managing the cache.</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#the-resource">The resource</a>
+</li>
+<li><a href="#configuration-ownership">Configuration ownership</a>
+</li>
+<li><a href="#mounting-cached-weights">Mounting cached weights</a>
+</li>
+<li><a href="#mount-authorization">Mount authorization</a>
+</li>
+<li><a href="#download-and-verification">Download and verification</a>
+</li>
+<li><a href="#failure-reasons">Failure reasons</a>
+</li>
+<li><a href="#references-restart-and-collection">References, restart and collection</a>
+</li>
+<li><a href="#metrics">Metrics</a>
+</li>
+<li><a href="#requirements-and-limits">Requirements and limits</a>
+</li>
+</ul>
+<h2 id="the-resource">The resource</h2>
+<p>The following shows a worker-managed object returned by <code>kubectl get nodemodelstore -o yaml</code>.
+Do not apply it as a manifest: the public API supports reads and deletion, and the worker and
+node plugin maintain its configuration and status. Configure the cache through
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/">Model Store Operations</a>
+.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">NodeModelStore                        </span><span class="w"> </span><span class="c"># cluster-scoped, short name nms, category gpustack</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpu-node-01                         </span><span class="w"> </span><span class="c"># the Node&#39;s name</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ownerReferences</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Node</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpu-node-01</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec:                                        # the worker</span><span class="p">:</span><span class="w"> </span><span class="l">this node&#39;s effective configuration</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">watermarks</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">highPercent</span><span class="p">:</span><span class="w"> </span><span class="m">80</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">lowPercent</span><span class="p">:</span><span class="w"> </span><span class="m">70</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">download</span><span class="p">:</span><span class="w"> </span><span class="c"># 0 is unlimited</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">concurrency</span><span class="p">:</span><span class="w"> </span><span class="m">8</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bytesPerSecond</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">hub</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">huggingFaceEndpoint</span><span class="p">:</span><span class="w"> </span><span class="l">https://huggingface.co</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">httpsProxy</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">noProxy</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">caBundleConfigMap</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">                    </span><span class="c"># a ConfigMap in the operator namespace, key ca.crt</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kubelet</span><span class="p">:</span><span class="w">                                   </span><span class="c"># the node&#39;s effective kubelet thresholds, from its configz</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nodefsAvailable</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10%&#34;</span><span class="w">                   </span><span class="c"># evictionHard[&#34;nodefs.available&#34;]; empty = kubelet sets none</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">imagefsAvailable</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">                     </span><span class="c"># evictionHard[&#34;imagefs.available&#34;]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">imageGCHighThresholdPercent</span><span class="p">:</span><span class="w"> </span><span class="m">85</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">status:                                      # the plugin on that node</span><span class="p">:</span><span class="w"> </span><span class="l">its facts</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">observedGeneration</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">                      </span><span class="c"># the spec generation the plugin applies</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">capacity</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">totalBytes</span><span class="p">:</span><span class="w"> </span><span class="m">999641755648</span><span class="w">                 </span><span class="c"># the cache filesystem&#39;s size</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">storedBytes</span><span class="p">:</span><span class="w"> </span><span class="m">15231233024</span><span class="w">                 </span><span class="c"># published trees and partial downloads</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">usedPercent</span><span class="p">:</span><span class="w"> </span><span class="m">40</span><span class="w">                          </span><span class="c"># the filesystem&#39;s usage, rounded down to a multiple of 5</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">models</span><span class="p">:</span><span class="w">                                    </span><span class="c"># keyed by digest, at most 256 entries</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">digest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:0f3c...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l">Ready                          </span><span class="w"> </span><span class="c"># Downloading, Ready or Failed</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sizeBytes</span><span class="p">:</span><span class="w"> </span><span class="m">15231233024</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">referenced</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">                       </span><span class="c"># some Pod mounts it</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">lastUsedTime</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2026-09-25T06:00:00Z&#34;</span><span class="w">   </span><span class="c"># truncated to the hour</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">                             </span><span class="c"># Failed: see Failure reasons</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">message</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">retryTime: null                        # Failed</span><span class="p">:</span><span class="w"> </span><span class="l">the earliest next attempt</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l">Hub                           </span><span class="w"> </span><span class="c"># where its bytes came from; none on older trees</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">digest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:7a1e...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l">Downloading</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">sizeBytes</span><span class="p">:</span><span class="w"> </span><span class="m">145424101604</span><span class="w">                </span><span class="c"># set once the manifest is listed</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">downloadedBytes</span><span class="p">:</span><span class="w"> </span><span class="m">61741236224</span><span class="w">           </span><span class="c"># what the attempt holds, a resume&#39;s checkpoints included</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l">Hub</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">conditions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Ready</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;True&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">Serving</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">CapacityLow</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;False&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">WithinWatermarks</span></span></span></code></pre></div>
+</div><p><code>kubectl get nms</code> prints Ready, Used (<code>usedPercent</code>) and Age.</p>
+<ul>
+<li><strong>It never names a tenant.</strong> It is cluster-scoped, so it carries a digest and sizes and never a
+namespace, an artifact, a Pod or a repository; those would leak across tenants. A failure&rsquo;s
+<code>message</code> says what its reason means and a detail such as the hub&rsquo;s HTTP status; the full error,
+with the file and the URL, is in the plugin&rsquo;s log.</li>
+<li><strong><code>status</code> is rebuilt from the node</strong>, never from the previous status: from what is on disk and
+what is mounted. A plugin restart rewrites it.</li>
+<li><strong>Download progress is written on thresholds.</strong> The progress fields, <code>downloadedBytes</code> and,
+while a download runs, <code>storedBytes</code>, are written only once 30 seconds passed since the last write
+and some download moved by 5% of its size: at most twenty progress writes per download, and at
+most two a minute.</li>
+<li><strong>Everything else is written on change</strong>, at once and with the current progress: an entry&rsquo;s state,
+<code>referenced</code>, the hour of <code>lastUsedTime</code>, <code>usedPercent</code>, a condition, <code>observedGeneration</code>. The
+plugin&rsquo;s own writes never trigger its next report, and a quiet node writes nothing.</li>
+<li><strong>More content than 256 entries</strong>: the referenced ones are kept, then the most recently used; the
+<code>Ready</code> message counts what was left out.</li>
+</ul>
+<table>
+  <thead>
+      <tr>
+          <th>Condition</th>
+          <th>Reason</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Ready=True</code></td>
+          <td><code>Serving</code></td>
+          <td>the plugin serves mounts and applies <code>observedGeneration</code>; the message says when the high watermark is capped</td>
+      </tr>
+      <tr>
+          <td><code>Ready=False</code></td>
+          <td><code>InvalidConfiguration</code></td>
+          <td><code>spec</code> or its CA ConfigMap fails the plugin&rsquo;s own check; no download starts and nothing is collected, not under the previous <code>spec</code> either; mounts of published content still work</td>
+      </tr>
+      <tr>
+          <td><code>CapacityLow=True</code></td>
+          <td><code>NothingToRemove</code></td>
+          <td>usage is above the high watermark and every tree on the filesystem is in use</td>
+      </tr>
+      <tr>
+          <td><code>CapacityLow=False</code></td>
+          <td><code>WithinWatermarks</code></td>
+          <td>collection can keep usage within the watermarks</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="configuration-ownership">Configuration ownership</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Part</th>
+          <th>Writer</th>
+          <th>Rule</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>the object</td>
+          <td>worker</td>
+          <td>created when the node&rsquo;s <code>CSINode</code> lists <code>model.csi.gpustack.ai</code>; removed with the Node, and all of them while the <code>CSIDriver</code> object does not exist</td>
+      </tr>
+      <tr>
+          <td><code>spec</code></td>
+          <td>worker</td>
+          <td>the merge of the configuration layers, rewritten within a minute of a Setting change; never a value that fails its check</td>
+      </tr>
+      <tr>
+          <td><code>spec.kubelet</code></td>
+          <td>worker</td>
+          <td>the node&rsquo;s kubelet thresholds, read from kubelet&rsquo;s <code>configz</code> endpoint when the object is written and every 30 minutes; a failed read keeps the last reading, and a node never read has none. The plugin gets no <code>nodes/proxy</code> access</td>
+      </tr>
+      <tr>
+          <td><code>status</code></td>
+          <td>the plugin on that node</td>
+          <td>admitted only through the status webhook below</td>
+      </tr>
+  </tbody>
+</table>
+<p>The public <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/views/#resources">NodeModelStore API</a>
+ supports reads and deletion. Its configuration
+and status are maintained by the worker and node plugin. The worker recreates a deleted object
+while its node runs the plugin.</p>
+<p>The worker does not delete an object when the driver leaves <code>CSINode</code>, because every plugin
+restart unregisters it for a moment. A node the plugin no longer runs on keeps a stale object whose
+<code>Ready</code> condition stops changing.</p>
+<p>A validating webhook on <code>nodemodelstores/status</code>, <code>failurePolicy: Fail</code>, admits an update only
+when every rule holds, and names the rule it refused by:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Rule</th>
+          <th>Refusal message begins</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>the requester is the plugin&rsquo;s ServiceAccount (<code>--model-manager-service-account</code> of the worker)</td>
+          <td><code>only the model-manager plugin writes a NodeModelStore's status</code></td>
+      </tr>
+      <tr>
+          <td>its token is bound to a Pod: <code>authentication.kubernetes.io/pod-name</code> and <code>pod-uid</code> are in the request&rsquo;s extra</td>
+          <td><code>the plugin's token must be bound to its Pod</code></td>
+      </tr>
+      <tr>
+          <td>that Pod exists in the operator namespace with that UID and runs on the object&rsquo;s node</td>
+          <td><code>the plugin writes only the status of the node its Pod runs on</code></td>
+      </tr>
+  </tbody>
+</table>
+<p>On Kubernetes 1.30 and later the token also carries <code>authentication.kubernetes.io/node-name</code>, and the
+node comparison reads it without looking the Pod up. The guarantee is the same on 1.29.</p>
+<p><code>ModelArtifact</code> status has the same kind of guard: only the worker&rsquo;s own identity may update
+<code>modelartifacts/status</code> (refusal: <code>only the worker writes a ModelArtifact's status</code>). The worker
+learns it at startup with a <code>SelfSubjectReview</code>, or, where the API server does not serve one (before
+1.28), with a <code>TokenReview</code> of its own token; with neither it does not start. Mount authorization trusts that status, so the guard is what keeps a
+tenant from making an artifact look resolved.</p>
+<h2 id="mounting-cached-weights">Mounting cached weights</h2>
+<p>A <code>ModelDeployment</code> under Node delivery and an <code>Instance</code> naming a Hugging Face or ModelScope artifact render:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">volumes</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-model</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">csi</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">driver</span><span class="p">:</span><span class="w"> </span><span class="l">model.csi.gpustack.ai</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">volumeAttributes</span><span class="p">:</span><span class="w">                      </span><span class="c"># hints; the plugin checks each against the API</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">artifact</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">artifactUID</span><span class="p">:</span><span class="w"> </span><span class="l">3f0c...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">manifestDigest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:0f3c...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">nodePublishSecretRef</span><span class="p">:</span><span class="w"> </span><span class="c"># the artifact&#39;s secretRef; absent without one</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">hf-token</span></span></span></code></pre></div>
+</div><p>A hand-written Pod may mount the same volume; it is held to the same rules. The CSIDriver has
+<code>attachRequired: false</code>, <code>podInfoOnMount: true</code>, an <code>Ephemeral</code> entry in <code>volumeLifecycleModes</code>, and
+<code>fsGroupPolicy: None</code>, so the tree keeps the plugin&rsquo;s ownership and is readable by any user.</p>
+<h2 id="mount-authorization">Mount authorization</h2>
+<p>On every mount, before touching the disk, the plugin requires all of:</p>
+<ol>
+<li>an inline ephemeral volume (<code>csi.storage.k8s.io/ephemeral=true</code>) with a mount capability and a
+target under the kubelet directory;</li>
+<li>a <code>ModelArtifact</code> named <code>artifact</code> in the Pod&rsquo;s namespace, <code>csi.storage.k8s.io/pod.namespace</code>;</li>
+<li>its UID equal to <code>artifactUID</code>, a Hugging Face or ModelScope source, <code>Resolved=True</code>, and
+<code>status.resolved.manifestDigest</code> equal to <code>manifestDigest</code>.</li>
+</ol>
+<p>The namespace is the one kubelet adds, and kubelet writes its Pod keys over the Pod&rsquo;s own attributes,
+so a tenant who sets <code>csi.storage.k8s.io/pod.namespace</code> is still judged in their own namespace.
+<strong>The digest is never authorization</strong>: content already on the node is refused to a namespace that
+has no resolved artifact naming it.</p>
+<p>A refusal is <code>PermissionDenied</code> with the failed rule in the message, which kubelet records on the Pod
+as a <code>FailedMount</code> event. An artifact that stops being resolved stops new mounts only; mounted Pods
+keep theirs. For a short window after the plugin starts, before it has read the artifacts, mounts
+answer <code>Unavailable</code>.</p>
+<h2 id="download-and-verification">Download and verification</h2>
+<p>The first authorized mount of a digest the node does not hold starts one background attempt and
+returns <code>Aborted</code> with the progress so far (<code>materializing sha256:0f3c…: 2.1 GiB of 15.2 GiB received</code>). kubelet retries the mount, and the first call after publication mounts. After a
+download completes, a Pod starts at kubelet&rsquo;s next retry, up to about two minutes later.</p>
+<ol>
+<li><strong>Manifest.</strong> The tree at <code>status.resolved.revision</code> is listed with the mount&rsquo;s credential and
+filtered by the artifact&rsquo;s patterns; its canonical digest must equal <code>manifestDigest</code>. An
+artifact whose <code>digestSource</code> is <code>Expected</code> resolved to its anchor without the hub and has no
+commit to list at: the manifest comes from a peer&rsquo;s published listing instead, reassembled and
+bound to the digest before it is trusted, and the chain is peers only; there is no hub to fall
+back to.</li>
+<li><strong>Capacity.</strong> The rest of the manifest&rsquo;s size, together with what every other running download
+has yet to write, is reserved against the high watermark, collecting first when it does not fit;
+two downloads that each fit and together do not are never both admitted. The reservation is held
+until the attempt ends.</li>
+<li><strong>Download.</strong> From <code>{endpoint}/{repository}/resolve/{commit}/{path}</code>, redirects followed, through
+<code>spec.hub</code>&rsquo;s proxy and CA. At most <code>download.concurrency</code> requests run on the node across every
+download, under one <code>bytesPerSecond</code> limit, and large files are fetched as parallel byte ranges.
+A range that makes no progress for 30 seconds is retried from its last byte.</li>
+<li><strong>Verification while downloading.</strong> Each file is hashed in byte order as it arrives, <code>sha256</code> for
+an LFS file and the git blob SHA-1 otherwise, and its size must match. Nothing is read back from
+disk to verify, and a resumed file continues from a saved hash state.</li>
+<li><strong>Publication.</strong> Every file and a marker naming the digest are synced, then the directory is
+renamed to its published name in one step. A tree without its marker is never mounted.</li>
+</ol>
+<p>Concurrent mounts of one digest join the running attempt. A credential is used only for the
+repository of the artifact that presented it, kept in memory for the attempt, never written
+anywhere, and never sent on a redirect to another host or from <code>https</code> to <code>http</code>.</p>
+<p><strong>Backoff.</strong> A failed attempt puts the digest in <code>Failed</code> with a <code>retryTime</code>: one minute after the
+first failure, doubling to one hour, reset by a success and kept across a plugin restart. Until then
+mounts of it return at once, <code>Unavailable</code>, without downloading. <code>AccessDenied</code> backs off too; the
+next call brings the Secret again. <code>InvalidRequest</code> and <code>Canceled</code> do not back off: the next mount
+starts again at once.</p>
+<p><strong>Cancellation.</strong> An attempt no mount has asked for in five minutes is canceled; its partial files
+stay for a resume.</p>
+<h2 id="failure-reasons">Failure reasons</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Reason</th>
+          <th>Meaning</th>
+          <th>What happens</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>InvalidRequest</code></td>
+          <td>the configuration cannot be executed: an invalid endpoint, proxy or CA</td>
+          <td>waits for the configuration to change</td>
+      </tr>
+      <tr>
+          <td><code>AccessDenied</code></td>
+          <td>the Hub refused the credential</td>
+          <td>backoff</td>
+      </tr>
+      <tr>
+          <td><code>SourceUnavailable</code></td>
+          <td>the Hub is unreachable, answers 5xx or 429, a file&rsquo;s ranges keep failing, or no node holds an anchored artifact&rsquo;s digest</td>
+          <td>backoff</td>
+      </tr>
+      <tr>
+          <td><code>IntegrityMismatch</code></td>
+          <td>a file&rsquo;s hash or size, or the manifest&rsquo;s digest, does not match</td>
+          <td>the file is discarded; backoff</td>
+      </tr>
+      <tr>
+          <td><code>InsufficientCapacity</code></td>
+          <td>the reservation does not fit under the high watermark after collection</td>
+          <td>backoff</td>
+      </tr>
+      <tr>
+          <td><code>Canceled</code></td>
+          <td>no mount asked for the digest for five minutes</td>
+          <td>resumes on the next mount</td>
+      </tr>
+  </tbody>
+</table>
+<p>A mount refused while materializing shows the attempt&rsquo;s progress in its message, and a failed
+attempt names its reason from this table. No message, event or log line carries a token, an
+<code>Authorization</code> header or a signed URL.</p>
+<h2 id="references-restart-and-collection">References, restart and collection</h2>
+<p>A reference is a mounted target. A tree is never removed between the check that it is published and
+the mount that binds it, and a mount whose reference cannot be recorded fails. Unmounting works
+from the target path alone and succeeds for a target it never mounted.</p>
+<p>On start the plugin rebuilds its references from the node&rsquo;s live mounts, removes partial
+directories that belong to no attempt, and rewrites <code>status</code>. A mounted Pod keeps running
+while the plugin restarts or rolls: its mount is a kernel bind mount.</p>
+<p>Collection runs when usage passes the high watermark, when a reservation does not fit, and every
+five minutes. It removes, oldest <code>lastUsedTime</code> first and down to the low watermark:</p>
+<ul>
+<li>published trees no Pod references, unreferenced for at least ten minutes;</li>
+<li>partial downloads with no running attempt that no mount has asked for in 24 hours;</li>
+<li>failure records whose digest is neither published, partly on disk nor being materialized, 24 hours
+after the last failure, so <code>status.models</code> stops listing them.</li>
+</ul>
+<p>It never removes a referenced tree or a partial being written, and it reads references from the
+node&rsquo;s own mounts, never from the API.</p>
+<p>A digest listed in <code>spec.pinned</code> is never a candidate at all; the pins arrive from
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/prefetch/"><code>ModelPrefetch</code></a>
+ retention and survive collection until the pin is withdrawn,
+though it still counts toward the usage the watermarks read.</p>
+<p>How the watermarks are capped when the cache shares kubelet&rsquo;s filesystem is under <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/#the-capacity-rule">the capacity
+rule</a>
+.</p>
+<p>When the references cannot be read, no configuration has been applied yet, or the node&rsquo;s <code>spec</code>
+fails its check, a collection removes nothing, a stale partial included, and the <code>Ready</code> message
+says <code>collection skipped</code> and why. A <code>spec</code> that fails after an earlier one applied does not leave
+the earlier watermarks in force.</p>
+<h2 id="metrics">Metrics</h2>
+<p>Served on the plugin&rsquo;s HTTPS port (<code>modelManager.securePort</code>, 32444), beside <code>/readyz</code> and <code>/livez</code>:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Metric</th>
+          <th>Labels</th>
+          <th>Meaning</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>gpustack_model_manager_download_bytes_total</code></td>
+          <td><code>source=&quot;hub&quot;</code></td>
+          <td>bytes received</td>
+      </tr>
+      <tr>
+          <td><code>gpustack_model_manager_mounts_total</code></td>
+          <td><code>result</code>: <code>hit</code>, <code>materialized</code>, <code>denied</code>, <code>pending</code></td>
+          <td>mount calls</td>
+      </tr>
+      <tr>
+          <td><code>gpustack_model_manager_materializations_total</code></td>
+          <td><code>result</code>: <code>published</code> or a failure reason</td>
+          <td>finished attempts</td>
+      </tr>
+      <tr>
+          <td><code>gpustack_model_manager_publish_duration_seconds</code></td>
+          <td>—</td>
+          <td>from an attempt&rsquo;s start to its publication</td>
+      </tr>
+      <tr>
+          <td><code>gpustack_model_manager_gc_removed_bytes_total</code></td>
+          <td>—</td>
+          <td>bytes collection removed</td>
+      </tr>
+      <tr>
+          <td><code>gpustack_model_manager_stored_bytes</code>, <code>gpustack_model_manager_capacity_bytes</code></td>
+          <td>—</td>
+          <td>the cache&rsquo;s bytes and its filesystem&rsquo;s size</td>
+      </tr>
+  </tbody>
+</table>
+<p>No label carries a namespace, an artifact, a repository or a Pod.</p>
+<p>The ModelArtifact <a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/views/#the-progress-subresource">progress</a>
+ subresource reads the running
+downloads from this port for live bytes between the status thresholds.</p>
+<h2 id="requirements-and-limits">Requirements and limits</h2>
+<ul>
+<li><strong>Kubernetes 1.29</strong> for node delivery, the floor the ModelArtifact reference states, though the
+chart itself admits older clusters. The status guard needs the Pod extras bound service-account
+tokens carry since 1.22, and the worker learns its own identity with a <code>SelfSubjectReview</code> (GA in
+1.28) or, before that, a <code>TokenReview</code>.</li>
+<li><strong>A Hugging Face or ModelScope source.</strong> A claim artifact is always mounted directly.</li>
+<li><strong>kubelet&rsquo;s configz</strong>, served while its debugging handlers are enabled (the default). Without it
+a node has no <code>spec.kubelet</code> and its cap assumes kubelet&rsquo;s defaults, which the <code>Ready</code> message
+says.</li>
+<li><strong>A preference, not a filter.</strong> A Pod prefers the nodes holding its digest while they have room;
+one placed on a node without it downloads it there. See
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/topology/scheduling/#placement-of-node-delivered-models">a node-delivered model prefers the nodes holding
+it</a>
+.</li>
+<li><strong>A download comes from the Hub</strong>, directly or through the proxy, or, when
+<a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/peer-sync/">node-to-node sync</a>
+ is on, from a peer node that already holds
+the tree.</li>
+</ul>
+<nav class="reading-footer" aria-label="Further reading">
+    <section>
+      <h2>See also</h2>
+      <ul class="related-pages"><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/artifact/">Model Artifact</a>
+ for the artifact and its other
+deliveries</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/views/">Model Artifact API</a>
+ for resource status and
+<code>progress</code></li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/peer-sync/">Node-to-Node Sync</a>
+ for where a node&rsquo;s bytes come from</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/">Model Store Operations</a>
+ for enabling, configuring and upgrading</li><li><a href="/gpustack-operator/v0.9.0-rc2/docs/reference/settings/#online-adjustable-settings">Settings</a>
+ for the Settings <code>spec</code> is built from.</li></ul>
+    </section><section class="next-page">
+        <h2>Next</h2>
+        <div><a href="/gpustack-operator/v0.9.0-rc2/docs/modules/model-delivery/operations/">Model Store Operations</a></div>
+      </section></nav>
+
+      </article>
+    </main>
+    <aside class="toc-panel" aria-label="Page navigation">
+      <div class="toc-inner">
+        
+          
+          
+          
+          <nav class="page-actions" aria-label="Page source">
+            <a href="https://github.com/gpustack/gpustack-operator/blob/3947d8e1e0b39f9574e2fc67bb8ca3e4b6531ebc/docs/modules/model-delivery/node-store.md">View page source</a>
+            
+          </nav>
+        
+        
+          <div class="toc-title">On this page</div>
+          <nav id="TableOfContents">
+  <ul>
+    <li><a href="#contents">Contents</a></li>
+    <li><a href="#the-resource">The resource</a></li>
+    <li><a href="#configuration-ownership">Configuration ownership</a></li>
+    <li><a href="#mounting-cached-weights">Mounting cached weights</a></li>
+    <li><a href="#mount-authorization">Mount authorization</a></li>
+    <li><a href="#download-and-verification">Download and verification</a></li>
+    <li><a href="#failure-reasons">Failure reasons</a></li>
+    <li><a href="#references-restart-and-collection">References, restart and collection</a></li>
+    <li><a href="#metrics">Metrics</a></li>
+    <li><a href="#requirements-and-limits">Requirements and limits</a></li>
+  </ul>
+</nav>
+        
+      </div>
+    </aside>
+  </div>
+  
+  <script src="/gpustack-operator/v0.9.0-rc2/js/site.8ee8b2e2cfd2dd3d707e929c8da8d999cb9e7ad384f74f4b78c2e46771b76daa.js" defer></script>
+</body>
+</html>
