@@ -12,9 +12,11 @@ import (
 // KVCachePoolBindingApplyConfiguration represents a declarative configuration of the KVCachePoolBinding type for use
 // with apply.
 //
-// KVCachePoolBinding is the schema for worker.gpustack.ai.
+// KVCachePoolBinding grants a namespace a cache quota and reuse domain within a pool.
 //
-// KVCachePoolBinding proxies the v1alpha1.KVCachePoolBinding.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 type KVCachePoolBindingApplyConfiguration struct {
 	metav1.TypeMetaApplyConfiguration    `json:",inline"`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`

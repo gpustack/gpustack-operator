@@ -12,9 +12,11 @@ import (
 // KVCachePoolApplyConfiguration represents a declarative configuration of the KVCachePool type for use
 // with apply.
 //
-// KVCachePool is the schema for worker.gpustack.ai.
+// KVCachePool declares a backend quota shared through namespace bindings.
 //
-// KVCachePool proxies the v1alpha1.KVCachePool.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 type KVCachePoolApplyConfiguration struct {
 	metav1.TypeMetaApplyConfiguration    `json:",inline"`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`

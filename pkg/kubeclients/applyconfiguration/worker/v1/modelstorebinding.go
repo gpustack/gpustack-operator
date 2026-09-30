@@ -12,9 +12,11 @@ import (
 // ModelStoreBindingApplyConfiguration represents a declarative configuration of the ModelStoreBinding type for use
 // with apply.
 //
-// ModelStoreBinding is the schema for worker.gpustack.ai.
+// ModelStoreBinding grants a namespace a model-cache budget and permission to pin artifacts.
 //
-// ModelStoreBinding proxies the v1alpha1.ModelStoreBinding.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 type ModelStoreBindingApplyConfiguration struct {
 	metav1.TypeMetaApplyConfiguration    `json:",inline"`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`

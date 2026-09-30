@@ -12,9 +12,11 @@ import (
 // TopologySourceApplyConfiguration represents a declarative configuration of the TopologySource type for use
 // with apply.
 //
-// TopologySource is the schema for worker.gpustack.ai.
+// TopologySource selects the topology inventory used to form Kueue placement hierarchies.
 //
-// TopologySource proxies the v1alpha1.TopologySource.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 type TopologySourceApplyConfiguration struct {
 	metav1.TypeMetaApplyConfiguration    `json:",inline"`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`

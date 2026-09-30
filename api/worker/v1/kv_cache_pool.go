@@ -7,9 +7,11 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
-// KVCachePool is the schema for worker.gpustack.ai.
+// KVCachePool declares a backend quota shared through namespace bindings.
 //
-// KVCachePool proxies the v1alpha1.KVCachePool.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 //
 // +genclient
 // +genclient:noStatus

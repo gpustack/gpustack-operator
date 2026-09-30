@@ -592,9 +592,11 @@ message InstanceTypeList {
   repeated InstanceType items = 2;
 }
 
-// KVCacheBackend is the schema for worker.gpustack.ai.
+// KVCacheBackend declares a managed or external KV cache backend and reports its endpoints and capacity.
 //
-// KVCacheBackend proxies the v1alpha1.KVCacheBackend.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 //
 // +genclient
 // +genclient:noStatus
@@ -618,9 +620,11 @@ message KVCacheBackendList {
   repeated KVCacheBackend items = 2;
 }
 
-// KVCachePool is the schema for worker.gpustack.ai.
+// KVCachePool declares a backend quota shared through namespace bindings.
 //
-// KVCachePool proxies the v1alpha1.KVCachePool.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 //
 // +genclient
 // +genclient:noStatus
@@ -635,9 +639,11 @@ message KVCachePool {
   optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCachePoolStatus status = 3;
 }
 
-// KVCachePoolBinding is the schema for worker.gpustack.ai.
+// KVCachePoolBinding grants a namespace a cache quota and reuse domain within a pool.
 //
-// KVCachePoolBinding proxies the v1alpha1.KVCachePoolBinding.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 //
 // +genclient
 // +genclient:noStatus
@@ -911,9 +917,11 @@ message ModelPrefetchList {
   repeated ModelPrefetch items = 2;
 }
 
-// ModelStore is the schema for worker.gpustack.ai.
+// ModelStore declares cache policy for nodes selected by an administrator.
 //
-// ModelStore proxies the v1alpha1.ModelStore.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 //
 // +genclient
 // +genclient:noStatus
@@ -928,9 +936,11 @@ message ModelStore {
   optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelStoreStatus status = 3;
 }
 
-// ModelStoreBinding is the schema for worker.gpustack.ai.
+// ModelStoreBinding grants a namespace a model-cache budget and permission to pin artifacts.
 //
-// ModelStoreBinding proxies the v1alpha1.ModelStoreBinding.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 //
 // +genclient
 // +genclient:noStatus
@@ -1119,9 +1129,11 @@ message S3InstancePersistentVolumeSource {
   repeated string mountOptions = 9;
 }
 
-// TopologySource is the schema for worker.gpustack.ai.
+// TopologySource selects the topology inventory used to form Kueue placement hierarchies.
 //
-// TopologySource proxies the v1alpha1.TopologySource.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 //
 // +genclient
 // +genclient:noStatus

@@ -2011,7 +2011,7 @@ func schema_gpustack_api_worker_v1_KVCacheBackend(ref common.ReferenceCallback) 
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "KVCacheBackend is the schema for worker.gpustack.ai.\n\nKVCacheBackend proxies the v1alpha1.KVCacheBackend.",
+				Description: "KVCacheBackend declares a managed or external KV cache backend and reports its endpoints and capacity.\n\nConfiguration changes proxy to the v1alpha1 resource. Controller-owned status is read-only through the main object; the public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -2108,7 +2108,7 @@ func schema_gpustack_api_worker_v1_KVCachePool(ref common.ReferenceCallback) com
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "KVCachePool is the schema for worker.gpustack.ai.\n\nKVCachePool proxies the v1alpha1.KVCachePool.",
+				Description: "KVCachePool declares a backend quota shared through namespace bindings.\n\nConfiguration changes proxy to the v1alpha1 resource. Controller-owned status is read-only through the main object; the public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -2156,7 +2156,7 @@ func schema_gpustack_api_worker_v1_KVCachePoolBinding(ref common.ReferenceCallba
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "KVCachePoolBinding is the schema for worker.gpustack.ai.\n\nKVCachePoolBinding proxies the v1alpha1.KVCachePoolBinding.",
+				Description: "KVCachePoolBinding grants a namespace a cache quota and reuse domain within a pool.\n\nConfiguration changes proxy to the v1alpha1 resource. Controller-owned status is read-only through the main object; the public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -3180,7 +3180,7 @@ func schema_gpustack_api_worker_v1_ModelStore(ref common.ReferenceCallback) comm
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelStore is the schema for worker.gpustack.ai.\n\nModelStore proxies the v1alpha1.ModelStore.",
+				Description: "ModelStore declares cache policy for nodes selected by an administrator.\n\nConfiguration changes proxy to the v1alpha1 resource. Controller-owned status is read-only through the main object; the public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -3228,7 +3228,7 @@ func schema_gpustack_api_worker_v1_ModelStoreBinding(ref common.ReferenceCallbac
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelStoreBinding is the schema for worker.gpustack.ai.\n\nModelStoreBinding proxies the v1alpha1.ModelStoreBinding.",
+				Description: "ModelStoreBinding grants a namespace a model-cache budget and permission to pin artifacts.\n\nConfiguration changes proxy to the v1alpha1 resource. Controller-owned status is read-only through the main object; the public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -3621,7 +3621,7 @@ func schema_gpustack_api_worker_v1_TopologySource(ref common.ReferenceCallback) 
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "TopologySource is the schema for worker.gpustack.ai.\n\nTopologySource proxies the v1alpha1.TopologySource.",
+				Description: "TopologySource selects the topology inventory used to form Kueue placement hierarchies.\n\nConfiguration changes proxy to the v1alpha1 resource. Controller-owned status is read-only through the main object; the public API serves no status subresource. Main-resource writes preserve the backing resource's status.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {

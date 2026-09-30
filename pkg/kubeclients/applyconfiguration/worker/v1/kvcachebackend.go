@@ -12,9 +12,11 @@ import (
 // KVCacheBackendApplyConfiguration represents a declarative configuration of the KVCacheBackend type for use
 // with apply.
 //
-// KVCacheBackend is the schema for worker.gpustack.ai.
+// KVCacheBackend declares a managed or external KV cache backend and reports its endpoints and capacity.
 //
-// KVCacheBackend proxies the v1alpha1.KVCacheBackend.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 type KVCacheBackendApplyConfiguration struct {
 	metav1.TypeMetaApplyConfiguration    `json:",inline"`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`

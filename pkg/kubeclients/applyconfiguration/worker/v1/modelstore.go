@@ -12,9 +12,11 @@ import (
 // ModelStoreApplyConfiguration represents a declarative configuration of the ModelStore type for use
 // with apply.
 //
-// ModelStore is the schema for worker.gpustack.ai.
+// ModelStore declares cache policy for nodes selected by an administrator.
 //
-// ModelStore proxies the v1alpha1.ModelStore.
+// Configuration changes proxy to the v1alpha1 resource. Controller-owned status is read-only
+// through the main object; the public API serves no status subresource. Main-resource writes
+// preserve the backing resource's status.
 type ModelStoreApplyConfiguration struct {
 	metav1.TypeMetaApplyConfiguration    `json:",inline"`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
