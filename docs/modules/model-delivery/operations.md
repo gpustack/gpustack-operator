@@ -172,7 +172,7 @@ uses the plugin for a hub artifact, whatever the Setting says.
 ## Where replicas land
 
 A node-delivered Pod prefers the nodes holding its digest when they can take it; the mechanism is in
-[Topology-Aware Scheduling](../topology/scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
+[Topology-Aware Scheduling](../topology/scheduling.md#placement-of-node-delivered-models).
 Compute always comes first, so a warm cache never holds a Pod back.
 
 ```bash

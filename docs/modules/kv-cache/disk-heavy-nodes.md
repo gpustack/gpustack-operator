@@ -5,11 +5,11 @@ member. Add local disks to that member, then size the memory segment as describe
 
 ## Contents
 
-- [There is no disk-only member](#there-is-no-disk-only-member)
-- [The shape that works](#the-shape-that-works)
-- [How small the memory segment may be](#how-small-the-memory-segment-may-be)
+- [Memory segment requirement](#memory-segment-requirement)
+- [Configuration](#configuration)
+- [Memory segment floor](#memory-segment-floor)
 
-## There is no disk-only member
+## Memory segment requirement
 
 **Every member group mounts a memory segment, and a disk tier is a layer on a group that already
 holds one.** `members[].medium` names which memory (`DRAM` for the host's, `VRAM` for the
@@ -27,7 +27,7 @@ halves were read from is in
 A disk-heavy node still needs enough memory to drive its disk tier. The next section gives the
 group shape and the memory floor.
 
-## The shape that works
+## Configuration
 
 **Declare one group with a thin memory segment and a thick tier.** The terabytes go on
 `localDisks[].capacity`; `capacityPerMember` is sized to drive the tier rather than to hold the cache,
@@ -62,26 +62,26 @@ client](backend.md#the-store-version-must-match-the-engines-client) before copyi
 
 **Rendering this shape correctly does not make the tier fill.** `status.capacity` will not tell
 you either way. What decides it, and the figure to read instead, are in
-[the tier is written one bucket at a time](local-disk-tier.md#the-tier-is-written-one-bucket-at-a-time).
+[bucket writes](local-disk-tier.md#bucket-writes).
 Read that section before concluding this backend works.
 
 Three things that manifest depends on and does not state:
 
 - **The path must already exist on every selected node, owned by the image's user.** A member that
   cannot write it never becomes Ready. See
-  [the directory has to exist](local-disk-tier.md#the-directory-has-to-exist-and-be-writable-by-the-images-user).
+  [directory requirements](local-disk-tier.md#directory-requirements).
 - **The path is chosen once, at the first apply.** Adding a tier to a running group, removing it from
   one, or repathing it are each refused; the tier's other settings stay editable. See
   [The local disk tier](local-disk-tier.md).
 - **Nothing in Kubernetes accounts for what the tier writes.** Watching that filesystem is yours.
-  See [what the tier costs](local-disk-tier.md#what-the-tier-costs-that-nothing-accounts-for).
+  See [unaccounted disk usage](local-disk-tier.md#unaccounted-disk-usage).
 
-## How small the memory segment may be
+## Memory segment floor
 
 **`capacityPerMember` has a floor of 16Mi on a group declaring `localDisks`.** That is one bucket,
 the unit the tier is written in and the figure this operator renders as `MemberBucketSizeLimit` in
 `pkg/worker/kvcache/mooncake/member_workload.go`. Why a segment below one bucket can never fill one
-is in [the tier is written one bucket at a time](local-disk-tier.md#the-tier-is-written-one-bucket-at-a-time).
+is in [bucket writes](local-disk-tier.md#bucket-writes).
 
 **The bound is judged only when a write moves the value** (on creation, or on an update that
 changes it). An object already carrying a smaller figure is admitted for every other edit, including
@@ -106,7 +106,7 @@ keeps the value from being free to raise later.
 The tier's own ceilings carry a matching floor, and a disk-heavy node is nowhere near it. `capacity`
 sits far above one bucket, and the example leaves `keyLimit` unset, so the store's own applies and
 there is no declared ceiling to be near. Those two rules belong to
-[the tier is written one bucket at a time](local-disk-tier.md#the-tier-is-written-one-bucket-at-a-time); the
+[bucket writes](local-disk-tier.md#bucket-writes); the
 floor that binds here is the memory one above.
 
 ---

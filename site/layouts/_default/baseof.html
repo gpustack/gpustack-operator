@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ffffff">
   <title>{{ if not .IsHome }}{{ partial "page-title.html" . }} · {{ end }}{{ .Site.Title }}</title>
-  <link rel="stylesheet" href="{{ "css/site.css" | relURL }}">
+  <link rel="stylesheet" href="{{ (resources.Get "css/site.css" | fingerprint).RelPermalink }}">
+  <link rel="stylesheet" href="{{ (resources.Get "css/code.css" | fingerprint).RelPermalink }}">
 </head>
 <body class="{{ if .IsHome }}home{{ else }}docs-page{{ end }}">
   <a class="skip-link" href="#main-content">Skip to content</a>
@@ -20,25 +21,16 @@
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
       <nav id="docs-navigation" class="sidebar-inner">
+        <form class="docs-search" action="{{ "search/" | relURL }}" role="search">
+          <label class="visually-hidden" for="docs-query">Search documentation</label>
+          <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
+          <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
+        </form>
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="{{ "/" | relURL }}" {{ if .IsHome }}aria-current="page"{{ end }}>Overview</a>
-        {{ $groups := slice
-          (dict "name" "Getting started" "path" "/docs/getting-started/")
-          (dict "name" "Heterogeneous Devices" "path" "/docs/modules/devices/")
-          (dict "name" "RDMA Networking" "path" "/docs/modules/rdma/")
-          (dict "name" "Topology Management" "path" "/docs/modules/topology/")
-          (dict "name" "KV Cache" "path" "/docs/modules/kv-cache/")
-          (dict "name" "Model Delivery" "path" "/docs/modules/model-delivery/")
-          (dict "name" "Model Deployment" "path" "/docs/modules/model-deployment/")
-          (dict "name" "Accelerated Instances" "path" "/docs/modules/instances/")
-          (dict "name" "Operations" "path" "/docs/operate/")
-          (dict "name" "Reference" "path" "/docs/reference/")
-          (dict "name" "Contributing" "path" "/docs/contribute/")
-        }}
-        {{ range $groups }}
+        {{ range .Site.Data.navigation.groups }}
           {{ partial "nav-section.html" (dict "page" (site.GetPage .path) "name" .name "current" $) }}
         {{ end }}
-        <a class="nav-home" href="{{ "/docs/readme/" | relURL }}" {{ if eq .RelPermalink "/docs/readme/" }}aria-current="page"{{ end }}>All pages</a>
       </nav>
     </aside>
     <main id="main-content">
@@ -78,6 +70,12 @@
       </div>
     </aside>
   </div>
-  <script src="{{ "js/site.js" | relURL }}" defer></script>
+  {{ if .Store.Get "hasMermaid" }}
+    {{ $mermaid := resources.GetRemote "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js" | fingerprint }}
+    {{ $license := resources.GetRemote "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/LICENSE" | resources.Copy "licenses/mermaid.txt" }}
+    <!-- Mermaid license: {{ $license.RelPermalink }} -->
+    <script src="{{ $mermaid.RelPermalink }}" integrity="{{ $mermaid.Data.Integrity }}" defer></script>
+  {{ end }}
+  <script src="{{ (resources.Get "js/site.js" | fingerprint).RelPermalink }}" defer></script>
 </body>
 </html>

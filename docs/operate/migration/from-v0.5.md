@@ -12,15 +12,15 @@ behind as orphans. v0.6.x is the worked example throughout; substitute your targ
 
 ## Contents
 
-- [What changes (v0.5.x → v0.6.x, the first higher version)](#what-changes-v05x--v06x-the-first-higher-version)
-- [Why a plain helm upgrade is not enough](#why-a-plain-helm-upgrade-is-not-enough)
-- [Kueue finalizer deadlock (self-healed automatically)](#kueue-finalizer-deadlock-self-healed-automatically)
+- [Changes from v0.5.x to v0.6.x](#changes-from-v05x-to-v06x)
+- [Orphaned objects after helm upgrade](#orphaned-objects-after-helm-upgrade)
+- [Kueue finalizer deadlock](#kueue-finalizer-deadlock)
 - [Path A — uninstall then reinstall (recommended)](#path-a--uninstall-then-reinstall-recommended)
 - [Path B — in-place upgrade, then remove the orphans](#path-b--in-place-upgrade-then-remove-the-orphans)
 - [Verify](#verify)
 - [Notes](#notes)
 
-## What changes (v0.5.x → v0.6.x, the first higher version)
+## Changes from v0.5.x to v0.6.x
 
 | Object | v0.5.x | v0.6.x |
 |---|---|---|
@@ -34,7 +34,7 @@ behind as orphans. v0.6.x is the worked example throughout; substitute your targ
 `Devices` and `Instance` keep their per-node / same names (the `Devices` schema only grows a
 per-accelerator allocation ledger), so they update in place and leave nothing orphaned.
 
-## Why a plain `helm upgrade` is not enough
+## Orphaned objects after `helm upgrade`
 
 The v0.6.x operator indexes objects by their new names, so it never sees the v0.5.x-named
 ResourceFlavors, ClusterQueues, Cohorts and LocalQueues, and it neither reconciles nor
@@ -49,7 +49,7 @@ ever cleans.
 Stale node labels are the one exception: the same-named `<node>-gpustack-worker` NodeFeature is
 overwritten on upgrade and NFD drops the removed labels.
 
-## Kueue finalizer deadlock (self-healed automatically)
+## Kueue finalizer deadlock
 
 A v0.5.x `Instance` runs on an `InstanceType`-backed `ClusterQueue`, and Kueue stamps every
 ClusterQueue with the `kueue.x-k8s.io/resource-in-use` finalizer. Tearing Kueue down while that

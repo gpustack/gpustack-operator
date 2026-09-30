@@ -7,7 +7,7 @@ before changing the operator's behavior.
 ## Contents
 
 - [Commands](#commands)
-- [Checks whose failure reads as success](#checks-whose-failure-reads-as-success)
+- [Checks that can report false success](#checks-that-can-report-false-success)
 - [Shipped specification corrections](#shipped-specification-corrections)
 - [Runtime log verbosity](#runtime-log-verbosity)
 - [API groups & code generation](#api-groups--code-generation)
@@ -130,7 +130,7 @@ GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/nodefeature/...
 GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -run TestExtractGeneralNodeKey ./pkg/nodefeature/
 ```
 
-## Checks whose failure reads as success
+## Checks that can report false success
 
 REQUIRED: take a check's verdict from its **return code** and from the object under test, never from
 the shape of its output. The traps below can make a failed check look successful when stderr, a

@@ -8,22 +8,22 @@ placement. [Network Topology](network-topology.md) explains how endpoints become
 
 - [Which key a workload asks for](#which-key-a-workload-asks-for)
 - [How many endpoints beside N accelerators](#how-many-endpoints-beside-n-accelerators)
-- [What one grant hands the container](#what-one-grant-hands-the-container)
-- [The shape to ask for](#the-shape-to-ask-for)
+- [Injected devices](#injected-devices)
+- [Example manifest](#example-manifest)
 - [Enabling NUMA alignment on the kubelet](#enabling-numa-alignment-on-the-kubelet)
-- [Confirming the policy is in force](#confirming-the-policy-is-in-force)
-- [Kueue does not meter the RDMA keys](#kueue-does-not-meter-the-rdma-keys)
-- [What an EFA leg needs from the engine image](#what-an-efa-leg-needs-from-the-engine-image)
+- [Verifying the policy](#verifying-the-policy)
+- [Kueue and the RDMA keys](#kueue-and-the-rdma-keys)
+- [EFA engine images](#efa-engine-images)
 - [When a Pod does not schedule](#when-a-pod-does-not-schedule)
 
 ## Which key a workload asks for
 
 The three keys differ in allocation mode, in what a quantity of a key means, and in how many tokens
 one endpoint carries. [Network
-Topology](network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves) describes those
+Topology](network-topology.md#the-rdma-resource-keys) describes those
 differences. Choose the key for your workload:
 
-| Key | Ask for it when |
+| Key | Use when |
 |---|---|
 | `device.gpustack.ai/rdma` | the workload must be the adapter's only tenant |
 | `device.gpustack.ai/rdma.shared` | everything else |
@@ -32,7 +32,7 @@ differences. Choose the key for your workload:
 **A node serves one branch or the other, and nothing in a manifest chooses it.** An SR-IOV physical
 function with virtual functions configured serves the partitioned key **only**; every other
 interface serves the exclusive and shared keys ([which interface serves
-what](network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)).
+what](network-topology.md#the-rdma-resource-keys)).
 Read the fleet before writing the manifest:
 
 ```bash
@@ -55,7 +55,7 @@ Pod and does not assert that the engine has transferred bytes.
 
 **An EFA leg also needs an EFA build of Mooncake in the engine image**, which no runner image
 carries; see [what an EFA leg needs from the engine
-image](#what-an-efa-leg-needs-from-the-engine-image).
+image](#efa-engine-images).
 
 ## How many endpoints beside N accelerators
 
@@ -85,11 +85,11 @@ the granted names below.
 
 The operator's own `rdma.distance` and `rdma.numa` labels cannot close the gap either. Both describe
 the whole node, so neither can say which accelerator ended up beside which adapter in this
-container ([what a label can carry](network-topology.md#the-three-node-labels-and-what-a-label-can-carry)).
+container ([what a label can carry](network-topology.md#the-three-node-labels)).
 
-## What one grant hands the container
+## Injected devices
 
-| What appears in the container | How many |
+| Container contents | Count |
 |---|---|
 | the endpoint's verbs character device, `/dev/infiniband/uverbs<N>` | one per granted endpoint |
 | the node-level connection-manager device, `/dev/infiniband/rdma_cm` | **one per response**, however many endpoints were granted, and only where the host has one |
@@ -105,12 +105,12 @@ echo "$NCCL_IB_HCA"
 Two granted endpoints therefore show **two** `uverbs` entries, **one** `rdma_cm`, and two names in
 `NCCL_IB_HCA`. The single connection manager is the correct answer rather than a half grant: it
 belongs to the node, not to an endpoint, so it is injected once whatever was granted ([what an
-allocation hands over](network-topology.md#what-an-allocation-hands-over)).
+allocation hands over](network-topology.md#the-allocation-response)).
 
 The injected set is evidenced for RoCE and for nothing else; what that leaves open on a classic
-InfiniBand fabric is [what an allocation hands over](network-topology.md#what-an-allocation-hands-over).
+InfiniBand fabric is [what an allocation hands over](network-topology.md#the-allocation-response).
 
-## The shape to ask for
+## Example manifest
 
 ```yaml
 apiVersion: v1
@@ -156,7 +156,7 @@ are two independent picks.
 
 Two fields, in the kubelet's own `KubeletConfiguration`:
 
-| Field | Default | What to set |
+| Field | Default | Set to |
 |---|---|---|
 | `topologyManagerPolicy` | `none` — the hint is discarded | **`restricted`**; [what each of the four does](../devices/preflight.md#reading-the-result) |
 | `topologyManagerScope` | `container` — each container is aligned on its own | leave it: the accelerator and the adapter already share a container |
@@ -196,7 +196,7 @@ it. A managed Kubernetes offering commonly does not expose the kubelet's configu
 failure is silent: the Pod is admitted, the two sides are picked independently, and only the
 throughput says so.
 
-## Confirming the policy is in force
+## Verifying the policy
 
 Editing a file is not the kubelet running what it says. Read it back from the kubelet itself, which
 needs permission on the `nodes/proxy` subresource:
@@ -219,7 +219,7 @@ tell a node that was configured from one that was left alone.
 The two therefore differ in exactly one case, and it is not a contradiction: on a node nobody
 configured, `configz` says `none` and preflight says `unknown`.
 
-## Kueue does not meter the RDMA keys
+## Kueue and the RDMA keys
 
 Do not read a queue's admission as an RDMA reservation. The RDMA keys sit outside every accelerator
 family, and the same classifier drives Kueue's node-devices admission, so an RDMA request
@@ -238,10 +238,10 @@ Three things to do instead of a quota:
 - **Watch Pending Pods belonging to admitted Workloads**, not queue depth. That pair is where the
   over-subscription becomes visible; queue depth stays at zero throughout.
 - **Remember which key runs out first.** An endpoint carries one exclusive token and many more
-  shared ones ([how many of each](network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)),
+  shared ones ([how many of each](network-topology.md#the-rdma-resource-keys)),
   so a fleet exhausts the exclusive key long before the shared one on the same hardware.
 
-## What an EFA leg needs from the engine image
+## EFA engine images
 
 Which engine can use EFA on which leg, beside every other transport, is [the transport
 matrix](../model-deployment/engine-versions.md#which-transport-each-engine-can-use). This section is what
@@ -300,7 +300,7 @@ grep -ac EfaTransport "$MC/engine.so"
 kubectl logs <engine-pod> | grep 'The Mooncake Transfer Engine is using efa'
 ```
 
-### What you maintain
+### Image maintenance
 
 The image is yours from then on, and nothing in the operator tracks it:
 
@@ -314,7 +314,7 @@ The image is yours from then on, and nothing in the operator tracks it:
 - **The image on every EFA role.** A new role, or a role you re-create, runs the runner image until
   you name yours on it.
 
-### What the EFA build does not carry
+### Limitations
 
 Measured on the `0.3.13.post1` wheels. These are why the runner images keep the standard build:
 
@@ -327,7 +327,7 @@ Measured on the `0.3.13.post1` wheels. These are why the runner images keep the 
 - **Not measured:** the RDMA data path on InfiniBand or RoCE hardware with the `rdma-core` the
   installer brings.
 
-### SGLang cannot use EFA
+### SGLang and EFA
 
 No SGLang leg reaches EFA. On the direct leg the operator grants SGLang no fabric
 device: SGLang does not hand the declared protocol to its transfer engine, so the declaration cannot
@@ -338,7 +338,7 @@ On the store leg the operator renders the pool's protocol into SGLang's `MOONCAK
 SGLang's runner image carries a Mooncake with no EFA transport, and the EFA build lacks the modules
 SGLang loads. Run SGLang on AWS over `TCP`, which has been run there.
 
-### On AWS, `RDMA` is not an option
+### RDMA on AWS
 
 **Choose `EFA` or `TCP` on AWS.** The Device Manager discovers no RDMA device on an EFA node, so
 the `device.gpustack.ai/rdma` keys are allocatable at zero there, and a member group or engine that
@@ -347,14 +347,14 @@ verbs path fails creating its completion queue, as above.
 
 ## When a Pod does not schedule
 
-| Symptom | What it means | What to check |
+| Symptom | Meaning | Check |
 |---|---|---|
 | no node advertises the key at all | the node has no RDMA-capable interface, or that family is switched off on the Device Manager | the allocatable read above; the `--no-shared` and `--no-partitioned` switches |
-| the key is advertised, every token unhealthy | the node judged every endpoint's link `Failed`, which withholds nothing but marks the tokens | [reading it yourself](network-topology.md#reading-it-yourself) |
-| the Workload is admitted and its Pod stays `Pending` | over-subscription: nothing meters these keys | [the section above](#kueue-does-not-meter-the-rdma-keys) |
+| the key is advertised, every token unhealthy | the node judged every endpoint's link `Failed`, which withholds nothing but marks the tokens | [reading it yourself](network-topology.md#inspecting-the-record) |
+| the Workload is admitted and its Pod stays `Pending` | over-subscription: nothing meters these keys | [the section above](#kueue-and-the-rdma-keys) |
 | the Pod is scheduled, then refused on the node and not rescheduled | the node's totals sufficed but its devices sit on two NUMA nodes | the node's policy, and that both requests sit in one container |
-| the container starts with fewer devices than expected | one `rdma_cm` is correct — count the `uverbs` entries | [what one grant hands the container](#what-one-grant-hands-the-container) |
-| a node drops out of scheduling without changing | its link broke: the hardware stays, the label does not | [reading it yourself](network-topology.md#reading-it-yourself) |
+| the container starts with fewer devices than expected | one `rdma_cm` is correct — count the `uverbs` entries | [the injected set](#injected-devices) |
+| a node drops out of scheduling without changing | its link broke: the hardware stays, the label does not | [reading it yourself](network-topology.md#inspecting-the-record) |
 
 ---
 

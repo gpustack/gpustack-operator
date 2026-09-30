@@ -1,4 +1,4 @@
-# Model Deployment
+# Model Deployment Configuration
 
 A `ModelDeployment` defines one or more inference-engine roles, each with its own replicas. The
 roles can share cached prefixes through a KV cache pool, form a direct prefill/decode pair, or do
@@ -13,12 +13,12 @@ admission still applies to every replica.
 - [A minimal deployment](#a-minimal-deployment)
 - [Prefill and decode](#prefill-and-decode)
 - [Topology placement](#topology-placement)
-- [The reuse domain is inherited](#the-reuse-domain-is-inherited)
+- [Inherited reuse domain](#inherited-reuse-domain)
 - [The three override tiers](#the-three-override-tiers)
-- [What the operator owns](#what-the-operator-owns)
-- [The runner image is a formula](#the-runner-image-is-a-formula)
-- [Rollout is a rolling replacement](#rollout-is-a-rolling-replacement)
-- [What admission refuses](#what-admission-refuses)
+- [Operator-owned keys](#operator-owned-keys)
+- [Runner image formula](#runner-image-formula)
+- [Rollout behavior](#rollout-behavior)
+- [Admission refusals](#admission-refusals)
 - [Operating notes](#operating-notes)
 
 ## A minimal deployment
@@ -129,7 +129,7 @@ resources scaled by the card count, so they are not expressible here.
 An optional `resources.interface` requests a whole number of fabric interfaces per engine Pod.
 One RDMA interface uses `device.gpustack.ai/rdma.shared`; more than one uses that count of
 `device.gpustack.ai/rdma` devices. EFA uses
-[the EFA device plugin's own key](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves).
+[the EFA device plugin's own key](../rdma/network-topology.md#the-rdma-resource-keys).
 An unset or zero count adds no device request.
 
 The key follows the bound cache backend's effective group protocol and any direct prefill/decode
@@ -180,9 +180,9 @@ What pairs the two roles is on [Model Deployment Prefill and Decode](prefill-dec
 router block and its fields, the direct transfer and its transport, roles on different hardware, and
 a role's own address.
 
-### What every Pod of the group carries
+### Pod group labels and annotations
 
-| Key | Value | What it is for |
+| Key | Value | Purpose |
 |---|---|---|
 | label `kueue.x-k8s.io/pod-group-name` | `gpustack-fnv64-<hash>` over the namespace, deployment, role and ordinal — always the hashed form, on every shape | membership: it is what makes a replica its own group. The name is unique, not parseable: the ordinal travels in its own label and the hash is never read back, so a sole role's replica names its group exactly as one role of several does |
 | label `modeldeployment.gpustack.ai/pod-ordinal` | the replica's slot within its role, from 0 up | the one per-replica identity the converger reads back: the group name is derived from it, the spec hash covers it, and a scale-down sheds the highest ordinals first |
@@ -210,7 +210,7 @@ join while nothing errors.
 
 `roles[].topology.requiredLevel` is an optional Kubernetes label key. It requires the `size` Pods in
 each replica group to fit within one domain at that level. See [per-replica request
-semantics](../topology/scheduling.md#a-modeldeployment-request-is-per-replica).
+semantics](../topology/scheduling.md#per-replica-topology-requests).
 
 The value names a configured level, not a domain value. Region, zone, a GPUStack rack key, an
 administrator-owned key, and selected Topograph labels all use the same field. The syntax is
@@ -224,7 +224,7 @@ The full discovery, profile, capacity, and diagnostic contract is in [Topology-A
 Scheduling](../topology/scheduling.md); setup examples are in [Topology-Aware
 Scheduling Operations](../topology/operations.md).
 
-## The reuse domain is inherited
+## Inherited reuse domain
 
 The reuse domain (`name`, `blockSize`, `dtype`) is a required, immutable block on the
 `KVCachePoolBinding`; its `name` alone may be left out, and is then `default`. `ModelDeploymentSpec` has **no domain field**, and that is a security property
@@ -250,16 +250,16 @@ pollution: writes succeed, reads succeed, and the tensors are wrong.
 For an operator-managed role, the operator renders a non-empty Binding domain as the engine's tenant
 identifier. It does not inspect the engine image version or decide whether that build supports
 tenant isolation. The tenant variable is operator-owned, so supplying it in `env` or `extraArgs` is
-refused: it is a second path to a value [the API already refuses](#the-reuse-domain-is-inherited).
+refused: it is a second path to a value [the API already refuses](#inherited-reuse-domain).
 
 **"A tenant was injected" is not "the workload is isolated."** The operator records what it
 rendered, never what the container did with it: whether the build inside the image reads the value
 is not knowable at render time.
 
 Users who require tenant isolation must select a compatible engine image and verify it themselves; see
-[Tenant compatibility is the image owner's responsibility](../kv-cache/injection.md#tenant-compatibility-is-the-image-owners-responsibility) for what
+[Tenant compatibility](../kv-cache/injection.md#tenant-compatibility) for what
 the image must consume. The API states the requested boundary, while the engine enforces it
-(the same caveat [KV Cache Pool](../kv-cache/pool.md#what-a-binding-does-not-do) states for
+(the same caveat [KV Cache Pool](../kv-cache/pool.md#limitations) states for
 capacity).
 
 ## The three override tiers
@@ -297,11 +297,11 @@ Taking over the command line has a visible cost: the role reports
 `status.roles[].unmanaged: true` and `CacheAttached` moves to `Unknown`. The operator configured no
 cache client for that role, so it does not report on one it did not render.
 
-### A take-over role is outside the reuse-domain guarantee
+### Take-over roles and the reuse domain
 
 **A role that owns its whole argv can name any reuse domain, and this operator does not stop it.**
 `MOONCAKE_TENANT_ID` is refused in `roles[].env` on the engines that own it (the table under
-[What the operator owns](#what-the-operator-owns) is the authority), but `roles[].command` is a
+[Operator-owned keys](#operator-owned-keys) is the authority), but `roles[].command` is a
 program and its arguments, so the same value travels inside a shell assignment or inside the script
 the argv names, and admission has nothing to read either way.
 
@@ -311,15 +311,15 @@ there is no version of the take-over tier that also bounds the domain.
 
 Where the operator does build the argv, that refusal is real enforcement: the user cannot interpose
 a shell, so the environment is the only path left. Why the key is owned at all is stated under
-[What the operator owns](#what-the-operator-owns).
+[Operator-owned keys](#operator-owned-keys).
 
 Do not read the above as the boundary of the exposure: a take-over role is one instance of the
 mechanism, not the mechanism. The boundary is stated once, under
-[What a Binding does not do](../kv-cache/pool.md#what-a-binding-does-not-do), and tracked at
+[Limitations](../kv-cache/pool.md#limitations), and tracked at
 [#168](https://github.com/gpustack/gpustack-operator/issues/168), whose own void conditions include a
 webhook-level one, so nothing here should be read as a claim about how that issue can be closed.
 
-## What the operator owns
+## Operator-owned keys
 
 Ownership is per (engine, key): a key one engine owns is an ordinary user argument on another.
 `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` is meaningless to `vllm` and is a plain user variable there.
@@ -339,7 +339,7 @@ way to own it instead.
 
 **`--kv-cache-dtype` is owned on both engines while `spec.kvCache` is set**, in every spelling the
 engine reads as it, because the operator renders the Binding's `dtype` there; why is under
-[The dtype is handed to the engine](../kv-cache/pool.md#the-dtype-is-handed-to-the-engine). It is
+[Engine dtype](../kv-cache/pool.md#engine-dtype). It is
 not in the table because it is conditional:
 
 - A deployment with no `spec.kvCache`, or a role with `roles[].command`, keeps the flag as its own.
@@ -353,8 +353,8 @@ not in the table because it is conditional:
 which the hit rate this design rests on cannot be measured at all. It is read by the transfer engine
 rather than by an engine's config class, so it does not depend on which keys that class accepts.
 
-So are `MC_FORCE_TCP` [on a `tcp` leg](prefill-decode.md#the-direct-transfers-transport) and
-[SGLang's two cache switches](../kv-cache/injection.md#sglangs-host-memory-tier).
+So are `MC_FORCE_TCP` [on a `tcp` leg](prefill-decode.md#direct-transfer-transport) and
+[SGLang's two cache switches](../kv-cache/injection.md#sglang-host-memory-tier).
 
 Two of SGLang's owned keys are owned for what a user entry would **destroy** rather than duplicate,
 and the operator does not set either of them:
@@ -375,7 +375,7 @@ fixed when the object is admitted, when no Pod IP exists yet, so only an environ
 
 `MOONCAKE_TENANT_ID` is the one in that list whose ownership is a **security** property rather than a
 consistency one: it carries the reuse domain, and a workload able to set it could write into another
-Binding's domain. It is a second path to a value [the API already refuses](#the-reuse-domain-is-inherited).
+Binding's domain. It is a second path to a value [the API already refuses](#inherited-reuse-domain).
 
 On the vLLM family the operator mounts the rendered client JSON at
 `/etc/gpustack/kvcache/mooncake.json`, read-only. **There is no ConfigMap**: the file is a downwardAPI
@@ -404,7 +404,7 @@ unlikely to collide, but an overlay that mounts over that path replaces the conf
 and the owned `MOONCAKE_CONFIG_PATH` cannot protect against it. SGLang gets no file at all; its
 configuration travels entirely in the environment.
 
-## The runner image is a formula
+## Runner image formula
 
 A role with no `roles[].image` gets one assembled from the engine the deployment declares and the
 hardware its InstanceType observed. A stated image always wins.
@@ -453,7 +453,7 @@ only the lowest runs everywhere. The deployment then carries a `RuntimeVersionSk
 naming the value taken and the ones skipped, so the node holding the pool back is legible instead of
 appearing as an unattributable `ImagePullBackOff`.
 
-## Rollout is a rolling replacement
+## Rollout behavior
 
 Changing `replicas` adds or removes instances and nothing more: the survivors are not restarted, do
 not reload their weights and keep their cached blocks. What still replaces **every** instance of the
@@ -475,7 +475,7 @@ therefore turns a replica over only when every replica the role declares holds a
 on a full pool a rollout waits for capacity rather than shedding replicas it cannot re-reserve.
 
 The cost rides on the block lease described under
-[What a cache changes about a workload](../kv-cache/injection.md#what-a-cache-changes-about-a-workload): a lease survives a long queue and does **not**
+[Workload impact](../kv-cache/injection.md#workload-impact): a lease survives a long queue and does **not**
 survive an interrupted heartbeat, which is what a departing replica is. A departing replica
 therefore costs its siblings the blocks it held.
 
@@ -488,7 +488,7 @@ labels, annotations and spec, so a release that changes what every replica rende
 once: the `role-kind` label above did, and so did the [drain](shutdown.md). Nothing
 is required of you, but on a busy deployment the restart is worth scheduling.
 
-### A replica that leaves is replaced
+### Replica departures
 
 Most departures are not a spec change, and none of them touches a sibling:
 
@@ -535,11 +535,11 @@ Add `,app.kubernetes.io/component=<role>` for one role's replicas, or
 called. A runbook that spells `<deployment>-<role>-0` breaks here and has no fixed name to move to.
 
 Changing `replicas` is not one of these departures either: it adds or sheds instances and leaves the
-survivors running. See [Rollout is a rolling replacement](#rollout-is-a-rolling-replacement) for
+survivors running. See [Rollout behavior](#rollout-behavior) for
 which edits replace every instance instead. The role set cannot be edited at all; admission refuses
 it.
 
-### Which fields are the deployment's identity
+### Deployment identity fields
 
 Fields that identify the deployment are frozen. Fields that control how it runs are generally
 editable; the table below lists both groups and the scheduling exceptions.
@@ -594,7 +594,7 @@ A scale-down sheds the **highest ordinals first**, deleting each departing repli
 its own Workload: the Workload delete is what releases Kueue's finalizer on the Pod and the quota the
 replica held, because a serving group is never finished and nothing else releases either.
 
-## What admission refuses
+## Admission refusals
 
 Two webhooks make up the admission surface. Nearly every default lives in the CRD schema; the
 mutating half exists for the one value a schema cannot reach: a role's accelerator count, which
@@ -605,7 +605,7 @@ depends on the `InstanceType` the role names.
 | more than 10 roles | the bound as **this operator's own shape limit**, not an upstream number — every role renders its own replicas, Services and queue references |
 | a role whose members could not be named | the longest name the declared `replicas` and `size` would produce, its length and why it is not a hostname, and the three ways out — shorten the role, shorten the deployment, or declare fewer replicas |
 | two roles sharing a `name` | the duplicate — refused by the **schema**, since `roles` is a list keyed on `name`, so this one never reaches the webhook |
-| an edit to an identity field — `model`, `engine.name`, `kvCache`, or the shape of the roles | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Which fields are the deployment's identity](#which-fields-are-the-deployments-identity) |
+| an edit to an identity field — `model`, `engine.name`, `kvCache`, or the shape of the roles | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Deployment identity fields](#deployment-identity-fields) |
 | a resource mode the named `InstanceType` does not offer | the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list |
 | a whole-accelerator count over the type's whole-accelerator capacity | the capacity itself, not only that the request was too large, so the next attempt is not a guess. The bound is the pool's total, not what is free, so a deployment submitted while every accelerator is held is admitted and waits in its queue; one above the largest node but within the total is admitted and stays queued — see [Accelerator Requests](../devices/requests.md#limitations) |
 | a negative or fractional `resources.interface`, or one with no effective RDMA/EFA leg | the role's interface field and the protocol that prevents allocation; mixed backend groups and mixed fabric legs are rejected |
@@ -619,7 +619,7 @@ depends on the `InstanceType` the role names.
 | a `kind` the engine has no rendering term for | the engine and the kind. No engine this API accepts is refused by this rule today: vLLM and SGLang both render `Server`, `Prefill` and `Decode` |
 | an owned key in `extraArgs` | the key, the engine, and `roles[].command` as the way to own it |
 | an owned name in `env` | the same three |
-| `--kv-cache-dtype` in `extraArgs` while `spec.kvCache` is set | that it carries the Binding's `dtype`, and a Binding declaring another dtype or `roles[].command` as the ways out — see [What the operator owns](#what-the-operator-owns) |
+| `--kv-cache-dtype` in `extraArgs` while `spec.kvCache` is set | that it carries the Binding's `dtype`, and a Binding declaring another dtype or `roles[].command` as the ways out — see [Operator-owned keys](#operator-owned-keys) |
 | a `--port` in `extraArgs` or `command` naming another port than the role's first `ports` entry | both values and the field each came from. A managed direct decoder is exempt, since its proxy owns the declared port. A stored role is judged only when an edit changes its `ports` or arguments |
 | a port the operator reserves for a listener it synthesizes onto the role — vLLM's KV event ports under `llm-d-router`, or the bootstrap port of a prefiller in a declared pair that names a router or a cache — declared in `ports`, or passed as `--port` in `extraArgs` by a role declaring no `ports` | the port, the field it came from and the reserved set, on `spec.router` when a router is named. A replaced `command` is exempt, since nothing is synthesized onto it. A stored `--port` collision is left alone until an edit changes it; adding a router that creates one is refused |
 | a parallel degree the role's books cannot be read for — a known flag's value missing, non-integer, out of range or below its bound, or a malformed `VLLM_DP_SIZE` | the role, the flag, and `roles[].command` as the way to own the whole line |
@@ -660,7 +660,7 @@ own message, because a pass that cannot build a replica aborts before writing an
 ## Operating notes
 
 **Two notes apply to every workload on a pool, replicas included, and are stated once under**
-[What a cache changes about a workload](../kv-cache/injection.md#what-a-cache-changes-about-a-workload): the transfer engine binds ports nobody
+[Workload impact](../kv-cache/injection.md#workload-impact): the transfer engine binds ports nobody
 configured, so a NetworkPolicy or port reservation has to be a range rather than a list; and the
 `transfer_metadata.cpp` "Local segment descriptor not found" line at startup is an `ERROR` that is
 benign on a client mounting no segment of its own, which is what every replica here is.

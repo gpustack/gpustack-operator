@@ -3,7 +3,7 @@
 Through v0.7.x the chart deployed only the worker and device managers; the worker installed
 Kueue, Node Feature Discovery and the two CSI drivers at runtime, each its own Helm release:
 
-| Runtime release | Now |
+| Runtime release | Becomes |
 |---|---|
 | `gpustack-kueue` | the `kueue` subchart of the operator release |
 | `gpustack-node-feature-discovery` | the `node-feature-discovery` subchart |
@@ -19,10 +19,10 @@ ClusterQueues, Workloads, ResourceFlavors, node labels and mounted volumes survi
 ## Contents
 
 - [The one-time upgrade](#the-one-time-upgrade)
-- [What runs during the upgrade](#what-runs-during-the-upgrade)
-- [Image mode migrates itself](#image-mode-migrates-itself)
+- [Upgrade hooks](#upgrade-hooks)
+- [Automatic migration in image mode](#automatic-migration-in-image-mode)
 - [If Kueue or NFD was not installed by Helm](#if-kueue-or-nfd-was-not-installed-by-helm)
-- [Four things that change permanently](#four-things-that-change-permanently)
+- [Permanent changes](#permanent-changes)
 - [Do not roll back with helm rollback](#do-not-roll-back-with-helm-rollback)
 - [Verify](#verify)
 
@@ -59,7 +59,7 @@ Keep the install instructions' release name **`gpustack-operator`** and namespac
   install can go anywhere. The only rule is Kueue's own: it refuses to start when it matches its
   own namespace.
 
-## What runs during the upgrade
+## Upgrade hooks
 
 Two hook Jobs run the operator image, which bundles `helm`, `kubectl`, `jq` and the packaged chart.
 Both are idempotent and no-ops on a healthy cluster.
@@ -91,7 +91,7 @@ release, not five:
 helm list -n gpustack-system     # expect: gpustack-operator only
 ```
 
-## Image mode migrates itself
+## Automatic migration in image mode
 
 Installing the bundled chart from inside its own image, the worker detects its own legacy release
 and sets the transfer for that install only, never unconditionally, so there is nothing to run.
@@ -144,9 +144,9 @@ done
 then install normally: this is `--take-ownership`'s adoption, narrowed to what needs it. Read [Do not roll
 back](#do-not-roll-back-with-helm-rollback) first, because the release then owns those CRDs.
 
-## Four things that change permanently
+## Permanent changes
 
-### `manufacturers` moved to `global.manufacturers`, and each entry became a row
+### `manufacturers` moved to `global.manufacturers`
 
 The top-level `manufacturers` map is now `global.manufacturers`, each entry carrying
 a manufacturer's whole identity, not only its PCI vendor ID:
@@ -175,7 +175,7 @@ Creation still happens only where the class is absent or already belongs to this
 on the narrower `runtimeInjectsDriver` or `runtimeInjectsDevices`, where the runtime is certainly
 installed. `deviceManager.createRuntimeClasses=false` remains the opt-out.
 
-### `worker.certmanager` moved to `global.certmanager`, and now answers for Kueue too
+### `worker.certmanager` moved to `global.certmanager`
 
 The block that sat under `worker` is `global.certmanager`, same keys, same `auto` default:
 
@@ -203,7 +203,7 @@ global.certmanager.enabled=false` keeps every component, worker included, self-m
 Naming an existing issuer (`global.certmanager.issuer.name`) now covers Kueue's certificates as well
 as the worker's, and no self-signed Issuer is created for either.
 
-#### Turning cert-manager back off is not a plain upgrade
+#### Disabling cert-manager after the migration
 
 Turning it on later needs no flags: everything that `--set global.certmanager.enabled=auto` (or
 `true`) once changed (`insecureSkipTLSVerify` on the visibility APIServices, Kueue's self-managed
@@ -237,7 +237,7 @@ The same happens if cert-manager is uninstalled while `global.certmanager.enable
 the answer flips with nobody editing a value, and the next upgrade, even an image bump, fails
 identically. Where cert-manager comes and goes, state `"true"` or `"false"` rather than `auto`.
 
-### `helm uninstall` now takes Kueue with it
+### `helm uninstall` removes Kueue
 
 Kueue used to be its own release and outlived an operator uninstall. The release now owns Kueue
 and its CRDs, and a deleted CRD takes every custom resource of that kind, so
@@ -250,7 +250,7 @@ whether or not your Kueue came from Helm ([the not-installed-by-Helm
 case](#if-kueue-or-nfd-was-not-installed-by-helm) needs extra steps). The chart prints the uninstall
 notes at install time, so you need not remember this.
 
-### A handful of old certificate Secrets are left behind
+### Leftover certificate Secrets
 
 Older workers cached certificates in Secrets named by `generateName: gpustack-cert-`, one per
 restart. The cache is now a fixed `gpustack-cert-<hash>` derived from content, so the churn stops

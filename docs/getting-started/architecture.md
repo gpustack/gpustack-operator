@@ -1,119 +1,153 @@
 # Architecture
 
-GPUStack Operator uses [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery)
-to publish node features as labels. [Kueue](https://github.com/kubernetes-sigs/kueue) queues workloads
-against the resulting capacity; its AdmissionCheck lets GPUStack check the fit on individual
-accelerators.
-
-The chart includes NFD, Kueue and two CSI drivers as subcharts. It also includes Topograph, which
-stays disabled until an administrator selects a provider.
+GPUStack Operator manages accelerator-backed workloads on Kubernetes. It discovers devices, turns
+node capacity into schedulable pools, and runs GPU Instances and model deployments against those
+pools. Optional model delivery, topology placement and shared KV cache support inference workloads
+that need more than a single GPU.
 
 ## Contents
 
-- [One binary, four subcommands](#one-binary-four-subcommands)
-- [How it works: four stages](#how-it-works-four-stages)
-- [Life of a sliced-GPU request](#life-of-a-sliced-gpu-request)
+- [Components](#components)
+- [Workload flow](#workload-flow)
+- [Device scheduling](#device-scheduling)
+- [Model delivery and KV cache](#model-delivery-and-kv-cache)
+- [Request admission](#request-admission)
 - [Vocabulary](#vocabulary)
-- [Where to go next](#where-to-go-next)
+- [Related documentation](#related-documentation)
 
-## One binary, four subcommands
+## Components
 
-| Subcommand | Package | Deployed by | Job |
-|---|---|---|---|
-| `worker` (alias `w`) | `pkg/worker` | this chart, as a control-plane Deployment | aggregated extension API server + the scheduling-chain controllers |
-| `worker-gateway` | `pkg/workergateway` | not this chart; run it yourself, wherever the fleet view belongs | aggregates InstanceTypes and capacity across upstream clusters |
-| `device-manager` | `pkg/devicemanager` | this chart, as one DaemonSet per manufacturer | detects accelerators, maintains the `Devices` ledger, serves the device plugin |
-| `model-manager` (alias `mm`) | `pkg/modelmanager` | this chart, as one DaemonSet on every node | the CSI node plugin that mounts a Hugging Face `ModelArtifact` from the node's verified cache ([Node Model Store](../modules/model-delivery/node-store.md)) |
+The operator ships one binary with four subcommands:
 
-Details, and the startup ordering the worker must keep, are in [Internals](../contribute/internals.md).
+| Component | Deployment | Role |
+|---|---|---|
+| `worker` | Control-plane Deployment | Serves the public APIs and manages workloads, queues and supporting resources. |
+| `device-manager` | One DaemonSet per manufacturer | Discovers accelerators and network interfaces, reports available capacity and allocates devices to containers. |
+| `model-manager` | Node DaemonSet | Caches model weights and mounts them into workloads using node delivery. |
+| `worker-gateway` | Installed separately | Combines InstanceTypes and capacity from multiple clusters into a fleet view. |
 
-## How it works: four stages
+The chart also includes [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery),
+[Kueue](https://github.com/kubernetes-sigs/kueue) and two CSI drivers. Topograph is optional and remains
+disabled until an administrator selects a provider. See [Installation Modes](../operate/installation-modes.md)
+for the deployment choices and [Internals](../contribute/internals.md) for contributor details.
 
-1. The chart starts NFD and the Device Manager DaemonSets ([Installation Modes](../operate/installation-modes.md)).
-2. The Device Manager detects accelerators, publishes their feature labels and maintains the
-   `Devices` record.
-3. The Worker derives per-node capacity labels for CPU cores, the four logical-slicing
-   capacities (`.sliced.*`) and hardware partitioning (`.partitioned.*`).
-4. Worker controllers turn those labels and topology profiles into Kueue `Topology`,
-   `ResourceFlavor` and `ClusterQueue` objects, with one isolated queue per pool. They also
-   create an `InstanceType` and use a per-accelerator `AdmissionCheck`.
+## Workload flow
+
+GPU Instances provide containers with optional SSH access. Model deployments run inference engines
+and, where configured, routers or prefill/decode groups. Both use the same device capacity and
+admission chain. Model delivery and KV cache are optional services alongside that chain.
 
 ```mermaid
-flowchart TD
-    subgraph node["Each Node"]
-        NFDW["NFD worker"]
-        DM["Device Manager Pod<br/>(DaemonSet per manufacturer)"]
+flowchart TB
+    subgraph control["Control plane"]
+        REQUEST["Instance / ModelDeployment / Pod"]
+        WORKER["Worker APIs and controllers"]
+        QUEUES["InstanceTypes and queues"]
+        KUEUE["Kueue admission and placement"]
+        TOPOLOGY["Topology inventory and profiles"]
+        ARTIFACT["ModelArtifact"]
+        CACHE["KV cache backends and pools"]
     end
 
-    subgraph control["Control Plane"]
-        NFDM["NFD master"]
-        WK["GPUStack Worker controllers"]
-        KUEUE["Kueue objects<br/>Topology / ResourceFlavor / ClusterQueue / LocalQueue<br/>+ AdmissionCheck"]
-        IT["InstanceType CRD<br/>(materialized four-view status)"]
+    subgraph nodes["Workload nodes"]
+        DISCOVERY["NFD and Device Manager"]
+        MODELS["Model Manager and node cache"]
+        PODS["GPU Instance and inference Pods"]
     end
 
-    NFDW -- "NodeFeature (PCI + CPU scan)<br/>pci-VENDOR.present / cpu-model.*" --> NFDM
-    NFDM -- "apply labels" --> NODE["Node labels"]
-    NODE -- "nodeSelector schedules DM" --> DM
-    DM -- "NodeFeature NODE-gpustack-device-manager<br/>acceleratable.feature.gpustack.ai/* + Devices CR ledger" --> NFDM
-    NODE -- "watched by" --> WK
-    WK -- "NodeFeature NODE-gpustack-worker<br/>general./acceleratable. capacity labels" --> NFDM
-    NODE -- "capacity labels drive" --> KUEUE
-    WK -- "owns / materializes" --> IT
-    DM -- "Devices ledger feeds" --> IT
+    STORE["Shared KV cache · managed or external"]
+    REQUEST --> WORKER
+    DISCOVERY -- "device capacity" --> QUEUES
+    WORKER -- "workload Pods" --> KUEUE
+    QUEUES --> KUEUE
+    TOPOLOGY -- "placement domains" --> KUEUE
+    KUEUE -- "admitted workloads" --> PODS
+    DISCOVERY -- "accelerator and RDMA allocation" --> PODS
+    ARTIFACT -- "node delivery" --> MODELS
+    MODELS -- "mounted weights" --> PODS
+    ARTIFACT -- "Pod or claim delivery" --> PODS
+    CACHE -- "managed members or external service" --> STORE
+    STORE -. "optional KV reuse" .-> PODS
 ```
 
-Stages 1–2 are detailed in [Device Discovery](../modules/devices/discovery.md), stages 3–4 in [Scheduling
-Chain](../modules/devices/scheduling.md).
+The diagram shows the main dependencies. It does not require every workload to use a model artifact,
+RDMA, a topology source or a shared cache. An ordinary Pod can request device resources directly.
 
-## Life of a sliced-GPU request
+## Device scheduling
 
-A workload asking for half a GPU passes five admission gates, each seeing something the previous one
-cannot:
+Device scheduling has four stages:
 
-| Step | What happens | Detail |
+1. NFD identifies node hardware and labels the nodes.
+2. The Device Manager discovers accelerators and network interfaces and maintains the `Devices`
+   inventory and allocation record.
+3. The Worker derives schedulable CPU and accelerator capacity from that inventory.
+4. The Worker creates InstanceTypes and Kueue resources. Each pool has an isolated queue; topology
+   profiles constrain placement, and admission checks verify whether individual accelerators fit.
+
+[Device Discovery](../modules/devices/discovery.md) covers the first two stages.
+[Scheduling Chain](../modules/devices/scheduling.md) covers capacity and queues.
+[RDMA Operations](../modules/rdma/operations.md) explains network resource requests, while
+[Topology-Aware Scheduling](../modules/topology/scheduling.md) explains placement domains.
+
+## Model delivery and KV cache
+
+A `ModelArtifact` describes model weights from a model repository, an image or a persistent-volume
+claim. A workload can download weights in its own Pod, use an existing claim, or mount weights from
+an eligible node's verified cache. Node delivery is handled by the Model Manager; it is separate from
+device admission. See [Model Delivery](../modules/model-delivery/_index.md).
+
+A shared KV cache stores reusable inference state. A backend runs the cache service or points to an
+external one; pools and namespace bindings provide access and quota grants. Compatible workloads
+receive the cache configuration when their Pods are created. This service is optional, and its quota
+is separate from accelerator quota. See [KV Cache](../modules/kv-cache/_index.md).
+
+[Model Deployment](../modules/model-deployment/_index.md) brings these services together with engine,
+router and replica configuration. [GPU Instances](../modules/instances/_index.md) support interactive
+containers and SSH access using the same accelerator allocation.
+
+## Request admission
+
+For a workload requesting a GPU slice, admission proceeds through five gates:
+
+| Gate | Check | Details |
 |---|---|---|
-| Submit | a Pod — plain, or rendered by a GPUStack `Instance` or by a [`ModelDeployment`](../modules/model-deployment/deployment.md) replica — carries the pool's entrance label `kueue.x-k8s.io/queue-name: gpustack-fnv64-…` and requests `nvidia.com/gpu.sliced: 1` + `nvidia.com/gpu.sliced.memory-percentage: 50` | [Accelerator Requests](../modules/devices/requests.md) |
-| Gate 1 — Pod webhook | validates the request rules and folds the memory budget into `nvidia.com/gpu.sliced.units`, the credit input | [Admission](../modules/devices/admission.md#gate-1--the-pod-webhook) |
-| Gate 2 — Kueue | reserves against the pool ClusterQueue's `credits.gpustack.ai/nvidia` quota and fits the complete PodSet inside the selected topology domains | [Topology-Aware Scheduling](../modules/topology/scheduling.md) |
-| Gate 3 — AdmissionCheck | asks the pool's `Devices` ledger whether one accelerator can really host the slice; holds the workload with `Retry` if not | [Admission](../modules/devices/admission.md#gate-3--the-per-accelerator-admissioncheck) |
-| Gate 4 — scheduler / kubelet | picks a node whose `.sliced.*` capacity keys still fit, then an accelerator-bound token — *which is* the accelerator | [Device Discovery](../modules/devices/discovery.md#placement-is-a-preference-not-a-decision) |
-| Gate 5 — allocator | refuses an accelerator another mode holds, injects the manufacturer's runtime isolation, and records the allocation in the `Devices` ledger | [Device Discovery](../modules/devices/discovery.md#the-device-plugin-allocator) |
-| Observe | the `InstanceType.status` four-view moves as the pod allocates, and back when it exits (`kubectl get instancetype -w`) | [Admission](../modules/devices/admission.md#four-view-status) |
+| Pod webhook | Validates resource combinations and calculates the scheduling units. | [Accelerator Requests](../modules/devices/requests.md) |
+| Kueue | Reserves pool quota and places the workload within compatible topology domains. | [Topology-Aware Scheduling](../modules/topology/scheduling.md) |
+| AdmissionCheck | Verifies that individual accelerators can satisfy the request; retries when they cannot. | [Admission](../modules/devices/admission.md) |
+| Scheduler and kubelet | Select a node and device tokens with enough remaining capacity. | [Device Discovery](../modules/devices/discovery.md) |
+| Device allocator | Checks conflicting allocations, configures device access and records the grant. | [Device Discovery](../modules/devices/discovery.md#the-device-plugin-allocator) |
+
+InstanceType status reports the remaining capacity as workloads allocate and release devices. Use
+`kubectl get instancetype -w` to watch those changes. The [Walkthrough](walkthrough.md) shows the
+request and its resulting Kubernetes resources.
 
 ## Vocabulary
 
-The three hardware words (**Device**, **Accelerator**, **Resource**) and the layering between them
-are defined in [Device Discovery](../modules/devices/discovery.md#device-accelerator-resource). The rest:
-
 | Term | Meaning |
 |---|---|
-| **pool** | one `(CPU key, [accelerator key,] os, arch)` group — one isolated `ClusterQueue` + one `InstanceType`, no borrowing |
-| **`gKey` / `aKey`** | the general(CPU) node key (e.g. `amd-epyc-7763`, or the `generic` sentinel) / the accelerator device key (e.g. `nvidia-a10g`) |
-| **family** | the two mutually exclusive ways to share an accelerator: **logical slicing** (`.sliced*`, the manufacturer's own runtime facility budgets compute and VRAM) and **physical partitioning** (`.partitioned*`, NVIDIA MIG). An accelerator serves exactly one |
-| **credits** | `credits.gpustack.ai/<manufacturer>`, the only accelerator quota a ClusterQueue carries; one whole accelerator = `M = 1,600,000` credit units, so fractional shares stay integer-valued |
-| **four-view (EX/SH/SL/PT)** | the `InstanceType.status` projections: free whole accelerators / shareable slots / logically sliceable VRAM-percent units / hardware partition instances |
-| **`Devices` ledger** | the per-accelerator `AcceleratorAllocation` accounting on the `Devices` CR — the single authoritative record of who holds what |
-| **entrance** | the per-namespace `LocalQueue` (`gpustack-fnv64-<hash>`) a workload submits against |
+| Pool | Nodes with compatible CPU, accelerator, operating system and architecture identities, served by an isolated queue. |
+| InstanceType | The resource configuration and available capacity offered by a pool. |
+| Allocation mode | Whole accelerators, shared accelerators, logical slices or hardware partitions. |
+| Credits | Integer units used by Kueue to account for accelerator quota, including fractional requests. |
+| Four capacity views | Exclusive, shared, sliced and partitioned capacity reported by an InstanceType. |
+| `Devices` ledger | The per-node inventory and record of accelerator allocations. |
+| LocalQueue | The namespace queue through which a workload enters its pool. |
 
-## Where to go next
+The hardware terms Device, Accelerator and Resource are defined in
+[Device Discovery](../modules/devices/discovery.md#device-accelerator-resource).
 
-- [Device Discovery](../modules/devices/discovery.md) — stages 1 and 2, and what the allocator injects.
-- [Scheduling Chain](../modules/devices/scheduling.md) — stages 3 and 4.
-- [Topology-Aware Scheduling](../modules/topology/scheduling.md) — inventory, profiles and Kueue TAS.
-- [Admission](../modules/devices/admission.md) — the five gates and the four-view status.
-- [Installation Modes](../operate/installation-modes.md) — chart mode versus image mode.
-- [Internals](../contribute/internals.md) — startup order and the invariants that fail silently.
-- [KV Cache Backend](../modules/kv-cache/backend.md) — a separate chain: running and observing a
-  pooled KV cache for inference workloads; quota over that cache is granted per namespace through
-  [KV Cache Pool](../modules/kv-cache/pool.md).
-- [Walkthrough](walkthrough.md) — all of it recorded on a live cluster, with real output.
+## Related documentation
 
-Every page, with its audience and read time, is in the [documentation index](../README.md).
+- [Walkthrough](walkthrough.md) — submit a workload and inspect the scheduling chain.
+- [GPU Instances](../modules/instances/_index.md) — configure an interactive container and SSH access.
+- [Model Deployment](../modules/model-deployment/_index.md) — configure inference engines and replicas.
+- [Model Delivery](../modules/model-delivery/_index.md) — resolve, cache and mount model weights.
+- [KV Cache](../modules/kv-cache/_index.md) — connect inference workloads to a shared cache.
+- [Installation Modes](../operate/installation-modes.md) — choose how to install the operator.
 
 ---
 
-**See also** — [Accelerator Requests](../modules/devices/requests.md) (the request contract) ·
+**See also** — [Accelerator Requests](../modules/devices/requests.md) ·
 [Settings](../reference/settings.md) · [All documentation](../README.md)
 
-**Next** → [Device Discovery](../modules/devices/discovery.md) — stage 1 and 2 in detail.
+**Next** → [Walkthrough](walkthrough.md) — follow a workload from submission to allocation.

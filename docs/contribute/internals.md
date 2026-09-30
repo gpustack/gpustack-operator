@@ -5,18 +5,18 @@ changes to the operator's services. Vendor libraries and object names have their
 
 ## Contents
 
-- [One binary, four subcommands](#one-binary-four-subcommands)
-- [Worker startup order matters](#worker-startup-order-matters)
-- [The worker gateway mirrors the cluster API, it does not embed it](#the-worker-gateway-mirrors-the-cluster-api-it-does-not-embed-it)
-- [Device plugins re-register on their own, once per kubelet restart](#device-plugins-re-register-on-their-own-once-per-kubelet-restart)
+- [Operator subcommands](#operator-subcommands)
+- [Worker startup order](#worker-startup-order)
+- [Worker gateway](#worker-gateway)
+- [Device plugin re-registration](#device-plugin-re-registration)
 - [Per-manufacturer device support](#per-manufacturer-device-support)
 - [CGO bindings (`binding/`)](#cgo-bindings-binding)
-- [The 63-character constraint, recurring](#the-63-character-constraint-recurring)
+- [63-character limits](#63-character-limits)
 
-## One binary, four subcommands
+## Operator subcommands
 
 `cmd/gpustack-operator/main.go` wires one binary with the four cobra subcommands
-[Architecture](../getting-started/architecture.md#one-binary-four-subcommands) tabulates. Beyond that table:
+[Architecture](../getting-started/architecture.md#components) tabulates. Beyond that table:
 
 - **`worker`** (alias `w`) runs an aggregated extension API server *and* a controller-runtime manager in
   one process, plus the scheduling-chain controllers ([Scheduling Chain](../modules/devices/scheduling.md)). It can
@@ -28,7 +28,7 @@ changes to the operator's services. Vendor libraries and object names have their
   it materializes and mounts model weights and writes only its own node's `NodeModelStore`
   status ([Node Model Store](../modules/model-delivery/node-store.md)).
 
-## Worker startup order matters
+## Worker startup order
 
 `pkg/worker/worker.go` runs `Prepare` (system namespace → CRDs → extension API services → webhook
 configs → settings → applications → the `gpustack-cpu-info` NodeFeatureRule → the
@@ -40,7 +40,7 @@ controllers can index extension-API resources. Preserve this ordering when addin
 The last three steps each retry for up to 5 minutes while their CRD becomes available. A worker
 starting alongside NFD and Kueue can reach these steps before their CRDs are served. The worker
 applies the resources in both installation modes; see [Installation
-Modes](../operate/installation-modes.md#the-chart-deploys-workloads-the-worker-applies-the-custom-resources).
+Modes](../operate/installation-modes.md#chart-deployed-and-worker-applied-resources).
 
 ### Every `Prepare` step runs in every replica
 
@@ -48,7 +48,7 @@ Every step of `Prepare` runs in **all** replicas, before leader election, so eac
 or idempotent by construction. Keep it that way when adding a step: a rolling update overlaps two
 replicas even where `worker.replicas` is 1.
 
-### The two ensurers, and where they run
+### CRD and APIService maintenance
 
 `Prepare`'s installation cannot outlive the boot, so `Start` also runs `pkg/api`'s `EnsureCRDs` and
 `EnsureServices` beside the controller manager, deliberately **not** behind the services-ready wait.
@@ -81,7 +81,7 @@ with no repair loop and no way to report that.
 > Realigning the spec every tick would instead have the outgoing replica fight the incoming one through
 > *every* rolling update: likelier, and worse.
 
-### The one step that takes a lock
+### Application installation lock
 
 Installing the applications is the one step for which neither property was available, so it holds a
 `coordination.k8s.io` Lease (`applications.worker.gpustack.ai` in the system namespace, via
@@ -92,7 +92,7 @@ last resort, not a pattern to copy; reach for it only where idempotence is out o
 > **Why** — Helm's release storage is a compare-and-create, not a mutex, and two Helm actions on one
 > release can leave it pending where no later attempt gets past.
 
-## The worker gateway mirrors the cluster API, it does not embed it
+## Worker gateway
 
 `pkg/workergateway/service` folds many clusters' `InstanceType`s into one fleet-wide
 `AggregatedInstanceType`: candidates (one per cluster) group into tiers by accelerator `OnceMaxRequest`,
@@ -109,7 +109,7 @@ Adding one means touching `types.go` and every aggregation site in `helper.go` (
 `TestAggregatedInstanceTypeMirrorsEveryStatusView` fails while the field sets differ, but cannot see a
 missed aggregation site; walk them.
 
-## Device plugins re-register on their own, once per kubelet restart
+## Device plugin re-registration
 
 kubelet's device-plugin registration server unlinks **every socket** in
 `/var/lib/kubelet/device-plugins` each time it starts, and only then listens on a fresh
@@ -209,7 +209,7 @@ means editing C, not a config.
 > rediscovered rather than inherited. Every other binding calls `binding.Library.Load`; dcmi calls
 > only `Path()`.
 
-## The 63-character constraint, recurring
+## 63-character limits
 
 Kubernetes label *values* cap at 63 chars. Long names (ClusterQueue names, queue references) live in
 `schedule.gpustack.ai/*` **annotations**, not labels; LocalQueues are named `gpustack-fnv64-<hash>`

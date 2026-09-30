@@ -7,7 +7,7 @@ Each managed Pod also exposes its own native `/metrics` output for Prometheus us
 
 - [The subresource](#the-subresource)
 - [Fields and sources](#fields-and-sources)
-- [What each field counts](#what-each-field-counts)
+- [Per-field series](#per-field-series)
 - [Windowed cache hits](#windowed-cache-hits)
 - [Latency, traffic, and transfer](#latency-traffic-and-transfer)
 - [Missing and partial samples](#missing-and-partial-samples)
@@ -34,14 +34,14 @@ sample timestamps to the selected Prometheus series.
 `queueing[]` holds `waiting` and `decode-transfer-waiting`. Engine gauges are summed by role over
 readable Pods. The unit is `requests`, except `backends` for `router-backends` and `workers` for
 `router-reported-workers`, a count that alone does not prove a worker reachable or ready. Which
-series each field reads is in [What each field counts](#what-each-field-counts).
+series each field reads is in [Per-field series](#per-field-series).
 
 Every gauge includes its exact Prometheus `source`, `scope` (`engine` or `router`), `unit`, numeric
 `value`, `podCount` and `observedAt`. Sources are kept separate: a router's view of active requests
 is never added to the engine's view. Prefill and decode roles also stay separate. A measured `0`
 is present as zero.
 
-## What each field counts
+## Per-field series
 
 Each cell names the series a field reads, without its `vllm:` or `sglang:` prefix, and what it
 counts there. A dash means the field is not read there. vLLM-Ascend Pods are read as vLLM; no
@@ -106,7 +106,7 @@ exported, so what each counts has not been checked against a failed request. Why
 in [Latency, traffic, and transfer](#latency-traffic-and-transfer).
 
 Where a router sent each request is not in the snapshot; its own per-replica series say, listed in
-[Seeing where requests went](routing.md#seeing-where-requests-went).
+[Per-worker routing metrics](routing.md#per-worker-routing-metrics).
 
 ## Windowed cache hits
 
@@ -128,7 +128,7 @@ vLLM exports its external prefix cache counters without a KV connector too, and 
 a Pod whose arguments render no connector and whose external query counter has never moved,
 `missing[]` names `external-store` as an unsupported source rather than a window with no queries.
 A Pod with a connector that is not read, as described in
-[What each field counts](#what-each-field-counts), is named the same way with its own reason.
+[Per-field series](#per-field-series), is named the same way with its own reason.
 
 ## Latency, traffic, and transfer
 

@@ -10,19 +10,19 @@ on the same node.
 
 ## Contents
 
-- [Who injects the devices](#who-injects-the-devices)
-- [Two device plugins, one resource name](#two-device-plugins-one-resource-name)
+- [Allocator injection](#allocator-injection)
+- [Device plugin name collisions](#device-plugin-name-collisions)
 - [One Node Feature Discovery per cluster](#one-node-feature-discovery-per-cluster)
-- [A removed plugin's resource lingers](#a-removed-plugins-resource-lingers)
+- [Resource removal lag](#resource-removal-lag)
 - [Per manufacturer](#per-manufacturer)
 
-## Who injects the devices
+## Allocator injection
 
 Whether a container toolkit is required at all follows directly from how our own allocator makes the
 accelerator visible: a `/dev` node needs nothing from the toolkit, while an env var needs the vendor's
 runtime hook to interpret it.
 
-| Manufacturer | Allocator injects | Container toolkit required |
+| Manufacturer | Allocator injection | Toolkit required |
 |---|---|---|
 | AMD | `/dev` nodes (`/dev/kfd`, `/dev/dri/card*`, `/dev/dri/renderD*`) | No |
 | Ascend | `ASCEND_VISIBLE_DEVICES` | Yes |
@@ -41,7 +41,7 @@ runtime hook to interpret it.
 An env var reaches the container either way, so a missing toolkit does not fail the allocation: it
 produces a running container with the variable set and no accelerator behind it.
 
-## Two device plugins, one resource name
+## Device plugin name collisions
 
 The kubelet does not reject a second device-plugin registration for a resource name it already knows:
 it replaces the endpoint. Both plugins keep writing their own device sets, so node capacity oscillates
@@ -103,7 +103,7 @@ cluster holding only those is already served by its list.
 Read the six items as a checklist rather than a recipe: every cluster this page was written against
 ran the NFD this chart bundles, so a handover has not been observed end to end.
 
-## A removed plugin's resource lingers
+## Resource removal lag
 
 Removing a vendor's device plugin does not immediately remove its extended resource from the Node
 object: the kubelet only drops it once it reconverges. A scheduler can keep seeing the old resource as
@@ -119,9 +119,9 @@ Read against **AMD GPU Operator v1.5.1** —
 [Helm Chart Install](https://instinct.docs.amd.com/projects/gpu-operator/en/latest/installation/kubernetes-helm.html) ·
 [Toolkit Install](https://instinct.docs.amd.com/projects/container-toolkit/en/latest/index.html).
 
-**Install before GPUStack** — the ROCm driver alone. Per [Who injects the
-devices](#who-injects-the-devices), our allocator injects `/dev/kfd` and each granted accelerator's DRM
-nodes itself, so neither the AMD Container Toolkit nor `amd-container-runtime` is needed.
+**Install before GPUStack** — the ROCm driver alone. Per [Allocator
+injection](#allocator-injection), our allocator injects `/dev/kfd` and each granted accelerator's
+DRM nodes itself, so neither the AMD Container Toolkit nor `amd-container-runtime` is needed.
 
 A non-root workload still needs `video` and `render` supplementary-group membership on its container's
 user: the device plugin API has no field to grant a supplementary group, so this is the workload's or
@@ -179,8 +179,8 @@ statements below, **MindCluster 26.1.0**, the release carried by the A5 host the
 [MindCluster](https://www.hiascend.com/software/mindx-dl).
 
 **Install before GPUStack** — the Ascend NPU driver and firmware, and the Ascend Docker Runtime: per
-[Who injects the devices](#who-injects-the-devices), our allocator emits `ASCEND_VISIBLE_DEVICES` and
-no device node, so that runtime is what turns an allocation into `/dev` entries.
+[Allocator injection](#allocator-injection), our allocator emits `ASCEND_VISIBLE_DEVICES` and no
+device node, so that runtime is what turns an allocation into `/dev` entries.
 
 Register the runtime under the handler name `ascend`, which is the RuntimeClass this chart creates for
 this manufacturer, or set `deviceManager.createRuntimeClasses=false` and attach your own.
@@ -248,11 +248,11 @@ does need a ranktable; this rule covers the single-node case.
 Read against **Cambricon driver 5.10.22** (Neuware SDK 1.15.0) —
 [Driver Install](https://www.cambricon.com/docs/sdk_1.15.0/driver_5.10.22/user_guide/index.html).
 
-**Install before GPUStack** — the Cambricon MLU driver alone. Per [Who injects the
-devices](#who-injects-the-devices), our allocator injects the card's own node and the host's control
+**Install before GPUStack** — the Cambricon MLU driver alone. Per [Allocator
+injection](#allocator-injection), our allocator injects the card's own node and the host's control
 nodes on both the whole-card and the sliced path, so `cntoolkit` is not required. It still sets the
-`CAMBRICON_VISIBLE_DEVICES` a deployment running `cambricon-container-runtime` keys on, naming the same
-cards the injected nodes do.
+`CAMBRICON_VISIBLE_DEVICES` a deployment running `cambricon-container-runtime` keys on, naming the
+same cards the injected nodes do.
 
 
 ### Hygon
@@ -261,10 +261,10 @@ Read against the **Hygon DCU Operator** — its documentation tree publishes onl
 with no pinned semantic version —
 [Overview](https://developer.sourcefind.cn/document/7541efc4-54b1-11f1-8265-0242ac150003).
 
-**Install before GPUStack** — the Hygon DCU driver and firmware, with the device files
-(`/dev/kfd`, `/dev/mkfd`, `/dev/dri/card*`, `/dev/dri/renderD*`) visible on the node. Per [Who injects
-the devices](#who-injects-the-devices), our allocator injects those nodes directly, and the DCU
-Operator ships no container runtime of its own, so no container toolkit is required.
+**Install before GPUStack** — the Hygon DCU driver and firmware, with the device files (`/dev/kfd`,
+`/dev/mkfd`, `/dev/dri/card*`, `/dev/dri/renderD*`) visible on the node. Per [Allocator
+injection](#allocator-injection), our allocator injects those nodes directly, and the DCU Operator
+ships no container runtime of its own, so no container toolkit is required.
 
 **Vendor GPU Operator** — the DCU Operator, driven by a single `DeviceConfig` CR (`kubectl explain
 deviceconfig.spec`); every component below is a field under that one CR, not a separate CRD.
@@ -300,8 +300,8 @@ Read against **ix-GPU-Operator v4.4.0** and **ix-Container-Toolkit v1.1.0** —
 [Helm Chart Install](https://developer.iluvatar.com/docs/generaldocs_ix_gpu_operator?category=%E4%BA%91%E5%8E%9F%E7%94%9F%E4%B8%8E%E9%9B%86%E7%BE%A4%E9%83%A8%E7%BD%B2&manual=generaldocs_k8stools_all) ·
 [Toolkit Install](https://developer.iluvatar.com/docs/generaldocs_ix_container_toolkit?category=%E4%BA%91%E5%8E%9F%E7%94%9F%E4%B8%8E%E9%9B%86%E7%BE%A4%E9%83%A8%E7%BD%B2&manual=generaldocs_k8stools_all).
 
-**Install before GPUStack** — the Iluvatar driver and the ix-Container-Toolkit: per [Who injects the
-devices](#who-injects-the-devices), our allocator emits `IX_VISIBLE_DEVICES` and no device node. The
+**Install before GPUStack** — the Iluvatar driver and the ix-Container-Toolkit: per [Allocator
+injection](#allocator-injection), our allocator emits `IX_VISIBLE_DEVICES` and no device node. The
 two are paired by version — a v4.4.0 driver needs the v1.1.0 toolkit, and the vendor states the two
 must match on host and in-container.
 
@@ -351,8 +351,8 @@ Read against **MetaX Kubernetes GPU Operator v0.15.3** —
 [Helm Chart Install](https://developer.metax-tech.com/api/client/document/preview/1411/k8s/02_start.html) ·
 [Components](https://developer.metax-tech.com/api/client/document/preview/1411/k8s/03_component.html).
 
-**Install before GPUStack** — the MetaX driver and the MXMACA SDK. Per [Who injects the
-devices](#who-injects-the-devices), our allocator injects the three control nodes (`/dev/mxcd`,
+**Install before GPUStack** — the MetaX driver and the MXMACA SDK. Per [Allocator
+injection](#allocator-injection), our allocator injects the three control nodes (`/dev/mxcd`,
 `/dev/mxnd`, `/dev/mxgd`) and each granted accelerator's DRM nodes directly, so no container toolkit
 is required.
 
@@ -400,9 +400,9 @@ Read against **MT GPU Operator v2.1.0** (KUAE Cloud Native) —
 [Overview](https://docs.mthreads.com/cloud-native/cloud-native-doc-online/introduction/) ·
 [Helm Chart Install](https://docs.mthreads.com/cloud-native/cloud-native-doc-online/install_guide#mt-gpu-operator).
 
-**Install before GPUStack** — the Moore Threads driver and the MT Container Toolkit: per [Who injects
-the devices](#who-injects-the-devices), our allocator emits `MTHREADS_VISIBLE_DEVICES` and no device
-node. Both can come from the operator's own `full` mode below.
+**Install before GPUStack** — the Moore Threads driver and the MT Container Toolkit: per [Allocator
+injection](#allocator-injection), our allocator emits `MTHREADS_VISIBLE_DEVICES` and no device node.
+Both can come from the operator's own `full` mode below.
 
 **Vendor GPU Operator** — the MT GPU Operator, installed in one of two modes rather than by a single
 toggle. `full` is the `mt-gpu-operator` Helm chart pair; `core` is a `kubectl apply -f` of plain
@@ -452,8 +452,8 @@ Read against **NVIDIA GPU Operator v26.3.3** —
 [Overview](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/overview.html) ·
 [Helm Chart Install](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html).
 
-**Install before GPUStack** — the NVIDIA driver and the NVIDIA Container Toolkit: per [Who injects the
-devices](#who-injects-the-devices), our allocator emits `NVIDIA_VISIBLE_DEVICES` by default and no
+**Install before GPUStack** — the NVIDIA driver and the NVIDIA Container Toolkit: per [Allocator
+injection](#allocator-injection), our allocator emits `NVIDIA_VISIBLE_DEVICES` by default and no
 device node. The toolkit is what the other channel needs too — it is what writes the node's CDI
 specifications. Both can come from the operator itself.
 
@@ -562,8 +562,8 @@ download centre, installs to `/usr/local/PPU_SDK` by default, and is verified wi
 prints the driver version) and `hgcc --version`. Take HGGCRT v3 rather than v2: it is backward
 compatible with the v2 API.
 
-Per [Who injects the devices](#who-injects-the-devices), our allocator injects T-Head accelerators as
-`/dev` nodes directly, which is the mechanism the vendor's own container guide uses — it isolates a
+Per [Allocator injection](#allocator-injection), our allocator injects T-Head accelerators as `/dev`
+nodes directly, which is the mechanism the vendor's own container guide uses — it isolates a
 container by passing those nodes to `docker run --device`, with no vendor runtime in the path. Which
 nodes a container receives is in [Device Discovery](../modules/devices/discovery.md).
 

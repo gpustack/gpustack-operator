@@ -7,17 +7,17 @@ name in the manifests below, then apply them in that order.
 
 ## Contents
 
-- [The four objects, and why the order is fixed](#the-four-objects-and-why-the-order-is-fixed)
+- [Creation order](#creation-order)
 - [Step 1: the store](#step-1-the-store)
 - [Step 2: the pool and the grant](#step-2-the-pool-and-the-grant)
 - [Step 3: the workload](#step-3-the-workload)
 - [Step 4: high availability](#step-4-high-availability)
-- [Step 5: what a failover keeps](#step-5-what-a-failover-keeps)
-- [The three things that go wrong](#the-three-things-that-go-wrong)
+- [Step 5: post-failover state](#step-5-post-failover-state)
+- [Failure modes](#failure-modes)
 
-## The four objects, and why the order is fixed
+## Creation order
 
-| Object | Scope | Who creates it | What it decides |
+| Object | Scope | Creator | Purpose |
 |---|---|---|---|
 | `KVCacheBackend` | cluster | administrator | which nodes contribute memory, and how much |
 | `KVCachePool` | cluster | administrator | how much of that store may be handed out at all |
@@ -118,7 +118,7 @@ the master; the name is what keeps the two apart.
 
 **A quota ceiling is not a reservation.** It is the most this namespace may hold at once, and going
 over it does not fail a write. See
-[What a full quota actually does](pool.md#what-a-full-quota-actually-does).
+[Full-quota behavior](pool.md#full-quota-behavior).
 
 **The ceiling is enforced because the Step-1 leader carries its tenant ledger, which the default
 gave it.** A backend declared `leader.multiTenancy: false` holds no ledger instead: its pool is
@@ -127,7 +127,7 @@ admitted with a warning, the Binding reports `QuotaGranted=True` with reason `Un
 
 **A multi-tenant master refuses a tenant name absent from its ledger.** An engine that ignores the
 injected tenant then needs a second Binding whose domain is `default`, or that leaves `name` out.
-See [Tenant compatibility](injection.md#tenant-compatibility-is-the-image-owners-responsibility).
+See [Tenant compatibility](injection.md#tenant-compatibility).
 
 ## Step 3: the workload
 
@@ -202,7 +202,7 @@ cost of changing `leader.electionBackend`.
 
 These conditions apply at one replica too; the phase does not summarize them:
 
-| Condition | True means | False means |
+| Condition | True | False |
 |---|---|---|
 | `ElectionObserved` | the Lease names a holder, so an election happened | a ready leader and a holderless Lease — the image, the role binding, or a first campaign still running |
 | `RolloutComplete` | every replica runs the current template and none of the previous one is left | a rollout in flight, or one that has stalled |
@@ -210,7 +210,7 @@ These conditions apply at one replica too; the phase does not summarize them:
 `RolloutComplete` exists because this workload disables the deployment deadline that would normally
 answer it: that deadline requires every replica to be available, and only one ever is here.
 
-## Step 5: what a failover keeps
+## Step 5: post-failover state
 
 **A failover keeps nothing in memory.** A standby holds no data, so the replica that takes over knows
 none of the objects held in member memory and rebuilds from member remounts alone; a single leader
@@ -221,7 +221,7 @@ misses afterwards. Plan for a cold cache after every failover and every leader r
 restoring a snapshot can make the cache serve another key's bytes instead of a miss.
 [High availability](leader.md#high-availability) says why.
 
-## The three things that go wrong
+## Failure modes
 
 **A published upstream store image, under high availability.** No published `kvcacheai/mooncake`
 image carries a leadership backend: the leader answers `UNAVAILABLE_IN_CURRENT_MODE` and runs as a

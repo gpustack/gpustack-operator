@@ -123,7 +123,7 @@ fi
 # the Codex invocation policy beside each skill, and the exclusion list in .opencodereview -- are
 # named here so that a turn editing only one of them gets the target that compares them, rather
 # than only the code gate, which does not read them.
-if paths_match '\.md$|/check-(docs|skills)\.sh$|\.agents/skills/|\.opencodereview/rule\.json'; then
+if paths_match '\.md$|/check-docs\.sh$|^hack/check/skills\.sh$|\.agents/skills/|\.opencodereview/rule\.json|^site/|^hack/(site(-serve)?\.sh|lib/hugo\.sh|check/site-links\.py)$'; then
   run_lint "make lint docs" make lint docs
 fi
 

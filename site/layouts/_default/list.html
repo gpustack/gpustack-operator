@@ -3,7 +3,7 @@
   {{ if not .Content }}
     <h1>{{ partial "page-title.html" . }}</h1>
     <ul>
-      {{ range .Pages.ByTitle }}<li><a href="{{ .RelPermalink }}">{{ partial "page-title.html" . }}</a></li>{{ end }}
+      {{ range partial "ordered-pages.html" . }}<li><a href="{{ .RelPermalink }}">{{ partial "page-title.html" . }}</a></li>{{ end }}
     </ul>
   {{ end }}
 {{ end }}

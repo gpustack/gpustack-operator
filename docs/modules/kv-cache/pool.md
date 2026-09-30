@@ -4,7 +4,7 @@ A `KVCacheBackend` runs a store. A `KVCachePool` publishes one, and a `KVCachePo
 namespace a quota on it under one reuse domain.
 
 **A Binding provisions capacity; it does not enforce access.** See
-[What a Binding does not do](#what-a-binding-does-not-do) before treating it as an isolation boundary.
+[Limitations](#limitations) before treating it as an isolation boundary.
 
 Two vocabularies meet here, as on the backend page. This API says **reuse domain**; the store says
 **tenant**, and every flag, metric and error keeps the vendor's spelling.
@@ -12,13 +12,13 @@ Two vocabularies meet here, as on the backend page. This API says **reuse domain
 ## Contents
 
 - [Two kinds, split by scope](#two-kinds-split-by-scope)
-- [The Binding is where capacity is granted](#the-binding-is-where-capacity-is-granted)
+- [Capacity grants](#capacity-grants)
 - [One Binding, one reuse domain](#one-binding-one-reuse-domain)
 - [The domain is immutable](#the-domain-is-immutable)
-- [The ceiling is a request, the grant is the answer](#the-ceiling-is-a-request-the-grant-is-the-answer)
-- [What a full quota actually does](#what-a-full-quota-actually-does)
+- [Ceiling and grant](#ceiling-and-grant)
+- [Full-quota behavior](#full-quota-behavior)
 - [The quota policy file](#the-quota-policy-file)
-- [When a pool grants zero](#when-a-pool-grants-zero)
+- [Zero grants](#zero-grants)
 - [Operating notes](#operating-notes)
 
 ## Two kinds, split by scope
@@ -58,7 +58,7 @@ a namespace draws on that capacity, and it is the object RBAC can be written aga
 ledger, and one store cannot account for bytes held in another. A pool spanning two backends could
 not answer the question the pool exists to answer.
 
-## The Binding is where capacity is granted
+## Capacity grants
 
 **A namespace without a Binding has no quota on the pool.** An administrator creating the Binding is
 the act that provisions the two things a namespace needs, a ceiling and a registered reuse domain,
@@ -73,7 +73,7 @@ accounts for it.
 > **Why** — a pool name a workload could type would make its quota a spelling question. Here it is an
 > object an admin has to create in that namespace, so it is RBAC-able on its own.
 
-### What a Binding does not do
+### Limitations
 
 **It is not an isolation boundary, and nothing here enforces one.** The store is reached over a
 Service any pod in the cluster can dial, no credential is derived from this object, and nothing ties
@@ -103,7 +103,7 @@ separate Bindings as the thing keeping them apart.
 `spec.domain` declares exactly one reuse domain, and the domain **is** the store's tenant id.
 Everything below is about *registering* a name; using one somebody else registered is a separate
 question, answered in
-[What a Binding does not do](#what-a-binding-does-not-do).
+[Limitations](#limitations).
 
 - **Leaving `name` out registers `default`.** The API server stores an omitted `spec.domain.name`
   as `default`, the store's own tenant for a writer that names none. On a multi-tenant master, the
@@ -121,7 +121,7 @@ question, answered in
   in one default tenant, so a second distinct domain against it is **rejected at admission**.
   Otherwise the Binding is admitted with a **warning**, including when the master's ledger state
   is still unknown. The store's support is unproven, so the image must meet the
-  [engine's tenant compatibility floor](injection.md#tenant-compatibility-is-the-image-owners-responsibility).
+  [engine's tenant compatibility floor](injection.md#tenant-compatibility).
 - **A workload may not *register* its own domain.** It sends a domain name at runtime, because that
   is how the store is addressed, but a multi-tenant master accepts only names an admin already
   registered through a Binding. Every distinct registered name is a new tenant with its own
@@ -140,7 +140,7 @@ grant it observed can serve a write at all.
 
 Every field of `spec.domain` is rejected on update, and so is `spec.poolRef`:
 
-| Field | Why a change is refused |
+| Field | Reason |
 |---|---|
 | `domain.name` | the tenant id; changing it abandons the ledger entry and its bytes under the old name |
 | `domain.blockSize` | a warm cache is read back at the block size it was written at |
@@ -150,7 +150,7 @@ Every field of `spec.domain` is rejected on update, and so is `spec.poolRef`:
 To change any of them, delete the Binding and create a new one; the cache under the old domain is
 not carried over.
 
-### The dtype is handed to the engine
+### Engine dtype
 
 `domain.dtype` is rendered as `--kv-cache-dtype <dtype>`, **verbatim**, on every engine attached
 through the Binding: each `ModelDeployment` role the operator builds the command line of, and each
@@ -171,7 +171,7 @@ without this two engines on one domain can write two element types under one key
   load, so it binds nothing. A Binding stored with it before the refusal stays usable and updatable.
 - **The engine is not free to disagree.** A role naming `--kv-cache-dtype` itself is refused; the
   rule and its exceptions are under
-  [What the operator owns](../model-deployment/deployment.md#what-the-operator-owns).
+  [Operator-owned keys](../model-deployment/deployment.md#operator-owned-keys).
 
 All of it follows the Setting `model-deployment-kv-cache-dtype-owned`, on by default; turning it
 off renders and refuses nothing, as before. See [Settings](../../reference/settings.md).
@@ -183,7 +183,7 @@ off renders and refuses nothing, as before. See [Settings](../../reference/setti
 
 The lists are read from vLLM v0.29.0 and SGLang v0.5.18; the engine image in use is the authority.
 
-## The ceiling is a request, the grant is the answer
+## Ceiling and grant
 
 `spec.quota.ceiling` is what this namespace **asks for**. `status.effectiveQuota` is what the pool
 **granted**, and the two differ whenever the pool is oversubscribed.
@@ -215,7 +215,7 @@ recut below what the domain already holds, and is reported that way.
 > unusable. The field is required rather than defaulted because a guessed ceiling is a number nobody
 > chose.
 
-## What a full quota actually does
+## Full-quota behavior
 
 **A quota is not an admission barrier. It is the point at which the store starts discarding this
 domain's own objects to make room for the next write.** Measured on a real store, not inferred:
@@ -240,7 +240,7 @@ admit new ones. The order is not predictable: the store scans from an arbitrary 
 stops as soon as it has freed enough, so a recently written object can go before an older one, and a
 hit rate cannot be reasoned about from age.
 
-### Eviction is not configured or reported here
+### Eviction
 
 Neither kind has an eviction field, and neither reports an eviction figure.
 
@@ -279,7 +279,7 @@ fallback.
 `QuotaPolicyWritable` on the pool reports whether the operator can still write that file. False means
 ceilings have stopped propagating, whatever the rest of the status says.
 
-## When a pool grants zero
+## Zero grants
 
 A pool whose backend has **nothing mounted** has nothing to allocate. Every domain's effective quota
 is then zero and no write can succeed, so this is reported rather than left to look healthy:
@@ -383,7 +383,7 @@ team-a   shared-dram   qwen-72b-v2   450Gi       280Gi    Ready   6d
 ```
 
 A grant well below the ceiling is oversubscription, which is legitimate and reported. A grant of
-zero is the [When a pool grants zero](#when-a-pool-grants-zero) case.
+zero is the [Zero grants](#zero-grants) case.
 
 ---
 

@@ -6,10 +6,10 @@ on a server role; on a prefill/decode pair, where each half is chosen separately
 ## Contents
 
 - [Each router's default](#each-routers-default)
-- [Shared prefixes land on one replica](#shared-prefixes-land-on-one-replica)
+- [Prefix affinity](#prefix-affinity)
 - [Switching to round robin](#switching-to-round-robin)
 - [llm-d-router takes no policy flag](#llm-d-router-takes-no-policy-flag)
-- [Seeing where requests went](#seeing-where-requests-went)
+- [Per-worker routing metrics](#per-worker-routing-metrics)
 
 ## Each router's default
 
@@ -17,7 +17,7 @@ on a server role; on a prefill/decode pair, where each half is chosen separately
 candidate for each request.** The operator renders no policy flag for the first two, so each runs its
 upstream default:
 
-| `spec.router.name` | Default | What picks the replica |
+| `spec.router.name` | Default | Replica selection |
 |---|---|---|
 | `vllm-router` | `cache_aware` | The replica whose past requests share the longest prefix with this one, when that share is above `--cache-threshold` (`0.3`); below it, the replica with the smallest record. Once the busiest replica has more than `--balance-abs-threshold` (`64`) requests over the idlest and more than `--balance-rel-threshold` (`1.5`) times as many, the least-loaded replica instead |
 | `sglang-gateway` | `cache_aware` | The same algorithm, with the same three defaults |
@@ -28,7 +28,7 @@ Both `cache_aware` routers log the policy once at startup, as `policy: CacheAwar
 `sgl-project/sglang@gateway-v0.3.1`, the versions `pack/llm-router/Dockerfile` builds; the profile is
 what `pkg/worker/kvcache/router/router.go` renders.
 
-## Shared prefixes land on one replica
+## Prefix affinity
 
 **Under `cache_aware`, requests that share a long prefix and arrive one after another all go to one
 replica, and the others stay idle.** That is the policy working, not a fault: the replica that served
@@ -73,14 +73,14 @@ under each router, 120 requests with none failing, 60 on each replica. `vllm-rou
 in `vllm_router_policy_decisions_total{policy="round_robin"}`, 60 per replica, and `sglang-gateway`
 in `smg_worker_selection_total{policy="round_robin"}`, 120 in all.
 
-`router.extraArgs` is [editable](deployment.md#which-fields-are-the-deployments-identity), so a
+`router.extraArgs` is [editable](deployment.md#deployment-identity-fields), so a
 running deployment can switch as well. The router Pod is then replaced, and the new one starts with
 no record of earlier prefixes. Only a flag set at creation has been run.
 
 **The value is each project's own, and the router checks it, not admission**, so a misspelled one
 stops the router at startup:
 
-| `spec.router.name` | Values `--policy` takes |
+| `spec.router.name` | `--policy` values |
 |---|---|
 | `vllm-router` | `random`, `round_robin`, `cache_aware`, `power_of_two`, `consistent_hash`, `rendezvous_hash` |
 | `sglang-gateway` | `random`, `round_robin`, `cache_aware`, `power_of_two`, `prefix_hash`, `manual` |
@@ -95,13 +95,13 @@ those has been run either.
 configuration document the operator renders and mounts, and `--config-file`, which would point the
 router at another one, is refused there. No field sets them either.
 
-## Seeing where requests went
+## Per-worker routing metrics
 
 The deployment's [metrics snapshot](metrics.md) does not say which replica served a
 request. Each router's own `/metrics` does, for the series below, all seen exported in runs. A
 `worker` label is the worker's URL, which carries its Pod address.
 
-| `spec.router.name` | Series | What it shows |
+| `spec.router.name` | Series | Meaning |
 |---|---|---|
 | `vllm-router` | `vllm_router_processed_requests_total{worker}` | requests sent to each worker, in both modes |
 | `vllm-router` | `vllm_router_policy_decisions_total{policy,worker}` | picks each policy made, per worker |

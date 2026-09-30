@@ -91,17 +91,15 @@ jobs:
       # the 20200816 on a current macOS, so a feature added between the two still passes here.
       - name: Setup onetrueawk
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends original-awk
+      - name: Setup Go for Hugo
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - name: Check
         run: |
           sudo update-alternatives --set awk /usr/bin/original-awk
           awk --version 2>&1 | head -1
           make lint docs
-      - name: Setup Go for Hugo
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Build documentation site
-        run: make site
       # The local check above never resolves an external URL — it only follows relative paths and
       # in-file anchors — which is how a 404 in PULL_REQUEST_TEMPLATE.md survived unnoticed. This step
       # fetches them, and it lives here rather than in "make lint docs" so the local check keeps its

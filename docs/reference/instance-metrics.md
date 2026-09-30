@@ -8,17 +8,17 @@ calculation code.
 
 - [The subresource](#the-subresource)
 - [The sample](#the-sample)
-- [One accelerator entry, whatever the mode](#one-accelerator-entry-whatever-the-mode)
-- [Where each figure comes from](#where-each-figure-comes-from)
-- [Which manufacturers measure a share](#which-manufacturers-measure-a-share)
-- [Why a share's figure is absent](#why-a-shares-figure-is-absent)
+- [One entry per grant](#one-entry-per-grant)
+- [Data sources](#data-sources)
+- [Measured figures by manufacturer](#measured-figures-by-manufacturer)
+- [Reasons for absent figures](#reasons-for-absent-figures)
 - [Scoping and authorization](#scoping-and-authorization)
 - [Degradation rules](#degradation-rules)
 - [The node exporter](#the-node-exporter)
 - [Metric families](#metric-families)
-- [Querying it](#querying-it)
-- [Scraping it](#scraping-it)
-- [Restricting who may scrape](#restricting-who-may-scrape)
+- [Querying the metrics](#querying-the-metrics)
+- [Scraping the exporter](#scraping-the-exporter)
+- [Restricting scrape access](#restricting-scrape-access)
 - [Limits](#limits)
 
 ## The subresource
@@ -59,7 +59,7 @@ are **rounded up**: a sub-1 MiB working set reads `1`, never `0`.
 An `accelerators[]` entry carries `id`, `mode`, `memoryTotalMiB`, `memoryUsedMiB`,
 `memoryUtilizationPercent`, `coresUtilizationPercent`, `temperatureCelsius`, `powerUsageWatts`
 and `unhealthy`. Every figure is **the Instance's own**, whatever the allocation did to the card;
-see [One accelerator entry, whatever the mode](#one-accelerator-entry-whatever-the-mode).
+see [One entry per grant](#one-entry-per-grant).
 
 Two caveats come with the pairs:
 
@@ -76,7 +76,7 @@ Two caveats come with the pairs:
 > sides of one percentage. The kubelet evicts on the pod-level aggregate, so that aggregate is
 > the only numerator the limit can be read against, and it is the one `storageUsedMiB` carries.
 
-## One accelerator entry, whatever the mode
+## One entry per grant
 
 Every mode reports the same fields with the same meaning. An Instance holding a whole device
 reads the device's own figures, because the device is what it was granted; one holding a **logical
@@ -133,7 +133,7 @@ Four properties are worth knowing before reading a number off an entry:
 > to consume: a reader had to know the mode to know which of two places held its own number. The
 > card-wide view belongs to a node- or device-scoped surface, not to the per-Instance one.
 
-## Where each figure comes from
+## Data sources
 
 - CPU / memory / storage: the kubelet's stats summary, read through the API-server node
   proxy (`/api/v1/nodes/<node>/proxy/stats/summary`); no Prometheus or metrics-server needed. The
@@ -153,7 +153,7 @@ Four properties are worth knowing before reading a number off an entry:
   manufacturer's accelerators, so an allocation spanning two is read from both, never
   substituted. Only accelerators in the pod's allocation annotation are returned.
 
-## Which manufacturers measure a share
+## Measured figures by manufacturer
 
 A carved share's usage exists only where the manufacturer's own library answers a **per-process**
 query. So the totals are available on every backend that can carve a share, while the measurements
@@ -214,7 +214,7 @@ vary by what the vendor exposes, and by whether we have been able to run it agai
   than that field therefore reports an absence with a reason until its Pod is allocated again; the
   parent card's figures are every tenant's, so reporting them as this Instance's would be worse.
 
-## Why a share's figure is absent
+## Reasons for absent figures
 
 An absent figure always has a reason, and the reason is discoverable: on the exporter's
 [capability gauge](#metric-families) and in the Device Manager's log under
@@ -351,7 +351,7 @@ One more family explains the absences, and is the only one here that carries **n
 
 `entry_point` is `memory` or `cores`, because a driver commonly serves process memory while refusing
 process utilization; `reason` is empty when the query answered and otherwise one of the
-[reasons above](#why-a-shares-figure-is-absent). It is a property of the node's driver and one of its
+[reasons above](#reasons-for-absent-figures). It is a property of the node's driver and one of its
 cards rather than of any tenant, so two Instances sharing a card have one answer between them;
 giving it Instance labels would publish that one answer twice.
 
@@ -369,7 +369,7 @@ target.
 > surfaces reporting the same figure can never disagree by a rounding step. The unit is in every
 > name, so nothing is ambiguous, only unidiomatic.
 
-## Querying it
+## Querying the metrics
 
 "What is this Instance using" is **one metric name**, in every mode:
 
@@ -406,7 +406,7 @@ promised.
 > mistake: it made the metric name depend on the allocation, so every dashboard needed a fallback
 > and every `sum()` risked counting a carved Instance twice.
 
-## Scraping it
+## Scraping the exporter
 
 The Device Manager Service carries the conventional annotations: `prometheus.io/scrape`,
 `prometheus.io/port` (the **secure port**, not the Service's 443), `prometheus.io/path` and
@@ -453,7 +453,7 @@ Two things are worth knowing before adapting it:
   pod, which is what the per-node series need; a Service-level scrape would land on one pod at
   random per request, since the Service load-balances across every node's Device Managers.
 
-## Restricting who may scrape
+## Restricting scrape access
 
 `/metrics` is **unauthenticated**, and it lists every Instance running on the node (names,
 namespaces, declared sizes, live usage and accelerator IDs) to anything that can reach port

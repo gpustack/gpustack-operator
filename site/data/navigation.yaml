@@ -1,0 +1,134 @@
+groups:
+  - name: Getting started
+    path: /docs/getting-started/
+  - name: Devices Manager
+    path: /docs/modules/devices/
+  - name: RDMA Manager
+    path: /docs/modules/rdma/
+  - name: Topology Aware
+    path: /docs/modules/topology/
+  - name: KV Cache
+    path: /docs/modules/kv-cache/
+  - name: Model Delivery
+    path: /docs/modules/model-delivery/
+  - name: Model Deployment
+    path: /docs/modules/model-deployment/
+  - name: GPU Instances
+    path: /docs/modules/instances/
+  - name: Operations
+    path: /docs/operate/
+  - name: Reference
+    path: /docs/reference/
+  - name: Contributing
+    path: /docs/contribute/
+order:
+  /docs/getting-started/:
+    - architecture
+    - vendor-prerequisites
+    - walkthrough
+  /docs/modules/devices/:
+    - preflight
+    - discovery
+    - requests
+    - scheduling
+    - admission
+    - nvidia-mig
+    - hygon-mig
+    - thead-mig
+  /docs/modules/rdma/:
+    - network-topology
+    - operations
+  /docs/modules/topology/:
+    - scheduling
+    - operations
+  /docs/modules/kv-cache/:
+    - walkthrough
+    - backend
+    - pool
+    - injection
+    - leader
+    - local-disk-tier
+    - disk-heavy-nodes
+  /docs/modules/model-delivery/:
+    - artifact
+    - image-source
+    - prefetch
+    - node-store
+    - peer-sync
+    - operations
+    - views
+  /docs/modules/model-deployment/:
+    - deployment
+    - engine-versions
+    - prefill-decode
+    - routing
+    - metrics
+    - status
+    - shutdown
+  /docs/operate/:
+    - installation-modes
+    - high-availability
+    - migration
+  /docs/operate/migration/:
+    - from-v0.5
+    - to-subcharts
+    - kv-cache-dtype
+    - troubleshooting
+  /docs/reference/:
+    - commands
+    - settings
+    - instance-type-unit-resources
+    - instance-metrics
+  /docs/contribute/:
+    - development
+    - internals
+labels:
+  /docs/getting-started/architecture/: Architecture
+  /docs/getting-started/vendor-prerequisites/: Prerequisites
+  /docs/getting-started/walkthrough/: Walkthrough
+  /docs/modules/devices/preflight/: Preflight
+  /docs/modules/devices/discovery/: Discovery
+  /docs/modules/devices/requests/: Resource requests
+  /docs/modules/devices/scheduling/: Scheduling
+  /docs/modules/devices/admission/: Admission
+  /docs/modules/devices/nvidia-mig/: NVIDIA MIG
+  /docs/modules/devices/hygon-mig/: Hygon MIG
+  /docs/modules/devices/thead-mig/: T-Head MIG
+  /docs/modules/rdma/network-topology/: Interface discovery
+  /docs/modules/rdma/operations/: Operations
+  /docs/modules/topology/scheduling/: Scheduling
+  /docs/modules/topology/operations/: Operations
+  /docs/modules/kv-cache/walkthrough/: Walkthrough
+  /docs/modules/kv-cache/backend/: Backends
+  /docs/modules/kv-cache/pool/: Pools and bindings
+  /docs/modules/kv-cache/injection/: Pod injection
+  /docs/modules/kv-cache/leader/: Leader
+  /docs/modules/kv-cache/local-disk-tier/: Local disk tier
+  /docs/modules/kv-cache/disk-heavy-nodes/: Disk-heavy nodes
+  /docs/modules/model-delivery/artifact/: Artifacts
+  /docs/modules/model-delivery/image-source/: Image sources
+  /docs/modules/model-delivery/prefetch/: Prefetch and quotas
+  /docs/modules/model-delivery/node-store/: Node cache
+  /docs/modules/model-delivery/peer-sync/: Peer sync
+  /docs/modules/model-delivery/operations/: Operations
+  /docs/modules/model-delivery/views/: API reference
+  /docs/modules/model-deployment/deployment/: Configuration
+  /docs/modules/model-deployment/engine-versions/: Engine versions
+  /docs/modules/model-deployment/prefill-decode/: Prefill and decode
+  /docs/modules/model-deployment/routing/: Routing
+  /docs/modules/model-deployment/metrics/: Metrics
+  /docs/modules/model-deployment/status/: Status
+  /docs/modules/model-deployment/shutdown/: Shutdown
+  /docs/operate/installation-modes/: Installation
+  /docs/operate/high-availability/: High availability
+  /docs/operate/migration/: Upgrades
+  /docs/operate/migration/from-v0.5/: From v0.5
+  /docs/operate/migration/to-subcharts/: Subchart migration
+  /docs/operate/migration/kv-cache-dtype/: Cache data types
+  /docs/operate/migration/troubleshooting/: Troubleshooting
+  /docs/reference/commands/: Commands
+  /docs/reference/settings/: Settings
+  /docs/reference/instance-type-unit-resources/: Resource presets
+  /docs/reference/instance-metrics/: Instance metrics
+  /docs/contribute/development/: Development
+  /docs/contribute/internals/: Internals

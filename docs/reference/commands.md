@@ -6,8 +6,8 @@ between them.
 
 ## Contents
 
-- [The commands at a glance](#the-commands-at-a-glance)
-- [Which one-shot to run](#which-one-shot-to-run)
+- [Command summary](#command-summary)
+- [Choosing a one-shot command](#choosing-a-one-shot-command)
 - [Global flags](#global-flags)
 - [worker](#worker)
 - [worker-gateway](#worker-gateway)
@@ -17,7 +17,7 @@ between them.
 - [device-manager monitor](#device-manager-monitor)
 - [device-manager preflight](#device-manager-preflight)
 
-## The commands at a glance
+## Command summary
 
 | Command | Alias | Shape | Who runs it |
 |---|---|---|---|
@@ -29,11 +29,11 @@ between them.
 | `device-manager monitor` | `dm monitor` | one-shot | a person, on a node |
 | `device-manager preflight` | `dm preflight` | one-shot | a person, on a node |
 
-## Which one-shot to run
+## Choosing a one-shot command
 
 The three one-shots answer three different questions, and only one of them acts on the node.
 
-| Question | Command | What it does to the node |
+| Question | Command | Node effect |
 |---|---|---|
 | What accelerators are here, in full? | `detect` | nothing — a pure read |
 | What are they doing right now? | `monitor` | nothing — a pure read |
@@ -56,7 +56,7 @@ and nothing more, because the isolation that injection establishes is the thing 
 
 Every command accepts these. They come from klog and are omitted from the per-command tables below.
 
-| Flag | What it does |
+| Flag | Effect |
 |---|---|
 | `-v` | log verbosity, `0` unless you pass one. The DaemonSet runs at `-v=2`; `-v=3` adds the per-decision lines, including why a container runtime did or did not resolve |
 | `--vmodule` | per-file verbosity, `pattern=N` comma separated |
@@ -74,7 +74,7 @@ the applications a cluster needs.
 Runs as the operator Deployment. Flags below are the ones that change behaviour rather than tune a
 connection; see [Settings](settings.md) for what is configured through the `Setting` CR instead.
 
-| Flag | Default | What it does |
+| Flag | Default | Effect |
 |---|---|---|
 | `--manufacturer` | all nine | which manufacturers to detect |
 | `--disable-applications` | none | applications to skip installing, or `*` for all. See [Installation Modes](../operate/installation-modes.md) |
@@ -101,7 +101,7 @@ gpustack-operator worker --secure-port=31443 --disable-applications=kueue
 Aggregates resources from upstream clusters and mirrors them for `worker` to read. Runs beside
 `worker`; by default the two speak over a unix socket rather than a port.
 
-| Flag | Default | What it does |
+| Flag | Default | Effect |
 |---|---|---|
 | `--bind-unix-path` | `/var/lib/gpustack/gpustack-operator-worker-gateway.sock` | the socket to serve on. When set, `--bind-address` and `--secure-port` are ignored |
 | `--worker-conn-mode` | `gpustack-api` | how the worker is reached: `gpustack-api` or `loopback` |
@@ -124,7 +124,7 @@ allocated containers.
 Runs as the Device Manager DaemonSet. The four `--no-*` mode flags are how a node is restricted to a
 subset of the allocation modes its hardware would otherwise offer.
 
-| Flag | Default | What it does |
+| Flag | Default | Effect |
 |---|---|---|
 | `--manufacturer` | all nine | which manufacturers to detect |
 | `--no-sliced` | `false` | do not create logically sliced devices |
@@ -151,7 +151,7 @@ status. See [Node Model Store](../modules/model-delivery/node-store.md).
 Runs as the Model Manager DaemonSet beside the `node-driver-registrar` sidecar. Its configuration
 comes from its node's `NodeModelStore.spec`, not from flags.
 
-| Flag | Default | What it does |
+| Flag | Default | Effect |
 |---|---|---|
 | `--node-name` | — | the node it runs on, also its `NodeModelStore`'s name |
 | `--kubelet-dir` | `/var/lib/kubelet` | kubelet's root directory, whose pods directory holds the mount targets |
@@ -172,7 +172,7 @@ started, and no flag changes that.
 The output is the `Devices` CRD's own `spec.groups`, so it can be compared directly against what the
 cluster recorded; `kubectl get devices <node> -o yaml` beside it is a diff.
 
-| Flag | Default | What it does |
+| Flag | Default | Effect |
 |---|---|---|
 | `--manufacturer` | all nine | which manufacturers to detect |
 | `--no-pci-check` | `false` | skip the PCI check |
@@ -253,7 +253,7 @@ This is the only command an operator runs by hand that acts on the node. See
 [Preflight](../modules/devices/preflight.md) for the procedure (what to mount, what it starts and
 removes, how to read each row).
 
-| Flag | Default | What it does |
+| Flag | Default | Effect |
 |---|---|---|
 | `--manufacturer` | all nine | which manufacturers to ask about. Every one asked about is reported, including those nothing is read for |
 | `--dry-run` | `false` | print the container steps instead of taking them, and write nothing to the host. Each answer reports the complete invocation — and, because nothing was written, names the staging it would have done: the library tree, and whatever the manufacturer's responder renders. Both have to exist before the printed command runs |
@@ -262,7 +262,7 @@ removes, how to read each row).
 | `--runtime` | resolved | the host runtime to drive, overriding what was resolved. One of `docker`, `nerdctl`, `ctr`; anything else is refused before the pass starts. An escape hatch: one of the three that the host does not carry drops every container step to being emitted |
 | `--no-pci-check` | `false` | skip the PCI check |
 
-### The three answers
+### Row states and depths
 
 Each row carries a state, a depth and, where a container ran, the evidence it ran on.
 
@@ -272,13 +272,13 @@ Each row carries a state, a depth and, where a container ran, the evidence it ra
 | `not-declared` | the accelerator does not offer it, so there is nothing to check | 0 |
 | `unavailable` | it is offered and this pass did not establish it | **non-zero** |
 
-| Depth | How the answer was reached |
+| Depth | Method |
 |---|---|
 | `declared` | read from the driver |
 | `simulated` | the allocator produced the injection, and it was not run |
 | `measured` | a container ran with that injection and its output was read |
 
-### A measured row
+### A measured example
 
 Taken from a run on two RX 7800 XT cards:
 
@@ -306,7 +306,7 @@ The same row under `--dry-run` carries the `command` and no `evidence`, and its 
 the probe allocates nothing: the injection sets a cap and no container was observed under it. A row
 is `measured` only where something was read back, never where the intent alone is known.
 
-### Where the runtime comes from
+### Runtime resolution
 
 Resolved from the kubelet's own CRI endpoint wherever the host names one, because that is what
 starts a container on this node in production. A host that names none (a bare machine, or a

@@ -5,15 +5,15 @@ count; kubelet decides which endpoints a container receives.
 
 ## Contents
 
-- [Request an interface](#request-an-interface)
-- [Inspect the node](#inspect-the-node)
+- [RDMA requests](#rdma-requests)
+- [Interface discovery](#interface-discovery)
 
-## Request an interface
+## RDMA requests
 
 [RDMA Operations](operations.md) covers the resource keys, endpoint counts and kubelet
 TopologyManager policy. It also explains why Kueue admission alone does not reserve an interface.
 
-## Inspect the node
+## Interface discovery
 
 [Network Topology](network-topology.md) describes the interface inventory, link
 checks and labels the Device Manager reports.

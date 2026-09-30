@@ -5,15 +5,15 @@ those domains.
 
 ## Contents
 
-- [Understand placement](#understand-placement)
-- [Configure a source](#configure-a-source)
+- [Placement and scheduling](#placement-and-scheduling)
+- [Topology sources](#topology-sources)
 
-## Understand placement
+## Placement and scheduling
 
 [Topology-Aware Scheduling](scheduling.md) explains topology
 profiles, Kueue Topologies and how a replica asks to stay in one domain.
 
-## Configure a source
+## Topology sources
 
 [Topology-Aware Scheduling Operations](operations.md) covers inventory
 sources, verification and diagnosis of a Pending group.

@@ -20,7 +20,7 @@ The mode applies to the whole node. Once partitioned, that node serves only part
 - [Enabling partitioning on a node](#enabling-partitioning-on-a-node)
 - [Disabling partitioning on a node](#disabling-partitioning-on-a-node)
 - [Node reboot recovery](#node-reboot-recovery)
-- [What GPUStack Operator does NOT do](#what-gpustack-operator-does-not-do)
+- [Operator boundaries](#operator-boundaries)
 
 ## Prerequisites
 
@@ -242,7 +242,7 @@ The operator needs no recovery step of its own. Ownership records whose Pods are
 on the next pass, and a record naming an instance the driver no longer has is refused rather than
 acted on.
 
-## What GPUStack Operator does NOT do
+## Operator boundaries
 
 - **Enable, disable or reconfigure the mode.** It is node-wide, it is refused while the device
   manager is running, and turning it on with nothing carved makes every card unusable. It is a

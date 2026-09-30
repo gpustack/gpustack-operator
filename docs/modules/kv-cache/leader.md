@@ -142,7 +142,7 @@ use the leader Service even if `memberAddressing: Lease` is set.
 **A published `kvcacheai/mooncake` image cannot do this, on either side.** Leadership backend
 availability is a compile-time switch and every option ships **off**:
 
-| role on a published image | what it does |
+| Role | Behavior |
 |---|---|
 | leader | answers `UNAVAILABLE_IN_CURRENT_MODE`, runs as a permanent standby |
 | member | answers `Invalid HA backend entry`, exits, CrashLoopBackOffs |
@@ -223,7 +223,7 @@ the Service resolves to the serving leader. With `memberAddressing: Lease` and a
 the member instead gets `k8s://<namespace>/<lease>` and reads the current holder itself. Without an
 election, both values render the Service address.
 
-| value | what a member is given | what it pays |
+| Value | Member receives | Cost |
 |---|---|---|
 | `Lease` | the Lease's coordinates, read by the client itself | the member must reach the API server, so its image must carry the leadership backend |
 | `Service` (default) | `<backend>-leader.<namespace>.svc:50051` | endpoint propagation after an election |

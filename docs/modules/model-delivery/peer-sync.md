@@ -10,10 +10,10 @@ node can materialize a resolved artifact while the hub is unreachable.
 ## Contents
 
 - [The switch and the port](#the-switch-and-the-port)
-- [What a peer serves](#what-a-peer-serves)
-- [Who may ask](#who-may-ask)
-- [How a cold node pulls](#how-a-cold-node-pulls)
-- [What the status and metrics say](#what-the-status-and-metrics-say)
+- [Peer endpoints](#peer-endpoints)
+- [Peer authentication](#peer-authentication)
+- [Cold-node pull](#cold-node-pull)
+- [Status and metrics](#status-and-metrics)
 - [Cost model](#cost-model)
 
 ## The switch and the port
@@ -24,14 +24,14 @@ node can materialize a resolved artifact while the hub is unreachable.
 | chart (`L1`) | `modelManager.peerSync.maxServingStreams` / `streamsPerSource` | `8` / `4` | the serving and pulling concurrency limits |
 | Settings (`L2`) | `model-store-peer-sync` | `true` | whether a node's plugin may pull from peers; `false` keeps the listener but pulls from the hub only |
 
-## What a peer serves
+## Peer endpoints
 
 `GET /peer/v1/trees/{hex}` answers a published tree's manifest (its digest and every file's
 path, size and digest, stored by the publish itself); `GET /peer/v1/trees/{hex}/files/{path}`
 answers one file by HTTP byte range. Trees published before manifests were stored are not
 listing sources. At most `maxServingStreams` file answers run at once.
 
-## Who may ask
+## Peer authentication
 
 A request carries the pulling plugin's projected ServiceAccount token (audience
 `gpustack-model-peer`); the serving plugin checks it with a TokenReview and admits only the
@@ -42,7 +42,7 @@ The NetworkPolicy the chart ships (default on) drops every other source: a tenan
 connection to the port times out rather than being answered. On CNIs where a `hostNetwork`
 tenant bypasses podSelector policies, the token check remains the gate.
 
-## How a cold node pulls
+## Cold-node pull
 
 Discovery lists the ready nodes holding the digest (and skips plugins without the peer port);
 the candidate's stored manifest is reassembled and bound to the artifact's resolved root digest
@@ -53,7 +53,7 @@ Bytes are hashed in the download stream and checkpointed every 64 MiB, so a peer
 mid-file resumes from the last checkpoint, and the hub fallback re-pulls only the bytes after it.
 One source at a time; scheduling segments across several peers is a deliberate extension point.
 
-## What the status and metrics say
+## Status and metrics
 
 `NodeModelStore.status.models[].source` names where the bytes came from (`Hub` or `Peer`, the
 majority kind), and the plugin's `download_bytes_total` metric splits `hub` from `peer`. On a

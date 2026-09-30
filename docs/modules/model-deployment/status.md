@@ -141,7 +141,7 @@ described with the artifact it reports on, in [Model Artifact](../model-delivery
 
 **`DomainRegistered`** — whether the referenced Binding resolved and its domain was read.
 
-| Value | Reason | Where it sends you |
+| Value | Reason | Action |
 |---|---|---|
 | `True` | `Registered` | nowhere; the domain in `status.kvCache` is current |
 | `True` | `NotApplicable` | nowhere; the deployment declares no `kvCache`, so there is no Binding to resolve |

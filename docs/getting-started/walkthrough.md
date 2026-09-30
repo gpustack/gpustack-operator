@@ -27,7 +27,7 @@ walkthrough](../modules/devices/nvidia-mig.md#walkthrough-three-mig-configuratio
 - [3. Requesting a logical sliced GPU](#3-requesting-a-logical-sliced-gpu)
 - [4. Managing a custom InstanceType](#4-managing-a-custom-instancetype)
 - [5. Enabling CPU-manufacturer awareness](#5-enabling-cpu-manufacturer-awareness)
-- [6. Pinning an Instance to a node, and mounting more than the workspace](#6-pinning-an-instance-to-a-node-and-mounting-more-than-the-workspace)
+- [6. Pinning an Instance to a node and adding volumes](#6-pinning-an-instance-to-a-node-and-adding-volumes)
 
 ## The cluster
 
@@ -607,7 +607,7 @@ Turning it back off collapses the layer again, still without touching a flavor.
 
 ---
 
-## 6. Pinning an Instance to a node, and mounting more than the workspace
+## 6. Pinning an Instance to a node and adding volumes
 
 An Instance normally lets the scheduler pick any node its pool covers. `spec.nodeName` narrows that to
 one, and `spec.additionalVolumes` mounts paths beside the workspace — a shared dataset, one ConfigMap

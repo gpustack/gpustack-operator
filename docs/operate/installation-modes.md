@@ -8,8 +8,8 @@ the operator chart's `values.yaml`.
 
 - [Chart mode and image mode](#chart-mode-and-image-mode)
 - [The two modes are exclusive](#the-two-modes-are-exclusive)
-- [Three switches worth calling out](#three-switches-worth-calling-out)
-- [The chart deploys workloads; the worker applies the custom resources](#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)
+- [Notable switches](#notable-switches)
+- [Chart-deployed and worker-applied resources](#chart-deployed-and-worker-applied-resources)
 
 ## Chart mode and image mode
 
@@ -39,7 +39,7 @@ also renders the overlay's switches.
 `gpustack-cpu-info` is in neither set: that NodeFeatureRule has **no `enabled` switch**, since the chain
 starts at it. Every mode needs it, including `node-feature-discovery.enabled=false`, the supported way
 to run against the cluster's own NFD. That is why the worker applies it rather than the chart (see
-[below](#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)).
+[below](#chart-deployed-and-worker-applied-resources)).
 
 Topograph is also absent from the image-mode application map. It is an optional provider stack,
 defaults off, and requires provider credentials and security choices that an image-mode overlay must
@@ -63,7 +63,7 @@ disabling a component here and in `worker.disableApplications` in step, at every
 checking it. Wherever this chart deploys the worker, `worker.disableApplications` keeps the `*`; image
 mode is for clusters where no chart deploys it.
 
-## Three switches worth calling out
+## Notable switches
 
 Because they change what a mode installs:
 
@@ -75,7 +75,7 @@ Because they change what a mode installs:
   then seeds no `Node` delivery; see [Model Store Operations](../modules/model-delivery/operations.md#enable-it).
 - `worker.enabled=false` — the chart deploys only the applications, what image mode's overlay sets.
 
-## The chart deploys workloads; the worker applies the custom resources
+## Chart-deployed and worker-applied resources
 
 A chart cannot own a custom resource whose CRD it does not ship. Helm REST-maps the *entire*
 manifest before creating anything, so an unserved kind fails the whole install rather than degrading.
@@ -92,7 +92,7 @@ Both AdmissionChecks are created in chart mode and image mode, including when ap
 disabled. You do not create them manually. `pkg/worker/worker.go` installs them during `Prepare`;
 their controllers mark them `Active` before queues reference them.
 
-| AdmissionCheck | Purpose | Queues that reference it once `Active` |
+| AdmissionCheck | Purpose | Referencing queues |
 | --- | --- | --- |
 | `gpustack-node-devices` | Checks whether individual accelerators can satisfy a request | Accelerated queues while `instance-type-derived-from-node` is enabled |
 | `gpustack-model-deployment-joint` | Coordinates admission across a ModelDeployment's roles | Every operator-managed queue, including CPU queues and queues for administrator-authored InstanceTypes |

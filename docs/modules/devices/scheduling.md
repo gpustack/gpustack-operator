@@ -8,7 +8,7 @@ a workload then passes.
 ## Contents
 
 - [Stage 3: capacity profiling](#stage-3-capacity-profiling)
-- [The unit spec is not derived from node capacity](#the-unit-spec-is-not-derived-from-node-capacity)
+- [Unit spec defaults](#unit-spec-defaults)
 - [Stage 4: the Kueue chain](#stage-4-the-kueue-chain)
 - [Naming and grouping](#naming-and-grouping)
 - [The controllers](#the-controllers)
@@ -31,9 +31,10 @@ Three Worker controllers turn Node + `Devices` signals into the capacity labels 
 
 For every accelerator model whose `.sliced` resource is present and greater than zero in the Node
 capacity, the worker publishes four `.sliced.*` counting keys. The default scheduler and the kubelet
-consume them at admission:
+consume them at admission. Both capacity tables below list suffixes of
+`acceleratable.${prefix}${aKey}.…` labels:
 
-| Label suffix (`acceleratable.${prefix}${aKey}.…`) | Value |
+| Label suffix | Value |
 |----------------------------------------------------|--------|
 | `.sliced.units`             | `count × M` (M = 1,600,000 credit units per whole accelerator) |
 | `.sliced.cores-percentage`  | `Σ per-accelerator slices × 100` (compute overcommit) or `count × 100` (compute non-overcommittable) |
@@ -46,7 +47,7 @@ The `.partitioned.*` keys follow the same rule for models whose `.partitioned` r
 and greater than zero. They are counted over the disjoint population of accelerators in a
 partitioning mode, so no accelerator counts in both families:
 
-| Label suffix (`acceleratable.${prefix}${aKey}.…`) | Value |
+| Label suffix | Value |
 |----------------------------------------------------|--------|
 | `.partitioned.units`               | `partitioned accelerators × M` (a partitioned accelerator is worth a whole accelerator's credits, exactly as a logically sliceable one is) |
 | `.partitioned.<kind>-<profile>`    | `Σ (allocated + remaining)` instances of that profile over the node's partitioned accelerators |
@@ -122,7 +123,7 @@ conditionally two informational keys. No operator-generated flavor pins any of t
 is the one meant for a workload's own nodeSelector, and withholding it is how a node with no usable
 link stops being selected by one.
 
-See [Network Topology](../rdma/network-topology.md#the-three-node-labels-and-what-a-label-can-carry) for
+See [Network Topology](../rdma/network-topology.md#the-three-node-labels) for
 which link states count as usable, when each informational key is present, and why the accelerator
 interconnect gets no label at all.
 
@@ -160,7 +161,7 @@ The pin stays on the Workload and never reaches the Pod; why that must hold is u
 > `feature.` prefixes other controllers watch, so a value moving on every allocation wakes none of
 > them. The node-topology and topology-source watchers ignore an update that moved only fit labels.
 
-## The unit spec is not derived from node capacity
+## Unit spec defaults
 
 The unit spec (unitCPU / unitRAM / localStorage) is not derived from node capacity at all. The
 InstanceType default follows acceleratable-ness: `1c / 2Gi / 100Gi` non-accelerated; accelerated, a
@@ -191,7 +192,7 @@ Scheduling](../topology/scheduling.md).
 
 TAS also ranks the domains that fit by a Pod's preferred node affinity, which is how a node-delivered
 model's Pods [prefer the nodes holding its
-weights](../topology/scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
+weights](../topology/scheduling.md#placement-of-node-delivered-models).
 
 ## Naming and grouping
 
@@ -277,7 +278,7 @@ there is no min-capacity-node selection.
 After syncing a flavor, and only under `instance-type-derived-from-node=true` (default), it authors
 the pool's `InstanceType`, **create-only**, at the setting-correct name and identity
 (`generalGroup`/`acceleratorGroup`/`acceleratable`/`os`/`arch`; the CPU key is the `generic` sentinel
-when awareness is off) with the [default unit spec](#the-unit-spec-is-not-derived-from-node-capacity).
+when awareness is off) with the [default unit spec](#unit-spec-defaults).
 
 An existing type is untouched, admin- or operator-authored, leaving the `InstanceTypeReconciler` sole
 owner of an InstanceType's lifecycle. It also watches the types it authored and re-authors a deleted
@@ -342,7 +343,7 @@ resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
   whole accelerator = `M = 1,600,000` credits, so Kueue's int64 accounting never rounds fractional
   shared/sliced credits up to 1), a non-accelerated queue only CPU.
 - **AdmissionCheck** — `gpustack-node-devices`, referenced on an accelerated queue once Active, whoever
-  authored its InstanceType, and only while [`instance-type-derived-from-node`](../../reference/settings.md#authoring-the-instancetype-yourself) is on.
+  authored its InstanceType, and only while [`instance-type-derived-from-node`](../../reference/settings.md#authoring-the-instancetype) is on.
   `gpustack-model-deployment-joint` is referenced on every queue once Active, whatever that setting says.
 - **Finalizing flavor** — **absent**. Its nodes left, so `NodeFlavorReconciler` deleted it, but Kueue
   holds `resource-in-use` until no ClusterQueue references it, and dropping it from the groups is the

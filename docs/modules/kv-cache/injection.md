@@ -11,14 +11,14 @@ other webhooks may write too.
 ## Contents
 
 - [The contract](#the-contract)
-- [What gets injected, per engine](#what-gets-injected-per-engine)
-- [Refusals and their fixes](#refusals-and-their-fixes)
-- [Tenant compatibility is the image owner's responsibility](#tenant-compatibility-is-the-image-owners-responsibility)
+- [Injection per engine](#injection-per-engine)
+- [Refusals and fixes](#refusals-and-fixes)
+- [Tenant compatibility](#tenant-compatibility)
 - [Verify the vLLM file vehicle](#verify-the-vllm-file-vehicle)
-- [Reading the injection record](#reading-the-injection-record)
+- [The injection record](#the-injection-record)
 - [Transport compatibility at binding](#transport-compatibility-at-binding)
-- [What a cache changes about a workload](#what-a-cache-changes-about-a-workload)
-- [What it leaves alone, and one flag that replaces it](#what-it-leaves-alone-and-one-flag-that-replaces-it)
+- [Workload impact](#workload-impact)
+- [Engine prefix caching](#engine-prefix-caching)
 
 ## The contract
 
@@ -110,11 +110,11 @@ than ignored, so a manifest written against an escape hatch that does not exist 
 can see it.
 
 That is a provisioning contract, **not an isolation boundary**. What a Binding does and does not
-bound is stated in [What a Binding does not do](pool.md#what-a-binding-does-not-do), with
+bound is stated in [Limitations](pool.md#limitations), with
 issue #168 for the gap. The tenant value is Binding-owned too: on SGLang the webhook replaces every
 container declaration of `MOONCAKE_TENANT_ID` with the Binding's domain.
 
-## What gets injected, per engine
+## Injection per engine
 
 Each engine receives its values through a different vehicle, and the choice turns on *when* the
 value becomes known, not on which keys the engine accepts. `local_hostname` is an address, and a
@@ -122,15 +122,15 @@ mutating webhook runs before a Pod has an IP. vLLM computes its own at startup; 
 configuration, and only its environment path consults the process environment, where Kubernetes can
 supply the Pod's IP through a `fieldRef` the kubelet resolves at container start.
 
-| Engine | Vehicle | What lands on the container |
+| Engine | Vehicle | Injected values |
 |---|---|---|
 | `vLLM` | a projected file | arg `--kv-transfer-config` selecting `MooncakeStoreConnector` and the role; env `MOONCAKE_CONFIG_PATH`; a read-only volume and mount at `/etc/gpustack/kvcache` |
 | `vllm-ascend` | a projected file | the same, except the connector is `AscendStoreConnector` — the two engines share the vehicle and the file's keys, but not a connector registry |
-| `SGLang` | environment variables | arg `--hicache-storage-backend mooncake` and [`--enable-hierarchical-cache`](#sglangs-host-memory-tier); the `MOONCAKE_*` variables below; **no** volume and **no** mount |
+| `SGLang` | environment variables | arg `--hicache-storage-backend mooncake` and [`--enable-hierarchical-cache`](#sglang-host-memory-tier); the `MOONCAKE_*` variables below; **no** volume and **no** mount |
 
 Every engine is also given `--kv-cache-dtype` with the Binding's `dtype`, verbatim. Why, and which
 spellings each engine accepts, is under
-[The dtype is handed to the engine](pool.md#the-dtype-is-handed-to-the-engine).
+[Engine dtype](pool.md#engine-dtype).
 
 The file is a `downwardAPI` projection of the Pod's own `kvcache.gpustack.ai/client-config`
 annotation. No ConfigMap is created, so the webhook needs no RBAC for one and leaves nothing to
@@ -175,7 +175,7 @@ tree read-only. See [How a pair is wired](../model-deployment/prefill-decode.md#
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
 when the container does not already set them. A value you set yourself is left alone.
 
-### SGLang's host-memory tier
+### SGLang host-memory tier
 
 An SGLang container also gets `--enable-hierarchical-cache`, after the injected arguments, unless its
 own arguments already name that flag. The storage backend hangs off the hierarchical cache's host
@@ -208,27 +208,27 @@ would not help.
 ambiguity nothing reports. `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` and
 `--hicache-storage-backend-extra-config` select the configuration **source**, which leaves the
 injected variables present and unread. Each key, the engine it applies to and why it is refused are
-under [Refusals and their fixes](#refusals-and-their-fixes).
+under [Refusals and fixes](#refusals-and-fixes).
 
 A flag is refused in every spelling the engine's own parser reads as it (a unique prefix, and on
 the vLLM family an underscored or dotted form) by the rule under
-[What the operator owns](../model-deployment/deployment.md#what-the-operator-owns).
+[Operator-owned keys](../model-deployment/deployment.md#operator-owned-keys).
 
 This applies only to `env`: a value supplied through `envFrom` is invisible to the check and **will
 be overwritten with no symptom**, so declare Mooncake variables in `env`.
 
-## Refusals and their fixes
+## Refusals and fixes
 
 The webhook fails closed and refuses rather than guessing, because every case below produces a
 container that starts normally and does not use the cache. That result is invisible from outside the Pod.
 
-| The message names | Why it refuses | The fix |
+| Refusal | Reason | Fix |
 |---|---|---|
 | the `binding` annotation | it is required; it selects the pool and the declared reuse domain to resolve — not necessarily the Binding the writes are charged to | set it to a `KVCachePoolBinding` in this Pod's namespace |
 | a `/` in the binding value | there is no cross-namespace form; a Binding is resolved in the Pod's own namespace | use a plain name |
 | a Binding that does not exist, and the namespace | without it there is nothing to resolve the provisioned domain and endpoint from | create the Binding, or fix the name |
 | a pool or backend that does not exist | the Binding points at something missing | fix the `poolRef`, or create the pool |
-| the pool and `QuotaLedgerAvailable`, with the controller's own reason | the pool has not reported the condition, reports it `Unknown`, or reports it `False` for a reason other than `MultiTenancyDisabled` — `LedgerUnreachable`, for one, means a request to the master failed, which is an outage rather than a setting. `False` with `MultiTenancyDisabled` is **not** refused: it is a declared single-tenant store, and the Pod is injected with no tenant id — see [What a Binding does not do](pool.md#what-a-binding-does-not-do) | restore the master, or wait if the condition is not reported yet or is `Unknown` |
+| the pool and `QuotaLedgerAvailable`, with the controller's own reason | the pool has not reported the condition, reports it `Unknown`, or reports it `False` for a reason other than `MultiTenancyDisabled` — `LedgerUnreachable`, for one, means a request to the master failed, which is an outage rather than a setting. `False` with `MultiTenancyDisabled` is **not** refused: it is a declared single-tenant store, and the Pod is injected with no tenant id — see [Limitations](pool.md#limitations) | restore the master, or wait if the condition is not reported yet or is `Unknown` |
 | the `engine` or `manufacturer` annotation | the engine is required and never guessed from an image; `manufacturer` selects the Ascend vLLM runtime | set `vLLM` or `SGLang`; for vLLM-Ascend, set `engine: vLLM` and `manufacturer: ascend` |
 | the container count and their names | several containers and none named; the first is never chosen | set `kvcache.gpustack.ai/container` |
 | a named container that is an init container | it finishes before the workload starts, so configuring it caches nothing | name an app container |
@@ -291,7 +291,7 @@ workload rolls.
 > that. Clearing a finalizer touches none of the three keys, so it is admitted whether the webhook is
 > reachable or not.
 
-## Tenant compatibility is the image owner's responsibility
+## Tenant compatibility
 
 **Use an engine image that reads and forwards the injected tenant when the Binding's domain must
 isolate cache reuse.** The webhook always writes a non-empty domain and never inspects or rejects the
@@ -330,7 +330,7 @@ one in the previous section, and calls for a different fix: an unregistered tena
 `TENANT_NOT_REGISTERED` on every write, while a missing reader fails silently. The workload runs
 correctly, just with no cache at all.
 
-## Reading the injection record
+## The injection record
 
 An injected Pod carries `kvcache.gpustack.ai/injected`, a JSON object recording what was decided:
 
@@ -340,9 +340,9 @@ $ kubectl get pod chat-0 -o jsonpath='{.metadata.annotations.kvcache\.gpustack\.
  "tenantInjected":true,"launchProgram":"vllm","launchArgsForwarded":false}
 ```
 
-| Field | What it answers |
+| Field | Meaning |
 |---|---|
-| `binding` | which Binding this Pod named and the webhook resolved — **not** necessarily the one its writes are charged to; see [tenant compatibility](#tenant-compatibility-is-the-image-owners-responsibility) |
+| `binding` | which Binding this Pod named and the webhook resolved — **not** necessarily the one its writes are charged to; see [tenant compatibility](#tenant-compatibility) |
 | `engine` | what was configured |
 | `vehicle` | `file` or `environment` |
 | `domain` | the reuse domain the Binding declared |
@@ -425,7 +425,7 @@ verify both before relying on cross-vendor sharing.
 > edited. Treat this section as temporary: it records where the engines and this operator stand, and
 > upstream work on either side can obsolete it.
 
-## What a cache changes about a workload
+## Workload impact
 
 Joining a pool changes three things about a Pod that are easy to file as bugs.
 
@@ -446,7 +446,7 @@ uses a 16 MiB default. Budget those 16 MiB the same way, in the request as well 
 > **Why** that number, and why it is written at all — it is the value the store's own reference uses,
 > and it is a constant here rather than a field because it is transfer-layer staging, not a resource
 > grant. What an absent key costs instead is under
-> [What gets injected, per engine](#what-gets-injected-per-engine).
+> [Injection per engine](#injection-per-engine).
 
 **Random ports.** The transfer engine binds ports nobody configured (one observed run took `15002`
 and `15995`, a second client `16566` and `16655`). **Any NetworkPolicy or port reservation must be
@@ -466,7 +466,7 @@ E transfer_metadata.cpp:991] Local segment descriptor not found
 The projected client configuration is readable by anyone who can read the Pod. It carries addresses, a
 protocol and a domain name, and no credential.
 
-## What it leaves alone, and one flag that replaces it
+## Engine prefix caching
 
 **Injection does not touch the engine's own prefix caching, and switching that off is not a
 workaround for anything.** vLLM's `enable_prefix_caching` defaults on and reuses blocks in GPU HBM;
@@ -480,7 +480,7 @@ Host DRAM is where an overlap could happen, and neither engine puts KV there unl
 `--swap-space` is deprecated and ignored, and `kv_offloading_size` defaults off, so on vLLM the only
 host DRAM this injection adds is the staging buffer above. SGLang's host tier needs
 `--enable-hierarchical-cache`, which this injection renders because the store hangs off that tier.
-Its [host pool](#sglangs-host-memory-tier) is the one host allocation it adds there.
+Its [host pool](#sglang-host-memory-tier) is the one host allocation it adds there.
 
 > **Never set `kv_offloading_size` on a container this injects into.** Setting it makes vLLM
 > overwrite `kv_connector` with `OffloadingConnector`, unconditionally and with no conflict check,

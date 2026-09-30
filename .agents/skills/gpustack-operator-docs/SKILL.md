@@ -23,7 +23,7 @@ one, not to widen the overview.
 
 ## Where a fact belongs
 
-| The change is about… | Page |
+| Topic | Page |
 |---|---|
 | NFD labels, the `gpustack-cpu-info` rule, the manufacturer map | `docs/modules/devices/discovery.md` |
 | Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/modules/devices/discovery.md` |
@@ -92,6 +92,16 @@ use `{}` or `[]`; removing their delimiters would change them to null.
 When formatting is requested, preserve field order, values, scalar types, quoting, comments and
 intentional invalid examples. Review the YAML diff field by field before finishing. A string whose
 consumer requires JSON and a captured JSON response keep that format.
+
+## Site rendering
+
+Keep diagrams in fenced `mermaid` blocks so GitHub and the Hugo site render the same source.
+The site shows the diagram with an expandable source block. `docs/README.md` remains the agent
+index and is excluded from the site; link site readers to the module landing pages.
+`make lint docs` checks source links, page structure and the rendered site's internal links.
+When adding a page, add its order and short menu label to `site/data/navigation.yaml`. Put setup
+and configuration before operations and diagnosis; keep related vendor procedures together.
+Menu labels omit the parent module's name. Article titles and the agent index keep the full names.
 
 ## Page shape
 

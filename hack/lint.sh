@@ -88,6 +88,11 @@ function docs_lint() {
     fi
   fi
 
+  # Rendered paths and heading IDs can differ from Markdown source links.
+  if ! make -C "${ROOT_DIR}" site; then
+    failed+=("site links")
+  fi
+
   if [[ ${#failed[@]} -gt 0 ]]; then
     gpustack::log::fatal "docs lint failed: ${failed[*]}"
   fi

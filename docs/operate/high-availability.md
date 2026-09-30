@@ -10,12 +10,12 @@ and the caveats are inline.
 
 ## Contents
 
-- [Before you start: count your nodes](#before-you-start-count-your-nodes)
-- [The knobs, per component](#the-knobs-per-component)
-- [The one topology that cannot be made redundant](#the-one-topology-that-cannot-be-made-redundant)
+- [Node count prerequisites](#node-count-prerequisites)
+- [Per-component settings](#per-component-settings)
+- [The non-redundant topology](#the-non-redundant-topology)
 - [Verify](#verify)
 
-## Before you start: count your nodes
+## Node count prerequisites
 
 A `DoNotSchedule` spread needs **at least as many schedulable nodes as your largest replica count**; below
 that, surplus replicas stay `Pending` forever. This page assumes three replicas on three nodes; with
@@ -31,7 +31,7 @@ an install that relied on that must set their three lists before upgrading. Upgr
 `--reset-then-reuse-values`, not `--reuse-values`, or the new lists never reach the release; see
 [Upgrading the Chart](../../deploy/gpustack-operator/chart/README.md#upgrading-the-chart).
 
-## The knobs, per component
+## Per-component settings
 
 | Component | Replicas | PodDisruptionBudget | Node spread |
 |---|---|---|---|
@@ -44,7 +44,7 @@ an install that relied on that must set their three lists before upgrading. Upgr
 Those "none" and "only" cells are upstream chart limitations: each changes what three replicas get
 you, and each is spelled out below.
 
-### A values file to start from
+### Example values
 
 ```yaml
 worker:
@@ -162,7 +162,7 @@ Deployment never fully ready. As with Kueue, the example's `labelSelector` must 
 Also set `strategyType: RollingUpdate`: both default to `Recreate`, which takes every replica down
 before the new one starts and gives up, at every upgrade, the failover the replica was added for.
 
-## The one topology that cannot be made redundant
+## The non-redundant topology
 
 When the worker runs **outside** the cluster it manages but near it (image mode, `!LoopbackKubeInside &&
 LoopbackKubeNearby`), its admission webhooks register against one node IP URL instead of a Service.
@@ -203,7 +203,7 @@ kubectl uncordon <node>
 
 **See also** — [Installation Modes](installation-modes.md) (these knobs need chart mode; image
 mode has no user-values channel) ·
-[Internals](../contribute/internals.md#worker-startup-order-matters) · [Settings](../reference/settings.md) ·
+[Internals](../contribute/internals.md#worker-startup-order) · [Settings](../reference/settings.md) ·
 [KV Cache Backend](../modules/kv-cache/leader.md#high-availability) — a `KVCacheBackend`'s leader elects the
 same way but is **not** a chart component: it is a custom resource, so its replica count is a field on
 the object rather than a value here

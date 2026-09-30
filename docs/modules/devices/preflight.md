@@ -2,18 +2,18 @@
 
 Run preflight on a bare host to check which accelerators the node can serve and what an allocation
 would require. It needs no cluster, CRDs, NFD labels or running Device Manager. This page covers
-the command, host mounts and result fields; [Discovery](discovery.md#preflight-the-preconditions-read-before-a-workload-does)
+the command, host mounts and result fields; [Discovery](discovery.md#preflight-checks)
 explains the states, depths and how preflight reuses the allocator checks.
 
 ## Contents
 
 - [Before you run it](#before-you-run-it)
 - [The command line](#the-command-line)
-- [What each mount is for](#what-each-mount-is-for)
-- [What each flag is for](#what-each-flag-is-for)
-- [What the command starts, writes and removes](#what-the-command-starts-writes-and-removes)
-- [When a step is emitted instead of run](#when-a-step-is-emitted-instead-of-run)
-- [What you get, by manufacturer](#what-you-get-by-manufacturer)
+- [Mounts](#mounts)
+- [Flags](#flags)
+- [Side effects](#side-effects)
+- [Emitted steps](#emitted-steps)
+- [Output by manufacturer](#output-by-manufacturer)
 - [Reading the result](#reading-the-result)
 
 ## Before you run it
@@ -120,8 +120,8 @@ docker run --rm --privileged --network=host \
 The third mount is the only writable one on this page: the vendor library materializes a partition by
 writing that registry, and the DaemonSet mounts it writable for the same reason. Add
 `--probe-image <image>` to measure the two slice rows; no default is claimed for a Hygon family, and
-what the image has to carry is in [If you are in the "container probe, no driver read"
-tier](#if-you-are-in-the-container-probe-no-driver-read-tier).
+what the image has to carry is in [The container-probe
+tier](#the-container-probe-tier).
 
 ### Iluvatar
 
@@ -202,9 +202,9 @@ rest of the questions need. Only NVIDIA, Ascend and AMD carry a host CLI to cros
 detection against, so for the other six a detection of zero is this container's own view and not the
 host's; the Host cross-check column below says which is which.
 
-## What each mount is for
+## Mounts
 
-| Mount | What it is for |
+| Mount | Purpose |
 |---|---|
 | `-v /:/host` | the host's own root. Preflight enters it with `chroot` to run the host's container CLI and the host's vendor CLI, and stages the preload libraries through it. Move it with `--host-root` |
 | `--network=host` | `chroot` changes the root and not the network namespace, so a host CLI entered through it reads the host's `/etc/resolv.conf` inside this container's namespace. Without it, any host CLI asked to pull an image fails on DNS |
@@ -216,9 +216,9 @@ host's; the Host cross-check column below says which is which.
 > need not match the daemon it talks to. Entering the host root costs one mount and gives the host's
 > own CLIs, at their own versions.
 
-## What each flag is for
+## Flags
 
-| Flag | What it does |
+| Flag | Effect |
 |---|---|
 | `--manufacturer` | which manufacturers to ask about, comma separated. Every one asked about is reported, including the ones nothing is read for. Defaults to all of them |
 | `--no-pci-check` | as on `detect` — skip the PCI check the detect pass makes |
@@ -250,7 +250,7 @@ the kubelet in its agent process — has no such command line. Then
 which kubelet is running, and the paths above are only this node's kubelet's if this node's kubelet
 reads them. Every container step drops to being emitted; `--runtime` names a runtime past it.
 
-## What the command starts, writes and removes
+## Side effects
 
 **It starts one probe container per accelerator that can host a logical slice**, and — on a
 manufacturer whose co-tenancy is measured — **two more for that accelerator afterwards**, started
@@ -301,14 +301,14 @@ and the CLI is pointed at the socket that was resolved rather than at its own de
 > kubelet scheduled would be counted as occupancy. Preflight never writes into it, so a run killed
 > before it can clean up costs a later allocation nothing.
 
-## When a step is emitted instead of run
+## Emitted steps
 
 A container step that cannot be taken is **printed complete**, and the row says it was emitted. That
 is an answer, not a failure of the node, and it does not affect the exit code. Whether it runs as
 printed depends on the case: the two below that write nothing to the host name what you have to put
 there first, and the `ctr` row names a CLI this host does not have. Five cases reach it:
 
-| Case | What is printed |
+| Case | Printed output |
 |---|---|
 | `--dry-run` | the command, plus the two things its reader still has to do: stage the library tree, and let a responder render whatever it renders — a dry run writes neither |
 | the library tree could not be staged | the command, naming what could not be written. It is not runnable until that is fixed, and the row says so — but the command is what an operator needs in order to stage the tree by hand and take the step themselves |
@@ -321,7 +321,7 @@ there first, and the `ctr` row names a CLI this host does not have. Five cases r
 > That would report an isolation the injection never established: a measured answer that measured the
 > wrong thing.
 
-## What you get, by manufacturer
+## Output by manufacturer
 
 **Find your manufacturer first.** How much this command can tell you depends on how much your
 allocator reads before it hands a device out, and that differs by vendor. The four tiers below say
@@ -339,7 +339,7 @@ serves no other mode. One declaring neither family reports none of the four.
 
 **An absent row is a family this accelerator does not offer**, not a result that went missing.
 
-| Tier | Manufacturers | A driver-read row | The four capability rows reach | Deepest answer |
+| Tier | Manufacturers | Driver-read row | Capability rows via | Deepest answer |
 |---|---|---|---|---|
 | **Full** | NVIDIA, Ascend, AMD, T-Head | yes | a real container, except `sidecar-visibility` | `measured` |
 | **Container probe, no driver read** | Hygon | no — a `note` says why instead | a real container, except `sidecar-visibility` | `measured` |
@@ -354,7 +354,7 @@ read a driver and start no container; Hygon starts a container and reads no driv
 the owner container still running when the sidecar starts, and the probe containers are one-shots that
 exit as soon as they have printed their evidence.
 
-### If you are in the "injection only" tier
+### The injection-only tier
 
 **Your rows stop one step short of the full tier's, and the missing step is the driver read.** Your
 allocator consults no driver when it serves an allocation: the memory cap and compute weight come from
@@ -381,7 +381,7 @@ What you do get:
 If a slice does not work on your node, the place to look is the vendor container runtime and the
 resource request, not a driver flag.
 
-### If you are in the "container probe, no driver read" tier
+### The container-probe tier
 
 **Hygon is here, and it is the tier where the two sliced rows mean the most.** Its allocator reads no
 driver (the paragraph above applies to the `note` on your group unchanged), but a container is
@@ -477,7 +477,7 @@ Three things about these rows are worth reading off the table rather than inferr
 - **A host root this command could not look in is `unavailable`, not `ok`.** A missing
   `/etc/hccl_rootinfo.json` and an unmounted host root are the same absence to the filesystem, and
   only the first is a healthy node. A run with [no host root to
-  enter](#when-a-step-is-emitted-instead-of-run) carries on as a dry run rather than stopping, so
+  enter](#emitted-steps) carries on as a dry run rather than stopping, so
   this row says the host was never looked at. A path that merely resembles a host root counts as
   none.
 - **A ranktable behind a symbolic link is `unavailable` too.** This command resolves an absolute
@@ -500,7 +500,7 @@ the four rows below are what they add.
 
 The rows themselves are the same four everywhere:
 
-| Row | What it establishes |
+| Row | Establishes |
 |---|---|
 | `sliced-runtime-loaded` | every shared object the injection mounts is in the container's own address space — or, where the injection mounts none, that the driver recorded a slicing instance for the container. `unavailable` means the slice was **not** established: usually a container that got the whole accelerator and no cap at all, and for a driver-record manufacturer also a probe whose client could not run. The row's `reason` and `evidence` say which |
 | `sliced-quota-in-force` | the container reported back the cap the injection set, rather than the accelerator's own figure |
@@ -541,14 +541,14 @@ topology:                # what this node's kubelet does with a NUMA hint
 
 Each `accelerators` group carries the time it was read, the detection answer, and a row per
 accelerator per capability — each row carrying
-[the state and the depth](discovery.md#preflight-the-preconditions-read-before-a-workload-does)
+[the state and the depth](discovery.md#preflight-checks)
 it reached, the driver's or the container's own words, and the container command where one was
 involved.
 
 The `network` section carries one row per RDMA-capable interface — and per RDMA-capable virtual
 function, named `<interface>/<vf bus id>`, since on an SR-IOV node those are every RDMA device there
 is. Each row gives the name, the RDMA device and the
-[link verdict](../rdma/network-topology.md#the-rdma-link-is-checked-because-a-bound-device-is-not-a-working-link).
+[link verdict](../rdma/network-topology.md#the-rdma-link-check).
 
 The rows come from the same pass that produces the node's published record, so the two judge a link
 the same way. They need not say the same thing: this section is a fresh read taken when you invoke
@@ -565,7 +565,7 @@ read off the same command line and out of the same configuration the CRI endpoin
 It matters because the policy decides what the kubelet does with the NUMA hint a device plugin
 publishes: `single-numa-node` and `restricted` gate admission on it, `best-effort` admits a
 misaligned placement anyway, and `none` discards it. So a request pairing an accelerator with an
-[RDMA interface](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)
+[RDMA interface](../rdma/network-topology.md#the-rdma-resource-keys)
 lands them on one NUMA node only where the policy enforces it.
 
 A node nobody configured runs `none` — [how to set a policy, and how to confirm the kubelet took
@@ -639,8 +639,8 @@ verified nothing and said it passed. Treat it as a bug worth reporting, with the
 attached; the stack trace goes to the log rather than the document.
 
 **A sweep that could not be completed fails the accelerators it could not clear.** Before anything is
-started, the run removes every container left behind by an earlier one, see [What the command
-starts, writes and removes](#what-the-command-starts-writes-and-removes). Where that sweep fails, the
+started, the run removes every container left behind by an earlier one, see [Side
+effects](#side-effects). Where that sweep fails, the
 run carries one `stale-container-sweep` row per accelerator:
 
 ```yaml
@@ -673,7 +673,7 @@ the CLI is there, its socket file may even be there, but nothing can be behind i
 ---
 
 **See also** — [Device
-Discovery](discovery.md#preflight-the-preconditions-read-before-a-workload-does)
+Discovery](discovery.md#preflight-checks)
 (what preflight reads and what the states and depths mean) · [Vendor
 Prerequisites](../../getting-started/vendor-prerequisites.md) (the driver and toolkit paths per manufacturer) ·
 [Accelerator Requests](requests.md) (the modes these answers guard)

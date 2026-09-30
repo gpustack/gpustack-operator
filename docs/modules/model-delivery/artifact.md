@@ -112,7 +112,7 @@ A Hugging Face source is resolved **once**, with the namespace's own token: the 
 every page of `/api/models/<repo>/tree/<commit>?recursive=true` becomes the manifest. Nothing follows
 the branch afterwards.
 
-| The Hub answers | `Resolved` reason |
+| Hub response | `Resolved` reason |
 | --- | --- |
 | 404 with `X-Error-Code: RevisionNotFound` | `RevisionNotFound` |
 | 401, 403, 404 `RepoNotFound`, `GatedRepo`, or a tree whose LFS digests are masked with `*` | `AccessDenied` |
@@ -137,7 +137,7 @@ at 3000 entries, so a full page is re-listed per directory, and a directory with
 direct children refuses (`SourceUnavailable`): the API cannot enumerate it, and a partial
 manifest would be a silent wrong answer. Every file must carry the hub's `sha256`.
 
-| ModelScope answers | `Resolved` reason |
+| ModelScope response | `Resolved` reason |
 | --- | --- |
 | `commits` answers no commit for the ref, or the listing has no file tree at the revision (code 10990101004) | `RevisionNotFound` |
 | 404 code 10010205001 (not found) or 10010200001 (no access), any other 401/403/404 | `AccessDenied` |
@@ -335,7 +335,7 @@ Kueue's topology-aware scheduling does not read a Pod's volumes. A claim bound t
 affinity was measured to fail silently without help: the Pod was assigned elsewhere and stayed
 Pending, while its Workload stayed Admitted holding quota. So:
 
-| The claim | What the operator does |
+| Claim state | Operator action |
 | --- | --- |
 | Bound | adds the PV's required node affinity to every Pod at creation, outside the Pod fingerprint |
 | Pending, `WaitForFirstConsumer` with a provisioner | creates the Pods; the first one's node decides the binding |
@@ -382,7 +382,7 @@ hexadecimal digits of the manifest digest, or of the SHA-256 of the artifact's U
   `ModelArtifact`.
 - The vLLM-Ascend store connector gets no prefix: its key layout was not read.
 - The Binding's `blockSize` and `dtype` are not part of either key. The `dtype` is
-  [handed to the engine](../kv-cache/pool.md#the-dtype-is-handed-to-the-engine) instead.
+  [handed to the engine](../kv-cache/pool.md#engine-dtype) instead.
 
 ## Status
 
@@ -458,7 +458,7 @@ waits instead when that node cannot run one, naming the node and the floor
 - **Node delivery downloads from the Hub on every cold node.** A Pod prefers the nodes already
   holding the digest, but only while they have room; placed anywhere else, its node downloads. See
   [a node-delivered model prefers the nodes holding
-  it](../topology/scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
+  it](../topology/scheduling.md#placement-of-node-delivered-models).
 - Settings: [Settings & Environment Variables](../../reference/settings.md#online-adjustable-settings) carries the
   two hub endpoints, proxy, no-proxy, CA bundle, revalidation interval, delivery mode and the node
   cache's watermarks and download limits.

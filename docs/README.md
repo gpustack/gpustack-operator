@@ -42,7 +42,7 @@ and only the deep page needed for the task.
 
 ### Heterogeneous devices
 
-| Page | Open it to… |
+| Page | Description |
 |---|---|
 | [Heterogeneous Devices](modules/devices/_index.md) | Choose an accelerator request. |
 | [Device Discovery](modules/devices/discovery.md) | Trace hardware detection and allocation. |
@@ -57,7 +57,7 @@ and only the deep page needed for the task.
 
 ### RDMA networking
 
-| Page | Open it to… |
+| Page | Description |
 |---|---|
 | [RDMA Networking](modules/rdma/_index.md) | Start with RDMA requests. |
 | [Network Topology](modules/rdma/network-topology.md) | See how links and devices are discovered. |
@@ -65,7 +65,7 @@ and only the deep page needed for the task.
 
 ### Topology management
 
-| Page | Open it to… |
+| Page | Description |
 |---|---|
 | [Topology Management](modules/topology/_index.md) | Start with placement by domain. |
 | [Topology-Aware Scheduling](modules/topology/scheduling.md) | Follow topology data into scheduling. |
@@ -73,7 +73,7 @@ and only the deep page needed for the task.
 
 ### KV cache
 
-| Page | Open it to… |
+| Page | Description |
 |---|---|
 | [KV Cache](modules/kv-cache/_index.md) | Start with a shared inference cache. |
 | [KV Cache Backend](modules/kv-cache/backend.md) | Understand the store and its capacity. |
@@ -86,7 +86,7 @@ and only the deep page needed for the task.
 
 ### Model delivery
 
-| Page | Open it to… |
+| Page | Description |
 |---|---|
 | [Model Delivery](modules/model-delivery/_index.md) | Choose how weights reach workloads. |
 | [Model Artifact](modules/model-delivery/artifact.md) | Resolve and verify model weights. |
@@ -99,10 +99,10 @@ and only the deep page needed for the task.
 
 ### Model deployment
 
-| Page | Open it to… |
+| Page | Description |
 |---|---|
 | [Model Deployment](modules/model-deployment/_index.md) | Start with managed model serving. |
-| [Model Deployment](modules/model-deployment/deployment.md) | Configure serving roles and overrides. |
+| [Model Deployment Configuration](modules/model-deployment/deployment.md) | Configure serving roles and overrides. |
 | [Model Deployment Prefill and Decode](modules/model-deployment/prefill-decode.md) | Pair serving roles. |
 | [Engine Versions](modules/model-deployment/engine-versions.md) | Check supported engine versions. |
 | [Model Deployment Routing](modules/model-deployment/routing.md) | Choose a routing policy. |
@@ -112,14 +112,14 @@ and only the deep page needed for the task.
 
 ### Accelerated instances
 
-| Page | Open it to… |
+| Page | Description |
 |---|---|
 | [Accelerated Instances](modules/instances/_index.md) | Start an accelerator-backed workspace. |
 | [Instance Metrics Reference](reference/instance-metrics.md) | Read an Instance’s resource use. |
 
 ### Start here
 
-| Page | Open it to… |
+| Page | Description |
 |---|---|
 | [Architecture](getting-started/architecture.md) | See the operator’s four-stage path. |
 | [Walkthrough](getting-started/walkthrough.md) | Follow a recorded cluster run. |
@@ -127,7 +127,7 @@ and only the deep page needed for the task.
 
 ### Cluster operations and upgrades
 
-| Page | Open it to… |
+| Page | Description |
 |---|---|
 | [Installation Modes](operate/installation-modes.md) | Choose chart or image installation. |
 | [High Availability Operations](operate/high-availability.md) | Set replica counts for control-plane parts. |
@@ -138,7 +138,7 @@ and only the deep page needed for the task.
 
 ### Reference and contribution
 
-| Page | Open it to… |
+| Page | Description |
 |---|---|
 | [Internals](contribute/internals.md) | Review startup and naming constraints. |
 | [Settings & Environment Variables](reference/settings.md) | Look up operator configuration. |

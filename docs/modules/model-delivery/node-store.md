@@ -303,7 +303,7 @@ between the status thresholds.
 - **A preference, not a filter.** A Pod prefers the nodes holding its digest while they have room;
   one placed on a node without it downloads it there. See
   [a node-delivered model prefers the nodes holding
-  it](../topology/scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
+  it](../topology/scheduling.md#placement-of-node-delivered-models).
 - **A download comes from the Hub**, directly or through the proxy, or, when
   [node-to-node sync](peer-sync.md) is on, from a peer node that already holds
   the tree.

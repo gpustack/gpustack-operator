@@ -10,7 +10,7 @@ decode](deployment.md#prefill-and-decode) describes the role fields and admissio
 - [Two ways to configure a pair](#two-ways-to-configure-a-pair)
 - [The router block](#the-router-block)
 - [The two router fields](#the-two-router-fields)
-- [The direct transfer's transport](#the-direct-transfers-transport)
+- [Direct transfer transport](#direct-transfer-transport)
 - [Different hardware per role](#different-hardware-per-role)
 - [Addressing a role](#addressing-a-role)
 
@@ -23,7 +23,7 @@ With the managed `llm-d-router`, the connector a native vLLM role runs depends o
 `spec.kvCache` is set; the two settings render two different connector documents, not one document
 with a field toggled:
 
-| `spec.kvCache` | Connector rendered | What carries the blocks |
+| `spec.kvCache` | Connector rendered | Block path |
 | --- | --- | --- |
 | omitted | `MooncakeConnector` alone | the direct prefill-to-decode transfer, and nothing else |
 | set | `MultiConnector` wrapping `MooncakeConnector` and `MooncakeStoreConnector` | the direct transfer, with the shared pool attached alongside it |
@@ -73,10 +73,10 @@ failure as the missing leg, one level down.
 
 Admission holds the visible side of the contract: a degree the command line does not state legibly
 is refused, and so is a declared per-member width the role's card request cannot hold; see
-[What admission refuses](deployment.md#what-admission-refuses).
+[Admission refusals](deployment.md#admission-refusals).
 
 SGLang renders its halves through the engine's own disaggregation arguments rather than this
-connector path; the two engines' legs differ by [their handshake](#the-direct-transfers-transport)
+connector path; the two engines' legs differ by [their handshake](#direct-transfer-transport)
 alone.
 
 ## Two ways to configure a pair
@@ -179,7 +179,7 @@ connector; the gateway has no such flag, because its transfer backend is the eng
 
 A router is also **engine-matched**, and a pair outside this table is refused naming both sides:
 
-| `spec.router.name` | Engines it fronts | Shape it renders | Routing policy |
+| `spec.router.name` | Engines | Rendered shape | Routing policy |
 | --- | --- | --- | --- |
 | `llm-d-router` | `vLLM`, `SGLang` | An endpoint picker behind a proxy, configured by a mounted document | [A fixed scoring profile](routing.md#llm-d-router-takes-no-policy-flag) |
 | `vllm-router` | `vLLM` | One process, configured entirely by its command line | [`cache_aware` unless `extraArgs` names another](routing.md#switching-to-round-robin) |
@@ -226,7 +226,7 @@ picker's ext_proc gRPC server, whose only client is the Envoy container **in the
 `127.0.0.1`. `--metrics-endpoint-auth` guards the picker's own `/metrics`, scraped in-cluster. So
 there is no field for either, and neither is reachable through `extraArgs`.
 
-## The direct transfer's transport
+## Direct transfer transport
 
 The point-to-point leg renders Mooncake's `tcp` when the API field is unset:
 
@@ -251,7 +251,7 @@ Which value works on which engine is [the transport matrix](engine-versions.md#w
 
 **`tcp` is enforced, not only requested**: the transfer engine picks its transport from the host,
 and with no RDMA device a build with multi-node NVLink installs NVLink between hosts with no NVLink
-path. So native vLLM also gets the [defaulted](deployment.md#what-the-operator-owns) `MC_FORCE_TCP=1`. Both pins
+path. So native vLLM also gets the [defaulted](deployment.md#operator-owned-keys) `MC_FORCE_TCP=1`. Both pins
 are process-wide, so neither renders beside a store on another transport, and every client at
 its engine's [supported minimum](engine-versions.md) honors them.
 
@@ -269,7 +269,7 @@ It is also **not** the pool's transport. `KVCacheBackend.spec.transport` feeds t
 client; this leg is engine to engine and never traverses the store, so the two declare separately: a
 deployment with no `kvCache` block still has this leg to configure.
 
-Editing it [turns over every role](deployment.md#rollout-is-a-rolling-replacement): the value renders
+Editing it [turns over every role](deployment.md#rollout-behavior): the value renders
 into both ends' arguments, so every role's replicas turn over one at a time. A prefiller and a decoder
 can disagree on the protocol until both converge, the same window an `engine.version` edit opens.
 
@@ -281,7 +281,7 @@ never going to share a Workload, on two `instanceType`s or on one. The set is ad
 admission check rather than by Kueue's intra-group rule.
 
 See [One group per replica](deployment.md#one-group-per-replica) for what that costs an edit, and
-[Authoring the InstanceType yourself](../../reference/settings.md#authoring-the-instancetype-yourself) for which
+[Authoring the InstanceType yourself](../../reference/settings.md#authoring-the-instancetype) for which
 queues carry the check.
 
 **Across manufacturers is the same change, not a second one.** A queue's accelerator quota is

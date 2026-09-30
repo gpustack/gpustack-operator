@@ -5,15 +5,15 @@ a node cache, a PVC or an image.
 
 ## Contents
 
-- [Choose a source and delivery](#choose-a-source-and-delivery)
-- [Run the node cache](#run-the-node-cache)
+- [Sources and delivery](#sources-and-delivery)
+- [Cache operations](#cache-operations)
 
-## Choose a source and delivery
+## Sources and delivery
 
 [Model Artifact](artifact.md) covers resolution, validation and the delivery
 choices. [Model Image Source](image-source.md) covers image-backed weights.
 
-## Run the node cache
+## Cache operations
 
 [Model Store Operations](operations.md) covers configuration, watermarks and
 removal. [Model Prefetch](prefetch.md) covers warming weights before a Pod needs

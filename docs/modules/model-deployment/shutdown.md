@@ -6,7 +6,7 @@ The grace period bounds how long it can wait for running requests and engine shu
 ## Contents
 
 - [The drain window](#the-drain-window)
-- [What the window does not cover](#what-the-window-does-not-cover)
+- [Coverage limits](#coverage-limits)
 
 ## The drain window
 
@@ -16,7 +16,7 @@ its Pod: a scale-down, a rollout, a node drain, a preemption or `kubectl delete 
 `G` below is the role's grace: `roles[].terminationGracePeriodSeconds`, 30 when unset, written to
 the Pod's field of the same name.
 
-| From the delete | At the default | What happens |
+| From the delete | At the default | Action |
 |---|---|---|
 | 0 s | 0 s | the routers drop the replica, and the kubelet starts the engine container's preStop hook |
 | 0–5 s | 0–5 s | the engine keeps serving normally, including a request routed to it just before the delete |
@@ -69,13 +69,13 @@ sample the hook cannot parse.
 
 Adding the hook and the grace changed every replica's Pod spec, so upgrading to the release that
 carries them turns each existing replica over once; see
-[Rollout is a rolling replacement](deployment.md#rollout-is-a-rolling-replacement).
+[Rollout behavior](deployment.md#rollout-behavior).
 
 Changing a role's `terminationGracePeriodSeconds` turns its replicas over the same way, and each
 replica that leaves in that rollout leaves with the grace it was created with. Writing 30 onto a
 role that set none renders the same Pods, so it turns nothing over.
 
-## What the window does not cover
+## Coverage limits
 
 - **A request still running at `G` − 5 is cut**, 25 s after the delete at the default. vLLM aborts it
   when SIGTERM arrives; SGLang keeps draining it on its own until the kill at `G`. No supported

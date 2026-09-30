@@ -148,6 +148,8 @@ Two consequences worth stating:
   more than one paragraph — and past 5 lines it fails the paragraph cap. A `###` heading is cheap and
   becomes an anchor others can link to.
 - **Prefer a table for anything enumerable** — modes, keys, vendors, gates, knobs.
+- **Keep table headers short.** Use a precise noun or short phrase, such as `Resource`, `Scope` or
+  `Default`. Put conditions and explanations in the cells or adjacent prose. Preserve technical names.
 - **Name the code.** `pkg/nodefeature`, `node_queue.go`, `pkg/nodefeature/unit_resources_preset.yaml` — a reader
   should be able to jump from the claim to the source. Do not paste code that will drift; name it.
 - **No symbol-numbered cross-references** (`switch ①`, "gate-2 above"). Use the heading name and a
@@ -192,8 +194,8 @@ Three limits keep the cleanup from doing harm:
   ranking. A sentence that needs a detail you do not have gets a simpler wording, not a guess.
 - **Change prose only unless the task requests example formatting.** Code blocks, inline code,
   commands, paths, link targets and table rows compared with code (see the invariants in `SKILL.md`)
-  stay as they are. A heading keeps its words, because
-  changing them breaks every inbound anchor; re-casing is safe.
+  stay as they are. When the task includes headings, use concise technical names and update Contents,
+  self links and every inbound anchor. Re-casing alone preserves anchors.
 - **A pattern is a default, not a crime.** A `> **Why**` note may legitimately correct a belief the
   reader holds ("allocatable also falls to zero when a family is merely saturated"), and a quotation, a
   title or a proper name keeps its wording. One weak tell alone (a single dash, a single hedge) is not

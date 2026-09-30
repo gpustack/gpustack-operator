@@ -10,7 +10,7 @@ pool capacity, while GPUStack checks whether individual accelerators can satisfy
 - [Four-view status](#four-view-status)
 - [Capability versus availability](#capability-versus-availability)
 - [The InstanceType and Instance webhooks](#the-instancetype-and-instance-webhooks)
-- [The KV cache injection webhook is not a gate](#the-kv-cache-injection-webhook-is-not-a-gate)
+- [The KV cache injection webhook](#the-kv-cache-injection-webhook)
 - [Update validation while an object is deleted](#update-validation-while-an-object-is-deleted)
 - [Running-instance stop](#running-instance-stop)
 - [Known behavior: the deployed Kueue Configuration](#known-behavior-the-deployed-kueue-configuration)
@@ -21,7 +21,7 @@ A layered five-gate admission model: Kueue is a coarse gate, and the per-acceler
 fine one. Each gate produces or consumes the `.sliced.*` / `.partitioned.*` values at a distinct
 point on the path.
 
-| # | Gate | What it can see | What it cannot |
+| # | Gate | Sees | Cannot see |
 |---|---|---|---|
 | 1 | Pod webhook (Worker) | the request's shape; folds memory into credits | cluster-wide capacity |
 | 2 | Kueue `credits` | the pool's aggregate total | per-accelerator fragmentation |
@@ -68,7 +68,7 @@ the Workload with `Retry` when the fit fails.
 The worker's `Prepare()` applies the `gpustack-node-devices` AdmissionCheck at startup, retrying
 until Kueue's CRD is established — the chart cannot ship it, since Kueue templates its own CRDs and
 nothing orders them ahead of a custom resource in the same render (see [Install
-modes](../../operate/installation-modes.md#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)).
+modes](../../operate/installation-modes.md#chart-deployed-and-worker-applied-resources)).
 
 This reconciler keeps it `Active`; the accelerated queue references it in `spec.admissionChecksStrategy`
 only once it is ([`NodeQueueReconciler`](scheduling.md#nodequeuereconciler-node_queuego)).
@@ -249,7 +249,7 @@ four-view and backs gate 3, but is not itself a gate.
 `InstanceType.status` carries four per-accelerator bin-packing projections from the `Devices` ledger, not
 a credits fold-down:
 
-| View | Column | What it counts |
+| View | Column | Counts |
 |---|---|---|
 | `Accelerator` | **EX** | free whole accelerators |
 | `AcceleratorShared` | **SH** | shareable ownership slots |
@@ -314,7 +314,7 @@ representation.
 ## The InstanceType and Instance webhooks
 
 The unit spec lives **only** on the InstanceType: a derived type is stamped with its [per-product
-preset](scheduling.md#the-unit-spec-is-not-derived-from-node-capacity) at creation, and an admin
+preset](scheduling.md#unit-spec-defaults) at creation, and an admin
 edit touches only the InstanceType, never a Node or the ClusterQueue notes.
 
 - **InstanceType validating, create** — requires the complete input, read independently of any editable
@@ -340,7 +340,7 @@ edit touches only the InstanceType, never a Node or the ClusterQueue notes.
     within the pool's total is admitted and cannot run until a node that large joins, because one Pod's
     cores come from one node and `InstanceType.status` carries no per-node capacity to refuse it with.
 
-## The KV cache injection webhook is not a gate
+## The KV cache injection webhook
 
 A second mutating webhook on Pods writes the client configuration an inference engine needs to use a
 [KV cache pool](../kv-cache/injection.md). It sits **outside** the five gates:
@@ -385,7 +385,7 @@ A handler opts out of the guard by implementing `webhook.ReceiveDeletionUpdate`,
 `metadata.finalizers`? A cross-object read is compatible with opting out while it is gated on the field
 it answers for having moved, which a finalizer edit does not do.
 
-| Handler | Validates an UPDATE while deleting | Because |
+| Handler | Validates update while deleting | Reason |
 |---|---|---|
 | `KVCachePoolBinding` | yes | its pool read is gated on the quota ceiling having moved |
 | `KVCacheBackend` | yes | it reads the fallback-image setting only when `spec.image` moved |

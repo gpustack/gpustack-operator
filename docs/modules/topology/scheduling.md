@@ -7,11 +7,11 @@ Node, then makes every generated queue topology-aware so that admission can enfo
 ## Contents
 
 - [The discovery boundary](#the-discovery-boundary)
-- [TopologySource normalizes other inventories](#topologysource-normalizes-other-inventories)
-- [One hierarchy becomes one profile](#one-hierarchy-becomes-one-profile)
-- [Profiles enter the Kueue chain](#profiles-enter-the-kueue-chain)
-- [A ModelDeployment request is per replica](#a-modeldeployment-request-is-per-replica)
-- [A node-delivered model prefers the nodes holding it](#a-node-delivered-model-prefers-the-nodes-holding-it)
+- [The TopologySource contract](#the-topologysource-contract)
+- [Hierarchy profiles](#hierarchy-profiles)
+- [Profiles in the Kueue chain](#profiles-in-the-kueue-chain)
+- [Per-replica topology requests](#per-replica-topology-requests)
+- [Placement of node-delivered models](#placement-of-node-delivered-models)
 - [Capacity and lifecycle limits](#capacity-and-lifecycle-limits)
 - [Failure surfaces](#failure-surfaces)
 
@@ -19,7 +19,7 @@ Node, then makes every generated queue topology-aware so that admission can enfo
 
 GPUStack does not infer physical locality. It consumes facts from one of two boundaries:
 
-| Boundary | What discovers locality | What GPUStack owns |
+| Boundary | Discovers locality | GPUStack owns |
 |---|---|---|
 | Topograph | A selected Topograph provider and its Kubernetes engine | The pinned optional chart, selection of the labels that form a hierarchy, and their Kueue projection |
 | `TopologySource` | Existing Node labels, a ConfigMap snapshot, or an HTTPS inventory endpoint | Input validation, writing-source ownership, profile assignment, and Kueue projection |
@@ -37,7 +37,7 @@ ConfigMap or webhook inventory publishes its own region, zone, and rack under
 There is no well-known Kubernetes rack key. `spec.levels` names the keys actually used by that
 source; GPUStack never copies values between the standard and private keys.
 
-## TopologySource normalizes other inventories
+## The TopologySource contract
 
 `TopologySource` is cluster-scoped because its output changes cluster-wide admission. Its
 `nodeSelector` chooses the Nodes it may describe, `levels` lists label keys from coarsest to finest,
@@ -80,7 +80,7 @@ undeclared level, an invalid label, an incomplete parent chain, or one child val
 tuples. `revision` is an opaque, non-empty identifier; it establishes which complete snapshot was
 last applied, not an ordering scheme.
 
-## One hierarchy becomes one profile
+## Hierarchy profiles
 
 `NodeTopologyReconciler` selects exactly one Ready `TopologySource` for a Node. Zero or multiple
 matching sources deliberately fall back to a hostname-only hierarchy. When the inventory is
@@ -99,7 +99,7 @@ the NUL-delimited ordered level keys. The generated Topology is named `gpustack-
 `NodeDevicesReconciler` mirrors the Node profile onto its `Devices` ledger so accelerator admission
 checks the same profile as the flavor and Kueue placement.
 
-## Profiles enter the Kueue chain
+## Profiles in the Kueue chain
 
 Every generated `ResourceFlavor` pins the Node's topology profile and references the matching Kueue
 `Topology`. Hardware identity and topology profile together form flavor identity, so capacity from
@@ -114,7 +114,7 @@ Kueue assigns one flavor per covered resource in a PodSet. Capacity fragmented a
 profiles cannot be added together to satisfy one PodSet, even when the ClusterQueue's aggregate
 quota appears sufficient.
 
-## A ModelDeployment request is per replica
+## Per-replica topology requests
 
 `roles[].topology.requiredLevel` names a level label key, not a concrete domain value. GPUStack puts
 the Kueue `podset-required-topology` annotation on every Pod in that replica group; Kueue's Pod
@@ -139,7 +139,7 @@ Omitting `requiredLevel` adds no explicit topology request. The queue is still t
 Kueue may choose any compatible hierarchy. The [field contract](../model-deployment/deployment.md#topology-placement)
 defines the implicit hostname level.
 
-## A node-delivered model prefers the nodes holding it
+## Placement of node-delivered models
 
 When the worker creates a Pod whose hub weights the node delivers (a `ModelDeployment`
 replica under `Node` delivery, or an `Instance`), it adds one preferred node-affinity term per

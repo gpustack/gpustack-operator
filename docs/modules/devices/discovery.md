@@ -13,7 +13,7 @@ in `Devices`. These are stages 1 and 2 of the operator's discovery and schedulin
 - [Logical slicing per manufacturer](#logical-slicing-per-manufacturer)
 - [SSH-enabled Instances and the visibility resource](#ssh-enabled-instances-and-the-visibility-resource)
 - [Container identification and cross-mode exclusion](#container-identification-and-cross-mode-exclusion)
-- [Placement is a preference, not a decision](#placement-is-a-preference-not-a-decision)
+- [Placement preference](#placement-preference)
 - [One driver stack per node](#one-driver-stack-per-node)
 
 ## Device, Accelerator, Resource
@@ -140,7 +140,7 @@ corrects false negatives.
 
 Jobs 2 and 3 are the work of the `gpustack-cpu-info` **NodeFeatureRule**, applied by the worker at
 startup in every install mode (see [The chart deploys workloads, the worker applies the custom
-resources](../../operate/installation-modes.md#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)).
+resources](../../operate/installation-modes.md#chart-deployed-and-worker-applied-resources)).
 Its two matcher lists come from facts that exist for other reasons:
 
 - the PCI vendor IDs of the manufacturers the worker manages — `--manufacturer`, filled by the chart
@@ -153,7 +153,7 @@ Two Go tests hold the chart's `global.manufacturers` map and `deviceClassWhiteli
 
 The manufacturer map is where a manufacturer's whole identity lives, one row per manufacturer:
 
-| Field | What it carries |
+| Field | Meaning |
 |---|---|
 | `pciVendorID` | the PCI vendor ID Job 1 labels the node with |
 | `resourceName` | the name this manufacturer's device-plugin advertises |
@@ -367,7 +367,7 @@ run the vendor runtime.
 A manufacturer that publishes CDI specifications can carry the grant through CDI. The allocation
 response carries the values below; the injection channel determines which component applies them:
 
-| Channel | What the response carries | Who injects |
+| Channel | Response payload | Injected by |
 |---|---|---|
 | `envvar` (default) | `NVIDIA_VISIBLE_DEVICES=GPU-…` | the vendor's container runtime, *if* it is in the Pod's path. Under a generic OCI handler the variable is inert: the container starts with no accelerator and no error |
 | `cdi-annotations` | the annotation `cdi.k8s.io/gpustack-<manufacturer>: <kind>=<id>` | the container engine itself, resolving that name against the specifications already on the node and injecting the device nodes *and* the driver libraries — no vendor runtime in the Pod's path |
@@ -451,7 +451,7 @@ CUDA, `CUDA_VISIBLE_DEVICES` included.
 > **Never-overwrite reads the container's own `env:` entries** — an `envFrom:`-sourced value is
 > invisible to the allocator, so opting out that way needs an explicit `env:`.
 
-### The order a positional injection is emitted in
+### Positional injection order
 
 A key addressed by position — `CUDA_DEVICE_MEMORY_LIMIT_<i>`, `HGGC_DEVICE_MEMORY_LIMIT_<i>`,
 `VROCM_DEVICE_MEMORY_LIMIT_<i>`, `HSA_CU_MASK`'s `GPU_list` — is read against the numbering the
@@ -461,7 +461,7 @@ index**, the enumeration the detector recorded.
 Which vendors that order matters to differs, because it depends on who decides the container's
 numbering:
 
-| Vendor | Numbers the container's accelerators by | So the order is |
+| Vendor | Numbering basis | Order impact |
 |---|---|---|
 | NVIDIA | NVML/CUDA re-enumerating the visible cards by PCI bus id | **load-bearing** — the emission must match it |
 | T-Head | the SDK renumbering the injected nodes by ascending card ordinal (measured) | **load-bearing** |
@@ -508,7 +508,7 @@ The reconcile still stores them canonically (accelerators by index, groups by ma
 first accelerator), which keeps the stored list a function of the hardware rather than of which
 detection pass first saw each group. The allocators order what they read regardless.
 
-### Preflight: the preconditions read before a workload does
+### Preflight checks
 
 `device-manager preflight` reads, on a bare host, the allocation-time preconditions the allocator
 reads when a workload lands. It drives each manufacturer's own responder with a synthetic
@@ -531,7 +531,7 @@ It asks three questions per manufacturer, in order, and each is answerable on it
 Every answer is one of three states, exhaustive and mutually exclusive, each with a different
 consequence for the allocation it guards:
 
-| State | Meaning | What an allocation does |
+| State | Meaning | Allocation effect |
 |---|---|---|
 | `ok` | the capability works, at the depth the row states | proceeds |
 | `unavailable` | it is offered and this pass did not establish it | is refused |
@@ -549,7 +549,7 @@ observe would let a node through on an assumption. The row's `reason` is what se
 
 The state also carries the depth it was reached at, so an assumption is never read as evidence:
 
-| Depth | What was done | What it establishes |
+| Depth | Action | Establishes |
 |---|---|---|
 | `declared` | the driver was asked and answered | what the host claims |
 | `simulated` | the allocator's own code produced the artifact and it was asserted on, while nothing on the hardware changed | what the allocation would emit |
@@ -588,7 +588,7 @@ Every sliceable manufacturer has real per-slice runtime isolation, but only four
 Ascend and T-Head) take both budgets from a preload library. Every preload library is activated
 through `/etc/ld.so.preload`.
 
-| Manufacturer | Enforcer | Per-container quota and injection |
+| Manufacturer | Enforcer | Quotas and injection |
 |---|---|---|
 | NVIDIA, Iluvatar | HAMi-core `libvgpu.so` | `CUDA_DEVICE_SM_LIMIT` / `CUDA_DEVICE_MEMORY_LIMIT_*` |
 | Ascend | vcann-rt `libvruntime.so` | an `npu_info.config` carrying `aicore-quota` / `memory-quota` |
@@ -864,7 +864,7 @@ allocation hint read the same room, so when it refuses, no candidate fits that a
 It is the one layer every path reaches, a Pod outside the scheduling chain or a hint the kubelet
 declined, and it fires exactly where the ledger used to clamp `Remaining` at zero. Both the kubelet
 lookup and the refusal have an off switch, `GPUSTACK_DEVICE_PLUGIN_IDENTIFY_BY_KUBELET` and
-`GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE` (see [Settings](../../reference/settings.md#configuration-knobs)).
+`GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE` (see [Settings](../../reference/settings.md#general-variables)).
 
 All `Allocate`s of a node run in its single device-manager process, so a per-node mutex serializes
 each workload `Allocate`'s *identify → cross-mode check → reserve* section; the durable-annotation
@@ -880,7 +880,7 @@ A Pod that has **finished**, in phase `Succeeded` or `Failed`, is the exception:
 back its exclusive and shared cards and its logical slices, so the ledger stops charging those. A
 hardware partition and a MetaX or Cambricon slice stay charged until the Pod is gone, because the
 reclaimer destroys them only then. `GPUSTACK_LEDGER_RELEASE_TERMINATED_PODS=false` turns the exception
-off ([settings](../../reference/settings.md#configuration-knobs)).
+off ([settings](../../reference/settings.md#general-variables)).
 
 One thing takes an entry back earlier, and it is the only one: an allocation the manufacturer
 responder refuses **after** the record is written is given back on the spot — the entry and the
@@ -911,7 +911,7 @@ The `sshd` visibility path re-finds its Pod's **non-self accelerator allocation*
 first, durable annotation second, both by the same owner pick — rather than the reservation-skip; the
 request rules confine a Pod's claims to one container group, so that owner is unambiguous.
 
-## Placement is a preference, not a decision
+## Placement preference
 
 For the accelerator-bound families, tokens name an accelerator, so the kubelet's pick of a token is
 the pick of an accelerator; the plugin only orders the candidates it offers back from

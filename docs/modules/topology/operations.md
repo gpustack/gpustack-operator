@@ -18,7 +18,7 @@ Queues created by a previously published version are outside that transition pat
 
 ## Choose the inventory path
 
-Use one source of truth for each selected Node. See [profile selection](scheduling.md#one-hierarchy-becomes-one-profile)
+Use one source of truth for each selected Node. See [profile selection](scheduling.md#hierarchy-profiles)
 for how overlapping Ready sources are handled.
 
 | Situation | Inventory path |
@@ -36,7 +36,7 @@ accelerator partition, are not an ordered hierarchy merely because both are labe
 
 Topograph is silently disabled by default: the chart renders no Topograph workload or ServiceAccount
 and pulls no Topograph image. A private deployment may stay in that state and use `TopologySource`;
-with no source at all, the [default profile](scheduling.md#one-hierarchy-becomes-one-profile)
+with no source at all, the [default profile](scheduling.md#hierarchy-profiles)
 applies. Enable Topograph only on
 Kubernetes 1.27 or later, with a production provider and the `k8s` engine:
 
@@ -93,7 +93,7 @@ spec:
 ```
 
 Do not copy a tier list from another cluster; inspect the labels actually published on these Nodes.
-The [profile rules](scheduling.md#one-hierarchy-becomes-one-profile)
+The [profile rules](scheduling.md#hierarchy-profiles)
 define tier normalization.
 
 ## Observe existing Node labels
@@ -169,7 +169,7 @@ described Node; NFD publishes its writable labels onto the Node. On read failure
 
 For a cloud cluster, use `nodeLabels` to consume the existing standard region and zone keys.
 If a snapshot includes those keys as parents of a private rack, follow the [standard-label
-boundary](scheduling.md#topologysource-normalizes-other-inventories).
+boundary](scheduling.md#the-topologysource-contract).
 Use the private region and zone keys above when the inventory itself owns those facts.
 
 Use `additionalWritePrefix` when the data center owns another DNS prefix. It must be one DNS prefix
@@ -310,7 +310,7 @@ cannot satisfy one zone-constrained PodSet.
 
 A multi-role deployment can show one Workload with `QuotaReserved=True` and a topology assignment,
 counted in the queue's `status.reservingWorkloads`, while its joint check reads `Pending` and no role
-Pod is bound. That group fits and is [held for its set](scheduling.md#a-modeldeployment-request-is-per-replica);
+Pod is bound. That group fits and is [held for its set](scheduling.md#per-replica-topology-requests);
 the other roles are the ones short of a domain. Free their capacity or delete the deployment.
 
 If the [flavor limit](scheduling.md#capacity-and-lifecycle-limits)

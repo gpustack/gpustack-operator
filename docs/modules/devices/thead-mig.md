@@ -17,7 +17,7 @@ Requests](requests.md#two-families-two-accelerator-populations).
 - [Enabling partitioning on a node](#enabling-partitioning-on-a-node)
 - [Disabling partitioning on a node](#disabling-partitioning-on-a-node)
 - [Node reboot recovery](#node-reboot-recovery)
-- [What GPUStack Operator does NOT do](#what-gpustack-operator-does-not-do)
+- [Operator boundaries](#operator-boundaries)
 
 ## Prerequisites
 
@@ -310,7 +310,7 @@ reboot as if it did not:
    the operator materializes a fresh instance on admission. A pre-reboot Pod that lingers with its on-disk
    ownership record but no live instance fails its device allocation closed until recreated.
 
-## What GPUStack Operator does NOT do
+## Operator boundaries
 
 - Enable, disable or reconfigure partition mode — those are `ppu-smi mig` operations you run. (It does
   create and destroy the Instances backing scheduled workloads.)

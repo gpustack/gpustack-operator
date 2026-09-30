@@ -3,9 +3,13 @@ title = "GPUStack Operator"
 enableRobotsTXT = true
 disableKinds = ["taxonomy", "term"]
 
+[outputs]
+  home = ["HTML", "JSON"]
+
 [markup]
   [markup.highlight]
     style = "github"
+    noClasses = false
   [markup.goldmark]
     [markup.goldmark.renderer]
       unsafe = true
@@ -19,9 +23,13 @@ disableKinds = ["taxonomy", "term"]
   [[module.mounts]]
     source = "../docs"
     target = "content/docs"
+    excludeFiles = ["README.md"]
   [[module.mounts]]
     source = "layouts"
     target = "layouts"
   [[module.mounts]]
-    source = "static"
-    target = "static"
+    source = "assets"
+    target = "assets"
+  [[module.mounts]]
+    source = "data"
+    target = "data"

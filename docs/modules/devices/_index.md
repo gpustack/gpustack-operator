@@ -5,16 +5,16 @@ runtime isolation method depend on the manufacturer.
 
 ## Contents
 
-- [Start with a request](#start-with-a-request)
-- [Operate the hardware](#operate-the-hardware)
+- [Accelerator requests](#accelerator-requests)
+- [Device operations](#device-operations)
 
-## Start with a request
+## Accelerator requests
 
 [Accelerator Requests](requests.md) explains whole, shared, logically sliced and
 physically partitioned requests. [Device Discovery](discovery.md) explains
 how the per-node `Devices` record connects discovery to allocation.
 
-## Operate the hardware
+## Device operations
 
 Check a node before installation with [Preflight Operations](preflight.md). If you
 use hardware partitioning, follow the runbook for [NVIDIA](nvidia-mig.md),

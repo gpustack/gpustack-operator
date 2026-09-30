@@ -12,7 +12,7 @@ live guidance, for older releases and for the reset any release can meet too.
 - [Namespace stuck Terminating](#namespace-stuck-terminating)
 - [Kueue CRDs stuck Terminating after a teardown](#kueue-crds-stuck-terminating-after-a-teardown)
 - [NFD prune Job that never finishes](#nfd-prune-job-that-never-finishes)
-- [The safe full-reset order](#the-safe-full-reset-order)
+- [The full-reset order](#the-full-reset-order)
 
 ## Worker CrashLoopBackOff after an upgrade
 
@@ -60,7 +60,7 @@ kubectl api-resources --api-group=worker.gpustack.ai -o wide
 
 If the pod still fails on a missing Kueue CRD, check whether the CRD itself is stuck `Terminating`
 (`kubectl get crd | grep kueue`); that is the finalizer deadlock of [Migrating from
-v0.5.x](from-v0.5.md#kueue-finalizer-deadlock-self-healed-automatically), which the chart's
+v0.5.x](from-v0.5.md#kueue-finalizer-deadlock), which the chart's
 migrate-pre hook reaps on the next boot. When neither repair converges, take the full reset below.
 
 ## Namespace stuck Terminating
@@ -191,7 +191,7 @@ helm -n "$NS" list -a | grep gpustack-node-feature-discovery \
   && helm -n "$NS" uninstall gpustack-node-feature-discovery --no-hooks
 ```
 
-## The safe full-reset order
+## The full-reset order
 
 Re-registering a cluster against a different GPUStack server means wiping the worker install. Done in
 this order, the namespace never wedges:

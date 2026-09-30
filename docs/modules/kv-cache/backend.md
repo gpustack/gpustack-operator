@@ -13,7 +13,7 @@ rendered flag, environment variable and metric keeps the vendor's spelling.
 - [The image](#the-image)
 - [The metadata plane](#the-metadata-plane)
 - [The members](#the-members)
-- [What status reports](#what-status-reports)
+- [Status and conditions](#status-and-conditions)
 - [Growing and shrinking a group](#growing-and-shrinking-a-group)
 - [The external mode](#the-external-mode)
 - [Operating notes](#operating-notes)
@@ -63,7 +63,7 @@ the data it holds, so an edit is refused and the choice is made when the group i
 An earlier shape offered five values. Four of them named things that are **not member groups**, and
 each is reached another way:
 
-| Was a `medium` value | What it actually is | Where it lives |
+| Former `medium` value | What it is | Location |
 |---|---|---|
 | `LocalDisk` | a tier on the members that already hold the memory replica | [`members[].localDisks`](local-disk-tier.md) |
 | `NoF` | an NVMe-oF target coordinate, registered once, with no node affinity and no Pod | no API surface; it is not a member group |
@@ -114,7 +114,7 @@ declare one.
 A pool sets the quota ceiling on a backend; a Binding grants a namespace a share of that quota.
 This mirrors Kueue's `ClusterQueue` and `LocalQueue` split
 (<https://kueue.sigs.k8s.io/docs/concepts/>). Several pools can reference one backend. The grant
-does not enforce access to the store; see [What a Binding does not do](pool.md#what-a-binding-does-not-do).
+does not enforce access to the store; see [Limitations](pool.md#limitations).
 
 ## The image
 
@@ -141,7 +141,7 @@ leave an object that owns nothing and cannot be deleted.
 The client side is where the vendor lives, and it lives in the published wheel rather than in a custom
 build:
 
-| variant | client layout | transports compiled in |
+| variant | client layout | Transports |
 |---|---|---|
 | base (CUDA 12) | everything static in `store.so` (18.8 MB) | `RdmaTransport`, `TcpTransport` |
 | `-rocm` | `store.so` 19.3 MB | `HipTransport`, `RdmaTransport`, `TcpTransport` |
@@ -362,13 +362,13 @@ build compiles no `ascend` transport.
 > requested, never inferred. Naming `RDMA` or `EFA` is also what accepts the security context that
 > comes with it — which is those three things and **not** `privileged`. A `TCP` group sets none of
 > them. `privileged` is reachable, but only by writing it into
-> [`members[].securityContext`](#reaching-a-nodes-accelerator), never by naming a protocol.
+> [`members[].securityContext`](#vram-group-accelerator-access), never by naming a protocol.
 
 **Both host fabrics also grant the member one device, and the protocol names it.** Nothing is
 declared: an `RDMA` group asks for `device.gpustack.ai/rdma.shared`, one of
-[this operator's own RDMA keys](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves);
+[this operator's own RDMA keys](../rdma/network-topology.md#the-rdma-resource-keys);
 an `EFA` group asks for
-[the key AWS's EFA device plugin advertises](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves).
+[the key AWS's EFA device plugin advertises](../rdma/network-topology.md#the-rdma-resource-keys).
 
 The renderer **derives** the RDMA name rather than spelling it, so the page linked above is the one
 to trust if the two ever disagree. The request is the permission (a bind mount of a device tree is
@@ -413,7 +413,7 @@ Nothing is mounted from a host EFA install: the libfabric an `EFA` member runs o
 
 **The engines an `EFA` group serves need an EFA build of Mooncake as well**, which no runner image
 carries. See [what an EFA leg needs from the engine
-image](../rdma/operations.md#what-an-efa-leg-needs-from-the-engine-image).
+image](../rdma/operations.md#efa-engine-images).
 
 EFA capability is a property of the instance size rather than of its family (the largest `i7ie`
 sizes carry it while every smaller one does not), so check the size about to run, with
@@ -457,13 +457,13 @@ one accelerator would take a whole one away from inference to account for a frac
 memory, on a node where the member cannot use the rest of what it took. An eight-accelerator node
 keeps all eight available to inference, and one member contributes a slice of the first.
 
-### Reaching a node's accelerator
+### VRAM group accelerator access
 
 A VRAM group's container needs the vendor's **user-space driver**, which is what the store's client
 loads to allocate a segment at all. That driver is the node's and is never in the image, so it has to
 be brought in. Nothing is inferred; every route is written on the group:
 
-| Field | What it is for |
+| Field | Purpose |
 |---|---|
 | `members[].extraEnv` | The vendor runtime's own trigger, where one exists — `NVIDIA_VISIBLE_DEVICES: all` makes the NVIDIA toolkit inject the driver and every device. Ascend has no counterpart. |
 | `members[].runtimeClassName` | The vendor container runtime named explicitly, for a cluster where it is not the default runtime. |
@@ -571,7 +571,7 @@ hands to clients. Rules written for the data plane therefore target pod addresse
 > nothing here survived a restart anyway. On the host-fabric paths the pod holds the host's network
 > namespace and this is the node's address regardless.
 
-## What status reports
+## Status and conditions
 
 ```console
 $ kubectl get kvcb
@@ -645,7 +645,7 @@ This condition does not identify which deployment attempted a write, and a previ
 window does not prove that every current write fails.
 
 To ask whether the **disk** tier is holding data, the figure to read is not on the CR at all. See
-[The tier is written one bucket at a time](local-disk-tier.md#the-tier-is-written-one-bucket-at-a-time).
+[Bucket writes](local-disk-tier.md#bucket-writes).
 
 **Capacity is absent (not zero) while the leader is starting.** `/metrics` is ungated: a leader
 that is up but not serving answers 200 with a well-formed exposition whose gauges all read zero, and a
@@ -728,7 +728,7 @@ belongs to the Pod template, not to that field.
 `allocationStrategy`: `FreeRatioFirst` (the default) biases new writes toward the emptier member,
 `Random` does not.
 
-### A group's position is its identity
+### Group identity by position
 
 A group has **no name**. Its position in `members` is what the DaemonSet's name, its immutable
 selector labels and its members' HTTP port are all derived from, so moving an entry in that list
@@ -873,7 +873,7 @@ Two behaviours differ from the managed mode:
   identity, then copy an excerpt of the answer into a status readable by anyone who can read the
   object. The redirect is reported as the response it is.
 
-### Keeping two external objects off one leader is yours
+### Two objects on one leader
 
 **Two `KVCacheBackend` objects may name the same leader, and nothing in the operator notices.** For
 a managed backend the object *is* the leader, so two objects are two leaders. For an external one the
@@ -901,9 +901,9 @@ backend object**, so two Bindings reaching one leader through two objects are bo
    as an error. It surfaces as a cache that keeps losing content nobody asked it to lose.
 3. **Two Bindings on one `domain.name` with a different `blockSize` or `dtype` corrupt each
    other's blocks.** The reuse identity an engine is handed is the domain **name alone**. Each
-   Binding hands its own [`dtype`](pool.md#the-dtype-is-handed-to-the-engine) to its own
+   Binding hands its own [`dtype`](pool.md#engine-dtype) to its own
    engines, and `blockSize` reaches no engine at all. So two differently-shaped caches land under
-   one identity, which is [the silent cache pollution](../model-deployment/deployment.md#the-reuse-domain-is-inherited)
+   one identity, which is [the silent cache pollution](../model-deployment/deployment.md#inherited-reuse-domain)
    a wrong `blockSize` or `dtype` causes, reached here without either value being wrong.
 
 If you point two objects at one leader, either keep their pools' Bindings on **different**

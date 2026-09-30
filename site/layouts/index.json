@@ -1,0 +1,7 @@
+{{- $pages := slice -}}
+{{- range .Site.Pages -}}
+  {{- if and .File (hasPrefix .RelPermalink "/docs/") -}}
+    {{- $pages = $pages | append (dict "title" (partial "page-title.html" .) "url" .RelPermalink "content" (.Plain | htmlUnescape)) -}}
+  {{- end -}}
+{{- end -}}
+{{- $pages | jsonify -}}

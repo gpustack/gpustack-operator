@@ -6,16 +6,16 @@ the user enter the workload container.
 
 ## Contents
 
-- [Create an Instance](#create-an-instance)
-- [Understand device access](#understand-device-access)
+- [Instance configuration](#instance-configuration)
+- [Device access](#device-access)
 
-## Create an Instance
+## Instance configuration
 
 The [Usage](../../../README.md#usage) example creates a sliced Instance. [Accelerator
 Requests](../devices/requests.md#requesting-through-the-instance-api) explains how
 `spec.resources` maps to the accelerator resource families.
 
-## Understand device access
+## Device access
 
 The workload container owns the accelerator request. The optional SSH sidecar uses a separate
 visibility resource to enter the same workspace without acquiring a second accelerator. See

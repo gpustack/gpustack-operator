@@ -12,7 +12,7 @@ those releases, and this documentation does not track them; upgrading is the fix
 
 ## The minimum per shape
 
-| Engine | Shape | Minimum | Mooncake client in the runner image | Store members |
+| Engine | Shape | Minimum | Mooncake client | Store members |
 |---|---|---|---|---|
 | vLLM | alone | `0.29.0` | `0.3.13.post1`, on the `cuda12.9` and the `cuda13.0` tag | — |
 | vLLM | prefill/decode, direct transfer over `tcp` | `0.29.0` | `0.3.13.post1` | — |
@@ -32,7 +32,7 @@ vLLM-Ascend rows ran on the runner's `cann9.1-910b-vllm0.23.0-router` tag, named
 ## Reading the table
 
 **`engine.version` has no default.** The operator assembles the runner image from it (see [The
-runner image is a formula](deployment.md#the-runner-image-is-a-formula)), so the minimum is a
+runner image formula](deployment.md#runner-image-formula)), so the minimum is a
 value you write, and nothing refuses a lower one.
 
 **The client comes with the image, not with the version.** The column above is read off the
@@ -63,13 +63,13 @@ prefill/decode pair. The first column gives the API and Mooncake spellings. `Aut
 | Transport (API / Mooncake) | Engine | Store leg | Direct leg |
 |---|---|---|---|
 | `Auto`, `TCP` / `tcp` | vLLM | **Works**, default images; beside a direct leg it keeps its store connections open too and did not [run out of ports](#known-failures-at-the-minimum) where measured | **Works**, default images; it keeps its connections open and did not [run out of ports](#known-failures-at-the-minimum) where measured |
-| `TCP` / `tcp` | SGLang | **Works**, with a published store image on [its client's line](#the-minimum-per-shape), named by hand; beside a direct leg, [it runs out of ports](#known-failures-at-the-minimum) unless [`model-deployment-tcp-tw-reuse`](../../reference/settings.md#letting-sglang-prefill-pods-reuse-time-wait-ports) is on | **Works**, default images; under sustained load [it runs out of ports](#known-failures-at-the-minimum), and [`model-deployment-tcp-tw-reuse`](../../reference/settings.md#letting-sglang-prefill-pods-reuse-time-wait-ports) is the remedy, run so far only beside a store |
+| `TCP` / `tcp` | SGLang | **Works**, with a published store image on [its client's line](#the-minimum-per-shape), named by hand; beside a direct leg, [it runs out of ports](#known-failures-at-the-minimum) unless [`model-deployment-tcp-tw-reuse`](../../reference/settings.md#sglang-time-wait-port-reuse) is on | **Works**, default images; under sustained load [it runs out of ports](#known-failures-at-the-minimum), and [`model-deployment-tcp-tw-reuse`](../../reference/settings.md#sglang-time-wait-port-reuse) is the remedy, run so far only beside a store |
 | `TCP` / `tcp` | vLLM-Ascend | **Not supported**: refused at admission, its store client accepts `CANN` only | **Not supported**: the value is ignored, the leg runs `ascend` |
 | `RDMA` / `rdma` | vLLM | **Not verified** | **Not verified** |
 | `RDMA` / `rdma` | SGLang | **Not verified** | **Not supported**: the operator grants SGLang's direct leg no device |
 | `RDMA` / `rdma` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` | **Not supported**: ignored, as for `tcp` |
-| `EFA` / `efa` | vLLM | **Own image**: an [EFA build of Mooncake](../rdma/operations.md#what-an-efa-leg-needs-from-the-engine-image) in the engine; default store image | **Own image**: [the same build](../rdma/operations.md#what-an-efa-leg-needs-from-the-engine-image) on both ends |
-| `EFA` / `efa` | SGLang | **Not supported**: [no EFA build serves SGLang](../rdma/operations.md#sglang-cannot-use-efa) | **Not supported**: the operator grants SGLang's direct leg no device |
+| `EFA` / `efa` | vLLM | **Own image**: an [EFA build of Mooncake](../rdma/operations.md#efa-engine-images) in the engine; default store image | **Own image**: [the same build](../rdma/operations.md#efa-engine-images) on both ends |
+| `EFA` / `efa` | SGLang | **Not supported**: [no EFA build serves SGLang](../rdma/operations.md#sglang-and-efa) | **Not supported**: the operator grants SGLang's direct leg no device |
 | `EFA` / `efa` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` | **Not supported**: ignored, as for `tcp` |
 | `CANN` / `ascend` | vLLM | **Not supported**: the CUDA client has no Ascend transport | **Not supported**: the CUDA client has no Ascend transport |
 | `CANN` / `ascend` | SGLang | **Not verified** | **Not verified** |
@@ -97,20 +97,20 @@ have not been run. With a positive `resources.interface`, an `RDMA` leg beside a
 refused at admission.
 
 On AWS the `RDMA` rows do not apply; [choose `EFA` or
-`TCP`](../rdma/operations.md#on-aws-rdma-is-not-an-option).
+`TCP`](../rdma/operations.md#rdma-on-aws).
 
 ## Known failures at the minimum
 
 - **SGLang with a store** holds a pinned host pool and needs the node's available memory above a
   fixed reserve plus that pool; see [SGLang's host-memory
-  tier](../kv-cache/injection.md#sglangs-host-memory-tier).
+  tier](../kv-cache/injection.md#sglang-host-memory-tier).
 - **SGLang prefill/decode over `TCP` runs out of local ports under sustained load, with or without
   a store.** The prefill half opens a new connection for every transfer, to the decode half and to
   each store member, all from the same ephemeral ports of its container. Connections left in
   `TIME-WAIT` use them up; from then on every request through that pair fails and keeps failing
   until the engine Pods are restarted.
 
-  **Turning on [`model-deployment-tcp-tw-reuse`](../../reference/settings.md#letting-sglang-prefill-pods-reuse-time-wait-ports)
+  **Turning on [`model-deployment-tcp-tw-reuse`](../../reference/settings.md#sglang-time-wait-port-reuse)
   avoids it**, after a kubelet change on every node the prefill half can run on.
 
   An SGLang `0.5.18` pair with a `TCP` store, sent short chat requests one after another, locked

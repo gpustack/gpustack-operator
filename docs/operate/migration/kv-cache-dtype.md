@@ -3,17 +3,17 @@
 From this release, a Binding's `spec.domain.dtype` stops being a declaration and becomes the engine's
 `--kv-cache-dtype`, changing objects a running cluster already holds. The rule itself is stated once,
 under
-[The dtype is handed to the engine](../../modules/kv-cache/pool.md#the-dtype-is-handed-to-the-engine).
+[The dtype is handed to the engine](../../modules/kv-cache/pool.md#engine-dtype).
 
 ## Contents
 
-- [What changes on upgrade](#what-changes-on-upgrade)
+- [Changes on upgrade](#changes-on-upgrade)
 - [Check every Binding first](#check-every-binding-first)
 - [Find roles that pass the flag themselves](#find-roles-that-pass-the-flag-themselves)
 - [If new Pods fail argument parsing](#if-new-pods-fail-argument-parsing)
 - [Verify](#verify)
 
-## What changes on upgrade
+## Changes on upgrade
 
 - Every pool-attached `ModelDeployment` rolls once. Its replicas gain an argument, which moves
   their spec hash, so each is replaced at the deployment's first reconcile after the upgrade.
@@ -37,7 +37,7 @@ kubectl get kvcachepoolbindings -A \
 ```
 
 Each engine's accepted spellings are listed once, under
-[The dtype is handed to the engine](../../modules/kv-cache/pool.md#the-dtype-is-handed-to-the-engine). A
+[The dtype is handed to the engine](../../modules/kv-cache/pool.md#engine-dtype). A
 Binding whose deployments run both engines needs a value in both rows there. A spelling its engine
 does not accept is what the next two sections recover from, and fixing it before upgrading is
 cheaper.
@@ -94,7 +94,7 @@ An injected Pod carries the same two entries at the end of its `args`, where the
 ---
 
 **See also** — [KV Cache Pool](../../modules/kv-cache/pool.md) (the dtype rule) ·
-[ModelDeployment](../../modules/model-deployment/deployment.md#what-the-operator-owns) (what the operator owns) ·
+[ModelDeployment](../../modules/model-deployment/deployment.md#operator-owned-keys) (what the operator owns) ·
 [KV Cache Injection](../../modules/kv-cache/injection.md) (the Pod path) ·
 [Settings](../../reference/settings.md) (the escape switch)
 

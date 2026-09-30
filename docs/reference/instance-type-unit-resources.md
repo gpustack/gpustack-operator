@@ -10,7 +10,7 @@ is never touched.
 
 ## Contents
 
-- [What the preset does and does not affect](#what-the-preset-does-and-does-not-affect)
+- [Preset scope](#preset-scope)
 - [The tiers](#the-tiers)
 - [NVIDIA](#nvidia)
 - [Ascend](#ascend)
@@ -24,9 +24,9 @@ is never touched.
 - [Intel](#intel)
 - [Kunlun](#kunlun)
 - [Biren](#biren)
-- [If a preset does not fit your hardware](#if-a-preset-does-not-fit-your-hardware)
+- [Hardware without a preset](#hardware-without-a-preset)
 
-## What the preset does and does not affect
+## Preset scope
 
 - **It is the default request.** An Instance omitting `cpu`/`ram` is sized from it — by accelerator
   count for a whole accelerator, by memory percentage for a slice or partition.
@@ -237,7 +237,7 @@ Not reachable yet: the operator has no manufacturer key for Kunlun.
 
 Not reachable yet: the operator has no manufacturer key for Biren.
 
-## If a preset does not fit your hardware
+## Hardware without a preset
 
 Create the `InstanceType` yourself: an administrator-created type is never touched by the operator,
 and no preset overrides it. There is no setting to override the table; it ships in the operator
@@ -253,7 +253,7 @@ at the top of that file; when either changes, compare the rows here with the pre
 
 ---
 
-**See also** — [Scheduling Chain](../modules/devices/scheduling.md#the-unit-spec-is-not-derived-from-node-capacity)
+**See also** — [Scheduling Chain](../modules/devices/scheduling.md#unit-spec-defaults)
 (where the unit spec is stamped) · [Admission](../modules/devices/admission.md#the-instancetype-and-instance-webhooks)
 (what the webhooks enforce on it) · [Walkthrough](../getting-started/walkthrough.md#4-managing-a-custom-instancetype)
 

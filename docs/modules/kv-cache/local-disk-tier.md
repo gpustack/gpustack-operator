@@ -27,7 +27,7 @@ spec:
                   low: 80
 ```
 
-| what it renders | where |
+| Rendered | Location |
 |---|---|
 | `MOONCAKE_OFFLOAD_ENABLED` and `..._FILE_STORAGE_PATH`, plus `..._BUCKET_SIZE_LIMIT_BYTES` and `..._BUCKET_KEYS_LIMIT` | the member container |
 | `..._TOTAL_SIZE_LIMIT_BYTES` **and** `..._BUCKET_MAX_TOTAL_SIZE`, both from `capacity`; `..._TOTAL_KEYS_LIMIT` from `keyLimit` | the member container |
@@ -52,19 +52,19 @@ object, so there is nothing to opt into.
 
 **Every example on this page is a `DRAM` group, and that is not incidental.** What is and is not
 measured about pairing the tier with a `VRAM` group is stated once, beside the medium it belongs to,
-at [Reaching a node's accelerator](backend.md#reaching-a-nodes-accelerator). Read it before writing
+at [VRAM group accelerator access](backend.md#vram-group-accelerator-access). Read it before writing
 one. It is named there and not restated here on purpose: a second copy of a measurement is a second
 thing to keep true, and this page has already been wrong about it once.
 
 ## Contents
 
-- [The tier is written one bucket at a time](#the-tier-is-written-one-bucket-at-a-time)
-- [What the tier does when it fills](#what-the-tier-does-when-it-fills)
-- [The directory has to exist, and be writable by the image's user](#the-directory-has-to-exist-and-be-writable-by-the-images-user)
-- [Emptying the directory when the backend goes away](#emptying-the-directory-when-the-backend-goes-away)
-- [What the tier costs that nothing accounts for](#what-the-tier-costs-that-nothing-accounts-for)
+- [Bucket writes](#bucket-writes)
+- [Eviction](#eviction)
+- [Directory requirements](#directory-requirements)
+- [Cleanup on deletion](#cleanup-on-deletion)
+- [Unaccounted disk usage](#unaccounted-disk-usage)
 
-## The tier is written one bucket at a time
+## Bucket writes
 
 The store does not write an offloaded object on its own. It **assembles objects into a bucket and
 writes nothing until that bucket is full** (by bytes or by object count), and what is short of the
@@ -74,7 +74,7 @@ threshold is carried to the next attempt, indefinitely.
 has a tier that holds nothing while looking healthy.** The member Pods are Ready, the leader logs the
 mount and reports objects deferred for offload, and `status.capacity` shows the size the tier
 declared, because that figure is **capacity, not usage** (see
-[What status reports](backend.md#what-status-reports)).
+[Status and conditions](backend.md#status-and-conditions)).
 
 This is what [issue #200](https://github.com/gpustack/gpustack-operator/issues/200) was filed for;
 the history of what was and was not observed on the way to finding it is in
@@ -117,7 +117,9 @@ member client fills its own bucket, so traffic spread over four members has to r
 worth before every one of them closes (the figure the group's
 [`capacityPerMember` floor](disk-heavy-nodes.md) is taken from). Judge the two together:
 
-| offered **per member** since the tier came up | what a settled `0` means |
+Compare each member’s offered data since the tier started with a settled zero disk-usage reading:
+
+| Offered data | Zero usage |
 |---|---|
 | below one bucket | the expected reading; waiting does not change it, because nothing is due |
 | one bucket or more | **the tier is not taking writes** — this is the reading to act on |
@@ -126,11 +128,11 @@ The gauge updates when a bucket closes. An immediate read after a `put` can stil
 working tier; it catches up within tens of seconds. If each member has received a bucket's worth
 of data and the gauge remains `0` past that delay, the tier is not taking writes.
 
-## What the tier does when it fills
+## Eviction
 
 `localDisks[].eviction` is one choice with two outcomes, not a set of knobs:
 
-| `eviction` | what the tier does when full |
+| `eviction` | Behavior when full |
 |---|---|
 | unset | whatever the store does by default |
 | `enabled: true` (the default when the block is present) | drops what it holds and goes on accepting writes |
@@ -162,7 +164,7 @@ from the environment only. A name the operator already renders is refused there,
 takes a container carrying one name twice and leaves the winner to the runtime. **Every value is
 world-readable**, on the cluster-scoped object and again in the Pod. No credential belongs there.
 
-## The directory has to exist, and be writable by the image's user
+## Directory requirements
 
 `localDisks[].path` is mounted with `type: Directory`, so **the directory must already exist on every
 node the group selects**. This is deliberate: a directory the kubelet creates is owned by `root` with
@@ -192,7 +194,7 @@ There is **no switch that makes the operator create the directory for you.**
 
 That objection is about ownership, so it reaches creating the directory and not emptying it: removing
 content needs no uid. Emptying is a switch, and it is
-[below](#emptying-the-directory-when-the-backend-goes-away).
+[below](#cleanup-on-deletion).
 
 Five rules the path has to satisfy, all enforced at apply time:
 
@@ -243,7 +245,7 @@ The last one never reaches a Ready state (the member's REST port opens only afte
 so the readiness probe never passes), and `MembersMounted` reports the shortfall rather than the
 backend looking healthy.
 
-## Emptying the directory when the backend goes away
+## Cleanup on deletion
 
 Deleting a `KVCacheBackend` leaves the tier directory exactly as it was. Set
 `members[].localDisks[].cleanAfterDelete: true` and the operator empties it as part of the deletion, on
@@ -270,7 +272,7 @@ filesystem there.
 before the member starts, and it runs `sh -c`; an image without a shell keeps the member from
 starting. The store images this project ships have one.
 
-### Leaving it off, and what that costs
+### When cleanup is disabled
 
 A later backend pointed at the same `path` starts on whatever the previous one left. The store
 claims those buckets, so a key the new backend has written can read back as the **old backend's
@@ -305,7 +307,7 @@ exist yet. A node still scheduling or still pulling holds the `True` verdict ope
 being skipped over. A node whose only reading came from a replacement counts as one that has not
 answered, which is why a backend can end up with no verdict at all.
 
-### What it does not promise
+### Cleanup limitations
 
 **A node it cannot reach in time keeps its content.** The deletion is not held open for it: a
 deletion waiting on a node that is gone is an object nobody can delete. The node is left as it is and
@@ -353,7 +355,7 @@ with it. A removal already under way when the path becomes shared is **stopped**
 $ kubectl describe node <node> | grep -E 'KVCacheTierNotCleaned|KVCacheTierSharedPath|KVCacheTierPartlyEmptied'
 ```
 
-## What the tier costs that nothing accounts for
+## Unaccounted disk usage
 
 The `hostPath` is **not** counted into any resource request, and it cannot be: the kubelet's
 ephemeral-storage accounting covers the container filesystem, `emptyDir` volumes and logs, never a

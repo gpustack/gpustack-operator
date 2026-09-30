@@ -20,7 +20,7 @@ request device-plugin resources, but these checks and resource-unit calculations
 
 An accelerator is shared in one of two physically incompatible ways, and GPUStack names them apart:
 
-| Term | What it is | How isolation is enforced | Example |
+| Term | Definition | Isolation | Example |
 |---|---|---|---|
 | **Logical slicing** (`.sliced*`) | software slicing of a whole accelerator | the manufacturer's own sharing facility caps compute and VRAM per container — [which facility, per manufacturer](discovery.md#sliced-logical-slicing) | 50 % of an A10G |
 | **Physical partitioning** (`.partitioned*`) | hardware partitioning of an accelerator put into a partitioning mode | the hardware itself; the operator materializes the instance | an NVIDIA MIG `3g.40gb`, or a partition of a T-Head PPU or a Hygon DCU |
@@ -39,7 +39,7 @@ no `.partitioned*` keys at all.
 `<base>` is the manufacturer's device resource (`nvidia.com/gpu`, `huawei.com/npu`, … — see
 [Accelerator support](../../../README.md#accelerator-support)).
 
-| Key | Served by | Accelerators that serve it | Request value | Node value |
+| Key | Served by | Eligible accelerators | Request value | Node value |
 |---|---|---|---|---|
 | `<base>` | device plugin (Exclusive) | unpartitioned only | accelerator count | Σ healthy tokens |
 | `<base>.shared` | device plugin (Shared) | unpartitioned only | distinct accelerators on one node, one ownership share on each (10 per accelerator) | Σ healthy tokens |
@@ -368,14 +368,14 @@ An RDMA interface is requested through three node-level keys that sit beside the
 families, not inside them: a network interface belongs to the node rather than to a manufacturer,
 so no `<base>` applies. The mechanism (which interface serves which key, and what a grant hands
 the container) is described in
-[Network Topology](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves); the request rules are here.
+[Network Topology](../rdma/network-topology.md#the-rdma-resource-keys); the request rules are here.
 
 [RDMA Operations](../rdma/operations.md) covers how many to ask for and how to configure a node so
 the request lands well.
 
 All three are served by the device plugin, and a request names what it wants one of:
 
-| Key | A request asks for |
+| Key | Quantity meaning |
 |---|---|
 | `device.gpustack.ai/rdma` | whole interfaces |
 | `device.gpustack.ai/rdma.shared` | concurrent uses of an interface |
@@ -383,7 +383,7 @@ All three are served by the device plugin, and a request names what it wants one
 
 What a quantity of each key means, how many tokens an endpoint carries, and which allocation mode
 each key belongs to, are stated once with the mechanism:
-[the RDMA resource keys](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves).
+[the RDMA resource keys](../rdma/network-topology.md#the-rdma-resource-keys).
 There are no `.units` keys on this side: nothing is webhook-derived, and the value you set is the
 value that schedules.
 
@@ -392,18 +392,18 @@ seven rules above neither apply to them nor can be violated by them: an accelera
 RDMA key in one Pod is legal.
 
 The same blindness reaches Kueue, which therefore meters these keys not at all. See
-[RDMA Operations](../rdma/operations.md#kueue-does-not-meter-the-rdma-keys) for what that costs a
+[RDMA Operations](../rdma/operations.md#kueue-and-the-rdma-keys) for what that costs a
 fleet and what to do instead of a quota.
 
 Neither a node without an RDMA-capable interface nor an endpoint whose link the node judged
 `failed` carries allocatable tokens (what each one advertises is on
-[the mechanism page](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)),
+[the mechanism page](../rdma/network-topology.md#the-rdma-resource-keys)),
 so a request for these keys never schedules onto them.
 
 A grant injects the endpoint's own verbs character device, the node-level connection-manager device
 where the host has one, and `NCCL_IB_HCA` naming the granted devices. That set is evidenced for
 RoCE and for nothing else — see
-[what an allocation hands over](../rdma/network-topology.md#what-an-allocation-hands-over).
+[what an allocation hands over](../rdma/network-topology.md#the-allocation-response).
 
 **Shared accelerator and RDMA interface in one container**, the shape a co-located workload uses:
 
@@ -434,7 +434,7 @@ says so.
   read the policy a given node runs. No release sets one for you — [how to set it, and how to
   confirm it took](../rdma/operations.md#enabling-numa-alignment-on-the-kubelet).
 - **The alignment's unit is the NUMA node.** See
-  [the RDMA resource keys](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)
+  [the RDMA resource keys](../rdma/network-topology.md#the-rdma-resource-keys)
   for why a shared PCIe switch is finer than a hint can express.
 
 What is not guaranteed is the node itself: the scheduler selects by quantities and cannot see

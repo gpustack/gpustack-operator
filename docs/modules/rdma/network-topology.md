@@ -6,13 +6,13 @@ checks RDMA links before publishing the labels and resource keys used for schedu
 ## Contents
 
 - [The interface inventory](#the-interface-inventory)
-- [`pciRootId` is the outermost bridge; `pciSwitches` is the tighter fact](#pcirootid-is-the-outermost-bridge-pciswitches-is-the-tighter-fact)
-- [The RDMA link is checked, because a bound device is not a working link](#the-rdma-link-is-checked-because-a-bound-device-is-not-a-working-link)
-- [The three node labels, and what a label can carry](#the-three-node-labels-and-what-a-label-can-carry)
-- [The RDMA resource keys, and what each endpoint serves](#the-rdma-resource-keys-and-what-each-endpoint-serves)
-- [What an allocation hands over](#what-an-allocation-hands-over)
-- [The scale-up fabric is a second network, and a different shape](#the-scale-up-fabric-is-a-second-network-and-a-different-shape)
-- [Reading it yourself](#reading-it-yourself)
+- [pciRootId and pciSwitches](#pcirootid-and-pciswitches)
+- [The RDMA link check](#the-rdma-link-check)
+- [The three node labels](#the-three-node-labels)
+- [The RDMA resource keys](#the-rdma-resource-keys)
+- [The allocation response](#the-allocation-response)
+- [The scale-up fabric](#the-scale-up-fabric)
+- [Inspecting the record](#inspecting-the-record)
 
 ## The interface inventory
 
@@ -41,7 +41,7 @@ logged at `Error`. A pass that enumerated and found none *does* write the empty 
 > compare unequal on passes where nothing changed and issue an API write on every pass, forever,
 > with correct data in the object the whole time.
 
-## `pciRootId` is the outermost bridge; `pciSwitches` is the tighter fact
+## `pciRootId` and `pciSwitches`
 
 `DeviceTopology.pciRootId` holds the **address of the outermost PCI bridge** above the device. The
 name suggests the root complex; the field is not that. Code that reads it as the root complex claims
@@ -56,14 +56,14 @@ fields answer different questions and are never read as the same claim.
 > across the two sides, so sharing the code makes them identical by construction rather than by
 > discipline.
 
-## The RDMA link is checked, because a bound device is not a working link
+## The RDMA link check
 
 `rdma: true` says an RDMA device is bound. It does not say the link works, and on real hardware the
 two differ: a port can be fully configured, with an address and a gateway, while its link is down.
 
 Each RDMA device's ports are read for their transport state and their physical link state:
 
-| state | meaning | does this interface count as usable? |
+| State | Meaning | Usable |
 |---|---|---|
 | `OK` | some port is active with the physical link up | yes |
 | `Unverified` | the check ran and could not establish an answer | yes, and the reason says why |
@@ -111,9 +111,9 @@ makes the two readings interpret the host identically. The readings are not iden
 since `preflight` reads sysfs when it is invoked and the published record is as old as the last pass
 that had a reason to run. See [Preflight operations](../devices/preflight.md).
 
-## The three node labels, and what a label can carry
+## The three node labels
 
-| label | value | selectable? |
+| Label | Value | Selectable |
 |---|---|---|
 | `feature.gpustack.ai/rdma.capable` | `true` | **yes** — the link gate, for a nodeSelector or affinity you write |
 | `feature.gpustack.ai/rdma.distance` | the closest bus distance any accelerator has to an RDMA-capable interface | no — informational |
@@ -156,7 +156,7 @@ The `rdma.numa` set is joined with an underscore, not a comma. A comma is not a 
 character and it does not fail validation: the sanitizer every label value passes through drops it
 silently, so `{0,1}` would publish as `01` and read as node 01.
 
-## The RDMA resource keys, and what each endpoint serves
+## The RDMA resource keys
 
 The inventory and the link verdict describe an RDMA endpoint. Three device-plugin resources make one
 allocatable: the interface inventory decides which endpoints each key serves, the link verdict
@@ -177,7 +177,7 @@ EFA is allocated under none of these keys. AWS's EFA device plugin advertises it
 
 The mode is **read off the node, never chosen** (`pkg/deviceplugin/rdma_endpoint.go`):
 
-| the interface is… | it serves | its endpoints are |
+| Interface | Serves | Endpoints |
 |---|---|---|
 | an SR-IOV physical function with virtual functions configured | `partitioned` only | each of its virtual functions |
 | anything else — a physical function with none configured, or not a physical function | `exclusive`, `shared` | the interface itself |
@@ -211,7 +211,7 @@ declining to answer), and when neither answers, **no hint is attached rather tha
 container against a proximity nobody measured.
 
 A hint's unit is the NUMA node; a shared PCIe switch is finer than a hint can express (see
-[`pciRootId` above](#pcirootid-is-the-outermost-bridge-pciswitches-is-the-tighter-fact)).
+[`pciRootId` above](#pcirootid-and-pciswitches)).
 
 The `partitioned` family is the one place an RDMA token publishes a hint where its accelerator
 counterpart publishes none: an RDMA partition token names exactly one virtual function, whose
@@ -248,7 +248,7 @@ inventory, so a device that appears when a driver loads is picked up by the next
 mechanism for the same fact. The `--no-shared` and `--no-partitioned` switches drop the matching
 families; exclusive is ungated.
 
-## What an allocation hands over
+## The allocation response
 
 A granted token is resolved back to its endpoint in `Devices.spec.interfaces[]` at allocation
 time, and the response hands the container three things
@@ -280,7 +280,7 @@ container on such a host can be granted an endpoint, open it, and still fail ins
 transport library. And the two layouts above are exercised against fixture trees; which one a live
 host answers through has not been read yet.
 
-## The scale-up fabric is a second network, and a different shape
+## The scale-up fabric
 
 Everything above is the node's *Ethernet* view: interfaces the kernel enumerates, and RDMA over them.
 Beside it, several accelerator generations carry a **scale-up fabric** of their own: an interconnect
@@ -290,7 +290,7 @@ no PCI function of its own, and no IP.
 
 It is recorded per accelerator, in `spec.groups[].accelerators[].topology.fabric`:
 
-| Field | What it is |
+| Field | Meaning |
 |---|---|
 | `kind` | the interconnect — `ub`, `nvlink` or `xgmi`. Part of every comparison: two ids from different interconnects share no namespace |
 | `id` | the domain's identity, **comparable across nodes** — which is the only reason publishing it is worth anything |
@@ -325,7 +325,7 @@ reading the shape alone would cost a real super server the domain it is in.
 
 **What each manufacturer publishes differs, and absence is not uniform.**
 
-| Manufacturer | Concept | What it reports | Recorded today |
+| Manufacturer | Concept | Reports | Recorded today |
 |---|---|---|---|
 | Ascend A5 (950) | super pod, over the UB fabric | domain id, shape, member count, server index, rack, per-accelerator endpoints | Yes |
 | NVIDIA | NVLink / MNNVL domain | fabric cluster uuid, clique id | Yes — once the fabric manager has registered the accelerator, and not before |
@@ -384,7 +384,7 @@ per-pass answer would claim the GPU is in the NPU's super pod, and the two passe
 other's key forever. A pass that cannot read the node's other manufacturers withholds nothing and
 leaves the labels as published.
 
-## Reading it yourself
+## Inspecting the record
 
 ```bash
 # the fabric domain of every accelerator on one node

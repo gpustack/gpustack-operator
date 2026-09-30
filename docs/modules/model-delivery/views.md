@@ -125,7 +125,7 @@ column names what is missing and who owns it.
 | Delete with `cleanup_on_delete` | delete the prefetch; collection after the last reference and its grace | none |
 | `reset` (retry now) | automatic backoff to `retryTime` | not planned |
 | One row per source per worker | one entry per digest per node, shared by artifacts with the same content | none |
-| Prefer workers holding the files | [placement preference](../topology/scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it), compute first | none |
+| Prefer workers holding the files | [placement preference](../topology/scheduling.md#placement-of-node-delivered-models), compute first | none |
 | LoRA and draft-model files | not in this batch | later |
 | Tenant scope | the artifact's namespace; the node store names no tenant | none |
 

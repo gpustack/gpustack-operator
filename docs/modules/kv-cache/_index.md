@@ -5,20 +5,21 @@ capacity they receive.
 
 ## Contents
 
-- [Start with a working cache](#start-with-a-working-cache)
-- [Understand the parts](#understand-the-parts)
+- [Quick start](#quick-start)
+- [Cache configuration](#cache-configuration)
 
-## Start with a working cache
+## Quick start
 
 [KV Cache Walkthrough](walkthrough.md) creates the backend, pool, binding and
 deployment in order. A plain Pod can also use a binding through [KV Cache
 Injection](injection.md).
 
-## Understand the parts
+## Cache configuration
 
 Read [KV Cache Backend](backend.md) for the store and [KV Cache Pool](pool.md)
 for grants and quotas. The [leader](leader.md) and [local disk
 tier](local-disk-tier.md) have separate operating details.
+[Disk-Heavy Nodes](disk-heavy-nodes.md) covers cache placement on storage nodes.
 
 ---
 
