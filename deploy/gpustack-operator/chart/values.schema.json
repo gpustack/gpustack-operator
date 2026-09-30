@@ -1302,8 +1302,8 @@
           "type": "object"
         },
         "port": {
-          "default": 0,
-          "description": "TCP port the node's published trees are served to the other nodes' plugins on, for\nnode-to-node sync; `0` is off. When on, plugins authenticate each other with the projected\nServiceAccount token (audience `gpustack-model-peer`), and the networkPolicy below keeps\ntenant Pods off the port.",
+          "default": 32445,
+          "description": "TCP port the node's published trees are served to the other nodes' plugins on, for\nnode-to-node sync, enabled by default; `0` is off. Plugins authenticate each other with a\nprojected ServiceAccount token (audience `gpustack-model-peer`), and the networkPolicy below keeps\ntenant Pods off the port.",
           "title": "port",
           "type": "integer"
         },

@@ -18,9 +18,14 @@ node can materialize a resolved artifact while the hub is unreachable.
 
 ## The switch and the port
 
+The Helm chart enables node-to-node sync on port `32445` when `modelManager.enabled` is `true`.
+Set `modelManager.port` to `0` to disable peer serving and pulling while keeping node delivery
+and the model cache enabled. The standalone `model-manager` command keeps peer sync disabled
+until its port and peer authentication are configured.
+
 | Layer | Field | Default | Meaning |
 |---|---|---|---|
-| chart (`L1`) | `modelManager.port` | `0` | the TCP port the peer endpoints answer on; `0` is off and is the master switch |
+| chart (`L1`) | `modelManager.port` | `32445` | the TCP port the peer endpoints answer on; `0` is off and is the master switch |
 | chart (`L1`) | `modelManager.peerSync.maxServingStreams` / `streamsPerSource` | `8` / `4` | the serving and pulling concurrency limits |
 | Settings (`L2`) | `model-store-peer-sync` | `true` | whether a node's plugin may pull from peers; `false` keeps the listener but pulls from the hub only |
 
@@ -38,9 +43,17 @@ A request carries the pulling plugin's projected ServiceAccount token (audience
 plugins' ServiceAccount. Accepted tokens are cached briefly, never past the token's own expiry;
 refusals are never cached.
 
+Peer clients do not verify the serving plugin's TLS certificate. Use peer sync on a trusted Pod
+network: TokenReview authenticates requesters, and digest checks detect altered model bytes, but
+neither authenticates the server. Set `modelManager.port` to `0` if that network trust cannot be met.
+
 The NetworkPolicy the chart ships (default on) drops every other source: a tenant Pod's
 connection to the port times out rather than being answered. On CNIs where a `hostNetwork`
 tenant bypasses podSelector policies, the token check remains the gate.
+
+If a monitoring service scrapes the secure port, add its Pod and namespace selectors to
+`modelManager.networkPolicy.scrapers`. The default policy admits the worker and peer plugins;
+other ingress needs an explicit rule. The policy takes effect only on a CNI that enforces it.
 
 ## Cold-node pull
 
