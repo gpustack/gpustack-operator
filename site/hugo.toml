@@ -12,6 +12,7 @@ disableKinds = ["taxonomy", "term"]
     noClasses = false
   [markup.goldmark]
     [markup.goldmark.renderer]
+      # Reader tables use raw <br/> markup. Keep executable HTML out of Markdown.
       unsafe = true
     [markup.goldmark.renderHooks.link]
       useEmbedded = "auto"

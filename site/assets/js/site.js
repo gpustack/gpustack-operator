@@ -63,7 +63,8 @@ if (searchForm) {
         link.textContent = page.title;
         const snippet = document.createElement("p");
         const text = page.content.replace(/\s+/g, " ").trim();
-        const match = text.toLocaleLowerCase().indexOf(terms[0]);
+        const positions = terms.map(term => text.toLocaleLowerCase().indexOf(term)).filter(position => position >= 0);
+        const match = positions.length ? Math.min(...positions) : 0;
         const start = Math.max(0, match - 70);
         snippet.textContent = `${start ? "…" : ""}${text.slice(start, start + 220)}${text.length > start + 220 ? "…" : ""}`;
         item.append(link, snippet);
