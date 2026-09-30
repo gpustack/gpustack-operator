@@ -1,11 +1,11 @@
 # Instance Type Unit Resources Reference
 
 With `instance-type-derived-from-node` enabled, the operator summarizes a node into an
-`InstanceType` and stamps its **unit resources** — the CPU and RAM for *one unit*, which for an
+`InstanceType` and stamps its **unit resources**: the CPU and RAM for *one unit*, which for an
 acceleratable type is **one whole accelerator**.
 
 Chosen once, at creation: `spec.unitResources` is immutable afterwards and the operator never
-updates a type it did not just create — so a type you authored, or one an earlier version created,
+updates a type it did not just create, so a type you authored, or one an earlier version created,
 is never touched.
 
 ## Contents
@@ -32,10 +32,10 @@ is never touched.
   count for a whole accelerator, by memory percentage for a slice or partition.
 - **It caps an explicit request.** An Instance setting `cpu`/`ram` is capped against it.
 
-With `instance-general-resources-overcommit` enabled — the default — the preset is the container
+With `instance-general-resources-overcommit` enabled (the default), the preset is the container
 *limit* and the scheduler sees `100m` CPU per core, `128Mi` per Gi instead: an `xlarge` accelerator
-asks for 1.2 CPU / 24Gi. Disabled, the limit *is* the request — check the presets against what your
-nodes provide per accelerator.
+asks for 1.2 CPU / 24Gi. With it disabled, the limit *is* the request; check the presets against
+what your nodes provide per accelerator.
 
 ## The tiers
 
@@ -50,14 +50,14 @@ nodes provide per accelerator.
 `spec.localStorage` is always `100Gi`, never preset per product; a CPU-only derived type is always
 `1` CPU / `2Gi`.
 
-**An accelerator not listed below gets `fallback`** — `4` CPU / `16Gi`, what every accelerator got
+**An accelerator not listed below gets `fallback`**: `4` CPU / `16Gi`, what every accelerator got
 before presets existed.
 
 A family's tier starts from its VRAM band, then drops to what its **lowest** published
 multi-accelerator host configuration supports on both axes; single-accelerator cloud tiers are
-ignored, tracking the buyer's instance size rather than the accelerator. CPU stops at `12` on
-purpose: being also the defaulted request, a generous CPU number is, with overcommit disabled, the
-first thing to leave single-accelerator Pods `Pending`.
+ignored, tracking the buyer's instance size rather than the accelerator. The CPU ladder stops at
+`12` on purpose: the preset is also the defaulted request, so with overcommit disabled a generous
+CPU number is the first thing that leaves single-accelerator Pods `Pending`.
 
 `Anchor` is the published configuration each preset was taken from, per accelerator.
 
@@ -133,8 +133,8 @@ first thing to leave single-accelerator Pods `Pending`.
 910B is held one tier below its VRAM band because the KunLun G5680 V2 gives 64GB per accelerator;
 `ascend-910b4` also covers `910B4-1`.
 
-The 950 rows sit at the top of the ladder on VRAM alone — 128GB on the PR part, 144GB on the DT
-part, both above every band below them — since no host configuration has been published to anchor
+The 950 rows sit at the top of the ladder on VRAM alone (128GB on the PR part, 144GB on the DT
+part, both above every band below them), since no host configuration has been published to anchor
 them against. The detector resolves any `950*` chip name to one family, so a suffix this table has
 yet to list still schedules; it just takes the fallback unit resources until a row is added.
 
@@ -240,16 +240,16 @@ Not reachable yet: the operator has no manufacturer key for Biren.
 ## If a preset does not fit your hardware
 
 Create the `InstanceType` yourself: an administrator-created type is never touched by the operator,
-and no preset overrides it. There is no setting to override the table — it ships in the operator
+and no preset overrides it. There is no setting to override the table; it ships in the operator
 image. Two things to know first:
 
 - Presets apply only to types created after the upgrade, since `spec.unitResources` is immutable and
   the operator only ever creates; an upgraded cluster carries mixed old and new sizing.
-- Deleting a derived `InstanceType` has the operator author it again at the current presets — the
-  supported way to re-size a pool the operator owns; the pool is not schedulable in between.
+- Deleting a derived `InstanceType` has the operator author it again at the current presets (the
+  supported way to re-size a pool the operator owns); the pool is not schedulable in between.
 
 The table lives in `pkg/nodefeature/unit_resources_preset.yaml`, with the rules an edit must satisfy
-at the top of that file; a test asserts every entry appears on this page.
+at the top of that file; when either changes, compare the rows here with the preset data.
 
 ---
 

@@ -48,27 +48,25 @@ spec:
 ```
 
 `model.name` is what the engine serves. The weights come from the engine's own hub client, a role's
-volumes, or a `ModelArtifact` named by `model.artifactRef` — see the
+volumes, or a `ModelArtifact` named by `model.artifactRef`; see the
 [Model Artifact](../model-delivery/artifact.md).
 
 `poolRef` is a `LocalObjectReference` on purpose: naming another namespace, the cluster-scoped
 `KVCachePool`, or a bare endpoint URL is unrepresentable rather than merely rejected. The Binding is
-the authorization point — an admin creating one in a namespace is what grants that namespace access.
+the authorization point: an admin creating one in a namespace is what grants that namespace access.
 
-**`connector` has one value, and that is the transport convergence rather than a placeholder.** The KV
-transfer converges on Mooncake because it is the implementation that supports heterogeneous prefill
-and decode. NIXL and ROCm NIXL stay reachable; nothing in this repository has run them, and the
-field's existence is not a claim that they would work.
+`connector` currently selects Mooncake, which supports heterogeneous prefill and decode. NIXL and ROCm NIXL stay reachable; nothing in this repository has run them, and the field's
+existence is not a claim that they would work.
 
-What the enum reserves is the **discriminator**, so naming a second connector later is a widening
-rather than a new field. Widening it is four things and not one: a sub-package, an entry in the enum,
+The enum reserves the **discriminator**: naming a second connector later widens the enum rather
+than adding a field. Widening it takes four things: a sub-package, an entry in the enum,
 a renderer, and the wiring that threads this value to a dispatch point that does not exist yet.
 
 Today the value reaching the renderer is synthesized from the engine, the role's `kind` and the
 pool's backend, and this field is read by nothing. It is also frozen after creation, so a widened
 enum reaches new deployments only.
 
-`roles` takes **1 to 10** entries, and the upper bound is **this operator's own shape limit** rather
+`roles` takes **1 to 10** entries, and the upper bound is this operator's own shape limit rather
 than an upstream one. Each replica composes a Workload of its own carrying a single PodSet, so no
 Kueue bound constrains how many roles a deployment declares; ten is what a prefill/decode deployment
 needs with room to spare, and raising it is a product decision.
@@ -77,12 +75,12 @@ It lives in the validating webhook rather than in the schema so that the refusal
 and so that changing it is not a schema change every stored object must survive.
 
 `replicas` counts **independent serving instances**: each one starts, serves and is replaced on its
-own. Changing the number adds or removes instances, and the ones that survive are not restarted —
+own. Changing the number adds or removes instances, and the ones that survive are not restarted:
 they keep serving without interruption and keep whatever cache they hold.
 
 `size` is how many Pods form one instance, defaulting to 1. The Pods of one instance are
 fate-sharing: they start together, they are admitted together, and they are replaced together. Use
-it when one instance genuinely spans hosts — tensor, pipeline, expert or sequence parallelism.
+it when one instance genuinely spans hosts (tensor, pipeline, expert or sequence parallelism).
 
 **`size` cannot be changed after creation.** The Pods a running instance is made of are not the Pods
 a different size asks for, so no edit exists that does not replace every instance of the role at
@@ -109,9 +107,9 @@ so that widening an instance later cannot turn a deployment that was accepted in
 refused. The index is read from a label so that every member of an instance carries the same
 container spec and only the label value differs.
 
-⛔ **What the engine does with those facts is yours.** The operator composes no
+**What the engine does with those facts is yours.** The operator composes no
 `--tensor-parallel-size` or equivalent: the degrees do not decompose from `size` alone, and a
-formula missing an input is worse than no formula. Composing none is not seeing none — a degree
+formula missing an input is worse than no formula. Composing none is not seeing none: a degree
 the author declares on the role is read and validated, and [the transfer leg renders from
 it](prefill-decode.md#how-a-pair-is-wired).
 
@@ -124,7 +122,7 @@ read them, so an override able to shadow them would make the feasibility check r
 does not match reality.
 
 The accelerator request of **one Pod** lives in `roles[].resources`, whose fields mirror
-[Accelerator Requests](../devices/requests.md) — at `size: 1` the Pod and the instance are the
+[Accelerator Requests](../devices/requests.md); at `size: 1` the Pod and the instance are the
 same request. CPU, memory and ephemeral storage are **derived** from the InstanceType's per-unit
 resources scaled by the card count, so they are not expressible here.
 
@@ -165,8 +163,8 @@ admission check this operator runs, which holds every group until the whole set 
 ```
 
 > **A role's parallelism degrees are not API fields.** They reach the engine through
-> `roles[].extraArgs` — or through `roles[].command` alone when the role takes the line over —
-> spelled the engine's own way. The operator composes no degree, but it reads those books:
+> `roles[].extraArgs` (or through `roles[].command` alone when the role takes the line over),
+> spelled the engine's own way. The operator composes no degree, but it reads the command line:
 > admission refuses a degree it cannot parse, and the transfer leg renders from them. They do not
 > determine the AscendDirect transfer-port window.
 
@@ -200,12 +198,12 @@ a role's own address.
 
 The `role-hash` annotation is load-bearing rather than cosmetic. Kueue takes it verbatim when present
 and otherwise derives a digest of the Pod spec's *shape*, which names the PodSet after nothing an
-operator wrote — status joins a Workload's PodSets to the roles by this name, so a digest breaks the
+operator wrote; status joins a Workload's PodSets to the roles by this name, so a digest breaks the
 join while nothing errors.
 
 > **`kueue.x-k8s.io/pod-group-fast-admission` must never be set.** That path composes the Workload
 > from the first runnable Pod alone and gives that single PodSet the whole group's total; with a total
-> of one it buys nothing, and it stays a trap for the day a group ever grows a second member. The
+> of one it buys nothing, and it mis-composes the group the day one ever grows a second member. The
 > operator never sets it, and a test asserts its absence.
 
 ## Topology placement
@@ -228,7 +226,7 @@ Scheduling Operations](../topology/operations.md).
 
 ## The reuse domain is inherited
 
-The reuse domain — `name`, `blockSize`, `dtype` — is a required, immutable block on the
+The reuse domain (`name`, `blockSize`, `dtype`) is a required, immutable block on the
 `KVCachePoolBinding`; its `name` alone may be left out, and is then `default`. `ModelDeploymentSpec` has **no domain field**, and that is a security property
 rather than tidiness.
 
@@ -242,7 +240,7 @@ The requested semantics:
 - Two referencing **different** Bindings use different tenant identifiers. They are isolated only
   when their engine images read and forward those identifiers.
 - Name matching between workloads disappears, and with it a whole class of typo.
-- A namespace needing two reuse boundaries creates **two Bindings** on the same pool — the same shape
+- A namespace needing two reuse boundaries creates **two Bindings** on the same pool, the same shape
   as a namespace having several Kueue `LocalQueue`s.
 
 `status.kvCache` echoes the Binding's `binding`, `pool` and the whole domain block, so an operator
@@ -252,17 +250,17 @@ pollution: writes succeed, reads succeed, and the tensors are wrong.
 For an operator-managed role, the operator renders a non-empty Binding domain as the engine's tenant
 identifier. It does not inspect the engine image version or decide whether that build supports
 tenant isolation. The tenant variable is operator-owned, so supplying it in `env` or `extraArgs` is
-refused — it is a second path to a value [the API already refuses](#the-reuse-domain-is-inherited).
+refused: it is a second path to a value [the API already refuses](#the-reuse-domain-is-inherited).
 
 **"A tenant was injected" is not "the workload is isolated."** The operator records what it
 rendered, never what the container did with it: whether the build inside the image reads the value
 is not knowable at render time.
 
-Users who require tenant isolation must select a compatible engine image and verify it themselves;
-see
-[Tenant compatibility is the image owner's responsibility](../kv-cache/injection.md#tenant-compatibility-is-the-image-owners-responsibility)
-for what the image must consume. The API states the requested boundary, while the engine enforces it
-— the same caveat [KV Cache Pool](../kv-cache/pool.md#what-a-binding-does-not-do) states for capacity.
+Users who require tenant isolation must select a compatible engine image and verify it themselves; see
+[Tenant compatibility is the image owner's responsibility](../kv-cache/injection.md#tenant-compatibility-is-the-image-owners-responsibility) for what
+the image must consume. The API states the requested boundary, while the engine enforces it
+(the same caveat [KV Cache Pool](../kv-cache/pool.md#what-a-binding-does-not-do) states for
+capacity).
 
 ## The three override tiers
 
@@ -276,17 +274,19 @@ Without one, users patch the rendered Pod and the reconcile loop silently overwr
 | take over | `roles[].command` | the user owns the whole argv; the operator synthesizes **no** engine argument and **no** client environment |
 
 Unlike the `Instance` that keeps its pod shape inside an `InstanceTemplate`, a role's Pod fields sit
-on the role itself and are **mutable** — the Instance's immutability is a rule its webhook enforces,
+on the role itself and are **mutable**: the Instance's immutability is a rule its webhook enforces,
 not a property of the type, and dropping it here is what makes a rollout possible at all.
 
 Arguments fold into `command`; there is deliberately no `args`. A second append tier beside
 `extraArgs` would have no defined precedence, and would make the take-over tier ambiguous, since
-`args` alone would be neither take-over nor append. A take-over `command` is then the whole
-argv — the image's own entrypoint never participates — and an `extraArgs` written beside it is
-inert: read by nobody, refused nothing, and no part of the books the transfer leg renders from.
+`args` alone would be neither take-over nor append.
+
+A take-over `command` is then the whole argv (the image's own entrypoint never participates), and an
+`extraArgs` written beside it is inert: read by nobody, refused nothing, and invisible to the check
+that reads parallelism from the command line.
 
 **Engine authentication is the append tier's known bad input.** `--api-key` and `VLLM_API_KEY`
-are not operator-owned, so admission accepts them — and vLLM then guards its `/v1` routes,
+are not operator-owned, so admission accepts them, and vLLM then guards its `/v1` routes,
 including the `/v1/models` a direct decode role's gates read. The probes get 401, and a
 disaggregated pair's decode replica never becomes Ready.
 
@@ -299,9 +299,9 @@ cache client for that role, so it does not report on one it did not render.
 
 ### A take-over role is outside the reuse-domain guarantee
 
-⚠️ **A role that owns its whole argv can name any reuse domain, and this operator does not stop it.**
-`MOONCAKE_TENANT_ID` is refused in `roles[].env` on the engines that own it — the table under
-[What the operator owns](#what-the-operator-owns) is the authority — but `roles[].command` is a
+**A role that owns its whole argv can name any reuse domain, and this operator does not stop it.**
+`MOONCAKE_TENANT_ID` is refused in `roles[].env` on the engines that own it (the table under
+[What the operator owns](#what-the-operator-owns) is the authority), but `roles[].command` is a
 program and its arguments, so the same value travels inside a shell assignment or inside the script
 the argv names, and admission has nothing to read either way.
 
@@ -309,19 +309,19 @@ the argv names, and admission has nothing to read either way.
 would have to recover intent from an argv the tier exists to let the user write however they like, so
 there is no version of the take-over tier that also bounds the domain.
 
-Where the operator *does* build the argv, that refusal is real enforcement — the user cannot interpose
+Where the operator does build the argv, that refusal is real enforcement: the user cannot interpose
 a shell, so the environment is the only path left. Why the key is owned at all is stated under
 [What the operator owns](#what-the-operator-owns).
 
-⛔ Do not read the above as the boundary of the exposure: a take-over role is one instance of the
+Do not read the above as the boundary of the exposure: a take-over role is one instance of the
 mechanism, not the mechanism. The boundary is stated once, under
 [What a Binding does not do](../kv-cache/pool.md#what-a-binding-does-not-do), and tracked at
-[#168](https://github.com/gpustack/gpustack-operator/issues/168) — whose own void conditions include a
+[#168](https://github.com/gpustack/gpustack-operator/issues/168), whose own void conditions include a
 webhook-level one, so nothing here should be read as a claim about how that issue can be closed.
 
 ## What the operator owns
 
-Ownership is per **(engine, key)**: a key one engine owns is an ordinary user argument on another.
+Ownership is per (engine, key): a key one engine owns is an ordinary user argument on another.
 `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` is meaningless to `vllm` and is a plain user variable there.
 
 | Engine | Owned arguments | Owned environment |
@@ -338,7 +338,7 @@ argument cannot be told apart. The refusal names the key, the engine, and `roles
 way to own it instead.
 
 **`--kv-cache-dtype` is owned on both engines while `spec.kvCache` is set**, in every spelling the
-engine reads as it, because the operator renders the Binding's `dtype` there — why is under
+engine reads as it, because the operator renders the Binding's `dtype` there; why is under
 [The dtype is handed to the engine](../kv-cache/pool.md#the-dtype-is-handed-to-the-engine). It is
 not in the table because it is conditional:
 
@@ -363,14 +363,14 @@ and the operator does not set either of them:
   then environment. The operator leaves both of the first two unset, and that is what **selects** the
   environment loader.
 - Each of the first two loaders falls back to a **compile-time literal** per key. So setting either
-  one does not override a value: it silently replaces the whole configuration with defaults — a 4 GiB
-  segment and a `localhost` identity.
+  one does not override a value: it silently replaces the whole configuration with defaults (a 4 GiB
+  segment and a `localhost` identity).
 
 SGLang needs `local_hostname`, which is the replica's own Pod IP. A file and an argument are both
 fixed when the object is admitted, when no Pod IP exists yet, so only an environment variable with a
-`fieldRef` on `status.podIP` can carry it — which is why this engine gets no config file at all.
+`fieldRef` on `status.podIP` can carry it, which is why this engine gets no config file at all.
 
-`MOONCAKE_CONFIG_PATH` is owned on `vllm` and **not** on `sglang`, while seven other
+`MOONCAKE_CONFIG_PATH` is owned on `vllm` and not on `sglang`, while seven other
 `MOONCAKE_*` names are owned on `sglang` alone. The table is the authority; a name prefix is not.
 
 `MOONCAKE_TENANT_ID` is the one in that list whose ownership is a **security** property rather than a
@@ -400,7 +400,7 @@ exactly the replica's. It is also part of the Pod's spec hash, which is what mov
 the pool's published endpoint changes.
 
 It sits under `/etc` rather than in the image's workspace so that a role's own volumes are
-unlikely to collide — but an overlay that mounts over that path replaces the configuration silently,
+unlikely to collide, but an overlay that mounts over that path replaces the configuration silently,
 and the owned `MOONCAKE_CONFIG_PATH` cannot protect against it. SGLang gets no file at all; its
 configuration travels entirely in the environment.
 
@@ -415,7 +415,7 @@ gpustack/runner:<backend><runtimeVersion>[-<variant>]-<engine><version>
 
 `gpustack/runner:cuda12.9-vllm0.29.0` on an NVIDIA pool; `gpustack/runner:cann9.0-910b-sglang0.5.18`
 on an Ascend 910B one. The shape is verified against the runner project's 338 published records with
-zero mismatches. The platform is **not** part of the tag: no published tag carries an architecture,
+zero mismatches. The platform is not part of the tag: no published tag carries an architecture,
 and the 338 records collapse to 208 distinct names, the signature of one multi-arch manifest each.
 
 | This project's manufacturer | Runner backend |
@@ -443,9 +443,9 @@ version alignment; a bad combination surfaces as an `ImagePullBackOff` on a tag 
 It is per deployment rather than per role, which is what lets one engine and one version assemble a
 **different** image per role: the backend half of the tag comes from the role's own InstanceType.
 
-Two synthesis failures read alike and are not: a manufacturer with no backend, or a family with no
-variant, will **never** resolve and the role has to name an image, while an unobserved runtime version
-resolves on a later reconcile. Each message says which one it is.
+Two synthesis failures read alike and are not the same: a manufacturer with no backend, or a family
+with no variant, will **never** resolve and the role has to name an image, while an unobserved
+runtime version resolves on a later reconcile. Each message says which one it is.
 
 **A pool mid driver rollout does not agree on a runtime version.** The image takes the **lowest**
 version the pool reports, because a workload's image is fixed before admission chooses its node and
@@ -457,31 +457,31 @@ appearing as an unattributable `ImagePullBackOff`.
 
 Changing `replicas` adds or removes instances and nothing more: the survivors are not restarted, do
 not reload their weights and keep their cached blocks. What still replaces **every** instance of the
-role is an edit that changes what a replica's Pod renders — `image`, `extraArgs`, `env`, `ports`,
+role is an edit that changes what a replica's Pod renders: `image`, `extraArgs`, `env`, `ports`,
 `additionalVolumes`, `terminationGracePeriodSeconds`. A change to `size` is not on that list because
 it cannot be made: see `roles[].size` above.
 
-Such an edit **deletes and recreates** the role's replicas — one replica per role per pass, waited
+Such an edit **deletes and recreates** the role's replicas, one replica per role per pass, waited
 out. The role set itself cannot be edited at all; admission refuses it, so there is no role rename or
 addition to roll. There are no surge or unavailable knobs.
 
 The one-at-a-time cadence is a constraint rather than a choice: Kueue counts a group against its
 declared total, so a replacement created beside a member Kueue still counts active reads as one over,
-and Kueue's answer to the excess is to delete the newest un-finalized Pod — the replacement itself.
+and Kueue's answer to the excess is to delete the newest un-finalized Pod, the replacement itself.
 
 A replacement is a **fresh admission**, not a rider on the reservation the departed replica held:
 freeing the slot deletes that replica's Workload, and the reservation goes with it. The cadence guard
-therefore turns a replica over only when every replica the role declares holds an admitted Workload —
+therefore turns a replica over only when every replica the role declares holds an admitted Workload;
 on a full pool a rollout waits for capacity rather than shedding replicas it cannot re-reserve.
 
-The cost is real and worth stating, and it rides on the block lease described under
+The cost rides on the block lease described under
 [What a cache changes about a workload](../kv-cache/injection.md#what-a-cache-changes-about-a-workload): a lease survives a long queue and does **not**
-survive an interrupted heartbeat, which is what a departing replica is.
+survive an interrupted heartbeat, which is what a departing replica is. A departing replica
+therefore costs its siblings the blocks it held.
 
-So a departing replica costs its siblings the blocks it held. The deployment records an event naming
-the replica and the lease window on each of three paths — `ReplicaEvicted`, `ReplicaLeaving`,
-`ReplicaRestarted` — so an operator correlating a burst of failed requests with a replica that went
-away has the correlation written down rather than inferred.
+The deployment records an event naming the replica and the lease window on each of three paths
+(`ReplicaEvicted`, `ReplicaLeaving`, `ReplicaRestarted`), so an operator correlating a burst of
+failed requests with a replica that went away has the correlation written down rather than inferred.
 
 **An upgrade can trigger the same turnover without any spec edit.** The fingerprint covers a replica's
 labels, annotations and spec, so a release that changes what every replica renders turns each one over
@@ -503,7 +503,7 @@ Who frees the slot depends on the cause. Kueue's own preemption evicts the depar
 Workload, and that eviction removes the Pod and releases the slot; the replacement then follows on
 its own.
 
-A delete that lands on the Pod alone — a drain, a kubelet eviction, `kubectl delete pod` — leaves
+A delete that lands on the Pod alone (a drain, a kubelet eviction, `kubectl delete pod`) leaves
 that replica's Workload standing, and the Workload is what holds the slot: the Pod stays readable on
 the API server and no replacement is created beside it. Deleting the departed replica's Workload
 releases the Pod and the quota, and the replacement follows on the terms the callout above states.
@@ -515,7 +515,7 @@ The replacement carries a fresh name the API server assigns, never the departed 
 means for anything that addresses replicas, and the selector to use instead, is below.
 
 On a cluster with preemption enabled, a replica going away is therefore **routine rather than an
-incident** — worth knowing before you chase one as a fault.
+incident**, worth knowing before you chase one as a fault.
 
 **A replica on a node that is NotReady but still registered is never replaced.** Its Pod keeps its
 `nodeName` and a Running phase, so its ordinal still reads occupied and no replacement is created.
@@ -536,14 +536,13 @@ called. A runbook that spells `<deployment>-<role>-0` breaks here and has no fix
 
 Changing `replicas` is not one of these departures either: it adds or sheds instances and leaves the
 survivors running. See [Rollout is a rolling replacement](#rollout-is-a-rolling-replacement) for
-which edits replace every instance instead. The role set cannot be edited at all — admission refuses
+which edits replace every instance instead. The role set cannot be edited at all; admission refuses
 it.
 
 ### Which fields are the deployment's identity
 
-Some fields cannot be edited at all, and the rule that sorts them is a question rather than a list:
-**a field is frozen when it answers *which deployment is this*, and editable when it answers *how is
-this deployment being run right now*.**
+Fields that identify the deployment are frozen. Fields that control how it runs are generally
+editable; the table below lists both groups and the scheduling exceptions.
 
 | Frozen | Editable |
 |---|---|
@@ -555,22 +554,20 @@ this deployment being run right now*.**
 | `roles[].resources` | the role's own Pod fields — `image`, `imagePullPolicy`, `imagePullSecrets`, `privileged`, `ports`, `additionalVolumes`, `terminationGracePeriodSeconds` |
 | `roles[].command` | labels and annotations |
 
-`roles[].resources` is frozen against the criterion rather than by it, and that is marked here so it
-does not read as an oversight: it does not say which deployment this is, but changing it renegotiates
-the scheduling, which is not materially different from deleting and recreating. Its mirror image is
-`roles[].privileged`, which the criterion leaves editable even though a different argument could
-move it.
+`roles[].resources` is frozen because changing it renegotiates scheduling, much like deleting and
+recreating the deployment. `roles[].privileged` stays editable because it controls how the role
+runs.
 
-**What to do instead of editing one is create another deployment.** A frozen field is not a lock
-protecting a concurrent writer, and the refusal says so: what you are describing is a different
-deployment, so it is created rather than edited. The name, the `status` history and the cache-pool
-registration are what you keep by editing, and none of them is what a frozen field carries.
+**To change a frozen field, create another deployment.** A frozen field is not a lock protecting a
+concurrent writer, and the refusal says so: what you are describing is a different deployment, so it
+is created rather than edited. Editing is what keeps the object's name, its `status` history and its
+cache-pool registration; a frozen field is none of those things.
 
-Judging a **new** field means asking that question, not appending to the table — a list alone grows
-by precedent and stops meaning anything.
+When adding a field, decide whether it identifies the deployment or controls how it runs before
+choosing its update rule.
 
 > **A merge patch that omits a frozen field is an edit to that frozen field.** `roles` is a list, and
-> `kubectl patch --type=merge` replaces a list wholesale rather than merging into it — so a role
+> `kubectl patch --type=merge` replaces a list wholesale rather than merging into it, so a role
 > restated without its `command` sets `command` to null, and the edit is refused naming
 > that field rather than the one you meant to change.
 >
@@ -582,7 +579,7 @@ by precedent and stops meaning anything.
 
 The grouping key is the **replica**: every replica of every role forms its own pod group, derived from
 the role and the replica's ordinal within it, and Kueue composes one Workload per group with a
-declared total equal to the role's `size`. Two roles naming the same `instanceType` share nothing —
+declared total equal to the role's `size`. Two roles naming the same `instanceType` share nothing:
 a queue name is derived from the `instanceType` and one Workload carries one queue name, so rather
 than forbid the shape the roles are simply not made to share.
 
@@ -600,7 +597,7 @@ replica held, because a serving group is never finished and nothing else release
 ## What admission refuses
 
 Two webhooks make up the admission surface. Nearly every default lives in the CRD schema; the
-mutating half exists for the one value a schema cannot reach — a role's accelerator count, which
+mutating half exists for the one value a schema cannot reach: a role's accelerator count, which
 depends on the `InstanceType` the role names.
 
 | Refused | Message names |
@@ -644,7 +641,7 @@ blocks on another transport fail, so repair the pool even though an unrelated up
 
 **Any rule that reads an `InstanceType` declines for a deployment being deleted**, in the mutating
 half and the validating half alike. Such a rule refuses when the type is absent, so leaving it on
-would let a deleted `InstanceType` block the very update that clears the deployment's finalizer — an
+would let a deleted `InstanceType` block the very update that clears the deployment's finalizer, an
 object its own teardown could never release.
 
 The price is named rather than hidden: an edit made while a deployment is being deleted can move a
@@ -654,7 +651,7 @@ rather than merely tidy is in
 
 A manufacturer with no runner backend is still refused **at render time and not at admission**, and the
 reason is not the missing client. The rule needs the InstanceType's OBSERVED detail, and
-`InstanceType.status` has not converged on a freshly created object — so the rule would refuse a
+`InstanceType.status` has not converged on a freshly created object, so the rule would refuse a
 perfectly legal deployment for losing a race against the InstanceType reconciler.
 
 The render-time refusal reaches a reader as a `RenderFailed` warning event carrying the renderer's
@@ -666,7 +663,7 @@ own message, because a pass that cannot build a replica aborts before writing an
 [What a cache changes about a workload](../kv-cache/injection.md#what-a-cache-changes-about-a-workload): the transfer engine binds ports nobody
 configured, so a NetworkPolicy or port reservation has to be a range rather than a list; and the
 `transfer_metadata.cpp` "Local segment descriptor not found" line at startup is an `ERROR` that is
-benign on a client mounting no segment of its own — which is what every replica here is.
+benign on a client mounting no segment of its own, which is what every replica here is.
 
 **A replica serves on port 8000** unless the role names its own container port. The
 Service and `status.endpoint` keep that external port. On a managed native-vLLM decoder the routing

@@ -67,8 +67,8 @@ clone. The verdict on committed `.agents` shell comes from `agents-shell.yml` an
 
 ### Vendored subcharts
 
-Kueue, Node Feature Discovery, `csi-driver-nfs` and `csi-driver-s3` are **vendored unpacked** under
-`deploy/gpustack-operator/chart/charts/<name>/` and **committed**, so `helm install` works from a bare
+Kueue, Node Feature Discovery, `csi-driver-nfs` and `csi-driver-s3` are vendored unpacked under
+`deploy/gpustack-operator/chart/charts/<name>/` and committed, so `helm install` works from a bare
 clone and CI stays offline.
 
 `gpustack::chart_staging` (`hack/deps.sh`) pulls each pinned archive, unpacks it, stamps `_VERSION_` and
@@ -81,12 +81,12 @@ parent cannot compose `global.imageRegistry` into a subchart's `image.repository
 
 To change an upstream chart:
 
-1. **Never edit a staged tree in place** — a version bump makes `make deps` delete and re-unpack it, so
+1. **Never edit a staged tree in place**: a version bump makes `make deps` delete and re-unpack it, so
    every change lives in a patch file.
 2. Write the patch against the unpacked tree (`git diff` from a scratch copy works), drop it into
    `hack/deploy/gpustack-operator/chart/charts/<name>/`, bump the pinned version in `hack/deps.sh` if that
    is the change, and re-run `make deps`.
-3. A patch that no longer applies, or leaves a `.rej`, **fails `make deps`** — otherwise a moved chart
+3. A patch that no longer applies, or leaves a `.rej`, **fails `make deps`**; otherwise a moved chart
    ships half-patched and silent. A **shifted** hunk is fine: `patch` runs `-F0`, so context still matches
    exactly, and two patches on one file shift each other.
 
@@ -115,8 +115,8 @@ inline findings plus a summary under the org's GitHub App identity. The pipeline
 as a reusable workflow — this repository only pins its model backing and maps the org secrets. To
 re-review the latest head, comment `/open-code-review` on the PR (MEMBER/OWNER/COLLABORATOR only).
 
-What each file is reviewed *against* is owned here, in `.opencodereview/rule.json` — its
-include/exclude lists and path-scoped rules are the single source of truth; a review-scope change
+What each file is reviewed *against* is owned here, in `.opencodereview/rule.json`: its
+include/exclude lists and path-scoped rules are the single source of truth, and a review-scope change
 lands there, not in this document. Verify a rule change before committing: `npx -y
 @alibaba-group/open-code-review rules check <path>` shows which rule a file resolves to; `npx -y
 @alibaba-group/open-code-review review --preview` shows which files a diff would send to review.
@@ -133,10 +133,9 @@ GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -run TestExtractGeneralNodeKe
 ## Checks whose failure reads as success
 
 REQUIRED: take a check's verdict from its **return code** and from the object under test, never from
-the shape of its output. Each trap below broke with the signal taken as the verdict reading as
-success, while the failure sat in a channel nobody was reading: stderr, a return code, or a line
-that was never printed. The shell traps are about the prompt these commands get typed at, which on
-macOS is zsh; the repository's own scripts run under bash with `pipefail` set.
+the shape of its output. The traps below can make a failed check look successful when stderr, a
+return code or missing output goes unnoticed. The shell examples use the interactive shell you
+type these commands into, which on macOS is zsh; the repository's own scripts run under bash with `pipefail` set.
 
 **An unquoted `$var` does not word-split in zsh.** `FILES="a b c"; cp $FILES $dir` passes the list
 as one filename and the copy fails, where bash would split it into three arguments. Keep a list in
@@ -149,7 +148,7 @@ arrays stepped together stay aligned, so the other iterations land correctly and
 one reads as a flake rather than as a boundary error.
 
 **A pipeline reports only its last command.** `make lint | tail -5; echo "rc=$?"` gives `tail`'s
-status, not lint's, unless `pipefail` is set -- and neither zsh nor bash sets it by default. A green
+status, not lint's, unless `pipefail` is set, and neither zsh nor bash sets it by default. A green
 lint prints nothing after its closing banner, so "the code is 0" and "the last line is the banner"
 confirm each other. Redirect instead: `make lint >/tmp/out.log 2>&1; echo "RC=$?"`.
 
@@ -160,8 +159,8 @@ count at all: a missing path, or `-P` on the macOS grep, exits `2` with its mess
 
 **Let the check veto the cleanup.** Verification and teardown joined by `;` tear down even when the
 verification failed, costing the evidence needed to diagnose it; `&&` is the guard, and it guards
-only a check that exits non-zero. Carry the verdict in the status --
-`[ -n "$a" ] && [ -n "$b" ] && [ "$a" = "$b" ] && rm -rf "$tree"` -- rather than printing `SAME` or
+only a check that exits non-zero. Carry the verdict in the status
+(`[ -n "$a" ] && [ -n "$b" ] && [ "$a" = "$b" ] && rm -rf "$tree"`) rather than printing `SAME` or
 `DIFF` and returning `0` either way. The non-empty tests matter: two missing values compare equal.
 
 ## Shipped specification corrections
@@ -185,7 +184,7 @@ paragraph's marker carrying one thing that paragraph otherwise forbids — the r
 here — so the note MUST name the page that carries the rule now. Everything else in that paragraph
 still applies: retain enough of the former text to explain what changed, and keep the edit to it.
 
-A superseded section MUST NOT be left carrying a **file name** that resolves to nothing — the reader
+A superseded section MUST NOT be left carrying a **file name** that resolves to nothing; the reader
 follows it and lands nowhere. Naming the document is fine and often necessary; what must go is the
 extension that makes the name a path. So write `2026-01-02-a-thing` rather than `2026-01-02-a-thing.md`
 once that file is gone. The prohibition is on the dangling path, not on the mention.
@@ -207,12 +206,12 @@ kubectl -n gpustack-system exec <pod> -- \
 `-H "Host: 127.0.0.1"` is **mandatory**: `httpx.LoopbackAccessHandlerFunc` compares `r.Host` against the
 bare `127.0.0.1` / `localhost` / `::1` and an ordinary request carries the port (`127.0.0.1:32443`), so
 without it the guard answers a plain `404` that reads like a missing route. A `GET` with the header
-answers `406 unsupported http method` — the guard passing.
+answers `406 unsupported http method`, which is the guard passing.
 
 Use it to see a decision logged above the deployment's verbosity. The device plugin is the sharpest case:
 its `ResourceServer`s use `Logger: logger.V(3)` (`pkg/devicemanager/allocator/allocator.go`) while the
-DaemonSet runs `-v=2`, so `Allocate`/`GetPreferredAllocation` decisions — which accelerator a slice landed
-on — are discarded by default.
+DaemonSet runs `-v=2`, so `Allocate`/`GetPreferredAllocation` decisions (which accelerator a slice landed
+on) are discarded by default.
 
 Raise `v` **before** creating the workload to trace; those lines fire only on an allocation, so a quiet
 window afterwards proves nothing. The `gpustack-operator-e2e` skill carries the same recipe as a triage

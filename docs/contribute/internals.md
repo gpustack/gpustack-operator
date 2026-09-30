@@ -61,7 +61,7 @@ replicas even where `worker.replicas` is 1.
 Both repair **absence only**, never the spec of an object that is there; aligning the spec stays with
 `InstallCRDs` / `InstallServices`, on the boot of the replica carrying that version. Neither reviews a
 permission of its own, and neither may return except on context done: returning early leaves the process
-with no repair loop and nothing to say so.
+with no repair loop and no way to report that.
 
 > **Why absence only** — in that overlap an outgoing replica would otherwise push its own version of
 > every object back over the incoming one, once per interval, for as long as it lives.
@@ -84,8 +84,8 @@ with no repair loop and nothing to say so.
 ### The one step that takes a lock
 
 Installing the applications is the one step for which neither property was available, so it holds a
-`coordination.k8s.io` Lease — `applications.worker.gpustack.ai` in the system namespace, via
-`pkg/kubeapp`'s `Lock` — for its whole duration: exactly one replica installs at a time. The lock is a
+`coordination.k8s.io` Lease (`applications.worker.gpustack.ai` in the system namespace, via
+`pkg/kubeapp`'s `Lock`) for its whole duration: exactly one replica installs at a time. The lock is a
 last resort, not a pattern to copy; reach for it only where idempotence is out of reach, and read
 `pkg/kubeapp/lock.go` for what it does and does not guarantee.
 
@@ -96,10 +96,10 @@ last resort, not a pattern to copy; reach for it only where idempotence is out o
 
 `pkg/workergateway/service` folds many clusters' `InstanceType`s into one fleet-wide
 `AggregatedInstanceType`: candidates (one per cluster) group into tiers by accelerator `OnceMaxRequest`,
-and each level carries an overview bundle — one achievable allocation copied from the winning member —
+and each level carries an overview bundle (one achievable allocation copied from the winning member)
 plus a `Remaining` that is the per-dimension sum.
 
-Those overview types **re-declare** the cluster `InstanceTypeStatus`'s resource views field by field
+Those overview types re-declare the cluster `InstanceTypeStatus`'s resource views field by field
 rather than embedding them, and no generator maintains them. A view added to the CRD therefore still
 compiles while the gateway never ingests, sums or serves it, and the fleet reads as having no capacity
 there.
@@ -107,7 +107,7 @@ there.
 Adding one means touching `types.go` and every aggregation site in `helper.go` (`newAggregatedTier`,
 `newAggregatedCandidate`, both `Recompute` methods, `overviewResourceIsZero`).
 `TestAggregatedInstanceTypeMirrorsEveryStatusView` fails while the field sets differ, but cannot see a
-missed aggregation site — walk them.
+missed aggregation site; walk them.
 
 ## Device plugins re-register on their own, once per kubelet restart
 
@@ -116,8 +116,8 @@ kubelet's device-plugin registration server unlinks **every socket** in
 `kubelet.sock`. That directory is a hostPath in the device-manager, so the unlink takes the plugin's
 own socket with it while the plugin's process carries on untouched.
 
-`serving.Start` (`pkg/deviceplugin/serving.go`) therefore serves in **generations** — a socket, a
-gRPC server on it, and a registration naming the two to kubelet — and loops over them. The socket
+`serving.Start` (`pkg/deviceplugin/serving.go`) therefore serves in **generations** (a socket, a
+gRPC server on it, and a registration naming the two to kubelet) and loops over them. The socket
 going missing is the level-based signal that kubelet restarted, so the next generation listens and
 registers again.
 
@@ -128,7 +128,7 @@ the RDMA resource keys on exactly the terms above, and recovers them on the same
 
 A generation ending because its server stopped serving is a second, separate signal. Unlinking the
 socket belongs to the *start* of a generation, so that a retiring one cannot unlink whatever holds
-the path by then — which, once a replacement allocator has taken over, is the replacement's socket.
+the path by then, which, once a replacement allocator has taken over, is the replacement's socket.
 The path therefore outlives its listener, and a listener that died under one is invisible to the
 socket check.
 
@@ -143,8 +143,8 @@ back, blocking, from inside `Register`, and refuses a registration whose socket 
 > set off the Node too — the flavor and InstanceType views move, not just allocatability.
 
 Nothing about the *process* looks wrong while that lasts, and its Pod stays Ready, so the plugin-side
-signal is the allocator's `registering to kubelet, retrying` error — visible at the DaemonSet's
-shipped `-v=2` because `Error` is not gated by V level the way `Info` is. The cluster-side signal is
+signal is the allocator's `registering to kubelet, retrying` error (visible at the DaemonSet's
+shipped `-v=2`, because `Error` is not gated by V level the way `Info` is). The cluster-side signal is
 louder and comes first: the family's keys leave the Node.
 
 `Stop` ends the serving loop rather than one generation of it, and reports nothing for having been
@@ -153,7 +153,7 @@ asked to.
 The layer above it draws the same distinction through the `gox.Lifecycle`
 (`pkg/utils/gox/lifecycle.go`) a vendor allocator runs its tasks under: its `Stop` cancels the context
 every task its `Start` launched runs under, and waits for them. The device manager's own `Start` needs
-none of that — nothing stops it but its caller — so its detector, allocator, exporter and controller
+none of that (nothing stops it but its caller), so its detector, allocator, exporter and controller
 manager run under a plain `gox.GroupWithContextIn` group.
 
 > **The invariant** — the tasks under one of these groups are not interchangeable. A per-vendor
@@ -164,10 +164,10 @@ manager run under a plain `gox.GroupWithContextIn` group.
 > returned, such a task also swallows a *sibling's* failure: before this shape, a device plugin that
 > could not establish a generation of service left the node advertising nothing for that manufacturer,
 > and the only trace was that server's own log line. The failure never reached the allocator, so
-> nothing acted on it — the signal to look for is the missing process-level one, not a missing log.
+> nothing acted on it; the signal to look for is the missing process-level one, not a missing log.
 >
-> So a task that *fails* ends its siblings — the group cancels the context they share on any task's
-> error, which is also what lets that failure be reported at all — and at the manager's level that is
+> So a task that *fails* ends its siblings: the group cancels the context they share on any task's
+> error, which is also what lets that failure be reported at all. At the manager's level that is
 > what ends the process, rather than leaving a Pod passing its liveness probe with a dead subsystem
 > inside it. A task that merely *finishes* is left to have finished: the metrics exporter serves no
 > Instance gauges on a node whose name it cannot read and says so by returning, and ending the run
@@ -178,7 +178,7 @@ manager run under a plain `gox.GroupWithContextIn` group.
 > `context.Canceled` for an ordinary undetect would take the node down. A `Stop` that arrives before
 > its run does is kept, not lost: an allocator's `Start` is submitted to a pool, so it can reach the
 > `Lifecycle` after the undetect that retired it, and a run that began then is one nothing holds the
-> cancel of — the leak, reproduced by the teardown meant to end it.
+> cancel of, which is the leak reproduced by the teardown meant to end it.
 
 ## Per-manufacturer device support
 
@@ -198,7 +198,7 @@ rsmi/amdsmi/amdgpu, cndev, dcmi, hgml, ixml, mtml/mxsml, hsa, dl). The generator
 (c-for-go is vendored in `.sbin/`). The top-level `binding/helper*.go` files are hand-written CPU/NUMA
 topology helpers — *not* generated.
 
-**`dcmi` is the one binding that does not follow the shape above.** Its entry points are
+The `dcmi` binding is the one that does not follow the shape above. Its entry points are
 hand-transcribed into a `.def` macro list rather than read from a vendor header, and it opens its
 library from a hand-written C wrapper instead of through `binding/dl`. Adding an entry point there
 means editing C, not a config.
@@ -213,7 +213,7 @@ means editing C, not a config.
 
 Kubernetes label *values* cap at 63 chars. Long names (ClusterQueue names, queue references) live in
 `schedule.gpustack.ai/*` **annotations**, not labels; LocalQueues are named `gpustack-fnv64-<hash>`
-(always 31 chars — see [Scheduling Chain](../modules/devices/scheduling.md#nodequeueentrancereconciler-node_queue_entrancego)).
+(always 31 chars; see [Scheduling Chain](../modules/devices/scheduling.md#nodequeueentrancereconciler-node_queue_entrancego)).
 Check this limit for any name that flows into a label value.
 
 ---

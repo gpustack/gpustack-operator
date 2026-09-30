@@ -25,8 +25,8 @@ roles of the same kind are summed. A serving instance made of several Pods still
 `status.roles[].desired` to see the requested count.
 
 Without a router, `status.endpoint` is the address the deployment-wide Service serves on, in the form
-`<scheme>://<name>.<namespace>.svc:<port>`. The scheme is read from the same role the port is — the
-first one — and is `https` only where that role passes `--ssl-certfile` or `--ssl-keyfile`. With a
+`<scheme>://<name>.<namespace>.svc:<port>`. The scheme is read from the same role the port is (the
+first one), and is `https` only where that role passes `--ssl-certfile` or `--ssl-keyfile`. With a
 router it is absent until the router is ready, then uses the router Service's own `http` transport.
 
 `status.router` publishes the contract used to render the router: its implementation and address,
@@ -43,9 +43,9 @@ router and engine Pod endpoints and reports partial coverage explicitly.
 > so `--ssl-ca-certs`, `--ssl-ciphers`, `--ssl-keyfile-password` or `--ssl-cert-reqs` passed by
 > itself leaves an ordinary HTTP server.
 
-**`ready` counts replicas whose engine answered, not replicas whose process started** — for every
-role except the three shapes listed below, which carry no gates and keep the weaker meaning. One
-still loading its model counts as not ready for as long as that takes.
+**`ready` counts replicas whose engine answered, not replicas whose process started**, except on the
+three shapes listed below, which carry no gates and keep the weaker meaning. One still loading its
+model counts as not ready for as long as that takes.
 
 **Both figures count replicas, which is the same as counting Pods only while a replica is one Pod.**
 A role at `size: 2` with `replicas: 2` runs four Pods and reports `desired: 2`. A replica of several
@@ -57,7 +57,7 @@ engine's own `GET /health` on the port the Service targets, so `ready == desired
 answers" are one fact rather than two.
 
 The KV cache store's leader answers a route of the same name that is deliberately **not** a readiness
-signal — see [KV Cache Leader](../kv-cache/leader.md). They are different programs, and only the
+signal; see [KV Cache Leader](../kv-cache/leader.md). They are different programs, and only the
 engine's route is read here.
 
 **The startup gate allows thirty minutes per attempt, not in total.** A replica that has not
@@ -67,29 +67,29 @@ is a restart loop rather than a replica stuck at not-ready.
 **The liveness gate never sees that window**, because the kubelet suppresses liveness and readiness
 alike until the startup gate succeeds.
 
-⛔ **A replica that stops answering loses readiness first, and is restarted only if it stays quiet
+**A replica that stops answering loses readiness first, and is restarted only if it stays quiet
 for longer.** The liveness gate's failure threshold is wider than the readiness gate's.
 
 > **Why** — the two cost different things: losing readiness withdraws a replica from the Service and
 > is undone by answering again, while a restart throws away a model that took the startup budget to
 > load. Equal thresholds would collapse them into one event. And without the liveness gate such a
 > replica has no way back at all, since this operator deletes a replica only to shed one the spec no
-> longer declares, or to turn over an outdated one — never because it went quiet.
+> longer declares, or to turn over an outdated one, never because it went quiet.
 
 **The operator tells the engine where to listen.** It renders `--host 0.0.0.0` and `--port <the port
 the Service targets>` into the engine's own command line, so the address traffic is sent to and the
-address the engine opens are one decision. The two engines do not agree on a default — vLLM opens
-every interface on 8000, SGLang opens `127.0.0.1:30000` — and an engine left on its own would be
+address the engine opens are one decision. The two engines do not agree on a default (vLLM opens
+every interface on 8000, SGLang opens `127.0.0.1:30000`), and an engine left on its own would be
 unreachable on one of them.
 
-⛔ **Both flags are filled, not owned.** A role that passes either through `extraArgs` keeps its own
+**Both flags are filled, not owned.** A role that passes either through `extraArgs` keeps its own
 value, and the operator adds only the one that is missing.
 
 **A role that enables TLS is still gated**, over HTTPS, on the criterion above. Only the transport
-moved — the address is still the operator's own — and the kubelet does not verify the server
+moved (the address is still the operator's own), and the kubelet does not verify the server
 certificate on a probe, so a self-signed pair is graded like any other.
 
-⛔ **Three shapes carry no gates at all**: a role that replaces the command through
+**Three shapes carry no gates at all**: a role that replaces the command through
 `roles[].command`; a role that moves where its engine listens, with `--host` or `--port`, or that
 demands a client certificate a probe has none to present, with `--ssl-cert-reqs` set to anything but
 `0` or `1` **alongside a certificate or key**; and a role declaring its port as `UDP` or `SCTP`.
@@ -107,26 +107,26 @@ Replicas of all three are Ready as soon as their process starts.
 
 `quotaReserved` is how many of the role's replicas hold a quota reservation. Each replica is its own
 Workload and reserves on its own, so a role sits anywhere between zero and `desired` while capacity
-arrives — where a role that shared one Workload passed all-or-nothing and this figure could not exist.
+arrives; a role that shared one Workload passed all-or-nothing, and this figure could not exist.
 
 The field is always present once written, and its zero is an observed zero: it is counted from Pod
 and Workload lists that succeeded, and a failed list writes no status at all rather than a zero. The
-two readings call for opposite actions — a visible 0 means the pass read everything and no replica
+two readings call for opposite actions: a visible 0 means the pass read everything and no replica
 holds quota, so investigate capacity; a field that is not there means the pass could not see, so wait,
 or look at the operator rather than the pool.
 
 `assignedFlavors` answers *which accelerator models did this role's replicas actually get*, read from
 each replica's own Workload's per-PodSet assignment. It is a **deduplicated, sorted** list, because
-each replica is its own Workload and Kueue assigns a flavor per Workload — two replicas of one role
+each replica is its own Workload and Kueue assigns a flavor per Workload, so two replicas of one role
 can land on different flavors.
 
 It is **absent** rather than empty while no assignment exists, and absent does not only mean "not
 admitted yet". The field reports the flavor of a replica's *accelerator* credits: a role admitted onto
-a pool carrying no accelerator at all reports nothing here while being perfectly healthy — its
+a pool carrying no accelerator at all reports nothing here while being perfectly healthy: its
 Workloads hold assignments, naming a flavor for `cpu`.
 
 One entry means every assigned replica of the role names it. Several entries mean the replicas were
-assigned different flavors — the signal to investigate, not a degraded form of one answer. Which
+assigned different flavors, the signal to investigate and not a degraded form of one answer. Which
 replica carries which flavor is deliberately not here: the ordinal such an answer would key on is the
 converger's internal slotting rather than a promise this API makes, and a reader who needs the mapping
 reads the replicas' own Pods.
@@ -197,7 +197,7 @@ deployment preempted in part starves whatever is queued behind it.
 What to do about it:
 
 - **Add capacity.** The reclaimed replicas are admitted again on their own once capacity returns.
-  The state self-heals but is UNBOUNDED — no timeout, no give-up, nothing makes the holder yield, so
+  The state self-heals but is UNBOUNDED: no timeout, no give-up, nothing makes the holder yield, so
   capacity that never comes back leaves it standing.
 - **Delete and recreate the deployment.** Deleting is the other release for the quota the kept
   replicas hold.
@@ -232,9 +232,9 @@ and that is already reported as a replica that never becomes Ready.
 
 **`ReplicasUpToDate`** — whether the running replicas match what the convergence renders for them now.
 It is deliberately **not** a statement about `spec` alone: the hash it compares covers the synthesized
-KV cache connector too, so a replica still carrying the current spec differs from the render as soon as
-that connector stops resolving — which is the one state the other three conditions describe correctly
-while saying nothing about.
+KV cache connector too, so a replica still carrying the current spec differs from the render as soon
+as that connector stops resolving, which is the one state the other three conditions describe
+correctly while saying nothing about.
 
 | Value | Reason | Meaning |
 |---|---|---|
@@ -245,23 +245,23 @@ while saying nothing about.
 | `False` | `RolloutHeldByWeights` | replicas that differed from the render were **left in place**: the model weights their replacements need are blocked, so deleting them would only remove serving replicas; `WeightsReady` says what blocks them |
 | `Unknown` | `RolloutNotObserved` | the pass accounted for no replica at all, so it established nothing either way |
 
-A pass answers only for the replicas it can vouch for — ones whose hash it read, or ones it created
-from the render it just performed. A pass that can vouch for none reports `Unknown`, because "nothing
-was outdated" and "nothing was looked at" are the same zero and only one of them is an answer.
+A pass answers only for the replicas it can vouch for (ones whose hash it read, or ones it created
+from the render it just performed). A pass that can vouch for none reports `Unknown`, because
+"nothing was outdated" and "nothing was looked at" are the same zero and only one of them is an answer.
 
-That is not a rare path, and it is not a quiet one. A teardown and the pass between a rollout's
-delete and the create that answers it both reach the status write that way — and those are the
-moments the replicas are least current.
+This happens in ordinary operation, and the status shows it: a teardown, and the pass between a
+rollout's delete and the create that answers it, both write status this way. Those are the moments
+the replicas are least current.
 
 `ReplacementInProgress` and `RolloutInProgress` are separate because they answer opposite questions.
 A rollout answers "did my edit land"; a replacement answers "why is capacity moving when I changed
-nothing" — reading the first for the second sends you to diff a spec that did not change. While the
+nothing"; reading the first for the second sends you to diff a spec that did not change. While the
 pass waits to replace a missing one, what to watch is the departed Pod itself: the replacement is
 created only once no Pod for that ordinal reads on the API server.
 
 > **Why `Unknown` rather than leaving the last answer standing.** Leaving it alone keeps whatever the
 > last answering pass wrote, and after a steady deployment that is an authoritative `True`. A pass
-> that finds every replica on its way out accounts for none of them — and a sticky answer would go on
+> that finds every replica on its way out accounts for none of them, and a sticky answer would go on
 > reporting that every replica matches the render while none exists.
 
 `RolloutHeldByCache` is the answer to "I changed the image and nothing happened". Nothing else on the
@@ -269,7 +269,7 @@ object is about that edit: the only false condition names a reuse domain whose f
 read, which is accurate and about a different subject.
 
 > **It does not mean an edit is waiting.** During an outage the render carries no connector, so every
-> attached replica differs from it whether or not anyone changed the deployment — an ordinary store
+> attached replica differs from it whether or not anyone changed the deployment; an ordinary store
 > blink puts every deployment on the pool into this state. The message therefore says what *would* be
 > delayed, and never that something is.
 
@@ -278,13 +278,13 @@ read, which is accurate and about a different subject.
 > ordinary path. What waits is an edit that changes a running replica's rendered Pod.
 
 > **A scale-out is no longer a lever for the waiting edit.** Replicas added during the outage are
-> created without a connector and turn over once more when the store returns — they pay the second
-> reload themselves — but the edit waiting on the running replicas still waits. What bounds the wait
+> created without a connector and turn over once more when the store returns (they pay the second
+> reload themselves), but the edit waiting on the running replicas still waits. What bounds the wait
 > is the store's own recovery, and the condition's message says what waits rather than promising a way
 > out.
 
-> **The stall is a decision, not a missing feature.** The guard exists because the alternative —
-> recreating every replica whose render lost its connector — deletes every replica of every deployment
+> **The stall is a decision, not a missing feature.** The guard exists because the alternative
+> (recreating every replica whose render lost its connector) deletes every replica of every deployment
 > on a pool for a few seconds of store unavailability. Measured, a withheld edit lands within seconds
 > of the store returning.
 
@@ -298,8 +298,8 @@ for" is what `phase` answers, by summing every role's counts before judging.
 | `False` | `KindsNotReady` | at least one kind has none; the message names the kinds |
 | `Unknown` | `NoRoleStatuses` | the pass accounted for no role at all, so there is nothing to judge |
 
-A deployment whose roles all share one kind — the shape you get when no role names a `kind`, since it
-defaults to `Server` — reports `True` as soon as any replica is ready. That is not a blind spot. The
+A deployment whose roles all share one kind (the shape you get when no role names a `kind`, since it
+defaults to `Server`) reports `True` as soon as any replica is ready. That is not a blind spot. The
 degradation is real and `phase` reports it as `Degraded`; this condition answers a different question
 and is silent on that shape by design.
 
@@ -316,7 +316,7 @@ reading.
 > **Why it never claims the deployment is serving.** Whether a request can be answered depends on
 > what the engine does with a role told it is a producer, and on whether a Service's endpoints reach
 > the ready replicas. Neither is observable from this object, so this condition reports readiness by
-> kind and stops there — which is what keeps it correct however those two are later settled.
+> kind and stops there, which is what keeps it correct however those two are later settled.
 
 **`KVEventsPublishing`** — whether every role that produces cache blocks has publisher configuration
 in its rendered Pods. It reports configuration, not live traffic: a configured publisher that later
@@ -331,8 +331,8 @@ crashes remains `True`.
 | `Unknown` | `RoleUnmanaged` | a producing role replaced its command line, so the operator cannot inspect what it does |
 
 **`RouterReady`** — whether the managed router rendered and has a ready replica. A render refusal is
-projected here rather than returned: it is a spec problem, so the rest of the status — phase, the
-other conditions, the role counts — keeps computing instead of going stale with no axis naming the
+projected here rather than returned: it is a spec problem, so the rest of the status (phase, the
+other conditions, the role counts) keeps computing instead of going stale with no axis naming the
 cause.
 
 | Value | Reason | Meaning |

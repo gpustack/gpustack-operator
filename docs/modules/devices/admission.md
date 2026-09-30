@@ -17,8 +17,9 @@ pool capacity, while GPUStack checks whether individual accelerators can satisfy
 
 ## The five gates
 
-A layered **five-gate admission** model in which **Kueue is a coarse gate, not the ledger**. Each gate
-produces or consumes the `.sliced.*` / `.partitioned.*` values at a distinct point on the path.
+A layered five-gate admission model: Kueue is a coarse gate, and the per-accelerator ledger is the
+fine one. Each gate produces or consumes the `.sliced.*` / `.partitioned.*` values at a distinct
+point on the path.
 
 | # | Gate | What it can see | What it cannot |
 |---|---|---|---|
@@ -58,9 +59,11 @@ fragmentation.
 
 ### Gate 3 — the per-accelerator AdmissionCheck
 
-`NodeDevicesAdmissionReconciler` (`node_devices_admission.go`) introspects the assigned ResourceFlavor's
-nodes through the `Devices` ledger, closing the credits "over-admit exclusive" gap: a scalar total cannot
-see that 8 accelerators each 50 %-sliced satisfy no 5-exclusive request.
+When Kueue reserves quota, `NodeDevicesAdmissionReconciler` (`node_devices_admission.go`) reads the
+`Devices` ledger of every node the assigned ResourceFlavor names and checks the fit per accelerator.
+The `credits` gate before it sees only a scalar total, so it cannot tell that eight accelerators
+sliced to 50 % each cannot serve a request for five whole accelerators. This check can, and holds
+the Workload with `Retry` when the fit fails.
 
 The worker's `Prepare()` applies the `gpustack-node-devices` AdmissionCheck at startup, retrying
 until Kueue's CRD is established — the chart cannot ship it, since Kueue templates its own CRDs and
@@ -130,8 +133,8 @@ node named there must host its own share of the PodSet from its own accelerators
 > accelerator cannot hold and a shared request its node cannot spread over distinct accelerators,
 > failing the Pod.
 
-**The Workload fit pin.** A mutating webhook on Kueue `Workload` CREATE and UPDATE adds the pin to each
-PodSet: a logical slice of `U` units per accelerator gets `sliced-max-free-units… Gt U-1`, and a
+The Workload fit pin: a mutating webhook on Kueue `Workload` CREATE and UPDATE adds the pin to each
+PodSet, so a logical slice of `U` units per accelerator gets `sliced-max-free-units… Gt U-1`, and a
 shared request of `N >= 2` accelerators gets `shared-free-cards… Gt N-1`. `N` is the largest count
 any one container asks for.
 
@@ -169,7 +172,7 @@ geometry allows.
 
 **Feasibility is per role.** A Workload composed from a pod group carries one PodSet per role, and
 [each PodSet gets its own ResourceFlavor](scheduling.md#stage-4-the-kueue-chain) — so a demand
-is judged against the accelerators of the flavor **its own** PodSet was assigned, never against every
+is judged against the accelerators of the flavor its own PodSet was assigned, never against every
 accelerator in the pool.
 
 - Two PodSets' demands merge only when the flavor agrees as well as the family.
@@ -186,9 +189,9 @@ accelerator in the pool.
 > reach. It stands because the check answers for every workload in the queues it is referenced
 > from, not only for the ones rendered here.
 
-The ledger seeds every accelerator at `M`, so an exclusive over-admit coarse `credits` let through is
-caught exactly and held with `Retry`, transient and self-healing once Kueue re-admits after the backoff.
-A **check-only** gate: never preempts, never `Rejected`.
+The ledger seeds every accelerator at `M`, so an exclusive over-admit that coarse `credits` let
+through is caught exactly, held with `Retry`, and self-heals once Kueue re-admits after the backoff.
+The gate only checks: it never preempts and never answers `Rejected`.
 
 > **Why it skips an evicted Workload** — Kueue resets the checks to `Pending` and drops the quota
 > reservation in two separate writes. Between them an evicted Workload still reports a reservation, so
@@ -262,7 +265,8 @@ shown capacity a partitioned accelerator could not serve.
 
 - `EX` — the largest single *node*'s free accelerators; one request can span a node's accelerators;
 - `SH` — the largest single *node*'s accelerators that still have a free share, since a shared request
-  of N names N distinct accelerators on one node — a node's spare shares on one accelerator do not add;
+  of N names N distinct accelerators on one node, and a node's spare shares on one accelerator do not
+  add;
 - `SL` — the freest single *accelerator*'s; a slice targets one accelerator;
 - `PT` — `1` while any accelerator can host an instance, else `0`; a partition request is validated to
   be exactly one instance on one accelerator, so nothing larger is requestable.
@@ -272,10 +276,10 @@ shown capacity a partitioned accelerator could not serve.
 
 ## Capability versus availability
 
-**Which field answers "what can I still get".** Neither `PT` number, for a partitioned pool:
-`onceMaxRequest` is only the `1`/`0` "is there room at all", and `remaining` is a best case over profiles
-competing for the same physical slices, each accelerator contributing its largest per-profile free count,
-never a per-profile total.
+For a partitioned pool, neither `PT` number reports which profiles are still available.
+`onceMaxRequest` is the `1`/`0` answer to whether any partition fits. `remaining` sums each
+accelerator's largest free count across profiles that compete for the same physical slices;
+it does not give a total for each profile.
 
 The per-profile answer is `status.acceleratorPartitioned.remainingProfiles`, paired with
 `allocatedProfiles`: the pool-level Σ by profile name of the per-accelerator ledger on
@@ -285,10 +289,11 @@ filled reads `0` instead of vanishing, keeping "offered but full" distinct from 
 `kubectl get instancetypes -o wide` shows the same list as the `PARTITIONS` column; the worker gateway
 sums it across clusters (Active members only, like every availability dimension).
 
-**Do not read `status.detail.slicedDetail` for this.** The static slicing **capability** catalog,
-aggregated from the `Devices` **spec** side, by design does not move as instances are carved and
-released. The Instance webhook needs the whole catalog: to reject an unoffered profile while naming the
-offered set, and to size a request from its `MemoryMib`, which the ledger lacks.
+**Do not read `status.detail.slicedDetail` for this.** It aggregates the static slicing **capability**
+catalog from the `Devices` **spec** side, and that catalog deliberately does not move as instances are
+carved and released. The Instance webhook uses the catalog to reject an unoffered profile while
+naming the offered set, and to size a request from the profile's `MemoryMib`, which the ledger does
+not carry.
 
 Repurposing those counts as availability would make a momentarily-full profile vanish from the offered
 set, turning a request that should stay `Retry` at the AdmissionCheck into a permanent rejection.
@@ -317,7 +322,7 @@ edit touches only the InstanceType, never a Node or the ClusterQueue notes.
   (`unitResources.cpu`/`.ram` + `localStorage`); empty or partial is rejected. A CPU-only
   (`acceleratable=false`) type's unit CPU must be exactly 1 core, an accelerated type any unitless
   positive integer.
-- **InstanceType validating, update** — **freezes the spec**: every field immutable except
+- **InstanceType validating, update** — freezes the spec: every field immutable except
   `displayName` (rename) and `inactive` (in/out of service), so re-sizing or re-pointing a pool means
   delete and re-create. Only immutability is re-checked, never the create-time shape, so a legacy type
   stored before a tightened rule can still be renamed or deactivated.
@@ -344,11 +349,11 @@ A second mutating webhook on Pods writes the client configuration an inference e
   none, and never touches `resources`.
 - It cannot be a branch of gate 1, because the two select on independent criteria: gate 1 fires on
   `kueue.x-k8s.io/queue-name`, this one on `kvcache.gpustack.ai/inject`, and a `LabelSelector` cannot
-  express the union. Independent, not disjoint — a Pod may carry both labels and be served by both
-  entries, which is exactly what the next point is about.
+  express the union. The two are independent but not disjoint: a Pod may carry both labels and be
+  served by both entries, which is exactly what the next point is about.
 - Both entries live in the single `gpustack-worker-mutation` configuration, whose name sorts before
-  Kueue's on purpose. Their order within it is immaterial, which a test asserts by running both over
-  one Pod in both orders.
+  Kueue's so that gate 1 folds a Pod's units before Kueue hashes its resources. Their order within it
+  is immaterial, which a test asserts by running both over one Pod in both orders.
 - Before it adds connector arguments, the KV cache webhook removes the transparent launcher prefixes
   it knows and accepts only the entry point for the declared engine: `vllm` for the vLLM family or
   `python3 -m sglang.launch_server` for SGLang. An unrecognised launcher, launch form, or mismatched
@@ -407,8 +412,8 @@ without putting that read back in the path of every release.
 
 Before (re)creating an Instance's Pod, the `InstanceReconciler` (`instance.go`) reads the backing
 `ClusterQueue`'s `StopPolicy` and **stops** the Instance (`spec.stop=true`) rather than recreate a Pod
-the queue can never admit — when the queue is `HoldAndDrain` (a pool drain or a teardown evicting
-admitted workloads), or the `InstanceType` is being deleted or gone.
+the queue can never admit. That covers a queue in `HoldAndDrain` (a pool drain, or a teardown evicting
+admitted workloads), an `InstanceType` being deleted, and an `InstanceType` already gone.
 
 An admin `Hold` (the `Inactive` switch) is deliberately **not** a stop: running Pods keep running, a new
 Instance stays pending.

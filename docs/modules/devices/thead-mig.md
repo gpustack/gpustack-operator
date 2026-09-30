@@ -17,7 +17,7 @@ Requests](requests.md#two-families-two-accelerator-populations).
 - [Enabling partitioning on a node](#enabling-partitioning-on-a-node)
 - [Disabling partitioning on a node](#disabling-partitioning-on-a-node)
 - [Node reboot recovery](#node-reboot-recovery)
-- [What GPUStack Operator does *NOT* do](#what-gpustack-operator-does-not-do)
+- [What GPUStack Operator does NOT do](#what-gpustack-operator-does-not-do)
 
 ## Prerequisites
 
@@ -45,9 +45,9 @@ Failed to Enable MIG mode for PPU <bus-id>: An operation cannot be performed bec
 
 Two notes:
 
-- **The count is not the list length** — three processes reported, two holder lines printed. Treat it as
+- **The count is not the list length**: three processes reported, two holder lines printed. Treat it as
   a lower bound and go to the file descriptors.
-- **`PPU00<N>` names the card ordinal** — what `ppu-smi -i <N>` takes, the `<N>` in `/dev/alixpu_ppu<N>` —
+- **`PPU00<N>` names the card ordinal** (what `ppu-smi -i <N>` takes, the `<N>` in `/dev/alixpu_ppu<N>`),
   not the reported minor number, a different value (see [Requesting a
   partition](#requesting-a-partition)).
 
@@ -87,13 +87,13 @@ GPU-instance profiles the driver reports for the PPU in front of it.
   whitespace, applied by both the detector and the driver seam) that also drops NVIDIA's `+me` / `+gfx`
   variants.
 - **A memory-slice span is read from the driver's placement records**, never divided out of a hardcoded
-  per-PPU slice count; a profile with *no* legal placement is not offered, since the span could only be
-  guessed — and the ledger being placement-derived, such a key could never allocate. The PPU names it in
+  per-PPU slice count; a profile with no legal placement is not offered, since the span could only be
+  guessed, and the ledger being placement-derived, such a key could never allocate. The PPU names it in
   a warning.
 - **A partition is one whole GPU instance; subdividing it is not supported.** Every profile is created as a
   GPU instance plus a single compute instance covering all of it. GPUStack addresses a partition by one
-  device id, and a GPU instance subdivided into several compute instances has several — a share of the
-  compute each, all on the same memory — so it is refused rather than half-addressed.
+  device id, and a GPU instance subdivided into several compute instances has several (a share of the
+  compute each, all on the same memory), so it is refused rather than half-addressed.
 
 All three rules are shared with NVIDIA.
 
@@ -117,10 +117,11 @@ spanning all eight), creating either taking the other to zero free; those sparse
 indexes profiles by position.
 
 **The published name carries a separator the manufacturer's does not.** Display names carry a `MIG `
-prefix and a space, dropped by normalization, and spell the geometry with no separator between its two
-numbers where NVIDIA writes one. So both read alike in a Pod spec, the operator publishes it: `MIG 4g48gb`
-is advertised and requested as `<base>.partitioned.mig-4g.48gb`, and `MIG 8g96gb` as
-`<base>.partitioned.mig-8g.96gb`.
+prefix and a space, dropped by normalization, and spell the geometry with no separator between its
+two numbers where NVIDIA writes one.
+
+So both read alike in a Pod spec once the operator publishes it: `MIG 4g48gb` is advertised and
+requested as `<base>.partitioned.mig-4g.48gb`, and `MIG 8g96gb` as `<base>.partitioned.mig-8g.96gb`.
 
 The InstanceType's offered inventory and per-profile ledgers carry that name too, so the name you read is
 the name you write. Below that boundary the driver's spelling stays — `ppu-smi`, the `Devices` record and
@@ -131,8 +132,8 @@ driver reports it.
 
 With the mode on, a workload asks for **one hardware instance of a named profile**, as for NVIDIA: the
 same `<base>.partitioned` / `<base>.partitioned.<kind>-<profile>` key pair and the same seven [request
-rules](requests.md#the-request-rules) — one PPU, one profile shape, one container group,
-`.units` webhook-derived, exclusive of every other family:
+rules](requests.md#the-request-rules) (one PPU, one profile shape, one container group,
+`.units` webhook-derived, exclusive of every other family):
 
 ```yaml
 resources:
@@ -164,9 +165,10 @@ rather than handing over an incomplete set.
 
 **Two numbers name a PPU, and only one names a path.** The device node and the capability subtree both
 carry the **card ordinal** — what `ppu-smi -i <N>` takes, the `<N>` in `/dev/alixpu_ppu<N>`, the `ppu<N>` in
-the procfs capability tree. The ordinal keeps the word *card*: it addresses a PPU, not identifies one.
+the procfs capability tree. The ordinal keeps the word card: it addresses a PPU rather than identifying
+one.
 
-The **minor number** the driver reports is a *different* value: the shared `/dev/alixpu` control node
+The **minor number** the driver reports is a different value: the shared `/dev/alixpu` control node
 takes minor 0 of the same character-device major, so a PPU's minor is its ordinal plus one on the host
 measured (ordinal 14 → minor 15, across all sixteen PPUs). Contradicting the manufacturer documentation's
 `/dev/alixpu_ppu[minor number]`, a path built from the minor addresses **the next PPU**.
@@ -186,18 +188,18 @@ and [Device Discovery](discovery.md#the-partitioned-family-fungible-tokens), inc
 the SSH sidecar seeing the partition rather than the parent PPU, and the reclaim race a same-profile
 replacement can hit.
 
-Device-node injection is the one place T-Head's response differs in *shape* from NVIDIA's.
+Device-node injection is the one place T-Head's response differs in shape from NVIDIA's.
 
 ## Limitations
 
-- **GPUStack never enables, disables or reconfigures partition *mode***, and never evicts Pods on a mode
-  change — the administrator owns the mode lifecycle, as for [NVIDIA](nvidia-mig.md#limitations).
+- **GPUStack never enables, disables or reconfigures partition mode**, and never evicts Pods on a mode
+  change: the administrator owns the mode lifecycle, as for [NVIDIA](nvidia-mig.md#limitations).
 - **A profile whose name the driver did not report, or cannot be normalized into a valid resource-name
   segment, never appears in the inventory** and cannot be requested (see [How partition profiles are
   discovered](#how-partition-profiles-are-discovered)).
 - **One partition per allocated PPU.** A multi-partition workload asks for several Pods, the scope decision
   NVIDIA makes too (see [Rule 3](requests.md#rule-3--basepartitioned-is-exactly-1)).
-- **Hand-carving a partition outside GPUStack is unsupported on a managed node** — every node-level number
+- **Hand-carving a partition outside GPUStack is unsupported on a managed node**: every node-level number
   derives from the allocation annotations the device plugin writes, and a hand-carved instance produces
   none; see [Accelerator Requests](requests.md#limitations). It is deleted as an orphan once
   its PPU is idle. An instance with something **running on it** is the exception: it is left alone and
@@ -229,7 +231,7 @@ procedure with the GPUStack-side steps it does not know about, and with the trap
 hardware called out where they bite.
 
 1. Satisfy the [Prerequisites](#prerequisites): no accelerator workloads, no device-manager Pod.
-2. Enable the mode. **`-mig` is a top-level flag, not a `ppu-smi mig` subcommand flag** — the subcommand
+2. Enable the mode. **`-mig` is a top-level flag, not a `ppu-smi mig` subcommand flag**: the subcommand
    carries the instance operations (`-lgip`, `-cgi`, `-dgi`, …) and rejects `-mig`:
 
    ```console
@@ -240,8 +242,8 @@ hardware called out where they bite.
    ```
 
    **One PPU per invocation.** `-i` takes no PPU list for this flag: a comma-separated form answers `No
-   devices were found` and changes nothing — which reads like missing hardware, not a rejected argument.
-   Several PPUs, several calls.
+   devices were found` and changes nothing, which reads like missing hardware rather than a rejected
+   argument. A node with several PPUs to flip therefore takes several calls.
 
    Then confirm, because a successful call is not an applied mode:
 
@@ -298,7 +300,7 @@ Read `ppu-smi mig -i <N> -lgi`.
 ## Node reboot recovery
 
 Partitions do not survive a Device Manager restart that finds different hardware state underneath them,
-and — per [Limitations](#limitations) — whether the mode survives a host reboot is unconfirmed. Treat a
+and (per [Limitations](#limitations)) whether the mode survives a host reboot is unconfirmed. Treat a
 reboot as if it did not:
 
 1. Re-run [Enabling partitioning on a node](#enabling-partitioning-on-a-node).
@@ -308,15 +310,15 @@ reboot as if it did not:
    the operator materializes a fresh instance on admission. A pre-reboot Pod that lingers with its on-disk
    ownership record but no live instance fails its device allocation closed until recreated.
 
-## What GPUStack Operator does *NOT* do
+## What GPUStack Operator does NOT do
 
-- Enable, disable or reconfigure partition *mode* — those are `ppu-smi mig` operations you run. (It *does*
+- Enable, disable or reconfigure partition mode — those are `ppu-smi mig` operations you run. (It does
   create and destroy the Instances backing scheduled workloads.)
 - Trigger on nodeconfig or labels, flip the mode automatically, or rewrite the geometry.
 - Deschedule or evict Pods when the mode changes.
-- Account for an instance you carved by hand. (It *does* delete it: an instance no allocation accounts for
+- Account for an instance you carved by hand. (It does delete it: an instance no allocation accounts for
   is reclaimed as an orphan once its PPU is idle and nothing is running on it.)
-- Hand out a *subdivided* instance, or subdivide one itself — it creates a GPU instance with a single
+- Hand out a subdivided instance, or subdivide one itself — it creates a GPU instance with a single
   compute instance covering all of it, and refuses one somebody else subdivided ([How partition profiles
   are discovered](#how-partition-profiles-are-discovered)).
 

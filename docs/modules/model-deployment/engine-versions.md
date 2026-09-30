@@ -25,14 +25,14 @@ those releases, and this documentation does not track them; upgrading is the fix
 | SGLang | with a Mooncake store | `0.5.18`, run as a pair | `0.3.12.post1` | the 0.3.12 line, such as `kvcacheai/mooncake:0.3.12.post1` |
 
 A version counts as run when the shape answered requests and, where it moves KV, the engine or the
-store reported blocks moving — a transfer or a store write, not a Pod reaching `Ready`. The
+store reported blocks moving: a transfer or a store write, not a Pod reaching `Ready`. The
 vLLM-Ascend rows ran on the runner's `cann9.1-910b-vllm0.23.0-router` tag, named through
 `roles[].image`.
 
 ## Reading the table
 
-**`engine.version` has no default.** The operator assembles the runner image from it — see [The
-runner image is a formula](deployment.md#the-runner-image-is-a-formula) — so the minimum is a
+**`engine.version` has no default.** The operator assembles the runner image from it (see [The
+runner image is a formula](deployment.md#the-runner-image-is-a-formula)), so the minimum is a
 value you write, and nothing refuses a lower one.
 
 **The client comes with the image, not with the version.** The column above is read off the
@@ -41,10 +41,10 @@ client and has not been run. A role naming its own `roles[].image` carries whate
 image embeds: read it off the image, then pick the store from it.
 
 **A store runs on the client's minor line.** The store column is a requirement rather than a
-suggestion — see [The store version must match the engine's
+suggestion; see [The store version must match the engine's
 client](../kv-cache/backend.md#the-store-version-must-match-the-engines-client).
 
-**vLLM-Ascend's direct transfer has no `tcp` shape**, and one router renders it — see [How a pair is
+**vLLM-Ascend's direct transfer has no `tcp` shape**, and one router renders it; see [How a pair is
 wired](prefill-decode.md#how-a-pair-is-wired).
 
 **The shapes above move KV over `tcp`, or over `ascend` on vLLM-Ascend.** Which other transport
@@ -80,12 +80,12 @@ prefill/decode pair. The first column gives the API and Mooncake spellings. `Aut
 
 The vLLM and SGLang verdicts are read on their CUDA runner images. What each verdict means:
 
-- **Works** — run on this operator with blocks moving, by the criterion under [the
+- **Works**: run on this operator with blocks moving, by the criterion under [the
   minimum](#the-minimum-per-shape), on the images the cell names.
-- **Own image** — works only on an engine image you build and keep up to date yourself.
-- **Not supported** — admission refuses it, the operator renders nothing for it, or no image the
+- **Own image**: works only on an engine image you build and keep up to date yourself.
+- **Not supported**: admission refuses it, the operator renders nothing for it, or no image the
   cell could run carries the transport; the cell says which.
-- **Not verified** — no run. Nothing refuses it; nothing here says it works.
+- **Not verified**: no run. Nothing refuses it; nothing here says it works.
 
 **"Default images" needs no image work from you**: the runner image the operator assembles for each
 role, and the [`kv-cache-backend-image`](../../reference/settings.md) default for the store members. "Named by
@@ -96,13 +96,13 @@ minimum](#the-minimum-per-shape) rather than added up from two cells; both legs 
 have not been run. With a positive `resources.interface`, an `RDMA` leg beside an `EFA` one is
 refused at admission.
 
-On AWS the `RDMA` rows do not apply — [choose `EFA` or
+On AWS the `RDMA` rows do not apply; [choose `EFA` or
 `TCP`](../rdma/operations.md#on-aws-rdma-is-not-an-option).
 
 ## Known failures at the minimum
 
 - **SGLang with a store** holds a pinned host pool and needs the node's available memory above a
-  fixed reserve plus that pool — see [SGLang's host-memory
+  fixed reserve plus that pool; see [SGLang's host-memory
   tier](../kv-cache/injection.md#sglangs-host-memory-tier).
 - **SGLang prefill/decode over `TCP` runs out of local ports under sustained load, with or without
   a store.** The prefill half opens a new connection for every transfer, to the decode half and to

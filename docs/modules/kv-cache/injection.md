@@ -4,9 +4,9 @@ A `KVCachePool` is usable by any Pod, not only by workloads this operator render
 admission webhook watches for one label, reads the `KVCachePoolBinding` the Pod names, and writes the
 client configuration its inference engine expects. Nothing else about the Pod changes.
 
-A Pod that does not carry the label is left untouched **by this webhook** — not byte-identical after
-admission, since the API server still defaults fields such as the service-account volume, and other
-webhooks may write too.
+A Pod that does not carry the label is left untouched **by this webhook**. It is not byte-identical
+after admission, since the API server still defaults fields such as the service-account volume, and
+other webhooks may write too.
 
 ## Contents
 
@@ -36,7 +36,7 @@ characters, so everything of unbounded length is an annotation.
 | annotation | `kvcache.gpustack.ai/container` | a container name | only when the Pod has more than one container |
 | annotation | `kvcache.gpustack.ai/launch-args-forwarded` | `"true"` | no — only when an unrecognised launcher, script, or image ENTRYPOINT forwards appended arguments to the declared engine |
 
-For a plain server, one that is not half of a prefill/decode split, LEAVE THE ROLE ANNOTATION OFF.
+For a plain server, one that is not half of a prefill/decode split, leave the role annotation off.
 `Server` is not in its value domain and a Pod carrying it is refused, while the same arrangement is
 spelled `Server` on `ModelDeployment.spec.roles[].kind`, which even defaults to it. The value that
 is correct there turns a Pod away here. An absent annotation renders the read-and-write
@@ -71,7 +71,7 @@ spec:
             - "Qwen/Qwen3-8B"
 ```
 
-A bare Pod follows the same contract — the label opts it in, and the optional annotations select the
+A bare Pod follows the same contract. The label opts it in, and the optional annotations select the
 role and the container:
 
 ```yaml
@@ -100,27 +100,27 @@ spec:
 ```
 
 The engine is **declared, never guessed from the image**. Engines take entirely different flags, and a
-renamed or vendored image sniffed wrongly produces a container that starts normally and caches
+wrong guess about a renamed or vendored image produces a container that starts normally and caches
 nothing.
 
 There is deliberately **no domain annotation**. The reuse domain comes from the Binding, because the
-Binding is the object that registers a domain and carries its ceiling — so every domain this operator
-provisions has something accounting for it. `kvcache.gpustack.ai/domain` is refused rather than
-ignored, so a manifest written against an escape hatch that does not exist fails where its author can
-see it.
+Binding is the object that registers a domain and carries its ceiling. Every domain this operator
+provisions therefore has something accounting for it. `kvcache.gpustack.ai/domain` is refused rather
+than ignored, so a manifest written against an escape hatch that does not exist fails where its author
+can see it.
 
-That is a provisioning contract, **not an isolation boundary** — what a Binding does and does not
+That is a provisioning contract, **not an isolation boundary**. What a Binding does and does not
 bound is stated in [What a Binding does not do](pool.md#what-a-binding-does-not-do), with
 issue #168 for the gap. The tenant value is Binding-owned too: on SGLang the webhook replaces every
 container declaration of `MOONCAKE_TENANT_ID` with the Binding's domain.
 
 ## What gets injected, per engine
 
-The vehicle differs per engine, and the reason is *when* a value can be known rather than which keys
-an engine accepts. `local_hostname` is an address, and a mutating webhook runs before a Pod has an IP.
-vLLM computes its own at startup; SGLang reads it from configuration, and only its environment path
-consults the process environment — where Kubernetes can supply the Pod's IP through a `fieldRef` the
-kubelet resolves at container start.
+Each engine receives its values through a different vehicle, and the choice turns on *when* the
+value becomes known, not on which keys the engine accepts. `local_hostname` is an address, and a
+mutating webhook runs before a Pod has an IP. vLLM computes its own at startup; SGLang reads it from
+configuration, and only its environment path consults the process environment, where Kubernetes can
+supply the Pod's IP through a `fieldRef` the kubelet resolves at container start.
 
 | Engine | Vehicle | What lands on the container |
 |---|---|---|
@@ -128,7 +128,7 @@ kubelet resolves at container start.
 | `vllm-ascend` | a projected file | the same, except the connector is `AscendStoreConnector` — the two engines share the vehicle and the file's keys, but not a connector registry |
 | `SGLang` | environment variables | arg `--hicache-storage-backend mooncake` and [`--enable-hierarchical-cache`](#sglangs-host-memory-tier); the `MOONCAKE_*` variables below; **no** volume and **no** mount |
 
-Every engine is also given `--kv-cache-dtype` with the Binding's `dtype`, verbatim — why, and which
+Every engine is also given `--kv-cache-dtype` with the Binding's `dtype`, verbatim. Why, and which
 spellings each engine accepts, is under
 [The dtype is handed to the engine](pool.md#the-dtype-is-handed-to-the-engine).
 
@@ -137,7 +137,7 @@ annotation. No ConfigMap is created, so the webhook needs no RBAC for one and le
 garbage-collect: the configuration's lifetime is exactly the Pod's.
 
 The values are the same on every engine; only the spellings differ. Both vLLM-family engines read
-the same file with the same key names — where they differ is the connector selected alongside it,
+the same file with the same key names. Where they differ is the connector selected alongside it,
 and which keys their readers know.
 
 | Value | vLLM file key | SGLang variable |
@@ -159,7 +159,7 @@ and which keys their readers know.
 > the symptom is an OOM pointing at no field anybody wrote.
 
 `device_name` is empty on **every** path, RDMA and EFA included. Empty means "use every device found",
-which is the only value correct for every host in one pool — a device is named per host, `mlx5_0` on
+which is the only value correct for every host in one pool. A device is named per host, `mlx5_0` on
 one and `erdma_0` on the next. The documented string `auto-discovery` is not special-cased anywhere in
 the client: it is parsed as a filter naming a device no host has.
 
@@ -170,10 +170,10 @@ renders an RDMA or EFA resource limit on its engine Pod according to the effecti
 The backend's member Pods configure their own host network and device access separately.
 
 The one exception is the Ascend prefill/decode leg, whose engine Pods mount a host driver
-tree read-only — see [How a pair is wired](../model-deployment/prefill-decode.md#how-a-pair-is-wired).
+tree read-only. See [How a pair is wired](../model-deployment/prefill-decode.md#how-a-pair-is-wired).
 
 Two observability variables, `MC_TE_METRIC` and `MC_STORE_CLIENT_METRIC_BANDWIDTH`, are set to `1`
-when the container has not spoken about them. A value you set yourself is left alone.
+when the container does not already set them. A value you set yourself is left alone.
 
 ### SGLang's host-memory tier
 
@@ -183,8 +183,8 @@ tier: naming the backend alone enables storage prefetch over a plain radix cache
 request fails with an `AttributeError` (measured at SGLang v0.5.18).
 
 That tier is a pinned host pool of `hicache_ratio` (default 2.0) times the device KV pool. SGLang
-refuses to build it unless the node's available memory — read host-wide, not from the container's
-limit — exceeds a fixed 10 GiB reserve plus the pool, so size the node for it. The container's
+refuses to build it unless the node's available memory (read host-wide, not from the container's
+limit) exceeds a fixed 10 GiB reserve plus the pool, so size the node for it. The container's
 memory limit still has to hold the engine and the pool, or the result is an OOM kill.
 
 A `ModelDeployment` renders the same switch on every SGLang role with a store except a decode half,
@@ -204,14 +204,14 @@ kept.
 Two kinds of key are **refused at admission** instead of overwritten, because overwriting them
 would not help.
 
-`MOONCAKE_CONFIG_PATH` and `--kv-transfer-config` select the **mechanism** — a second one is an
+`MOONCAKE_CONFIG_PATH` and `--kv-transfer-config` select the **mechanism**. A second one is an
 ambiguity nothing reports. `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` and
 `--hicache-storage-backend-extra-config` select the configuration **source**, which leaves the
 injected variables present and unread. Each key, the engine it applies to and why it is refused are
 under [Refusals and their fixes](#refusals-and-their-fixes).
 
-A flag is refused in every spelling the engine's own parser reads as it — a unique prefix, and on
-the vLLM family an underscored or dotted form — by the rule under
+A flag is refused in every spelling the engine's own parser reads as it (a unique prefix, and on
+the vLLM family an underscored or dotted form) by the rule under
 [What the operator owns](../model-deployment/deployment.md#what-the-operator-owns).
 
 This applies only to `env`: a value supplied through `envFrom` is invisible to the check and **will
@@ -220,7 +220,7 @@ be overwritten with no symptom**, so declare Mooncake variables in `env`.
 ## Refusals and their fixes
 
 The webhook fails closed and refuses rather than guessing, because every case below produces a
-container that starts normally and does not use the cache — a result invisible from outside the Pod.
+container that starts normally and does not use the cache. That result is invisible from outside the Pod.
 
 | The message names | Why it refuses | The fix |
 |---|---|---|
@@ -239,7 +239,7 @@ container that starts normally and does not use the cache — a result invisible
 | a volume name or mount path the webhook owns | the same collision, in the Pod's storage | rename yours |
 | a container declaring **neither** `command` nor `args` | appending would not append: Kubernetes then reads `args` as the whole command line and discards the image's `CMD` | put the engine executable in `command` and the image's launch arguments in `args` |
 | a container declaring `args` but no `command` | admission cannot inspect the image `ENTRYPOINT`, so it cannot show that appended arguments reach the engine | put the engine executable in `command`, or declare `kvcache.gpustack.ai/launch-args-forwarded: "true"` only when the image ENTRYPOINT forwards them |
-| the launcher, when nothing follows it — `command: ["tini", "--"]` with `args` empty | the container names no program at all, so the appended connector flag becomes the command that launcher executes | put the engine executable and its arguments after the launcher, or in `command` and `args` directly |
+| the launcher, when nothing follows it: `command` runs `tini --` with `args` empty | the container names no program at all, so the appended connector flag becomes the command that launcher executes | put the engine executable and its arguments after the launcher, or in `command` and `args` directly |
 | an unrecognised launch program or a program for another engine | the webhook would otherwise inject one engine's configuration into another program, or silently trust an unknown launcher | launch the engine named by the `engine` annotation directly, or declare forwarding only for an unrecognised launcher that passes appended arguments through |
 | a container launched through a shell's `-c` | an appended flag becomes the shell's `$0`, so it never reaches the engine and the Pod is stamped as injected anyway | launch the engine directly — its executable in `command`, its arguments in `args` — or add the connector flag to the script yourself |
 | a command line hidden inside one argument — `env -S "…"` and its `--split-string` spellings | there is nothing on the command line to test: the launcher splits that string itself, so admission cannot tell whether a shell is inside it | launch the engine directly, add the connector flag inside that argument, or declare that it forwards appended arguments |
@@ -257,18 +257,18 @@ guarantee. The general launch check also refuses a suffix-less wrapper named `en
 unless its author declares that it forwards appended arguments. Admission cannot open the file, so
 the declaration is the only way to admit that uncertainty.
 
-⛔ **A key that selects where the engine reads its store configuration from is refused**, per engine:
+**A key that selects where the engine reads its store configuration from is refused**, per engine:
 `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` and `--hicache-storage-backend-extra-config` on SGLang,
 `MOONCAKE_CONFIG_PATH` on vLLM. None of them collides with anything this operator writes, and that
 is what makes them worth refusing: the engine selects one source out of three, so either key leaves
 every injected variable present on the Pod and read by nothing.
 
-The same key on an engine that does not read it is **not** refused — SGLang's variable means nothing
+The same key on an engine that does not read it is **not** refused. SGLang's variable means nothing
 to vLLM, and a refusal there would have nothing behind it.
 
 To take future Pods back over, set `kvcache.gpustack.ai/inject: "false"` on the workload's **Pod
 template**, or drop the label there. It does not undo an existing Pod: the injected args, env and
-volume stay, and most of a running Pod's spec is immutable — the change takes effect when the
+volume stay, and most of a running Pod's spec is immutable. The change takes effect when the
 workload rolls.
 
 > **The label and the two written annotations are frozen once the Pod exists**, which is why the
@@ -286,7 +286,7 @@ workload rolls.
 >
 > That guard is a validating webhook on UPDATE with `failurePolicy: Ignore`, so it does **not** hold
 > while the webhook is unreachable. The direction is deliberate: it keeps a record honest, and it must
-> never be the reason a live Pod cannot be updated or finished — under `Fail` an unreachable webhook
+> never be the reason a live Pod cannot be updated or finished. Under `Fail`, an unreachable webhook
 > would block finalizer removal on every opted-in Pod, and a pool's own teardown waits behind exactly
 > that. Clearing a finalizer touches none of the three keys, so it is admitted whether the webhook is
 > reachable or not.
@@ -327,7 +327,7 @@ $ kubectl exec chat-0 -- python3 -c \
 
 An `ImportError` means the injection is inert on that image. Note the symptom is different from the
 one in the previous section, and calls for a different fix: an unregistered tenant fails loudly with
-`TENANT_NOT_REGISTERED` on every write, while a missing reader fails silently — the workload runs
+`TENANT_NOT_REGISTERED` on every write, while a missing reader fails silently. The workload runs
 correctly, just with no cache at all.
 
 ## Reading the injection record
@@ -358,8 +358,8 @@ must ignore that legacy field and must not infer image compatibility from it.
 container: `"file"` means a projected configuration document plus its volume, `"environment"` means
 variables alone.
 
-It used to carry a second job — telling you that your own `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` had
-taken precedence and left the injection inert. That outcome no longer occurs: those keys are refused
+It used to carry a second job: telling you that your own `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH` had
+taken precedence and left the injection inert. That outcome no longer occurs. Those keys are refused
 at admission, so a Pod that was injected is a Pod whose injection is read.
 
 ## Transport compatibility at binding
@@ -391,13 +391,13 @@ handed: `tcp` against `ascend`. The value to set is the API's, **`CANN`**, becau
 `spec.transport.protocol` is a case-sensitive enum.
 
 **The failing backend is not one somebody misconfigured.** `spec.transport.protocol` defaults to
-`Auto`, which resolves to the store's `tcp` — so a backend left entirely at its defaults is precisely the
+`Auto`, which resolves to the store's `tcp`. A backend left entirely at its defaults is precisely the
 one this engine cannot use. Pair vLLM-Ascend with a pool that offers `CANN`: declared on the backend's
 `spec.transport.protocol`, or on one member group's `transport.protocol` when only one group serves
 the fabric.
 
-**A backend may also mix vendors across member groups** — one group offering `rdma` to NVIDIA nodes,
-another `ascend` to Ascend nodes — through the same per-group `transport.protocol` override.
+**A backend may also mix vendors across member groups** (one group offering `rdma` to NVIDIA nodes,
+another `ascend` to Ascend nodes) through the same per-group `transport.protocol` override.
 Admission imposes no rule on that combination; the per-engine check above is untouched. Whether
 cross-vendor *sharing* then works is a property of the engine's cache key, not of the transport:
 
@@ -407,13 +407,13 @@ cross-vendor *sharing* then works is a property of the engine's cache key, not o
 | `vLLM` | not applicable | the key embeds `model`, `tp_rank`, `pcp`, `dcp` and `pp_rank`, so the key itself is heterogeneous across two vendors |
 
 "Cross-vendor sharing is meaningless" is a statement about vLLM only. For SGLang the one remaining
-precondition is that both sides lay a block's payload bytes out identically, and that has NEVER been
+precondition is that both sides lay a block's payload bytes out identically, and that has never been
 measured: the experiment is one model, one `page_size` and one TP/PP shape, SGLang on NVIDIA against
 SGLang on Ascend pointed at one pool, checking whether the second side hits the first's entries and
 reads back the correct bytes.
 
 The transport is not the limit: the HIXL wiki documents Mooncake's `rdma` transport moving buffers
-directly between an NVIDIA GPU and an Ascend NPU — [Mooncake NPU guide, appendix 2](https://gitcode.com/cann/hixl/wiki/Mooncake%EF%BC%88NPU%20%E7%89%88%EF%BC%89%E5%AE%8C%E6%95%B4%E6%8C%87%E5%8D%97.md).
+directly between an NVIDIA GPU and an Ascend NPU ([Mooncake NPU guide, appendix 2](https://gitcode.com/cann/hixl/wiki/Mooncake%EF%BC%88NPU%20%E7%89%88%EF%BC%89%E5%AE%8C%E6%95%B4%E6%8C%87%E5%8D%97.md)).
 
 The operator's `applyMemberFabric` grants host network and device access to backend member groups
 only for `rdma` and `efa`. An `ascend` group receives none of those grants. This rendering alone
@@ -429,32 +429,32 @@ verify both before relying on cross-vendor sharing.
 
 Joining a pool changes three things about a Pod that are easy to file as bugs.
 
-**Host memory the Pod never asked for — on the vLLM family only.** The injected `local_buffer_size`
+**Host memory the Pod never asked for (on the vLLM family only).** The injected `local_buffer_size`
 is `128 MiB` of staging the client registers with the transfer engine. It is charged to the
 container's memory and appears in no `resources` field, so **add 128 MiB to both the request and the
 limit of any `vllm` or `vllm-ascend` container you inject into**.
 
-Both, not just the limit. The limit alone keeps one container off a cgroup OOM, but the scheduler
-places Pods by their *requests* — so raising only the limit lets a node be filled to its request
+Raise both, and not only the limit. The limit alone keeps one container off a cgroup OOM, but the scheduler
+places Pods by their *requests*. Raising only the limit therefore lets a node be filled to its request
 capacity while every injected Pod on it consumes 128 MiB more than that arithmetic accounted for.
 The result is node memory pressure and kubelet eviction, on a node whose bookkeeping says it is
 within budget.
 
 SGLang is not given one: the injection writes no `local_buffer_size` in any spelling, and that engine
-uses a 16 MiB default. Budget those 16 MiB the same way — in the request as well as the limit.
+uses a 16 MiB default. Budget those 16 MiB the same way, in the request as well as the limit.
 
 > **Why** that number, and why it is written at all — it is the value the store's own reference uses,
 > and it is a constant here rather than a field because it is transfer-layer staging, not a resource
 > grant. What an absent key costs instead is under
 > [What gets injected, per engine](#what-gets-injected-per-engine).
 
-**Random ports.** The transfer engine binds ports nobody configured — one observed run took `15002`
-and `15995`, a second client `16566` and `16655`. **Any NetworkPolicy or port reservation must be
+**Random ports.** The transfer engine binds ports nobody configured (one observed run took `15002`
+and `15995`, a second client `16566` and `16655`). **Any NetworkPolicy or port reservation must be
 written as a range, not a list.** The webhook cannot change this and does not try.
 
 **A 30-second lease on cached blocks.** `kv_lease_duration` defaults to 30 seconds. It does not expire
-from long queueing, but it does expire when a Pod's heartbeat is interrupted — preemption, eviction,
-restart — and the default failure policy then fails the request outright. Anything that kills an
+from long queueing, but it does expire when a Pod's heartbeat is interrupted (preemption, eviction,
+restart), and the default failure policy then fails the request outright. Anything that kills an
 injected Pod destroys cache its peers may be waiting on.
 
 One benign line appears in every client's startup log and is not an error to chase:
@@ -472,22 +472,22 @@ protocol and a domain name, and no credential.
 workaround for anything.** vLLM's `enable_prefix_caching` defaults on and reuses blocks in GPU HBM;
 SGLang's radix cache does the same.
 
-What the transfer engine registers is that SAME memory, so the network card can map it. Nothing is
-copied and nothing is allocated twice, so the two are not competing — disabling prefix caching buys
+What the transfer engine registers is that same memory, so the network card can map it. Nothing is
+copied and nothing is allocated twice, so the two are not competing. Disabling prefix caching buys
 no memory back and loses the engine's own reuse.
 
 Host DRAM is where an overlap could happen, and neither engine puts KV there unless asked. vLLM's
 `--swap-space` is deprecated and ignored, and `kv_offloading_size` defaults off, so on vLLM the only
 host DRAM this injection adds is the staging buffer above. SGLang's host tier needs
-`--enable-hierarchical-cache`, which this injection renders because the store hangs off that tier —
-its [host pool](#sglangs-host-memory-tier) is the one host allocation it adds there.
+`--enable-hierarchical-cache`, which this injection renders because the store hangs off that tier.
+Its [host pool](#sglangs-host-memory-tier) is the one host allocation it adds there.
 
-> **NEVER set `kv_offloading_size` on a container this injects into.** Setting it makes vLLM
-> overwrite `kv_connector` with `OffloadingConnector` — unconditionally, with no conflict check,
+> **Never set `kv_offloading_size` on a container this injects into.** Setting it makes vLLM
+> overwrite `kv_connector` with `OffloadingConnector`, unconditionally and with no conflict check,
 > because `kv_connector` holds one value. The connector this operator rendered is simply gone.
 >
 > The container then starts, serves, and uses no shared cache, with nothing in it saying so. The two
-> are alternative second-tier caches — one on the node's own DRAM, one on the cluster's pool — so
+> are alternative second-tier caches (one on the node's own DRAM, one on the cluster's pool), so
 > choose between them rather than configuring both.
 
 ---

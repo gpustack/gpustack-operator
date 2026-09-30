@@ -85,7 +85,7 @@ role that set none renders the same Pods, so it turns nothing over.
   since its engine then has less than the 20 s it takes to exit: 10 s after the delete at the
   default, 25 s at 45. The replica is idle by that point, or its hook gave up on it, so the kill cuts
   no request the deadline would not.
-- **A take-over role** — one that sets `command` — gets no hook, because the operator cannot claim
+- **A take-over role** (one that sets `command`) gets no hook, because the operator cannot claim
   that container serves the gauges. Its Pod gets the role's `terminationGracePeriodSeconds` as given,
   and keeps the Kubernetes default when the role sets none.
 - **A role that moves the engine with its own `--port`** gets only the first 5 s: nothing answers the

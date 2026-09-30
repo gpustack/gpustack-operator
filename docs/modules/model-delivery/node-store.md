@@ -115,7 +115,7 @@ The public [NodeModelStore API](views.md#resources) supports reads and deletion.
 and status are maintained by the worker and node plugin. The worker recreates a deleted object
 while its node runs the plugin.
 
-The worker does **not** delete an object when the driver leaves `CSINode`, because every plugin
+The worker does not delete an object when the driver leaves `CSINode`, because every plugin
 restart unregisters it for a moment. A node the plugin no longer runs on keeps a stale object whose
 `Ready` condition stops changing.
 
@@ -139,7 +139,7 @@ tenant from making an artifact look resolved.
 
 ## The volume a consumer mounts
 
-A `ModelDeployment` under Node delivery and an `Instance` naming a Hugging Face artifact render:
+A `ModelDeployment` under Node delivery and an `Instance` naming a Hugging Face or ModelScope artifact render:
 
 ```yaml
 volumes:
@@ -156,7 +156,7 @@ volumes:
 ```
 
 A hand-written Pod may mount the same volume; it is held to the same rules. The CSIDriver has
-`attachRequired: false`, `podInfoOnMount: true`, `volumeLifecycleModes: [Ephemeral]` and
+`attachRequired: false`, `podInfoOnMount: true`, an `Ephemeral` entry in `volumeLifecycleModes`, and
 `fsGroupPolicy: None`, so the tree keeps the plugin's ownership and is readable by any user.
 
 ## Mount authorization
@@ -166,7 +166,7 @@ On every mount, before touching the disk, the plugin requires all of:
 1. an inline ephemeral volume (`csi.storage.k8s.io/ephemeral=true`) with a mount capability and a
    target under the kubelet directory;
 2. a `ModelArtifact` named `artifact` in the Pod's namespace, `csi.storage.k8s.io/pod.namespace`;
-3. its UID equal to `artifactUID`, a Hugging Face source, `Resolved=True`, and
+3. its UID equal to `artifactUID`, a Hugging Face or ModelScope source, `Resolved=True`, and
    `status.resolved.manifestDigest` equal to `manifestDigest`.
 
 The namespace is the one kubelet adds, and kubelet writes its Pod keys over the Pod's own attributes,
@@ -191,7 +191,7 @@ to about two minutes later.
    filtered by the artifact's patterns; its canonical digest must equal `manifestDigest`. An
    artifact whose `digestSource` is `Expected` resolved to its anchor without the hub and has no
    commit to list at: the manifest comes from a peer's published listing instead, reassembled and
-   bound to the digest before it is trusted, and the chain is peers only — there is no hub to fall
+   bound to the digest before it is trusted, and the chain is peers only; there is no hub to fall
    back to.
 2. **Capacity.** The rest of the manifest's size, together with what every other running download
    has yet to write, is reserved against the high watermark, collecting first when it does not fit;
@@ -258,8 +258,8 @@ five minutes. It removes, oldest `lastUsedTime` first and down to the low waterm
 It never removes a referenced tree or a partial being written, and it reads references from the
 node's own mounts, never from the API.
 
-A digest listed in `spec.pinned` is never a candidate at all — the pins arrive from
-[`ModelPrefetch`](prefetch.md) retention and survive collection until the pin is withdrawn —
+A digest listed in `spec.pinned` is never a candidate at all; the pins arrive from
+[`ModelPrefetch`](prefetch.md) retention and survive collection until the pin is withdrawn,
 though it still counts toward the usage the watermarks read.
 
 How the watermarks are capped when the cache shares kubelet's filesystem is under [the capacity
@@ -296,15 +296,15 @@ between the status thresholds.
   chart itself admits older clusters. The status guard needs the Pod extras bound service-account
   tokens carry since 1.22, and the worker learns its own identity with a `SelfSubjectReview` (GA in
   1.28) or, before that, a `TokenReview`.
-- **A Hugging Face source only.** A claim artifact is always mounted directly.
+- **A Hugging Face or ModelScope source.** A claim artifact is always mounted directly.
 - **kubelet's configz**, served while its debugging handlers are enabled (the default). Without it
   a node has no `spec.kubelet` and its cap assumes kubelet's defaults, which the `Ready` message
   says.
 - **A preference, not a filter.** A Pod prefers the nodes holding its digest while they have room;
-  one placed on a node without it downloads it there —
+  one placed on a node without it downloads it there. See
   [a node-delivered model prefers the nodes holding
   it](../topology/scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
-- **A download comes from the Hub**, directly or through the proxy — or, when
+- **A download comes from the Hub**, directly or through the proxy, or, when
   [node-to-node sync](peer-sync.md) is on, from a peer node that already holds
   the tree.
 

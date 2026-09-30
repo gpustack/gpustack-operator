@@ -87,15 +87,15 @@ status:
   and `?` cross `/`, a trailing `/` means everything under it, an empty allow list keeps every file,
   and an ignored file is dropped even when allowed. At most 32 per list, 1 to 256 characters each,
   refused on claim and image sources. A filter that keeps no file is `Resolved=False`,
-  `EmptyManifest`. A
-  filtered artifact needs [Node delivery](#referencing-it-from-a-modeldeployment).
+  `EmptyManifest`, and a filtered artifact needs
+  [Node delivery](#referencing-it-from-a-modeldeployment).
 - **`expectedDigest` asserts what must resolve.** Optional, immutable with the spec, `"sha256:"` and
-  64 lowercase hex — the manifest digest, exactly what `status.resolved.manifestDigest`
-  carries. Admission accepts it on a hub source only: a claim's content is whatever the volume
-  holds at mount time — dynamically provisioned claims differ per provisioning — and its identity is
+  64 lowercase hex: the manifest digest, exactly what `status.resolved.manifestDigest`
+  carries. Admission accepts it on a hub source only. A claim's content is whatever the volume
+  holds at mount time (dynamically provisioned claims differ per provisioning), and its identity is
   the claim itself, which the user confirms; an image's identity is its reference's digest. What the
   assertion does is under [Resolution and revalidation](#resolution-and-revalidation).
-- **`status.nodes` counts the content, not the artifact.** Nodes whose `NodeModelStore` lists the
+- **`status.nodes` counts the nodes reporting the digest.** Nodes whose `NodeModelStore` lists the
   digest `Ready`, `Downloading` or `Failed`; artifacts with the same digest see the same nodes, and
   only numbers cross namespaces. The mean covers the downloading nodes only, each a whole copy. It
   is written on the [thresholds](node-store.md#the-resource) the nodes store progress on. The
@@ -123,17 +123,18 @@ message says "does not exist or is not accessible". A gated repository answers 2
 and tree endpoints and only masks its digests, which is why the masked tree is its own row.
 
 **A ModelScope source resolves the same way, against its own API.** A full commit is taken as is; a
-branch or tag is resolved through `GET /api/v1/models/<id>/commits?Ref=<rev>` and **cross-checked
-against git**: `git ls-remote` over `https://www.modelscope.cn/<id>.git` must name the same commit
+branch or tag is resolved through `GET /api/v1/models/<id>/commits?Ref=<rev>` and cross-checked
+against git: `git ls-remote` over `https://www.modelscope.cn/<id>.git` must name the same commit
 (the peeled entry, for an annotated tag).
 
-A disagreement refuses the resolution as `SourceUnavailable` — the hub's index and its git
-disagreeing is exactly how a misspelled parameter would silently resolve the wrong revision. A
-private repository authenticates ls-remote with the user name `oauth2` and the namespace's token.
+A disagreement refuses the resolution as `SourceUnavailable`: a misspelled parameter can make the
+hub's index and its git disagree, and that disagreement is what would silently resolve the wrong
+revision. A private repository authenticates ls-remote with the user name `oauth2` and the
+namespace's token.
 
-The file listing walks `repo/files?Revision=<commit>&Recursive=true`; the API truncates **silently
-at 3000 entries**, so a full page is re-listed per directory, and a directory with 3000 or more
-direct children refuses (`SourceUnavailable`) — the API cannot enumerate it, and a partial
+The file listing walks `repo/files?Revision=<commit>&Recursive=true`; the API truncates silently
+at 3000 entries, so a full page is re-listed per directory, and a directory with 3000 or more
+direct children refuses (`SourceUnavailable`): the API cannot enumerate it, and a partial
 manifest would be a silent wrong answer. Every file must carry the hub's `sha256`.
 
 | ModelScope answers | `Resolved` reason |
@@ -143,12 +144,12 @@ manifest would be a silent wrong answer. Every file must carry the hub's `sha256
 | 5xx, a network error, a directory the API cannot enumerate | `SourceUnavailable` |
 
 ModelScope has no distinct 401 or 403, and "no access" covers private-without-token,
-gated-without-grant and valid-token-without-grant alike — the message says "does not exist or is
-not accessible" as on Hugging Face. **A mistyped token is silent there too**, so the controller
+gated-without-grant and valid-token-without-grant alike; the message says "does not exist or is
+not accessible" as on Hugging Face. A mistyped token is silent in the same way, so the controller
 checks each new token with `GET /openapi/v1/users/me` and emits the same `InvalidToken` Warning
 when the hub rejects it.
 
-**Access is revalidated** every `model-artifact-revalidate-interval` (default `24h`) and whenever the
+Access is revalidated every `model-artifact-revalidate-interval` (default `24h`) and whenever the
 Secret changes, with one `HEAD` of a file at the resolved commit, redirects not followed:
 
 - a refusal sets `Degraded=True` and is checked again a minute later; the same refusal then sets
@@ -159,45 +160,48 @@ Secret changes, with one `HEAD` of a file at the resolved commit, redirects not 
 - a later pass restores `Resolved=True`, with the commit and digest unchanged.
 
 The HEAD is `/api/models/<repo>/resolve/<commit>/<file>` on Hugging Face and
-`/api/v1/models/<id>/repo?Revision=<commit>&FilePath=<file>` on ModelScope, where a 200 — an LFS
-file's too — confirms and every 404 is an access refusal.
+`/api/v1/models/<id>/repo?Revision=<commit>&FilePath=<file>` on ModelScope, where a 200 (an LFS
+file's too) confirms and every 404 is an access refusal.
 
 **An `expectedDigest` turns both passes into assertions.** At resolution the digest is compared
 with the anchor; a mismatch refuses with `DigestMismatch`, both digests in the message. At
 revalidation an anchored artifact does not stop at the one-file `HEAD`: the tree is re-listed at
 the resolved commit, so a hub or mirror that stops serving the pinned content fails the same
-staircase — first `Degraded`, then `Resolved=False`. Unanchored artifacts keep the two-request check.
+staircase, first `Degraded`, then `Resolved=False`. Unanchored artifacts keep the two-request check.
 
-**A hub that cannot be reached, confirmed, hands the identity to the anchor.** One
+**The anchor takes over when the hub stays unreachable.** One
 `SourceUnavailable` is not a verdict; the artifact asks again a minute later. When the second pass
 fails the same way, the anchor becomes the resolution: `Resolved=True`, `manifestDigest` = the
 anchor, `digestSource: Expected`, no revision, file count or size, and the hub is never contacted
-again. A hub that *answered* is never anchored around; only an unanswered hub falls back.
+again.
+
+A hub that answered, even with a refusal, is never anchored around; only a hub that does not
+answer at all falls back.
 
 | `digestSource` | Meaning |
 | --- | --- |
 | `Hub` | the digest came from the hub's own listing, checked against the anchor when one is set |
 | `Expected` | the digest is the spec's anchor, written after the hub's absence was confirmed |
 
-**What an `Expected` identity delivers.** No commit exists, so [Engine
+**Delivery under an `Expected` identity.** No commit exists, so [Engine
 delivery](#engine-delivery) is refused (`AnchorNeedsNodeDelivery`) and
 [Node delivery](node-store.md#materialization) draws the manifest and the bytes from the other
 nodes; with no peer holding the tree the mount fails naming the digest nothing holds. Seed one
-node while the hub is reachable — the identity stands without it.
+node while the hub is reachable, and the identity stands without it.
 
-**The shipped access model for `Expected` identities.** Integrity is never at risk: only
-anchor-named, verified bytes enter a published set or a mount. What relaxes is secrecy — an
+Anchor verification narrows what an `Expected` identity promises. Integrity is never at risk: only
+anchor-named, verified bytes enter a published set or a mount. What relaxes is secrecy: an
 artifact whose anchor names a digest already published on a node can mount that tree with no
 credential, and digests are visible cluster-wide on `NodeModelStore` status. Private content must
 not rely on digest secrecy; hub-verified identities keep resolving with the namespace's token.
 
-`Resolved=False` stops **new** consumption: no new replica, replacement or scale-up. It never
+`Resolved=False` stops new consumption: no new replica, replacement or scale-up. It never
 deletes a running Pod. A claim source is resolved by the claim existing; the operator never reads
 its content, so it has no revision and no digest.
 
 ## The manifest digest
 
-The digest is the content address of a Hugging Face artifact: the SHA-256 of a canonical manifest,
+The digest is the content address of a hub artifact: the SHA-256 of a canonical manifest,
 one line per file of the commit. The format is `gpustack-manifest v1`:
 
 ```text
@@ -207,16 +211,16 @@ sha256:8111d5af… 453864 model.safetensors
 ```
 
 - A line is `<algorithm>:<hex> <size> <path>`, sorted by the path's UTF-8 bytes, every line ending
-  in LF. An LFS file uses its `sha256`, any other file its git blob `gitsha1`; **a ModelScope
-  artifact's manifest is all `sha256` lines**, the hub giving no other digest.
+  in LF. An LFS file uses its `sha256`, any other file its git blob `gitsha1`; a ModelScope
+  artifact's manifest is all `sha256` lines, the hub giving no other digest.
 - A path must be valid UTF-8, relative, with no control character and no empty, `.` or `..`
   segment; the whole resolution fails on one that is not.
-- The source, the repository, the commit and the patterns are **not** part of it, so the same files
+- The source, the repository, the commit and the patterns are not part of it, so the same files
   have the same digest wherever they live. A filter changes the digest only through the files it
   keeps, and an artifact without patterns has the digest it always had. The reference
   implementation is `pkg/modelartifact`.
 
-Two consequences to keep in mind:
+Two consequences follow:
 
 - **The digest is never evidence of access.** A public and a private repository holding the same
   files have the same digest; authorization always comes from resolving with the namespace's token.
@@ -225,7 +229,7 @@ Two consequences to keep in mind:
 - **The anchor is the migration's acceptance contract.** A future import of a legacy GPUStack
   cache ([gpustack/gpustack-operator#693](https://github.com/gpustack/gpustack-operator/issues/693),
   deferred) may publish only trees whose computed manifest digest equals the artifact's
-  `expectedDigest`, through the node store's own pipeline, lazily and one-shot — never an online
+  `expectedDigest`, through the node store's own pipeline, lazily and one-shot, never an online
   migration of a running install. This format and that pipeline are what such an import verifies
   against.
 
@@ -257,7 +261,7 @@ deployment once):
 | Both | `--served-model-name <spec.model.name>`, unless the role states it | same | same | same |
 
 An image source takes `Image` whatever the Setting says, and kubelet pulls the pinned image on the
-node that needs it — [Model Image Source](image-source.md).
+node that needs it; see [Model Image Source](image-source.md).
 
 `--revision` pins the weights and the tokenizer together on both engines. A take-over role (one
 with `command`) gets the claim or node mount and nothing else, and nothing at all under `Engine`.
@@ -276,10 +280,10 @@ While `artifactRef` is set, admission refuses:
   `--model-path`, `--revision` and `--download-dir`, and `HF_TOKEN`, `HF_ENDPOINT`, `HF_HOME`,
   `MODELSCOPE_API_TOKEN`, `MODELSCOPE_DOMAIN`, `MODELSCOPE_CACHE` and the engine's
   `VLLM_USE_MODELSCOPE` / `SGLANG_USE_MODELSCOPE` in
-  `env`, whatever the source — a later value would silently replace the artifact's;
+  `env`, whatever the source (a later value would silently replace the artifact's);
 - a role volume at, inside or around `/var/lib/gpustack/model` or `/var/lib/gpustack/model-cache`.
 
-On **every** managed role, with or without an artifact, `--served-model-name` must be exactly
+On every managed role, with or without an artifact, `--served-model-name` must be exactly
 `spec.model.name`. Any other name was measured to fail silently: requests by `spec.model.name`
 answer 404 through the router, and requests by the other name succeed while the router's
 prefix-cache scoring falls to zero, with the deployment reporting `Ready`.
@@ -301,7 +305,7 @@ Under `Engine`, the engine downloads the pinned commit itself, with:
 
 A ModelScope artifact renders the `MODELSCOPE_*` rows; a Hugging Face artifact the `HF_*` rows.
 The ModelScope rows reach the engine through the runner's bundled SDK, whose version decides
-whether a commit is accepted — see [Requirements](#requirements-and-limits).
+whether a commit is accepted; see [Requirements](#requirements-and-limits).
 
 The cache is an `emptyDir` with a `sizeLimit` of the manifest's size plus a tenth, and at least
 1 GiB more. The manifest is the whole commit, so it bounds whatever subset the engine downloads (vLLM
@@ -383,7 +387,7 @@ hexadecimal digits of the manifest digest, or of the SHA-256 of the artifact's U
 ## Status
 
 `status.model` echoes the artifact, its `revision` and `manifestDigest`, and the `delivery`, `PVC`,
-`Engine`, `Node` or `Image` — an image source echoes neither a revision nor a digest, its reference
+`Engine`, `Node` or `Image`; an image source echoes neither a revision nor a digest, its reference
 being the identity. `WeightsReady` says whether every engine role's weights are there:
 
 | Status | Reason | Meaning |
@@ -419,7 +423,7 @@ spec:
 ```
 
 The volume is always read-only and takes no `subPath`. A claim artifact's `path` is the sub-path and
-the claim placement rules above apply. A Hugging Face artifact is mounted through the node plugin
+the claim placement rules above apply. A hub artifact is mounted through the node plugin
 whatever `model-artifact-delivery-mode` says, since an Instance has no engine to download it; while
 the CSIDriver does not exist the Instance creates no Pod and says so in its phase message.
 
@@ -452,7 +456,7 @@ waits instead when that node cannot run one, naming the node and the floor
   without a token (not measured).
 - **vLLM 0.29.0 needs `--enforce-eager` for InternLM2** with `trust_remote_code`, an engine defect.
 - **Node delivery downloads from the Hub on every cold node.** A Pod prefers the nodes already
-  holding the digest, but only while they have room; placed anywhere else, its node downloads —
+  holding the digest, but only while they have room; placed anywhere else, its node downloads. See
   [a node-delivered model prefers the nodes holding
   it](../topology/scheduling.md#a-node-delivered-model-prefers-the-nodes-holding-it).
 - Settings: [Settings & Environment Variables](../../reference/settings.md#online-adjustable-settings) carries the

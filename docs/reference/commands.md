@@ -1,8 +1,8 @@
 # Command Reference
 
 One binary carries four long-running services and three one-shot commands. The services are what a
-deployment runs; the one-shots are what you run by hand on a node, and choosing between them is the
-first thing this page answers.
+deployment runs; the one-shots are what you run by hand on a node, and the first two sections choose
+between them.
 
 ## Contents
 
@@ -40,8 +40,8 @@ The three one-shots answer three different questions, and only one of them acts 
 | Can they actually be sliced, and managed while sliced? | `preflight` | starts containers, stages libraries, asks a driver mode on |
 
 `detect` and `monitor` are reads no flag can turn into an action. `preflight` is the one that acts:
-it starts probe containers, stages the injected libraries onto the host, and — where a
-manufacturer's sharing mode is off — asks the driver to turn it on to see whether it takes, putting
+it starts probe containers, stages the injected libraries onto the host, and, where a
+manufacturer's sharing mode is off, asks the driver to turn it on to see whether it takes, putting
 it back either way. `--dry-run` is how it is made a read.
 
 The probe containers it starts are themselves **not** privileged: they get the allocator's injection
@@ -67,9 +67,9 @@ Every command accepts these. They come from klog and are omitted from the per-co
 
 ## worker
 
-The control plane. Profiles node capacity, runs the five reconcilers that materialize the Kueue
-scheduling chain, serves the aggregated extension APIs and the admission webhooks, and installs the
-applications a cluster needs.
+It is the control plane: it profiles node capacity, runs the five reconcilers that materialize the
+Kueue scheduling chain, serves the aggregated extension APIs and the admission webhooks, and installs
+the applications a cluster needs.
 
 Runs as the operator Deployment. Flags below are the ones that change behaviour rather than tune a
 connection; see [Settings](settings.md) for what is configured through the `Setting` CR instead.
@@ -117,9 +117,9 @@ gpustack-operator worker-gateway --worker-conn-mode=loopback
 
 ## device-manager serve
 
-The per-node agent. Detects accelerators, keeps the `Devices` ledger current, samples utilization,
-registers with the kubelet as a device plugin and injects the vendor runtime into allocated
-containers.
+It is the per-node agent: it detects accelerators, keeps the `Devices` ledger current, samples
+utilization, registers with the kubelet as a device plugin and injects the vendor runtime into
+allocated containers.
 
 Runs as the Device Manager DaemonSet. The four `--no-*` mode flags are how a node is restricted to a
 subset of the allocation modes its hardware would otherwise offer.
@@ -166,11 +166,11 @@ gpustack-operator model-manager --node-name="$(hostname)" --cache-root=/mnt/mode
 
 ## device-manager detect
 
-Runs one detect pass and prints the result. A pure read: nothing is written, nothing is started, and
-no flag changes that.
+Runs one detect pass and prints the result. It is a pure read: nothing is written, nothing is
+started, and no flag changes that.
 
 The output is the `Devices` CRD's own `spec.groups`, so it can be compared directly against what the
-cluster recorded — `kubectl get devices <node> -o yaml` beside it is a diff.
+cluster recorded; `kubectl get devices <node> -o yaml` beside it is a diff.
 
 | Flag | Default | What it does |
 |---|---|---|
@@ -211,7 +211,7 @@ docker run --rm --privileged -v /dev:/dev -v /sys:/sys \
             count: 128
 ```
 
-> **A vendor's user-space libraries have to be reachable** — AMD has no container runtime that
+> **A vendor's user-space libraries have to be reachable.** AMD has no container runtime that
 > injects them, so a run without `/opt/rocm` mounted finds no accelerator on a node that has two.
 > `preflight`'s host cross-check is what tells that apart from a node with none; see
 > [below](#device-manager-preflight).
@@ -246,12 +246,12 @@ Metrics](instance-metrics.md).
 
 ## device-manager preflight
 
-Answers whether the allocation modes this node's allocators offer actually work here — the question
-`detect` cannot answer, because a declared capability and a working one are different facts.
+It answers whether the allocation modes this node's allocators offer actually work here. `detect`
+cannot answer that question, because a capability can be declared and still not work.
 
-This is the only command an operator runs by hand that acts on the node. For the procedure — what to
-mount, what it starts and removes, how to read each row — see [Preflight](../modules/devices/preflight.md).
-What follows is the reference.
+This is the only command an operator runs by hand that acts on the node. See
+[Preflight](../modules/devices/preflight.md) for the procedure (what to mount, what it starts and
+removes, how to read each row).
 
 | Flag | Default | What it does |
 |---|---|---|
@@ -264,7 +264,7 @@ What follows is the reference.
 
 ### The three answers
 
-Each row carries a **state**, a **depth** and — where a container ran — the evidence it ran on.
+Each row carries a state, a depth and, where a container ran, the evidence it ran on.
 
 | State | Meaning | Exit code |
 |---|---|---|
@@ -303,17 +303,17 @@ The same row under `--dry-run` carries the `command` and no `evidence`, and its 
 
 **Not every row on that node reaches `measured`.** `sliced-quota-in-force` on the same two cards is
 `simulated`, because the vendor reader there reports nothing until an allocation has been charged and
-the probe allocates nothing — the injection sets a cap and no container was observed under it. A row
+the probe allocates nothing: the injection sets a cap and no container was observed under it. A row
 is `measured` only where something was read back, never where the intent alone is known.
 
 ### Where the runtime comes from
 
 Resolved from the kubelet's own CRI endpoint wherever the host names one, because that is what
-starts a container on this node in production. A host that names none — a bare machine, or a
-distribution keeping that configuration elsewhere — falls through to probing `docker`, `nerdctl`,
+starts a container on this node in production. A host that names none (a bare machine, or a
+distribution keeping that configuration elsewhere) falls through to probing `docker`, `nerdctl`,
 `ctr`.
 
-The sources are ordered, and the first that names an endpoint answers — so a standard kubelet
+The sources are ordered, and the first that names an endpoint answers, so a standard kubelet
 configuration wins over a distribution drop-in rather than conflicting with it. The conflict that
 does stop a run is **within one source**: a glob matching two directories that disagree, where
 neither is the kubelet's own by position. The steps are emitted instead, naming the endpoints in
@@ -321,8 +321,8 @@ conflict, and `--runtime` is how you settle it.
 
 `ctr` is never driven: `ctr run` has no `--device`, and its only alternative grants every device, so
 what it measured would not be the isolation the injection established. A node resolving to it gets
-the step emitted for `nerdctl` instead, against the socket and namespace `ctr` resolved — or for
-`docker`, where `nerdctl` cannot pass this manufacturer's vendor runtime either.
+the step emitted for `nerdctl` instead, against the socket and namespace `ctr` resolved, or for
+`docker` where `nerdctl` cannot pass this manufacturer's vendor runtime either.
 
 ```bash
 docker run --rm --privileged --network=host --runtime nvidia \

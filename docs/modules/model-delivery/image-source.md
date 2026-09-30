@@ -27,21 +27,21 @@ weights on different pulls, and the identity a frozen reference pins would be no
 refuses a tag with that reason. Patterns are refused too: an image is mounted whole, so there is no
 listing to select from.
 
-> **Why** — the digest pins the image's manifest bytes. It is **not** the manifest digest a Hugging
+> **Why** — the digest pins the image's manifest bytes. It is not the manifest digest a Hugging
 > Face source resolves to, and `status.resolved` stays empty for an image source, as for a claim:
 > the operator never reads the registry, so the reference in the immutable spec is the only record
 > of what the artifact delivers, and the KV reuse identity falls back to the artifact's UID. Two
-> artifacts naming one image never share KV blocks — safe, only not deduplicated.
+> artifacts naming one image never share KV blocks; that is safe, only not deduplicated.
 
 Creation is **refused on an apiserver older than 1.35**, where the image-volume field would be
-dropped from the Pod silently — the refusal names the floor and the alternatives. On a supported
+dropped from the Pod silently; the refusal names the floor and the alternatives. On a supported
 apiserver the artifact resolves on its first pass with no network: `Resolved=True`, `resolved`
 carrying only `resolvedTime`, no `nodes` aggregation, no revalidation.
 
 ## Building the image
 
 The build's contract: **the weights live at the image's root**, because delivery mounts the root
-whole and offers no sub-path (a sub-path would raise the containerd floor — see
+whole and offers no sub-path (a sub-path would raise the containerd floor; see
 [Versions](#versions-and-prerequisites)). A recipe measured end to end, from
 `Qwen/Qwen2.5-7B-Instruct` at commit `a09a3545…`, one safetensors shard per layer:
 
@@ -52,28 +52,28 @@ done
 ```
 
 The mount is a read-only overlay of the layer snapshots, and every file the engine reads matches the
-Hub copy byte for byte — measured sha256-equal to the LFS oids on Kubernetes 1.35.7 /
+Hub copy byte for byte, measured sha256-equal to the LFS oids on Kubernetes 1.35.7 /
 containerd 2.2.6. That equality is a property of the build, which this recipe produces; the operator
 does not verify it.
 
 ## Delivery
 
-An image source always delivers `Image`, whatever `model-artifact-delivery-mode` says — the Setting
-governs Hugging Face sources only. A `ModelDeployment` renders one image volume per role, mounted
+An image source always delivers `Image`, whatever `model-artifact-delivery-mode` says; the Setting
+governs hub sources (Hugging Face and ModelScope). A `ModelDeployment` renders one image volume per role, mounted
 read-only at `/var/lib/gpustack/model`, and nothing else: no cache `emptyDir`, no `HF_*` or proxy
 environment, no `--revision`, no ephemeral-storage raise.
 
 The served path and the `--served-model-name` rule are the claim's, and the engine-argument
 refusals apply unchanged. A take-over role gets the mount like a claim's.
 
-An `Instance` model volume mounts the image read-only and whole, and needs no CSIDriver — the
+An `Instance` model volume mounts the image read-only and whole, and needs no CSIDriver; the
 node's plugin plays no part. An Instance pinned to a node checks that node before rendering: kubelet
 below 1.35, containerd below 2.1, a runtime that is not containerd, or a version that cannot be read
 holds the Pod with a phase message naming the node and the floor. An unpinned Instance cannot know,
 and waits like a `ModelDeployment` does.
 
 `WeightsReady` follows the claim path: `WeightsNotMounted` until every Pod has started. A failed or
-slow pull keeps that reason — kubelet's own event on the Pod names the pull error, and that event is
+slow pull keeps that reason; kubelet's own event on the Pod names the pull error, and that event is
 the diagnostic path.
 
 ## Versions and prerequisites
@@ -105,9 +105,9 @@ containerd 2.2.6 with a 15,242,807,270-byte model:
 
 Uncompressed layers save decompression time, not disk. **Kubelet's own accounting does not see the
 doubling**: the CRI image size is the compressed size, ~12.07 GB where the disk really holds ~27.3
-GB (**~2.26×** apart). Size a node's disk from the table, never from `kubectl`'s image sizes.
+GB (~2.26× apart). Size a node's disk from the table, never from `kubectl`'s image sizes.
 
-A node image that ships `discard_unpacked_layers = true` — the local kind images do — keeps only the
+A node image that ships `discard_unpacked_layers = true` (the local kind images do) keeps only the
 blobs and does not pay the snapshot copy; do not take that as the fleet default.
 
 ## Image GC
@@ -124,8 +124,8 @@ Three rules, verified on 1.35.7 / 2.2.6:
    **Scaling a deployment to zero and back can re-pull a dozen GB** (a first pull measured 12m43s on
    a 2-vCPU node at ~20 MB/s).
 3. **The 85% cascade.** A model image that pushes the disk past `imageGCHighThresholdPercent`
-   (default 85) drags every other unused image on the node into the same rounds — measured: 18
-   unrelated images collected alongside.
+   (default 85) drags every other unused image on the node into the same rounds (measured: 18
+   unrelated images collected alongside).
 
 The only retention is another reference: a resident Pod mounting the image keeps it. A deployment's
 replicas are themselves that reference while they run.

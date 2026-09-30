@@ -1,6 +1,7 @@
 # Settings & Environment Variables
 
-GPUStack Operator is configured two ways, and the distinction matters operationally.
+GPUStack Operator reads configuration from two places: the `Setting` resource, which you can change
+at runtime, and environment variables, which the process reads once at startup.
 
 > **First-deploy seeding vs. runtime changes.** On first deploy, `settings.Initialize` creates the delegated
 > Secret `gpustack-settings` in the system namespace and seeds every Setting from
@@ -18,7 +19,7 @@ GPUStack Operator is configured two ways, and the distinction matters operationa
 A fixed catalog of named values, served as the namespaced `Setting` aggregated API resource
 (`gpustack.ai/v1`, short name `set`, category `gpustack`) and read at runtime with `kubectl`; the operator
 picks a new value up on its next reconcile. Fixed means the resource serves
-`get,list,watch,apply,update,patch`, no create/delete — you edit a Setting's **value**, not its existence.
+`get,list,watch,apply,update,patch` and no create/delete: you edit a Setting's **value**, not its existence.
 
 ```bash
 # List every setting and its current value
@@ -44,14 +45,14 @@ kubectl -n gpustack-system patch setting instance-type-derived-from-node --type 
 | `model-deployment-router-proxy-image` | `GPUSTACK_MODEL_DEPLOYMENT_ROUTER_PROXY_IMAGE` | `gpustack/mirrored-envoy:distroless-v1.33.2` | Proxy fronting a managed router's endpoint picker. It has **no field on the API** to override it: this operator renders the proxy's configuration against one proxy's configuration schema, so swapping the binary would mean swapping that configuration too. The setting exists for registry redirection and for pinning a release back, not for running a different proxy. |
 | `model-deployment-routing-sidecar-image` | `GPUSTACK_MODEL_DEPLOYMENT_ROUTING_SIDECAR_IMAGE` | `gpustack/mirrored-llm-d-router-disagg-sidecar:v0.10.0` | Sidecar a decoder runs to accept a remote prefill handoff. Same terms as the proxy above: this operator renders its arguments, so the setting is for redirection and pinning rather than for a different implementation. |
 | `model-deployment-tcp-tw-reuse` | `GPUSTACK_MODEL_DEPLOYMENT_TCP_TW_REUSE` | `false` | Render `net.ipv4.tcp_tw_reuse=1` on the prefill half of every SGLang prefill/decode pair, which otherwise [runs out of local ports](../modules/model-deployment/engine-versions.md#known-failures-at-the-minimum) under sustained load. **Allow the sysctl on the kubelet of every node that can run such a Pod before turning it on**: without that the Pod fails with `SysctlForbidden`, and so does every replacement. The steps, which Pods it reaches and how to confirm the refusal are under [Letting SGLang prefill Pods reuse TIME-WAIT ports](#letting-sglang-prefill-pods-reuse-time-wait-ports). |
-| `model-prefetch-warmup-image` | `GPUSTACK_MODEL_PREFETCH_WARMUP_IMAGE` | `gpustack/mirrored-python:3.12-alpine` | Image a [`ModelPrefetch`](../modules/model-delivery/prefetch.md)'s warm-up pod runs on each target node. The pod mounts the artifact's volume, verifies every file reads back and exits, so the image needs only a shell, `find` and `sha256sum` — it never runs a model. It is a setting because the one thing it must guarantee is that the node can pull it, which only the cluster's own registry arrangement decides; an air-gapped cluster points it at its mirror. |
+| `model-prefetch-warmup-image` | `GPUSTACK_MODEL_PREFETCH_WARMUP_IMAGE` | `gpustack/mirrored-python:3.12-alpine` | Image the [`ModelPrefetch`](../modules/model-delivery/prefetch.md) warm-up pod runs on each target node. The pod mounts the artifact's volume, verifies every file reads back and exits, so the image needs only a shell, `find` and `sha256sum` — it never runs a model. It is a setting because the one thing it must guarantee is that the node can pull it, which only the cluster's own registry arrangement decides; an air-gapped cluster points it at its mirror. |
 | `model-artifact-huggingface-endpoint` | `GPUSTACK_MODEL_ARTIFACT_HUGGINGFACE_ENDPOINT` | `https://huggingface.co` | The Hugging Face Hub a [`ModelArtifact`](../modules/model-delivery/artifact.md) resolves and revalidates against, and the `HF_ENDPOINT` an engine downloading the weights is given; the node plugin downloads from it too. What changing it does is under [Engine delivery](../modules/model-delivery/artifact.md#engine-delivery). |
 | `model-artifact-modelscope-endpoint` | `GPUSTACK_MODEL_ARTIFACT_MODELSCOPE_ENDPOINT` | `https://www.modelscope.cn` | The ModelScope hub a [`ModelArtifact`](../modules/model-delivery/artifact.md) resolves and revalidates against and the node plugin downloads from; an engine downloading the weights gets its host as `MODELSCOPE_DOMAIN` — the runners' SDK takes a bare host. What changing it does is under [Engine delivery](../modules/model-delivery/artifact.md#engine-delivery). |
 | `model-artifact-https-proxy` | `GPUSTACK_MODEL_ARTIFACT_HTTPS_PROXY` | *(blank)* | HTTPS proxy for resolution, revalidation and the node plugin's downloads, and the `HTTPS_PROXY` given to an engine downloading the weights, where a role's own value wins. Blank keeps the worker's own environment and renders nothing. Only an `http` or `https` URL without credentials is accepted, because the value reaches tenant Pods; a value from the environment that is not refuses the worker's start. |
 | `model-artifact-no-proxy` | `GPUSTACK_MODEL_ARTIFACT_NO_PROXY` | *(blank)* | Comma-separated hosts that bypass `model-artifact-https-proxy`, for the node plugin too, given to engines as `NO_PROXY` on the same terms. |
 | `model-artifact-ca-bundle` | `GPUSTACK_MODEL_ARTIFACT_CA_BUNDLE` | *(blank)* | Name of a ConfigMap in the worker's namespace whose `ca.crt` the resolution and the node plugin trust beside the system pool. **It is not given to engine Pods**: they run in tenant namespaces, which cannot mount it. |
-| `model-artifact-revalidate-interval` | `GPUSTACK_MODEL_ARTIFACT_REVALIDATE_INTERVAL` | `24h` | How often a resolved Hugging Face artifact's access is checked again, at least `1m`; a Secret change checks it at once. What a refusal does is under [Resolution and revalidation](../modules/model-delivery/artifact.md#resolution-and-revalidation). |
-| `model-artifact-delivery-mode` | `GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE` | `Engine` | How a Hugging Face artifact's weights reach a `ModelDeployment`: `Engine`, the engine downloads them, or `Node`, the node's [`model-manager` plugin](../modules/model-delivery/node-store.md) mounts a verified copy. The chart seeds `Node` when it deploys the plugin, and a seed never overrides a stored value. `Node` is refused while the CSIDriver `model.csi.gpustack.ai` does not exist. **Changing it rolls every Hugging Face deployment once**; see [Switch delivery](../modules/model-delivery/operations.md#switch-delivery). |
+| `model-artifact-revalidate-interval` | `GPUSTACK_MODEL_ARTIFACT_REVALIDATE_INTERVAL` | `24h` | How often a resolved hub artifact's access is checked again, at least `1m`; a Secret change checks it at once. What a refusal does is under [Resolution and revalidation](../modules/model-delivery/artifact.md#resolution-and-revalidation). |
+| `model-artifact-delivery-mode` | `GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE` | `Engine` | How a hub artifact's weights reach a `ModelDeployment`: `Engine`, the engine downloads them, or `Node`, the node's [`model-manager` plugin](../modules/model-delivery/node-store.md) mounts a verified copy. The chart seeds `Node` when it deploys the plugin, and a seed never overrides a stored value. `Node` is refused while the CSIDriver `model.csi.gpustack.ai` does not exist. **Changing it rolls every deployment using a hub artifact once**; see [Switch delivery](../modules/model-delivery/operations.md#switch-delivery). |
 | `model-store-high-watermark` | `GPUSTACK_MODEL_STORE_HIGH_WATERMARK` | `80` | The node cache filesystem's usage percent above which the plugin removes content no Pod mounts; above the low watermark, at most `95`. On a filesystem shared with kubelet the plugin caps it below kubelet's thresholds ([the capacity rule](../modules/model-delivery/operations.md#the-capacity-rule)). |
 | `model-store-low-watermark` | `GPUSTACK_MODEL_STORE_LOW_WATERMARK` | `70` | The usage percent a collection removes down to; at least `1`, below the high watermark. |
 | `model-store-download-concurrency` | `GPUSTACK_MODEL_STORE_DOWNLOAD_CONCURRENCY` | `8` | Concurrent HTTP requests the plugin makes per node, across every download; `1` to `64`. |
@@ -69,47 +70,48 @@ kubectl -n gpustack-system patch setting instance-type-derived-from-node --type 
 | `instance-type-drain-when-no-flavors` | `GPUSTACK_INSTANCE_TYPE_DRAIN_WHEN_NO_FLAVORS` | `true` | Whether a ClusterQueue whose pool has lost all its ResourceFlavors is drained (`HoldAndDrain`, so Kueue evicts admitted workloads) before its resource groups are emptied. When `true`, the queue is drained first; when `false`, the operator waits for the reservations to clear on their own, then empties. Either way the groups are emptied only once every reservation is zero, so Kueue's counters never go negative. Read per-reconcile. |
 | `instance-type-aware-cpu-manufacturer` | `GPUSTACK_INSTANCE_TYPE_AWARE_CPU_MANUFACTURER` | `false` | Whether the derived ClusterQueue/InstanceType/InstanceTypeFlavor aggregation splits by CPU manufacturer. When `false`, non-accelerated flavors collapse into one `generic` pool per os/arch and accelerated flavors pool per accelerator (CPU ignored); when `true`, every pool splits by the CPU key (`gpustack--${gKey}-…` / `gpustack--${gKey}--${aKey}-…`) and the InstanceType records the raw CPU detail. The `ResourceFlavor`s themselves are unaffected — they always carry the CPU key, so a flip only re-groups the aggregation layer. Read per-reconcile. |
 
-The last five — `node-management-manual`, `instance-type-mixed-on-node`, `instance-type-derived-from-node`,
-`instance-type-drain-when-no-flavors`, `instance-type-aware-cpu-manufacturer` — are read **per-reconcile**
-(`ShouldValueBool(ctx)`): flipping one re-converges the scheduling chain next reconcile, no restart.
+The last five (`node-management-manual`, `instance-type-mixed-on-node`, `instance-type-derived-from-node`,
+`instance-type-drain-when-no-flavors`, `instance-type-aware-cpu-manufacturer`) are read **per-reconcile**
+(`ShouldValueBool(ctx)`): flipping one re-converges the scheduling chain on the next reconcile, with no
+restart.
 
 ### Authoring the InstanceType yourself
 
 With `instance-type-derived-from-node=false` the operator authors no InstanceType, so the
 administrator owns both halves of a pool: which InstanceTypes exist, and whether what their queue
 admits can actually be placed. Flipping the setting off does not retire the types the operator
-already authored — the derived marker is provenance, and nothing auto-removes a type.
+already authored; the derived marker is provenance, and nothing auto-removes a type.
 
-**No ClusterQueue gains a reference to the node-devices feasibility gate in this mode.** That
+No ClusterQueue gains a reference to the node-devices feasibility gate in this mode. That
 [AdmissionCheck](../modules/devices/admission.md#gate-3--the-per-accelerator-admissioncheck) has one
 writer, [`NodeQueueReconciler`](../modules/devices/scheduling.md#nodequeuereconciler-node_queuego),
 which reads this setting as a cluster-wide switch, not as "was this queue derived".
 
 So with the switch on, every accelerated queue carries the reference once the check reports `Active`,
 whoever authored its InstanceType; with it off none is added, and a queue that already carries one
-drops it the next time its resource groups are refilled — not at the moment of the flip.
+drops it the next time its resource groups are refilled, not at the moment of the flip.
 
 > **Why it is not attached in this mode anyway** — the gate changes what a queue admits, and in the
 > mode where the administrator authors every InstanceType that is theirs to decide.
 
-**The failure shape to expect.** Without that gate a Workload is admitted on quota alone and its Pods
-then sit `Pending` — which reads as a full cluster, while the truth is usually a request no node can
-place: quota is a scalar total and cannot see per-accelerator fragmentation. When the Pods of an
-admitted Workload stay `Pending`, compare the request against the per-accelerator ledger
+The failure shape to expect: without that gate, a Workload is admitted on quota alone and its Pods
+then sit `Pending`, which reads as a full cluster while the usual truth is a request no node can
+place, because quota is a scalar total and cannot see per-accelerator fragmentation. When the Pods
+of an admitted Workload stay `Pending`, compare the request against the per-accelerator ledger
 (`kubectl get devices <node> -o yaml`) before adding capacity.
 
-**The joint-admission check is attached in both modes.** Every queue backing an InstanceType
+The joint-admission check is attached in both modes. Every queue backing an InstanceType
 references `gpustack-model-deployment-joint` once it reports `Active`, whoever authored the type and
 whatever this setting says.
 
 It answers `Ready` at once for every Workload that is not a replica of a multi-role ModelDeployment,
-so the only thing it changes in this mode is that such a deployment is admitted as a set — see
+so the only thing it changes in this mode is that such a deployment is admitted as a set; see
 [Prefill and decode](../modules/model-deployment/deployment.md#prefill-and-decode), and
 [Status](../modules/model-deployment/status.md#status) for a set that stays short of quota.
 
-**Write the InstanceType against the `InstanceTypeFlavor` catalog.** It is the read-only,
-os/arch-agnostic view of the pools that actually exist — one entry per grouping the settings above
-produce — and its `spec` carries the identity fields an InstanceType is built from:
+Write the InstanceType against the `InstanceTypeFlavor` catalog. It is the read-only,
+os/arch-agnostic view of the pools that actually exist (one entry per grouping the settings above
+produce), and its `spec` carries the identity fields an InstanceType is built from:
 `acceleratorGroup`, `generalGroup`, `acceleratable`, `manufacturer`, `product`, `family`, `memory`,
 `cores`.
 
@@ -123,9 +125,9 @@ An InstanceType whose identity matches no entry there backs a ClusterQueue that 
 
 ### Letting SGLang prefill Pods reuse TIME-WAIT ports
 
-**`model-deployment-tcp-tw-reuse` renders `net.ipv4.tcp_tw_reuse=1` into the Pod
+`model-deployment-tcp-tw-reuse` renders `net.ipv4.tcp_tw_reuse=1` into the Pod
 `securityContext.sysctls` of the prefill half of every SGLang prefill/decode pair, and of no other
-Pod.** The sysctl lets the kernel reuse ports held by `TIME-WAIT` sockets for new outgoing
+Pod. The sysctl lets the kernel reuse ports held by `TIME-WAIT` sockets for new outgoing
 connections, in that Pod's own network namespace only.
 
 The prefill half opens a new TCP connection for every transfer, so over `TCP`, with or without a
@@ -133,12 +135,12 @@ store, its `TIME-WAIT` sockets [use up its local
 ports](../modules/model-deployment/engine-versions.md#known-failures-at-the-minimum) under sustained load.
 
 It does not reach the decode half, which accepts transfers rather than opening them; a vLLM role,
-which keeps its transfer connections open; or a [KV cache backend](../modules/kv-cache/backend.md)'s members.
+which keeps its transfer connections open; or the members of a [KV cache backend](../modules/kv-cache/backend.md).
 A role that replaced its `command` gets nothing either, since the operator did not build what runs
 there. Whether an SGLang server with a store runs out of ports is not measured, and the setting
 does not reach it.
 
-**1. Allow the sysctl on the kubelet of every node that can run such a Pod.** It is not on the
+1. Allow the sysctl on the kubelet of every node that can run such a Pod. It is not on the
 Kubernetes [safe list](https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/#safe-and-unsafe-sysctls),
 so a kubelet refuses it until told otherwise. Add it to the kubelet configuration and restart the
 kubelet:
@@ -167,7 +169,7 @@ these it takes effect on newly created nodes:
   configuration](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/node-system-config).
 - A platform that exposes no kubelet configuration cannot run this setting; leave it off there.
 
-**2. Turn the setting on.**
+2. Turn the setting on.
 
 ```bash
 kubectl -n gpustack-system patch setting model-deployment-tcp-tw-reuse --type merge -p '{"spec":{"value":"true"}}'
@@ -179,7 +181,7 @@ reconcile, and a setting change does not wake one. To apply it at once, delete o
 deployment's prefill Pods: the reconcile that replaces it renders the new value, and the rollout
 replaces the other prefill replicas. A pair that has already locked up recovers the same way.
 
-**If the kubelet was not changed, the prefill replica never starts.** The node's kubelet refuses the
+If the kubelet was not changed, the prefill replica never starts. The node's kubelet refuses the
 Pod, which ends in phase `Failed` with reason `SysctlForbidden`; the operator deletes it and logs
 `removing replica that failed` with that reason, and the replacement is refused the same way, over
 and over. The events outlive the Pods, and their message names the sysctl:
@@ -226,7 +228,7 @@ helm upgrade gpustack-operator <chart> --namespace gpustack-system --reset-then-
 ```
 
 - `GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE=false` is for a slice refused although its accelerator
-  has room — the Pod keeps coming back `UnexpectedAdmissionError` naming that accelerator. With it
+  has room: the Pod keeps coming back `UnexpectedAdmissionError` naming that accelerator. With it
   off, the slice is allocated and the ledger clamps that accelerator's `Remaining` at zero.
 - `GPUSTACK_DEVICE_PLUGIN_IDENTIFY_BY_KUBELET=false` is for allocations recorded on the wrong Pod while
   the kubelet is reachable. With it off, the device manager picks the oldest pending Pod the request
@@ -281,7 +283,7 @@ A fourth override applies only to a manufacturer that has hardware partitioning 
 
 - `GPUSTACK_${MANUFACTURER}_PARTITION_KIND` — the manufacturer's own name for hardware partitioning, which becomes the segment prefix of its per-profile resource key.
 
-`nvidia` is the only one with a default — `mig`, giving `nvidia.com/gpu.partitioned.mig-${profile}`.
+`nvidia` is the only one with a default: `mig`, giving `nvidia.com/gpu.partitioned.mig-${profile}`.
 Elsewhere the variable does nothing: without hardware partitioning there is no `.partitioned` family, so
 no key segment to rename.
 
@@ -298,13 +300,13 @@ for the CDI channel to resolve, so the variable does nothing there. The partitio
 partition-backed visibility always use `envvar`, whatever the strategy names, since a MIG instance is
 materialized at `Allocate` time and no pre-generated specification names it.
 
-**Prefer `auto` over naming the CDI channel yourself.** The CDI channel needs a container engine that
-resolves CDI requests — containerd 2.x does, containerd 1.7 only with `enable_cdi = true`. Ask for it on
+Prefer `auto` over naming the CDI channel yourself. The CDI channel needs a container engine that
+resolves CDI requests (containerd 2.x does; containerd 1.7 only with `enable_cdi = true`). Ask for it on
 an engine that does not and the request is simply ignored: no variable is set either, and the container
 starts with no accelerator and no error, which is the failure this setting exists to remove. `auto` reads
 the engine first and keeps the variable when the answer is no.
 
-**Which value a runtime wants.** Two independent questions decide it: does the engine resolve CDI
+Two independent questions decide which value a runtime wants: does the engine resolve CDI
 requests at all, and can `auto` tell that it does? `auto` reads both answers out of containerd's
 `config.toml`, so a runtime that keeps them anywhere else is invisible to it. That file is where the
 detection looks; it is not something the channel itself needs.
@@ -318,11 +320,11 @@ detection looks; it is not something the channel itself needs.
 
 `cdi-annotations` is the answer on exactly one row: a runtime that does resolve CDI requests but that
 `auto` has no way to see. Everywhere else `auto` reaches the same channel by itself, or correctly
-declines to — and naming the channel where the engine ignores it is how a container ends up running
+declines to; naming the channel where the engine ignores it is how a container ends up running
 with nothing.
 
-**Where to set it.** The name embeds the manufacturer in upper case, so it is not a literal you will
-find spelled out anywhere — pass it through the chart's `deviceManager.env`, which lands on every
+Where to set it: the name embeds the manufacturer in upper case, so it is not a literal you will
+find spelled out anywhere. Pass it through the chart's `deviceManager.env`, which lands on every
 device-manager DaemonSet:
 
 ```bash
@@ -333,12 +335,12 @@ It is read once, when that manufacturer's allocator is constructed, so a change 
 the DaemonSet restarts. A value that is not one of the three is reported and the node keeps `envvar`:
 refusing to start the allocator over it would take the node's accelerators with it.
 
-`auto` also keeps the variable wherever the engine's own default runtime is already the vendor runtime,
-which is the usual shape on a distribution that ships the GPU toolkit for you. There every Pod runs under
+`auto` also keeps the variable when the engine's own default runtime is already the vendor runtime.
+That is the usual shape on a distribution that ships the GPU toolkit for you. There every Pod runs under
 that runtime whether it asks to or not, so the variable works and a CDI request would only add a second
 injection path. `auto` doing nothing on such a node is the correct answer, not a misconfiguration.
 
-Which channel a node settled on, and why, is logged once per answer — but at the allocator's own
+Which channel a node settled on, and why, is logged once per answer, but at the allocator's own
 verbosity, above what the DaemonSet ships with. [Runtime log
 verbosity](../contribute/development.md#runtime-log-verbosity) raises it on a running Pod.
 

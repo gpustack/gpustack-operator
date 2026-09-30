@@ -1,8 +1,8 @@
 # Topology-Aware Scheduling
 
-Topology is a capacity boundary, not a placement hint. GPUStack first establishes an ordered,
-validated hierarchy for each Node, then makes every generated queue topology-aware so Kueue admits
-the complete PodSet only when one requested domain has enough capacity.
+GPUStack treats topology as a capacity boundary: Kueue admits the complete PodSet only when one
+requested domain has enough capacity. It first establishes an ordered, validated hierarchy for each
+Node, then makes every generated queue topology-aware so that admission can enforce it.
 
 ## Contents
 
@@ -83,8 +83,8 @@ last applied, not an ordering scheme.
 ## One hierarchy becomes one profile
 
 `NodeTopologyReconciler` selects exactly one Ready `TopologySource` for a Node. Zero or multiple
-matching sources deliberately fall back to a hostname-only hierarchy; this prevents ambiguous
-inventories from being flattened into a false tree.
+matching sources deliberately fall back to a hostname-only hierarchy. When the inventory is
+ambiguous, no tree is invented: flattening two conflicting sources into one would misplace Pods.
 
 The reconciler takes the longest populated prefix of the selected level list and always appends
 `kubernetes.io/hostname`. Missing a finer suffix is valid, but a child without its parent is not.
@@ -141,9 +141,9 @@ defines the implicit hostname level.
 
 ## A node-delivered model prefers the nodes holding it
 
-When the worker creates a Pod whose Hugging Face weights the node delivers, a `ModelDeployment`
-replica under `Node` delivery or an `Instance`, it adds one preferred node-affinity term per digest.
-The term names, by `kubernetes.io/hostname`, the nodes whose
+When the worker creates a Pod whose hub weights the node delivers (a `ModelDeployment`
+replica under `Node` delivery, or an `Instance`), it adds one preferred node-affinity term per
+digest. The term names, by `kubernetes.io/hostname`, the nodes whose
 [`NodeModelStore`](../model-delivery/node-store.md) lists that digest `Ready`.
 
 Kueue copies the Pod's affinity into the PodSet. With `TASRespectNodeAffinityPreferred` on, the
@@ -152,10 +152,11 @@ nodes take as many of the PodSet's Pods as fit, and the rest go where capacity a
 node is skipped, and nothing waits for one. kube-scheduler gets the Pod with a hostname already
 selected, so it has nothing left to score.
 
-A node counts while its store lists the digest `Ready`, the store's `Ready` condition is `True`, and
-its `CSINode` lists `model.csi.gpustack.ai` now; a store the plugin left keeps a stale `Ready`. A term
-names at most 16 nodes, keeping those that mount the digest now, then the most recently used, then
-by name. A digest no node holds adds no term.
+A node counts while three things hold: its store lists the digest `Ready`, the store's `Ready`
+condition is `True`, and its `CSINode` lists `model.csi.gpustack.ai` now. A store the plugin left
+behind keeps a stale `Ready`, so it does not count. A term names at most 16 nodes, keeping those
+that mount the digest now, then the most recently used, then by name. A digest no node holds adds no
+term.
 
 > **Why at creation, not in the render** — the render feeds a replica's spec hash, so a preference
 > inside it would recreate every replica each time a download finished. Added at creation, it stays

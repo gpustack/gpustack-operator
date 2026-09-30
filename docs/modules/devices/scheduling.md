@@ -29,8 +29,9 @@ Three Worker controllers turn Node + `Devices` signals into the capacity labels 
 
 ### Logical-slicing capacities
 
-Per accelerator model whose `.sliced` resource is present and > 0 in the Node capacity, four capacities
-the default scheduler / kubelet count at admission:
+For every accelerator model whose `.sliced` resource is present and greater than zero in the Node
+capacity, the worker publishes four `.sliced.*` counting keys. The default scheduler and the kubelet
+consume them at admission:
 
 | Label suffix (`acceleratable.${prefix}${aKey}.…`) | Value |
 |----------------------------------------------------|--------|
@@ -41,15 +42,16 @@ the default scheduler / kubelet count at admission:
 
 ### Hardware-partitioning capacities
 
-Symmetrically per model whose `.partitioned` resource is present and > 0, over the *disjoint* population
-of accelerators in a partitioning mode, so no accelerator counts in both families:
+The `.partitioned.*` keys follow the same rule for models whose `.partitioned` resource is present
+and greater than zero. They are counted over the disjoint population of accelerators in a
+partitioning mode, so no accelerator counts in both families:
 
 | Label suffix (`acceleratable.${prefix}${aKey}.…`) | Value |
 |----------------------------------------------------|--------|
 | `.partitioned.units`               | `partitioned accelerators × M` (a partitioned accelerator is worth a whole accelerator's credits, exactly as a logically sliceable one is) |
 | `.partitioned.<kind>-<profile>`    | `Σ (allocated + remaining)` instances of that profile over the node's partitioned accelerators |
 
-The per-profile key is **geometry-aware and ledger-derived**, not a static ceiling: with one `3g.40gb`
+The per-profile key is geometry-aware and ledger-derived, not a static ceiling: with one `3g.40gb`
 carved on an 80 GB accelerator, `…partitioned.mig-7g.80gb` reads 0 while `…partitioned.mig-3g.40gb`
 still reads 1 free instance.
 
@@ -58,7 +60,7 @@ still reads 1 free instance.
 > published yet falls back to its static per-profile ceiling, not to zero, so a fresh node advertises
 > room instead of nothing.
 
-`<profile>` is the **published** name, not always what the manufacturer's CLI prints:
+`<profile>` is the published name, not always what the manufacturer's CLI prints:
 
 - a manufacturer that writes its two-number geometry without a separator has one added — T-Head's
   `4g48gb` publishes as `4g.48gb`, matching how NVIDIA already writes `3g.40gb`;
@@ -95,7 +97,7 @@ able to claim a full 100 %; the others cap it at `count × 100`.
 
 ### Presence-gating on capacity
 
-Both families' counting keys are **presence-gated on capacity**: patched only while the bare pool
+Both families' counting keys are presence-gated on capacity: patched only while the bare pool
 (`.sliced` / `.partitioned`) is present and positive in `Node.status.capacity`, reverse-patched away
 when it disappears or reaches 0. A model with no logical slicing gets none of the four `.sliced.*`
 capacities; one with no partitioned accelerator gets no `.partitioned.*` key.
@@ -160,9 +162,9 @@ The pin stays on the Workload and never reaches the Pod; why that must hold is u
 
 ## The unit spec is not derived from node capacity
 
-The **unit spec** (unitCPU / unitRAM / localStorage) is **not derived from node capacity at all**. The
+The unit spec (unitCPU / unitRAM / localStorage) is not derived from node capacity at all. The
 InstanceType default follows acceleratable-ness: `1c / 2Gi / 100Gi` non-accelerated; accelerated, a
-**per-product preset** keyed by the accelerator's manufacturer and product name, falling back to
+per-product preset keyed by the accelerator's manufacturer and product name, falling back to
 `4c / 16Gi / 100Gi`.
 
 The tier per product family is in [Instance Type Unit Resources
@@ -172,11 +174,11 @@ API without touching any Node.
 ## Stage 4: the Kueue chain
 
 The capacity and topology-profile labels drive a Kueue chain built by
-`pkg/worker/controllers/worker`. **One isolated ClusterQueue per pool**: with exclusive / shared /
+`pkg/worker/controllers/worker`. One isolated ClusterQueue per pool: with exclusive / shared /
 sliced / partitioned in one queue there is no cross-queue borrowing to broker, so
 `spec.cohortName` stays empty.
 
-**Kueue assigns a ResourceFlavor per PodSet, not per Workload.** Each PodSet forms its own assignment
+Kueue assigns a ResourceFlavor per PodSet, not per Workload. Each PodSet forms its own assignment
 group and a candidate flavor is evaluated against that PodSet's own `nodeSelector`, so one ClusterQueue
 can serve two accelerator models at once: a Workload's PodSets may land on different flavors of the
 same pool.
@@ -193,7 +195,7 @@ weights](../topology/scheduling.md#a-node-delivered-model-prefers-the-nodes-hold
 
 ## Naming and grouping
 
-The **`ResourceFlavor` is the finest grain and setting-independent**: always the CPU key, plus the
+The `ResourceFlavor` is the finest grain and setting-independent: always the CPU key, plus the
 accelerator key when accelerated, so the aggregation layer re-groups without rewriting a flavor. That
 layer (`ClusterQueue` / `InstanceType` / `InstanceTypeFlavor`) is grouped by the editable
 [`instance-type-aware-cpu-manufacturer`](../../reference/settings.md#online-adjustable-settings) (default `false`):
@@ -214,7 +216,7 @@ InstanceTypeFlavor (catalog, no os/arch): mirrors the same grouping —
   gpustack--${gKey}  / gpustack--${gKey}--${aKey}   (aware=true)
 ```
 
-Two discriminators keep the pools clean:
+Two discriminators keep the pools clean, and one annotation carries the raw CPU detail:
 
 - `feature.gpustack.ai/acceleratable=true|false`, on every flavor and queue, lets a collapsed generic
   queue select "all non-accelerated flavors" and stops an *aware* generic queue (`general.${gKey}=true`)
@@ -268,18 +270,18 @@ Labels carry the pool identity (`.count`, `.capacity = contributing nodes × cou
 `note.gpustack.ai/*` annotations the per-accelerator VRAM and device descriptors — device information
 only, no unit spec.
 
-A flavor whose group has **no** contributing node is **deleted**; no drain-tombstone anymore. Identity
-comes from the first contributing node — every contributor to a flavor name shares it — so there is no
-min-capacity-node selection.
+A flavor whose group has **no** contributing node is deleted; there is no drain-tombstone anymore.
+Identity comes from the first contributing node — every contributor to a flavor name shares it — so
+there is no min-capacity-node selection.
 
-After syncing a flavor, and only under `instance-type-derived-from-node=true` (default), it **authors
-the pool's `InstanceType`** — **create-only**, at the setting-correct name and identity
+After syncing a flavor, and only under `instance-type-derived-from-node=true` (default), it authors
+the pool's `InstanceType`, **create-only**, at the setting-correct name and identity
 (`generalGroup`/`acceleratorGroup`/`acceleratable`/`os`/`arch`; the CPU key is the `generic` sentinel
 when awareness is off) with the [default unit spec](#the-unit-spec-is-not-derived-from-node-capacity).
 
 An existing type is untouched, admin- or operator-authored, leaving the `InstanceTypeReconciler` sole
-owner of an InstanceType's lifecycle. It also **watches the types it authored and re-authors a deleted
-one**, the safeguard the `InstanceTypeReconciler` applies to the backing queue.
+owner of an InstanceType's lifecycle. It also watches the types it authored and re-authors a deleted
+one, the safeguard the `InstanceTypeReconciler` applies to the backing queue.
 
 > **Why nothing else would** — its own inputs never change when an output is destroyed, and the periodic
 > informer resync is no fallback, since it re-delivers the flavor unchanged and the update filter drops
@@ -287,8 +289,8 @@ one**, the safeguard the `InstanceTypeReconciler` applies to the backing queue.
 
 ### `InstanceTypeReconciler` (`instance_type.go`)
 
-Owns the backing `ClusterQueue`'s **existence and metadata** and the materialized `InstanceType`'s
-status — not its quota. It does **not** author InstanceTypes (the `NodeFlavorReconciler` does) and never
+Owns the backing `ClusterQueue`'s existence and metadata and the materialized `InstanceType`'s
+status, but not its quota. It does **not** author InstanceTypes (the `NodeFlavorReconciler` does) and never
 deletes one for lack of flavors.
 
 `ensureClusterQueue` creates the name-identical queue when missing, stamping at creation the pool's
@@ -308,14 +310,14 @@ those), and prunes a stale feature-key label when the group/acceleratable change
 queue's selectors match.
 
 It watches the queue to keep `.status` fresh (the [four-view](admission.md#four-view-status) / CPU
-projection + `status.entrance`, DeepEqual-guarded) and to **recreate a queue an admin deleted** while
+projection + `status.entrance`, DeepEqual-guarded) and to recreate a queue an admin deleted while
 the InstanceType still lives.
 
-On delete, a `gpustack.ai/controlled` finalizer runs a **delete-then-wait teardown**: mark the type
+On delete, a `gpustack.ai/controlled` finalizer runs a delete-then-wait teardown: mark the type
 `Inactive`, delete the queue once, hold the finalizer until Kueue has removed it. It does not drain; the
 `NodeQueueReconciler` sees the deletion and drives that.
 
-It also syncs `it.Spec.Inactive` with the queue's `StopPolicy` for the **admin `Inactive`** path: `Hold`
+It also syncs `it.Spec.Inactive` with the queue's `StopPolicy` for the admin `Inactive` path: `Hold`
 when `Inactive` (blocking new admission without evicting running workloads, never `HoldAndDrain`),
 `None` when an admin reactivates, and `Inactive=true` backfilled one-way and stickily whenever the queue
 is stopped by any means. So `Hold↔None` is owned here, `HoldAndDrain` by the `NodeQueueReconciler`.
@@ -331,7 +333,7 @@ Clearing `Inactive` on a queue that has no resource groups marks its `Hold` rath
 
 ### `NodeQueueReconciler` (`node_queue.go`)
 
-Owns the backing `ClusterQueue`'s **quota and admission gating** — resource groups, the `HoldAndDrain`
+Owns the backing `ClusterQueue`'s quota and admission gating — resource groups, the `HoldAndDrain`
 drain policy (admin `Hold↔None` belongs to the `InstanceTypeReconciler`), the AdmissionCheck reference —
 resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
 
@@ -363,8 +365,8 @@ resolved from the pool's ResourceFlavors alone, never the owning InstanceType.
   groups, or one resource group would exceed the [flavor limit](../topology/scheduling.md#capacity-and-lifecycle-limits).
 
 Once flavors return it switches the held queue to the new plan, and only then **restores** the stop
-policy the queue had before the drain — `None`, or an admin `Hold`, including one set or cleared while
-it waited. The queue carries its migration marker the whole time, and the `InstanceTypeReconciler`
+policy the queue had before the drain (`None`, or an admin `Hold`, including one set or cleared while
+it waited). The queue carries its migration marker the whole time, and the `InstanceTypeReconciler`
 does not backfill `Inactive` while it is present, so a recovered pool admits again without an admin.
 A drained queue also stops its running Instances — see [Running-instance stop](admission.md#running-instance-stop).
 

@@ -83,8 +83,8 @@ cannot:
 
 ## Vocabulary
 
-The three hardware words — **Device**, **Accelerator**, **Resource** — and the layering between them
-are in [Device Discovery](../modules/devices/discovery.md#device-accelerator-resource). The rest:
+The three hardware words (**Device**, **Accelerator**, **Resource**) and the layering between them
+are defined in [Device Discovery](../modules/devices/discovery.md#device-accelerator-resource). The rest:
 
 | Term | Meaning |
 |---|---|

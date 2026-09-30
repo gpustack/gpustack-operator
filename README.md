@@ -306,15 +306,15 @@ enabled by an administrator; its availability depends on the device and its curr
 
 | Manufacturer | Class | Kubernetes resource | Logical slicing | Physical partitioning |
 |---|---|---|---|---|
-| AMD | GPU | `amd.com/gpu` | ✅ | — |
-| Cambricon | MLU | `cambricon.com/mlu` | ✅ | — |
-| Huawei Ascend | NPU | `huawei.com/npu` | ✅ | — |
-| Hygon | DCU | `hygon.com/dcu` | ✅ | ✅ MIG |
-| Iluvatar | GPU | `iluvatar.com/gpu` | ✅ | — |
-| MetaX | GPU | `metax-tech.com/gpu` | ✅ | — |
-| Moore Threads | GPU | `mthreads.com/gpu` | ✅ | — |
-| NVIDIA | GPU | `nvidia.com/gpu` | ✅ | ✅ MIG |
-| T-Head | PPU | `alibabacloud.com/ppu` | ✅ | ✅ MIG |
+| AMD | GPU | `amd.com/gpu` | Yes | — |
+| Cambricon | MLU | `cambricon.com/mlu` | Yes | — |
+| Huawei Ascend | NPU | `huawei.com/npu` | Yes | — |
+| Hygon | DCU | `hygon.com/dcu` | Yes | Yes (MIG) |
+| Iluvatar | GPU | `iluvatar.com/gpu` | Yes | — |
+| MetaX | GPU | `metax-tech.com/gpu` | Yes | — |
+| Moore Threads | GPU | `mthreads.com/gpu` | Yes | — |
+| NVIDIA | GPU | `nvidia.com/gpu` | Yes | Yes (MIG) |
+| T-Head | PPU | `alibabacloud.com/ppu` | Yes | Yes (MIG) |
 
 A Pod requests one resource family in one container group. For NVIDIA, the four forms are:
 

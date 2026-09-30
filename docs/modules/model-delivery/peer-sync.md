@@ -1,8 +1,7 @@
 # Node-to-Node Sync
 
-A fleet's nodes need the same weights far more often than they need different ones. When the
-hub serves every node separately, egress grows with node count and a hub outage stalls every
-cold node.
+A fleet's nodes mostly need the same weights. When the hub serves every node separately, egress
+grows with node count and a hub outage stalls every cold node.
 
 Node-to-node sync lets the plugins serve each other from the per-node trees the cache already
 publishes: the **hub delivers one copy's worth of bytes for any number of nodes**, and a cold
@@ -37,7 +36,7 @@ listing sources. At most `maxServingStreams` file answers run at once.
 A request carries the pulling plugin's projected ServiceAccount token (audience
 `gpustack-model-peer`); the serving plugin checks it with a TokenReview and admits only the
 plugins' ServiceAccount, caching positives until the earlier of a short lifetime and the
-token's own expiry — never caching refusals.
+token's own expiry, never caching refusals.
 
 The NetworkPolicy the chart ships (default on) drops every other source: a tenant Pod's
 connection to the port times out rather than being answered. On CNIs where a `hostNetwork`
@@ -51,7 +50,7 @@ before any byte is pulled, so a forged or truncated listing is refused and the n
 takes over.
 
 Bytes are hashed in the download stream and checkpointed every 64 MiB, so a peer dying
-mid-file resumes from the last checkpoint — the hub fallback re-pulls only the bytes after it.
+mid-file resumes from the last checkpoint, and the hub fallback re-pulls only the bytes after it.
 One source at a time; scheduling segments across several peers is a deliberate extension point.
 
 ## What the status and metrics say
@@ -67,7 +66,7 @@ floors that cap, because the cache's own collection is then the only space recla
 The feature buys hub egress and hub-independence, not wall clock: on networks where the
 node-to-node link is slower than each node's own hub path, all-hub finishes a simultaneous
 fan-out sooner. Serving costs CPU on the seed node (measured ≈ 0.25 vCPU per concurrent puller
-on 2-vCPU nodes, plus the link's bandwidth) — on GPU nodes this shares headroom with inference.
+on 2-vCPU nodes, plus the link's bandwidth); on GPU nodes this shares headroom with inference.
 
 **See also** — [Node Model Store](node-store.md) for the cache the trees live in, and
 [Model Artifact](artifact.md) for the manifest digest the listings are bound to.

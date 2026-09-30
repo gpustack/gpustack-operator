@@ -1,6 +1,6 @@
 # Model Store Operations
 
-The `model-manager` DaemonSet keeps one model cache per node. It downloads each Hugging Face
+The `model-manager` DaemonSet keeps one model cache per node. It downloads each Hugging Face or ModelScope
 `ModelArtifact` digest once per node and mounts it for workloads. Configure and inspect that cache
 with the steps below; [Node Model Store](node-store.md) explains each mount.
 
@@ -86,7 +86,7 @@ node's `spec.store`; nodes no store matches keep the cluster defaults.
 
 Two stores whose selectors match one node never merge silently: both report `SelectorOverlap`, and
 the alphabetically first name wins the shared nodes. Fix the selectors rather than relying on the
-order — it is a tie-break, not a policy.
+order; it is a tie-break, not a policy.
 
 ## Read a node
 
@@ -153,12 +153,12 @@ the downloads still running, so several starting together stay under the waterma
 
 ## Switch delivery
 
-`model-artifact-delivery-mode` chooses how a Hugging Face artifact reaches a `ModelDeployment`:
+`model-artifact-delivery-mode` chooses how a hub artifact reaches a `ModelDeployment`:
 `Engine`, the engine downloads its commit into its own cache, or `Node`, the plugin mounts it at
 `/var/lib/gpustack/model`. A claim artifact is always mounted directly, and an `Instance` always
-uses the plugin for a Hugging Face artifact, whatever the Setting says.
+uses the plugin for a hub artifact, whatever the Setting says.
 
-- **Changing it rolls every Hugging Face deployment once**, the way an image change does. Replicas
+- **Changing it rolls every deployment using a hub artifact once**, the way an image change does. Replicas
   on the old and the new delivery serve the same weights under the same served name.
 - **vLLM's KV store key also carries the last path segment of `--model`**, which differs between the
   two (`model` against the repository's name), so KV blocks written before the switch are not hit
@@ -188,7 +188,7 @@ A replica on a node that downloads again is expected when the first command show
   node-delivered, or it asks for a preferred topology level;
 - **the gate is off**, in a string you override or in a Kueue this chart does not install.
 
-**Turning it off.** Set `TASRespectNodeAffinityPreferred: false` in
+To turn the preference off, set `TASRespectNodeAffinityPreferred: false` in
 `kueue.managerConfig.controllerManagerConfigYaml`, copying the whole string, since Helm replaces a
 string value whole. The gate is Kueue's, so it also stops Kueue honoring a preferred node affinity
 any other author wrote in a TAS queue. Pods keep their terms, which then change nothing. There is no
@@ -200,7 +200,7 @@ names refuses to start, so a Kueue upgrade checks it first.
 ## Upgrade notes
 
 **From the version before node delivery.** With the plugin enabled, the upgrade seeds
-`model-artifact-delivery-mode=Node`, and every `ModelDeployment` on a Hugging Face artifact rolls
+`model-artifact-delivery-mode=Node`, and every `ModelDeployment` using a hub artifact rolls
 once, to Node delivery. A seed fills only a Setting the cluster does not have yet, so there are two
 ways to avoid the roll:
 

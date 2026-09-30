@@ -1,18 +1,18 @@
 # NVIDIA MIG Operations
 
 You drive MIG **mode** with `nvidia-smi`; GPUStack catches up when the node's Device Manager re-detects.
-NVIDIA **MIG** (Multi-Instance GPU) mode is a **manually managed** node property: the operator *observes*
+NVIDIA **MIG** (Multi-Instance GPU) mode is a **manually managed** node property: the operator observes
 the geometry into the `Devices` ledger and the advertised partitioning capability, but never enables,
-disables or reconfigures it. It *does* **dynamically allocate** the instances that back scheduled workloads
-— see [Requesting a partition](#requesting-a-partition).
+disables or reconfigures it. It does dynamically allocate the instances that back scheduled workloads;
+see [Requesting a partition](#requesting-a-partition).
 
 A capability change enters the cluster **only** through Device Manager re-detection, and the detect loop's
 trigger watches the device set and health, not the partitioning mode, so a mode toggle needs a **DaemonSet
-restart** (see [what it does *NOT* do](#what-gpustack-operator-does-not-do)).
+restart** (see [what it does NOT do](#what-gpustack-operator-does-not-do)).
 
 MIG is GPUStack's one implemented **physical partitioning** backend, a resource family of its own
 (`nvidia.com/gpu.partitioned*`) disjoint from the logical (software) slicing family `nvidia.com/gpu.sliced*`:
-a MIG-enabled GPU serves *only* partition requests, an unpartitioned GPU *only* whole-GPU, shared and
+a MIG-enabled GPU serves only partition requests, and an unpartitioned GPU only whole-GPU, shared and
 logical-slice requests. The full key set and request rules live in
 [Accelerator Requests](requests.md).
 
@@ -25,7 +25,7 @@ logical-slice requests. The full key set and request rules live in
 - [Enabling partitioning on a node](#enabling-partitioning-on-a-node)
 - [Disabling partitioning on a node](#disabling-partitioning-on-a-node)
 - [Node reboot recovery](#node-reboot-recovery)
-- [What GPUStack Operator does *NOT* do](#what-gpustack-operator-does-not-do)
+- [What GPUStack Operator does NOT do](#what-gpustack-operator-does-not-do)
 - [Walkthrough: three MIG configurations on one node](#walkthrough-three-mig-configurations-on-one-node)
 
 ## Prerequisites
@@ -65,7 +65,7 @@ memory, and one shape is named for the memory the product carries — `3g.20gb` 
 **Which profiles your GPU offers is NVIDIA's table to publish, not ours**, and it covers every MIG-capable
 product and memory variant: [Supported MIG
 Profiles](https://docs.nvidia.com/datacenter/tesla/mig-user-guide/supported-mig-profiles.html). Read the
-"GPU Instance Profiles" table for your product before planning a node — its `Instances` column is the
+"GPU Instance Profiles" table for your product before planning a node: its `Instances` column is the
 maximum a GPU can host, and its placement column is what the rules below act on.
 
 Three rules govern what reaches GPUStack from that set, and all three are shared with the other two
@@ -92,7 +92,7 @@ covers two as the same-size `1g` does yet gets three slots to its four.
 
 A live instance therefore removes slots from *other* profiles: a `3g` at 0–3 takes the GPU's only `4g` slot
 with it, while leaving room for a second `3g` at 4–7. That is why the `Devices` ledger reports each MIG
-GPU's inventory as static per-profile *counts* — the maximum it could host — plus a **placement-aware
+GPU's inventory as static per-profile counts (the maximum it could host) plus a **placement-aware
 `Remaining`**, how many still fit (see [Requesting a partition](#requesting-a-partition)).
 
 ## Requesting a partition
@@ -112,13 +112,13 @@ resources:
   own under the same `.partitioned.<kind>-<profile>` shape.
 - **Name the exact profile** from [How partition profiles are discovered](#how-partition-profiles-are-discovered) (e.g. `1g.10gb`). There is no
   memory→profile translation: you request `mig-<profile>`, not a fraction or a MiB amount.
-- Both keys **must be exactly `1`** — a scope decision, not a hardware limit; a multi-partition workload
+- Both keys **must be exactly `1`** (a scope decision, not a hardware limit); a multi-partition workload
   asks for several Pods.
 - The partition family is **mutually exclusive** with every other accelerator family Pod-wide (a Pod also
   asking for a whole GPU, a shared unit or a logical slice is rejected at admission), it is **one profile
   shape per Pod**, and the accelerator claims must sit in **one container group**. The full rule set, with an
   accepted and a rejected example, is in [Accelerator Requests](requests.md#the-request-rules).
-- **`nvidia.com/gpu.partitioned.units` is webhook-derived** — do not set it. The webhook folds the profile's
+- **`nvidia.com/gpu.partitioned.units` is webhook-derived**: do not set it. The webhook folds the profile's
   VRAM into it, and quota is charged on the manufacturer's `credits` resource folded from it, so a `3g.40gb`
   and a logical `40Gi` slice cost the same.
 - A MIG request must go through **Kueue** — a Pod (or workload) on a `LocalQueue`, or an `Instance` (below).
@@ -154,8 +154,8 @@ spec:
 
 **GPU selection is the plugin's, not the kubelet's.** A `.partitioned` token is a fungible count, unlike the
 three GPU-bound families: the plugin picks the GPU against the live partition geometry and records it. It
-**packs** — the most-occupied GPU that still fits wins, keeping a sibling whole for a later whole-GPU
-profile — so a rejection from `Allocate` means the node has no room, not a wrong GPU from the kubelet.
+**packs** (the most-occupied GPU that still fits wins, keeping a sibling whole for a later whole-GPU
+profile), so a rejection from `Allocate` means the node has no room, not a wrong GPU from the kubelet.
 
 **Scheduling and the `Remaining` ledger.** Each MIG GPU advertises `allocated + remaining` per profile,
 mirrored onto the node as `nvidia.com/gpu.partitioned.mig-<profile>`. Admission is placement-aware: the
@@ -193,10 +193,10 @@ is gone or recreated fails the sidecar's allocation closed — no fallback to th
   token health, AdmissionCheck) derives from the allocation annotations the device plugin writes, and
   `nvidia-smi mig -cgi` by hand produces none.
 
-  So while a GPUStack workload holds the GPU the node advertises room it does not have, and that **never
-  converges** — placement reads live NVML and will not double-book it, but the accounting above stays
-  wrong. Once the GPU is drained the reverse happens: after its debounce the reclaimer **destroys** an
-  instance no allocation accounts for as an orphan, including one it never created.
+  So while a GPUStack workload holds the GPU the node advertises room it does not have, and that
+  **never converges**: placement reads live NVML and will not double-book it, but the accounting above
+  stays wrong. Once the GPU is drained the reverse happens: after its debounce the reclaimer **destroys**
+  an instance no allocation accounts for as an orphan, including one it never created.
 
   An instance with something **running on it** is the exception: it is left alone and re-checked each
   cycle, so one you carved by hand survives for as long as you are using it.
@@ -285,7 +285,7 @@ $ kubectl label node <node> nvidia.com/mig.config=all-enabled --overwrite
 ```
 
 The label is per node, so a fleet can mix freely: nodes labelled `all-enabled` serve partitions, nodes
-labelled `all-disabled` — or carrying no label at all — stay whole-card.
+labelled `all-disabled` (or carrying no label at all) stay whole-card.
 
 **Restarting the Device Manager is still yours to do**, on every node whose label you changed, exactly as
 in step 4 above. The MIG Manager restarts the GPU clients it owns, and this operator's Device Manager is
@@ -327,18 +327,18 @@ A workload running before the reboot lost its instance, so **resubmit it** — d
 Pod/workload, and the operator materializes a fresh instance on admission. A lingering pre-reboot Pod keeps
 its ownership record but has no live instance, so its device allocation fails closed until it is recreated.
 
-## What GPUStack Operator does *NOT* do
+## What GPUStack Operator does NOT do
 
-- Enable, disable or reconfigure MIG *mode* — `nvidia-smi` operations you run.
+- Enable, disable or reconfigure MIG mode — `nvidia-smi` operations you run.
 - Trigger on nodeconfig or labels, flip the mode automatically, rewrite its geometry, or deschedule and
-  evict Pods on a *mode* change.
-- Account for an instance you carved by hand — though it *does* delete it as an orphan once its GPU is
+  evict Pods on a mode change.
+- Account for an instance you carved by hand — though it does delete it as an orphan once its GPU is
   idle and nothing is running on it ([Limitations](#limitations)).
-- Hand out a *subdivided* instance, or subdivide one itself — it creates a GPU instance with a single
+- Hand out a subdivided instance, or subdivide one itself — it creates a GPU instance with a single
   compute instance covering all of it, and refuses one somebody else subdivided
   ([How partition profiles are discovered](#how-partition-profiles-are-discovered)).
 
-It *does* create and destroy the *instances* backing scheduled workloads
+It does create and destroy the instances backing scheduled workloads
 ([Requesting a partition](#requesting-a-partition)).
 
 ## Walkthrough: three MIG configurations on one node
@@ -564,7 +564,7 @@ Every number is `Σ over GPUs of (allocated + remaining)`, which makes them subt
 
 Read the `3g.40gb` row as `allocated (1) + remaining (1)`: the scheduler subtracts `mig-demo`'s request and
 sees **one** more fitting there. `7g.80gb` and `4g.40gb` each lost exactly the carved GPU; `3g.40gb` lost
-nothing — [2.5](#25-where-those-numbers-come-from) walks why.
+nothing; [2.5](#25-where-those-numbers-come-from) walks why.
 
 Deleting the Pod releases the credits immediately; the hardware and the profile keys follow within one
 [reclaim cycle](#requesting-a-partition).
@@ -575,7 +575,7 @@ Deleting the Pod releases the credits immediately; the hardware and the profile 
 
 #### 2.5 Where those numbers come from
 
-Four kinds of number count that one carved GPU, and they disagree — deliberately.
+Four kinds of number count that one carved GPU, and they disagree, deliberately.
 
 **Per GPU it is interval overlap, nothing more.** A profile may only start at one of its
 [hardcoded slots](#how-partition-profiles-are-discovered), and an instance fits when its interval overlaps nothing already
@@ -598,7 +598,7 @@ Every profile is re-counted against that occupied interval:
 | `4g.40gb` | 4 | 0 | 0 | — | 0 |
 | `7g.80gb` | 8 | 0 | 0 | — | 0 |
 
-One row repays a second read: `4g.40gb` contributes **0 allocated**, not 1, since the ledger keys an
+One row is easy to misread: `4g.40gb` contributes **0 allocated**, not 1, since the ledger keys an
 allocation by the profile actually built.
 
 **The four numbers, and what each sums** over the node's seven untouched GPUs plus the carved one:
@@ -611,11 +611,11 @@ allocation by the profile actually built.
 | `InstanceType` `PT` onceMaxRequest | `1` | not a sum: `1` while any GPU can host an instance, else `0` | one request builds one instance on one GPU, and both ingress paths reject any other count |
 
 `53` and `52` differ by exactly the one live instance, which only the pool key carries. And `onceMaxRequest`
-is `1`, not `52`, because no single request could consume the node's remainder — nor even two instances.
+is `1`, not `52`, because no single request could consume the node's remainder, nor even two instances.
 
 **A GPU's contribution is a maximum, never a sum.** The carved GPU contributes `3` to those last three
 numbers, not `3 + 2 + 1 + 1 = 7`: its profiles compete for the same slices, so creating one consumes
-placements of the others. Three `1g.10gb`, or fewer larger ones — never both.
+placements of the others. One GPU holds three `1g.10gb`, or fewer larger ones, never both.
 
 **The capability snapshot does not move at all.** `status.detail.slicedDetail` still reports
 `physical.count: 56` and `4g.40gb: 8` after the carve, unchanged from
@@ -623,13 +623,13 @@ placements of the others. Three `1g.10gb`, or fewer larger ones — never both.
 record of what these GPUs could host when empty, and never reads the runtime ledger. Every number in the
 table above joins that spec capability with the `Devices` **status** ledger.
 
-So read `slicedDetail` as "what is this pool made of", never as a remainder — the node keys and `PT` answer
+So read `slicedDetail` as "what is this pool made of", never as a remainder; the node keys and `PT` answer
 "what is still free".
 
 ### 3. Mixed — part logical, part physical
 
-Disabling MIG on five of the eight leaves three partitioned — the configuration where **both** families are
-advertised at once:
+Disabling MIG on five of the eight leaves three partitioned: the configuration where **both** families are
+advertised at once.
 
 ```console
 # On node-h100 (via SSH):
@@ -747,7 +747,7 @@ $ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(se
 ```
 
 Only the partitioned GPUs' keys moved: the `3g.40gb` was carved outside the whole GPUs' population, so their
-`.sliced.*` keys are untouched. The placement is not luck — a partition token exists only on a
+`.sliced.*` keys are untouched. The placement is not luck. A partition token exists only on a
 partitioned GPU, a `.sliced` token only on a whole one, so the resource name rules out the wrong population
 before the kubelet is involved.
 

@@ -5,7 +5,7 @@ vendor artifact and product version its statements were read against.
 
 Every section starts with what to **install before GPUStack**. Where the vendor also ships a GPU
 Operator, it goes on to say which of that operator's components conflict with ours, how to **install
-it** alongside GPUStack, and — if it is **already installed** — what to change before GPUStack can go
+it** alongside GPUStack, and, if it is **already installed**, what to change before GPUStack can go
 on the same node.
 
 ## Contents
@@ -49,8 +49,6 @@ between the two views, and a Pod can fail admission during the flap.
 
 An `Allocate` call can also arrive carrying the *other* plugin's device IDs — GPUStack's own responder
 rejects those outright (`ParseResourceToken` in `pkg/deviceplugin/server.go`, called from `Allocate`).
-The symptom of two plugins claiming one resource is flapping capacity and admission failures, not a
-clean startup error.
 
 ## One Node Feature Discovery per cluster
 
@@ -71,7 +69,7 @@ the install mode gives you: `--set node-feature-discovery.enabled=false` in char
 Modes](../operate/installation-modes.md#chart-mode-and-image-mode) has the difference.
 
 Either way the worker still applies the `gpustack-cpu-info` NodeFeatureRule itself, so that one is never
-the replacement's to install — only to evaluate. Ours is configured for six things an NFD must do
+the replacement's to install, only to evaluate. Ours is configured for six things an NFD must do
 here, and a replacement must be too:
 
 1. A worker collecting `pci`, with `vendor` among its `deviceLabelFields` and device classes `02`, `03`,
@@ -92,14 +90,14 @@ A vendor chart that bundles NFD as a subchart exposes all five, so its NFD can b
 The NVIDIA GPU Operator's already publishes `vendor` as its only `deviceLabelFields`, which is what
 item 1 asks for, and collects every source, which is item 2; its device classes are the gap.
 
-It whitelists `0300` and `0302` — the GPUs it was written for — and neither `0b` nor `12`, so an
+It whitelists `0300` and `0302` (the GPUs it was written for) and neither `0b` nor `12`, so an
 accelerator in either class never gets the label its device manager schedules on, and that DaemonSet
 stays unscheduled with nothing to say why. Both values live under that chart's
 `node-feature-discovery.worker.config.sources.pci`.
 
 Item 6 is not a version problem there: both charts vendor NFD 0.19.0, so the CRDs are the same objects
 and all that has to be settled is which release owns them. And the class gap only bites once a second
-manufacturer is present — the display-controller classes it does whitelist cover NVIDIA and AMD, so a
+manufacturer is present: the display-controller classes it does whitelist cover NVIDIA and AMD, so a
 cluster holding only those is already served by its list.
 
 Read the six items as a checklist rather than a recipe: every cluster this page was written against
@@ -108,7 +106,7 @@ ran the NFD this chart bundles, so a handover has not been observed end to end.
 ## A removed plugin's resource lingers
 
 Removing a vendor's device plugin does not immediately remove its extended resource from the Node
-object — the kubelet only drops it once it reconverges. A scheduler can keep seeing the old resource as
+object: the kubelet only drops it once it reconverges. A scheduler can keep seeing the old resource as
 allocatable for a window after the plugin is gone, so "disabled" is not the same moment as "gone" from
 a scheduling decision's point of view.
 
@@ -126,10 +124,10 @@ devices](#who-injects-the-devices), our allocator injects `/dev/kfd` and each gr
 nodes itself, so neither the AMD Container Toolkit nor `amd-container-runtime` is needed.
 
 A non-root workload still needs `video` and `render` supplementary-group membership on its container's
-user — the device plugin API has no field to grant a supplementary group, so this is the workload's or
+user: the device plugin API has no field to grant a supplementary group, so this is the workload's or
 the cluster's own `securityContext` to set. Measured, the failure mode without it is **zero enumerated
 ROCm agents, not an error**: `rocm-smi` reads sysfs and keeps reporting the accelerator regardless, so
-it is not a valid check here — use `rocminfo` instead.
+it is not a valid check here; use `rocminfo` instead.
 
 **Vendor GPU Operator** — the AMD GPU Operator, driven by a `DeviceConfig` CR the chart creates.
 
@@ -199,7 +197,7 @@ that is not there is fatal, so container creation fails, naming that device rath
 behind it.
 
 The cards are not the gap: `/dev/davinci<N>` is built from the requested index with no chip name
-involved, so an older runtime would have injected them. It never gets that far.
+involved, so an older runtime would have injected them, but it never gets that far.
 
 `ascend-docker-runtime --version` does not answer this. It is a `runc` wrapper that hands every
 unrecognized argument to the host's own `runc`, so `--version` prints `runc`'s banner and says nothing
@@ -229,7 +227,7 @@ Config_Error_Ranktable(EI0014): Value 1.0 for ranktable variable version is inva
 Expected value: 2.0.
 ```
 
-So a table left behind by an older fleet stops every **multi-card** job on the node — single-card
+So a table left behind by an older fleet stops every **multi-card** job on the node: single-card
 allocations never build a communicator and are unaffected. No environment variable disables the
 check, and the path is compiled into the library, so the file must be corrected rather than worked
 around:

@@ -109,12 +109,13 @@ server only.
 
 ## Capability map for GPUStack server
 
-By capability, not by field.
+The table matches each GPUStack server capability to the API surface that covers it; the gap
+column names what is missing and who owns it.
 
 | GPUStack server | This API | Gap and owner |
 | --- | --- | --- |
-| A source: Hugging Face repository, ModelScope model, local path | `ModelArtifact.spec.source`: `huggingFace`; a local path is a `persistentVolumeClaim` source | ModelScope is reserved and refused, a later source change |
-| One file of a repository (`huggingface_filename`, a GGUF) | `allowPatterns: ["<file>"]` | none |
+| A source: Hugging Face repository, ModelScope model, local path | `ModelArtifact.spec.source`: `huggingFace` or `modelScope`; a local path is a `persistentVolumeClaim` source | none |
+| One file of a repository (`huggingface_filename`, a GGUF) | `allowPatterns` with a single `<file>` entry | none |
 | A model file per worker, its `state` and `state_message` | the node's `status.models[]` entry: `state`, `reason`, `message` | none |
 | `download_progress` and `size` | the entry's `downloadedBytes` and `sizeBytes`; live through `progress`; the artifact's `status.nodes` | none |
 | `resolved_paths` on the worker | the fixed mount path in the consumer's container; host paths are never exposed | by design |
@@ -137,20 +138,18 @@ By capability, not by field.
   that blocks it leaves the stored values, and `live` says how many nodes answered.
 - **No watch on `progress`**: it answers one request. Watch NodeModelStores for changes.
 
----
-
-**See also** — [Model Artifact](artifact.md) for the artifact itself ·
-[Node Model Store](node-store.md) for each node's entries and the progress write rule ·
-[Model Deployment Metrics](../model-deployment/metrics.md) for the other subresource built
-the same way.
-
-**Next** → [Node Model Store](node-store.md)
-
 ## Table columns
 
 The aggregated API server renders the printer columns with its own `TableConvertor`
 (`NewJSONPathTemplateTableConvertor`, under `pkg/worker/extensionapis/worker/`). The columns in the
 resource table above describe the output of `kubectl get`.
 
-**See also** — [Node-to-Node Sync](peer-sync.md) for where a node's bytes come from,
-and [Node Model Store](node-store.md) for the status the views project.
+---
+
+**See also** — [Model Artifact](artifact.md) for the artifact itself ·
+[Node Model Store](node-store.md) for each node's entries and the progress write rule ·
+[Node-to-Node Sync](peer-sync.md) for where a node's bytes come from ·
+[Model Deployment Metrics](../model-deployment/metrics.md) for the other subresource built
+the same way.
+
+**Next** → [Node Model Store](node-store.md)

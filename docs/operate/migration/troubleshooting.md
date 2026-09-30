@@ -16,9 +16,9 @@ live guidance, for older releases and for the reset any release can meet too.
 
 ## Worker CrashLoopBackOff after an upgrade
 
-The symptom: after an in-place upgrade — re-applied server-rendered manifests in image mode, `helm
-upgrade` in chart mode — the new worker pod never leaves `CrashLoopBackOff`, yet the Deployment reports
-ready, because the old ReplicaSet's pod is still serving. The aggregated API answers with the OLD
+The symptom: after an in-place upgrade (re-applied server-rendered manifests in image mode, `helm
+upgrade` in chart mode) the new worker pod never leaves `CrashLoopBackOff`, yet the Deployment reports
+ready, because the old ReplicaSet's pod is still serving. The aggregated API answers with the old
 binary's surface: `kubectl api-resources --api-group=worker.gpustack.ai -o wide` shows the old verbs,
 and writes to `instancetypes` are refused.
 
@@ -30,9 +30,9 @@ release gpustack-operator-device-manager: ... rolled back due to atomic being se
 ```
 
 What happened: the boot's atomic Helm upgrade of `gpustack-operator-device-manager` was interrupted and
-rolled back, and the rollback deleted Kueue CRDs the interrupted upgrade had just adopted. Every later
-boot then fails patching a CRD the release record still references but the cluster no longer has, and a
-pod that fails its install never becomes Ready.
+rolled back, and the rollback deleted Kueue CRDs the interrupted upgrade had just adopted. On every
+later boot the worker then fails while patching a CRD that the release record still references but the
+cluster no longer has, and a pod that fails its install never becomes Ready.
 
 > **Why the old pod keeps serving** — the pre-fix worker Deployment rolled with maxUnavailable 0, so the
 > old pod is held Ready until the new one passes its probes. The new one never does: its install fails
@@ -59,22 +59,22 @@ kubectl api-resources --api-group=worker.gpustack.ai -o wide
 ```
 
 If the pod still fails on a missing Kueue CRD, check whether the CRD itself is stuck `Terminating`
-(`kubectl get crd | grep kueue`) — that is the finalizer deadlock of [Migrating from
+(`kubectl get crd | grep kueue`); that is the finalizer deadlock of [Migrating from
 v0.5.x](from-v0.5.md#kueue-finalizer-deadlock-self-healed-automatically), which the chart's
 migrate-pre hook reaps on the next boot. When neither repair converges, take the full reset below.
 
 ## Namespace stuck Terminating
 
 The symptom: `kubectl delete ns gpustack-system` never finishes, and `kubectl describe ns
-gpustack-system` reports `NamespaceDeletionDiscoveryFailure` — the APIServices `v1.gpustack.ai`,
+gpustack-system` reports `NamespaceDeletionDiscoveryFailure`: the APIServices `v1.gpustack.ai`,
 `v1.worker.gpustack.ai` and Kueue's two `visibility.kueue.x-k8s.io` ones stand at `False
 (ServiceNotFound)`. They are cluster-scoped and outlive their namespaced backing Services, and
 namespace GC cannot finish discovery while they do.
 
 Current releases remove all four themselves once the namespace is Terminating
 (`deregisterOnTeardown` in `pkg/worker/worker.go` deletes every APIService backed by the
-namespace, Kueue's pair included). On an older release — or wherever one is left — delete them
-by backing Service, not by name, and stop the worker FIRST: its ensurer recreates them within
+namespace, Kueue's pair included). On an older release (or wherever one is left) delete them
+by backing Service, not by name, and stop the worker first: its ensurer recreates them within
 ~30 seconds while it runs.
 
 ```bash
@@ -89,7 +89,7 @@ kubectl get apiservices -o jsonpath='{.items[?(@.spec.service.namespace=="'"$NS"
   | xargs -r kubectl delete apiservice
 ```
 
-The namespace then finalizes within about a minute. If it still hangs, describe it again — the
+The namespace then finalizes within about a minute. If it still hangs, describe it again; the
 condition names the next discovery group that cannot be listed, and the same two steps clear it.
 
 Two more kinds of debris outlive the namespace and bite **after** it is gone. Neither blocks the
@@ -97,9 +97,9 @@ finalizer, which is why they surface only on the next operation:
 
 - The `kueue-*` and `gpustack-worker-*` Mutating/ValidatingWebhookConfigurations keep
   intercepting creates and updates **cluster-wide** (Deployments included) with
-  `failurePolicy: Fail`, calling Services that no longer exist — the next `kubectl apply` of any
+  `failurePolicy: Fail`, calling Services that no longer exist, so the next `kubectl apply` of any
   Deployment fails with `service "kueue-webhook-service" not found`. Name patterns only nominate
-  the sweep — an external Kueue install matches them too — so confirm by the backing Service's
+  the sweep (an external Kueue install matches them too), so confirm by the backing Service's
   namespace before deleting:
 
   ```bash
@@ -113,13 +113,13 @@ finalizer, which is why they surface only on the next operation:
 - Orphaned cluster-scoped RBAC and `CSIDriver` objects still carry
   `meta.helm.sh/release-name` of a release whose record died with the namespace, so a reinstall
   CrashLoops the worker on `invalid ownership metadata`, and no adoption re-fires (it gates on
-  the legacy release records — exactly what is gone). Current `cleanup.sh` sweeps them; on an
+  the legacy release records, exactly what is gone). Current `cleanup.sh` sweeps them; on an
   older copy the same pattern over `clusterrole,clusterrolebinding,csidriver` clears them, plus
   `kubectl -n kube-system delete rolebinding kueue-visibility-server-auth-reader`.
 
 **Never** force-finalize a stuck namespace (`kubectl replace --raw .../finalize`, or patching
 `metadata.finalizers` away): the namespace object vanishes while whatever the deletion had not reached
-stays behind — CRs, Secrets, the very APIServices above — orphaned for good.
+stays behind (CRs, Secrets, the very APIServices above), orphaned for good.
 
 ## Kueue CRDs stuck Terminating after a teardown
 

@@ -1,7 +1,8 @@
 # Installation Modes
 
-The operator can deploy its dependencies as subcharts in one Helm release, or let the worker
-install them at runtime. Choose one mode for the cluster; both use the operator chart's `values.yaml`.
+The operator installs its dependencies two ways. Chart mode renders them as subcharts in one Helm
+release; image mode has the worker install them at runtime. Choose one mode per cluster; both read
+the operator chart's `values.yaml`.
 
 ## Contents
 
@@ -12,19 +13,19 @@ install them at runtime. Choose one mode for the cluster; both use the operator 
 
 ## Chart mode and image mode
 
-Kueue, NFD, Topograph and the two CSI drivers are **vendored subcharts** of the operator chart
+Kueue, NFD, Topograph and the two CSI drivers are vendored subcharts of the operator chart
 (`deploy/gpustack-operator/chart/charts/`), each behind an `enabled` switch. Their one configuration
 surface is the chart's `values.yaml`, reachable two ways:
 
-- **Chart mode (the default).** Helm renders the worker, the device-manager DaemonSets and the four
-  subcharts in **one release**; the worker starts with `--disable-applications=*`
+- Chart mode (the default): Helm renders the worker, the device-manager DaemonSets and the four
+  subcharts in one release; the worker starts with `--disable-applications=*`
   (`worker.disableApplications`, default `["*"]`) and installs nothing at runtime.
-- **Image mode.** No Helm release deploys the worker; it runs from a checkout or outside the cluster and
-  installs the chart **packaged into its own image**
+- Image mode: no Helm release deploys the worker. It runs from a checkout or outside the cluster and
+  installs the chart packaged into its own image
   (`${GPUSTACK_CONF_DIR:-/etc/gpustack}/charts/gpustack-operator-<version>.tgz`) as release
   `gpustack-operator-device-manager`.
 
-  Its overlay is the **whole** values surface, so an override like `kueue.controllerManager.replicas`
+  Its overlay is the whole values surface, so an override like `kueue.controllerManager.replicas`
   cannot be expressed. The overlay comes from the worker's own flags and settings: `worker.enabled=false`,
   `fullnameOverride: gpustack-operator`, one `enabled` per component, and the manufacturer map.
 
@@ -36,8 +37,8 @@ surface is the chart's `values.yaml`, reachable two ways:
 also renders the overlay's switches.
 
 `gpustack-cpu-info` is in neither set: that NodeFeatureRule has **no `enabled` switch**, since the chain
-starts at it. Every mode needs it, including `node-feature-discovery.enabled=false` — the supported way
-to run against the cluster's own NFD. Hence the worker applies it, not the chart (see
+starts at it. Every mode needs it, including `node-feature-discovery.enabled=false`, the supported way
+to run against the cluster's own NFD. That is why the worker applies it rather than the chart (see
 [below](#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)).
 
 Topograph is also absent from the image-mode application map. It is an optional provider stack,
@@ -57,8 +58,8 @@ worker's install fails on the first one and it never starts: startup is gated on
 > **Why** — measured: `ServiceAccount "csi-nfs-controller-sa" ... invalid ownership metadata`; Helm
 > names whichever shared object it maps first.
 
-Splitting components across the sides is no way out: the switches are independent, so it means
-disabling a component here and in `worker.disableApplications` in step, every upgrade, with nothing
+Splitting components across the sides does not work either. The switches are independent, so it means
+disabling a component here and in `worker.disableApplications` in step, at every upgrade, with nothing
 checking it. Wherever this chart deploys the worker, `worker.disableApplications` keeps the `*`; image
 mode is for clusters where no chart deploys it.
 
@@ -66,24 +67,24 @@ mode is for clusters where no chart deploys it.
 
 Because they change what a mode installs:
 
-- **`deviceManager.enabled=false`** — the chart renders no device-manager DaemonSets, nothing more. It
+- `deviceManager.enabled=false` — the chart renders no device-manager DaemonSets, nothing more. It
   does **not** hand that install to the worker: with the wildcard the worker installs nothing, so the
   cluster has no device managers (useful for control-plane-only). Before chart mode covered them, this
   switch was how the worker came to install them.
-- **`modelManager.enabled=false`** — no model-manager DaemonSet and no CSIDriver, and the worker
+- `modelManager.enabled=false` — no model-manager DaemonSet and no CSIDriver, and the worker
   then seeds no `Node` delivery; see [Model Store Operations](../modules/model-delivery/operations.md#enable-it).
-- **`worker.enabled=false`** — the chart deploys only the applications, what image mode's overlay sets.
+- `worker.enabled=false` — the chart deploys only the applications, what image mode's overlay sets.
 
 ## The chart deploys workloads; the worker applies the custom resources
 
-**A chart cannot own a custom resource whose CRD it does not ship.** Helm REST-maps the *entire*
+A chart cannot own a custom resource whose CRD it does not ship. Helm REST-maps the *entire*
 manifest before creating anything, so an unserved kind fails the whole install rather than degrading.
 The worker applies three resources after their CRDs become available:
 
 - the `gpustack-node-devices` and `gpustack-model-deployment-joint` AdmissionChecks. Their CRD belongs
   to Kueue, which templates its CRDs, so nothing can order it ahead of a custom resource in the same
   render;
-- the `gpustack-cpu-info` **NodeFeatureRule** — its CRD belongs to NFD, and the rule is required even
+- the `gpustack-cpu-info` NodeFeatureRule, whose CRD belongs to NFD. The rule is required even
   when `node-feature-discovery.enabled=false`; that install ships no NFD CRD, so a chart-owned rule
   fails outright: `resource mapping not found ... no matches for kind "NodeFeatureRule"`.
 
@@ -100,10 +101,10 @@ The joint check immediately passes workloads outside a multi-role ModelDeploymen
 single-role deployments. Queue reference conditions are in `node_queue.go`; the checks are installed
 by `pkg/worker/kuberess/apps_kueue_admission_check.go`.
 
-The division: **the chart deploys workloads and configuration; the worker applies the custom resources
-whose CRDs the chart cannot order** — the boundary the worker's own CRDs, aggregated APIServices and
-webhook configurations already sit on, in Go for the same reason. The cost: `helm template` shows none
-of them. All are *applied*, not created, so a repeat run only sets `spec`, never clobbering a
+The chart deploys workloads and configuration; the worker applies the custom resources whose CRDs
+the chart cannot order. The worker's own CRDs, aggregated APIServices and webhook configurations
+already sit on that side, in Go for the same reason. The cost: `helm template` shows none
+of them. All are *applied*, not created, so a repeat run only sets `spec` and never clobbers a
 controller-owned status.
 
 No release owns them either, so `helm uninstall` leaves them behind. Both AdmissionChecks go with

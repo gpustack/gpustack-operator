@@ -1,9 +1,9 @@
 # Upgrading to an Enforced Binding Dtype
 
 From this release, a Binding's `spec.domain.dtype` stops being a declaration and becomes the engine's
-`--kv-cache-dtype`. The rule itself is stated once, under
-[The dtype is handed to the engine](../../modules/kv-cache/pool.md#the-dtype-is-handed-to-the-engine); this page
-is what the switch does to objects that already exist.
+`--kv-cache-dtype`, changing objects a running cluster already holds. The rule itself is stated once,
+under
+[The dtype is handed to the engine](../../modules/kv-cache/pool.md#the-dtype-is-handed-to-the-engine).
 
 ## Contents
 
@@ -15,17 +15,17 @@ is what the switch does to objects that already exist.
 
 ## What changes on upgrade
 
-- **Every pool-attached `ModelDeployment` rolls once.** Its replicas gain an argument, which moves
+- Every pool-attached `ModelDeployment` rolls once. Its replicas gain an argument, which moves
   their spec hash, so each is replaced at the deployment's first reconcile after the upgrade.
-- **The `dtype` reaches the engine verbatim.** A spelling that engine rejects — `bf16` on vLLM,
-  `fp8` or `float16` on SGLang — makes every new Pod fail argument parsing, so each replica the
+- The `dtype` reaches the engine verbatim. A spelling that engine rejects (`bf16` on vLLM,
+  `fp8` or `float16` on SGLang) makes every new Pod fail argument parsing, so each replica the
   rollout replaces stops serving.
-- **A role's own `--kv-cache-dtype` is refused** while it attaches a pool. A deployment already
+- A role's own `--kv-cache-dtype` is refused while it attaches a pool. A deployment already
   stored with one keeps running on its own value, which wins because it comes later on the command
   line, until its next update is refused.
-- **A Pod opting into injection is refused** when its container passes the flag itself, so its
+- A Pod opting into injection is refused when its container passes the flag itself, so its
   owner reports `FailedCreate` until the flag is removed.
-- **A new Binding may not declare `auto`.** One stored with it keeps working and stays updatable.
+- A new Binding may not declare `auto`. One stored with it keeps working and stays updatable.
 
 ## Check every Binding first
 
@@ -39,7 +39,8 @@ kubectl get kvcachepoolbindings -A \
 Each engine's accepted spellings are listed once, under
 [The dtype is handed to the engine](../../modules/kv-cache/pool.md#the-dtype-is-handed-to-the-engine). A
 Binding whose deployments run both engines needs a value in both rows there. A spelling its engine
-does not accept is the case the next sections recover from, and it is cheaper to fix before upgrading.
+does not accept is what the next two sections recover from, and fixing it before upgrading is
+cheaper.
 
 ## Find roles that pass the flag themselves
 
@@ -67,7 +68,7 @@ kubectl -n gpustack-system patch setting model-deployment-kv-cache-dtype-owned \
 
 Then move the workloads to a Binding with a spelling the engine accepts, and turn the Setting back on:
 
-1. Create a new Binding on the same pool with the corrected `dtype` and a new `domain.name` — the old
+1. Create a new Binding on the same pool with the corrected `dtype` and a new `domain.name`; the old
    name stays claimed until the old Binding is gone.
 2. Recreate each deployment with `spec.kvCache.poolRef.name` naming the new Binding. `kvCache` is an
    identity field, so it is a new deployment rather than an edit.

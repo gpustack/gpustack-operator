@@ -1,12 +1,12 @@
 # High Availability Operations
 
-Every control-plane component the chart deploys elects a leader, so extra replicas stand by: **they buy
-failover, not throughput.** A highly available install raises each replica count and turns on its
+Every control-plane component the chart deploys elects a leader, so extra replicas stand by. They buy
+failover, not throughput. A highly available install raises each replica count and turns on its
 disruption budget; everything else is one pod per node (device managers, NFD worker, both CSI node
 DaemonSets).
 
-Configure it in `values.yaml`: no HA values file ships; every knob below sits at its chart's default,
-caveats inline.
+Configure it in `values.yaml`: no HA values file ships. Every knob below sits at its chart's default,
+and the caveats are inline.
 
 ## Contents
 
@@ -41,8 +41,8 @@ an install that relied on that must set their three lists before upgrading. Upgr
 | NFS CSI controller | `csi-driver-nfs.controller.replicas` | — none — | `csi-driver-nfs.controller.topologySpreadConstraints` (vendored patch) |
 | S3 CSI controller | `csi-driver-s3.controller.replicas` | — none — | — none — |
 
-Those "none"/"only" cells are upstream chart limitations, not oversights: each changes what "three
-replicas" gets you, and is spelled out below.
+Those "none" and "only" cells are upstream chart limitations: each changes what three replicas get
+you, and each is spelled out below.
 
 ### A values file to start from
 
@@ -104,71 +104,71 @@ helm upgrade gpustack-operator gpustack/gpustack-operator \
 
 ### Worker (control plane)
 
-The worker runs the aggregated extension API server *and* the scheduling-chain controllers in one
-process. Only one replica reconciles (leader election is always on) — but **every replica serves the
-extension API and the admission webhooks**: with one, losing its node takes `kubectl get instancetypes`
+The worker runs the aggregated extension API server and the scheduling-chain controllers in one
+process. Only one replica reconciles, because leader election is always on. Every replica serves the
+extension API and the admission webhooks, so with one, losing its node takes `kubectl get instancetypes`
 and Pod admission down until it reschedules.
 
 Node spread belongs in `worker.topologySpreadConstraints`. Its default `preferred` pod anti-affinity is
 deliberate: replicas stay off one node without any becoming unschedulable, so three still come up on two
 nodes. An entry omitting `labelSelector` gets the worker's own; `worker.affinity` **replaces** the
-default, not adds to it.
+default rather than adding to it.
 
 ### Kueue controller manager
 
-Kueue's `managerConfig` elects a leader, so standbys do not reconcile — but each serves Kueue's admission
-webhook, `failurePolicy: Fail`: with one replica, losing its node **blocks Pod creation in every namespace
-Kueue manages** until rescheduled. HA buys the most here.
+Kueue's `managerConfig` elects a leader, so standbys do not reconcile. Each replica still serves Kueue's
+admission webhook, whose `failurePolicy: Fail` means one replica losing its node **blocks Pod creation in
+every namespace Kueue manages** until it reschedules. HA buys the most here.
 
-- **The spread constraints carry no selector of their own.** Unlike the worker's they render as given, so
-  a `DoNotSchedule` spread needs `labelSelector` spelled out — `app.kubernetes.io/name: kueue` plus
-  `control-plane: controller-manager`, as in the example; omit it and it counts every pod in the
-  namespace.
-- **The Kueue chart has no affinity key**: spread constraints are its only placement control.
+- The spread constraints carry no selector of their own. Unlike the worker's, they render as given, so
+  a `DoNotSchedule` spread needs `labelSelector` spelled out: `app.kubernetes.io/name: kueue` plus
+  `control-plane: controller-manager`, as in the example. Omit it and the spread counts every pod in
+  the namespace.
+- The Kueue chart has no affinity key, so spread constraints are its only placement control.
 
 ### NFD master
 
 The NFD master turns detections into node labels: while it is down, no node is (re)classified and the
-chain stalls for new or changed nodes — labelled nodes and admitted workloads are unaffected.
+chain stalls for new or changed nodes. Labelled nodes and admitted workloads are unaffected.
 
-- **NFD spells the budget key `enable`, not `enabled`** — a stray `enabled: true` is schema-valid and
+- NFD spells the budget key `enable`, not `enabled`: a stray `enabled: true` is schema-valid and
   does nothing.
-- **Above one replica, NFD's chart adds `-enable-leader-election` for you.** Standbys watch without
+- Above one replica, NFD's chart adds `-enable-leader-election` for you. Standbys watch without
   writing.
-- **NFD's templates render no topology spread constraints**, so spreading the master means
-  `node-feature-discovery.master.affinity` — which **replaces** NFD's preference for control-plane nodes;
+- NFD's templates render no topology spread constraints, so spreading the master means
+  `node-feature-discovery.master.affinity`, which **replaces** NFD's preference for control-plane nodes;
   re-state it if wanted.
 
-The **garbage collector** stays at one replica: a stalled GC only delays cleanup of a departed node's
+The garbage collector stays at one replica: a stalled GC only delays cleanup of a departed node's
 objects, which nothing reads.
 
 ### The two CSI controllers
 
-Losing a CSI controller delays volume provisioning, resizing and snapshotting; **volumes already mounted
-keep working**: the mounting side is the node DaemonSet. The least urgent of the four, with the weakest
-chart support.
+Losing a CSI controller delays volume provisioning, resizing and snapshotting; volumes already mounted
+keep working, because the mounting side is the node DaemonSet. These are the least urgent of the four,
+with the weakest chart support.
 
-Both charts render **no PodDisruptionBudget**, and honour `controller.affinity` **only when it carries
-`nodeSelectorTerms`** — a pod anti-affinity is schema-valid, then silently dropped.
+Both charts render no PodDisruptionBudget, and honour `controller.affinity` **only when it carries
+`nodeSelectorTerms`**: a pod anti-affinity is schema-valid, then silently dropped.
 
-The S3 chart renders no topology spread at all: two replicas may land on one node, a drain taking both —
-raise its count for process-level failover, not node-level redundancy.
+The S3 chart renders no topology spread at all, so two replicas may land on one node and a drain can
+take both. Raise its count for process-level failover; it gives no node-level redundancy.
 
 The NFS chart renders `controller.topologySpreadConstraints` through a vendored patch, and above one
 replica the spread is **required, not just prudent**: its pods run on the host network and bind the
-liveness health port there, so two pods on one node leave the second crash-looping on the bind, the
-Deployment never fully ready. The example's `labelSelector` must be spelled out, as Kueue's must.
+liveness health port there, so two pods on one node leave the second crash-looping on the bind and the
+Deployment never fully ready. As with Kueue, the example's `labelSelector` must be spelled out.
 
-Also set `strategyType: RollingUpdate`: both default to `Recreate`, taking every replica down before the
-new one starts — giving up at every upgrade the failover the replica was added for.
+Also set `strategyType: RollingUpdate`: both default to `Recreate`, which takes every replica down
+before the new one starts and gives up, at every upgrade, the failover the replica was added for.
 
 ## The one topology that cannot be made redundant
 
 When the worker runs **outside** the cluster it manages but near it (image mode, `!LoopbackKubeInside &&
-LoopbackKubeNearby`), its admission webhooks register against one node IP URL, not a Service: one
-endpoint, so extra replicas are unreachable ("launch multiple instances, only one takes working", says
-the code). **Keep that topology at one replica.** Chart mode is unaffected: always in-cluster,
-Service-backed webhooks.
+LoopbackKubeNearby`), its admission webhooks register against one node IP URL instead of a Service.
+That URL is a single endpoint, so extra replicas receive no traffic; the source calls this "launch
+multiple instances, only one takes working". **Keep that topology at one replica.** Chart mode is
+unaffected: its webhooks are always in-cluster and Service-backed.
 
 ## Verify
 

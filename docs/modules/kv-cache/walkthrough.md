@@ -3,7 +3,7 @@
 Create four objects in order: a store, a pool, a namespace grant and a workload that uses it.
 
 On a cluster with GPUStack installed, replace the node selector, namespace, instance type and model
-name in the manifests below, then apply them in order.
+name in the manifests below, then apply them in that order.
 
 ## Contents
 
@@ -29,9 +29,9 @@ leaves references that resolve to nothing. The scope split is the one the schedu
 uses: a cluster-scoped object owns capacity, a namespaced object draws on it, and the namespaced one
 is what RBAC is written against.
 
-**The Binding is the authorization point.** A namespace gets access to a store by an administrator
-creating a Binding in it — not by a user naming a pool, which `poolRef` makes unrepresentable by
-being a same-namespace reference.
+**The Binding is the authorization point.** A namespace gets access to a store when an administrator
+creates a Binding in it. A user naming a pool is not a path this API has: `poolRef` is a
+same-namespace reference, so the name it accepts is a Binding's.
 
 ## Step 1: the store
 
@@ -54,18 +54,18 @@ spec:
 
 `spec.image` is left unset on purpose: the cluster-wide `kv-cache-backend-image`
 [Setting](../../reference/settings.md) supplies this project's own build, which is the one that can elect a leader
-later. Naming a published upstream image here works until Step 4 and then does not — see
+later. Naming a published upstream image here works until Step 4 and then does not. See
 [High availability](leader.md#high-availability).
 
 `capacityPerMember` is charged to each member Pod's host memory request, so it is a claim on the node
 and not a hint. One member Pod runs per node the selector matches.
 
-`leader: {}` takes the field defaults, `multiTenancy` included, so this master keeps a per-tenant
-quota ledger and Steps 2 and 3 read against it. A backend pinned to a store image from before
-Mooncake 0.3.12 is the one exception and declares `multiTenancy: false` out loud — see
+`leader: {}` takes the field defaults, `multiTenancy` included (it defaults on), so this master keeps
+a per-tenant quota ledger and Steps 2 and 3 read against it. A backend pinned to a store image from
+before Mooncake 0.3.12 is the one exception and declares `multiTenancy: false` out loud. See
 [The project's own build variants](backend.md#the-projects-own-build-variants).
 
-Wait for it, and read what it actually says:
+Wait for it, then read what it reports:
 
 ```console
 $ kubectl get kvcb mooncake-dram -w
@@ -74,9 +74,9 @@ mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:5005
 ```
 
 **`CAPACITY` is read from the store, never derived from the spec.** Two nodes at `8Gi` show `16Gi`
-because both members registered their segments, so this figure is what says the store is really
-assembled. A number smaller than expected means a member has not registered yet, whatever the phase
-says — `kubectl describe kvcb mooncake-dram` and its `MembersMounted` condition name which.
+because both members registered their segments, so this figure is the evidence that the store is
+really assembled. A number smaller than expected means a member has not registered yet, whatever the
+phase says: `kubectl describe kvcb mooncake-dram` and its `MembersMounted` condition name which.
 
 ## Step 2: the pool and the grant
 
@@ -112,12 +112,12 @@ workload start reading blocks another tokenizer wrote. Pick it to match the mode
 settings the deployments in this namespace will run; a second, different model gets a second Binding.
 
 **`domain.name` is left out, so it is `default`.** The backend from Step 1 runs with multi-tenancy
-— `leader.multiTenancy` defaults on — so `default` is the tenant id the engines are handed, the
-store's own tenant for a writer that names none. Name each domain once a second Binding shares the
-master; the name is what keeps the two apart.
+(`leader.multiTenancy` defaults on), so the engines are handed the tenant id `default`, which is also
+the tenant the store uses for a writer that names none. Name each domain once a second Binding shares
+the master; the name is what keeps the two apart.
 
 **A quota ceiling is not a reservation.** It is the most this namespace may hold at once, and going
-over it does not fail a write — see
+over it does not fail a write. See
 [What a full quota actually does](pool.md#what-a-full-quota-actually-does).
 
 **The ceiling is enforced because the Step-1 leader carries its tenant ledger, which the default
@@ -126,8 +126,8 @@ admitted with a warning, the Binding reports `QuotaGranted=True` with reason `Un
 `EFFECTIVE` figure, and every write lands in the store's default tenant.
 
 **A multi-tenant master refuses a tenant name absent from its ledger.** An engine that ignores the
-injected tenant then needs a second Binding whose domain is `default`, or that leaves `name` out — see
-[Tenant compatibility](injection.md#tenant-compatibility-is-the-image-owners-responsibility).
+injected tenant then needs a second Binding whose domain is `default`, or that leaves `name` out.
+See [Tenant compatibility](injection.md#tenant-compatibility-is-the-image-owners-responsibility).
 
 ## Step 3: the workload
 
@@ -154,7 +154,7 @@ spec:
         accelerator: 1
 ```
 
-`kvCache` is optional — omit it and the deployment runs with no shared cache at all, which is the
+`kvCache` is optional. Omit it and the deployment runs with no shared cache at all, which is the
 useful comparison to have run once before attributing anything to the pool.
 
 **The engine is configured by injection, not by anything you write here.** The operator resolves the
@@ -163,8 +163,8 @@ role's Pod. What is injected per engine, and every refusal, is on
 [KV Cache Injection](injection.md).
 
 **The store version must match the engine's client.** The engine version above decides the client,
-and Step 1's unset `spec.image` leaves the store on the Settings default. A pair off DIFFERENT lines
-starts healthy and then fails every write, so the version above is a choice — see
+and Step 1's unset `spec.image` leaves the store on the Settings default. A pair on different lines
+starts healthy and then fails every write, so the version above is a choice. See
 [The store version must match the engine's client](backend.md#the-store-version-must-match-the-engines-client).
 
 Check the attachment from the deployment's own status rather than from the Pods:
@@ -186,7 +186,7 @@ spec:
         replicas: 3
 ```
 
-⛔ **The healthy steady state now reads `3 desired / 1 ready`, and that is not a broken Deployment.**
+**The healthy steady state now reads `3 desired / 1 ready`, and that is not a broken Deployment.**
 Exactly one leader serves; the other two are standbys, deliberately not ready so the leader Service's
 endpoints never include a process that cannot serve. During a healthy failover `2` are briefly ready
 as the old leader steps down. Both readings are normal.
@@ -212,12 +212,12 @@ answer it: that deadline requires every replica to be available, and only one ev
 
 ## Step 5: what a failover keeps
 
-Nothing in memory. A standby holds no data, so the replica that takes over knows none of the objects
-held in member memory and rebuilds from member remounts alone; a single leader that restarts does the
-same. High availability shortens the outage, and every one of those objects misses afterwards. Plan
-for a cold cache after every failover and every leader restart.
+**A failover keeps nothing in memory.** A standby holds no data, so the replica that takes over knows
+none of the objects held in member memory and rebuilds from member remounts alone; a single leader
+that restarts does the same. High availability shortens the outage, and every one of those objects
+misses afterwards. Plan for a cold cache after every failover and every leader restart.
 
-⛔ **The store's snapshot is not offered, and its flags are refused in `leader.extraArgs`**, because
+**The store's snapshot is not offered, and its flags are refused in `leader.extraArgs`**, because
 restoring a snapshot can make the cache serve another key's bytes instead of a miss.
 [High availability](leader.md#high-availability) says why.
 
@@ -226,7 +226,7 @@ restoring a snapshot can make the cache serve another key's bytes instead of a m
 **A published upstream store image, under high availability.** No published `kvcacheai/mooncake`
 image carries a leadership backend: the leader answers `UNAVAILABLE_IN_CURRENT_MODE` and runs as a
 permanent standby, and members answer `Invalid HA backend entry` and CrashLoopBackOff. `spec.image`
-and every `members[].image` need a build that has one — leaving them unset is the simplest way.
+and every `members[].image` need a build that has one. Leaving them unset is the simplest way.
 
 **Expecting a failover or a restart to keep the cache.** Neither does: the new leader knows none of
 the objects held in member memory, so every lookup for one misses until an engine writes it again.

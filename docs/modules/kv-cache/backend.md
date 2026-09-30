@@ -41,18 +41,21 @@ spec:
           capacityPerMember: 4Gi
 ```
 
-⚠️ The example's `0.3.13` line fits vLLM's clients and not SGLang's — pick `spec.image` from the
+The example's `0.3.13` line fits vLLM's clients and not SGLang's. Pick `spec.image` from the
 [Engine Versions](../model-deployment/engine-versions.md) before copying it.
 
 `connection.managed` and `connection.external` are both optional pointers and **exactly one** must be
 set; neither and both are refused at admission with a message naming the two. Several member groups
 are allowed; at most one of them may carry a [local disk tier](local-disk-tier.md).
 
-**`members[].medium` takes two values, `DRAM` and `VRAM`** — host memory or device memory. It is a
-choice rather than an identity: the renderer splits on it, charging the segment to the Pod's host
-memory on one and to nothing at all on the other, where the segment is device memory and claiming it
-is allocating it (see [The members](#the-members)). One binary is one medium, so a node contributing
-both does so as two groups selecting it.
+**`members[].medium` takes two values, `DRAM` and `VRAM`**: host memory or device memory. The
+renderer treats the two differently. On a `DRAM` group the segment is host memory, so the operator
+adds `capacityPerMember` to the member Pod's host memory request. On a `VRAM` group the segment is
+device memory, so the Pod request carries nothing for it: the member claims its slice by allocating
+it.
+
+One binary is one medium, so a node contributing both does so as two groups selecting it. See
+[The members](#the-members) for the renderings each value produces.
 
 The field is **immutable**: a segment already mounted cannot change the kind of memory underneath
 the data it holds, so an edit is refused and the choice is made when the group is declared.
@@ -73,8 +76,8 @@ each is reached another way:
 > receive a single write. The object would say one thing, the running member another, and nothing
 > would report a fault.
 
-⛔ **Without ratcheting, an object still carrying one of the other four values can never be updated
-again — including by the controller removing its finalizer, so it cannot be deleted.** CRD validation
+**Without ratcheting, an object still carrying one of the other four values can never be updated
+again, including by the controller removing its finalizer, so it cannot be deleted.** CRD validation
 runs on the **write** path only (`rest.BeforeCreate` / `rest.BeforeUpdate`): the object still reads
 back, and every update is refused. It is the shape of the Kueue upgrade finalizer deadlock.
 
@@ -85,17 +88,17 @@ works.
 The gate is unavailable before v1.28, off by default from v1.28, on by default from v1.30, and
 **locked on** from v1.33.
 
-⚠️ Those thresholds are read against the API server's **effective** version, not the version of its
+Those thresholds are read against the API server's **effective** version, not the version of its
 binary. `LockToDefault` is checked on the spec selected for the emulation version, so a newer server
 emulating an older one resolves to the older spec and can still be running with the gate off.
 
 By effective version, then, and against this chart's `kubeVersion: ">=1.23.0-0"`: the deadlock is
 **unavoidable** below v1.28, a matter of **configuration** from v1.28 through v1.32, and
-**foreclosed** from v1.33. Emulation does not move those boundaries — it is why the version printed
+**foreclosed** from v1.33. Emulation does not move those boundaries: it is why the version printed
 by a server's binary does not tell you which of the three it is in.
 
 Reaching that state at all takes a cluster that installed the CRD, ran with **no webhook**, and
-created a member in one of the removed values in that window — so it is a development cluster or
+created a member in one of the removed values in that window. That is a development cluster or
 nothing.
 `KVCacheBackend` is absent from every tag from `v0.8.0` through `v0.8.6`, checked per tag, and the
 commit adding it landed after `v0.8.6`.
@@ -108,21 +111,22 @@ The object is **cluster-scoped**: it names nodes, claims host memory and host pa
 and EFA paths needs `hostNetwork` and a fabric device. Only a cluster administrator can legitimately
 declare one.
 
-Tenant isolation is a different axis, handled one layer up — exactly as Kueue separates `ClusterQueue`
-from `LocalQueue` (<https://kueue.sigs.k8s.io/docs/concepts/>). One backend can be referenced by
-several pools, which is the only reason a backend and a quota domain are separate objects.
+A pool sets the quota ceiling on a backend; a Binding grants a namespace a share of that quota.
+This mirrors Kueue's `ClusterQueue` and `LocalQueue` split
+(<https://kueue.sigs.k8s.io/docs/concepts/>). Several pools can reference one backend. The grant
+does not enforce access to the store; see [What a Binding does not do](pool.md#what-a-binding-does-not-do).
 
 ## The image
 
 **`spec.image` is explicit and never derived from the operator's own image**, which breaks
 deliberately with how the Device Manager image is derived from the worker image. Leave it unset and
 the cluster-wide `kv-cache-backend-image` Setting supplies it. That Setting ships a default, so a
-backend naming no image runs this project's own build; unset in both places — which takes an
-administrator clearing the Setting — is refused at admission, naming both.
+backend naming no image runs this project's own build; unset in both places (which takes an
+administrator clearing the Setting) is refused at admission, naming both.
 
 **Clearing that Setting later does not strand a backend admitted under it.** Admission re-asks for a
 fallback only when an update moves `spec.image` itself. Every other update is admitted whatever the
-Setting says now — including the reconciler's own removal of the finalizer, which would otherwise
+Setting says now. That includes the reconciler's own removal of the finalizer, which would otherwise
 leave an object that owns nothing and cannot be deleted.
 
 > **Why** — the master's link-time dependencies differ per published vendor variant, so no single
@@ -144,12 +148,11 @@ build:
 | `-npu` | thin shims over `libmooncake_store.so`, plus a separate `ascend_transport.so` | plus Ascend |
 
 **The master image needs no accelerator runtime; a member image needs the runtime of the transport it
-uses.** That is the sentence whoever picks an image needs. An `-npu`-built master on an all-NVIDIA
-cluster is legitimate — the master is a pure metadata service. A member on `ascend`, by contrast,
-needs CANN (`libascendcl.so`) in its container, and a CANN-less image fails as a loader error whose
-own message reaches `status.phaseMessage`.
+uses.** An `-npu`-built master on an all-NVIDIA cluster is legitimate, because the master is a pure
+metadata service. A member on `ascend`, by contrast, needs CANN (`libascendcl.so`) in its container,
+and a CANN-less image fails as a loader error whose own message reaches `status.phaseMessage`.
 
-A member on `EFA` needs libfabric in its image, and one that can drive the node's adapter — not the
+A member on `EFA` needs libfabric in its image, and one that can drive the node's adapter, not the
 distro build. `mirrored-mooncake` installs AWS's, ahead of that copy in its loader cache.
 
 Nothing has to be built to run this **without high availability**.
@@ -158,7 +161,7 @@ The example image above is published for amd64 and arm64 and carries **both** `m
 It runs on a host with no GPU: its `libcuda.so.1` is a stub and its `libcudart.so.12` is the real
 library, and neither reaches a driver.
 
-⛔ **[High availability](leader.md#high-availability) needs a different image, and for both roles.** That
+**[High availability](leader.md#high-availability) needs a different image, and for both roles.** That
 section carries which build, why no published one will do, and what each role does when handed one
 that cannot.
 
@@ -179,7 +182,7 @@ which is quieter and further from whoever can fix it. Clearing the Setting resto
 ### The project's own build variants
 
 Beside the `-cpu` default, this project publishes `mirrored-mooncake` in one build target per vendor
-— `cuda`, `cann`, `rocm` — whose base images are dispatch-time build arguments. Tags carry the
+(`cuda`, `cann`, `rocm`), whose base images are dispatch-time build arguments. Tags carry the
 toolchain version: `<mooncake-version>-<variant><toolchain>`, such as `0.3.13.post1-cuda13.0`.
 
 Each variant is built on `0.3.13.post1`, the line vLLM's supported clients are on, and on
@@ -196,8 +199,8 @@ and it exits at startup. The explicit false renders no flag, which is the comman
 has always run.
 
 **A VRAM group needs a build with VRAM segments compiled in (`USE_VRAM_SEGMENT=ON`), and the stock
-`-cpu` default is not one.** VRAM segments exist only on the `0.3.13` line — the `0.3.10.post2`
-variants carry the vendor transfer engine without them — so a VRAM group always names a
+`-cpu` default is not one.** VRAM segments exist only on the `0.3.13` line (the `0.3.10.post2`
+variants carry the vendor transfer engine without them), so a VRAM group always names a
 `0.3.13.post1` variant tag.
 
 Nothing refuses a VRAM group that names no image: the default is an administrator-editable Setting,
@@ -218,28 +221,28 @@ matches the medium; whether an image implements one is a fact about the image.
 **A private registry needs `spec.imagePullSecrets`**, and an explicit policy needs
 `spec.imagePullPolicy`. Both are backend-wide: they apply to the leader and to every member group,
 including a group that names its own `image`. Left unset, the policy is **resolved from the image
-tag by the same rule the API server would have applied** — `Always` for `:latest` or no tag,
-`IfNotPresent` otherwise — and it is re-resolved whenever the image or the field moves.
+tag by the same rule the API server would have applied** (`Always` for `:latest` or no tag,
+`IfNotPresent` otherwise), and it is re-resolved whenever the image or the field moves.
 
 > **Why they are fields and not Settings** — the cluster-wide `image-pull-policy` and
 > `image-pull-secrets` Settings are values of the bundled-application chart install. They reach the
 > subcharts and nothing a controller renders, so a `KVCacheBackend` that inherited them would be the
 > only object in this API whose running workloads move when a chart value moves. The service accounts
-> [high availability](leader.md#high-availability) renders carry no registry credentials either — they grant
-> Lease access and nothing else — so without these fields no image here could come from a private
-> registry at all.
+> [high availability](leader.md#high-availability) renders carry no registry credentials either (they
+> grant Lease access and nothing else), so without these fields no image here could come from a
+> private registry at all.
 
 ### The store version must match the engine's client
 
 **A store and an engine-embedded Mooncake client interoperate only within one minor line.** The
 criterion is the RPC wire signature, not the version string: the handshake answers `2.0.0` for every
-0.3.x release, so a mismatched pair is not refused at startup — every probe reads green, and every
+0.3.x release, so a mismatched pair is not refused at startup. Every probe reads green, and every
 write then fails at transfer time with `RPC_FAIL (-900)`.
 
 Two posts of one minor line share their RPC signatures and interoperate. The 0.3.12 and 0.3.13
 lines do not: the method names are unchanged, so the client reaches the handler and mis-decodes the
-arguments. Multi-tenancy moves neither: with it off — a declared `multiTenancy: false`, the field
-defaulting on — every request resolves to the default tenant.
+arguments. Multi-tenancy moves neither: with it off (a declared `multiTenancy: false`, the field
+defaulting on) every request resolves to the default tenant.
 
 **The client's version is a property of the engine image, not of anything on this CR.** Which
 client each supported engine's runner image carries, and so which line its store runs, is in the
@@ -253,8 +256,8 @@ one vLLM version built on different days can carry different clients.
 Direct P/D transfer (`MooncakeConnector`, no `spec.kvCache`) is engine to engine and exempt from this
 matching.
 
-Upstream has **no 0.3.12.post2** — the 0.3.12 line ends at 0.3.12.post1. High availability carries
-its own per-version rule — it needs a master from 0.3.12 on — see
+Upstream has **no 0.3.12.post2**; the 0.3.12 line ends at 0.3.12.post1. High availability carries
+its own per-version rule, a master from 0.3.12 on. See
 [High availability](leader.md#high-availability).
 
 ## The metadata plane
@@ -264,28 +267,31 @@ the literal `P2PHANDSHAKE`, unconditionally. It needs no etcd or Redis. The defa
 does use a Kubernetes Lease and its API access, even with one leader replica.
 
 Two axes get confused here, so both are stated. The metadata plane is how clients find one another.
-The **HA backend store** — `-enable_ha` with `-ha_backend_type` — is how the leader elects, even at
+The **HA backend store** (`-enable_ha` with `-ha_backend_type`) is how the leader elects, even at
 one replica by default. The Kubernetes Lease is selected by
 [`leader.electionBackend`](leader.md#high-availability), and it moves nothing on the metadata plane.
 
-⛔ **A manifest that tries to configure the metadata plane is not refused with a helpful message.**
+**A manifest that tries to configure the metadata plane is not refused with a helpful message.**
 There is no field, so there is nothing for a webhook to see:
 
-- a strict client — `kubectl apply`'s default — is refused by the schema with
+- a strict client (`kubectl apply`'s default) is refused by the schema with
   `strict decoding error: unknown field "spec.metadata"`;
 - a client with validation turned off has the block **silently pruned**, and the object is admitted
   and reconciled as though nothing had been written.
 
-The second is indistinguishable from success at the point of apply. This section is the protection
-against it: the metadata plane takes no configuration at all.
+The second is indistinguishable from success at the point of apply. The protection against it is the
+rule the page states: the metadata plane takes no configuration at all.
 
 ## The members
 
-One member group renders **one DaemonSet** over `members[].nodeSelector`. A member contributes *a
-node's* medium — that node's host memory or, on a VRAM group, its device memory, plus its host paths
-and on a host-fabric group its requested number of fabric devices — so its identity is the node, which
-is what a DaemonSet expresses. Two groups may select the same node — a DRAM group and a VRAM group
-is the shape the second medium exists for — and each still renders its own DaemonSet.
+One member group renders **one DaemonSet** over `members[].nodeSelector`. A member is one node's
+contribution to the store: it holds that node's host memory, or on a VRAM group its device memory,
+plus the node's host paths and, on a host-fabric group, the number of fabric devices the group
+requests.
+
+The member's identity is the node, and a DaemonSet is the workload that gives one Pod to every
+matching node. Two groups may select the same node (a DRAM group and a VRAM group is the shape the
+second medium exists for), and each still renders its own DaemonSet.
 
 The member's whole configuration renders as **environment variables**: no ConfigMap, no volume, no init
 container.
@@ -300,26 +306,26 @@ container.
 | `local_buffer_size` | `MOONCAKE_LOCAL_BUFFER_SIZE` |
 | `device_name` | `MOONCAKE_DEVICE` — **deliberately left unset**, see below |
 
-⛔ **`MOONCAKE_TE_META_DATA_SERVER` carries an underscore inside `META_DATA`.** It is not
+**`MOONCAKE_TE_META_DATA_SERVER` carries an underscore inside `META_DATA`.** It is not
 `MOONCAKE_TE_METADATA_SERVER`, and normalising it to the spelling that reads correctly **silently
 degrades the metadata plane** rather than erroring. It is asserted byte-for-byte by its own test.
 
-⛔ **`MOONCAKE_DEVICE` is left unset on purpose, and the documented value `auto-discovery` is a trap.**
+**`MOONCAKE_DEVICE` is left unset on purpose, and the documented value `auto-discovery` is a trap.**
 The client splits that key on commas into a device filter and nothing special-cases the string, so
 setting it produces a filter matching a device no host has. **Empty means "use every device found".**
 
-⛔ **`members[].extraArgs` is the exception to the table above: it renders into the container's
+**`members[].extraArgs` is the exception to the table above: it renders into the container's
 argv**, as `-D key=value`, not into an environment variable. `leader.extraArgs` does the same on the
 leader, as `-key=value`.
 
-⛔ **Either way the value is world-readable, on three paths.** It is stored verbatim on the
-`KVCacheBackend` — which is cluster-scoped, so reading it needs no access to any workload — and it is
+**Either way the value is world-readable, on three paths.** It is stored verbatim on the
+`KVCacheBackend` (which is cluster-scoped, so reading it needs no access to any workload), and it is
 rendered into the container's argv, readable again from the Pod and from the DaemonSet or Deployment
 carrying it. **Do not put a credential in `extraArgs`.** Nothing refuses one at admission.
 
 `spec.transport.protocol` accepts `Auto`, `TCP`, `RDMA`, `EFA`, `CANN`, `ROCM`, `MUSA` and `MACA`,
 and defaults to `Auto` whether or not the `transport` block is written at all. **`Auto` resolves to
-`TCP`** — it is not a per-node probe that promotes itself. `MUSA` and `MACA` are intra-node IPC
+`TCP`.** It is not a per-node probe that promotes itself. `MUSA` and `MACA` are intra-node IPC
 transports, not host fabrics, so they take none of the fabric privileges below.
 
 Which engine each value serves, and on which images, is [the transport
@@ -329,7 +335,7 @@ matrix](../model-deployment/engine-versions.md#which-transport-each-engine-can-u
 the backend's.** The override exists for the one thing two media do not agree on: a VRAM group
 reaching its peers over a fabric while the DRAM group beside it stays on `TCP`.
 
-**`TCP` is complete, not a fallback — and it costs CPU.** Everything the store does works over it:
+**`TCP` is complete, not a fallback, and it costs CPU.** Everything the store does works over it:
 the cache fills, cross-instance prefix reuse works, and capacity scales with DRAM and the disk tier.
 What it does not have is the zero-copy path the fabrics take. Every transfer traverses the kernel
 network stack packet by packet, and the CPU that does so is CPU the node is not giving to anything
@@ -340,15 +346,15 @@ same pool on `RDMA`, and **that is the transport behaving as designed**. Read it
 for a fabric, not as a defect to open a report against.
 
 The fabric privileges below render per group from the group's effective protocol, and an engine is
-handed the protocol of the group it matched — an engine whose constraint no group in the pool
+handed the protocol of the group it matched. An engine whose constraint no group in the pool
 satisfies is refused at admission rather than started.
 
 `CANN` is the one value an engine can **require**: vllm-ascend's store client currently raises on
-any other protocol (`MooncakeBackend.__init__`, verified at v0.23.0 and v0.26.0rc1 — upstream state,
-not a contract, and it may change), so a pool serving Ascend engines declares `CANN` here — or on
-one member group — rather than settling for the `TCP` default.
+any other protocol (`MooncakeBackend.__init__`, verified at v0.23.0 and v0.26.0rc1; upstream state,
+not a contract, and it may change), so a pool serving Ascend engines declares `CANN` here, or on
+one member group, rather than settling for the `TCP` default.
 
-The member then needs a CANN-carrying image, per the variant table above — the project's own CPU
+The member then needs a CANN-carrying image, per the variant table above. The project's own CPU
 build compiles no `ascend` transport.
 
 > **Why** — one group is one Pod template, which cannot express a per-node transport; and promoting to
@@ -365,8 +371,8 @@ an `EFA` group asks for
 [the key AWS's EFA device plugin advertises](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves).
 
 The renderer **derives** the RDMA name rather than spelling it, so the page linked above is the one
-to trust if the two ever disagree. The request is the permission — a bind mount of a device tree is
-not — so the member that gets one can `open()` the adapter and the member that gets none could not
+to trust if the two ever disagree. The request is the permission (a bind mount of a device tree is
+not), so the member that gets one can `open()` the adapter and the member that gets none could not
 have.
 
 **`members[].fabricInterfaceCount` sets how many interfaces each member asks for, on `RDMA` and
@@ -378,11 +384,11 @@ On every other protocol the count has no effect: no device is requested. Admissi
 than refuses** when a group writes one there, so the update that moves a group from `RDMA` back to
 `TCP` still goes through with the count in it.
 
-⚠️ **On a cluster tracking the default branch, this changes what running RDMA members ask for.** No
+**On a cluster tracking the default branch, this changes what running RDMA members ask for.** No
 release has ever carried this API, so there is no upgrade path to migrate; but a development cluster
 whose `RDMA` backend predates the change will have its members re-rendered against
 `device.gpustack.ai/rdma.shared` on the next reconcile. **Confirm the Device Manager is running on
-those nodes first** — otherwise the members roll and stay `Pending`.
+those nodes first**, or the members roll and stay `Pending`.
 
 **The cluster therefore needs the plugin that advertises the group's resource**, and a node without
 it never runs that member: the Pod stays `Pending`. That refusal is the intended one. A cluster
@@ -396,33 +402,33 @@ wants it back says so in `protocol` rather than by leaving a field empty.
 
 **No member mounts `/dev/infiniband`.** Each fabric's plugin injects the verbs character device of
 every device it grants, so mounting the tree beside that grant would add every adapter the member
-was **not** granted — visible and unopenable.
+was **not** granted, visible and unopenable.
 
 **On `EFA` the mount breaks a partial grant.** A member granted fewer EFA devices than its node has
 would see the rest through the tree, and `open()` on one returns `EPERM` from the device cgroup.
 libfabric's EFA provider gives up its whole device list on the first `EPERM`, so the store reports
 `No available EFA devices` and the container restarts in a loop. Without the mount it initializes.
 
-Nothing is mounted from a host EFA install — the libfabric an `EFA` member runs on is in the image.
+Nothing is mounted from a host EFA install: the libfabric an `EFA` member runs on is in the image.
 
 **The engines an `EFA` group serves need an EFA build of Mooncake as well**, which no runner image
-carries — see [what an EFA leg needs from the engine
+carries. See [what an EFA leg needs from the engine
 image](../rdma/operations.md#what-an-efa-leg-needs-from-the-engine-image).
 
-EFA capability is a property of the instance size rather than of its family — the largest `i7ie`
-sizes carry it while every smaller one does not — so check the size about to run, with
+EFA capability is a property of the instance size rather than of its family (the largest `i7ie`
+sizes carry it while every smaller one does not), so check the size about to run, with
 `fi_info -p efa` on the node or the instance type's own EFA field, never a family name.
 
-**Cross-node EFA REQUIRES both nodes in one cluster placement group.** One availability zone is
+**Cross-node EFA requires both nodes in one cluster placement group.** One availability zone is
 necessary and not sufficient. Two nodes sharing a zone but in different placement groups complete
-the libfabric handshake — the endpoint pair is reported established — and then every work request
+the libfabric handshake (the endpoint pair is reported established), and then every work request
 hangs forever with the receiving adapter's byte counters at zero and no error on either side. The
 silence is the problem: it reads as a hung probe, not as a placement fault.
 
 Where nodes sit is outside this operator, so it belongs to whoever builds the cluster. A managed
 node group typically gets a placement group of its own, which makes "members of one pool spread
-across two groups" the default outcome rather than an unusual one — so a pool whose members are
-meant to reach each other should be pinned to node groups that share one.
+across two groups" the default outcome rather than an unusual one. A pool whose members are meant
+to reach each other should be pinned to node groups that share one.
 
 **The medium and the transport are independent.** A `DRAM` group is as entitled to a fabric as a
 `VRAM` one, and this rendering reads the medium nowhere: the protocol decides the network, the
@@ -434,7 +440,7 @@ is charged to.
 requests**: host memory carries `localBufferSize` only, and the device memory is claimed by
 allocating it.
 
-⚠️ **The engine sharing that accelerator does not know the member took a slice of it.** Nothing in
+**The engine sharing that accelerator does not know the member took a slice of it.** Nothing in
 Kubernetes accounts for device memory, so the two are held apart by **sizing `capacityPerMember`
 against the engine's own memory fraction**, and by nothing else. Give the engine a
 `gpu_memory_utilization` that leaves `capacityPerMember` free, and expect whichever starts second to
@@ -446,7 +452,7 @@ Measured upstream at `v0.3.13.post1`: a member allocates its segment with one `c
 registration limit rather than spanning devices (`GetTransportRegistrationLimit`, `real_client.cpp`),
 and nothing on that path calls `cudaSetDevice`.
 
-**One member's segment is therefore on one device** — whichever the container sees first. Requesting
+**One member's segment is therefore on one device**, whichever the container sees first. Requesting
 one accelerator would take a whole one away from inference to account for a fraction of one device's
 memory, on a node where the member cannot use the rest of what it took. An eight-accelerator node
 keeps all eight available to inference, and one member contributes a slice of the first.
@@ -464,7 +470,7 @@ be brought in. Nothing is inferred; every route is written on the group:
 | `members[].hostPaths[]` | The driver tree taken from the node directly, for a cluster running no vendor runtime at all. |
 | `members[].securityContext` | Privilege, when a mount alone is not enough to open what was mounted. |
 
-⚠️ **Privilege alone does not cover this.** It opens the node's device tree under `/dev`, which is
+**Privilege alone does not cover this.** It opens the node's device tree under `/dev`, which is
 where the device nodes are and is **not** where the libraries are: Ascend's driver is under
 `/usr/local/Ascend/driver` with DCMI beside it, and NVIDIA's `libcuda.so` is injected by the
 container runtime. A privileged member with neither a runtime class nor the driver mounted starts,
@@ -472,11 +478,11 @@ reports healthy, and fails to allocate.
 
 `securityContext` is **merged onto** what the group's protocol already earned, field by field, with
 `capabilities.add` **unioned**. A `RDMA` or `EFA` group therefore keeps `IPC_LOCK` and `SYS_RESOURCE`
-whatever it declares — without them the transfer engine fails when it registers memory, long after
+whatever it declares. Without them the transfer engine fails when it registers memory, long after
 the container looked healthy. Declaring a capability adds it; a group that must hold neither of those
 two declares a protocol that does not ask for them.
 
-Each `hostPaths[]` entry is `{path, mountPath, type, readOnly}`. Name a `type` — left empty the
+Each `hostPaths[]` entry is `{path, mountPath, type, readOnly}`. Name a `type`: left empty, the
 kubelet checks nothing, so a missing path becomes an empty directory in the container and the member
 starts anyway. A mount path is refused if it duplicates another entry's, if it is `/dev/infiniband`
 (where a fabric's device plugin injects the granted device nodes, refused under every protocol since
@@ -497,7 +503,7 @@ members:
         value: all
 ```
 
-⚠️ That variable is honored only while the toolkit's
+That variable is honored only while the toolkit's
 `accept-nvidia-visible-devices-envvar-when-unprivileged` is on, which is its default and which
 NVIDIA's own hardening guidance turns **off**. On a cluster that turned it off, use
 `runtimeClassName` instead.
@@ -531,21 +537,21 @@ members:
 measured on NVIDIA.** Objects written past a 256Mi device segment left memory for the tier and read
 back with matching digests. No upstream test covers the pairing, so the reading is this project's own.
 
-⚠️ **The equivalent on Ascend (`cann`) and AMD (`rocm`) is still unmeasured.** Treat the pairing as
+**The equivalent on Ascend (`cann`) and AMD (`rocm`) is still unmeasured.** Treat the pairing as
 verified on NVIDIA and as unverified elsewhere, rather than as guaranteed everywhere.
 
-⚠️ **A writer against this tier must retry.** A put that fails on a full segment means eviction has
+**A writer against this tier must retry.** A put that fails on a full segment means eviction has
 not caught up, not that the tier is full: the offload heartbeat runs on an interval, so a writer that
 abandons on first failure reads "eviction in progress" as "cannot write".
 
-**Reachability is a port range, never a list.** The transfer engine picks its data ports at random —
-one observed run bound `15002` and `15995`, a second client `16566` and `16655`, none of them
-configured — and the peer-to-peer plane is what binds them. Write firewall and NetworkPolicy rules
+**Reachability is a port range, never a list.** The transfer engine picks its data ports at random
+(one observed run bound `15002` and `15995`, a second client `16566` and `16655`, none of them
+configured), and the peer-to-peer plane is what binds them. Write firewall and NetworkPolicy rules
 between member nodes, and from engine clients, as a **range**. The rendered Pod declares no fixed
 data-plane `containerPort`, because a fixed list would be a false statement.
 
 **The management port is fixed, and on a host fabric it lands on the node.** A member serves its HTTP
-API on `8080 + <group index>` — the first group on `8080`, a second group on `8081`. A `TCP` group
+API on `8080 + <group index>` (`8080` for the first group, `8081` for a second). A `TCP` group
 holds that port inside its own pod network namespace, but an `RDMA` or `EFA` group holds the host's,
 so on every node such a group selects that port must be free. Reserve one port from `8080` upward per
 member group.
@@ -554,13 +560,13 @@ member group.
 > two host-network Pods on it. On a single fixed port only the first binds; the second runs, never
 > passes readiness, and reports nothing about why.
 
-**A member advertises its POD IP, and that is what a client dials.** The address becomes the host
+**A member advertises its pod IP, and that is what a client dials.** The address becomes the host
 half of the segment's `te_endpoint`, which `status.members[]` is joined against and which the engine
 hands to clients. Rules written for the data plane therefore target pod addresses, not node ones.
 
 > **Why not the node name** — the engine binds its data port inside the pod's network namespace.
 > Measured on a two-node cluster: advertising the node name, a client pod got `ECONNREFUSED` against
-> both that name and the node IP, and connected only on the pod IP. It costs no stability — a
+> both that name and the node IP, and connected only on the pod IP. It costs no stability: a
 > segment's identity is minted fresh on every mount, a new id and a transfer port bound at random, so
 > nothing here survived a restart anyway. On the host-fabric paths the pod holds the host's network
 > namespace and this is the node's address regardless.
@@ -573,28 +579,28 @@ NAME            TYPE       PHASE   ENDPOINT                                     
 mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051  12Gi
 ```
 
-Five phases — `Provisioning`, `Ready`, `Degraded`, `Error`, `Deleting`. `Ready` carries no
+Five phases: `Provisioning`, `Ready`, `Degraded`, `Error`, `Deleting`. `Ready` carries no
 `phaseMessage`; every other phase carries one.
 
 Conditions report the axes: `LeaderAvailable`, `MembersMounted`, `CapacityObserved`, `PoolWrites`, `Deletable` and
-`RolloutComplete`. Two more appear only where they have something to judge — `ElectionObserved`
+`RolloutComplete`. Two more appear only where they have something to judge: `ElectionObserved`
 when `leader.electionBackend` is `Kubernetes` (including at one replica), and
 `TierWasEmpty` when a member group carries a [local disk tier](local-disk-tier.md).
 
 **Those last three do not move the phase, and that is deliberate.** A rollout in flight, an election
 that has not happened, and a disk tier found holding data are all states in which the backend serves
-normally — reporting them as `Degraded` would put a storage arrangement in the same field as a
+normally. Reporting them as `Degraded` would put a storage arrangement in the same field as a
 leader nobody can reach. Read the conditions for them; the phase will not tell you.
 
 **A member that is starting is not a shortfall; a member that is stuck is one.** A Pod still pulling
-its image is left alone — holding it against the backend would report `Degraded` for the length of
+its image is left alone. Holding it against the backend would report `Degraded` for the length of
 every rollout. But one whose container will not start, or that no node will take, is never going to
 arrive, so it reads `Degraded` even while the other members serve, and `phaseMessage` carries that
 Pod's own reason.
 
 **A member reads Ready only once its segment is mounted.** Its container carries a readiness probe
 that connects to the entrypoint's REST port, and the entrypoint mounts the segment *before* it serves
-that port — so readiness is evidence of the mount, not of the process.
+that port. Readiness is therefore evidence of the mount, not of the process.
 
 > **Why the probe is load-bearing** — without it the kubelet reports Ready as soon as the container
 > runs. Every ready member Pod is held to the leader's listing, so that window would read as a
@@ -609,23 +615,23 @@ the phase reads `Degraded` with reason `ListingTooLarge` and the previous listin
 
 **Status is polled every 15 seconds, not only refreshed on events.** Everything above is read over
 HTTP from the leader, and a store whose contents move while its Pods sit still produces no Kubernetes
-event at all — an external backend produces none ever, since this operator owns no workload for it.
+event at all. An external backend produces none ever, since this operator owns no workload for it.
 So `kubectl get kvcb -w` moves on its own.
 
 > **15 seconds is an interval, not a maximum age.** The timer starts after a pass finishes, and a
 > pass makes up to three sequential HTTP reads. More importantly, `status.members` is **deliberately
-> retained** when a read of the segment listing fails — a stale list plus `MembersMounted=False` is
-> more honest than an empty one — so it has no age bound at all while that read keeps failing. The
+> retained** when a read of the segment listing fails (a stale list plus `MembersMounted=False` is
+> more honest than an empty one), so it has no age bound at all while that read keeps failing. The
 > condition is what says whether the list was refreshed; the list alone never does.
 
 **Capacity is observed, not derived.** `status.capacity` is read from the leader's own counters,
-never from what the spec declares — nothing multiplies `capacityPerMember` by a replica count. A
+never from what the spec declares. Nothing multiplies `capacityPerMember` by a replica count. A
 backend with no disk tier reads `master_total_capacity_bytes`; one **with** a tier reads that plus
 `master_total_file_capacity_bytes`. Adding two **observed** families is not the same thing as
 adding up what members were asked to provide.
 
 **`status.capacity.total` is capacity, not usage**, and a disk tier contributes the ceiling the
-member declared — published as soon as the member registers, before anything is written there.
+member declared (published as soon as the member registers, before anything is written there).
 
 `PoolWrites` reports pool-wide write activity. `True` means the leader has seen a put end since
 its current process started, or a member reports positive `allocator_used_bytes`. `False` means
@@ -638,10 +644,10 @@ restarts; a single status poll could miss a short write.
 This condition does not identify which deployment attempted a write, and a previous failure in that
 window does not prove that every current write fails.
 
-To ask whether the **disk** tier is holding data, the figure to read is not on the CR at all — see
+To ask whether the **disk** tier is holding data, the figure to read is not on the CR at all. See
 [The tier is written one bucket at a time](local-disk-tier.md#the-tier-is-written-one-bucket-at-a-time).
 
-⛔ **Capacity is absent — not zero — while the leader is starting.** `/metrics` is ungated: a leader
+**Capacity is absent (not zero) while the leader is starting.** `/metrics` is ungated: a leader
 that is up but not serving answers 200 with a well-formed exposition whose gauges all read zero, and a
 zero is indistinguishable at the parser from a genuinely empty cache. Publishing is therefore gated on
 `service_ready`, not on the scrape succeeding.
@@ -651,11 +657,11 @@ row carries the leader's `segmentID`, `clientID` and advertised `segmentName`; t
 unique segment ID because several members may legitimately share a name.
 
 The leader is what allocation goes through, so a running member Pod it does not list holds nothing
-and is counted in `MembersMounted`'s message instead. The two fields the listing cannot supply — node
-name and medium — are joined in from the member Pod behind that segment, and left **empty** rather
-than guessed when nothing matches.
+and is counted in `MembersMounted`'s message instead. The two fields the listing cannot supply
+(node name and medium) are joined in from the member Pod behind that segment, and left **empty**
+rather than guessed when nothing matches.
 
-⛔ **Two ready host-network member Pods that share an address make Pod attribution ambiguous.** Their
+**Two ready host-network member Pods that share an address make Pod attribution ambiguous.** Their
 rows remain publishable because their segment and client IDs are distinct, but neither Pod exposes
 the ID that maps a row back to it. `MembersMounted` goes `False` with reason
 `AmbiguousMemberIdentity`; each row still carries the node and the medium its candidates **agree**
@@ -688,12 +694,12 @@ adds `GET /get_segments_detail` in 0.3.12; the 0.3.10 and 0.3.11 lines answer it
 members' allocations off the listing.
 
 Two states still read `MembersMounted=False` and `Degraded` there: a member Pod that will not start,
-read from the Pod's own status, and a `status.capacity.total` of zero, reported as `NoSegments` —
-the gauge sums the mounted segments, so zero is every member unmounted.
+read from the Pod's own status, and a `status.capacity.total` of zero, reported as `NoSegments`
+(the gauge sums the mounted segments, so zero is every member unmounted).
 
 > **Why a 404 is not a failed scrape** — waiting does not change a version, so `False` would hold
-> such a backend at `Degraded` for as long as it runs. Any other failure — a 5xx, a timeout, nothing
-> answering — is a leader failing a route it serves, and still reads `ListingFailed` with the
+> such a backend at `Degraded` for as long as it runs. Any other failure (a 5xx, a timeout, nothing
+> answering) is a leader failing a route it serves, and still reads `ListingFailed` with the
 > previous list kept.
 
 ## Growing and shrinking a group
@@ -708,12 +714,12 @@ count, leader included.
 > selector. A widening moves no fingerprint; an image, argv, environment, resource or fabric change
 > moves it and every member is recreated.
 
-⛔ **A Pod runs the template it was created from, so a setting cannot protect the same edit that
-removes it.** Anything rendered into the member Pod — the shutdown hook, its grace, the environment —
+**A Pod runs the template it was created from, so a setting cannot protect the same edit that
+removes it.** Anything rendered into the member Pod (the shutdown hook, its grace, the environment)
 reaches a member only when that member is recreated. A departing member leaves with what it started
 with.
 
-⇒ To make such a setting apply to a shrink, do it in **two steps**: change only the setting and wait
+To make such a setting apply to a shrink, do it in **two steps**: change only the setting and wait
 for members to be recreated with it (their pod-spec-hash annotation moves), then narrow the selector
 or remove the group. `scaleIn.gracePeriodSeconds` below is the case this bites today; the property
 belongs to the Pod template, not to that field.
@@ -728,7 +734,7 @@ A group has **no name**. Its position in `members` is what the DaemonSet's name,
 selector labels and its members' HTTP port are all derived from, so moving an entry in that list
 leaves every one of those in place and changes only the spec underneath it.
 
-⛔ **Moving a group to another position is refused at apply time.** The refusal names both positions.
+**Moving a group to another position is refused at apply time.** The refusal names both positions.
 Two shapes reach it:
 
 | Edit | Outcome |
@@ -748,24 +754,24 @@ node.** The group keeps its position, every later group keeps its DaemonSet, and
 > go with them**. Refusing the move costs nothing and rebuilds nothing. The decision, and what
 > evidence would reopen it, is recorded on the `members` field itself.
 
-⚠️ **The rule recognises a group that arrived unchanged at a position another group LEFT — not every
-reorder.** Without a name there is nothing else to recognise a group by, so two shapes are knowingly
-admitted:
+**The rule recognises a group that arrived unchanged at a position another group left; it does not
+recognise every reorder.** Without a name there is nothing else to recognise a group by, so two shapes
+are knowingly admitted:
 
 - a reorder **combined with an edit** to the same group, which is indistinguishable from two ordinary
   edits;
-- removing a group when a **later group is identical** to the one taking its place — `[A, B, C]`
+- removing a group when a **later group is identical** to the one taking its place, `[A, B, C]`
   becoming `[A, C, C]`. That produces the same two lists as editing position 1 to match an unchanged
   position 2, which is how the second of two look-alike groups is taken out of service, so refusing
   it would forbid the operation recommended above. `[A, B, C]` to `[A, C]`, with no look-alike to
   arrive in the gap, is still refused.
 
-Both admitted shapes leave one trace: the resulting `members` holds **two identical groups**. What the
-rule buys is that the mechanical reorder — the one a rewritten manifest produces — is reported instead
-of silently rebuilding members against another group's spec.
+Both admitted shapes leave one trace: the resulting `members` holds **two identical groups**. What
+the rule buys is that the mechanical reorder (the one a rewritten manifest produces) is reported
+instead of silently rebuilding members against another group's spec.
 
-⛔ **Shrinking a group discards the cache that member held.** Narrowing the selector, or removing a
-node, unmounts that member's segment **immediately** — there is no drain.
+**Shrinking a group discards the cache that member held.** Narrowing the selector, or removing a
+node, unmounts that member's segment **immediately**. There is no drain.
 
 > **Why it is not drained** — the member's own API does take a graceful unmount with a grace period,
 > and **it cannot be pointed at the segment this operator gives a member**. That segment is mounted by
@@ -782,8 +788,8 @@ node, unmounts that member's segment **immediately** — there is no drain.
 
 > **What would actually hand the keys back is a different operation on a different component.** The
 > leader offers `POST /api/v1/drain_jobs`, which **migrates** a segment's data to named targets rather
-> than unmounting it. It needs the remaining members to have room and it is a stateful orchestration —
-> create, poll, then scale — so it belongs to the control plane and not to a shutdown hook. The
+> than unmounting it. It needs the remaining members to have room and it is a stateful orchestration
+> (create, poll, then scale), so it belongs to the control plane and not to a shutdown hook. The
 > `terminationGracePeriodSeconds` the operator sets lets the entrypoint finish its own shutdown; it
 > does not preserve the data.
 
@@ -796,11 +802,11 @@ peer reading a key that lives only on that tier gets a clean miss for the whole 
 the end of it. Sizing this value so that in-flight peer reads can finish sizes it against something
 that does not happen.
 
-The same measurement shows the wait is unconditional rather than a drain — the process holds for the
+The same measurement shows the wait is unconditional rather than a drain. The process holds for the
 full value even when nothing is still reading. What it buys is local time for the departing member to
 finish what it is doing.
 
-⚠️ Both readings are that image's behaviour, not this operator's guarantee. `spec.image` selects the
+Both readings are that image's behaviour, not this operator's guarantee. `spec.image` selects the
 backend, and another image may deregister later or wait differently; what the operator controls is
 the value it sends to the endpoint.
 
@@ -815,7 +821,7 @@ spec:
 **The Pod's termination window is derived from it**, as `gracePeriodSeconds + 60`, rather than being
 a second field beside it. That is what makes the relationship hold: two independent fields could be
 set so the kubelet kills the container in the middle of the wait, and no validation makes that
-impossible — it only makes it checkable.
+impossible. It only makes it checkable.
 
 The upper bound of 3600 is the member endpoint's own; above it the call is refused with a `400`, so a
 larger value would render a hook that fails every time it runs.
@@ -824,16 +830,16 @@ larger value would render a hook that fails every time it runs.
 > above, and the disk tier stops answering as soon as the hook runs. A reader gets a clean miss
 > either way, which is the contract rather than a consolation.
 
-Migrating a member's data before it leaves — the store's drain job API — is **not** offered here. It
+Migrating a member's data before it leaves (the store's drain job API) is **not** offered here. It
 is stateful orchestration, and it reaches only the memory and NVMe-oF replicas: it cannot name the
 segments of the disk-backed ones and skips those keys without counting them as blocked, so **a drain
-over a backend with a disk tier reports success while leaving that tier's data where it was** — and
-its own success signal does not tell you that happened.
+over a backend with a disk tier reports success while leaving that tier's data where it was**. Its
+own success signal does not tell you that happened.
 
 ## The external mode
 
-`connection.external` points at a backend somebody else runs. The operator creates **nothing** — no
-Deployment, no Service, no DaemonSet — and only observes.
+`connection.external` points at a backend somebody else runs. The operator creates **nothing**
+(no Deployment, no Service, no DaemonSet) and only observes.
 
 ```yaml
   connection:
@@ -847,36 +853,36 @@ Deployment, no Service, no DaemonSet — and only observes.
 
 Both roles are required, so the list holds exactly two entries: entries are keyed by `name`, which
 has two values, and admission refuses a list missing either one. Each address is validated as
-`host:port` at admission — a blank or portless one would otherwise be mirrored into status and
+`host:port` at admission. A blank or portless one would otherwise be mirrored into status and
 handed to an engine that cannot dial it.
 
-**`Admin` is what this operator reads** — health, metrics and the segment listing — and **`Client` is
+**`Admin` is what this operator reads** (health, metrics and the segment listing), and **`Client` is
 what an inference engine connects to**. The addresses are mirrored into `status.endpoints` unchanged.
 
 Two behaviours differ from the managed mode:
 
-- ⛔ **An address that does not answer is reported as an `Error`, not as a backend still starting.** A
+- **An address that does not answer is reported as an `Error`, not as a backend still starting.** A
   managed leader is excused while its own Deployment has no ready replica; an external address was
   declared to name something that already runs, so there is no Pod to wait on and a mistyped endpoint
   would otherwise sit at `Provisioning` forever.
 - `status.members[]` carries **no** node name or medium, because those Pods are not this operator's to
   look up. Capacity is the **sum of both pools**, since an external object names no medium to pick one
   by.
-- ⛔ **A redirect from the `Admin` address is never followed.** That address belongs to whoever wrote
+- **A redirect from the `Admin` address is never followed.** That address belongs to whoever wrote
   the spec, and honouring a `3xx` from it would read some other host with the operator's network
   identity, then copy an excerpt of the answer into a status readable by anyone who can read the
   object. The redirect is reported as the response it is.
 
 ### Keeping two external objects off one leader is yours
 
-⛔ **Two `KVCacheBackend` objects may name the same leader, and nothing in the operator notices.** For
+**Two `KVCacheBackend` objects may name the same leader, and nothing in the operator notices.** For
 a managed backend the object *is* the leader, so two objects are two leaders. For an external one the
-object is a **declaration of addresses**, and one leader is reachable under more than one spelling —
+object is a **declaration of addresses**, and one leader is reachable under more than one spelling:
 by Service name in one object and by IP in another, with or without a trailing dot or an explicit
 default port.
 
 > **Why no check** — every identity the operator could compare is either editable or needs the leader
-> reachable at admission. The comparison cheap enough to run — byte-identical addresses — catches the
+> reachable at admission. The comparison cheap enough to run (byte-identical addresses) catches the
 > copy-paste case and misses the one a real deployment produces, which is the same leader spelled two
 > ways. A check that catches the easy half invites the reader to trust it for the other half. This is
 > tracked in [issue #288](https://github.com/gpustack/gpustack-operator/issues/288).
@@ -892,15 +898,15 @@ backend object**, so two Bindings reaching one leader through two objects are bo
 2. **The symptom of an undersized quota is a low hit rate and nothing else.** Exceeding a tenant's
    quota does not refuse the write: the store frees room by dropping that tenant's own older objects
    and retries, irreversibly and **without any counter moving**. So the flipping above never surfaces
-   as an error — it surfaces as a cache that keeps losing content nobody asked it to lose.
-3. ⛔ **Two Bindings on one `domain.name` with a different `blockSize` or `dtype` corrupt each
-   other's blocks.** The reuse identity an engine is handed is the domain **name alone** —
-   each Binding hands its own [`dtype`](pool.md#the-dtype-is-handed-to-the-engine) to its own
+   as an error. It surfaces as a cache that keeps losing content nobody asked it to lose.
+3. **Two Bindings on one `domain.name` with a different `blockSize` or `dtype` corrupt each
+   other's blocks.** The reuse identity an engine is handed is the domain **name alone**. Each
+   Binding hands its own [`dtype`](pool.md#the-dtype-is-handed-to-the-engine) to its own
    engines, and `blockSize` reaches no engine at all. So two differently-shaped caches land under
    one identity, which is [the silent cache pollution](../model-deployment/deployment.md#the-reuse-domain-is-inherited)
    a wrong `blockSize` or `dtype` causes, reached here without either value being wrong.
 
-⇒ If you point two objects at one leader, either keep their pools' Bindings on **different**
+If you point two objects at one leader, either keep their pools' Bindings on **different**
 `domain.name` values, or make sure every Binding that shares a name also shares its `blockSize`,
 `dtype` and `quota.ceiling`.
 
@@ -935,7 +941,7 @@ that prints nothing when nothing moved. The leader's Prometheus surface counts k
 measures no data plane, so without it the receiving end of every transfer is unmeasured while the
 sending end already reports.
 
-⛔ `MC_METADATA_SERVER` is **not** the variable this operator renders. The member is configured
+`MC_METADATA_SERVER` is **not** the variable this operator renders. The member is configured
 through the store client's key, `MOONCAKE_TE_META_DATA_SERVER`. Two names for the metadata plane is
 exactly the near-miss that gets one of them typed into a template.
 
@@ -944,7 +950,7 @@ the object stays at `phase: Deleting` with the claimant named in its message, an
 running. Clearing the last claim lets the teardown complete.
 
 **A backend in use also cannot have `leader.multiTenancy` turned off.** The webhook refuses the edit
-while `status.usedBy` names a consumer, and the refusal names them. Remove the consumers first — see
+while `status.usedBy` names a consumer, and the refusal names them. Remove the consumers first. See
 [KV Cache Pool](pool.md#operating-notes) for what the withdrawal costs on their side.
 
 > **Why** — the flag decides whether the master keeps a per-tenant ledger, and a consumer's quota is
@@ -954,8 +960,8 @@ while `status.usedBy` names a consumer, and the refusal names them. Remove the c
 > no longer exists refuses the edit too, and that list is where it is cleared.
 
 **The teardown deletes the workloads first, and the object disappears last.** The leader Deployment,
-its Service and every member DaemonSet go before the finalizer comes off — and it waits for them to
-be **gone**, not merely for the deletes to be accepted, so the object going away means the backend is
+its Service and every member DaemonSet go before the finalizer comes off. It waits for them to be
+**gone**, not merely for the deletes to be accepted, so the object going away means the backend is
 gone rather than scheduled to be.
 
 > **Why not leave it to ownership** — they are owned dependents, so the collector would reach them
@@ -975,7 +981,7 @@ Deleting a backend therefore finishes even when a node it ran on has stopped ans
 
 **Only objects carrying this backend's own note are deleted.** The names are derived, so an unrelated
 object can hold one, and a delete has to be surer than a name. The member sweep finds its DaemonSets
-by the same note it then checks, rather than by the identity labels — discovering on one key and
+by the same note it then checks, rather than by the identity labels. Discovering on one key and
 judging on another is how an object goes missing from its own teardown.
 
 ---

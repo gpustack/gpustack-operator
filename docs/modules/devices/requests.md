@@ -59,8 +59,8 @@ Two things the table does not say:
   or the profile's VRAM (partition), overwriting any client value. It feeds Kueue's `credits`
   transformation, so a partition and a logical slice of the same VRAM cost the same credits.
 - **The two token shapes differ.** `<base>`, `.shared` and `.sliced` tokens are *accelerator-bound*: the
-  token the kubelet picks **is** the accelerator. `.partitioned` and visibility tokens are a *fungible
-  count* — the plugin picks the accelerator itself against the live partition geometry and records the
+  token the kubelet picks is the accelerator. `.partitioned` and visibility tokens are a *fungible
+  count*: the plugin picks the accelerator itself against the live partition geometry and records the
   one it used. So a partition request never lands where its profile does not fit, and a rejection from
   `Allocate` means the whole node has no room.
 
@@ -87,9 +87,9 @@ resources:
 The value counts accelerators, never shares of one: `"2"` needs a node with two accelerators that each
 still have a free share. It is per container, and each container is one holder: two Pods, or two
 containers of one Pod, may hold a share of the same accelerator. A share carries no memory or compute
-cap — up to 10 holders use the whole accelerator side by side; isolating them is a logical slice's job.
+cap: up to 10 holders use the whole accelerator side by side; isolating them is a logical slice's job.
 
-The Pod webhook pins a request of two or more — its largest container's — to nodes with that many
+The Pod webhook pins a request of two or more (its largest container's) to nodes with that many
 accelerators. It adds
 `acceleratable.feature.gpustack.ai/<group>.count Gt N-1` to every required node-affinity term, reading
 `<group>` from the `InstanceType` fronting the queue, and rejects the Pod when that cannot be read.
@@ -127,7 +127,7 @@ resources:
 
 ## The request rules
 
-The rules are scoped by a container's **lifetime group**, not by the field it sits in:
+The rules are scoped by a container's lifetime group, not by the field it sits in:
 
 - the **init group** is `spec.initContainers` *without* `restartPolicy: Always`;
 - the **running group** is `spec.containers`;
@@ -193,7 +193,7 @@ spec:
 > spec.initContainers must give up its request, because its devices are held for the Pod's whole life while
 > the scheduler charges the Pod only once`
 
-Needs a device in two phases? Keep the claim on the app container — its device is the same hardware the
+Needs a device in two phases? Keep the claim on the app container: its device is the same hardware the
 init container would have held.
 
 > **Why** — two independent reasons, and one group makes charge and consumption agree by construction.
@@ -248,7 +248,7 @@ resources:
 > `spec.containers[0].resources.limits[nvidia.com/gpu.partitioned]: Invalid value: "2": a partition
 > request is always a single accelerator; request one Pod per instance`
 
-Unlike rule 2 this is a **scope decision** — the plugin picks the accelerator itself, so `N > 1` would
+Unlike rule 2 this is a scope decision: the plugin picks the accelerator itself, so `N > 1` would
 be implementable. No workload needs it yet, so a multi-partition workload asks for several Pods.
 
 A bare accelerator key with no profile is also rejected; there is no hardware shape to actuate.
@@ -366,12 +366,12 @@ group to move it out of.
 
 An RDMA interface is requested through three node-level keys that sit beside the accelerator
 families, not inside them: a network interface belongs to the node rather than to a manufacturer,
-so no `<base>` applies. The mechanism — which interface serves which key, and what a grant hands
-the container — is [Network Topology](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)'s;
-the request rules are here.
+so no `<base>` applies. The mechanism (which interface serves which key, and what a grant hands
+the container) is described in
+[Network Topology](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves); the request rules are here.
 
-How many to ask for, and what a node must be configured with for the request to land well, is
-[RDMA Operations](../rdma/operations.md).
+[RDMA Operations](../rdma/operations.md) covers how many to ask for and how to configure a node so
+the request lands well.
 
 All three are served by the device plugin, and a request names what it wants one of:
 
@@ -382,29 +382,30 @@ All three are served by the device plugin, and a request names what it wants one
 | `device.gpustack.ai/rdma.partitioned` | virtual functions |
 
 What a quantity of each key means, how many tokens an endpoint carries, and which allocation mode
-each key belongs to, are stated once with the mechanism — [the RDMA resource keys](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves).
+each key belongs to, are stated once with the mechanism:
+[the RDMA resource keys](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves).
 There are no `.units` keys on this side: nothing is webhook-derived, and the value you set is the
 value that schedules.
 
 **The keys are not an accelerator family.** The family classifier returns none for them, so the
-seven rules above neither apply to them nor can be violated by them — an accelerator family and an
+seven rules above neither apply to them nor can be violated by them: an accelerator family and an
 RDMA key in one Pod is legal.
 
-The same blindness reaches Kueue, which therefore meters these keys not at all — what that costs a
-fleet, and what to do instead of a quota, is
-[RDMA Operations](../rdma/operations.md#kueue-does-not-meter-the-rdma-keys)'s.
+The same blindness reaches Kueue, which therefore meters these keys not at all. See
+[RDMA Operations](../rdma/operations.md#kueue-does-not-meter-the-rdma-keys) for what that costs a
+fleet and what to do instead of a quota.
 
 Neither a node without an RDMA-capable interface nor an endpoint whose link the node judged
-`failed` carries allocatable tokens — what each one advertises is on
-[the mechanism page](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)
-— so a request for these keys never schedules onto them.
+`failed` carries allocatable tokens (what each one advertises is on
+[the mechanism page](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)),
+so a request for these keys never schedules onto them.
 
 A grant injects the endpoint's own verbs character device, the node-level connection-manager device
 where the host has one, and `NCCL_IB_HCA` naming the granted devices. That set is evidenced for
 RoCE and for nothing else — see
 [what an allocation hands over](../rdma/network-topology.md#what-an-allocation-hands-over).
 
-**Shared accelerator and RDMA interface in one container** — the shape a co-located workload uses:
+**Shared accelerator and RDMA interface in one container**, the shape a co-located workload uses:
 
 ```yaml
 resources:
@@ -416,15 +417,15 @@ resources:
 ## Co-locating an accelerator and an RDMA interface
 
 A container that requests an accelerator and an RDMA interface together is granted both on one NUMA
-node — the kubelet aligns resources that publish NUMA hints, and both sides publish them — but only
+node (the kubelet aligns resources that publish NUMA hints, and both sides publish them) but only
 when every condition below holds. Outside these conditions nothing aligns the two, and no error
 says so.
 
 - **Both requests sit in the same container.** The kubelet aligns per container by default, so an
   accelerator in one container and an RDMA interface in another are aligned by nothing.
 - **Both resources publish a hint.** The accelerator's whole-device modes do; an accelerator
-  partition token does not — it names no accelerator — so a partition profile paired with
-  `rdma.partitioned` is aligned to the RDMA side alone and is NOT covered, even though both are
+  partition token does not (it names no accelerator), so a partition profile paired with
+  `rdma.partitioned` is aligned to the RDMA side alone and is not covered, even though both are
   allocatable in the same container. An RDMA endpoint whose affinity the kernel did not report
   publishes none either.
 - **The node's kubelet runs `restricted` or `single-numa-node`.** It is node-level kubelet
@@ -432,11 +433,11 @@ says so.
   in [the preflight runbook](./preflight.md#reading-the-result), which is also where you
   read the policy a given node runs. No release sets one for you — [how to set it, and how to
   confirm it took](../rdma/operations.md#enabling-numa-alignment-on-the-kubelet).
-- **The alignment's unit is the NUMA node** — see
+- **The alignment's unit is the NUMA node.** See
   [the RDMA resource keys](../rdma/network-topology.md#the-rdma-resource-keys-and-what-each-endpoint-serves)
   for why a shared PCIe switch is finer than a hint can express.
 
-What is NOT guaranteed is the node itself: the scheduler selects by quantities and cannot see
+What is not guaranteed is the node itself: the scheduler selects by quantities and cannot see
 inside a node's topology, so a node whose totals suffice but whose devices sit on two NUMA nodes is
 selected and the container is then refused at admission — and a Pod refused that way is not
 rescheduled onto another node.
@@ -534,7 +535,7 @@ old reading under `SH` — `10/10` on one free accelerator now reads `1/10`.
 ## Limitations
 
 - **Media-engine and graphics profile variants are not exposed.** A profile whose name is not a valid
-  Kubernetes resource-name segment — the `+me`, `+me.all` and `+gfx` MIG variants — is **excluded** from
+  Kubernetes resource-name segment (the `+me`, `+me.all` and `+gfx` MIG variants) is **excluded** from
   an accelerator's inventory rather than rewritten to something key-safe, so a key always maps back to
   its profile by a plain prefix strip. Those variants cannot be requested.
 - **One accelerator per slice or partition request** (rules 2 and 3), for the different reasons given
@@ -554,12 +555,12 @@ old reading under `SH` — `10/10` on one free accelerator now reads `1/10`.
 
 - **Flipping an accelerator's partitioning mode is an operational procedure, not a live switch.** An
   accelerator advertises a family's tokens only while its reported capability backs that family, so a
-  flip *removes* the old tokens rather than marking them unhealthy — there is no continuity across it.
+  flip removes the old tokens rather than marking them unhealthy: there is no continuity across it.
 
   Drain the accelerator (the hardware refuses the toggle under load anyway), flip the mode with the
   manufacturer's tool, then **restart that node's Device Manager DaemonSet**: the re-detect trigger
   watches the device set and health, not the partitioning mode. Deleting the node's `Devices` object is
-  **not** required — an existing group's capability is rewritten in place.
+  **not** required, since an existing group's capability is rewritten in place.
 
   Full procedure: [NVIDIA MIG Operations](./nvidia-mig.md#enabling-partitioning-on-a-node) ·
   [T-Head MIG Operations](./thead-mig.md#enabling-partitioning-on-a-node) ·

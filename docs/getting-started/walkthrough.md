@@ -1,8 +1,8 @@
 # Walkthrough
 
-Real `kubectl` invocations with their real output, objects as YAML trimmed to `metadata.labels` /
-`spec` / `status`, and a **before / after** per operation via `kubectl get instancetypes`. Node names
-are genericized (`node-cpu`, `node-a10g`, `node-t4-a`, `node-t4-b`).
+This page records a real session: every `kubectl` invocation and its real output, objects as YAML
+trimmed to `metadata.labels` / `spec` / `status`, and a before / after `kubectl get instancetypes`
+per operation. Node names are genericized (`node-cpu`, `node-a10g`, `node-t4-a`, `node-t4-b`).
 
 The run uses the defaults: `instance-type-derived-from-node=true` auto-derives the pool objects,
 `instance-type-aware-cpu-manufacturer=false` keeps the CPU manufacturer out of the aggregation layer
@@ -398,8 +398,8 @@ gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi
 ```
 
 The A10G row moves `1/1 10/10 100/100 0/0` → `0/0 0/0 80/80 0/0`: **SL** gives up the 20 % slice;
-**EX** and **SH** fall to `0/0`, a partly-sliced accelerator being neither whole nor a shared unit;
-**PT** stays `0/0` — no partitioning mode, no hardware partition.
+**EX** and **SH** fall to `0/0` because a partly-sliced accelerator is neither whole nor a shared
+unit; **PT** stays `0/0`, since no partitioning mode means no hardware partition.
 
 Inside the Instance, the logical-slicing runtime caps visible VRAM to the slice, ≈ 20 % of 24 GiB:
 
@@ -410,9 +410,9 @@ NVIDIA A10G, 4912 MiB
 
 Deleting the Instance releases the slice: the row returns to `1/1 10/10 100/100 0/0`.
 
-> **Physical partitioning (MIG).** The A10G slices *logically*: a runtime caps a shared accelerator, and
+> **Physical partitioning (MIG).** The A10G slices logically: a runtime caps a shared accelerator, and
 > the `SL` view above tracks the per-accelerator credit budget. A MIG-capable accelerator (A100 / H100)
-> instead **hard-partitions** into fixed hardware instances the operator materializes on demand:
+> instead hard-partitions into fixed hardware instances the operator materializes on demand:
 >
 > - a different resource family (`.partitioned*`, reported under `PT`), with a different request shape —
 >   keys and rules in [Accelerator Requests](../modules/devices/requests.md);
@@ -457,7 +457,7 @@ gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-The new row shows `12/128Gi/200Gi` against the derived `8/64Gi/100Gi`, and both siblings `1/1` — one
+The new row shows `12/128Gi/200Gi` against the derived `8/64Gi/100Gi`, and both siblings `1/1`: one
 accelerator, two views of it.
 
 Deploy an Instance onto the custom type, whole accelerator:
@@ -480,7 +480,7 @@ spec:
       capacity: 1Gi
 ```
 
-Once `custom-demo` is `Ready`, both siblings drop to `0/0 0/0 0/0` — **consistent** across the
+Once `custom-demo` is `Ready`, both siblings drop to `0/0 0/0 0/0`, consistent across the
 accelerator's two views:
 
 ```console
@@ -493,7 +493,7 @@ gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-Deleting it retires gracefully: the operator drains the Instance (`HoldAndDrain`), the Instance stops,
+Deleting it retires in order: the operator drains the Instance (`HoldAndDrain`), the Instance stops,
 and the type plus its ClusterQueue go:
 
 ```console
@@ -517,7 +517,7 @@ returns the derived pool to `1/1 10/10 100/100`.
 
 ## 5. Enabling CPU-manufacturer awareness
 
-Flipping `instance-type-aware-cpu-manufacturer` on makes the **aggregation layer** split every pool by
+Flipping `instance-type-aware-cpu-manufacturer` on makes the aggregation layer split every pool by
 the CPU key. `ResourceFlavor`s are never rewritten; only queues, types and catalog re-group.
 
 ```console
@@ -565,7 +565,7 @@ gpustack--nvidia-a10g-linux-amd64                  gpustack-fnv64-c4680bb149644f
 ```
 
 `custom-demo` goes `Ready` on the aware pool, which drops to `0/0 0/0 0/0`, and the collapsed
-`gpustack--nvidia-a10g-linux-amd64` **also** drops — one accelerator, two consistent views.
+`gpustack--nvidia-a10g-linux-amd64` also drops: one accelerator, two consistent views.
 
 The aware ClusterQueue's labels now **carry the CPU key**, the difference from section 1:
 
@@ -595,8 +595,8 @@ gpustack--amd-epyc-7r32--nvidia-a10g                    amd-epyc-7r32           
 gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4   intel-xeon-platinum-8259cl   nvidia-tesla-t4    true            nvidia         Tesla-T4                                         16Gi     2560    true
 ```
 
-The **`ResourceFlavor` set is byte-for-byte unchanged**, the same 7 as section 1 — the flip re-grouped
-only the aggregation layer:
+The `ResourceFlavor` set is byte-for-byte unchanged, the same 7 as section 1: the flip re-grouped
+only the aggregation layer.
 
 ```console
 $ kubectl get resourceflavor --no-headers | wc -l
@@ -681,12 +681,12 @@ kept separate so node-path mounts can be allowed without a container escape:
 | `instance-privileged-allowed` | `spec.privileged` — escapes the container boundary, exposing the node's devices and kernel surface. |
 | `instance-host-path-volume-allowed` | `spec.additionalVolumes[*].hostPath` — reaches the node's filesystem, but not its devices or kernel. |
 
-Each gates **taking** its escape, so turning one off stops new grants without stranding an Instance
+Each gates taking its escape, so turning one off stops new grants without stranding an Instance
 that already holds one; [Settings](../reference/settings.md#online-adjustable-settings) has the exact terms.
 
 Both govern the **node** boundary, not the namespace one: a `persistent`, `configMap` or `secret`
 source names an object in the Instance's own namespace and may always be mounted, the same reach a Pod
-there has. Namespaces stay the tenancy boundary — put Instances whose authors should not read each
+there has. Namespaces stay the tenancy boundary: put Instances whose authors should not read each
 other's Secrets in their own.
 
 ---
