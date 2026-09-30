@@ -78,7 +78,11 @@ if (themePicker) {
   };
   themePicker.addEventListener("click", event => {
     const row = event.target.closest(".theme-row");
-    if (row) apply(row.dataset.themeChoice);
+    if (row) {
+      apply(row.dataset.themeChoice);
+      themePicker.open = false;
+      themePicker.querySelector("summary").focus();
+    }
   });
   darkQuery.addEventListener("change", () => {
     if (choice() === "system") paintMeta();
