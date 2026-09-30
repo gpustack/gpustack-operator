@@ -66,6 +66,9 @@ def compose(build, pages, ref, commit, root_url):
     previous = next((record for record in records if record["name"] == ref), None)
     if kind != "development" and previous and previous["commit"] != commit:
         raise ValueError("published tag documentation is immutable; do not move an existing tag")
+    package = pages / "charts" / f"gpustack-operator-{ref.removeprefix('v')}.tgz"
+    if kind != "development" and package.exists() and not previous:
+        raise ValueError("existing chart has no published source revision; verify its provenance before publishing documentation")
     destination = pages / ref
     if destination.exists():
         shutil.rmtree(destination)

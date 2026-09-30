@@ -157,12 +157,18 @@ still describes the implementation; verify that against the relevant code and sp
 ### Publishing
 
 The Site workflow publishes `main` after merges and a separate site for each `v*` version tag.
-It writes documentation alongside the charts on `github-pages`, then deploys the complete branch
-through GitHub Pages. Chart publication and both deployment jobs share a queue so concurrent runs
-preserve each other's files. The documentation composer verifies that chart bytes stay unchanged.
+For version tags, the same workflow publishes the Helm chart before composing documentation on
+`github-pages`. It deploys the complete branch once, under a shared publication queue. The Chart
+workflow retains generation, lint and installation checks. The documentation composer verifies
+that existing chart bytes stay unchanged.
 
 The publisher comes from `main`; the requested revision supplies all pages and Hugo layouts.
 Changes to publisher inputs and version metadata must remain compatible with existing published tags.
+
+Deployment uses the published content commit as its build identity, even when a tag and `main`
+share a source commit. The workflow verifies public version metadata, the chart index and the
+released package against the uploaded snapshot. A successful deployment status with stale public
+files fails publication.
 
 | Path | Content |
 |---|---|
@@ -183,6 +189,12 @@ Prerelease sites have `noindex` metadata. Publishing the matching stable version
 from the version menu, while keeping their direct URLs and source revisions for troubleshooting.
 Older stable versions remain available. Published tags cannot be moved to a different commit;
 `main` is the only site whose source revision changes over time.
+
+The Site workflow prepares documentation and release charts in one Pages checkout, then commits
+and deploys them together. It packages the tag's vendored chart dependencies without updating them.
+A retry of a published tag keeps its original chart package; a different source revision is rejected
+before chart changes. A chart without recorded source provenance requires verification before a
+site can be added for that version.
 
 To retry publication, run the Site workflow with `ref` set to `main` or an existing version tag.
 It uses the repository's `GITHUB_TOKEN` with contents, Pages and identity-token permissions;

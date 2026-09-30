@@ -1,8 +1,8 @@
 ---
 name: gpustack-operator-release
-description: "Cut a GPUStack Operator release end to end: draft the notes, push the `vX.Y.Z` tag, watch the tag-triggered pipelines, and promote the pre-release once CI is green. Also re-publishes an existing version."
+description: "Cut a GPUStack Operator release end to end: draft the notes, push the `vX.Y.Z` tag, watch the tag-triggered pipelines, and promote the pre-release once CI is green. Also retries publication of an existing version."
 disable-model-invocation: true
-allowed-tools: "Read, AskUserQuestion, Bash(git fetch*), Bash(git log*), Bash(git tag -l*), Bash(git tag --list*), Bash(git rev-parse*), Bash(git status*), Bash(git show*), Bash(git diff*), Bash(git describe*), Bash(git merge-base*), Bash(make version), Bash(command -v*), Bash(date*), Bash(mkdir -p .claude/reports/*), Bash(tee .claude/reports/*), Bash(gh auth status*), Bash(gh release list*), Bash(gh release view*), Bash(gh api repos/gpustack/gpustack-operator/releases/latest*), Bash(gh run list*), Bash(gh run view*), Bash(gh run watch*), Bash(gh pr list*), Bash(gh pr view*), Bash(curl -sL https://gpustack.github.io/gpustack-operator/*), Bash(tar tzf /tmp/*), Bash(tar xzf /tmp/*)"
+allowed-tools: "Read, AskUserQuestion, Bash(git fetch*), Bash(git ls-tree*), Bash(git show*), Bash(git log*), Bash(git tag -l*), Bash(git tag --list*), Bash(git rev-parse*), Bash(git status*), Bash(git show*), Bash(git diff*), Bash(git describe*), Bash(git merge-base*), Bash(make version), Bash(command -v*), Bash(date*), Bash(mkdir -p .claude/reports/*), Bash(tee .claude/reports/*), Bash(gh auth status*), Bash(gh release list*), Bash(gh release view*), Bash(gh api repos/gpustack/gpustack-operator/releases/latest*), Bash(gh run list*), Bash(gh run view*), Bash(gh run watch*), Bash(gh pr list*), Bash(gh pr view*), Bash(curl -sL https://gpustack.github.io/gpustack-operator/*), Bash(tar tzf /tmp/*), Bash(tar xzf /tmp/*)"
 ---
 
 # GPUStack Operator — cut a release
@@ -10,29 +10,34 @@ allowed-tools: "Read, AskUserQuestion, Bash(git fetch*), Bash(git log*), Bash(gi
 Drive a full release from a version number to a published GitHub Release. Cutting a release is a single act — **pushing a `vX.Y.Z` git tag** — which fans out to two pipelines:
 
 - `ci.yml` → multi-arch image + the **GitHub Release** object (published as a **pre-release** with a categorized baseline note).
-- `chart.yml` → the Helm chart, repacked from the tag and published to `github-pages`.
+- `site.yml` → the Helm chart and versioned documentation, published together to `github-pages` and deployed once.
 
 The version propagates from the tag → binary (`pack/utils.mk` / `hack/lib/version.sh` → ldflags → `gpustack-operator --version`) and → chart, so **the git tag is the single source of truth** — there is no `VERSION` file to bump.
 
 **Release-note contract.** `ci.yml`'s `release` job builds a categorized baseline note (`mikepenz/release-changelog-builder-action` in COMMIT mode, grouped by Conventional-Commit prefix) and publishes as `prerelease: true`. This skill's job: (a) produce a **better, highlight-focused** note and replace the baseline, and (b) **promote** the pre-release to the official release once CI is green. Nothing gets the GitHub **Latest** badge until you promote — that is the gate.
 
-**Overwrite (re-publish).** Re-cutting an already-published `vX.Y.Z` under the **same version** — to fix a mis-tagged commit, a bad build, or notes that need a full redo — is a supported but **non-default, interactive-only** path. It works by **delete + recreate** (drop the release and tag, re-tag the new SHA, push again); it relies on CI being overwrite-idempotent (mutable Docker Hub tags, `softprops/action-gh-release@v2` update-in-place, `stefanprodan/helm-gh-pages` overwriting the chart `.tgz`) so the re-pushed tag re-runs both pipelines over the same version. It never force-pushes and always requires an explicit confirm — see Phase 1 (detection) and Phase 3 (teardown). It is **reversible but not free**: *Rolling back an overwrite* restores the original version and re-cuts the new work under a fresh number, at the cost of a rewritten publish timestamp and a window in which the tag served other content.
+**Published versions are immutable.** A tag with published chart or documentation content cannot
+be re-cut at a different commit. Retry its workflows at the same source revision, edit its release
+notes, or choose a new version. Delete and recreate is limited to recovering a version with neither
+a chart package nor a documentation record; it is interactive-only and requires explicit approval.
+The Site workflow preserves package bytes on retries and rejects a changed source revision before
+preparing chart changes.
 
 ## Hard rules
 
 - **Release off any branch; default to `origin/main`.** Tag by SHA — never switch branches. Default target = `origin/main` HEAD; when the user names another branch/commit (e.g. a maintenance line like `origin/v0.5-dev`), tag that. A maintenance-line commit will **not** be an ancestor of `origin/main` — expected, not an error; confirm the (branch, commit) with the user and flag it as a maintenance release in the summary.
-- **Tag shape is exactly `vX.Y.Z` (final) or `vX.Y.Z-rcN` (pre-release)** — nothing else; a hyphen-less form like `v0.6.1rc1` is rejected (Phase 1 regex). The `-rcN` **hyphen is required**: `chart.yml` sets the Helm chart version to the tag without the `v`, and Helm enforces strict SemVer2, which rejects a hyphen-less pre-release like `0.6.1rc1`; the build's version derivation requires this shape too. Any tag containing `rc` stays a pre-release and must not be promoted.
+- **Tag shape is exactly `vX.Y.Z` (final) or `vX.Y.Z-rcN` (pre-release)** — nothing else; a hyphen-less form like `v0.6.1rc1` is rejected (Phase 1 regex). The `-rcN` **hyphen is required**: `site.yml` sets the Helm chart version to the tag without the `v`, and Helm enforces strict SemVer2, which rejects a hyphen-less pre-release like `0.6.1rc1`; the build's version derivation requires this shape too. Any tag containing `rc` stays a pre-release and must not be promoted.
 - **Every mutating step is confirmed** — creating/pushing the tag, `gh release edit`, and any tag/release deletion. Read-only inspection (git log/status, `gh run list/watch`, `gh release view`) runs without prompting.
-- **Never force-push.** An existing tag is **rejected by default**; the only way past it is the explicit, confirm-gated **overwrite path** (delete + recreate — Phase 1 detects, Phase 3 tears down), which never force-pushes and never mutates a published tag/release without a separate explicit confirm.
-- **Never delete a release without exporting its notes first.** `gh release delete` destroys the body irrecoverably — GitHub keeps no history of it. Phase 3 writes it to `$RPT/notes-original-$VER.md` **before** teardown; that file is the only thing that makes a rollback possible (see *Rolling back an overwrite*).
-- **Overwrite is interactive-only.** Auto mode never overwrites — an existing tag stops it and hands back to a human. Overwriting a release that is already a **promoted GA** or currently holds the **Latest** badge requires an **extra** explicit confirm, shown after the consumer-impact warning.
+- **Never force-push or move a published tag.** Inspect both the Pages manifest and chart inventory before offering recovery. A lookup failure is not evidence that a version is unpublished.
+- **Never delete a release without exporting its notes first.** `gh release delete` destroys the body irrecoverably — GitHub keeps no history of it. Phase 3 writes it to `$RPT/notes-original-$VER.md` **before** teardown; retain that file when recovering an unpublished version.
+- **Recovery is interactive-only.** Auto mode never deletes an existing release or tag. Recreating an unpublished version that already holds the **Latest** badge requires a separate explicit confirmation.
 - **Auto mode does not promote** — it stops at the published pre-release (see Modes).
 
 ## Modes
 
 - **Interactive (default).** Confirm at each gate: the (version, commit) pair, the drafted notes, the tag push, the note replacement, and the final promotion.
-- **Auto / bypass-permissions** (user says "auto", or runs with permissions skipped). Replace every confirmation with the sensible default — target = the branch the user named (its HEAD), else `origin/main` HEAD; notes generated without asking — and run **Phase 0 → 5 unattended, then stop at the published pre-release** (skip Phase 6). Report the release URL and tell the user to promote to the official release on GitHub when ready. **Auto never overwrites** — if the tag already exists, stop and hand back to a human (see Overwrite).
-- **Overwrite (re-publish)** layers on top of interactive mode when Phase 1 finds the tag already exists and the user chooses to overwrite. It is never entered in auto mode. It adds a teardown-and-recreate step (Phase 3) plus a re-promote step for a formerly-promoted GA (Phase 6); every other phase is unchanged.
+- **Auto / bypass-permissions** (user says "auto", or runs with permissions skipped). Replace every confirmation with the sensible default — target = the branch the user named (its HEAD), else `origin/main` HEAD; notes generated without asking — and run **Phase 0 → 5 unattended, then stop at the published pre-release** (skip Phase 6). Report the release URL and tell the user to promote to the official release on GitHub when ready. **Auto never overwrites** — if the tag already exists, stop and hand back to a human (see Phase 1).
+- **Unpublished-version recovery** layers on top of interactive mode when Phase 1 finds the tag already exists and the user chooses recovery. It is never entered in auto mode. It adds a teardown-and-recreate step (Phase 3) plus a re-promote step for a recovered GA (Phase 6); every other phase is unchanged.
 
 ## Flow
 
@@ -56,18 +61,29 @@ Nothing meaningful to print before the tag exists (version is derived from it at
 ### Phase 1 — Version + commit (confirm)
 
 - Validate `VER` against `^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$` (pre-releases need the SemVer2 hyphen, e.g. `v0.6.1-rc1`).
-- **Existing-tag decision.** If `git tag -l "$VER"` is empty, this is a fresh release — sanity-check `VER` is greater than the previous tag and continue. If it is **not** empty, do not hard-refuse: probe the current state, then ask (`AskUserQuestion`) whether to **pick a new version**, **overwrite the existing one** (destructive re-publish), or **abort**.
+- Default target = `origin/$BR` HEAD (`SHA=$(git rev-parse "origin/$BR")`, `BR` defaulting to `main`).
+- **Existing-tag decision.** Fetch the current Pages branch and inspect its manifest and chart
+  package before changing an existing tag:
 
   ```bash
-  git tag -l "$VER"                                                            # non-empty → overwrite decision
-  gh release view "$VER" --json isPrerelease,isDraft,tagName,url               # is there a release? already a GA?
-  gh api repos/gpustack/gpustack-operator/releases/latest --jq '.tag_name'     # does $VER currently hold Latest?
+  git fetch origin github-pages
+  git show FETCH_HEAD:versions.json > "$RPT/versions.json"
+  git ls-tree -r --name-only FETCH_HEAD -- "charts/gpustack-operator-${VER#v}.tgz"
+  gh release view "$VER" --json isPrerelease,isDraft,tagName,url
+  gh api repos/gpustack/gpustack-operator/releases/latest --jq '.tag_name'
   ```
 
-  Both probes tolerate "not found" — treat it as state, not failure: `gh release view` exits non-zero when the tag exists without a release object (a bare tag → the tag-only teardown path in Phase 3), and `releases/latest` 404s when the repo has no GA yet (`WAS_LATEST` false). Proceed to the decision either way.
+  Read the manifest's `published` records. If either a record for `$VER` or its chart package
+  exists, do not offer delete and recreate. Compare the tag's resolved commit with any recorded
+  source revision. Offer a retry at the original source, a new version, or abort. A chart with no
+  documentation record does not prove its source revision; verify provenance before adding a site.
+  A failed fetch or manifest read blocks the decision rather than establishing absence.
 
-  On **overwrite**, set `OVERWRITE=1` and record `WAS_GA` (release exists with `isPrerelease=false`) and `WAS_LATEST` (the latest-release tag equals `$VER`) for Phase 3/6. In overwrite mode **skip** the "greater than the previous tag" check — reusing the same version is the point.
-- Default target = `origin/$BR` HEAD (`SHA=$(git rev-parse "origin/$BR")`, `BR` defaulting to `main`).
+  If neither chart nor documentation has been published, interactive recovery may use the existing
+  teardown procedure after confirmation. Set `OVERWRITE=1`, record `ORIG_SHA`, `WAS_GA` and
+  `WAS_LATEST`, and skip the greater-than-previous-tag check. A missing release object is a bare tag,
+  not a failed probe; `releases/latest` returning 404 means no stable release exists.
+
 - Different commit wanted → list candidates and let the user pick (`AskUserQuestion`):
 
   ```bash
@@ -83,7 +99,7 @@ Read the range since the previous release and group by Conventional-Commit type.
 ```bash
 # previous *stable* release ON THIS LINE — restrict to tags reachable from $SHA so a maintenance-line
 # release picks its own predecessor (e.g. v0.5.3 for v0.5.4, not the global-latest v0.6.x); skip -rcN.
-# In overwrite mode `grep -Fvx "$VER"` drops the tag being re-published (fixed-string, whole-line match,
+# In recovery mode `grep -Fvx "$VER"` drops the tag being re-published (fixed-string, whole-line match,
 # so the dots in the version aren't treated as regex) so it can't become its own predecessor.
 LAST=$(git tag -l 'v*' --merged "$SHA" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -Fvx "$VER" | head -n1)
 # no prior stable tag on this line (brand-new repo/branch): fall back to the full history up to $SHA
@@ -104,12 +120,10 @@ Compose `$RPT/notes.md`:
 
 ### Phase 3 — Cut & push the tag (confirm → prompts)
 
-**Overwrite teardown (only when `OVERWRITE=1`).** Before re-tagging, spell out the consumer-impact of re-publishing the same version, then take an **extra** confirm — stronger wording when `WAS_GA`/`WAS_LATEST`:
-
-- The `vX.Y.Z` image tag and the chart `.tgz` are overwritten **in place** — anyone who already pulled them gets different content on the next pull. When verifying afterwards, pin the new `@sha256:` digest rather than trusting the tag alone.
-- If `WAS_LATEST`, the Latest badge drops to the next-newest GA during the teardown→re-run window and only returns when you re-promote in Phase 6.
-- The release's **publish timestamp resets to now** — a release object cannot be recreated with its historical date, so an overwrite permanently rewrites when that version appears to have shipped. Irreversible even by a rollback.
-- **Reusing a version number is not free even when the build is fine.** If the new content changes behavior — anything carrying an `action required` release-note, moved values, or a new manual upgrade step — downstream gets that change under a version number it has already pinned, with no signal to re-read the migration notes. Say so, and offer cutting a **new** version instead; overwrite is for a version whose *artifacts* are wrong, not for one whose *content* should have been a new release.
+**Recovery teardown (only when `OVERWRITE=1`).** Repeat the Pages manifest and chart inventory
+checks immediately before teardown. Refuse if content has been published since preflight. Confirm
+that the existing image tag may change, the release publish date resets, and the Latest badge may
+move temporarily. Export the release notes and record the original tag commit before deletion.
 
 Then tear down state-aware and recreate back-to-back to minimize the no-release window:
 
@@ -136,31 +150,27 @@ git tag -a "$VER" "$SHA" -m "Release $VER"
 git push origin "$VER"
 ```
 
-This triggers `ci.yml` and `chart.yml`. Per the note-generation contract, `ci.yml` creates the GitHub Release as a **pre-release** carrying the categorized baseline body.
+This triggers `ci.yml` and `site.yml`. Per the note-generation contract, `ci.yml` creates the GitHub Release as a **pre-release** carrying the categorized baseline body.
 
 ### Phase 4 — Monitor CI (read-only)
 
-Watch **every** run for the tag (both workflows) to completion. Tag pushes show up with the tag name as the head branch. `chart.yml` finishes in about a minute; `ci.yml` takes ~20 (multi-arch image, vendor SDK build stages) — so this phase is almost entirely waiting.
+Watch **every** run for the tag (both workflows) to completion. Tag pushes show up with the tag name as the head branch. `site.yml` publishes the chart and exact-tag documentation together, deploys their complete content snapshot, and verifies public bytes. `ci.yml` builds the multi-arch image and vendor SDK stages.
 
 Enumerate the runs, then chain both watches into **one backgrounded command** and wait for its completion notification:
 
 ```bash
-gh run list --branch "$VER" --limit 20              # enumerate ci.yml + chart.yml runs
+gh run list --branch "$VER" --limit 20              # enumerate ci.yml + site.yml runs
 # one command, both runs, run_in_background: true — each watch blocks until its run finishes
-gh run watch <chart-run-id> --exit-status --compact > /tmp/w-chart.log 2>&1; echo "CHART-EXIT=$?" >> /tmp/w-chart.log
+gh run watch <site-run-id> --exit-status --compact > /tmp/w-site.log 2>&1; echo "SITE-EXIT=$?" >> /tmp/w-site.log
 gh run watch <ci-run-id>    --exit-status --compact > /tmp/w-ci.log    2>&1; echo "CI-EXIT=$?"    >> /tmp/w-ci.log
 ```
 
 **Do not also poll in the foreground.** A `sleep 300; gh run list` blocks the whole turn doing nothing and duplicates the watcher already tracking the same runs. Wait for the background task's notification, then read the `*-EXIT=` lines — the chained command's own exit code is the trailing `echo`, not the watch, so judge each run by its marker. If a status check is genuinely needed mid-flight, one bare `gh run list` is enough; never a multi-minute `sleep`.
 
-Report per-workflow status. On any failure: `gh run view <run-id> --log-failed`, triage, and **stop — do not promote**. Offer (each gated by a confirm) to fix forward, or to delete and retry:
-
-```bash
-# retry after a fix (mutating — confirm each):
-gh release delete "$VER" --yes --cleanup-tag
-# or, if the release object isn't there yet:
-git push origin --delete "$VER" && git tag -d "$VER"
-```
+Report per-workflow status. On any failure, read `gh run view <run-id> --log-failed`, diagnose it,
+and stop before promotion. Retry a failed run at the same source commit. If a source change is
+required, cut a new version once any chart or documentation has been published; do not delete and
+recreate that tag. Notes can be edited without replacing release artifacts.
 
 ### Phase 5 — Refine & attach notes (confirm → prompts)
 
@@ -187,44 +197,20 @@ gh release edit "$VER" --latest --prerelease=false
 gh release edit "$VER" --prerelease=false --latest=false
 ```
 
-**After an overwrite**, CI always rebuilds the release as a **pre-release** (`ci.yml` sets `prerelease: true`). Re-promote here **only when `WAS_GA`** — i.e. the release you overwrote was itself a promoted GA; if it was a pre-release/rc, leave it as a pre-release. When re-promoting, restore the badge with `--latest` if `WAS_LATEST`, otherwise follow the maintenance-line rule above.
+**After unpublished-version recovery**, CI always rebuilds the release as a **pre-release** (`ci.yml` sets `prerelease: true`). Re-promote here **only when `WAS_GA`** — i.e. the release being recovered was itself a promoted GA; if it was a pre-release/rc, leave it as a pre-release. When re-promoting, restore the badge with `--latest` if `WAS_LATEST`, otherwise follow the maintenance-line rule above.
 
 Skip this phase entirely for `rc` tags and in auto mode — leave those as pre-releases.
 
-### Rolling back an overwrite (interactive only; confirm → prompts)
+### Recovering a bad publication
 
-An overwrite can be reversed — restore the original version, and re-cut the new work under a fresh number. Most often decided at the Phase 6 gate, once the overwritten release is there to look at. Two things make this more than editing the Release object back:
+For an unchanged source commit, rerun the failed workflow. After a Site fix reaches `main`, the
+Site workflow can be dispatched with `ref` set to the existing tag: it uses current publishing tools
+and the tag's exact sources. Confirm the public manifest, chart index and package bytes before
+calling the retry successful. It must preserve the original package.
 
-- **The artifacts were already overwritten.** The `vX.Y.Z` image tag and chart `.tgz` now hold the new content, so restoring the Release object alone leaves the tag pointing at one commit while the registry and Helm repo serve another. The tag has to be re-cut at `ORIG_SHA` and **pushed, so CI re-runs** and rebuilds the original content back over the new.
-- **The body is gone unless Phase 3 exported it** — restore from `$RPT/notes-original-$VER.md`.
-
-Push both tags back to back so all four pipelines run in parallel:
-
-```bash
-gh release delete "$VER" --yes --cleanup-tag         # drop the overwritten release + tag
-git tag -d "$VER"
-git tag -a "$VER" "$ORIG_SHA" -m "Release $VER"      # ORIG_SHA — recorded before the Phase 3 teardown
-git push origin "$VER"                               # CI rebuilds the ORIGINAL content over the new
-git tag -a "$NEW_VER" "$SHA" -m "Release $NEW_VER"   # the work that was briefly published as $VER
-git push origin "$NEW_VER"
-```
-
-Once all four runs are green:
-
-- `$VER` — attach `$RPT/notes-original-$VER.md`, then re-promote per Phase 6 if it was `WAS_GA`, but with **`--latest=false`**: `$NEW_VER` is now the newer stable tag, so the maintenance-line rule applies.
-- `$NEW_VER` — Phases 5–6 as normal, with the notes **rewritten for its narrower range** (`$VER..$SHA`, not the overwritten draft's `$LAST..$SHA`). Re-run the Phase 2 `LAST` computation rather than editing the old draft by hand: commits that belong to `$VER` must drop out, and the `Full Changelog` link and any `blob/<tag>/` doc links have to follow the new tag.
-
-**Verify the artifacts actually diverged**, not just the Release objects — the chart is the cheapest probe (note the `/charts/` path segment):
-
-```bash
-curl -sL -o /tmp/c.tgz "https://gpustack.github.io/gpustack-operator/charts/gpustack-operator-<X.Y.Z>.tgz"
-tar tzf /tmp/c.tgz | grep -cE '^gpustack-operator/charts/[^/]+/Chart.yaml'   # e.g. vendored subchart count
-tar xzf /tmp/c.tgz -O gpustack-operator/Chart.yaml | grep -E '^(version|appVersion):'
-```
-
-Pick something that genuinely differs between the two commits — a file only one side has, or a line one side changed. Matching `version`/`appVersion` alone proves only that the repack ran.
-
-**Residue a rollback cannot undo:** `$VER`'s publish timestamp is now the rollback date, and anyone who pulled the image or chart during the overwrite window holds the other content under the same tag. Both belong in the summary.
+For a source change, publish a new version with its own notes and artifacts. Leave the previous
+tag in place and explain the correction in the new release notes. An image or release-note problem
+alone does not justify moving the tag or replacing a published chart.
 
 ### Phase 7 — Summary
 
@@ -242,4 +228,4 @@ gh api repos/gpustack/gpustack-operator/releases/latest --jq '.tag_name'   # == 
 
 For a maintenance-line release that kept `--latest=false`, this correctly still points at the newer GA — not `$VER` — so a mismatch there is expected, not a failure.
 
-**After an overwrite**, note in the summary that the `vX.Y.Z` image tag was overwritten in place; anyone verifying that the new content actually runs should pin the fresh `@sha256:` digest rather than trusting the mutable tag.
+**After unpublished-version recovery**, note in the summary that the `vX.Y.Z` image tag was overwritten in place; anyone verifying that the new content actually runs should pin the fresh `@sha256:` digest rather than trusting the mutable tag.

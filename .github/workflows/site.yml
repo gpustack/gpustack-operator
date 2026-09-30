@@ -24,8 +24,8 @@ jobs:
     if: github.repository == 'gpustack/gpustack-operator'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    # Chart publication and deployment use this same queue. Acquire it before checkout so
-    # every writer and every deployment sees the latest complete Pages branch.
+    # Hold the publication queue through chart publication, site composition and deployment.
+    # A run uploads the complete branch and deploys it once.
     concurrency:
       group: github-pages
       queue: max
@@ -91,28 +91,62 @@ jobs:
         with:
           ref: github-pages
           path: pages
-      - name: Compose Pages without changing charts
+      - name: Compose versioned documentation
         run: |
           python3 tools/hack/site/publish.py --build source/site/public --pages pages \
             --ref "${REQUESTED_REF}" --commit "${SOURCE_COMMIT}" --root-url "${SITE_ROOT_URL}"
         env:
           SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
-      - name: Commit documentation
+      - name: Setup Helm for release charts
+        if: steps.ref.outputs.kind != 'development'
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.21.0
+      - name: Prepare release chart
+        if: steps.ref.outputs.kind != 'development'
+        run: |
+          version="${REQUESTED_REF#v}"
+          package="gpustack-operator-${version}.tgz"
+          # Composition has already checked the published tag's source revision.
+          # Keep the original package bytes when retrying a published version.
+          if [[ ! -f "pages/charts/${package}" ]]; then
+            package_dir=$(mktemp -d)
+            trap 'rm -rf "${package_dir}"' EXIT
+            helm package source/deploy/gpustack-operator/chart \
+              --version "${version}" --app-version "${version}" --destination "${package_dir}"
+            helm repo index "${package_dir}" --url "${SITE_ROOT_URL}charts" \
+              --merge pages/charts/index.yaml
+            cp "${package_dir}/${package}" pages/charts/
+            cp "${package_dir}/index.yaml" pages/charts/index.yaml
+          fi
+      - name: Commit chart and documentation
+        id: content
         working-directory: pages
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add .
           if ! git diff --cached --quiet; then
-            git commit -m "docs: publish ${REQUESTED_REF} site"
+            git commit -m "build: publish ${REQUESTED_REF} chart and documentation"
             git push origin HEAD:github-pages
           fi
+          echo "commit=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
       - name: Setup Pages
         uses: actions/configure-pages@v6
       - name: Upload complete Pages tree
+        id: upload
         uses: actions/upload-pages-artifact@v3
         with:
           path: pages
       - name: Deploy
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/github-script@v8
+        env:
+          PAGES_COMMIT: ${{ steps.content.outputs.commit }}
+          PAGES_ARTIFACT_ID: ${{ steps.upload.outputs.artifact_id }}
+        with:
+          script: |
+            await require('./tools/hack/site/deploy.cjs')({github, context, core});
+      - name: Verify public publication
+        run: |
+          python3 tools/hack/site/verify.py --pages pages --ref "${REQUESTED_REF}" --root-url "${SITE_ROOT_URL}"
