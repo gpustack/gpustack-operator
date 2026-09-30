@@ -83,6 +83,13 @@ jobs:
   check:
     timeout-minutes: 20
     runs-on: ubuntu-24.04
+    env:
+      # The repo-file shortcut in "Check links under .github" must recognize the branch a
+      # "blob" link pins, and that branch is whatever this event's repository calls its
+      # default, not a literal "main": a fork or a renamed default branch would otherwise
+      # send every default-branch link back through the flaky HTTP path. Structured
+      # context rather than a shell default, so it follows each event's repository.
+      default_branch: ${{ github.event.repository.default_branch }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -143,14 +150,23 @@ jobs:
           echo "Checking $(printf '%s\n' "${urls}" | wc -l | tr -d ' ') unique URL(s) under .github/**/*.md:"
           failed=""
           unverified=""
-          repository_files="https://github.com/${GITHUB_REPOSITORY}/blob/main/"
+          repository_files="https://github.com/${GITHUB_REPOSITORY}/blob/${default_branch}/"
           while IFS= read -r url; do
             [[ -n "${url}" ]] || continue
-            # A PR may move its own docs before main contains them. Check those paths against
-            # this checkout; links to other repositories and pinned revisions still use HTTP.
+            # A PR may move its own docs before the default branch contains them. Check those
+            # paths against this checkout; links to other repositories and pinned revisions
+            # still use HTTP, because the current checkout cannot prove a file existed at the
+            # revision the link pins.
             if [[ "${url}" == "${repository_files}"* ]]; then
               file="${url#"${repository_files}"}"
+              # Query and fragment first: a path's own "?" or "#" only exists once decoded.
+              file="${file%%\?*}"
               file="${file%%\#*}"
+              # Blob URLs percent-encode what the checkout stores raw; decode via stdlib
+              # unquote, passing the path as an argument, never inside the program text.
+              if [[ "${file}" == *%* ]]; then
+                file=$(python3 -c 'import sys, urllib.parse; sys.stdout.write(urllib.parse.unquote(sys.argv[1]))' "${file}")
+              fi
               if [[ -f "${file}" ]]; then
                 printf '  ok          file %s\n' "${url}"
               else
@@ -168,7 +184,9 @@ jobs:
             # first dropped connection — the exact case this retry exists to absorb. The default
             # covers the one path where curl exits before writing anything at all.
             for attempt in 1 2 3; do
-              code=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 20 "${url}")
+              # `|| true` keeps curl's non-zero exit from tripping errexit: without it the
+              # first dropped connection aborts the step before this loop can retry.
+              code=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 20 "${url}") || true
               code=${code:-000}
               case "${code}" in
                 000|408|429|5??) [[ "${attempt}" == 3 ]] || sleep 5 ;;
