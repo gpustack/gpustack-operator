@@ -87,6 +87,12 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&InstanceTypeFlavor{},
 		&InstanceTypeFlavorList{},
 		&InstanceTypeList{},
+		&KVCacheBackend{},
+		&KVCacheBackendList{},
+		&KVCachePool{},
+		&KVCachePoolBinding{},
+		&KVCachePoolBindingList{},
+		&KVCachePoolList{},
 		&ModelArtifact{},
 		&ModelArtifactList{},
 		&ModelArtifactProgress{},
@@ -95,8 +101,14 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ModelDeploymentMetrics{},
 		&ModelPrefetch{},
 		&ModelPrefetchList{},
+		&ModelStore{},
+		&ModelStoreBinding{},
+		&ModelStoreBindingList{},
+		&ModelStoreList{},
 		&NodeModelStore{},
 		&NodeModelStoreList{},
+		&TopologySource{},
+		&TopologySourceList{},
 	)
 	// AddToGroupVersion allows the serialization of client types like ListOptions.
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)

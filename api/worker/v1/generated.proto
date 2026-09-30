@@ -591,6 +591,83 @@ message InstanceTypeList {
   repeated InstanceType items = 2;
 }
 
+// KVCacheBackend is the schema for worker.gpustack.ai.
+//
+// KVCacheBackend proxies the v1alpha1.KVCacheBackend.
+//
+// +genclient
+// +genclient:noStatus
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["kvcb"]
+message KVCacheBackend {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCacheBackendSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCacheBackendStatus status = 3;
+}
+
+// KVCacheBackendList holds the list of KVCacheBackends.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message KVCacheBackendList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated KVCacheBackend items = 2;
+}
+
+// KVCachePool is the schema for worker.gpustack.ai.
+//
+// KVCachePool proxies the v1alpha1.KVCachePool.
+//
+// +genclient
+// +genclient:noStatus
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["kvcp"]
+message KVCachePool {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCachePoolSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCachePoolStatus status = 3;
+}
+
+// KVCachePoolBinding is the schema for worker.gpustack.ai.
+//
+// KVCachePoolBinding proxies the v1alpha1.KVCachePoolBinding.
+//
+// +genclient
+// +genclient:noStatus
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["kvcpb"]
+message KVCachePoolBinding {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCachePoolBindingSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.KVCachePoolBindingStatus status = 3;
+}
+
+// KVCachePoolBindingList holds the list of KVCachePoolBindings.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message KVCachePoolBindingList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated KVCachePoolBinding items = 2;
+}
+
+// KVCachePoolList holds the list of KVCachePools.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message KVCachePoolList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated KVCachePool items = 2;
+}
+
 // ModelArtifact is the v1 view of a model's weights: where they come from and where they are.
 //
 // It proxies the v1alpha1 resource for every verb and serves the progress subresource. IT HAS NO
@@ -832,6 +909,57 @@ message ModelPrefetchList {
   repeated ModelPrefetch items = 2;
 }
 
+// ModelStore is the schema for worker.gpustack.ai.
+//
+// ModelStore proxies the v1alpha1.ModelStore.
+//
+// +genclient
+// +genclient:noStatus
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["ms"]
+message ModelStore {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelStoreSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelStoreStatus status = 3;
+}
+
+// ModelStoreBinding is the schema for worker.gpustack.ai.
+//
+// ModelStoreBinding proxies the v1alpha1.ModelStoreBinding.
+//
+// +genclient
+// +genclient:noStatus
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["msb"]
+message ModelStoreBinding {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelStoreBindingSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.ModelStoreBindingStatus status = 3;
+}
+
+// ModelStoreBindingList holds the list of ModelStoreBindings.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelStoreBindingList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelStoreBinding items = 2;
+}
+
+// ModelStoreList holds the list of ModelStores.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message ModelStoreList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated ModelStore items = 2;
+}
+
 // NFSInstancePersistentVolumeSource defines the source of NFS.
 message NFSInstancePersistentVolumeSource {
   // Server is the hostname or IP address of the NFS server.
@@ -987,5 +1115,31 @@ message S3InstancePersistentVolumeSource {
   //
   // +default=["--no-checksum","--memory-limit=4000","--max-flushers=32","--max-parallel-parts=32","--part-sizes=25","--list-type=2","--no-specials"]
   repeated string mountOptions = 9;
+}
+
+// TopologySource is the schema for worker.gpustack.ai.
+//
+// TopologySource proxies the v1alpha1.TopologySource.
+//
+// +genclient
+// +genclient:noStatus
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["toposrc"]
+message TopologySource {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.TopologySourceSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.TopologySourceStatus status = 3;
+}
+
+// TopologySourceList holds the list of TopologySources.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message TopologySourceList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated TopologySource items = 2;
 }
 

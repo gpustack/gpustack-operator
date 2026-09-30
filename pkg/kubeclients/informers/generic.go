@@ -286,14 +286,26 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().InstanceTypes().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("instancetypeflavors"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().InstanceTypeFlavors().Informer()}, nil
+	case workerv1.SchemeGroupVersion.WithResource("kvcachebackends"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().KVCacheBackends().Informer()}, nil
+	case workerv1.SchemeGroupVersion.WithResource("kvcachepools"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().KVCachePools().Informer()}, nil
+	case workerv1.SchemeGroupVersion.WithResource("kvcachepoolbindings"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().KVCachePoolBindings().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("modelartifacts"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().ModelArtifacts().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("modeldeployments"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().ModelDeployments().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("modelprefetches"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().ModelPrefetches().Informer()}, nil
+	case workerv1.SchemeGroupVersion.WithResource("modelstores"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().ModelStores().Informer()}, nil
+	case workerv1.SchemeGroupVersion.WithResource("modelstorebindings"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().ModelStoreBindings().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("nodemodelstores"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().NodeModelStores().Informer()}, nil
+	case workerv1.SchemeGroupVersion.WithResource("topologysources"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().TopologySources().Informer()}, nil
 
 		// Group=worker.gpustack.ai, Version=v1alpha1
 	case workerv1alpha1.SchemeGroupVersion.WithResource("devices"):

@@ -49,6 +49,18 @@ func (c *FakeWorkerV1) InstanceTypeFlavors() v1.InstanceTypeFlavorInterface {
 	return newFakeInstanceTypeFlavors(c)
 }
 
+func (c *FakeWorkerV1) KVCacheBackends() v1.KVCacheBackendInterface {
+	return newFakeKVCacheBackends(c)
+}
+
+func (c *FakeWorkerV1) KVCachePools() v1.KVCachePoolInterface {
+	return newFakeKVCachePools(c)
+}
+
+func (c *FakeWorkerV1) KVCachePoolBindings(namespace string) v1.KVCachePoolBindingInterface {
+	return newFakeKVCachePoolBindings(c, namespace)
+}
+
 func (c *FakeWorkerV1) ModelArtifacts(namespace string) v1.ModelArtifactInterface {
 	return newFakeModelArtifacts(c, namespace)
 }
@@ -61,8 +73,20 @@ func (c *FakeWorkerV1) ModelPrefetches(namespace string) v1.ModelPrefetchInterfa
 	return newFakeModelPrefetches(c, namespace)
 }
 
+func (c *FakeWorkerV1) ModelStores() v1.ModelStoreInterface {
+	return newFakeModelStores(c)
+}
+
+func (c *FakeWorkerV1) ModelStoreBindings(namespace string) v1.ModelStoreBindingInterface {
+	return newFakeModelStoreBindings(c, namespace)
+}
+
 func (c *FakeWorkerV1) NodeModelStores() v1.NodeModelStoreInterface {
 	return newFakeNodeModelStores(c)
+}
+
+func (c *FakeWorkerV1) TopologySources() v1.TopologySourceInterface {
+	return newFakeTopologySources(c)
 }
 
 // RESTClient returns a RESTClient that is used to communicate

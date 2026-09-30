@@ -29,14 +29,26 @@ type Interface interface {
 	InstanceTypes() InstanceTypeInformer
 	// InstanceTypeFlavors returns a InstanceTypeFlavorInformer.
 	InstanceTypeFlavors() InstanceTypeFlavorInformer
+	// KVCacheBackends returns a KVCacheBackendInformer.
+	KVCacheBackends() KVCacheBackendInformer
+	// KVCachePools returns a KVCachePoolInformer.
+	KVCachePools() KVCachePoolInformer
+	// KVCachePoolBindings returns a KVCachePoolBindingInformer.
+	KVCachePoolBindings() KVCachePoolBindingInformer
 	// ModelArtifacts returns a ModelArtifactInformer.
 	ModelArtifacts() ModelArtifactInformer
 	// ModelDeployments returns a ModelDeploymentInformer.
 	ModelDeployments() ModelDeploymentInformer
 	// ModelPrefetches returns a ModelPrefetchInformer.
 	ModelPrefetches() ModelPrefetchInformer
+	// ModelStores returns a ModelStoreInformer.
+	ModelStores() ModelStoreInformer
+	// ModelStoreBindings returns a ModelStoreBindingInformer.
+	ModelStoreBindings() ModelStoreBindingInformer
 	// NodeModelStores returns a NodeModelStoreInformer.
 	NodeModelStores() NodeModelStoreInformer
+	// TopologySources returns a TopologySourceInformer.
+	TopologySources() TopologySourceInformer
 }
 
 type version struct {
@@ -90,6 +102,21 @@ func (v *version) InstanceTypeFlavors() InstanceTypeFlavorInformer {
 	return &instanceTypeFlavorInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
+// KVCacheBackends returns a KVCacheBackendInformer.
+func (v *version) KVCacheBackends() KVCacheBackendInformer {
+	return &kVCacheBackendInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// KVCachePools returns a KVCachePoolInformer.
+func (v *version) KVCachePools() KVCachePoolInformer {
+	return &kVCachePoolInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// KVCachePoolBindings returns a KVCachePoolBindingInformer.
+func (v *version) KVCachePoolBindings() KVCachePoolBindingInformer {
+	return &kVCachePoolBindingInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
 // ModelArtifacts returns a ModelArtifactInformer.
 func (v *version) ModelArtifacts() ModelArtifactInformer {
 	return &modelArtifactInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
@@ -105,7 +132,22 @@ func (v *version) ModelPrefetches() ModelPrefetchInformer {
 	return &modelPrefetchInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
+// ModelStores returns a ModelStoreInformer.
+func (v *version) ModelStores() ModelStoreInformer {
+	return &modelStoreInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// ModelStoreBindings returns a ModelStoreBindingInformer.
+func (v *version) ModelStoreBindings() ModelStoreBindingInformer {
+	return &modelStoreBindingInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
 // NodeModelStores returns a NodeModelStoreInformer.
 func (v *version) NodeModelStores() NodeModelStoreInformer {
 	return &nodeModelStoreInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// TopologySources returns a TopologySourceInformer.
+func (v *version) TopologySources() TopologySourceInformer {
+	return &topologySourceInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }

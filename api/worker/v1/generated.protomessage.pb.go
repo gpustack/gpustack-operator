@@ -70,6 +70,18 @@ func (*InstanceTypeFlavorSpec) ProtoMessage() {}
 
 func (*InstanceTypeList) ProtoMessage() {}
 
+func (*KVCacheBackend) ProtoMessage() {}
+
+func (*KVCacheBackendList) ProtoMessage() {}
+
+func (*KVCachePool) ProtoMessage() {}
+
+func (*KVCachePoolBinding) ProtoMessage() {}
+
+func (*KVCachePoolBindingList) ProtoMessage() {}
+
+func (*KVCachePoolList) ProtoMessage() {}
+
 func (*ModelArtifact) ProtoMessage() {}
 
 func (*ModelArtifactList) ProtoMessage() {}
@@ -96,6 +108,14 @@ func (*ModelPrefetch) ProtoMessage() {}
 
 func (*ModelPrefetchList) ProtoMessage() {}
 
+func (*ModelStore) ProtoMessage() {}
+
+func (*ModelStoreBinding) ProtoMessage() {}
+
+func (*ModelStoreBindingList) ProtoMessage() {}
+
+func (*ModelStoreList) ProtoMessage() {}
+
 func (*NFSInstancePersistentVolumeSource) ProtoMessage() {}
 
 func (*NodeModelStore) ProtoMessage() {}
@@ -103,3 +123,7 @@ func (*NodeModelStore) ProtoMessage() {}
 func (*NodeModelStoreList) ProtoMessage() {}
 
 func (*S3InstancePersistentVolumeSource) ProtoMessage() {}
+
+func (*TopologySource) ProtoMessage() {}
+
+func (*TopologySourceList) ProtoMessage() {}

@@ -1276,16 +1276,28 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.InstanceSSHPublicKeySpecApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceType"):
 		return &applyconfigurationworkerv1.InstanceTypeApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("KVCacheBackend"):
+		return &applyconfigurationworkerv1.KVCacheBackendApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("KVCachePool"):
+		return &applyconfigurationworkerv1.KVCachePoolApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("KVCachePoolBinding"):
+		return &applyconfigurationworkerv1.KVCachePoolBindingApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("ModelArtifact"):
 		return &applyconfigurationworkerv1.ModelArtifactApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("ModelDeployment"):
 		return &applyconfigurationworkerv1.ModelDeploymentApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("ModelPrefetch"):
 		return &applyconfigurationworkerv1.ModelPrefetchApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("ModelStore"):
+		return &applyconfigurationworkerv1.ModelStoreApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("ModelStoreBinding"):
+		return &applyconfigurationworkerv1.ModelStoreBindingApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("NFSInstancePersistentVolumeSource"):
 		return &applyconfigurationworkerv1.NFSInstancePersistentVolumeSourceApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("S3InstancePersistentVolumeSource"):
 		return &applyconfigurationworkerv1.S3InstancePersistentVolumeSourceApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("TopologySource"):
+		return &applyconfigurationworkerv1.TopologySourceApplyConfiguration{}
 
 		// Group=worker.gpustack.ai, Version=v1alpha1
 	case workerv1alpha1.SchemeGroupVersion.WithKind("Accelerator"):
