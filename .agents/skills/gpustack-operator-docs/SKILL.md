@@ -130,6 +130,9 @@ Keep diagrams in fenced `mermaid` blocks so GitHub and the Hugo site render the 
 The site shows the diagram with an expandable source block. `docs/README.md` remains the agent
 index and is excluded from the site; link site readers to the module landing pages.
 `make lint docs` checks source links, page structure and the rendered site's internal links.
+Published Markdown allows raw HTML only for attribute-free `<br>` or `<br/>` line breaks. Keep
+HTML examples inside fenced or inline code. The existing site gate checks this allowlist;
+link templates retain automatic URL escaping.
 When adding a page, add its order and short menu label to `site/data/navigation.yaml`. Put setup
 and configuration before operations and diagnosis; keep related vendor procedures together.
 Menu labels omit the parent module's name. Article titles and the agent index keep the full names.

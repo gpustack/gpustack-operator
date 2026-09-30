@@ -3,11 +3,74 @@
 
 import argparse
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 LINK = re.compile(r"!?\[([^\]\n]*)\]\(([^)\n]+)\)")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
+class ProseHTML(HTMLParser):
+    """Only attribute-free line breaks may appear as raw HTML in published prose."""
+
+    def __init__(self, source, errors):
+        super().__init__()
+        self.source = source
+        self.errors = errors
+
+    def reject(self, markup):
+        self.errors.append(f"{self.source}:{self.getpos()[0]}: raw HTML must be an attribute-free <br>: {markup}")
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "br" or attrs:
+            self.reject(self.get_starttag_text())
+
+    handle_startendtag = handle_starttag
+
+    def handle_endtag(self, tag):
+        self.reject(f"</{tag}>")
+
+    def handle_comment(self, data):
+        self.reject("HTML comment")
+
+    def handle_decl(self, decl):
+        self.reject(f"<!{decl}>")
+
+    def handle_pi(self, data):
+        self.reject("processing instruction")
+
+    def unknown_decl(self, data):
+        self.reject("HTML declaration")
+
+
+def check_prose_html(text, source, errors):
+    fence = ""
+    lines = []
+    for line in text.splitlines():
+        marker = FENCE.match(line)
+        if marker and not fence:
+            # Backticks in a backtick fence's info string make it ordinary prose.
+            if marker[1][0] == "`" and "`" in line[marker.end():]:
+                lines.append(line)
+                continue
+            fence = marker[1]
+            lines.append("")
+        elif fence:
+            if (marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence)
+                    and not line[marker.end():].strip()):
+                fence = ""
+            lines.append("")
+        else:
+            lines.append(line)
+    prose = "\n".join(lines)
+    # Inline code and Markdown autolinks are examples/text, not raw HTML.
+    prose = re.sub(r"(?<![\\`])(`+)(?!`)(?:(?!\n[ \t]*\n).)*?(?<![\\`])\1(?!`)",
+                   lambda match: "\n" * match[0].count("\n"), prose, flags=re.S)
+    prose = re.sub(r"<(?:https?://[^<>\s]+|[^<>\s@]+@[^<>\s@]+)>", "", prose)
+    parser = ProseHTML(source, errors)
+    parser.feed(prose)
+    parser.close()
 
 
 def section(text, title):
@@ -57,6 +120,10 @@ def markdown_path(source):
 def check(root, public, base_url):
     index = (root / "docs/README.md").read_text()
     errors = []
+    for directory in (root / "docs", root / "site/content"):
+        for source in directory.rglob("*.md"):
+            if source != root / "docs/README.md":
+                check_prose_html(source.read_text(), source.relative_to(root), errors)
     records = {}
     for block in re.split(r"(?m)^### ", section(index, "Module map"))[1:]:
         title, _, body = block.partition("\n")

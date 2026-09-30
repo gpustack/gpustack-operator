@@ -161,6 +161,9 @@ It writes documentation alongside the charts on `github-pages`, then deploys the
 through GitHub Pages. Chart publication and both deployment jobs share a queue so concurrent runs
 preserve each other's files. The documentation composer verifies that chart bytes stay unchanged.
 
+The publisher comes from `main`; the requested revision supplies all pages and Hugo layouts.
+Changes to publisher inputs and version metadata must remain compatible with existing published tags.
+
 | Path | Content |
 |---|---|
 | `/` | Redirect to the latest published stable documentation. |
