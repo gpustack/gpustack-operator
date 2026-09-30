@@ -49,7 +49,7 @@ awk '
     t = substr($0, 4); if (t == "Contents") next
     a = tolower(t); gsub(/`|\*/, "", a); gsub(/[^a-z0-9 _-]/, "", a); gsub(/ /, "-", a)
     gsub(/`/, "", t); printf "- [%s](#%s)\n", t, a
-  }' docs/architecture/scheduling-chain.md
+  }' docs/modules/devices/scheduling.md
 ```
 
 **Footer** — a `---` rule, then `**See also**` (sideways links, ` · `-separated, each with a
@@ -64,10 +64,10 @@ shaped by the directory it lives in:
 
 | Directory | H1 form | Example |
 |---|---|---|
-| root, `architecture/` | `<Subject>` | `Installation Modes` |
-| a domain directory — `kv-cache/`, `model-store/`, `model-deployment/` | `<Domain> <Topic>` where the domain reads naturally; a subject that names itself (`Engine Versions`, `Node-to-Node Sync`) stands without it; the domain's runbook keeps the `Operations` suffix | `KV Cache Backend`, `Model Artifact`, `Engine Versions`, `Node-to-Node Sync`, `Model Store Operations` |
-| `operation/` | `<Subject> Operations` | `High Availability Operations` |
-| `migration/` | `Migrating <from\|to> <what>`; a recovery page is `<Subject> Troubleshooting` | `Migrating from v0.5.x`, `Migration Troubleshooting` |
+| `getting-started/`, `operate/`, `contribute/` | `<Subject>` | `Installation Modes` |
+| `modules/<capability>/` | `<Domain> <Topic>` where the domain reads naturally; a subject that names itself (`Engine Versions`, `Node-to-Node Sync`) stands without it; runbooks keep the `Operations` suffix | `KV Cache Backend`, `Model Artifact`, `Engine Versions`, `Node-to-Node Sync` |
+| `operate/` and runbooks under `modules/` | `<Subject> Operations` | `High Availability Operations` |
+| `operate/migration/` | `Migrating <from\|to> <what>`; a recovery page is `<Subject> Troubleshooting` | `Migrating from v0.5.x`, `Migration Troubleshooting` |
 | `reference/` | `<Subject> Reference` | `Instance Metrics Reference` |
 
 A domain directory collects every page orbiting one CR family — the contracts, the field references,
@@ -86,7 +86,7 @@ something that belongs in a list, a table, or another page.
 | Cap | Limit | Exempt |
 |---|---|---|
 | prose paragraph | 5 lines / 500 rendered characters | fenced blocks, table rows, list *markers*, `> **Why**` notes, the footer |
-| page length | 1000 lines | `docs/walkthrough.md`, `docs/operation/*` — recordings and runbooks |
+| page length | 1000 lines | `docs/getting-started/walkthrough.md`, `docs/operate/*`, `docs/modules/devices/*-mig.md` — recordings and runbooks |
 | `##` sections | 10 per page, `## Contents` not counted | `docs/README.md`, `docs/reference/*` — both are lookup tables |
 
 A paragraph nested under a list item is prose a reader still has to get through, so it is measured on
@@ -98,7 +98,7 @@ corpus align with their marker, at two or three spaces, so the two never collide
 reads in short paragraphs and clear lists is a good page, and a short one that reads as a wall of text is
 not. The line cap is a backstop against a page nobody split, not a budget to spend down.
 
-`docs/architecture.md` is capped tighter still, at 200 lines: it is the front door, and a front door that
+`docs/getting-started/architecture.md` is capped tighter still, at 200 lines: it is the front door, and a front door that
 grows a mechanism has stopped being one.
 
 Run `scripts/check-docs.sh --report` while writing — it demotes the caps to warnings and prints the
@@ -111,10 +111,10 @@ it as follows — when a page starts serving two modes at once, that is the mome
 
 | Mode | Reader is… | Our pages |
 |---|---|---|
-| Tutorial | learning by doing | `README.md` Quick Start, `docs/walkthrough.md`, the MIG walkthrough, `docs/kv-cache/walkthrough.md` |
-| How-to | achieving a goal | `docs/operation/*`, `docs/migration/*`, `docs/development.md`, a domain runbook (`docs/model-store/operations.md`) |
-| Reference | looking something up | `docs/accelerator-requests.md`, `docs/settings.md`, `docs/reference/*` |
-| Explanation | building understanding | `docs/architecture.md`, `docs/architecture/*`, and the domain pages under `docs/kv-cache/`, `docs/model-store/` and `docs/model-deployment/` (a domain page serves the mode its reader arrives in — contract pages read as reference, mechanism pages as explanation) |
+| Tutorial | learning by doing | `README.md` Quick Start, `docs/getting-started/walkthrough.md`, the MIG walkthrough, `docs/modules/kv-cache/walkthrough.md` |
+| How-to | achieving a goal | `docs/operate/*`, `docs/modules/devices/*-mig.md`, `docs/operate/migration/*`, `docs/contribute/development.md`, a domain runbook (`docs/modules/model-delivery/operations.md`) |
+| Reference | looking something up | `docs/modules/devices/requests.md`, `docs/reference/settings.md`, `docs/reference/*` |
+| Explanation | building understanding | `docs/getting-started/architecture.md` and the deep pages under `docs/modules/` (contract pages read as reference, mechanism pages as explanation) |
 
 Two consequences worth stating:
 
@@ -153,7 +153,7 @@ Two consequences worth stating:
   more than one paragraph — and past 5 lines it fails the paragraph cap. A `###` heading is cheap and
   becomes an anchor others can link to.
 - **Prefer a table for anything enumerable** — modes, keys, vendors, gates, knobs.
-- **Name the code.** `pkg/nodefeature`, `node_queue.go`, `TestUnitResourcesPresetDocs` — a reader
+- **Name the code.** `pkg/nodefeature`, `node_queue.go`, `pkg/nodefeature/unit_resources_preset.yaml` — a reader
   should be able to jump from the claim to the source. Do not paste code that will drift; name it.
 - **No symbol-numbered cross-references** (`switch ①`, "gate-2 above"). Use the heading name and a
   link — the numbering breaks the moment a page is split.
@@ -186,15 +186,15 @@ edit on one sighting.
 | Shallow -ing riders | ", ensuring X", ", enabling Y", ", reflecting Z" tacked onto a fact | Drop the rider, or make it its own sentence with the mechanism named |
 | Bold as decoration | bold on ordinary terms, a bold label and colon on every bullet | Plain text. Turn a list whose labels carry nothing into a sentence or a table |
 | Decorative headings | Title Case below the H1, emoji, arrows, a rule between sections, a heading that restates its first sentence | Sentence case, none of the decoration |
-| Writing about the page | "the table below compares", "this section is organized by", "was added to replace" | State the subject. Mention a previous version only in `docs/migration/*` and release notes |
+| Writing about the page | "the table below compares", "this section is organized by", "was added to replace" | State the subject. Mention a previous version only in `docs/operate/migration/*` and release notes |
 | Chat residue | "Certainly!", "I hope this helps", "let me know", an offer to expand | Delete it |
 
 Three limits keep the cleanup from doing harm:
 
 - **Keep every fact.** A rewrite must not add or drop a name, number, version, key, condition or
   ranking. A sentence that needs a detail you do not have gets a simpler wording, not a guess.
-- **Change prose only.** Code blocks, inline code, commands, paths, link targets and table rows pinned by
-  a test (see the invariants in `SKILL.md`) stay as they are. A heading keeps its words, because
+- **Change prose only.** Code blocks, inline code, commands, paths, link targets and table rows compared with
+  code (see the invariants in `SKILL.md`) stay as they are. A heading keeps its words, because
   changing them breaks every inbound anchor; re-casing is safe.
 - **A pattern is a default, not a crime.** A `> **Why**` note may legitimately correct a belief the
   reader holds ("allocatable also falls to zero when a family is merely saturated"), and a quotation, a

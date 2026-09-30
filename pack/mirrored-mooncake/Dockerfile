@@ -27,7 +27,7 @@
 # backend on, because the vendor axis and the leadership axis are orthogonal. The choice this
 # comment used to call open -- rebuild per vendor, or keep members on the leader Service address
 # -- was settled as both: the variants above, and memberAddressing defaulting to the Service
-# address (docs/kv-cache/leader.md), which closed
+# address (docs/modules/kv-cache/leader.md), which closed
 # https://github.com/gpustack/gpustack-operator/issues/279
 #
 # EFA sits on the fabric axis, not the vendor axis: it needs no vendor runtime, only libfabric,
@@ -1931,7 +1931,7 @@ RUN <<EOF
     # that is not on the EFA path -- which is every other member.
     #
     # The timeout must outlast the device-less error path; if this check ever flakes, that is the
-    # knob to revisit. docs/kv-cache/backend.md quotes "No EFA devices found" in its HA section,
+    # knob to revisit. docs/modules/kv-cache/backend.md quotes "No EFA devices found" in its HA section,
     # so an upstream rewording of that message must be reflected in both places.
     command -v transfer_engine_bench
     rc=0

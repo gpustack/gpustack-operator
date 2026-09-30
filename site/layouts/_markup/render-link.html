@@ -1,0 +1,17 @@
+{{- $destination := .Destination -}}
+{{- $url := urls.Parse $destination -}}
+{{- if and (not $url.IsAbs) (not (strings.HasPrefix $destination "#")) -}}
+  {{- with .Page.GetPage $url.Path -}}
+    {{- $destination = .RelPermalink -}}
+    {{- with $url.Fragment -}}
+      {{- $destination = printf "%s#%s" $destination . -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $source := path.Clean (path.Join $.Page.File.Dir $url.Path) -}}
+    {{- $destination = printf "https://github.com/gpustack/gpustack-operator/blob/main/%s" $source -}}
+    {{- with $url.Fragment -}}
+      {{- $destination = printf "%s#%s" $destination . -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+<a href="{{ $destination | safeURL }}">{{ .Text }}</a>

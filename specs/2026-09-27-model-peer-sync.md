@@ -288,9 +288,9 @@ rejected by validation — the plugin must tolerate that (retry on the existing 
 once) and never crash-loop on it; the rollout note pins worker-before-plugin when practical.
 
 **Related work in flight.** The crew line is touching `pkg/setting/types.go` and
-`docs/settings.md` (C77/C78/C79). This spec does not touch `pkg/setting/types.go` at all —
+`docs/reference/settings.md` (C77/C78/C79). This spec does not touch `pkg/setting/types.go` at all —
 its Setting declares beside its siblings in `pkg/worker/settings/model_store.go` — and its
-only `docs/settings.md` change is one row, coordinated through the coordinator before the PR.
+only `docs/reference/settings.md` change is one row, coordinated through the coordinator before the PR.
 
 ### Boundaries
 
@@ -299,7 +299,7 @@ only `docs/settings.md` change is one row, coordinated through the coordinator b
   sanitizing (no tokens, no host addresses) in anything that leaves the machine.
 - **Ask first:** any change to files outside the listed paths; large rearrangements of existing
   files in `pkg/modelmanager` or `pkg/worker` (name the file list in the day's first progress
-  message before touching existing files there); the `docs/settings.md` edit (crew
+  message before touching existing files there); the `docs/reference/settings.md` edit (crew
   coordination).
 - **Never:** forward a tenant credential over a node-to-node hop; implement multi-source
   scheduling; touch Dragonfly or GC pooling semantics; alter S1–S4 delivered behavior.
@@ -368,8 +368,8 @@ only `docs/settings.md` change is one row, coordinated through the coordinator b
   fetcher builds on, additive only.
 - `pkg/modelmanager/gc/watermark.go` — the #655 fix in `availablePercent`/`KubeletCap`.
 - `api/worker/v1alpha1/node_model_store.go` — `Peer` enum value (+ `make generate`).
-- `pkg/worker/settings/model_store.go`, `docs/settings.md` — the `model-store-peer-sync`
-  Setting (the Setting declaration lives with its siblings; `docs/settings.md` is coordinated
+- `pkg/worker/settings/model_store.go`, `docs/reference/settings.md` — the `model-store-peer-sync`
+  Setting (the Setting declaration lives with its siblings; `docs/reference/settings.md` is coordinated
   with the crew line).
 - `deploy/gpustack-operator/chart/` — `modelManager.port` value, DaemonSet args/env,
   plugin RBAC (TokenReview create; Pods get/list in the operator namespace), NetworkPolicy
@@ -461,7 +461,7 @@ touched: `option.go`, `config.go`, `manager.go` (T3/T4 assembly lines only, addi
       NetworkPolicy, the `source` field, the token scheme's residual risk, the #655 capacity
       outcome), the `docs/README.md` index entry, the #657 clarification line in
       `docs/reference/model-artifact-views.md`, and the `model-store-peer-sync` row in
-      `docs/settings.md` (coordinated with the crew line before the PR).
+      `docs/reference/settings.md` (coordinated with the crew line before the PR).
       Verify: `make lint docs`
 
 Ship sequencing notes: the spec file itself is committed in the final commit with `Status:

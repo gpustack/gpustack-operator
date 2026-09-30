@@ -677,7 +677,7 @@ in this operator.
   it marks. That document is a bug fix's specification, so it is not in this repository and naming it
   as a path resolves to nothing. The markers now call it the segment-identity correction, which is a
   name rather than a path. What it supersedes is unchanged, and the rules in force are on the backend
-  page, `docs/kv-cache/backend.md`.
+  page, `docs/modules/kv-cache/backend.md`.
 
 #### F7 — `status.capacity` is read from the master's Prometheus counters
 
@@ -1346,7 +1346,7 @@ pkg/worker/kvcache/
   leader_workload.go                   # Deployment + Service
   member_workload.go                   # DaemonSet, security context, requests
   admin.go                             # /health decode + /metrics parse over an http.Client
-docs/kv-cache/backend.md  # the new page
+docs/modules/kv-cache/backend.md  # the new page
 docs/README.md                         # index entry
 ```
 
@@ -1850,7 +1850,7 @@ after T10 (status is fully observed); after T12 (every acceptance item is met).
 
 - [x] **T13 · Documentation**
       Blocked by: T12
-      Owns: `docs/kv-cache/backend.md`, `docs/README.md`
+      Owns: `docs/modules/kv-cache/backend.md`, `docs/README.md`
       Acceptance: the page states the two axes and why they are two; the cluster-scoped argument with
       the Kueue precedent link; the measured master-variant and client-layout tables, why `spec.image`
       is explicit, and that the master image needs no accelerator runtime while a member image needs

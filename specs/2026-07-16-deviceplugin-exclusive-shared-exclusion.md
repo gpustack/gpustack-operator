@@ -150,7 +150,7 @@ and the ledger reads `remaining=0`. The device-manager log shows the reject firi
   (`nvidia.com/gpu[.shared|.sliced]`) plus the optional `sshd` visibility sidecar. A second workload container
   requesting the same resource in the same Pod is skipped by identification and its `Allocate` either finds no
   pod and fails, or — if an unrelated single-card Pod is pending at the same instant — misattributes to that
-  pod; this shape is unsupported. Recorded in `docs/architecture.md`.
+  pod; this shape is unsupported. Recorded in `docs/getting-started/architecture.md`.
 - **Reservation lifetime.** The reservation gates cross-mode allocation for the Pod's whole lifetime, not just
   the sidecar's admission window, and is pruned in lockstep with the ledger rebuild: `pruneReservations`
   piggybacks the same `Reconcile` live-pod-UID sweep that recomputes `Devices.Status` (terminating pods stay in

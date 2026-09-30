@@ -47,7 +47,7 @@ borrows from the exclusive resource while the exclusive side may reclaim it). **
    (1d=12c/48g → per slice 1c/6g); `OnceMaxRequest = floorPow2(min(partitions/2, remaining slices))` —
    capped at the per-card half-card limit, rounded DOWN to a power of two, and shrinking as slices are used.
 
-**Testable success criteria.** Using node-5 (A10G×4) from `docs/architecture.md` as the canonical case, after
+**Testable success criteria.** Using node-5 (A10G×4) from `docs/getting-started/architecture.md` as the canonical case, after
 enabling `partitions=8`: the RF/CQ/Cohort names, credits values (sliced CQ=0 / exclusive CQ=4), Capacity=32,
 UnitResource=1c/6g, OnceMaxRequest=4, the Webhook rejecting `units=8`, and the Webhook rejecting
 `partitions=6` — all asserted by table-driven tests.

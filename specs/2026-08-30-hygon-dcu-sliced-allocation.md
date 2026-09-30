@@ -361,14 +361,14 @@ pkg/devicemanager/preflight/measure.go               LoadEvidence, MemoryQuotaCo
                                                      cutConfigField, the hygon probe, stageLibFor
 pkg/devicemanager/preflight/measure_test.go          load-evidence and directory-carrier rows
 pkg/devicemanager/detector/hygon/process.go          the doc comment: verified, and why three calls
-docs/operation/preflight.md                          the tier table and the per-manufacturer table
+docs/modules/devices/preflight.md                          the tier table and the per-manufacturer table
 .claude/skills/gpustack-operator-xbuild-and-verify/SKILL.md   the hygon cases, knobs and hard rule
 .claude/skills/gpustack-operator-xbuild-and-verify/cases/hygon-case-{1..5}.sh
 
 # "Landed here, not part of this deliverable" -- see that section
 pkg/devicemanager/cmd.go                             a cancelled pass is answered, not reported
 pkg/devicemanager/preflight/measure.go               injectsNothing, on the no-probe branch
-docs/architecture/device-discovery.md                the state column, defined without the driver
+docs/modules/devices/discovery.md                the state column, defined without the driver
 specs/2026-08-28-device-manager-preflight.md         the same correction, in the spec that set it
 ```
 

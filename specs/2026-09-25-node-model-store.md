@@ -727,7 +727,7 @@ logs.
   rule, switching delivery, the namespace requirement, uninstall and root-path migration, and upgrade
   notes stating that upgrading from the previous version rolls every Hugging Face deployment once
   and the two ways to avoid it); the
-  ModelArtifact reference page, `docs/settings.md`, `docs/architecture.md` (a fourth subcommand),
+  ModelArtifact reference page, `docs/reference/settings.md`, `docs/getting-started/architecture.md` (a fourth subcommand),
   the installation-modes page, `docs/README.md`, the documentation skill's routing table and the
   overview skill are updated; `make lint docs` passes.
 

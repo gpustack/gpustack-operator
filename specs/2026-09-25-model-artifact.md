@@ -657,7 +657,7 @@ the deployment itself, so that I do not have to read container logs.
 
 - A new reference page covers the resource, the manifest format, both sources, both deliveries,
   status, the Settings, the measured PVC throughput and the engine and router behavior;
-  `docs/README.md`'s page table, the documentation skill's routing table and `docs/settings.md`
+  `docs/README.md`'s page table, the documentation skill's routing table and `docs/reference/settings.md`
   are updated; `make lint docs` passes.
 
 #### F9 - End-to-end
@@ -799,7 +799,7 @@ never written to a file.
 - `pkg/worker/webhooks/worker/` — `model_artifact.go`, and the rules added to `model_deployment.go`
   and `instance.go`.
 - `pkg/worker/settings/` — the five Settings.
-- `docs/reference/model-artifact.md`, `docs/README.md`, `docs/settings.md`, the documentation
+- `docs/reference/model-artifact.md`, `docs/README.md`, `docs/reference/settings.md`, the documentation
   skill's routing table.
 - `.agents/skills/gpustack-operator-e2e/cases/` — the end-to-end cases.
 

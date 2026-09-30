@@ -252,7 +252,7 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
 - `pkg/worker/extensionapis/worker/instance_type_flavor.go` + `extensionapis/setup.go` — new handler.
 - `pkg/worker/settings/value.go` — `InstanceTypeDrainWhenNoFlavors`.
 - `pkg/worker/controllers/setup.go` — register `NodeQueueReconciler`.
-- `docs/architecture.md`, `docs/settings.md`, `docs/development.md`, `README.md`, e2e cases — updated.
+- `docs/getting-started/architecture.md`, `docs/reference/settings.md`, `docs/contribute/development.md`, `README.md`, e2e cases — updated.
 
 ### Code Style
 Editable setting, read per-reconcile (matches `value.go`):
@@ -375,9 +375,9 @@ scheduling chain functional. Each task is TDD (RED → GREEN → suite → `make
   - *Verify:* `go test ./pkg/worker/... -run 'InstanceType|NodeQueue|NodeFlavor|Pod'`, then the full
     suite + build; `make lint`. **Checkpoint: run the entire test suite and build before continuing.**
 
-- [x] **Task 5 — Docs.** `docs/architecture.md` (webhook enrichment + immutable sizing, `.count`
+- [x] **Task 5 — Docs.** `docs/getting-started/architecture.md` (webhook enrichment + immutable sizing, `.count`
   pinning, group/cores notes, the queue-ownership split, drain-then-empty + reactivate,
-  InstanceTypeFlavor), `docs/settings.md` (new setting row), `docs/development.md` (InstanceTypeFlavor
+  InstanceTypeFlavor), `docs/reference/settings.md` (new setting row), `docs/contribute/development.md` (InstanceTypeFlavor
   in the inventory), `README.md` (declarative InstanceType + catalog). *Verify:* links resolve, wording
   matches the shipped behavior.
 

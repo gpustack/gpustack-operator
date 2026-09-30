@@ -221,7 +221,7 @@ like any other clique rather than dropping to the two-part form.
 
 **F7 — The record's documentation stops saying one manufacturer fills it.**
 `DeviceFabric`'s comment, the generated copies of it, and the manufacturer table in
-`docs/architecture/network-topology.md` all state the new truth. Acceptance: no surviving sentence in
+`docs/modules/rdma/network-topology.md` all state the new truth. Acceptance: no surviving sentence in
 the repository claims only Ascend fills this field.
 
 ### Notes / Constraints / Caveats
@@ -315,7 +315,7 @@ pkg/nodefeature/
   fabric_test.go
 binding/nvml/library_device.go        # one symbol probe, repaired; hand-written, not generated
 api/worker/v1alpha1/devices.go        # comment only; no field, no tag, no shape
-docs/architecture/network-topology.md # the manufacturer table and the label's value grammar
+docs/modules/rdma/network-topology.md # the manufacturer table and the label's value grammar
 ```
 
 ### Code Style
@@ -375,7 +375,7 @@ identifiers appear in Go comments; file names are snake_case.
 
 - [x] **T5 · The documentation page**
       Blocked by: T1, T3
-      Owns: `docs/architecture/network-topology.md`
+      Owns: `docs/modules/rdma/network-topology.md`
       Acceptance: the manufacturer table, the registration gate, the value grammar and the reading
       recipe all state what the code does.
       Verify: `make lint docs < /dev/null`

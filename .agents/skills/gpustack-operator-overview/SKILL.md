@@ -20,7 +20,7 @@ per-node CSI plugin that delivers Hugging Face weights:
 4. **Queue construction & admission** — worker controllers materialize the labels into Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, no Cohort) plus a materialized `InstanceType` CRD, fronted by a per-namespace `LocalQueue` and gated per-card by a `gpustack-node-devices` AdmissionCheck.
 
 `pkg/nodefeature` is the heart of the label algebra (construct/extract of node keys, flavors,
-queues, credits). [architecture.md](../../../docs/architecture.md) is the one-page version — the four
+queues, credits). [architecture.md](../../../docs/getting-started/architecture.md) is the one-page version — the four
 stages, the life of a sliced-GPU request, and the vocabulary; load **one** deep page from
 [Going deeper](#going-deeper) when the question needs it, not all of them.
 
@@ -82,17 +82,17 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 ## Going deeper
 
 - The whole map, with reading paths per role → [docs/README.md](../../../docs/README.md)
-- What the operator builds, in one page → [architecture.md](../../../docs/architecture.md)
-- NFD labels, Device Manager detection, the `Devices` ledger, allocator injection → [architecture/device-discovery.md](../../../docs/architecture/device-discovery.md)
-- Capacity labels, flavor/queue/InstanceType naming, the five reconcilers → [architecture/scheduling-chain.md](../../../docs/architecture/scheduling-chain.md)
-- The five admission gates, webhook rules, the four-view status → [architecture/admission.md](../../../docs/architecture/admission.md)
-- Chart mode vs image mode, what the worker applies itself → [architecture/installation-modes.md](../../../docs/architecture/installation-modes.md)
-- Startup ordering, the gateway mirror, CGO bindings, the 63-char rule → [architecture/internals.md](../../../docs/architecture/internals.md)
-- Running and observing a pooled KV cache — a chain of its own, not part of the four stages → [kv-cache/backend.md](../../../docs/kv-cache/backend.md)
-- The two accelerator families, their resource keys and request rules → [accelerator-requests.md](../../../docs/accelerator-requests.md)
-- Settings & `GPUSTACK_*` configuration knobs → [settings.md](../../../docs/settings.md)
+- What the operator builds, in one page → [architecture.md](../../../docs/getting-started/architecture.md)
+- NFD labels, Device Manager detection, the `Devices` ledger, allocator injection → [architecture/device-discovery.md](../../../docs/modules/devices/discovery.md)
+- Capacity labels, flavor/queue/InstanceType naming, the five reconcilers → [architecture/scheduling-chain.md](../../../docs/modules/devices/scheduling.md)
+- The five admission gates, webhook rules, the four-view status → [architecture/admission.md](../../../docs/modules/devices/admission.md)
+- Chart mode vs image mode, what the worker applies itself → [architecture/installation-modes.md](../../../docs/operate/installation-modes.md)
+- Startup ordering, the gateway mirror, CGO bindings, the 63-char rule → [architecture/internals.md](../../../docs/contribute/internals.md)
+- Running and observing a pooled KV cache — a chain of its own, not part of the four stages → [kv-cache/backend.md](../../../docs/modules/kv-cache/backend.md)
+- The two accelerator families, their resource keys and request rules → [accelerator-requests.md](../../../docs/modules/devices/requests.md)
+- Settings & `GPUSTACK_*` configuration knobs → [settings.md](../../../docs/reference/settings.md)
 - Every command the binary offers, its flags and a runnable invocation → [reference/commands.md](../../../docs/reference/commands.md)
-- Checking a node can slice before it has to: the procedure → [operation/preflight.md](../../../docs/operation/preflight.md)
-- Node delivery of weights: the plugin and `NodeModelStore` → [model-store/node-store.md](../../../docs/model-store/node-store.md); running it → [model-store/operations.md](../../../docs/model-store/operations.md); the `v1` views and `progress` → [model-store/views.md](../../../docs/model-store/views.md)
-- Build / lint / test / codegen / vendored deps → [development.md](../../../docs/development.md)
+- Checking a node can slice before it has to: the procedure → [operation/preflight.md](../../../docs/modules/devices/preflight.md)
+- Node delivery of weights: the plugin and `NodeModelStore` → [model-store/node-store.md](../../../docs/modules/model-delivery/node-store.md); running it → [model-store/operations.md](../../../docs/modules/model-delivery/operations.md); the `v1` views and `progress` → [model-store/views.md](../../../docs/modules/model-delivery/views.md)
+- Build / lint / test / codegen / vendored deps → [development.md](../../../docs/contribute/development.md)
 - Writing or updating any of the above → the `gpustack-operator-docs` skill

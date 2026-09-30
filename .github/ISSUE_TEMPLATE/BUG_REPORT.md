@@ -57,7 +57,7 @@ https://github.com/gpustack/gpustack-operator/security/advisories/new.
 - OS (e.g: `cat /etc/os-release`):
 - Kernel (e.g. `uname -a`):
 - Install tools:
-- Accelerator preflight (for anything involving an accelerator, run `gpustack-operator device-manager preflight --dry-run` on the affected node and paste the output — see https://github.com/gpustack/gpustack-operator/blob/main/docs/operation/preflight.md for how to invoke it):
+- Accelerator preflight (for anything involving an accelerator, run `gpustack-operator device-manager preflight --dry-run` on the affected node and paste the output — see https://github.com/gpustack/gpustack-operator/blob/main/docs/modules/devices/preflight.md for how to invoke it):
 - Others:
 
 <!-- Every command the binary offers, with its flags and a runnable invocation:

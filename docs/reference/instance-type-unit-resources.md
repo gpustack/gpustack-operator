@@ -3,7 +3,7 @@
 > **Purpose** — the per-product CPU/RAM tier a node-derived `InstanceType` is sized with, and the
 > public configuration each tier was taken from.
 > **Audience** operators · **Prerequisites** [Scheduling
-> Chain](../architecture/scheduling-chain.md#the-unit-spec-is-not-derived-from-node-capacity) ·
+> Chain](../modules/devices/scheduling.md#the-unit-spec-is-not-derived-from-node-capacity) ·
 > **Read time** reference — look up your product
 
 With `instance-type-derived-from-node` enabled, the operator summarizes a node into an
@@ -259,8 +259,8 @@ at the top of that file; a test asserts every entry appears on this page.
 
 ---
 
-**See also** — [Scheduling Chain](../architecture/scheduling-chain.md#the-unit-spec-is-not-derived-from-node-capacity)
-(where the unit spec is stamped) · [Admission](../architecture/admission.md#the-instancetype-and-instance-webhooks)
-(what the webhooks enforce on it) · [Walkthrough](../walkthrough.md#4-managing-a-custom-instancetype)
+**See also** — [Scheduling Chain](../modules/devices/scheduling.md#the-unit-spec-is-not-derived-from-node-capacity)
+(where the unit spec is stamped) · [Admission](../modules/devices/admission.md#the-instancetype-and-instance-webhooks)
+(what the webhooks enforce on it) · [Walkthrough](../getting-started/walkthrough.md#4-managing-a-custom-instancetype)
 
-**Next** → [Settings](../settings.md#online-adjustable-settings) — the switches named on this page.
+**Next** → [Settings](settings.md#online-adjustable-settings) — the switches named on this page.

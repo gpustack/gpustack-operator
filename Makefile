@@ -28,6 +28,9 @@ help:
 	#   * [dev] `make build`, execute cross building.
 	#           - `VERSION=vX.y.z+l.m make build` build all targets with vX.y.z+l.m version.
 	#
+	#   * [docs] `make site`, build the local documentation site with Hugo.
+	#   * [docs] `make site-serve`, preview the site locally.
+	#
 	@echo
 
 .DEFAULT_GOAL := build

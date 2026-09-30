@@ -600,4 +600,4 @@ advertisement (no per-vendor isolation e2e is added here).
   can co-locate and the second strands; the fix (per-card `cores` accounting / non-100 default) lives in the
   capability spec / Pod webhook.
 - **K2 — webhook enforcement of `.sliced > 1` support per vendor (deferred).** The Pod webhook should reject
-  `.sliced > 1` for non-NVIDIA vendors; documented in `docs/architecture.md`, a follow-up.
+  `.sliced > 1` for non-NVIDIA vendors; documented in `docs/getting-started/architecture.md`, a follow-up.

@@ -251,7 +251,7 @@ correct and reviewable before any hardware exists.
   while the ledger charges per token, so two tokens on the same card yield one slice's isolation but a two-slice
   charge. Only NVIDIA meaningfully supports `.sliced > 1` today; MThreads / Hygon (and Ascend / MetaX / Cambricon)
   do not. **Control belongs in the Pod webhook** (reject `.sliced > 1` for non-NVIDIA vendors); recorded in
-  `docs/architecture.md` and as an open question — the webhook enforcement is a follow-up, not this spec.
+  `docs/getting-started/architecture.md` and as an open question — the webhook enforcement is a follow-up, not this spec.
 
 ## Design Details
 ### Commands
@@ -424,5 +424,5 @@ Table-driven; local `darwin`, no hardware. Per-package (date 2026-07-18):
 - **K2 — webhook enforcement of `.sliced > 1` support per vendor (open, deferred).** Only NVIDIA meaningfully serves
   `.sliced > 1` (multiple slices co-located in one container); MThreads / Hygon / Ascend / MetaX / Cambricon emit one
   slice per physical card, so `.sliced > 1` on a single card under-serves while over-charging. The Pod webhook should
-  reject `.sliced > 1` for non-NVIDIA vendors. Documented in `docs/architecture.md`; the webhook change is a
+  reject `.sliced > 1` for non-NVIDIA vendors. Documented in `docs/getting-started/architecture.md`; the webhook change is a
   follow-up, not this spec.

@@ -41,7 +41,7 @@
 #
 #              The mode itself is NEVER changed here. It is node-wide on this vendor, it is refused
 #              while the device manager holds the driver, and turning it on with nothing carved makes
-#              every card unusable — see docs/operation/hygon-mig.md. This case observes the mode and
+#              every card unusable — see docs/modules/devices/hygon-mig.md. This case observes the mode and
 #              refuses to run without it rather than arranging it.
 #
 #              The claim carrier must ship a runtime that can open the accelerator, because the
@@ -166,7 +166,7 @@ GROUP_ID=$(cut -f6 <<<"$DISCOVERED" | head -1)
 [ "$PARTITIONED_CARDS" -gt 0 ] || skip \
   "Node ${NODE} reports ${CARDS} ${MANU} card(s) and none offering a partition profile." \
   "Multi-Instance mode is off, or the driver was installed without virtualization support." \
-  "See docs/operation/hygon-mig.md; this case never changes the mode itself."
+  "See docs/modules/devices/hygon-mig.md; this case never changes the mode itself."
 
 # The narrowest profile is the one a card holds most of, which is what contract (2) needs.
 PROFILE=$(tr ',' '\n' <<<"$PROFILES" | sort | head -1)

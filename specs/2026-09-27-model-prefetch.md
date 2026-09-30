@@ -383,7 +383,7 @@ review gates; the stage gates go to the coordinator (draft confirmed, plan gate,
 
 - [x] **T8 · docs**
       Blocked by: T6, T7
-      Owns: `docs/**` (one new page + `docs/README.md` index entry + a `docs/settings.md` entry
+      Owns: `docs/**` (one new page + `docs/README.md` index entry + a `docs/reference/settings.md` entry
       for the `model-prefetch-warmup-image` Setting)
       Acceptance: page routing, header/Contents/footer per the docs skill; naming avoids KV-cache
       vocabulary.

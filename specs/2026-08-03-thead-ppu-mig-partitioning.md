@@ -877,8 +877,8 @@ on one file.
 pkg/nodefeature/knowns.go                  # F3: partition kind for the manufacturer
 deploy/gpustack-operator/chart/values.yaml # F3: manufacturer table entry
 
-docs/operation/thead-mig.md                # F8/F9: runbook  (new)
-docs/README.md, README.md, docs/accelerator-requests.md,
+docs/modules/devices/thead-mig.md                # F8/F9: runbook  (new)
+docs/README.md, README.md, docs/modules/devices/requests.md,
 docs/architecture/{discovery,scheduling-chain}.md   # index and cross-reference updates
 ```
 
@@ -1137,9 +1137,9 @@ neither of which any other task depends on for its own correctness.
 
 - [x] **T9 · Partitioning runbook and documentation cross-references**
       Blocked by: T3, T6
-      Owns: `docs/operation/thead-mig.md`, `docs/README.md`, `README.md`,
-      `docs/accelerator-requests.md`, `docs/architecture/discovery.md`,
-      `docs/architecture/scheduling-chain.md`
+      Owns: `docs/modules/devices/thead-mig.md`, `docs/README.md`, `README.md`,
+      `docs/modules/devices/requests.md`, `docs/architecture/discovery.md`,
+      `docs/modules/devices/scheduling.md`
       Gate: —
       Acceptance: a new runbook mirroring the NVIDIA page's structure, leading with the prerequisite that
       the node must be free of accelerator workloads before the mode can be changed and with the kernel-log

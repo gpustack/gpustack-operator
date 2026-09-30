@@ -334,7 +334,7 @@ misconfigured one — the compute limit appears in no `ppu-smi` field at all.
   `0` (our level 1 is per-denial, not per-call); "Where the preload libraries come from" records the one
   that is built from this repo's own `csrc/` tree rather than a pinned upstream commit, and that it is
   amd64-only.
-- `docs/accelerator-requests.md`'s logical-slicing row drops the per-vendor library names it carried and
+- `docs/modules/devices/requests.md`'s logical-slicing row drops the per-vendor library names it carried and
   links to the mechanism table instead: which facility a vendor slices with is a `discovery.md` fact, and
   naming two of them on a request page was the third place that list had to be kept in step.
 - Routed through the `gpustack-operator-docs` skill so the index, links and tables of contents are
@@ -515,7 +515,7 @@ pkg/devicemanager/allocator/thead/deviceplugin.go       # + Sliced server behind
 pkg/devicemanager/allocator/thead/deviceplugin_test.go  # + the sliced response cases
 README.md                                               # matrix row
 docs/architecture/discovery.md                          # mechanism table, env names, ordering, sources
-docs/accelerator-requests.md                            # logical-slicing row: drop the library names,
+docs/modules/devices/requests.md                            # logical-slicing row: drop the library names,
                                                         #   link the per-vendor mechanism table
 specs/2026-08-05-thead-ppu-sliced-allocation.md
 ```
@@ -652,7 +652,7 @@ so nothing was published):
 
 - [x] **T4 · Documentation**
       Blocked by: T1, T2, T3
-      Owns: `README.md`, `docs/architecture/discovery.md`, `docs/accelerator-requests.md`
+      Owns: `README.md`, `docs/architecture/discovery.md`, `docs/modules/devices/requests.md`
       Gate: (none)
       Acceptance: the README matrix marks T-Head logical slicing supported and the note under it stays
       accurate about what the compute budget is here (a duty-cycle cap, not a scheduling weight);
@@ -666,7 +666,7 @@ so nothing was published):
       drops its per-vendor library names for a link to that mechanism table. Routed through the
       `gpustack-operator-docs` skill.
       Verify: the `gpustack-operator-docs` skill's index / link / table-of-contents checks pass
-      (`OK: 17 docs pages checked`), `docs/architecture.md` stays at 140 lines — the overview gains nothing —
+      (`OK: 17 docs pages checked`), `docs/getting-started/architecture.md` stays at 140 lines — the overview gains nothing —
       and `make lint` still passes. The repo has no doc linter, so those checks plus a read of the rendered
       tables are the whole gate. One clause beyond the four items above: the sliced section states that this
       vendor's sliced response carries no visible-devices env, since the whole section is otherwise written

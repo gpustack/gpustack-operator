@@ -21,6 +21,12 @@ on:
     paths:
       - "**.md"
       - "docs/**"
+      - "site/**"
+      - "Makefile"
+      - "hack/check/site-links.py"
+      - "hack/site.sh"
+      - "hack/site-serve.sh"
+      - "hack/lib/hugo.sh"
       # README.md links ./LICENSE, and the script resolves non-markdown link targets too.
       - "LICENSE"
       # A renamed test breaks a spec's `go test -run` line without touching any markdown, so the
@@ -32,8 +38,8 @@ on:
       # it compares are JSON and prose, so each needs its own trigger or the gate misses the edit.
       - ".agents/skills/**"
       - ".opencodereview/rule.json"
-      - "hack/check-skills.sh"
-      - "hack/check-skills-selftest.sh"
+      - "hack/check/skills.sh"
+      - "hack/check/skills-selftest.sh"
       - "hack/lint.sh"
       - ".github/workflows/docs.yml"
   pull_request:
@@ -43,6 +49,12 @@ on:
     paths:
       - "**.md"
       - "docs/**"
+      - "site/**"
+      - "Makefile"
+      - "hack/check/site-links.py"
+      - "hack/site.sh"
+      - "hack/site-serve.sh"
+      - "hack/lib/hugo.sh"
       # README.md links ./LICENSE, and the script resolves non-markdown link targets too.
       - "LICENSE"
       # A renamed test breaks a spec's `go test -run` line without touching any markdown, so the
@@ -54,14 +66,14 @@ on:
       # it compares are JSON and prose, so each needs its own trigger or the gate misses the edit.
       - ".agents/skills/**"
       - ".opencodereview/rule.json"
-      - "hack/check-skills.sh"
-      - "hack/check-skills-selftest.sh"
+      - "hack/check/skills.sh"
+      - "hack/check/skills-selftest.sh"
       - "hack/lint.sh"
       - ".github/workflows/docs.yml"
 
 jobs:
   check:
-    timeout-minutes: 10
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -85,6 +97,12 @@ jobs:
           sudo update-alternatives --set awk /usr/bin/original-awk
           awk --version 2>&1 | head -1
           make lint docs
+      - name: Setup Go for Hugo
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build documentation site
+        run: make site
       # The local check above never resolves an external URL — it only follows relative paths and
       # in-file anchors — which is how a 404 in PULL_REQUEST_TEMPLATE.md survived unnoticed. This step
       # fetches them, and it lives here rather than in "make lint docs" so the local check keeps its

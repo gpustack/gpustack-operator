@@ -123,7 +123,7 @@ node's `Devices` ledger:
 most its `logicalSliced.count` slices, 4 on Hygon, and one holding all of them took no further slice
 while this label still offered its free units. The label now takes its maximum only over cards that
 still have a free slot; the rule is in
-[Per-card fit labels](../docs/architecture/scheduling-chain.md#per-card-fit-labels).
+[Per-card fit labels](../docs/modules/devices/scheduling.md#per-card-fit-labels).
 
 `<aKey>` is the accelerated device key, `<manufacturer>-<id>`, the same key as the
 `acceleratable.feature.gpustack.ai/<aKey>` labels and an `InstanceType`'s `spec.acceleratorGroup`.
@@ -350,7 +350,7 @@ a mocked accelerator NodeFeature and a mocked per-card `Devices` ledger. Node A 
   one Workload's `Ready` and its Pods' `Allocate` the ledger had not moved either. Gate 3 answered
   `Ready` for a second Workload onto the same card, and a two-Workload run on a four-card node
   oversubscribed that card twice out of two. Gate 3 now counts such a Workload as taken; the rule is on
-  the Admission page (`docs/architecture/admission.md`), under Gate 3.
+  the Admission page (`docs/modules/devices/admission.md`), under Gate 3.
 - **Several Pods of one PodSet, several PodSets, or one Pod asking for several sliced cards, on one
   node.** A template-built Workload can carry `<base>.sliced: 2`, which the Pod webhook would refuse
   on a Pod. The label admits a node when one
@@ -419,7 +419,7 @@ Every command against the cluster carries `KUBECONFIG="$KCFG"`.
 - `pkg/worker/webhooks/worker/` — the Workload mutating webhook, next to `pod.go`.
 - `pkg/nodefeature/` — the label key constructors.
 - `pkg/worker/settings/` — the `workload-fit-affinity` setting.
-- `docs/architecture/admission.md`, `docs/architecture/scheduling-chain.md`, `docs/settings.md` —
+- `docs/modules/devices/admission.md`, `docs/modules/devices/scheduling.md`, `docs/reference/settings.md` —
   the documentation.
 - `.agents/skills/gpustack-operator-e2e/cases/` — the kind case.
 
@@ -489,7 +489,7 @@ proves the whole path.
 
 - [x] **T4 · The ablation setting**
       Blocked by: None
-      Owns: `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `docs/settings.md`
+      Owns: `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `docs/reference/settings.md`
       Acceptance:
       - `WorkloadFitAffinity` is an editable bool named `workload-fit-affinity`, initialized from `GPUSTACK_WORKLOAD_FIT_AFFINITY`, default `true`.
       - The settings table documents it, including that a change takes up to 30 s to reach the webhook.
@@ -586,7 +586,7 @@ proves the whole path.
 
 - [x] **T7 · Documentation**
       Blocked by: T2, T5
-      Owns: `docs/architecture/admission.md`, `docs/architecture/scheduling-chain.md`
+      Owns: `docs/modules/devices/admission.md`, `docs/modules/devices/scheduling.md`
       Acceptance:
       - The admission page's Known behavior says a fragmented node is now skipped by TAS through the fit labels. It keeps the three residuals: the refresh window, several Pods on one node, and an unpinned Workload.
       - The scheduling-chain page gains a short section on the two labels, their writer, the Workload pin, the shared-Kueue identification, and why the pin never reaches a Pod.

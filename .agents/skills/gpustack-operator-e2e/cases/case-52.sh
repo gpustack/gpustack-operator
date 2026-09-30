@@ -56,7 +56,7 @@
 # the records this case reads -- which makes the two interpret a link the same way, not read the same
 # values, since it takes its own sysfs reading when invoked. Reaching it needs a privileged pod with
 # host mounts, which is `preflight`'s own operational surface rather than this chain's -- see
-# docs/operation/preflight.md.
+# docs/modules/devices/preflight.md.
 set -uo pipefail
 
 # Route every kubectl through the retrying shim. Against a remote API endpoint a read can fail on

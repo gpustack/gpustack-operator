@@ -264,7 +264,7 @@ metadata:
 spec:
   engine:
     name: vLLM
-    # The minimum vLLM docs/model-deployment/engine-versions.md supports. Inert here -- the
+    # The minimum vLLM docs/modules/model-deployment/engine-versions.md supports. Inert here -- the
     # role names its image explicitly, so nothing is synthesized from it -- but a version no
     # runner ships, or one below that minimum, would read as the version under test, and
     # this case tests nothing about an engine.

@@ -101,7 +101,7 @@ rather than poll-only.
      list-only, per the established contract).
 
 ### Notes / Constraints / Caveats
-- Go; commands per `docs/development.md`. Tests are table-driven with `testify`, fake clients over real
+- Go; commands per `docs/contribute/development.md`. Tests are table-driven with `testify`, fake clients over real
   deps.
 - **Separate-binary rule:** the worker-gateway must not import `pkg/worker/extensionapis` or the worker
   webhook helpers. The name builder and any strip-suffix logic are duplicated locally in

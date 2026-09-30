@@ -320,7 +320,7 @@ identifiers appear in Go comments; file names are snake_case.
 
 - [x] **T5 · Repair the statements this work makes false**
       Blocked by: T1, T2
-      Owns: `docs/kv-cache/backend.md`, `docs/kv-cache/local-disk-tier.md`
+      Owns: `docs/modules/kv-cache/backend.md`, `docs/modules/kv-cache/local-disk-tier.md`
       Gate: review
       Acceptance: no sentence in the documentation says a name is declared, that both fabrics mount
       the tree, or that an unset field is the way to ask for nothing; the loud-failure paragraph and

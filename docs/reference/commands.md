@@ -2,7 +2,7 @@
 
 > **Purpose** — every command the `gpustack-operator` binary offers: what each one does, who runs
 > it and when, the flags that change its behaviour, and a runnable invocation.
-> **Audience** operators, developers · **Prerequisites** [Architecture](../architecture.md) ·
+> **Audience** operators, developers · **Prerequisites** [Architecture](../getting-started/architecture.md) ·
 > **Read time** ~10 min
 
 One binary carries four long-running services and three one-shot commands. The services are what a
@@ -77,12 +77,12 @@ scheduling chain, serves the aggregated extension APIs and the admission webhook
 applications a cluster needs.
 
 Runs as the operator Deployment. Flags below are the ones that change behaviour rather than tune a
-connection; see [Settings](../settings.md) for what is configured through the `Setting` CR instead.
+connection; see [Settings](settings.md) for what is configured through the `Setting` CR instead.
 
 | Flag | Default | What it does |
 |---|---|---|
 | `--manufacturer` | all nine | which manufacturers to detect |
-| `--disable-applications` | none | applications to skip installing, or `*` for all. See [Installation Modes](../architecture/installation-modes.md) |
+| `--disable-applications` | none | applications to skip installing, or `*` for all. See [Installation Modes](../operate/installation-modes.md) |
 | `--secure-port` | `31443` | the HTTPS port |
 | `--bind-address` | `0.0.0.0` | the address to serve on |
 | `--cert-dir` | — | where `tls.crt` and `tls.key` are |
@@ -151,7 +151,7 @@ gpustack-operator device-manager serve --manufacturer=nvidia --no-partitioned
 The per-node model cache. A CSI node plugin serving inline ephemeral volumes of the driver
 `model.csi.gpustack.ai`: it authorizes each mount against the Pod's namespace, downloads and
 verifies a Hugging Face artifact's files once per node, and writes that node's `NodeModelStore`
-status. See [Node Model Store](../model-store/node-store.md).
+status. See [Node Model Store](../modules/model-delivery/node-store.md).
 
 Runs as the Model Manager DaemonSet beside the `node-driver-registrar` sidecar. Its configuration
 comes from its node's `NodeModelStore.spec`, not from flags.
@@ -253,7 +253,7 @@ Answers whether the allocation modes this node's allocators offer actually work 
 `detect` cannot answer, because a declared capability and a working one are different facts.
 
 This is the only command an operator runs by hand that acts on the node. For the procedure — what to
-mount, what it starts and removes, how to read each row — see [Preflight](../operation/preflight.md).
+mount, what it starts and removes, how to read each row — see [Preflight](../modules/devices/preflight.md).
 What follows is the reference.
 
 | Flag | Default | What it does |
@@ -341,8 +341,8 @@ answering.
 
 ---
 
-**See also** — [Preflight](../operation/preflight.md) for the procedure and the per-manufacturer
-tables · [Settings](../settings.md) for what is configured through the `Setting` CR ·
-[Internals](../architecture/internals.md) for startup order and the invariants these commands rest
+**See also** — [Preflight](../modules/devices/preflight.md) for the procedure and the per-manufacturer
+tables · [Settings](settings.md) for what is configured through the `Setting` CR ·
+[Internals](../contribute/internals.md) for startup order and the invariants these commands rest
 on.
-**Next** → [Preflight](../operation/preflight.md)
+**Next** → [Preflight](../modules/devices/preflight.md)

@@ -560,7 +560,7 @@ counter-argument stronger than expected — which is why it is written out rathe
   `2026-09-09-kv-cache-segment-identity-status`, then a file under `specs/`. That document is a bug
   fix's specification, so it is not in this repository and naming it as a path resolves to nothing; the markers now call it the
   segment-identity correction, which is a name rather than a path. What it supersedes is unchanged,
-  and the rules in force are on the backend page, `docs/kv-cache/backend.md`.
+  and the rules in force are on the backend page, `docs/modules/kv-cache/backend.md`.
 
 - **Corrected again after shipping, and this one removes the subject rather than narrowing it.** Call
   it the **unmount-reachability measurement**; later markers refer to it by that name. Measured
@@ -661,7 +661,7 @@ unschema'd string it does not own. A webhook reading its own `extraArgs` map nee
 
 #### F8 — Documentation
 
-`docs/kv-cache/backend.md` gains: the tiering model as the store implements it, stated as **offload
+`docs/modules/kv-cache/backend.md` gains: the tiering model as the store implements it, stated as **offload
 is routed to the owner of the memory replica**, with the consequence that a disk tier is a layer on a
 group and never a group of its own; the two fields that turn it on and the admission rule that keeps
 them paired; that the hostPath is **not** counted into any resource request and therefore that node
@@ -878,7 +878,7 @@ pkg/worker/webhooks/worker/
   kv_cache_backend.go                  # + F4's rules; - the per-medium refusal
 pkg/worker/controllers/worker/
   kv_cache_backend.go                  # selectKVCacheBackendCapacity: sum where a disk tier exists
-docs/kv-cache/backend.md               # F8
+docs/modules/kv-cache/backend.md               # F8
 ```
 
 ### Code Style
@@ -1104,7 +1104,7 @@ column of Verification is met).
 
 - [x] **T9 · Documentation**
       Blocked by: T8
-      Owns: `docs/kv-cache/backend.md`
+      Owns: `docs/modules/kv-cache/backend.md`
       Acceptance: F8's list, with the routing sentence — offload goes to the owner of the memory
       replica — stated first, because every other consequence follows from it.
       Verify: `make lint docs`.

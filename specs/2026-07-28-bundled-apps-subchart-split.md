@@ -395,7 +395,7 @@ the CSI drivers, which today's Go path does honour.
   existing `nextStep` DeepEqual path), not reinstalled.
 - AC (behaviour change): in chart mode, `deviceManager.enabled=false` no longer causes a
   runtime install — it means no device-managers. Recovering the old hybrid requires
-  `worker.disableApplications`, documented in `docs/architecture.md` and the migration doc.
+  `worker.disableApplications`, documented in `docs/getting-started/architecture.md` and the migration doc.
 
 **F5 — `NodeFeatureRule` owned by the operator, not by the NFD fork**
 - The `gpustack-cpu-info` rule (CPU-identity annotations, the `has-acceleratable-devices`
@@ -533,7 +533,7 @@ the CSI drivers, which today's Go path does honour.
 - **No HA recipe file ships with the chart.** Every knob being declared in `values.yaml` makes a
   second file redundant: it would only restate keys the user can now see and read about in place,
   and it would drift from them. The HA walkthrough — which knobs, which values, how many nodes —
-  lives in `docs/operation/high-availability.md` (T17), which `values.yaml` points at.
+  lives in `docs/operate/high-availability.md` (T17), which `values.yaml` points at.
 - Concurrent-start correctness. `Prepare()` runs before leader election and four of its steps
   genuinely race with N replicas. None needs a distributed lock; each needs a targeted fix:
   1. **CRD and webhook-configuration applies do not retry conflicts.** `pkg/kubeclientset`'s
@@ -677,15 +677,15 @@ pre-install/pre-upgrade hooks execute.
 - AC: NFD's `post-delete` hook still fires on uninstall (its node labels are removed).
 
 **F10 — Docs and e2e synchronised**
-- `docs/architecture.md`: the two install modes and what each renders, where the
+- `docs/getting-started/architecture.md`: the two install modes and what each renders, where the
   `NodeFeatureRule` now comes from, the `--disable-applications` scope and accepted names, the
   `worker.disableApplications` value, and the `deviceManager.enabled=false` behaviour change.
-- `docs/development.md`: `make deps` now vendors charts; how to add/refresh a chart patch; the
+- `docs/contribute/development.md`: `make deps` now vendors charts; how to add/refresh a chart patch; the
   mirrored-image prerequisite when bumping a pinned version.
-- New `docs/operation/high-availability.md` (including the single-URL webhook topology
-  restriction) and `docs/migration/to-subcharts.md` (the `--take-ownership` command, the
+- New `docs/operate/high-availability.md` (including the single-URL webhook topology
+  restriction) and `docs/operate/migration/to-subcharts.md` (the `--take-ownership` command, the
   required release name, and the widened uninstall blast radius).
-- `docs/settings.md`: `GPUSTACK_PCI_CLASS_PREFIXES` is now **DM-only** — T12 deleted the WK reader
+- `docs/reference/settings.md`: `GPUSTACK_PCI_CLASS_PREFIXES` is now **DM-only** — T12 deleted the WK reader
   that injected it into the NFD chart and the NodeFeatureRule, but `binding/helper_linux.go` still
   reads it for the DM's sysfs scan, so the row is corrected rather than removed. T22 leaves it
   DM-only and names the two other statements of the same list (the chart's `deviceClassWhitelist`,
@@ -695,7 +695,7 @@ pre-install/pre-upgrade hooks execute.
   RuntimeClasses it creates and Kueue's credits mapping from it *and* fans the row back out as those
   very variables — setting one alone leaves the rest on the old value until the next render
   overwrites it.
-- `docs/migration/from-v0.5.md`: two statements the migration hooks invalidate — that the Kueue reap
+- `docs/operate/migration/from-v0.5.md`: two statements the migration hooks invalidate — that the Kueue reap
   lives on the worker's Kueue install path, and that no hook runs on an upgrade.
 - The root `README.md` (**outside T17's `Owns:`**, taken because its "installed by the worker at
   runtime" note is directly contradicted by this change): the subchart note, the uninstall blast
@@ -717,7 +717,7 @@ pre-install/pre-upgrade hooks execute.
 - **T18 found the two install modes are mutually exclusive** — see the caveat below. Two statements
   written earlier in this spec's own docs pass were wrong and are corrected **outside T18's `Owns:`**
   for the same reason the root `README.md` was: `worker.disableApplications`'s values comment invited
-  a partial list ("hand some back to it"), and `docs/architecture.md`'s `deviceManager.enabled=false`
+  a partial list ("hand some back to it"), and `docs/getting-started/architecture.md`'s `deviceManager.enabled=false`
   bullet described handing the device-manager install back to the worker. Both configurations fail
   the worker's startup. The values comment and that bullet now say so, and
   `_e2e-lib/references/troubleshooting.md` names the symptom.
@@ -1057,7 +1057,7 @@ kind create cluster --name gpustack-ha --config .github/configs/kind-config-ha.y
 helm install gpustack-operator deploy/gpustack-operator/chart -n gpustack-system \
   --create-namespace
 # ... highly available (the knobs are all declared in values.yaml; see
-# docs/operation/high-availability.md), passed as the user's own values file
+# docs/operate/high-availability.md), passed as the user's own values file
 helm install gpustack-operator deploy/gpustack-operator/chart -n gpustack-system \
   --create-namespace -f my-ha-values.yaml
 
@@ -1524,13 +1524,13 @@ the baseline.
       `NodeDevicesAdmissionReconciler` bullet, which still says `installKueue` applies the
       AdmissionCheck "right after the Kueue install"; T12 moves that apply into `Prepare()`, so
       the sentence goes stale. Also: development (vendoring and
-      patch workflow, mirror-first), new `docs/operation/high-availability.md` — the walkthrough
+      patch workflow, mirror-first), new `docs/operate/high-availability.md` — the walkthrough
       `values.yaml` already points at, so until this task lands that reference dangles: which knob
       to raise per component (worker, `kueue.controllerManager`, `node-feature-discovery.master`,
       both `csi-driver-*.controller`), the values to give them, the node count a hard spread needs,
       and what each subchart cannot do (no spread for NFD, no PDB or spread for the CSI
       controllers, `Recreate` by default) — including the
-      single-URL webhook restriction; and `docs/migration/to-subcharts.md` (the
+      single-URL webhook restriction; and `docs/operate/migration/to-subcharts.md` (the
       `--take-ownership` command, the required release name **and namespace** — Kueue's
       `managedJobsNamespaceSelector` hard-codes `gpustack-system` because Helm cannot template a
       subchart value — and the widened uninstall blast radius). Chart README regenerated, never hand-edited.
@@ -1547,7 +1547,7 @@ the baseline.
       Blocked by: T13, T15, T16
       Owns: `.claude/skills/_e2e-lib/**`, `.claude/skills/gpustack-operator-chart-e2e/**`,
       `.claude/skills/gpustack-operator-e2e/**`
-      Also `deploy/gpustack-operator/chart/values.yaml` and `docs/architecture.md`, outside the
+      Also `deploy/gpustack-operator/chart/values.yaml` and `docs/getting-started/architecture.md`, outside the
       declared `Owns:` and recorded in F10: two statements this task proved wrong.
       Acceptance: `assert-core.sh` asserts in-release workloads instead of sub-releases; new
       cases for HA failover, upgrade adoption (with and without `--take-ownership`) and image mode;
@@ -1577,7 +1577,7 @@ the baseline.
       Owns: `pkg/worker/kuberess/**`,
       `deploy/gpustack-operator/chart/templates/nodefeaturerule.yaml` (deleted),
       `deploy/gpustack-operator/chart/values.yaml`,
-      `.claude/skills/_e2e-lib/scripts/assert-core.sh`, `docs/architecture.md`, `docs/settings.md`
+      `.claude/skills/_e2e-lib/scripts/assert-core.sh`, `docs/getting-started/architecture.md`, `docs/reference/settings.md`
       Also, outside the declared `Owns:` and each a direct consequence of the move: `pkg/nodefeature`
       (the class prefixes' new home), `pkg/worker/worker.go` (the new `Prepare()` step),
       `templates/NOTES.txt` and `files/migrate-pre.sh` (both described the rule as the chart's),
@@ -1592,14 +1592,14 @@ the baseline.
       served — and they are split today for a reason that is nobody's design: NFD ships its CRDs
       under `crds/`, which Helm's CRD phase establishes **before** it maps the manifest, while Kueue
       templates its own. **This reverses part of T11, on measured grounds.** With
-      `node-feature-discovery.enabled=false` — which `docs/architecture.md` calls the supported way
+      `node-feature-discovery.enabled=false` — which `docs/getting-started/architecture.md` calls the supported way
       to run against a cluster's own NFD — and that NFD not yet installed, the chart install does not
       degrade, it fails outright:
       `unable to build kubernetes objects from release manifest: resource mapping not found for
       name: "gpustack-cpu-info" ... no matches for kind "NodeFeatureRule"` (measured on kind against
       an empty cluster). A chart cannot own a custom resource whose CRD it does not ship; the same
       error is what keeps the AdmissionCheck out of the chart. So the boundary becomes statable, and
-      `docs/architecture.md` states it: **the chart deploys workloads and configuration; the worker
+      `docs/getting-started/architecture.md` states it: **the chart deploys workloads and configuration; the worker
       applies the custom resources whose CRDs the chart cannot order.** That boundary already exists
       — the worker's own CRDs, APIServices and webhook configurations are all applied in Go — so this
       removes an inconsistency rather than adding an exception.
@@ -1612,14 +1612,14 @@ the baseline.
       the NFD CRDs and takes it with them; and the post-upgrade prune cannot touch it, because its
       kind list is built-in kinds only.
       Costs, both accepted: `helm template` no longer shows the rule (it already shows neither the
-      AdmissionCheck nor the worker's own CRDs/APIServices/webhooks), and `docs/settings.md`'s
+      AdmissionCheck nor the worker's own CRDs/APIServices/webhooks), and `docs/reference/settings.md`'s
       sentence about the chart value replacing `GPUSTACK_PCI_CLASS_PREFIXES` needs rewriting.
       A third cost surfaced while building and is stated rather than hidden: the class-prefix list
       now appears in three places (`pkg/nodefeature` for the rule, the NFD subchart's
       `deviceClassWhitelist` for what NFD labels, `GPUSTACK_PCI_CLASS_PREFIXES` for the DM's sysfs
       scan) where the template read one value twice. The first two are held equal by a new Go test,
       `TestChartPciClassWhitelistMatchesNodeFeature`; the third stays a separate knob because T12
-      deliberately removed the worker's env reader, and `docs/settings.md` now names all three.
+      deliberately removed the worker's env reader, and `docs/reference/settings.md` now names all three.
       Also settled here, from a question the values surface raised: the kebab/camel split in
       `values.yaml` is **not** ours to unify. Helm requires a subchart's values key to equal that
       subchart's `Chart.yaml` name, so `kueue` / `node-feature-discovery` / `csi-driver-nfs` /
@@ -1657,7 +1657,7 @@ the baseline.
       namespace, because chart-testing only creates the ones it generates and `--helm-extra-args`
       cannot carry `--create-namespace` (the same string reaches `helm delete`, which has no such
       flag — measured). `make test chart` then passes. The **product** half stays open with T20: this
-      chart is installable into `gpustack-system` alone, which `docs/migration/to-subcharts.md`
+      chart is installable into `gpustack-system` alone, which `docs/operate/migration/to-subcharts.md`
       states, and T20's Kueue patch is what can make the selector follow `.Release.Namespace`.
 
 - [x] **T23 · The device-manager sees the host's processes and IPC**
@@ -1676,8 +1676,8 @@ the baseline.
       Blocked by: T22, T23 (both rewrite `device-manager/daemonset.yaml`)
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
       `deploy/gpustack-operator/chart/templates/**`, `pkg/worker/kuberess/chart_test.go`,
-      `pkg/worker/kuberess/apps_gpustack_operator.go`, `docs/settings.md`, `docs/architecture.md`,
-      `docs/migration/to-subcharts.md`
+      `pkg/worker/kuberess/apps_gpustack_operator.go`, `docs/reference/settings.md`, `docs/getting-started/architecture.md`,
+      `docs/operate/migration/to-subcharts.md`
       Gate: review
       Acceptance: F11's map. `manufacturers` stops being a name→PCI-vendor-ID map and becomes
       `global.manufacturers`, a map of objects carrying `pciVendorID`, `resourceName`,
@@ -1700,10 +1700,10 @@ the baseline.
       `TestChartManufacturersMatchNodeFeature` widens from the vendor ID to the four Go-backed
       fields, with `runtimeName` asserted as a subset (equal wherever stated) so the chart can
       deliberately withhold hygon and metax, and `runtimeInjectsDriver` asserted to imply a
-      `runtimeName`. Also rewrites the sentences T17 wrote about this map in `docs/settings.md`
+      `runtimeName`. Also rewrites the sentences T17 wrote about this map in `docs/reference/settings.md`
       (the `GPUSTACK_<MFR>_PCI_VENDOR_ID` row's "set the `manufacturers` value instead", now true
-      of four variables) and `docs/architecture.md`, and records the values rename in
-      `docs/migration/to-subcharts.md`.
+      of four variables) and `docs/getting-started/architecture.md`, and records the values rename in
+      `docs/operate/migration/to-subcharts.md`.
       Verify: `make generate chart` idempotent; `go test ./pkg/worker/kuberess/...`; and the check
       that matters — the default render differs from before the shape change **only** by the four
       added RuntimeClasses and the fanned-out environment variables, so the migration is a
@@ -1737,7 +1737,7 @@ the baseline.
       anywhere else crash-loops the controller (`managedJobsNamespaceSelector: Invalid value ...:
       should not match the "<ns>" namespace`), and `ct install`, which picks a random namespace,
       cannot pass at all. Rendered through the parent's helper, that selector follows
-      `.Release.Namespace` and the limitation `docs/migration/to-subcharts.md` documents goes away.
+      `.Release.Namespace` and the limitation `docs/operate/migration/to-subcharts.md` documents goes away.
       The CI half landed with T22 (`ct install --namespace gpustack-system`); this task removes
       that pin again, and `ct install` passing on its own random namespace is what proves the fix.
       Verify: `make generate chart` idempotent (and no longer running a generator);
@@ -1843,7 +1843,7 @@ the baseline.
 
 - [x] **T26 · A shifted patch is not a failure**
       Blocked by: T21
-      Owns: `hack/deps.sh`, `docs/development.md`,
+      Owns: `hack/deps.sh`, `docs/contribute/development.md`,
       `.claude/skills/gpustack-operator-chart-subcharts-manage/**`
       Acceptance: `chart_staging()` applies patches with `-F0 --no-backup-if-mismatch` and asserts
       on `*.rej` alone. Two patches touching one file shift each other's line numbers, so the old
@@ -1856,14 +1856,14 @@ the baseline.
       Verify: restore T21's pre-re-capture `global-image.patch` (the one whose `_helpers.tpl` hunk
       is 18 lines stale) and re-vendor from a deleted tree — it must apply silently and reproduce
       the committed tree byte-for-byte; then drift one context line of a patch and re-vendor again —
-      it must fail hard with a `.rej`. `docs/development.md` and the skill state the new rule.
+      it must fail hard with a `.rej`. `docs/contribute/development.md` and the skill state the new rule.
       Measured: both halves confirmed. The stale patch applies with no `.orig` and yields a tree
       `git status` calls clean; a drifted context line fails at `cert-manager.patch` with
       `_helpers.tpl.rej` and a non-zero exit.
 
 - [x] **T27 · Say what turning cert-manager back off actually costs**
       Blocked by: T21
-      Owns: `deploy/gpustack-operator/chart/values.yaml`, `docs/migration/to-subcharts.md`
+      Owns: `deploy/gpustack-operator/chart/values.yaml`, `docs/operate/migration/to-subcharts.md`
       Acceptance: T21's migration note offered `global.certmanager.enabled: "false"` as a plain
       way out for a cluster that has cert-manager. Verifying it on a cluster disproved that, so
       the values comment and the migration doc state the real cost instead. Turning cert-manager
@@ -1917,7 +1917,7 @@ source, and the two findings deliberately left are recorded under Open Questions
       Blocked by: T19
       Owns: `deploy/gpustack-operator/chart/templates/device-manager/runtimeclass.yaml`,
       `deploy/gpustack-operator/chart/values.yaml`, `pkg/worker/kuberess/chart_test.go`,
-      `docs/architecture.md`, `docs/migration/to-subcharts.md`
+      `docs/getting-started/architecture.md`, `docs/operate/migration/to-subcharts.md`
       Acceptance: T19 gated creation on a row stating a `runtimeName`, which took the chart from
       two RuntimeClasses to six. That conflates "this vendor's runtime uses that handler name"
       with "this cluster runs that runtime". `InstanceReconciler` attaches a RuntimeClass whenever
@@ -2008,8 +2008,8 @@ source, and the two findings deliberately left are recorded under Open Questions
       Blocked by: T29
       Owns: `pkg/worker/kuberess/apps_gpustack_operator.go`,
       `pkg/worker/kuberess/apps_gpustack_operator_test.go`, `hack/lib/helm.sh`,
-      `deploy/gpustack-operator/chart/values.yaml`, `docs/architecture.md`,
-      `docs/development.md`, `pack/gpustack-operator/Dockerfile`, this spec
+      `deploy/gpustack-operator/chart/values.yaml`, `docs/getting-started/architecture.md`,
+      `docs/contribute/development.md`, `pack/gpustack-operator/Dockerfile`, this spec
       Acceptance: the second review axis asked the one question the five quality dimensions never
       do — was this what the spec ordered — and found one break of a Goal plus a set of statements
       the diff had overtaken.
@@ -2032,10 +2032,10 @@ source, and the two findings deliberately left are recorded under Open Questions
         itself about it in two comments. It now sets `kueue.enableKueueViz`,
         `node-feature-discovery.topologyUpdater.enable` (NFD's gate is `enable`, not `enabled`) and
         `csi-driver-nfs.externalSnapshotter.enabled`.
-      - **`docs/architecture.md` still carried the sentence F10 records as corrected** — the
+      - **`docs/getting-started/architecture.md` still carried the sentence F10 records as corrected** — the
         `deviceManager.enabled=false` bullet pointing at a runtime install, 124 lines from its own
         correction, aimed at a configuration the exclusive-modes caveat says never starts the
-        worker. **`docs/development.md`** documented two behaviours T5 and T20 deleted: chart
+        worker. **`docs/contribute/development.md`** documented two behaviours T5 and T20 deleted: chart
         dependency updates in `make generate chart`, and a generated transformations list.
       - **The withdrawn second Kueue tree left three user-visible traces** — a values comment about
         "both Kueue lines" copied into the generated README, and "Kueue legacy" in the Dockerfile —

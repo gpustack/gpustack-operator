@@ -307,7 +307,7 @@ if [ -n "$remaining" ]; then
   echo "$remaining" >&2
   echo "[teardown] an install against them fails in ways that do not name this as the cause." >&2
   case "$remaining" in
-    *kueue.x-k8s.io*) echo "[teardown] for the Kueue ones see docs/migration/troubleshooting.md" >&2 ;;
+    *kueue.x-k8s.io*) echo "[teardown] for the Kueue ones see docs/operate/migration/troubleshooting.md" >&2 ;;
   esac
   echo "[teardown] (namespace ${NS} kept on purpose)" >&2
   exit 1

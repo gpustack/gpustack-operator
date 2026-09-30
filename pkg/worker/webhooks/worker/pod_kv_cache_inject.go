@@ -55,7 +55,7 @@ type injectionRecord struct {
 	// Binding is the KVCachePoolBinding this Pod NAMED and this webhook resolved, in the Pod's own
 	// namespace. It provisioned the domain and the capacity; it authorized nothing, and the API
 	// contract says so explicitly - a workload that knows another domain's name reaches it, Binding
-	// or no Binding (see "What a Binding does not do" in docs/kv-cache/pool.md, and #168).
+	// or no Binding (see "What a Binding does not do" in docs/modules/kv-cache/pool.md, and #168).
 	//
 	// It is NOT necessarily the Binding the writes are ACCOUNTED to. An engine build that ignores the
 	// injected tenant writes under the master's own "default" name, so usage lands on whichever

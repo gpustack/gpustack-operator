@@ -215,7 +215,7 @@ and consumed.
 | F5 | `NodeCapacityReconciler` reads Node + Devices, gates on `.sliced`, honors overcommit | It patches the four `.sliced.*` keys for a manufacturer only while `<mfr>.sliced` is present and > 0 in `Node.status.capacity`, reverse-patching otherwise (including at exactly 0), and sums each key over only that manufacturer's models whose Devices group — matched by the group ID in the acceleratable node key — reports a slicing capability, so a non-sliceable model (e.g. an Ascend 310 beside a sliceable 910B) contributes nothing. `.sliced.cores-percentage = Σ cards × maxSlices × 100` for a model whose `CoresPercentageOvercommit` is true, else `Σ cards × 100`; `.sliced.units`/`.memory-percentage`/`.memory-mib` are unchanged formulas. It reads `maxSlices` + overcommit from the same-named `Devices` CR at reconcile time; no `Devices` watch is needed because the device-plugin sizes the bare `.sliced` pool as `cards × maxSlices` off the same CR, so any capability change moves the bare `.sliced` capacity the Node predicate watches. Stale cleanup still covers all four suffixes. |
 | F6 | `NodeFlavorReconciler` records `AcceleratorsFeature` in notes; the derived InstanceType folds it in | The RF notes carry the group's `AcceleratorsFeature` as an `acceleratorFeature` JSON note (replacing the `sliceable` string note), read via `nodeFlavorAcceleratorsFeature`, which resolves the flavor's own device group by the group ID in its accelerator key. The InstanceType defaulting webhook folds the note into `Spec.Feature`, so a derived type carries the descriptor without a separate injection step. |
 | F7 | InstanceType API replaces `Sliceable bool` with the structured slicing descriptor | `InstanceTypeAccelerator` drops `Sliceable bool` for a **value** `Feature AcceleratorsFeature` field + an `IsSliceable()` helper (value, not pointer, so `InstanceTypeSpec` stays comparable for the workergateway map key). The v1 InstanceType is a type alias (no conversion), and the `Spec.Sliceable` consumers (`webhooks/worker/instance.go`, `controllers/worker/instance.go`) migrate to `IsSliceable()`. `make generate` regenerates deepcopy / protobuf / CRD / apiservice / applyconfiguration. |
-| F8 | Architecture doc: five-gate admission | `docs/architecture.md`'s admission section is rewritten as the five gates above (Pod webhook / credits / AdmissionCheck / scheduler / allocator), with the `Devices` ledger described as the backing store for gate 3. The `NodeCapacityReconciler` and `MaxPartitions=512` references are updated to the per-vendor max slice count. |
+| F8 | Architecture doc: five-gate admission | `docs/getting-started/architecture.md`'s admission section is rewritten as the five gates above (Pod webhook / credits / AdmissionCheck / scheduler / allocator), with the `Devices` ledger described as the backing store for gate 3. The `NodeCapacityReconciler` and `MaxPartitions=512` references are updated to the per-vendor max slice count. |
 | F9 | `testing/sample` devices updated | `testing/sample/devices/ascend-910b.yaml` (and any other sample carrying `features`/`roce`) moves the per-accelerator `features.roce` block to `topology.roce` and adds a group-level `features.logicalSliced` block (`{size: 63, coresPercentageOvercommit: true, memoryPercentageStep: 1}`). |
 
 ### Notes / Constraints / Caveats
@@ -305,7 +305,7 @@ cluster (k3s / docker-desktop) and is GPU-less-approximable via a fake NFD accel
 make generate                # deepcopy/register/apiservice/CRD/conversion/protobuf/webhook + applyconfiguration
 make lint                    # golangci-lint; `make lint dirty` also fails if `make generate` left the tree dirty
 
-# Targeted package tests (make test only excludes packages, so use go test directly per docs/development.md):
+# Targeted package tests (make test only excludes packages, so use go test directly per docs/contribute/development.md):
 GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/device/... ./pkg/deviceplugin/... \
   ./pkg/worker/controllers/worker/... ./pkg/worker/webhooks/worker/... ./pkg/worker/extensionapis/... \
   ./api/worker/...
@@ -339,7 +339,7 @@ pkg/kubeclients/applyconfiguration/worker/v1{,alpha1}/  # F7 generated apply-con
 pkg/worker/webhooks/worker/instance_type.go         # F6/F7 fold the acceleratorFeature note into Spec.Feature (defaulting webhook)
 pkg/worker/webhooks/worker/instance.go              # F7 Spec.Sliceable consumers (:305,:414) → IsSliceable()
 pkg/worker/controllers/worker/instance.go           # F7 Spec.Sliceable consumer (:947) → IsSliceable()
-docs/architecture.md                                # F8 five-gate admission; per-vendor max slice count
+docs/getting-started/architecture.md                                # F8 five-gate admission; per-vendor max slice count
 testing/sample/devices/ascend-910b.yaml             # F9 roce→topology; add group features.logicalSliced
 ```
 ### Code Style
@@ -420,7 +420,7 @@ the tree building; a `make lint` + `go test` + `make generate`-clean checkpoint 
   `Feature.LogicalSliced = {128,true,1}` folded from the note; `IsSliceable()`-gated slice admission is
   behavior-unchanged; the `instancetypeflavor` CLI still prints a Sliceable column. **Verify:**
   `go test ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/... ./pkg/worker/extensionapis/... && make generate && make lint`.
-- [x] **Task 4 — Architecture doc: five-gate admission (F8).** Rewrite `docs/architecture.md`'s admission section
+- [x] **Task 4 — Architecture doc: five-gate admission (F8).** Rewrite `docs/getting-started/architecture.md`'s admission section
   as the five gates (Pod webhook → Kueue credits → Kueue AdmissionCheck → default scheduler → DeviceManager
   allocator), with the `Devices` ledger described as gate-3's backing store; update the `.sliced.cores-percentage`
   formula and describe `maxSlices` as the per-vendor max slice count + the overcommit

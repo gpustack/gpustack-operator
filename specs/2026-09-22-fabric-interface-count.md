@@ -132,7 +132,7 @@ Keep API comments explicit about behavior and consequences, use protocol-derived
 
 - [x] **T5 · Document the interface-count behavior**
       Blocked by: T1, T3
-      Owns: `docs/kv-cache/backend.md`
+      Owns: `docs/modules/kv-cache/backend.md`
       Gate: None
       Acceptance: The backend documentation explains that a member's interface count selects its
       resource quantity and that an RDMA count above one uses exclusive resources.

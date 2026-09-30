@@ -738,7 +738,7 @@ fields), and `pack/mirrored-mooncake/`.
 Three files outside that list were touched, each as the mechanical counterpart of something inside
 it, and they are named here so the difference is a decision rather than a surprise:
 `.github/workflows/base-image.yml` (the new image is unbuildable in CI without its enum entry),
-`pkg/worker/settings/value.go` and `docs/settings.md` (the image Setting's own text claimed no image
+`pkg/worker/settings/value.go` and `docs/reference/settings.md` (the image Setting's own text claimed no image
 this project publishes had been measured end to end, which stopped being true).
 
 Does not own: `KVCachePool`, `KVCachePoolBinding`, the tenant ledger convergence, the member's disk
@@ -786,7 +786,7 @@ bound.
 - [x] **T7 — F6's exposure, written where it is read** — in the `highAvailability` doc comment, with
       the bound and the consequence in one sentence rather than two, because split apart the bound
       reads as harmless.
-- [x] **T8 — Documentation** (F7), in [`docs/kv-cache/backend.md`](../docs/kv-cache/backend.md).
+- [x] **T8 — Documentation** (F7), in [`docs/modules/kv-cache/backend.md`](../docs/modules/kv-cache/backend.md).
 - [ ] **T9 — e2e: an induced failover** on a single-node Kubernetes cluster. Service moves, no member
       restarts, and no fault is reported during the transition. Tracked as
       https://github.com/gpustack/gpustack-operator/issues/278. Two things it must check that no unit

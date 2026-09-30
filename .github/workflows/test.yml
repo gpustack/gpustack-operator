@@ -38,9 +38,7 @@ on:
     # sources -- the chart, the operator Dockerfile, testdata, embedded files, cgo headers --
     # and a path an allow-list forgets skips the run without a trace on the pull request.
     #
-    # LIMITED: a markdown-only change still skips this workflow, although two tests read
-    # documentation (pkg/nodefeature and pkg/worker/controllers/worker, each against a page
-    # under docs/reference/). Such a change is caught by the next run that does trigger.
+    # Documentation is checked by docs.yml; no Go test reads documentation pages.
     paths-ignore:
       - "docs/**"
       - "testing/**"

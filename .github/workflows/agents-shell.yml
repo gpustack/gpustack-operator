@@ -32,8 +32,12 @@ on:
       - "v*-dev"
     paths:
       - ".agents/**/*.sh"
-      - "hack/check-agents-shell.sh"
-      - "hack/check-agents-shell-selftest.sh"
+      - "hack/check/agents-shell.sh"
+      - "hack/check/agents-shell-selftest.sh"
+      - "hack/check/symbols.sh"
+      - "hack/lint.sh"
+      - "hack/lib/style.sh"
+      - "Makefile"
       - ".github/workflows/agents-shell.yml"
   pull_request:
     branches:
@@ -41,8 +45,12 @@ on:
       - "v*-dev"
     paths:
       - ".agents/**/*.sh"
-      - "hack/check-agents-shell.sh"
-      - "hack/check-agents-shell-selftest.sh"
+      - "hack/check/agents-shell.sh"
+      - "hack/check/agents-shell-selftest.sh"
+      - "hack/check/symbols.sh"
+      - "hack/lint.sh"
+      - "hack/lib/style.sh"
+      - "Makefile"
       - ".github/workflows/agents-shell.yml"
 
 jobs:
@@ -60,8 +68,6 @@ jobs:
       # release on first use. That is the parity argument made executable: the runner and a
       # contributor's machine run the same resolution, not two setups that have to be kept alike.
       # A preinstalled runner shellcheck of some other version is not used.
-      - name: Self-test
-        run: bash hack/check-agents-shell-selftest.sh
       - name: Check
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -69,8 +75,8 @@ jobs:
           PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           # The base is where "new relative to" starts: the PR's base commit, or the commit before
-          # the push. workflow_dispatch carries none by design, and for it the self-test above is
-          # the whole run. Every other shape that cannot name a base — a null before-sha from a
+          # the push. workflow_dispatch carries none by design, so it checks the local tree.
+          # Every other shape that cannot name a base — a null before-sha from a
           # force-pushed branch, a base object the checkout's history no longer reaches — is a
           # loud failure, not a pass: this workflow is the only enforcement for the paths it
           # selects, so a run that quietly checked nothing would be the vacuous green the gate
@@ -82,7 +88,7 @@ jobs:
           esac
           NULL_SHA="0000000000000000000000000000000000000000"
           if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "Manual run: the self-test above is the whole run."
+            make lint agents-shell
             exit 0
           fi
           if [[ -z "${BASE}" || "${BASE}" == "${NULL_SHA}" ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
@@ -103,4 +109,4 @@ jobs:
             exit 1
           fi
           BASE="${MERGE_BASE}"
-          bash hack/check-agents-shell.sh --base "${BASE}"
+          AGENTS_SHELL_BASE="${BASE}" make lint agents-shell

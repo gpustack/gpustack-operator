@@ -1051,9 +1051,9 @@ against the host's own vendor CLI. The link check is one more row on that surfac
 
 #### F9 — documentation
 
-- `docs/architecture/device-discovery.md`: the NIC pass, what `DeviceInterface` records, why
+- `docs/modules/devices/discovery.md`: the NIC pass, what `DeviceInterface` records, why
   enumeration starts at the interface rather than the bus (P5), and the sysfs read discipline (P11).
-- `docs/architecture/scheduling-chain.md`: the three labels, **the scope ordering**, the two limits
+- `docs/modules/devices/scheduling.md`: the three labels, **the scope ordering**, the two limits
   from F7, and the gate — that a withheld label is how an unusable node stops being selected. The
   worked example runs NIC → accelerators (P13).
 - The `Devices` field reference wherever the existing `DeviceTopology` fields are documented,
@@ -1313,8 +1313,8 @@ pkg/devicemanager/detector/
                                             # the pass instant both write paths stamp with
 pkg/devicemanager/preflight/
   network.go                                # F8's rows, reusing the F5 checker
-docs/architecture/device-discovery.md
-docs/architecture/scheduling-chain.md
+docs/modules/devices/discovery.md
+docs/modules/devices/scheduling.md
 .claude/skills/gpustack-operator-e2e/cases/case-52.sh
 ```
 

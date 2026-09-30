@@ -184,7 +184,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     LINT_DIRTY=${CI}
     # Lets the .agents shell check tell this build from a host whose git broke: from a worktree
     # checkout the context carries .git but not the gitdir it points at, and only here is that a
-    # reason to skip rather than a failure. hack/check-agents-shell.sh states why.
+    # reason to skip rather than a failure. hack/check/agents-shell.sh states why.
     export GPUSTACK_IMAGE_BUILD="true"
     pushd ${GPUSTACK_WORKSPACE} \
         && if [[ "${CI}" == "true" ]]; then make ci; else make build; fi \

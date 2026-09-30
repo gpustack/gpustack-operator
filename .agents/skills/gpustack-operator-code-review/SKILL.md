@@ -17,9 +17,9 @@ A change can pass one axis and fail the other — code that follows every standa
 but implements the wrong thing, or code that does what was asked but breaks project
 conventions. Reporting both separately stops one from masking the other.
 
-Before anything else, read `docs/architecture.md` enough to know which stage of the
+Before anything else, read `docs/getting-started/architecture.md` enough to know which stage of the
 chain (NFD → Device Manager → worker capacity profiling → Kueue materialization)
-the diff touches, and keep the deep page for that stage (`docs/architecture/*.md`)
+the diff touches, and keep the relevant deep page under `docs/modules/`
 in mind while reviewing.
 
 ## Procedure

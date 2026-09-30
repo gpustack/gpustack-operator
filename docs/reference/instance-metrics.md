@@ -4,7 +4,7 @@
 > `instances/<name>/metrics` subresource and the Device Manager's Prometheus exporter — their
 > fields, names, sources and limits.
 > **Audience** users, operators, console developers · **Prerequisites** [Accelerator
-> Requests](../accelerator-requests.md) · **Read time** ~9 min
+> Requests](../modules/devices/requests.md) · **Read time** ~9 min
 
 Both surfaces report the same figures from the same code, so they can never disagree by a
 rounding step. They differ in who asks: the subresource answers one Instance per request, the
@@ -522,7 +522,7 @@ it is accepted and never enforced, so the port stays open.
 
 ---
 
-**See also** — [Architecture](../architecture.md) · [Device
-Discovery](../architecture/device-discovery.md) for how the Device Manager samples accelerators ·
-[Internals](../architecture/internals.md) for the Device Manager's subcommands and flags.
-**Next** → [Accelerator Requests](../accelerator-requests.md)
+**See also** — [Architecture](../getting-started/architecture.md) · [Device
+Discovery](../modules/devices/discovery.md) for how the Device Manager samples accelerators ·
+[Internals](../contribute/internals.md) for the Device Manager's subcommands and flags.
+**Next** → [Accelerator Requests](../modules/devices/requests.md)

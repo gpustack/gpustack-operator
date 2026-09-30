@@ -550,7 +550,7 @@ func TestCountMatchingLines(t *testing.T) {
 			match: hostVendorCLIs[nodefeature.ManufacturerNVIDIA].match, want: 2,
 		},
 		{
-			// Copied from docs/operation/nvidia-mig.md. A partition is not a second card, and
+			// Copied from docs/modules/devices/nvidia-mig.md. A partition is not a second card, and
 			// counting it as one makes a single MIG-enabled GPU look like a host/container
 			// discrepancy on a node where nothing is wrong. Only the physical line's UUID is
 			// prefixed GPU-; a partition's is prefixed MIG-.

@@ -129,5 +129,5 @@ missed aggregation site. Walk the "Wire up" column too.
 Found another mirror of this shape? Add a row — the table is the reminder, and it is only as good as
 its coverage.
 
-See [development.md](../../../docs/development.md) for the full code-generation pipeline and the
+See [development.md](../../../docs/contribute/development.md) for the full code-generation pipeline and the
 API group/version/kind table.

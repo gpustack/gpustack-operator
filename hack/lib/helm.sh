@@ -49,7 +49,7 @@ function gpustack::helm::helm::install() {
 function gpustack::helm::helm::validate() {
   # LIMITED: existence is the whole check here, deliberately. Unlike helm-docs and helm-schema
   # below, the Helm CLI writes no committed artifact, so a stale one cannot move a generated
-  # baseline. hack/check-toolpins-selftest.sh holds the row that pins this.
+  # baseline. hack/check/toolpins-selftest.sh holds the row that pins this.
   # shellcheck disable=SC2046
   if [[ -n "$(command -v $(gpustack::helm::helm::bin))" ]]; then
     return 0

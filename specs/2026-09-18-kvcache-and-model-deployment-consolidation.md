@@ -768,7 +768,7 @@ Acceptance:
 | the frozen and editable field table | `:578-584` | same rules, new field paths |
 | "roles on one instanceType are one Workload" | `docs/reference/model-deployment-status.md:118` | one Workload per role |
 | "this operator deletes a replica only for a group rebuild" | `docs/reference/model-deployment-status.md:59` | and for a rollout, and for a scale-down |
-| every manifest naming a renamed field | `docs/kv-cache/*.md`, `docs/reference/*.md`, `docs/walkthrough.md` | the shapes in Proposal |
+| every manifest naming a renamed field | `docs/kv-cache/*.md`, `docs/reference/*.md`, `docs/getting-started/walkthrough.md` | the shapes in Proposal |
 
 Acceptance:
 
@@ -899,7 +899,7 @@ of it **for objects**.
 now. A restore does not check that member memory still holds the key it records there: once a forced
 remove, or a leader before the one taking over, has given that memory to other keys, the restored
 index returns another key's bytes instead of a miss — a wrong block, not a cold one. The rule is
-carried by `docs/kv-cache/leader.md`, under High availability.
+carried by `docs/modules/kv-cache/leader.md`, under High availability.
 
 **REQUIRED: C1 reads what came back, not whether something came back.** What a snapshot carries is
 the master's metadata shards and its segment state; whatever the store holds as pure runtime state
@@ -1198,7 +1198,7 @@ covered by T4's envtest.
   group's protocol when one group satisfies. No hardware needed. **Verify:**
   `go test ./pkg/worker/kvcache/inject/... ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/... && make lint`.
 - [x] **T5 — the docs: the reference page and the worked pair.**
-  Update `docs/kv-cache/backend.md`: the widened enum, per-group transport and its inheritance, the
+  Update `docs/modules/kv-cache/backend.md`: the widened enum, per-group transport and its inheritance, the
   variant tags and the vLLM version mapping (`0.3.13.post1` for vLLM 0.28.0+, `0.3.10.post2` before;
   cann ships `0.3.13.post1` and `0.3.11.post1`), the
   declared device grants and why nothing charges device memory, and a clear "measured on the
@@ -1263,7 +1263,7 @@ of them, because one API file has one set of consumers.
 
 - [x] **A5 · Documentation for Part A**
       Blocked by: A1, A2, A3, A4
-      Owns: `docs/kv-cache/**`, `docs/reference/kv-cache-injection.md`, `docs/walkthrough.md`
+      Owns: `docs/kv-cache/**`, `docs/modules/kv-cache/injection.md`, `docs/getting-started/walkthrough.md`
       Gate: none
       Acceptance: the last two rows of F17's acceptance, for the Part A names only.
       Verify: `make lint docs < /dev/null`
@@ -1341,7 +1341,7 @@ of them, because one API file has one set of consumers.
       Owns: `docs/reference/model-deployment.md`, `docs/reference/model-deployment-status.md`
       Gate: review
       Acceptance: F17, every row not covered by A5.
-      Verify: `make lint docs < /dev/null` and `go test ./pkg/worker/controllers/worker/... -run Docs`
+      Verify: `make lint docs < /dev/null`
 
 #### The verification trip
 

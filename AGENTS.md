@@ -26,15 +26,17 @@ controllers under `pkg/worker/controllers/worker` materialize Kueue `ResourceFla
 `pkg/nodefeature` holds the label algebra. A fourth, `model-manager`, is a per-node CSI plugin that
 mounts Hugging Face weights from a verified node cache (`pkg/modelmanager`, `NodeModelStore`).
 
-Read `docs/architecture.md` first: one page, the four stages, the life of a request, the vocabulary.
-Then the deep page under `docs/architecture/` for what you are touching — `device-discovery.md` (NFD,
-Device Manager, allocator), `scheduling-chain.md` (capacity labels, flavors/queues/InstanceTypes,
-`pkg/nodefeature`), `admission.md` (the five gates, webhooks, four-view status), `installation-modes.md`,
-`internals.md` (startup order and the invariants that fail silently). `docs/README.md` indexes it all.
+Read `docs/getting-started/architecture.md` first: one page, the four stages, the life of a request,
+and the vocabulary. Then use the deep page for the relevant capability: `docs/modules/devices/`
+for discovery, scheduling and admission; `docs/modules/rdma/` for network interfaces;
+`docs/modules/topology/` for placement; `docs/modules/kv-cache/`,
+`docs/modules/model-delivery/`, `docs/modules/model-deployment/` and
+`docs/modules/instances/` for workload features. Installation modes are under `docs/operate/`;
+startup constraints are under `docs/contribute/`. `docs/README.md` indexes every page.
 
 ## Development
 
-See `docs/development.md` for build/lint/test commands, code generation, and vendored dependencies.
+See `docs/contribute/development.md` for build/lint/test commands, code generation, and vendored dependencies.
 
 These build, deploy or publish, so they are explicit-only: your host never lists them, and offering
 one by name is your job. The change on the left is the trigger.
@@ -51,7 +53,7 @@ one by name is your job. The change on the left is the trigger.
   → `gpustack-operator-xbuild-and-verify`
 
 The `gpustack-operator-lint` hook dispatches on what a turn left dirty and implements this table;
-`hack/check-hook-dispatch.sh` asserts that it still does. It is report-only and runs once the turn
+`hack/check/hook-dispatch.sh` asserts that it still does. It is report-only and runs once the turn
 is over, so run the matching target yourself when you need the answer before that. The last row is a
 default, not a list, so a file type nobody named still has an answer:
 

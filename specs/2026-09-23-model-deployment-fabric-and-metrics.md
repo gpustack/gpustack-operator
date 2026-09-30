@@ -91,7 +91,7 @@ As a verifier, I want local and hardware-only checks attached to the existing B 
 #### Documentation, comments, and e2e revision
 
 - Revise existing API and renderer comments that say role resources contain only accelerators; document the interface count, protocol selection, and mixed-fabric refusal. Keep member-side resource comments consistent with the same quantity rule.
-- Revise `docs/reference/model-deployment.md`, `docs/reference/model-deployment-status.md`, `docs/operation/rdma.md`, and `docs/architecture/network-topology.md` where old no-engine-fabric or metrics statements become false. Add a dedicated ModelDeployment metrics reference page if needed, then update `docs/README.md` and the docs skill routing table. Existing pages already at the section cap must not gain another `##` heading.
+- Revise `docs/reference/model-deployment.md`, `docs/reference/model-deployment-status.md`, `docs/modules/rdma/operations.md`, and `docs/modules/rdma/network-topology.md` where old no-engine-fabric or metrics statements become false. Add a dedicated ModelDeployment metrics reference page if needed, then update `docs/README.md` and the docs skill routing table. Existing pages already at the section cap must not gain another `##` heading.
 - Revise existing e2e case assumptions and fixtures affected by resource rendering or scrape annotations. Add discriminating A1 and A2 cases: absent versus positive interface, RDMA 1 versus multiple, EFA key, pure P/D, conflicting fabric protocols, all three gauge areas, partial scrape, and annotation reachability. A case must read the rendered Pod or API response, not infer success from the input manifest.
 
 #### Verification matrix
@@ -224,7 +224,7 @@ Use the same conventions for the interface quantity. Keep validation errors tied
 
 - [x] **T7 · Documentation and e2e contract revision**
       Blocked by: T3, T5, T6
-      Owns: `docs/reference/model-deployment*.md`, `docs/operation/rdma.md`, `docs/architecture/network-topology.md`, `docs/README.md`, `.agents/skills/gpustack-operator-docs/SKILL.md`, `.agents/skills/gpustack-operator-e2e/cases/**`
+      Owns: `docs/reference/model-deployment*.md`, `docs/modules/rdma/operations.md`, `docs/modules/rdma/network-topology.md`, `docs/README.md`, `.agents/skills/gpustack-operator-docs/SKILL.md`, `.agents/skills/gpustack-operator-e2e/cases/**`
       Acceptance: API and rendering comments, referenced docs, index, and e2e assumptions state the implemented interface and metrics behavior. Discriminating cases inspect rendered Pods and `/metrics` responses for absent/positive requests, RDMA one/multiple, EFA, pure P/D, mixed protocols, the three gauge areas, partial reads, and annotation reachability. Existing B identifiers remain stable.
       Verify: `make lint docs` and `make lint`
 

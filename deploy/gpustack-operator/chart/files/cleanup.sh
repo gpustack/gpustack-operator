@@ -89,7 +89,7 @@ fi
 #    resolve to it and fail, silently skipping the strip below.
 #
 #    Name patterns only NOMINATE: an external Kueue/NFD install is a supported configuration
-#    (docs/migration/to-subcharts.md) whose objects match the same names, so a candidate is
+#    (docs/operate/migration/to-subcharts.md) whose objects match the same names, so a candidate is
 #    deleted only once the namespace of the Service it points at confirms it belongs to THIS
 #    install. That confirmation is also version-blind — Helm's ownership annotations would do
 #    for the chart-installed objects, but the worker registers its own at runtime and those

@@ -20,8 +20,8 @@ goimports_version=${GOIMPORT_VERSION:-"v0.49.0"}
 # LIMITED: pinned for the same class of reason. The .agents shell gate compares a change's
 # findings against the base version of the same file, so the analyzer version is part of the
 # comparison's fairness: a floating one re-derives the two sides differently on every machine.
-# hack/check-agents-shell.sh resolves this pin through these functions, and
-# hack/check-agents-shell-selftest.sh asserts the two literals agree. Bump both together.
+# hack/check/agents-shell.sh resolves this pin through these functions, and
+# hack/check/agents-shell-selftest.sh asserts the two literals agree. Bump both together.
 shellcheck_version=${SHELLCHECK_VERSION:-"v0.10.0"}
 
 function gpustack::lint::golangci_lint::install() {

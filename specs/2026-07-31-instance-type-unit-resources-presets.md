@@ -798,8 +798,8 @@ T4 needs T2's final family set. T1 and T3 both touch `pkg/nodefeature`, but disj
       Blocked by: T2
       Owns: `docs/reference/instance-type-unit-resources.md`, `README.md`,
             `pkg/nodefeature/unit_resources_preset_docs_test.go`, and — found at ship time, not
-            planned — `docs/architecture.md`, `docs/walkthrough.md`,
-            `docs/operation/nvidia-mig.md`, each of which asserted the retired fixed default
+            planned — `docs/getting-started/architecture.md`, `docs/getting-started/walkthrough.md`,
+            `docs/modules/devices/nvidia-mig.md`, each of which asserted the retired fixed default
       Gate: —
       Acceptance: the page satisfies AC5.1–AC5.5, the README doc index links it, and the sync test of
       AC5.6 asserts every `family` in the YAML appears in the page.

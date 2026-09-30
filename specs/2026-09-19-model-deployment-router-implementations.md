@@ -761,7 +761,7 @@ pkg/worker/settings/value.go                 # the router image default
 pack/llm-router/Dockerfile                   # three upstream sources, three binaries, one runtime layer
 pack/llm-router/patches/                     # the vLLM router patch, its defect statement beside it
 docs/reference/model-deployment.md           # the router section, the editable-fields table
-docs/settings.md                             # the router image setting
+docs/reference/settings.md                             # the router image setting
 .agents/skills/gpustack-operator-e2e/cases/  # the end-to-end cases
 ```
 
@@ -858,7 +858,7 @@ reading decides whether any pairing can be accepted.
       `pkg/worker/controllers/worker/model_deployment_test.go`,
       `pkg/worker/controllers/worker/model_deployment_status_test.go`,
       `pkg/worker/webhooks/worker/model_deployment_test.go`, `docs/reference/model-deployment.md`,
-      `docs/settings.md`, `.agents/skills/gpustack-operator-e2e/**`
+      `docs/reference/settings.md`, `.agents/skills/gpustack-operator-e2e/**`
       Gate: review
       Acceptance: the quoted literal, the unquoted uses in prose and YAML, and the label values in the
       end-to-end cases all read the new value; the two image names that embed the old spelling are
@@ -1129,7 +1129,7 @@ reading decides whether any pairing can be accepted.
 
 - [x] **T15b · The setting names the image**
       Blocked by: T15a, and on the image existing in the registry rather than merely being buildable
-      Owns: `pkg/worker/settings/value.go`, `docs/settings.md`
+      Owns: `pkg/worker/settings/value.go`, `docs/reference/settings.md`
       Gate: review
       Acceptance: the router image setting names `gpustack/llm-router:v0.1.0`; its documentation says
       the binary is chosen by the rendered command rather than by the image, which is what makes one

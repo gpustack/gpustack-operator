@@ -1,0 +1,25 @@
+baseURL = "/"
+title = "GPUStack Operator"
+enableRobotsTXT = true
+disableKinds = ["taxonomy", "term"]
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+    [markup.goldmark.renderHooks.link]
+      useEmbedded = "auto"
+
+[module]
+  [[module.mounts]]
+    source = "content"
+    target = "content"
+  [[module.mounts]]
+    source = "../docs"
+    target = "content/docs"
+  [[module.mounts]]
+    source = "layouts"
+    target = "layouts"
+  [[module.mounts]]
+    source = "static"
+    target = "static"

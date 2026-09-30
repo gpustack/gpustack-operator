@@ -11,7 +11,7 @@ Kueue, Node Feature Discovery, `csi-driver-nfs`, `csi-driver-s3`, and Topograph 
 vendored **unpacked and patched** under `deploy/gpustack-operator/chart/charts/<name>/` and **committed** —
 which is what makes `helm install` work from a bare clone and keeps CI offline-capable.
 
-Background: `docs/development.md` (*Helm chart* / *Vendored subcharts*) and
+Background: `docs/contribute/development.md` (*Helm chart* / *Vendored subcharts*) and
 `specs/2026-07-28-bundled-apps-subchart-split.md` F1–F2.
 
 ## When to use
@@ -77,7 +77,7 @@ or parent values — a patch making the subchart template `include` a parent hel
    as `index .Values "<kebab-name>"`); if the worker may install it, `applicationValuesKeys` in
    `pkg/worker/kuberess/apps.go` plus the overlay in `apps_gpustack_operator.go` (which
    `TestChartDefaultsMatchImageModeOverlay` compares against the chart's defaults); `files/cleanup.sh` if an
-   older version installed it as its own release; `docs/development.md` → *Vendored subcharts*.
+   older version installed it as its own release; `docs/contribute/development.md` → *Vendored subcharts*.
 8. Run the [ladder](#verification-ladder).
 
 ## Workflow B — bump a pinned version
@@ -154,8 +154,8 @@ strip CRs. Regenerate it with the commands above.
 3. The parent `values.yaml` block, then `make generate chart` (that is what drops it from `README.md` and
    `values.schema.json`).
 4. Every other mention: `templates/NOTES.txt`, `files/cleanup.sh`, `applicationValuesKeys` + the overlay in
-   `pkg/worker/kuberess/`, `chart_test.go` expectations, `docs/development.md`,
-   `docs/migration/to-subcharts.md`, and the `gpustack-operator-chart-e2e` / `-e2e` skills.
+   `pkg/worker/kuberess/`, `chart_test.go` expectations, `docs/contribute/development.md`,
+   `docs/operate/migration/to-subcharts.md`, and the `gpustack-operator-chart-e2e` / `-e2e` skills.
 
 **What an existing release keeps** — dropping the dependency cleans nothing up:
 

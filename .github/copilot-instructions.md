@@ -12,8 +12,8 @@ per-node capacity labels → controllers materialize Kueue `ResourceFlavor` →
 `ClusterQueue` → `LocalQueue`, plus an
 `InstanceType` CRD with a four-view (EX/SH/SL/PT) status. Accelerator quota is
 `credits.gpustack.ai/<manufacturer>`, one whole accelerator = `M = 1,600,000`
-integer credit units. Read `docs/architecture.md` first, then the deep page under
-`docs/architecture/` for the area a PR touches.
+integer credit units. Read `docs/getting-started/architecture.md` first, then the deep page under
+the relevant `docs/modules/` directory for the area a PR touches.
 
 Layout: controllers and reconcilers live under `pkg/` (`worker`, `devicemanager`,
 `nodefeature` — the label algebra), API types under `api/`, CGO bindings under
@@ -75,7 +75,7 @@ measurement it contradicts — that is the only form of it worth a reviewer's at
 ## Out of scope — do not review
 
 Mirrors the `exclude` list in `.opencodereview/rule.json`, verbatim and in the same order.
-`hack/check-review-config.sh` holds the two to that, and runs in `make lint`.
+`hack/check/review-config.sh` holds the two to that, and runs in `make lint`.
 
 A third copy is not in the tree and no gate can reach it: Copilot's real exclusions come from the
 content-exclusion policy in the repository settings, so this list describes that configuration

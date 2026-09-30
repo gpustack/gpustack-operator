@@ -194,7 +194,7 @@ proves the mechanism unchanged (AC1, AC5); none is code.
 
 ### Documentation
 
-- `docs/model-store/artifact.md`: the `expectedDigest` field in the resource example and its rules
+- `docs/modules/model-delivery/artifact.md`: the `expectedDigest` field in the resource example and its rules
   (shape, immutability, hub sources only — the claim and image refusals and why); `digestSource` in
   the status section; the `DigestMismatch` row in the reason table; the anchored-resolution states
   (hub-verified and Expected) and what revalidation does for each; the `AnchorNeedsNodeDelivery`
@@ -206,10 +206,10 @@ proves the mechanism unchanged (AC1, AC5); none is code.
   as the acceptance contract); the **downgrade note** (in a downgrade window the old webhook cannot
   see `expectedDigest`, so its immutability is unenforced and `digestSource` is dropped by old
   workers; re-upgrading recomputes it).
-- `docs/model-store/node-store.md`: the `Expected`-identity chain (peers only) and the no-source
+- `docs/modules/model-delivery/node-store.md`: the `Expected`-identity chain (peers only) and the no-source
   failure message.
 - `docs/README.md` and any cross-references follow the docs skill's routing; the reason tables and
-  the troubleshooting entries gain the new reasons. `docs/settings.md` is untouched: this spec adds
+  the troubleshooting entries gain the new reasons. `docs/reference/settings.md` is untouched: this spec adds
   no Setting.
 
 ### Version floors
@@ -366,7 +366,7 @@ with the case number taken at my-ship time as the lowest unused.
 | `pkg/worker/controllers/worker/model_artifact.go` (+`_test.go`) | hub anchor compare, `DigestMismatch` in the revoking reasons, the revalidation upgrade, the confirmed-cadence `Expected` fallback, `digestSource` on every write |
 | `pkg/worker/controllers/worker/model_artifact_placement.go`, `model_deployment.go` (+tests) | `AnchorNeedsNodeDelivery` under Engine delivery |
 | `pkg/modelmanager/materialize/materialize.go` (+ its test) | the `Expected`-identity chain: peers only, the no-source message |
-| `docs/model-store/artifact.md`, `docs/model-store/node-store.md`, `docs/README.md` | the documented behavior listed under Documentation |
+| `docs/modules/model-delivery/artifact.md`, `docs/modules/model-delivery/node-store.md`, `docs/README.md` | the documented behavior listed under Documentation |
 
 ### Code style
 
@@ -412,7 +412,7 @@ blocks, not ad-hoc strings.
       go test ./pkg/modelmanager/materialize/`
 - [x] **T4 · Documentation**
       Blocked by: T2, T3 (docs describe landed behavior)
-      Owns: `docs/model-store/artifact.md`, `docs/model-store/node-store.md`, `docs/README.md`
+      Owns: `docs/modules/model-delivery/artifact.md`, `docs/modules/model-delivery/node-store.md`, `docs/README.md`
       Acceptance: every Documentation bullet landed; `make lint docs` and the cross-reference
       checks green. (AC7)
       Verify: `make lint docs &&

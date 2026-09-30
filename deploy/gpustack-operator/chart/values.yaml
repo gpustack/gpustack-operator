@@ -112,7 +112,7 @@ global:
     # Turning it ON later is a plain `helm upgrade`. Turning it OFF again is not: cert-manager
     # owns the Secret Kueue's chart wants to template and writes CA bundles Helm never recorded,
     # so `helm upgrade` refuses the Secret before it starts, and forcing past that fails
-    # mid-apply on the visibility APIServices. docs/migration/to-subcharts.md carries the
+    # mid-apply on the visibility APIServices. docs/operate/migration/to-subcharts.md carries the
     # sequence that does work. The same applies when cert-manager is uninstalled from a cluster
     # while this is "auto", which flips the answer without anyone editing a value.
     enabled: auto
@@ -246,7 +246,7 @@ image:
 # `controller` of both CSI drivers. Spreading those replicas across nodes is per-component and
 # each key below says what its component supports; the cluster needs as many schedulable nodes as
 # the largest replica count for a hard spread to be satisfiable. Everything else here is a
-# DaemonSet, one pod per node already. docs/operation/high-availability.md walks through it.
+# DaemonSet, one pod per node already. docs/operate/high-availability.md walks through it.
 
 worker:
   # -- Deploy the worker (control plane). Disable to deploy only the device-managers.
@@ -275,7 +275,7 @@ worker:
   # own switch for it, in step, through every upgrade — nothing checks that, which is why the
   # supported split is all or nothing. The worker installs applications only where no chart
   # deploys it, see
-  # [Installation Modes](https://github.com/gpustack/gpustack-operator/blob/main/docs/architecture/installation-modes.md).
+  # [Installation Modes](https://github.com/gpustack/gpustack-operator/blob/main/docs/operate/installation-modes.md).
   # The value is templated rather than appended through `extraArgs` because the flag accumulates across
   # occurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,
   # `node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`, `model-manager`.

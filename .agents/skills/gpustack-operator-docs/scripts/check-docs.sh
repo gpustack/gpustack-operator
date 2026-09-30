@@ -14,7 +14,8 @@
 #   5. a prose paragraph longer than the cap (a set of items belongs in a list or a table);
 #   6. a page longer than the line cap;
 #   7. a page with more "##" sections than the cap;
-#   8. an index label in docs/README.md that differs from the page's own H1.
+#   8. an index label in docs/README.md that differs from the page's own H1;
+#   9. a docs path named in a skill that no longer exists.
 #
 # Usage: bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh [--report] [repo-root]
 #
@@ -78,7 +79,7 @@ H2_CAP=10           # "##" sections in one page
 
 # Cap exemptions, declared here rather than escaped inline. Each is a space-separated glob list.
 # A recording and a runbook are as long as the hardware makes them.
-LINE_CAP_EXEMPT='docs/walkthrough.md docs/operation/*'
+LINE_CAP_EXEMPT='docs/getting-started/walkthrough.md docs/operate/* docs/modules/devices/*-mig.md'
 # The index is a table of contents and a reference page is a lookup table: both are meant to be flat.
 H2_CAP_EXEMPT='docs/README.md docs/reference/*'
 
@@ -389,6 +390,12 @@ for f in $PAGES; do
   [ "$label" = "$h1" ] \
     || shape_err "$f: index label '$label' is not the page's H1 '$h1'"
 done
+
+# --- 9. paths named as skill inputs -----------------------------------------
+echo "==> skill document paths"
+while IFS= read -r path; do
+  [ -f "$path" ] || err "$path: named in a skill but no longer exists"
+done < <(grep -RhoE 'docs/[[:alnum:]_./-]+\.md' .agents/skills --include='*.md' | sort -u)
 
 if [ "$REPORT" -eq 1 ]; then
   echo
