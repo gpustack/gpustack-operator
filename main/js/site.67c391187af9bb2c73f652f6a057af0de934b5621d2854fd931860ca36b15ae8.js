@@ -24,6 +24,72 @@ for (const button of document.querySelectorAll(".copy-code")) {
   });
 }
 
+const pickers = document.querySelectorAll("details.picker");
+document.addEventListener("click", event => {
+  for (const picker of pickers) {
+    if (picker.open && !picker.contains(event.target)) picker.open = false;
+  }
+});
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  for (const picker of pickers) {
+    if (picker.open && picker.contains(event.target)) {
+      picker.open = false;
+      picker.querySelector("summary").focus();
+    }
+  }
+});
+for (const picker of pickers) {
+  picker.addEventListener("toggle", () => {
+    if (!picker.open) return;
+    for (const other of pickers) {
+      if (other !== picker) other.open = false;
+    }
+  });
+}
+
+const themePicker = document.querySelector(".theme-picker");
+if (themePicker) {
+  const rows = themePicker.querySelectorAll(".theme-row");
+  const root = document.documentElement;
+  const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  const choice = () => root.dataset.themeChoice || "system";
+  const paintMeta = () => {
+    if (!metaTheme) return;
+    const dark = choice() === "dark" || (choice() === "system" && darkQuery.matches);
+    metaTheme.setAttribute("content", dark ? "#15171a" : "#ffffff");
+  };
+  const apply = selected => {
+    root.dataset.themeChoice = selected;
+    if (selected === "light" || selected === "dark") root.dataset.theme = selected;
+    else delete root.dataset.theme;
+    try {
+      if (selected === "system") localStorage.removeItem("theme");
+      else localStorage.setItem("theme", selected);
+    } catch {}
+    for (const row of rows) {
+      const active = row.dataset.themeChoice === selected;
+      row.classList.toggle("is-active", active);
+      if (active) row.setAttribute("aria-current", "true");
+      else row.removeAttribute("aria-current");
+    }
+    paintMeta();
+  };
+  themePicker.addEventListener("click", event => {
+    const row = event.target.closest(".theme-row");
+    if (row) {
+      apply(row.dataset.themeChoice);
+      themePicker.open = false;
+      themePicker.querySelector("summary").focus();
+    }
+  });
+  darkQuery.addEventListener("change", () => {
+    if (choice() === "system") paintMeta();
+  });
+  apply(choice());
+}
+
 const searchForm = document.querySelector(".search-form");
 if (searchForm) {
   const input = document.getElementById("search-query");
@@ -120,39 +186,46 @@ if (diagrams.length) {
 }
 
 
-const versionPicker = document.getElementById("docs-version");
+const versionPicker = document.querySelector(".version-picker");
 if (versionPicker) {
   const status = document.getElementById("version-status");
+  const note = versionPicker.querySelector(".picker-note");
   const root = new URL(versionPicker.dataset.root);
   const currentPath = versionPicker.dataset.page.slice(root.pathname.length);
   // Keep the language and article path when another version contains that page.
   const articlePath = currentPath.slice(currentPath.indexOf("/") + 1);
+  note.textContent = "Loading versions…";
   fetch(new URL("versions.json", root)).then(response => {
     if (!response.ok) throw new Error("Version index unavailable");
     return response.json();
   }).then(index => {
+    if (!Array.isArray(index.versions)) throw new Error("Version index malformed");
     for (const version of index.versions) {
       if (version.name === versionPicker.dataset.version) continue;
-      const option = document.createElement("option");
-      option.value = new URL(version.path, root).href;
-      option.textContent = version.name === "main" ? "main (development)" : version.name;
-      versionPicker.append(option);
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "picker-row version-row";
+      row.textContent = version.name === "main" ? "main (development)" : version.name;
+      row.dataset.home = new URL(version.path, root).href;
+      row.dataset.target = new URL(articlePath, row.dataset.home).href;
+      note.before(row);
     }
-    versionPicker.disabled = false;
+    note.remove();
     status.textContent = "Documentation versions loaded.";
   }).catch(() => {
+    note.textContent = "Version list unavailable.";
     status.textContent = "Version list is unavailable. This documentation version is still readable.";
   });
-  versionPicker.addEventListener("change", async () => {
-    const home = new URL(versionPicker.value, window.location.origin);
-    const target = new URL(articlePath, home);
-    versionPicker.disabled = true;
+  versionPicker.addEventListener("click", async event => {
+    const row = event.target.closest(".version-row");
+    if (!row) return;
+    for (const other of versionPicker.querySelectorAll(".version-row")) other.disabled = true;
     status.textContent = "Opening documentation version…";
     try {
-      const response = await fetch(target, { method: "HEAD" });
-      window.location.assign(response.ok ? target.href : home.href);
+      const response = await fetch(row.dataset.target, { method: "HEAD" });
+      window.location.assign(response.ok ? row.dataset.target : row.dataset.home);
     } catch {
-      versionPicker.disabled = false;
+      for (const other of versionPicker.querySelectorAll(".version-row")) other.disabled = false;
       status.textContent = "Could not open that version. Try again.";
     }
   });
