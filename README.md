@@ -5,6 +5,8 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/gpustack/gpustack-operator?label=Docker%20Pulls)](https://hub.docker.com/r/gpustack/gpustack-operator)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/gpustack/gpustack-operator)
 
+<img src="./site/assets/images/logo.png" width="100" height="100" alt="GPUStack Operator logo">
+
 GPUStack Operator makes GPUs, NPUs and other accelerators available to Kubernetes workloads. It
 discovers the hardware on each node, groups similar capacity into pools and uses Kueue to admit
 workloads when a pool has room.

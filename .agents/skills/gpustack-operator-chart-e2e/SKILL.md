@@ -7,6 +7,10 @@ allowed-tools: "Read, Agent, Bash(bash .claude/skills/_e2e-lib/scripts/preflight
 
 # GPUStack Operator — Helm chart E2E verification
 
+Use [the shared module map](../../../docs/README.md#module-map) to locate the relevant guides,
+owning specs, code entry points and related modules. [AGENTS.md](../../../AGENTS.md#finding-sources)
+owns the retrieval and evidence rules; this skill owns its execution procedure.
+
 Install the operator **from its Helm chart** onto a **local** cluster and verify it installs, runs, and uninstalls cleanly — with the **right version** baked in.
 
 **Scope — chart contract only, NOT feature e2e:**

@@ -24,11 +24,15 @@ release. A user who needs those follows a link.
 
 ## `docs/README.md` (index)
 
-**Owns** — the reading paths and the page table (page and the task it helps with).
+**Owns** — reading paths, the page table, and module routing to guides, specs, code entry points,
+related modules and skills. It is the shared local navigation source; the site generates `llms.txt`
+from its page table.
 
 **Never** — content. If you are explaining something here, it belongs on a page.
 
-**Rule** — a new page is not done until it has a row here. `check-docs.sh` enforces it.
+**Rule** — a new page needs a row here. A new capability needs a module entry, and changes to
+code entry points, owning specs or skill inputs must update the entry in the same PR.
+`make lint docs` checks coverage, paths and generated exports; review checks the relationships.
 
 ## `docs/getting-started/architecture.md` (overview, ≤ ~200 lines)
 
@@ -359,7 +363,7 @@ version only together with a re-reading.
 
 **Owns** — make targets, the chart targets, vendored subcharts and how to patch one, commit-message
 rules, running a single test, runtime log verbosity, API groups and code generation, patched
-dependencies.
+dependencies, local site commands, Pages publication, version retention and translation setup.
 
 ## Runbooks under `docs/modules/` and `docs/operate/`
 

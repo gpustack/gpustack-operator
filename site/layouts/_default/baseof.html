@@ -1,19 +1,29 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ .Site.Language.LanguageCode }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ffffff">
+  {{ $logo := resources.Get "images/logo.png" }}
+  {{ $icon := $logo.Resize "32x32" | fingerprint }}
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ $icon.RelPermalink }}">
+  {{ if ne .Site.Params.releaseKind "stable" }}<meta name="robots" content="noindex, follow">{{ end }}
   <title>{{ if not .IsHome }}{{ partial "page-title.html" . }} · {{ end }}{{ .Site.Title }}</title>
+  {{ with .OutputFormats.Get "Markdown" }}
+  <link rel="alternate" type="text/markdown" href="{{ .RelPermalink }}">
+  {{ end }}
+  <link rel="describedby" href="{{ "llms.txt" | relURL }}">
   <link rel="stylesheet" href="{{ (resources.Get "css/site.css" | fingerprint).RelPermalink }}">
   <link rel="stylesheet" href="{{ (resources.Get "css/code.css" | fingerprint).RelPermalink }}">
 </head>
 <body class="{{ if .IsHome }}home{{ else }}docs-page{{ end }}">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
-    <a class="brand" href="{{ .Site.Home.RelPermalink }}">GPUStack Operator</a>
+    {{ $brandLogo := $logo.Resize "80x80" | fingerprint }}
+    <a class="brand" href="{{ .Site.Home.RelPermalink }}" aria-label="GPUStack Operator home"><img src="{{ $brandLogo.RelPermalink }}" width="40" height="40" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a href="{{ "/docs/" | relURL }}" {{ if hasPrefix .RelPermalink "/docs/" }}aria-current="page"{{ end }}>Documentation</a>
+      <a class="top-docs-link" href="{{ "docs/" | relLangURL }}" {{ if hasPrefix (partial "page-key.html" .) "/docs/" }}aria-current="page"{{ end }}>Documentation</a>
+      {{ partial "site-selectors.html" . }}
       <a href="https://github.com/gpustack/gpustack-operator">GitHub</a>
     </nav>
   </header>
@@ -21,13 +31,13 @@
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <form class="docs-search" action="{{ "search/" | relURL }}" role="search">
+        <form class="docs-search" action="{{ "search/" | relLangURL }}" role="search">
           <label class="visually-hidden" for="docs-query">Search documentation</label>
           <input id="docs-query" name="q" type="search" placeholder="Search documentation" required>
           <button type="submit" aria-label="Search"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></button>
         </form>
         <div class="nav-title">Documentation</div>
-        <a class="nav-home" href="{{ "/" | relURL }}" {{ if .IsHome }}aria-current="page"{{ end }}>Overview</a>
+        <a class="nav-home" href="{{ .Site.Home.RelPermalink }}" {{ if .IsHome }}aria-current="page"{{ end }}>Overview</a>
         {{ range .Site.Data.navigation.groups }}
           {{ partial "nav-section.html" (dict "page" (site.GetPage .path) "name" .name "current" $) }}
         {{ end }}
@@ -36,9 +46,9 @@
     <main id="main-content">
       {{ if not .IsHome }}
       <div class="breadcrumbs">
-        <a href="{{ "/docs/" | relURL }}">Docs</a><span aria-hidden="true">/</span>
+        <a href="{{ "docs/" | relLangURL }}">Docs</a><span aria-hidden="true">/</span>
         {{ with .Parent }}
-          {{ if and (ne .RelPermalink "/docs/") (ne .RelPermalink "/") }}
+          {{ if and (ne (partial "page-key.html" .) "/docs/") (not .IsHome) }}
             <a href="{{ .RelPermalink }}">{{ partial "page-title.html" . }}</a><span aria-hidden="true">/</span>
           {{ end }}
         {{ end }}
@@ -56,8 +66,10 @@
           {{ $filename := replace .Filename "\\" "/" }}
           {{ if hasSuffix $filename (printf "/site/content/%s" $source) }}{{ $source = printf "site/content/%s" $source }}{{ end }}
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/main/{{ $source }}">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/{{ $.Site.Params.sourceRef }}/{{ $source }}">View page source</a>
+            {{ if in (slice "local" "main") $.Site.Params.version }}
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/{{ $source }}">Edit this page</a>
+            {{ end }}
           </nav>
         {{ end }}
         {{ if .IsHome }}

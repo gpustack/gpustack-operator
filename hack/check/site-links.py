@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check links between pages and assets in a built Hugo site."""
 
+import argparse
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
@@ -21,10 +22,18 @@ class Page(HTMLParser):
             self.links.append(attrs["href"])
         if tag == "img" and "src" in attrs:
             self.links.append(attrs["src"])
+        if tag == "link" and "href" in attrs:
+            self.links.append(attrs["href"])
+        if tag == "script" and "src" in attrs:
+            self.links.append(attrs["src"])
+        if tag == "form" and "action" in attrs:
+            self.links.append(attrs["action"])
 
 
-def main(root):
+def main(root, base_url):
     root = root.resolve()
+    base = urlsplit(base_url)
+    prefix = base.path.rstrip("/") + "/"
     pages = {}
     for path in root.rglob("*.html"):
         page = Page()
@@ -39,9 +48,16 @@ def main(root):
     for source, page in pages.items():
         for href in page.links:
             url = urlsplit(href)
-            if url.scheme or url.netloc:
+            if url.scheme and url.scheme not in ("http", "https"):
+                continue
+            if (url.scheme or url.netloc) and url.netloc != base.netloc:
                 continue
             path = unquote(url.path)
+            if path.startswith("/"):
+                if not path.startswith(prefix):
+                    errors.append(f"{source.relative_to(root)} -> {href} (outside site base URL)")
+                    continue
+                path = "/" + path[len(prefix):]
             target = source if not path else (
                 root / path.lstrip("/") if path.startswith("/") else source.parent / path
             )
@@ -62,6 +78,8 @@ def main(root):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit("usage: site-links.py SITE_PUBLIC_DIR")
-    sys.exit(main(Path(sys.argv[1])))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("root", type=Path)
+    parser.add_argument("--base-url", default="/")
+    args = parser.parse_args()
+    sys.exit(main(args.root, args.base_url))

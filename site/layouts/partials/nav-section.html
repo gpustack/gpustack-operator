@@ -1,7 +1,7 @@
 {{ $page := .page }}
 {{ $current := .current }}
 {{ $active := hasPrefix $current.RelPermalink $page.RelPermalink }}
-<details class="nav-section" {{ if or $active (and $current.IsHome (eq $page.RelPermalink "/docs/getting-started/")) }}open{{ end }}>
+<details class="nav-section" {{ if or $active (and $current.IsHome (eq (partial "page-key.html" $page) "/docs/getting-started/")) }}open{{ end }}>
   <summary title="{{ partial "page-title.html" $page }}">{{ .name }}</summary>
   <div class="nav-children">
     {{ if $page.Content }}

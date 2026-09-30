@@ -7,6 +7,10 @@ allowed-tools: "Read, Edit, Write, Grep, Glob, Bash(make deps*), Bash(make gener
 
 # Manage a vendored subchart of the operator chart
 
+Use [the shared module map](../../../docs/README.md#module-map) to locate the relevant guides,
+owning specs, code entry points and related modules. [AGENTS.md](../../../AGENTS.md#finding-sources)
+owns the retrieval and evidence rules; this skill owns its execution procedure.
+
 Kueue, Node Feature Discovery, `csi-driver-nfs`, `csi-driver-s3`, and Topograph ship as subcharts of the operator chart,
 vendored **unpacked and patched** under `deploy/gpustack-operator/chart/charts/<name>/` and **committed** —
 which is what makes `helm install` work from a bare clone and keeps CI offline-capable.

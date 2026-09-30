@@ -1,0 +1,7 @@
+{{- /* Navigation keys follow content paths, independent of version and language URL prefixes. */ -}}
+{{- $key := "/" -}}
+{{- with .File -}}
+  {{- $key = printf "/%s%s/" .Dir .TranslationBaseName -}}
+  {{- if eq .TranslationBaseName "_index" -}}{{ $key = printf "/%s" .Dir }}{{- end -}}
+{{- end -}}
+{{- return $key -}}

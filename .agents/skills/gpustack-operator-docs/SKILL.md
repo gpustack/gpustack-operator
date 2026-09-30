@@ -5,12 +5,35 @@ description: "Write or update the GPUStack Operator documentation: route a new f
 
 # GPUStack Operator — documentation
 
+Use [the shared module map](../../../docs/README.md#module-map) to locate the relevant guides,
+owning specs, code entry points and related modules. [AGENTS.md](../../../AGENTS.md#finding-sources)
+owns the retrieval and evidence rules; this skill owns its execution procedure.
+
 The docs have seven capability guides, with technical pages linked from each guide. Everything in
 `docs/` follows one shape and one index. Generated chart documentation is still pinned to code.
 This skill routes a change to the page that owns it.
 
 **Read the index first**: [`docs/README.md`](../../../docs/README.md) — it carries the reading paths and
 the page table you must update when adding a page.
+
+## Shared index and generated exports
+
+`docs/README.md` owns both the complete page table and the module map. Each module entry uses
+single-line `ID`, `Use for`, `Aliases`, `Guides`, `Code` and `Skills` fields; `Specs` and `Related`
+link to applicable design records and neighboring module headings. Keep IDs stable when display
+names change. A capability directory needs its own entry; API changes, installation and development
+have shared task entries. Navigation points to evidence and does not establish implemented behavior.
+
+Update routing in the same PR when adding or moving a page, changing a code entry point or module
+boundary, replacing an owning spec, or changing a skill's document inputs. Update the owning guide
+and spec for contract changes; edit routing only when the association changes. Pure wording edits
+need no mechanical index update. Preserve existing spec status and evidence limits.
+
+Hugo generates `/llms.txt` from the `All pages` table and Markdown exports from page sources. Do not
+maintain a separate copy or summary. `make site` and `make lint docs` verify module coverage, skill
+consumers, local source paths, the generated index, exported prose and code blocks, and site links.
+These checks establish structure and synchronization; review must establish semantic completeness.
+The local module map stays out of the site's article list and navigation.
 
 ## The rule that keeps the overview small
 
@@ -137,19 +160,20 @@ These pages are not free text. Changing one side without the other breaks a buil
 
 ```bash
 make lint docs                                                             # the gate, as CI runs it
-bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh --report   # while writing
+bash .agents/skills/gpustack-operator-docs/scripts/check-docs.sh --report   # while writing
 ```
 
 It verifies relative links and `#anchor`s across `README.md`, `AGENTS.md`, `docs/**` and
-`.claude/skills/**`; and — for `docs/**` only — each page's `## Contents` against its headings, a
+`.agents/skills/**`; and — for `docs/**` only — each page's `## Contents` against its headings, a
 `**See also**` footer at the end, registration in the `## All pages` table of `docs/README.md`, the
 label there against the page's H1, and the three size caps (paragraph, page length, `##` count; see
 `references/conventions.md`). `--report` demotes the caps to warnings and
 prints the per-page metrics. The gate also resolves literal `docs/*.md` paths named across skills,
 so a moved page cannot leave a skill reading a missing file.
 
-`make lint docs` checks source links and page shape. `.github/workflows/docs.yml` also builds
-the Hugo site and checks links and anchors in rendered HTML.
+`make lint docs` checks source links and page shape, including Copilot instruction links. It also
+builds the Hugo site and checks HTML links, module routing, `llms.txt` and Markdown exports.
+`.github/workflows/docs.yml` runs the same gate.
 
 It still does **not** read prose: everything below is on you.
 
@@ -169,3 +193,15 @@ It still does **not** read prose: everything below is on you.
 Found a doc that a test, a generator or a CI job pins, and it is not in the invariants table? Add the
 row. Split or added a page? Add it to the routing table above and to `docs/README.md`. The tables are
 the memory — they are only as good as their coverage.
+
+## Publication and languages
+
+Site publication is owned by `.github/workflows/site.yml` and `hack/site/publish.py`; chart and
+Pages jobs share the `github-pages` queue. Preserve `/charts/index.yaml` and chart packages when
+changing publication. Versioned builds use their exact source revision; do not publish current
+prose as documentation for an older tag. Run the existing site link and export gates with a
+production `SITE_BASE_URL` when changing templates or publication paths.
+
+English is the active language. Translation files share their original stem with a language
+suffix; Chinese remains disabled until its content, interface and checks are ready. Keep language
+switches limited to real translations and search indexes scoped to the selected language.

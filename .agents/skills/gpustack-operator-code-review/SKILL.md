@@ -5,6 +5,10 @@ description: "Review a GPUStack Operator pull-request diff on two axes reported 
 
 # GPUStack Operator — code review
 
+Use [the shared module map](../../../docs/README.md#module-map) to locate the relevant guides,
+owning specs, code entry points and related modules. [AGENTS.md](../../../AGENTS.md#finding-sources)
+owns the retrieval and evidence rules; this skill owns its execution procedure.
+
 Review the PR's diff on **two axes**, reported separately and never merged or
 reranked against each other:
 
@@ -17,7 +21,7 @@ A change can pass one axis and fail the other — code that follows every standa
 but implements the wrong thing, or code that does what was asked but breaks project
 conventions. Reporting both separately stops one from masking the other.
 
-Before anything else, read `docs/getting-started/architecture.md` enough to know which stage of the
+After locating the relevant module, read `docs/getting-started/architecture.md` enough to know which stage of the
 chain (NFD → Device Manager → worker capacity profiling → Kueue materialization)
 the diff touches, and keep the relevant deep page under `docs/modules/`
 in mind while reviewing.
@@ -36,7 +40,8 @@ in mind while reviewing.
 
 Tests reveal intent better than implementation:
 
-- Do tests exist for the changed behavior? A bug fix without a regression test is a finding.
+- Do tests exist for changed runtime behavior? A bug fix without a regression test is a finding.
+  Documentation uses existing lint checks; do not require tests that read Markdown.
 - Are they table-driven with a shared execution loop, declarative cases, fixtures
   built through helpers?
 - Do they assert observable final state (not implementation details), use fake

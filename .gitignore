@@ -41,3 +41,6 @@ go.work.*
 !.claude/settings.json
 .site-public/
 site/public/
+
+# Hugo image processing cache.
+site/resources/

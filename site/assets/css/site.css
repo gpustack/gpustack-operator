@@ -43,7 +43,8 @@ a:focus-visible, summary:focus-visible, button:focus-visible { outline: 2px soli
   border-bottom: 1px solid var(--line);
 }
 .topbar a { text-decoration: none; }
-.brand { color: #16191d; font-size: 1.1rem; font-weight: 700; }
+.brand { display: inline-flex; align-items: center; gap: .6rem; color: #16191d; font-size: 1.1rem; font-weight: 700; }
+.brand img { display: block; flex-shrink: 0; }
 .brand:hover { color: #16191d; }
 .top-links { display: flex; gap: 1.6rem; align-items: center; }
 .top-links a { color: #4d535c; font-size: .93rem; }
@@ -182,6 +183,8 @@ article hr { margin: 2rem 0; border: 0; border-top: 1px solid var(--line); }
 }
 @media (max-width: 760px) {
   .topbar { padding: 0 1rem; }
+  .brand span { display: none; }
+  .top-docs-link { display: none; }
   .top-links { gap: .9rem; }
   .layout { display: block; }
   .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -236,3 +239,15 @@ input:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .nav-children .nav-section > summary { font-size: .83rem; }
 .code-block .chroma .line:has(.gi) { background: #dafbe1; }
 .code-block .chroma .line:has(.gd) { background: #ffebe9; }
+
+
+.version-picker { display: flex; align-items: center; gap: .4rem; font-size: .875rem; }
+.version-picker select { max-width: 12rem; border: 1px solid #d8dee8; border-radius: .25rem; padding: .25rem; background: #fff; color: inherit; font: inherit; }
+.language-picker { position: relative; font-size: .875rem; }
+.language-picker summary { cursor: pointer; }
+.language-picker nav { position: absolute; right: 0; z-index: 3; display: grid; gap: .5rem; padding: .75rem; border: 1px solid #d8dee8; background: #fff; min-width: 8rem; }
+
+@media (max-width: 480px) {
+  .version-picker { font-size: .75rem; }
+  .version-picker select { max-width: 9rem; }
+}

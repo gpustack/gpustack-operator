@@ -2,7 +2,7 @@
 # check-docs.sh — the documentation contract for this repository.
 #
 # Scope:
-#   * links and #anchors — README.md, AGENTS.md, docs/**/*.md, .claude/skills/**/*.md
+#   * links and #anchors — README.md, AGENTS.md, Copilot instructions, docs/**/*.md, .agents/skills/**/*.md
 #   * page structure and index coverage — docs/**/*.md only
 #
 # Fails on:
@@ -66,8 +66,8 @@ PAGES=$(find docs -name '*.md' | sort)
 # anyone counting what this list covers would otherwise find nothing to show for the entry and
 # conclude it is dead. It is not: it was confirmed to report both a path and an anchor that do not
 # exist, and to pass a link that resolves, before being trusted.
-LINKED_PAGES=$(printf '%s\n%s\n%s\n%s\n' \
-  "README.md" "AGENTS.md" "$PAGES" "$(find .claude/skills -name '*.md' | sort)")
+LINKED_PAGES=$(printf '%s\n' \
+  "README.md" "AGENTS.md" ".github/copilot-instructions.md" "$PAGES" "$(find .agents/skills -name '*.md' | sort)")
 
 # Shape caps (rules 5-7). The paragraph cap is the one that carries the weight: a long page that
 # reads in short paragraphs and clear lists is fine, a short page that reads as a wall of text is not.
@@ -406,7 +406,7 @@ if [ "$errors" -gt 0 ]; then
   echo "FAIL: $errors problem(s)."
   exit 1
 fi
-summary="OK: $(printf '%s\n' "$PAGES" | awk 'NF { n++ } END { print n + 0 }') docs pages checked; links also verified across README.md, AGENTS.md and .claude/skills."
+summary="OK: $(printf '%s\n' "$PAGES" | awk 'NF { n++ } END { print n + 0 }') docs pages checked; links also verified across README.md, AGENTS.md, Copilot instructions and .agents/skills."
 [ "$warnings" -eq 0 ] || summary="$summary
 WARN: $warnings shape warning(s); rules 5-8 are advisory under --report."
 echo "$summary"

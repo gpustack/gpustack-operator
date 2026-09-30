@@ -1,0 +1,1 @@
+{{- dict "version" .Site.Params.version "sourceRef" .Site.Params.sourceRef "baseURL" .Site.BaseURL | jsonify -}}

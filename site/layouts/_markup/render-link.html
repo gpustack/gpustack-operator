@@ -1,28 +1,2 @@
-{{- $destination := .Destination -}}
-{{- $url := urls.Parse $destination -}}
-{{- if and (not $url.IsAbs) (not $url.Host) (not (strings.HasPrefix $destination "#")) -}}
-  {{- with .Page.GetPage $url.Path -}}
-    {{- $destination = .RelPermalink -}}
-  {{- else -}}
-    {{- $destination = $url.Path -}}
-    {{- if not (strings.HasPrefix $url.Path "/") -}}
-      {{- $source := path.Clean (path.Join $.Page.File.Dir $url.Path) -}}
-      {{- $filename := replace $.Page.File.Filename "\\" "/" -}}
-      {{- if hasSuffix $filename (printf "/site/content/%s" $.Page.File.Path) -}}
-        {{- $source = path.Clean (path.Join "site/content" $source) -}}
-      {{- end -}}
-      {{- if eq $source "docs/README.md" -}}
-        {{- $destination = "/docs/" | relURL -}}
-      {{- else if hasPrefix $source "docs/" -}}
-        {{- $destination = printf "/%s" $source | relURL -}}
-      {{- else if hasPrefix $source "site/content/" -}}
-        {{- $destination = printf "/%s" (strings.TrimPrefix "site/content/" $source) | relURL -}}
-      {{- else -}}
-        {{- $destination = printf "https://github.com/gpustack/gpustack-operator/blob/main/%s" $source -}}
-      {{- end -}}
-    {{- end -}}
-  {{- end -}}
-  {{- with $url.RawQuery -}}{{ $destination = printf "%s?%s" $destination . }}{{- end -}}
-  {{- with $url.Fragment -}}{{ $destination = printf "%s#%s" $destination . }}{{- end -}}
-{{- end -}}
+{{- $destination := partial "link-destination.html" (dict "page" .Page "destination" .Destination "markdown" false) -}}
 <a href="{{ $destination | safeURL }}">{{ .Text }}</a>

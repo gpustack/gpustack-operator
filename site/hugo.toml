@@ -2,9 +2,51 @@ baseURL = "/"
 title = "GPUStack Operator"
 enableRobotsTXT = true
 disableKinds = ["taxonomy", "term"]
+defaultContentLanguage = "en"
+defaultContentLanguageInSubdir = false
+disableLanguages = ["zh"]
+
+[languages.en]
+  languageCode = "en"
+  languageName = "English"
+  weight = 1
+
+[languages.zh]
+  languageCode = "zh-CN"
+  languageName = "简体中文"
+  weight = 2
+
+[params]
+  version = "local"
+  sourceRef = "main"
+  siteRoot = ""
+  releaseKind = "development"
 
 [outputs]
-  home = ["HTML", "JSON"]
+  home = ["HTML", "JSON", "LLMS", "Markdown", "Version"]
+  page = ["HTML", "Markdown"]
+  section = ["HTML", "Markdown"]
+
+[mediaTypes."text/markdown"]
+  suffixes = ["md"]
+
+[outputFormats.Markdown]
+  mediaType = "text/markdown"
+  baseName = "index"
+  isPlainText = true
+  permalinkable = true
+
+[outputFormats.LLMS]
+  mediaType = "text/plain"
+  baseName = "llms"
+  isPlainText = true
+  notAlternative = true
+
+[outputFormats.Version]
+  mediaType = "application/json"
+  baseName = "site-version"
+  isPlainText = true
+  notAlternative = true
 
 [markup]
   [markup.highlight]
@@ -34,3 +76,7 @@ disableKinds = ["taxonomy", "term"]
   [[module.mounts]]
     source = "data"
     target = "data"
+  [[module.mounts]]
+    source = "../docs"
+    target = "assets/doc-index"
+    includeFiles = ["README.md"]

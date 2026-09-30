@@ -6,6 +6,10 @@ allowed-tools: "Bash(make generate*)"
 
 # Regenerate API & webhook code
 
+Use [the shared module map](../../../docs/README.md#module-map) to locate the relevant guides,
+owning specs, code entry points and related modules. [AGENTS.md](../../../AGENTS.md#finding-sources)
+owns the retrieval and evidence rules; this skill owns its execution procedure.
+
 The `api/` types and `pkg/*/webhooks/*/` sources are hand-written; the deepcopy, register, apiservice,
 CRD, conversion, protobuf, and webhook stubs are **generated** from them. After editing either,
 regenerate to keep the generated code in sync.

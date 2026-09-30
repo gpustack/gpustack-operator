@@ -34,6 +34,32 @@ for discovery, scheduling and admission; `docs/modules/rdma/` for network interf
 `docs/modules/instances/` for workload features. Installation modes are under `docs/operate/`;
 startup constraints are under `docs/contribute/`. `docs/README.md` indexes every page.
 
+## Finding sources
+
+Start with [the module map](docs/README.md#module-map). It links each capability and shared task
+to its guides, design records, code entry points, related modules and applicable skills.
+Read the relevant entry and its relationships before narrowing a code search. Use the local
+checkout; no external index or running documentation site is required.
+
+- Confirm the checkout, branch, uncommitted changes and relevant dependency versions before
+  reasoning about behavior. Site documentation or a merged PR may describe a different revision.
+- For a concrete error, search its stable text locally first. When it concerns an upstream
+  dependency or known failure, search that project's issues and PRs using the error and dependency
+  name. Remove variable paths, line numbers and IDs if the exact search returns nothing.
+- Cite the relevant source passage or file location for a consequential claim. Keep observed
+  behavior, source statements and inference distinct; preserve conditions and uncertainty when
+  summarizing. A navigation entry points to evidence but is not itself proof.
+- Read an issue's resolution and linked PR before using its opening report as guidance. Confirm
+  that the current checkout or installed version contains the fix and has not superseded it.
+- Guides own usage contracts; specs own design rationale and measurements; current code establishes
+  what this checkout implements. Check spec status and applicable versions when these disagree,
+  and report the disagreement rather than silently choosing one.
+
+REQUIRED: update the shared index in the same change when adding or moving a page, changing a
+module boundary or code entry point, replacing an owning spec, or changing a skill's document
+inputs. Ordinary wording changes need no index edit when routing remains accurate. Run
+`make lint docs`; it also checks the generated site index and Markdown exports.
+
 ## Development
 
 See `docs/contribute/development.md` for build/lint/test commands, code generation, and vendored dependencies.

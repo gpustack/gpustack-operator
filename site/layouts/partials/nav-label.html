@@ -1,1 +1,1 @@
-{{- return (index site.Data.navigation.labels .RelPermalink | default (partial "page-title.html" .)) -}}
+{{- return (index site.Data.navigation.labels (partial "page-key.html" .) | default (partial "page-title.html" .)) -}}

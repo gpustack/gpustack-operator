@@ -1,4 +1,4 @@
-{{- $order := index site.Data.navigation.order .RelPermalink | default slice -}}
+{{- $order := index site.Data.navigation.order (partial "page-key.html" .) | default slice -}}
 {{- $pages := .Pages -}}
 {{- $result := slice -}}
 {{- $included := slice -}}

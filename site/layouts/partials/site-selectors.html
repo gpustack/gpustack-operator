@@ -1,0 +1,20 @@
+{{ if .Site.Params.siteRoot }}
+  <label class="version-picker">Version
+    <select id="docs-version" aria-label="Documentation version" disabled
+      data-root="{{ .Site.Params.siteRoot }}" data-version="{{ .Site.Params.version }}"
+      data-home="{{ .Site.Home.RelPermalink }}" data-page="{{ .RelPermalink }}">
+      <option value="{{ .Site.Home.RelPermalink }}">{{ .Site.Params.version }}</option>
+    </select>
+  </label>
+  <span id="version-status" class="visually-hidden" role="status"></span>
+{{ end }}
+{{ if gt (len .AllTranslations) 1 }}
+  <details class="language-picker">
+    <summary>{{ .Site.Language.LanguageName }}</summary>
+    <nav aria-label="Page language">
+      {{ range .AllTranslations }}
+      <a href="{{ .RelPermalink }}" lang="{{ .Language.LanguageCode }}" hreflang="{{ .Language.LanguageCode }}" {{ if eq .Language.Lang $.Language.Lang }}aria-current="page"{{ end }}>{{ .Language.LanguageName }}</a>
+      {{ end }}
+    </nav>
+  </details>
+{{ end }}

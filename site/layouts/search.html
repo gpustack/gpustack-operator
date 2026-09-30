@@ -5,6 +5,6 @@
   <div><input id="search-query" name="q" type="search" required><button type="submit">Search</button></div>
 </form>
 <p id="search-status" role="status">Enter a term to search the documentation.</p>
-<ul id="search-results" data-index="{{ "index.json" | relURL }}"></ul>
+<ul id="search-results" data-index="{{ (.Site.Home.OutputFormats.Get "JSON").RelPermalink }}"></ul>
 <noscript>Enable JavaScript to search. You can also browse the documentation in the navigation.</noscript>
 {{ end }}

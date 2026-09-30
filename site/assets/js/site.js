@@ -118,3 +118,42 @@ if (diagrams.length) {
   }
   renderDiagrams();
 }
+
+
+const versionPicker = document.getElementById("docs-version");
+if (versionPicker) {
+  const status = document.getElementById("version-status");
+  const root = new URL(versionPicker.dataset.root);
+  const currentPath = versionPicker.dataset.page.slice(root.pathname.length);
+  // Keep the language and article path when another version contains that page.
+  const articlePath = currentPath.slice(currentPath.indexOf("/") + 1);
+  fetch(new URL("versions.json", root)).then(response => {
+    if (!response.ok) throw new Error("Version index unavailable");
+    return response.json();
+  }).then(index => {
+    for (const version of index.versions) {
+      if (version.name === versionPicker.dataset.version) continue;
+      const option = document.createElement("option");
+      option.value = new URL(version.path, root).href;
+      option.textContent = version.name === "main" ? "main (development)" : version.name;
+      versionPicker.append(option);
+    }
+    versionPicker.disabled = false;
+    status.textContent = "Documentation versions loaded.";
+  }).catch(() => {
+    status.textContent = "Version list is unavailable. This documentation version is still readable.";
+  });
+  versionPicker.addEventListener("change", async () => {
+    const home = new URL(versionPicker.value, window.location.origin);
+    const target = new URL(articlePath, home);
+    versionPicker.disabled = true;
+    status.textContent = "Opening documentation version…";
+    try {
+      const response = await fetch(target, { method: "HEAD" });
+      window.location.assign(response.ok ? target.href : home.href);
+    } catch {
+      versionPicker.disabled = false;
+      status.textContent = "Could not open that version. Try again.";
+    }
+  });
+}

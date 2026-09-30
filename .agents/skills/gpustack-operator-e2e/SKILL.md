@@ -7,6 +7,10 @@ allowed-tools: "Read, Agent, Bash(bash .claude/skills/_e2e-lib/scripts/preflight
 
 # GPUStack Operator — local E2E verification
 
+Use [the shared module map](../../../docs/README.md#module-map) to locate the relevant guides,
+owning specs, code entry points and related modules. [AGENTS.md](../../../AGENTS.md#finding-sources)
+owns the retrieval and evidence rules; this skill owns its execution procedure.
+
 Deploy the operator to a Kubernetes cluster — the user's own by default, or one provisioned for the run and destroyed afterwards — and verify the scheduling chain end to end:
 
 ```

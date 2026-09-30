@@ -32,11 +32,126 @@ Start an upgrade with the relevant page under [migration](operate/migration/to-s
 For code changes, read [Architecture](getting-started/architecture.md), then the relevant deep page in the
 table below. [Internals](contribute/internals.md) covers startup constraints, and
 [Development](contribute/development.md) lists the build and validation commands. The
-[`gpustack-operator-docs`](../.claude/skills/gpustack-operator-docs/SKILL.md) skill routes
+[`gpustack-operator-docs`](../.agents/skills/gpustack-operator-docs/SKILL.md) skill routes
 documentation changes.
 
 Agents should load `gpustack-operator-overview`, [Architecture](getting-started/architecture.md),
 and only the deep page needed for the task.
+
+## Module map
+
+Each entry routes one module or shared task to its guides, owning specs, code entry points, related
+modules and skills. Links here are navigation, not proof: a spec records what was decided and
+measured when it was written, so what the current checkout implements needs the current code.
+A skill link names a procedure; the entry's other fields carry shared facts.
+
+### Devices Manager
+
+- ID: `devices`
+- Use for: which resource key a workload asks for; how detection, capacity labels, queues and admission checks enforce it; MIG partitioning runbooks.
+- Aliases: `Devices`, `GPU`, `NPU`, `MIG`, `accelerator`, `device plugin`
+- Guides: [Heterogeneous Devices](modules/devices/_index.md); the request contract in [Accelerator Requests](modules/devices/requests.md); the gates in [Admission](modules/devices/admission.md).
+- Specs: [accelerator resource modes](../specs/2026-06-21-accelerator-resource-modes-refactor.md) · [soft-slicing runtime isolation](../specs/2026-06-25-accelerator-soft-slicing-runtime-isolation.md) · [unified pool](../specs/2026-06-29-instancetype-unified-pool-refactor.md) · [credit scoring](../specs/2026-06-24-unified-credit-base-scoring.md)
+- Code: [pkg/devicemanager](../pkg/devicemanager/) (detector, allocator, preflight) · [pkg/deviceplugin](../pkg/deviceplugin/) · [pkg/nodefeature](../pkg/nodefeature/) · chain reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/)
+- Related: [RDMA Manager](#rdma-manager) (interfaces in the same node inventory) · [Topology Aware](#topology-aware) (placement over pool capacity) · [GPU Instances](#gpu-instances) (the workload the chain admits)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (scheduling-chain cases) · [gpustack-operator-xbuild-and-verify](../.agents/skills/gpustack-operator-xbuild-and-verify/SKILL.md) (slicing builder stages and shims)
+
+### RDMA Manager
+
+- ID: `rdma`
+- Use for: requesting RDMA endpoints for a workload; how the NIC inventory, link states and labels are discovered; aligning requests with the kubelet TopologyManager policy.
+- Aliases: `RDMA`, `NIC`, `RoCE`, `link state`, `rdma.capable`
+- Guides: [RDMA Networking](modules/rdma/_index.md); keys and policy in [RDMA Operations](modules/rdma/operations.md); inventory in [Network Topology](modules/rdma/network-topology.md).
+- Specs: [NIC/RDMA topology](../specs/2026-09-02-devices-nic-rdma-topology.md) · [extended resource](../specs/2026-09-20-rdma-extended-resource.md) · [NVIDIA fabric domain](../specs/2026-09-20-nvidia-fabric-domain.md) · [fabric by protocol](../specs/2026-09-22-fabric-device-by-protocol.md) · [interface count](../specs/2026-09-22-fabric-interface-count.md)
+- Code: NIC and link discovery in [pkg/devicemanager/detector](../pkg/devicemanager/detector/) (`network.go`, `link.go`) · request vocabulary in [pkg/nodefeature/rdma.go](../pkg/nodefeature/rdma.go) and [pkg/nodefeature/fabric.go](../pkg/nodefeature/fabric.go)
+- Related: [Devices Manager](#devices-manager) (the interfaces are entries in the same per-node inventory)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (RDMA cases)
+
+### Topology Aware
+
+- ID: `topology`
+- Use for: describing domains such as zones and racks; letting Kueue place replicas within a domain; enabling a topology source; diagnosing a Pending group.
+- Aliases: `TAS`, `Topograph`, `topology source`, `zone`, `placement`
+- Guides: [Topology Management](modules/topology/_index.md); semantics in [Topology-Aware Scheduling](modules/topology/scheduling.md); enablement in [Topology-Aware Scheduling Operations](modules/topology/operations.md).
+- Specs: [topology discovery](../specs/2026-09-22-topology-discovery.md) · [model placement preference](../specs/2026-09-26-model-placement-preference.md)
+- Code: [pkg/worker/controllers/worker/topology_source.go](../pkg/worker/controllers/worker/topology_source.go) and [pkg/worker/controllers/worker/node_topology.go](../pkg/worker/controllers/worker/node_topology.go)
+- Related: [Devices Manager](#devices-manager) (placement constrains which pool serves a replica) · [Model Deployment](#model-deployment) (replicas can prefer nodes holding their model)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (TAS cases)
+
+### KV Cache
+
+- ID: `kv-cache`
+- Use for: standing up a shared inference cache; pool grants and quotas; attaching a workload to a pool.
+- Aliases: `KVCacheBackend`, `KVCachePool`, `Mooncake`, `prefix cache`, `injection`
+- Guides: [KV Cache](modules/kv-cache/_index.md); setup order in [KV Cache Walkthrough](modules/kv-cache/walkthrough.md); store and grants in [KV Cache Backend](modules/kv-cache/backend.md) and [KV Cache Pool](modules/kv-cache/pool.md).
+- Specs: [backend](../specs/2026-08-28-kv-cache-backend.md) · [pool](../specs/2026-08-28-kv-cache-pool.md) · [injection](../specs/2026-08-28-kv-cache-injection.md) · [media and scaling](../specs/2026-09-05-kv-cache-media-and-scaling.md) · [high availability](../specs/2026-09-06-kv-cache-backend-high-availability.md)
+- Code: store rendering and read-back in [pkg/worker/kvcache](../pkg/worker/kvcache/) · per-engine client config in [pkg/worker/kvcache/inject](../pkg/worker/kvcache/inject/) · `kv_cache_*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/)
+- Related: [Model Deployment](#model-deployment) (deployments and Pods consume a pool through injection)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (cache and serving cases)
+
+### Model Delivery
+
+- ID: `model-delivery`
+- Use for: giving model weights a stable identity; node caching and delivery; prefetch, peer sync, progress views and cache operations.
+- Aliases: `ModelArtifact`, `NodeModelStore`, `ModelStore`, `ModelPrefetch`, `model cache`, `Hugging Face`
+- Guides: [Model Delivery](modules/model-delivery/_index.md); the artifact contract in [Model Artifact](modules/model-delivery/artifact.md); the node cache in [Node Model Store](modules/model-delivery/node-store.md); the runbook in [Model Store Operations](modules/model-delivery/operations.md).
+- Specs: [model artifact](../specs/2026-09-25-model-artifact.md) · [node model store](../specs/2026-09-25-node-model-store.md) · [prefetch](../specs/2026-09-27-model-prefetch.md) · [peer sync](../specs/2026-09-27-model-peer-sync.md) · [image source](../specs/2026-09-27-model-image-source.md)
+- Code: Hub resolution in [pkg/modelartifact](../pkg/modelartifact/) · the per-node plugin and cache in [pkg/modelmanager](../pkg/modelmanager/) · cache configuration in [pkg/modelstore](../pkg/modelstore/)
+- Related: [Model Deployment](#model-deployment) (deployments mount or download artifacts) · [KV Cache](#kv-cache) (the weight identity enters KV keys) · [GPU Instances](#gpu-instances) (an Instance can mount weights)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (node-delivery cases)
+
+### Model Deployment
+
+- ID: `model-deployment`
+- Use for: describing a serving workload's model, engine and roles; prefill/decode pairing; replica routing, status and metrics.
+- Aliases: `ModelDeployment`, `prefill`, `decode`, `router`, `vLLM`, `SGLang`, `replica`
+- Guides: [Model Deployment](modules/model-deployment/_index.md); the role contract in [Model Deployment Configuration](modules/model-deployment/deployment.md); pairing in [Prefill and Decode](modules/model-deployment/prefill-decode.md).
+- Specs: [consolidation](../specs/2026-09-18-kvcache-and-model-deployment-consolidation.md) · [role replica admission](../specs/2026-09-19-role-replica-admission-unit.md) · [P/D pairing and router](../specs/2026-09-12-model-deployment-pd-pairing-and-router.md) · [router implementations](../specs/2026-09-19-model-deployment-router-implementations.md)
+- Code: `model_deployment_*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/) · webhooks in [pkg/worker/webhooks/worker](../pkg/worker/webhooks/worker/) · router image under [pack/llm-router](../pack/llm-router/)
+- Related: [KV Cache](#kv-cache) (a deployment can attach a shared cache) · [Model Delivery](#model-delivery) (weights reach replicas through an artifact) · [Topology Aware](#topology-aware) (the placement field constrains replicas)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (serving cases)
+
+### GPU Instances
+
+- ID: `instances`
+- Use for: launching an accelerator-backed container workspace; SSH access; node pinning and instance metrics.
+- Aliases: `Instance`, `InstanceType`, `SSH`, `workspace`
+- Guides: [Accelerated Instances](modules/instances/_index.md); the request form in [Accelerator Requests](modules/devices/requests.md); utilization in [Instance Metrics Reference](reference/instance-metrics.md).
+- Specs: [SSH instance slicing](../specs/2026-07-04-ssh-instance-accelerator-slicing.md) · [sidecar partition visibility](../specs/2026-07-26-ssh-sidecar-partition-visibility.md) · [node pinning and additional volumes](../specs/2026-07-31-instance-node-pinning-and-additional-volumes.md) · [utilization metrics](../specs/2026-08-07-instance-utilization-metrics.md)
+- Code: `instance*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/) · API handlers in [pkg/worker/extensionapis/worker](../pkg/worker/extensionapis/worker/) · gauges in [pkg/devicemanager/exporter](../pkg/devicemanager/exporter/) and [pkg/kubemetrics](../pkg/kubemetrics/)
+- Related: [Devices Manager](#devices-manager) (the request families and the admission chain) · [Model Delivery](#model-delivery) (mounting weights into an Instance)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (Instance cases)
+
+### API Changes
+
+- ID: `api`
+- Use for: which version a manifest or call targets. User-facing resources are `worker.gpustack.ai/v1`; `worker.gpustack.ai/v1alpha1` is internal controller storage behind the public API, not a version users switch between. The layers: public types, the handlers that proxy them onto internal storage, code generation, and the RBAC that grants access.
+- Aliases: `worker.gpustack.ai/v1`, `v1alpha1`, `CRD`, `aggregated apiserver`
+- Guides: the version table in [Development](contribute/development.md); a public surface example with its grants in [Model Artifact API](modules/model-delivery/views.md).
+- Code: public types in [api/worker/v1](../api/worker/v1/) and internal storage in [api/worker/v1alpha1](../api/worker/v1alpha1/) · handlers and proxies in [pkg/worker/extensionapis](../pkg/worker/extensionapis/) over the [pkg/extensionapi](../pkg/extensionapi/) plumbing · generators in [gen/api](../gen/api/) · worker RBAC in [deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml](../deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml)
+- Related: [Development](#development) (`make generate` regenerates the API surface) · [GPU Instances](#gpu-instances) (Instance and InstanceType are the main public resources)
+- Skills: [gpustack-operator-generate](../.agents/skills/gpustack-operator-generate/SKILL.md) (regenerate after type or webhook edits)
+
+### Installation
+
+- ID: `installation`
+- Use for: choosing chart or image mode; vendored subcharts and their patches; vendor prerequisites; upgrade and migration paths.
+- Aliases: `Helm chart`, `subchart`, `chart mode`, `image mode`, `values.yaml`
+- Guides: choices in [Installation Modes](operate/installation-modes.md); node drivers in [Vendor Prerequisites](getting-started/vendor-prerequisites.md); transfer in [Migrating to Bundled Subcharts](operate/migration/to-subcharts.md).
+- Specs: [bundled apps subchart split](../specs/2026-07-28-bundled-apps-subchart-split.md)
+- Code: [deploy/gpustack-operator/chart](../deploy/gpustack-operator/chart/) · vendoring in [hack/deps.sh](../hack/deps.sh) · image-mode in-cluster install in [pkg/worker/kuberess](../pkg/worker/kuberess/)
+- Related: [Development](#development) (chart targets and subchart patches) · [Devices Manager](#devices-manager) (the Device Manager DaemonSets the chart deploys)
+- Skills: [gpustack-operator-chart-e2e](../.agents/skills/gpustack-operator-chart-e2e/SKILL.md) (install, rollout and uninstall verification) · [gpustack-operator-chart-subcharts-manage](../.agents/skills/gpustack-operator-chart-subcharts-manage/SKILL.md) (add, patch or bump a vendored subchart)
+
+### Development
+
+- ID: `development`
+- Use for: build, lint, test and codegen commands; commit and PR conventions; contributor invariants; release steps; site publication and translations.
+- Aliases: `make`, `lint`, `codegen`, `vendored dependencies`, `staging`, `Hugo`, `GitHub Pages`
+- Guides: commands and targets in [Development](contribute/development.md); startup invariants in [Internals](contribute/internals.md); orientation in [Architecture](getting-started/architecture.md).
+- Code: [Makefile](../Makefile) and the scripts behind it in [hack](../hack/) · site publication in [Site workflow](../.github/workflows/site.yml) and [publisher](../hack/site/publish.py) · patched modules in [staging](../staging/) · generators in [gen](../gen/)
+- Related: [API Changes](#api-changes) (what `make generate` owns) · [Installation](#installation) (chart targets and vendoring)
+- Skills: [gpustack-operator-overview](../.agents/skills/gpustack-operator-overview/SKILL.md) (codebase tour) · [gpustack-operator-docs](../.agents/skills/gpustack-operator-docs/SKILL.md) (documentation changes) · [gpustack-operator-code-review](../.agents/skills/gpustack-operator-code-review/SKILL.md) (PR review axes) · [gpustack-operator-issue-pr](../.agents/skills/gpustack-operator-issue-pr/SKILL.md) (issue and PR titles) · [gpustack-operator-release](../.agents/skills/gpustack-operator-release/SKILL.md) (cut a release) · [gpustack-operator-generate](../.agents/skills/gpustack-operator-generate/SKILL.md) (API codegen)
 
 ## All pages
 

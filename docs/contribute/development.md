@@ -21,7 +21,7 @@ before changing the operator's behavior.
 
 - `make deps` — vendor patched k8s staging modules into `staging/` **and** upstream Helm charts into `deploy/gpustack-operator/chart/charts/`, then `go mod tidy && go mod download`; `make deps update` adds `go get -u ./...`.
 - `make generate` — the `gen/api` generators: deepcopy, register, apiservice, CRDs, conversion, protobuf, webhooks. `make generate binding` regenerates the CGO bindings in `binding/` via c-for-go.
-- `make lint` — golangci-lint (`.golangci.yaml`); `make lint dirty` also fails on a dirty tree. `make lint docs` checks the documentation contract instead — bash and awk over the corpus, a second or two, and no cluster; see [the docs skill](../../.claude/skills/gpustack-operator-docs/SKILL.md).
+- `make lint` — golangci-lint (`.golangci.yaml`); `make lint dirty` also fails on a dirty tree. `make lint docs` checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see [the docs skill](../../.claude/skills/gpustack-operator-docs/SKILL.md).
 - `make build` — cross-build `cmd/gpustack-operator` into `.dist/build/`, version ldflag-injected into `pkg/utils/version`; `VERSION=vX.y.z+l.m make build` sets it, `BUILD_PLATFORMS="linux/amd64 linux/arm64"` cross-compiles.
 - `make test` — `go test -v -failfast -race -cover -shuffle=on -timeout=30m ./...`, coverage to `.dist/test/coverage.out`. The order is shuffled on every run so an order-dependent test cannot hide behind the fixed one; a failure banner prints the seed, and `go test -shuffle=<seed>` reproduces that exact order. Trailing args are regexes of packages to **exclude**. `RACE=false make test` drops `-race` and changes nothing else.
 - `make package` — images via `docker buildx` from `pack/*/Dockerfile` (Linux only).
@@ -143,6 +143,71 @@ script and license are bundled under `site/assets/vendor/mermaid/`, so site buil
 Edit documentation under `docs/`, navigation labels and order in `site/data/navigation.yaml`, and
 layouts and styles under `site/`. Run `make lint docs` before committing to check source links,
 page structure, index entries and rendered site links. CI runs the same gate.
+
+The [shared module map](../README.md#module-map) connects guides, specs, code and skills for code
+changes. Update its routing in the same PR when those entry points or associations change.
+`make site` also generates `/llms.txt` from that index and `index.md` beside each article's HTML.
+Markdown exports preserve the prose and code blocks, with links adjusted for the website.
+Hugo watches the shared index and article sources during `make site-serve`.
+
+`make lint docs` runs the same build and checks module coverage, skill inputs, generated index
+coverage, Markdown content and local links. These checks cannot establish whether a design record
+still describes the implementation; verify that against the relevant code and spec status.
+
+### Publishing
+
+The Site workflow publishes `main` after merges and a separate site for each `v*` version tag.
+It writes documentation alongside the charts on `github-pages`, then deploys the complete branch
+through GitHub Pages. Chart publication and both deployment jobs share a queue so concurrent runs
+preserve each other's files. The documentation composer verifies that chart bytes stay unchanged.
+
+| Path | Content |
+|---|---|
+| `/` | Redirect to the latest published stable documentation. |
+| `/main/` | Development documentation from the current `main` branch. |
+| `/v0.9.0/` | Documentation built from that exact stable tag. |
+| `/v0.9.0-rc2/` | Preview built from that exact prerelease tag. |
+| `/charts/index.yaml` | Existing Helm chart index; its address stays unchanged. |
+| `/versions.json` | Generated version list and source revisions. |
+| `/llms.txt` | Index for the documentation selected by the root redirect. |
+
+These paths are relative to `https://docs.gpustack.ai/gpustack-operator/`. A stable version has a
+`vMAJOR.MINOR.PATCH` tag without a prerelease suffix. Only versions actually published by the Site
+workflow count when selecting the default; until the first stable site exists, the default is `main`.
+Tags that predate the site sources cannot be rebuilt using future documentation.
+
+Prerelease sites have `noindex` metadata. Publishing the matching stable version hides those previews
+from the version menu, while keeping their direct URLs and source revisions for troubleshooting.
+Older stable versions remain available. Published tags cannot be moved to a different commit;
+`main` is the only site whose source revision changes over time.
+
+To retry publication, run the Site workflow with `ref` set to `main` or an existing version tag.
+It uses the repository's `GITHUB_TOKEN` with contents, Pages and identity-token permissions;
+a separate personal access token is not required. The repository must use the GitHub Actions Pages
+source, and its `github-pages` environment must allow deployment from `main` and version tags.
+
+Before a release, run the production-path build locally as well as `make lint docs`:
+
+```bash
+SITE_BASE_URL=https://docs.gpustack.ai/gpustack-operator/main/ make site
+```
+
+This catches links that work at the preview root but lose their version prefix when published.
+The first RC after this workflow merges should also verify the deployed redirect, search, version
+menu, chart index and package downloads. A local build cannot confirm Pages environment permissions.
+
+### Translations
+
+Hugo assigns unsuffixed Markdown files to English. Chinese is configured but disabled until its
+content is ready. Add translations beside the originals, for example `requests.zh.md` beside
+`requests.md`, and `_index.zh.md` beside a section's `_index.md`. Keep file stems the same so Hugo
+can associate translated pages. English URLs stay unchanged; Chinese uses `/zh/` within each version.
+
+Before enabling Chinese, translate the site home and search page under `site/content/`, navigation
+labels and interface text, and update the source index and documentation checks for the translated
+pages. Remove `zh` from `disableLanguages` in `site/hugo.toml` once that work is ready. A language
+menu links only translations that actually exist; each language builds its own search index.
+
 
 ## Checks that can report false success
 
