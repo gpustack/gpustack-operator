@@ -29,7 +29,7 @@ The two never apply to the same accelerator: one in a partitioning mode advertis
 family, an unpartitioned one **only** the whole-accelerator, shared and logical-slice families. Hence the
 four separate `InstanceType` views (`EX` / `SH` / `SL` / `PT`) — each accelerator feeds exactly one.
 
-`<kind>` is the manufacturer's own word for hardware partitioning, and all three that offer it call it
+`<kind>` is the manufacturer's own word for hardware partitioning, and manufacturers that offer it call it
 `mig`: `nvidia.com/gpu.partitioned.mig-3g.40gb`, `alibabacloud.com/ppu.partitioned.mig-<profile>`,
 `hygon.com/dcu.partitioned.mig-2g.15gb`. A manufacturer with no hardware partitioning has no kind, and
 no `.partitioned*` keys at all.
@@ -388,7 +388,7 @@ There are no `.units` keys on this side: nothing is webhook-derived, and the val
 value that schedules.
 
 **The keys are not an accelerator family.** The family classifier returns none for them, so the
-seven rules above neither apply to them nor can be violated by them: an accelerator family and an
+accelerator rules above neither apply to them nor can be violated by them: an accelerator family and an
 RDMA key in one Pod is legal.
 
 The same blindness reaches Kueue, which therefore meters these keys not at all. See
@@ -449,7 +449,7 @@ readable source named one, never a guess of the default. See
 
 ## Requesting through the `Instance` API
 
-An `Instance` expresses the same four families through `spec.resources`, and the controller shapes them
+An `Instance` expresses the same request families through `spec.resources`, and the controller shapes them
 into the keys above:
 
 | Field | Effect |

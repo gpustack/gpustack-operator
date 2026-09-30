@@ -10,11 +10,11 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 
 ## Architecture in brief
 
-One `gpustack-operator` binary, four subcommands: `worker` ([pkg/worker](../../../pkg/worker/),
+The `gpustack-operator` binary provides these subcommands: `worker` ([pkg/worker](../../../pkg/worker/),
 the control plane), `worker-gateway` ([pkg/workergateway](../../../pkg/workergateway/), the fleet
 view), `device-manager` ([pkg/devicemanager](../../../pkg/devicemanager/), one DaemonSet per
 manufacturer) and `model-manager` ([pkg/modelmanager](../../../pkg/modelmanager/), a per-node CSI
-plugin that delivers Hugging Face weights). The chain has four stages: NFD labels the nodes; the
+plugin that delivers Hugging Face weights). The scheduling chain proceeds as follows: NFD labels the nodes; the
 Device Manager detects accelerators and network interfaces into a per-node `Devices` ledger; the
 worker derives per-card capacity labels ([pkg/nodefeature](../../../pkg/nodefeature/) is the label
 algebra); worker controllers materialize them into Kueue `ResourceFlavor`, `ClusterQueue` (one
@@ -22,7 +22,7 @@ isolated queue per pool), `LocalQueue` and an `InstanceType` CRD, gated per card
 AdmissionCheck. Vendor runtime bindings under [binding/](../../../binding/) are generated from
 [gen/binding/](../../../gen/binding/). Hand-written slicing preload libraries live in
 [csrc/](../../../csrc/). [architecture.md](../../../docs/getting-started/architecture.md) is the
-one-page version: the four stages, the life of a sliced-GPU request, and the vocabulary.
+one-page version: the scheduling chain, the life of a sliced-GPU request, and the vocabulary.
 
 ## Routing
 

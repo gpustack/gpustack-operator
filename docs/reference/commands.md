@@ -1,6 +1,6 @@
 # Command Reference
 
-One binary carries four long-running services and three one-shot commands. The services are what a
+The `gpustack-operator` binary provides long-running services and one-shot commands. The services are what a
 deployment runs; the one-shots are what you run by hand on a node, and the first two sections choose
 between them.
 
@@ -31,7 +31,7 @@ between them.
 
 ## Choosing a one-shot command
 
-The three one-shots answer three different questions, and only one of them acts on the node.
+The one-shot commands answer different questions; only `preflight` changes node state.
 
 | Question | Command | Node effect |
 |---|---|---|
@@ -67,7 +67,7 @@ Every command accepts these. They come from klog and are omitted from the per-co
 
 ## worker
 
-It is the control plane: it profiles node capacity, runs the five reconcilers that materialize the
+It is the control plane: it profiles node capacity, runs the controllers that materialize the
 Kueue scheduling chain, serves the aggregated extension APIs and the admission webhooks, and installs
 the applications a cluster needs.
 
@@ -76,7 +76,7 @@ connection; see [Settings](settings.md) for what is configured through the `Sett
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--manufacturer` | all nine | which manufacturers to detect |
+| `--manufacturer` | all manufacturers | which manufacturers to detect |
 | `--disable-applications` | none | applications to skip installing, or `*` for all. See [Installation Modes](../operate/installation-modes.md) |
 | `--secure-port` | `31443` | the HTTPS port |
 | `--bind-address` | `0.0.0.0` | the address to serve on |
@@ -121,12 +121,12 @@ It is the per-node agent: it detects accelerators, keeps the `Devices` ledger cu
 utilization, registers with the kubelet as a device plugin and injects the vendor runtime into
 allocated containers.
 
-Runs as the Device Manager DaemonSet. The four `--no-*` mode flags are how a node is restricted to a
+Runs as the Device Manager DaemonSet. The `--no-*` mode flags are how a node is restricted to a
 subset of the allocation modes its hardware would otherwise offer.
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--manufacturer` | all nine | which manufacturers to detect |
+| `--manufacturer` | all manufacturers | which manufacturers to detect |
 | `--no-sliced` | `false` | do not create logically sliced devices |
 | `--no-partitioned` | `false` | do not create hardware-partitioned devices |
 | `--no-shared` | `false` | do not create shared devices |
@@ -174,7 +174,7 @@ cluster recorded; `kubectl get devices <node> -o yaml` beside it is a diff.
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--manufacturer` | all nine | which manufacturers to detect |
+| `--manufacturer` | all manufacturers | which manufacturers to detect |
 | `--no-pci-check` | `false` | skip the PCI check |
 | `--no-fast-failed` | `false` | publish a first pass that found nothing rather than detecting again |
 
@@ -218,7 +218,7 @@ docker run --rm --privileged -v /dev:/dev -v /sys:/sys \
 
 ## device-manager monitor
 
-Takes one utilization sample and prints it. A pure read, like `detect`, and it takes the same three
+Takes one utilization sample and prints it. A pure read, like `detect`, and it accepts the same
 flags.
 
 ```bash
@@ -255,11 +255,11 @@ removes, how to read each row).
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--manufacturer` | all nine | which manufacturers to ask about. Every one asked about is reported, including those nothing is read for |
+| `--manufacturer` | all manufacturers | which manufacturers to ask about. Every one asked about is reported, including those nothing is read for |
 | `--dry-run` | `false` | print the container steps instead of taking them, and write nothing to the host. Each answer reports the complete invocation — and, because nothing was written, names the staging it would have done: the library tree, and whatever the manufacturer's responder renders. Both have to exist before the printed command runs |
 | `--probe-image` | derived per family | the image the probe containers run. Required for a family with no default, and the way to run in an air-gapped environment |
 | `--host-root` | `/host` | where the host's root filesystem is mounted into this container |
-| `--runtime` | resolved | the host runtime to drive, overriding what was resolved. One of `docker`, `nerdctl`, `ctr`; anything else is refused before the pass starts. An escape hatch: one of the three that the host does not carry drops every container step to being emitted |
+| `--runtime` | resolved | the host runtime to drive, overriding what was resolved. One of `docker`, `nerdctl`, `ctr`; anything else is refused before the pass starts. An escape hatch: a runtime that the host does not carry drops every container step to being emitted |
 | `--no-pci-check` | `false` | skip the PCI check |
 
 ### Row states and depths

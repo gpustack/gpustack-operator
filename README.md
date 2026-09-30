@@ -16,7 +16,7 @@ together, or browse the [documentation](./docs/README.md).
 
 ## Features
 
-- [Heterogeneous Devices](./docs/modules/devices/_index.md) — discover accelerators from nine
+- [Heterogeneous Devices](./docs/modules/devices/_index.md) — discover accelerators across
   manufacturers and allocate whole devices, shared devices, logical slices or hardware partitions.
 - [RDMA Networking](./docs/modules/rdma/_index.md) — give workloads RDMA network interfaces
   alongside their accelerators.
@@ -305,7 +305,7 @@ request accelerators directly; see
 
 ### Accelerator Support
 
-All nine manufacturers support whole-device and shared requests. Logical slicing shares a device
+All manufacturers support whole-device and shared requests. Logical slicing shares a device
 through the manufacturer's software facilities. Physical partitioning uses hardware partitions
 enabled by an administrator; its availability depends on the device and its current mode.
 
@@ -321,7 +321,7 @@ enabled by an administrator; its availability depends on the device and its curr
 | NVIDIA | GPU | `nvidia.com/gpu` | Yes | Yes (MIG) |
 | T-Head | PPU | `alibabacloud.com/ppu` | Yes | Yes (MIG) |
 
-A Pod requests one resource family in one container group. For NVIDIA, the four forms are:
+A Pod requests one resource family in one container group. For NVIDIA, the request forms are:
 
 | Request | `resources.limits` |
 |---|---|

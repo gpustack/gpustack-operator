@@ -9,7 +9,7 @@ Use [the shared module map](../../../docs/README.md#module-map) to locate the re
 owning specs, code entry points and related modules. [AGENTS.md](../../../AGENTS.md#finding-sources)
 owns the retrieval and evidence rules; this skill owns its execution procedure.
 
-The docs have seven capability guides, with technical pages linked from each guide. Everything in
+The docs have capability guides, with technical pages linked from each guide. Everything in
 `docs/` follows one shape and one index. Generated chart documentation is still pinned to code.
 This skill routes a change to the page that owns it.
 
@@ -37,7 +37,7 @@ The local module map stays out of the site's article list and navigation.
 
 ## The rule that keeps the overview small
 
-`docs/getting-started/architecture.md` is the **front door**: what the operator builds, the four stages, one worked
+`docs/getting-started/architecture.md` is the **front door**: what the operator builds, the scheduling chain, one worked
 request trace, the vocabulary. It is capped at ~200 lines and must stay readable in under 10 minutes.
 
 **Never add a new mechanism, rationale or table to it.** New detail goes on a deep page; the overview
@@ -51,7 +51,7 @@ one, not to widen the overview.
 | NFD labels, the `gpustack-cpu-info` rule, the manufacturer map | `docs/modules/devices/discovery.md` |
 | Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/modules/devices/discovery.md` |
 | The NIC/RDMA interface inventory, `pciRootId`/`pciSwitches`, the three link states, the `rdma.*` node labels, the RDMA resource keys | `docs/modules/rdma/network-topology.md` |
-| Capacity labels, flavor/queue/InstanceType naming and grouping, the five reconcilers | `docs/modules/devices/scheduling.md` |
+| Capacity labels, flavor/queue/InstanceType naming and grouping, the scheduling controllers | `docs/modules/devices/scheduling.md` |
 | Topograph's boundary, `TopologySource`, topology profiles, Kueue Topologies and TAS capacity semantics, and the placement preference toward nodes holding a model | `docs/modules/topology/scheduling.md` |
 | Any admission gate, the four-view status, InstanceType/Instance/Pod webhook rules, drain-stop | `docs/modules/devices/admission.md` |
 | Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/operate/installation-modes.md` |

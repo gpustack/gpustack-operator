@@ -1,6 +1,6 @@
 # KV Cache Walkthrough
 
-Create four objects in order: a store, a pool, a namespace grant and a workload that uses it.
+Create a store, a pool, a namespace grant and a workload in that order.
 
 On a cluster with GPUStack installed, replace the node selector, namespace, instance type and model
 name in the manifests below, then apply them in that order.

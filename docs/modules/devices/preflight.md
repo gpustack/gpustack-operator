@@ -18,12 +18,12 @@ explains the states, depths and how preflight reuses the allocator checks.
 
 ## Before you run it
 
-**There is one mode: the run reproduces what the device-manager does in production.** Three things
+**There is one mode: the run reproduces what the device-manager does in production.** These steps
 touch the node while it does, so decide them before running where live workloads are:
 
 - the probe containers, which hold an accelerator for as long as they run;
 - the preload-library tree, copied onto the host where an init container would have put it;
-- **a driver mode asked on and put straight back**, on the two manufacturers whose slicing depends on
+- **a driver mode asked on and put straight back**, on manufacturers whose slicing depends on
   one. A mode that is off is not a node that cannot serve (the allocator turns it on itself when a
   slice lands), so reading it answers nothing, and asking the driver is the only way to know. The
   toggle happens only where the mode was already off, so nothing on the node is sharing that
@@ -199,7 +199,7 @@ docker run --rm --network=host -v /:/host \
 
 **With no vendor mounts at all**, the run still reports every manufacturer and names the mounts the
 rest of the questions need. Only NVIDIA, Ascend and AMD carry a host CLI to cross-check that
-detection against, so for the other six a detection of zero is this container's own view and not the
+detection against, so for manufacturers without a host CLI a detection of zero is this container's own view and not the
 host's; the Host cross-check column below says which is which.
 
 ## Mounts
@@ -225,7 +225,7 @@ host's; the Host cross-check column below says which is which.
 | `--dry-run` | print the container steps instead of taking them. It writes nothing to the host at all — no library tree, nothing a responder rendered, no driver mode — so a printed step names what its reader has to stage first, and a capability that could only be established by asking the driver reports that it was not asked |
 | `--probe-image` | the image the probe containers run, overriding the per-family default. Required for a family that has no default, and the way to run a probe in an air-gapped environment |
 | `--host-root` | where the host's root filesystem is mounted into this container. Defaults to `/host` |
-| `--runtime` | the host container runtime to drive, overriding what was resolved. One of `docker`, `nerdctl`, `ctr`; anything else is refused before the pass starts, so a typo is a usage error rather than a run that quietly established nothing. An escape hatch: one of the three that the host does not carry drops every container step to being emitted |
+| `--runtime` | the host container runtime to drive, overriding what was resolved. One of `docker`, `nerdctl`, `ctr`; anything else is refused before the pass starts, so a typo is a usage error rather than a run that quietly established nothing. An escape hatch: a runtime that the host does not carry drops every container step to being emitted |
 
 **The runtime is resolved from the kubelet's own CRI endpoint** wherever the host states one. That
 is what starts a container on this node in production, and reproducing production is the point.
@@ -285,7 +285,7 @@ and the CLI is pointed at the socket that was resolved rather than at its own de
 
 > **Run it before the node serves workloads.** The mode above is put back within the same call, but
 > nothing serialises that against a device-manager allocating on the same card: an allocation landing
-> in that window can be switched off under. Ascend and Cambricon are the two manufacturers that write.
+> in that window can be switched off under. Ascend and Cambricon write to the driver.
 
 > **Run the image that matches the installed device-manager.** The library tree in the first row is
 > the one real allocations mount, not a copy of it, and staging replaces the files already there. On a
@@ -324,10 +324,10 @@ there first, and the `ctr` row names a CLI this host does not have. Five cases r
 ## Output by manufacturer
 
 **Find your manufacturer first.** How much this command can tell you depends on how much your
-allocator reads before it hands a device out, and that differs by vendor. The four tiers below say
+allocator reads before it hands a device out, and that differs by vendor. The tiers below say
 what a run on your node will and will not establish.
 
-**Every manufacturer is asked for the capability rows.** All nine allocators can produce an injection
+**Every manufacturer is asked for the capability rows.** All allocators can produce an injection
 without one being served, so every one of them answers what an allocation would grant. What differs
 by tier is the two things an injection alone cannot establish: whether a driver said anything
 **before** it, and whether a container was started **after** it.
@@ -387,7 +387,7 @@ resource request, not a driver flag.
 driver (the paragraph above applies to the `note` on your group unchanged), but a container is
 started, so `sliced-runtime-loaded` and `sliced-quota-in-force` come back at `measured`.
 
-Three things are worth knowing before you read those rows:
+Before reading those rows, check the following:
 
 - **`--probe-image` is required.** No default is claimed for a Hygon family. The image does not have
   to be a DTK one (the probe runs the vendor's own `BandwidthTest` out of `/opt/dtk`, which your
@@ -470,7 +470,7 @@ and a report filtered by either still carries it.
 Prerequisites](../../getting-started/vendor-prerequisites.md#ascend)** — the mechanism is stated there once, and the
 `reason` on the row itself carries it verbatim, so a report is readable without this page.
 
-Three things about these rows are worth reading off the table rather than inferring:
+Read the following from the table rather than inferring them:
 
 - **An absent ranktable is `ok`, not a prerequisite nobody installed.** It is the healthy state,
   which is why that row treats an unreadable file the opposite way to the one above it.
@@ -487,8 +487,8 @@ Three things about these rows are worth reading off the table rather than inferr
 
 ### The slice rows, and what the probe needs
 
-Five manufacturers have a container probe. Each starts one container per sliceable accelerator, and
-the four rows below are what they add.
+Manufacturers with a container probe start one container per sliceable accelerator. The table below
+lists their probe images and requirements.
 
 | Manufacturer | Probe image | Vendor runtime | Reader inside | Where the cap is |
 |---|---|---|---|---|
@@ -618,7 +618,7 @@ command exists to be run on.
 
 A panic in one is contained to that one: its group keeps the detection block it had already answered,
 discards whatever the crashed pass had filled in, and reports one `unavailable` row per accelerator
-plus a `note` with what the panic said. The other eight are read and reported as usual.
+plus a `note` with what the panic said. The other manufacturers are read and reported as usual.
 
 ```yaml
 - manufacturer: cambricon

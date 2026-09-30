@@ -17,7 +17,7 @@ that need more than a single GPU.
 
 ## Components
 
-The operator ships one binary with four subcommands:
+The `gpustack-operator` binary provides these subcommands:
 
 | Component | Deployment | Role |
 |---|---|---|
@@ -68,7 +68,7 @@ RDMA, a topology source or a shared cache. An ordinary Pod can request device re
 
 ## Device scheduling
 
-Device scheduling has four stages:
+Device scheduling follows this chain:
 
 1. NFD identifies node hardware and labels the nodes.
 2. The Device Manager discovers accelerators and network interfaces and maintains the `Devices`
@@ -77,7 +77,7 @@ Device scheduling has four stages:
 4. The Worker creates InstanceTypes and Kueue resources. Each pool has an isolated queue; topology
    profiles constrain placement, and admission checks verify whether individual accelerators fit.
 
-[Device Discovery](../modules/devices/discovery.md) covers the first two stages.
+[Device Discovery](../modules/devices/discovery.md) covers node labeling and device discovery.
 [Scheduling Chain](../modules/devices/scheduling.md) covers capacity and queues.
 [RDMA Operations](../modules/rdma/operations.md) explains network resource requests, while
 [Topology-Aware Scheduling](../modules/topology/scheduling.md) explains placement domains.

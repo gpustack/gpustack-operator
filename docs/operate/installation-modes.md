@@ -87,7 +87,7 @@ Because they change what a mode installs:
 
 A chart cannot own a custom resource whose CRD it does not ship. Helm REST-maps the *entire*
 manifest before creating anything, so an unserved kind fails the whole install rather than degrading.
-The worker applies three resources after their CRDs become available:
+The worker applies these resources after their CRDs become available:
 
 - the `gpustack-node-devices` and `gpustack-model-deployment-joint` AdmissionChecks. Their CRD belongs
   to Kueue, which templates its CRDs, so nothing can order it ahead of a custom resource in the same

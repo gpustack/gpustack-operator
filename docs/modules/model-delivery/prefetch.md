@@ -1,7 +1,7 @@
 # Model Prefetch
 
 Warming is declared, not performed: a tenant names an artifact and a target set, and the operator
-lands the weights through the node cache's ordinary delivery. Three objects divide the concerns:
+lands the weights through the node cache's ordinary delivery. These resources divide the responsibilities:
 
 | Object | Scope | Author | Carries |
 |---|---|---|---|
@@ -15,14 +15,14 @@ every field is in the [Node Model Store](node-store.md).
 
 ## Contents
 
-- [The three objects](#the-three-objects)
+- [Cache resources](#cache-resources)
 - [Placement](#placement)
 - [The warm-up pod](#the-warm-up-pod)
 - [Budgets and admission](#budgets-and-admission)
 - [Pinning and expiry](#pinning-and-expiry)
 - [Status and views](#status-and-views)
 
-## The three objects
+## Cache resources
 
 A `ModelStore` selects its pool with `spec.nodeSelector` and states watermarks and download
 limits as overrides field by field; the [pool layer](operations.md#the-pool-layer)

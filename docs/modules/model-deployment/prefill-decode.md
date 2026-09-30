@@ -324,8 +324,8 @@ decoder is reachable **as** a decoder. The managed router uses these stable role
 tokenizer and cache-event contracts; they also remain useful for addressing one half directly while
 debugging.
 
-With `spec.router`, the operator renders six objects named `<deployment>-router`: a Deployment,
-ConfigMap, Service, ServiceAccount, Role and RoleBinding. Removing `spec.router` prunes all six.
+With `spec.router`, the operator renders resources named `<deployment>-router`: a Deployment,
+ConfigMap, Service, ServiceAccount, Role and RoleBinding. Removing `spec.router` prunes these resources.
 What `status.endpoint` publishes in each shape is under [Status](status.md#status).
 
 ---

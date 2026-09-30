@@ -23,7 +23,7 @@ resources. [Architecture](../../getting-started/architecture.md) introduces the 
 
 **See also** — [Device Discovery](discovery.md) · [Walkthrough](../../getting-started/walkthrough.md)
 
-**Next** → [Admission](admission.md) — the five gates a request passes.
+**Next** → [Admission](admission.md) — the admission gates a request passes.
 ```
 
 **Introduction** — start with the subject or the task in one short paragraph. If the page already
@@ -138,6 +138,10 @@ as well; a skill that needs source or measurement detail should read the owning 
 Existing docs lint checks structure and links; it does not prove that a moved contract is complete.
 
 ## Writing rules
+
+Avoid counting extensible lists in prose when the adjacent list or table already states their
+members. Name the subject directly. Keep quantities that affect configuration, compatibility,
+capacity, timing or a safety limit.
 
 - **State the rule first, in the first sentence of the paragraph or section.** A reader who stops
   there must still be correct.

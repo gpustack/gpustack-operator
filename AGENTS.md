@@ -19,14 +19,14 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 
 ## Architecture
 
-Three subcommands (`worker`, `worker-gateway`, `device-manager`) drive a four-stage chain: NFD labels
+The `worker`, `worker-gateway` and `device-manager` subcommands drive the scheduling chain: NFD labels
 nodes → the Device Manager detects accelerators → the worker profiles node capacity → the
 controllers under `pkg/worker/controllers/worker` materialize Kueue `ResourceFlavor` →
 `ClusterQueue` (one isolated queue per pool) → `LocalQueue` plus an `InstanceType` CRD.
-`pkg/nodefeature` holds the label algebra. A fourth, `model-manager`, is a per-node CSI plugin that
+`pkg/nodefeature` holds the label algebra. The `model-manager` subcommand is a per-node CSI plugin that
 mounts Hugging Face weights from a verified node cache (`pkg/modelmanager`, `NodeModelStore`).
 
-Read `docs/getting-started/architecture.md` first: one page, the four stages, the life of a request,
+Read `docs/getting-started/architecture.md` first: one page, the scheduling chain, the life of a request,
 and the vocabulary. Then use the deep page for the relevant capability: `docs/modules/devices/`
 for discovery, scheduling and admission; `docs/modules/rdma/` for network interfaces;
 `docs/modules/topology/` for placement; `docs/modules/kv-cache/`,

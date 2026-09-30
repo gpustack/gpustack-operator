@@ -131,7 +131,7 @@ driver reports it.
 ## Requesting a partition
 
 With the mode on, a workload asks for **one hardware instance of a named profile**, as for NVIDIA: the
-same `<base>.partitioned` / `<base>.partitioned.<kind>-<profile>` key pair and the same seven [request
+same `<base>.partitioned` / `<base>.partitioned.<kind>-<profile>` key pair and the same [request
 rules](requests.md#the-request-rules) (one PPU, one profile shape, one container group,
 `.units` webhook-derived, exclusive of every other family):
 

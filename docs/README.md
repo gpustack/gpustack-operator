@@ -3,7 +3,7 @@
 Start with the [project README](../README.md) to install the operator. This index groups the
 remaining pages by task and lists every page below.
 
-The seven capability guides are [Heterogeneous Devices](modules/devices/_index.md),
+The capability guides are [Heterogeneous Devices](modules/devices/_index.md),
 [RDMA Networking](modules/rdma/_index.md), [Topology Management](modules/topology/_index.md),
 [KV Cache](modules/kv-cache/_index.md), [Model Delivery](modules/model-delivery/_index.md),
 [Model Deployment](modules/model-deployment/_index.md) and
@@ -196,7 +196,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | [KV Cache Local Disk Tier](modules/kv-cache/local-disk-tier.md) | Configure local disk storage. |
 | [KV Cache on Disk-Heavy Nodes](modules/kv-cache/disk-heavy-nodes.md) | Size memory on disk-heavy nodes. |
 | [KV Cache Pool](modules/kv-cache/pool.md) | Grant and limit cache use. |
-| [KV Cache Walkthrough](modules/kv-cache/walkthrough.md) | Create a working cache in four objects. |
+| [KV Cache Walkthrough](modules/kv-cache/walkthrough.md) | Create a working cache from backend to workload. |
 | [KV Cache Injection Reference](modules/kv-cache/injection.md) | Attach a Pod to a pool. |
 
 ### Model delivery

@@ -74,7 +74,7 @@ flavor selector (`scheduling-chain.md`), or the request rules an RDMA key obeys
 
 **Owns** — `NodeFeatureReconciler` / `NodeCapacityReconciler`, the `.sliced.*` and `.partitioned.*`
 capacity tables, per-vendor slice counts, presence-gating, the unit-spec default, the naming/grouping
-scheme, the controller diagram, and the five reconcilers' ownership split.
+scheme, the controller diagram, and the scheduling controllers' ownership split.
 
 **Never** — the ledger's internals (`device-discovery.md`) or gate behavior (`admission.md`). Cross-link both.
 

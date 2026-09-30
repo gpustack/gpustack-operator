@@ -108,7 +108,7 @@ figure is a measurement**, and is **absent rather than zero** when nothing on th
 it. A carved share whose usage could not be measured therefore reports **no usage at all** rather
 than the device's, whose figure counts every other tenant on the card.
 
-Four properties are worth knowing before reading a number off an entry:
+Before reading a number from an entry, check the following:
 
 - **A used figure may exceed its total, and is not clamped.** It measures the hardware while the
   total is the quota, so an overshoot is an anomaly to investigate (a leaking quota, a floor in the
@@ -256,7 +256,7 @@ every figure of **that whole device** absent for that sample, with `no_pod_compo
 - An Instance **none of whose containers has ever started** → `200` with its declared totals and
   every measurement zero. Unscheduled, no pod rendered yet, stopped, or holding only a previous
   incarnation's pod are all this same state: nothing has run, so nothing has been used, and that is
-  an answer rather than a failure. It replaces the three `503`s this surface used to return, so a
+  an answer rather than a failure. It replaces the `503` responses this surface used to return, so a
   console needs no branch for an Instance that is merely starting up or stopped.
 - The gate is **"has started", not "is ready"**. A pod can be running with a failing readiness
   probe, an unready sidecar, or a termination already begun while its main container still holds
@@ -285,7 +285,7 @@ scrape must not perform I/O it can block or fail on, and the kubelet's summary i
 roughly the same cadence anyway, so scrape-time reads would buy no freshness. A scrape reads
 memory only.
 
-Three rules decide which series exist:
+These rules determine which series exist:
 
 - **One exporter per node.** A node carrying two vendors runs two Device Managers, and both see
   all of its Instances. The manufacturer sorting first among the node's **Ready** Device Manager
@@ -473,7 +473,7 @@ It selects every manufacturer's Device Manager DaemonSet, is `Ingress`-only, and
 worker plus each `scrapers` peer on the secure port. **The default is `false`**, so an upgrade
 changes no existing behaviour; enabling it is recommended on a multi-tenant cluster.
 
-Three properties decide whether it does what you expect:
+These properties determine whether it does what you expect:
 
 - **It guards a port, not a route.** NetworkPolicy is L3/L4, and `/metrics`, `/monitor/snapshot`,
   `/readyz`, `/livez` and `/debug/*` all share 32443, so admitting a scraper admits it to the
@@ -492,7 +492,7 @@ Three properties decide whether it does what you expect:
   refused on the secure port, the worker's and a configured scraper's peers were admitted, and
   the Device Manager stayed Ready across its readiness and liveness probes without a restart.
   That CNI exempts the kubelet.
-- **On a CNI that does not exempt it, admit the nodes yourself.** All three Device Manager probes
+- **On a CNI that does not exempt it, admit the nodes yourself.** The Device Manager probes
   are HTTP GETs on 32443, so a policy that cuts them takes every Device Manager NotReady. Put the
   node address range in `extraIngress`, whose rules are appended verbatim:
 

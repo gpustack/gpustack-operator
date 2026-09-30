@@ -70,7 +70,7 @@ kubectl -n gpustack-system patch setting instance-type-derived-from-node --type 
 | `instance-type-drain-when-no-flavors` | `GPUSTACK_INSTANCE_TYPE_DRAIN_WHEN_NO_FLAVORS` | `true` | Whether a ClusterQueue whose pool has lost all its ResourceFlavors is drained (`HoldAndDrain`, so Kueue evicts admitted workloads) before its resource groups are emptied. When `true`, the queue is drained first; when `false`, the operator waits for the reservations to clear on their own, then empties. Either way the groups are emptied only once every reservation is zero, so Kueue's counters never go negative. Read per-reconcile. |
 | `instance-type-aware-cpu-manufacturer` | `GPUSTACK_INSTANCE_TYPE_AWARE_CPU_MANUFACTURER` | `false` | Whether the derived ClusterQueue/InstanceType/InstanceTypeFlavor aggregation splits by CPU manufacturer. When `false`, non-accelerated flavors collapse into one `generic` pool per os/arch and accelerated flavors pool per accelerator (CPU ignored); when `true`, every pool splits by the CPU key (`gpustack--${gKey}-…` / `gpustack--${gKey}--${aKey}-…`) and the InstanceType records the raw CPU detail. The `ResourceFlavor`s themselves are unaffected — they always carry the CPU key, so a flip only re-groups the aggregation layer. Read per-reconcile. |
 
-The last five (`node-management-manual`, `instance-type-mixed-on-node`, `instance-type-derived-from-node`,
+These settings (`node-management-manual`, `instance-type-mixed-on-node`, `instance-type-derived-from-node`,
 `instance-type-drain-when-no-flavors`, `instance-type-aware-cpu-manufacturer`) are read **per-reconcile**
 (`ShouldValueBool(ctx)`): flipping one re-converges the scheduling chain on the next reconcile, with no
 restart.
@@ -249,11 +249,11 @@ helm upgrade gpustack-operator <chart> --namespace gpustack-system --reset-then-
 
 ### Per-manufacturer overrides
 
-Three override patterns expand for every known manufacturer (`amd`, `ascend`, `cambricon`, `hygon`,
+Override patterns expand for every known manufacturer (`amd`, `ascend`, `cambricon`, `hygon`,
 `iluvatar`, `metax`, `mthreads`, `nvidia`, `thead`); both the WK and the DM read them, so the propagation
 above keeps the two sides consistent.
 
-**Installed by the chart, set the `global.manufacturers` row, not these variables.** All four overrides
+**Installed by the chart, set the `global.manufacturers` row, not these variables.** The overrides
 here are fields of that row (`pciVendorID`, `resourceName`, `runtimeName`, `partitionKind`), which the
 chart fans out as the matching variable to the worker *and* the device-managers, along with what a variable
 cannot reach: the DaemonSet node selectors, the RuntimeClasses it creates, Kueue's credits mapping. The
@@ -332,7 +332,7 @@ helm upgrade ... --set deviceManager.env.GPUSTACK_NVIDIA_DEVICE_INJECTION_STRATE
 ```
 
 It is read once, when that manufacturer's allocator is constructed, so a change takes effect only when
-the DaemonSet restarts. A value that is not one of the three is reported and the node keeps `envvar`:
+the DaemonSet restarts. A value that is not one of the supported choices is reported and the node keeps `envvar`:
 refusing to start the allocator over it would take the node's accelerators with it.
 
 `auto` also keeps the variable when the engine's own default runtime is already the vendor runtime.

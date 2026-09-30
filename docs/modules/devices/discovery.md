@@ -49,7 +49,7 @@ them as Resources.*
 
 ## Stage 1: Node Feature Discovery (NFD)
 
-NFD comes from the `node-feature-discovery` subchart, or from the cluster itself (see [Installation Modes](../../operate/installation-modes.md)). It performs three jobs.
+NFD comes from the `node-feature-discovery` subchart, or from the cluster itself (see [Installation Modes](../../operate/installation-modes.md)). It performs the following jobs.
 
 ### Job 1 — PCI vendor labels
 
@@ -170,7 +170,7 @@ label naming rules:
 | `acceleratable.${prefix}${aKey}.comcap=${cc}` | Compute capability (omitted when undetected) |
 
 `prefix` is `feature.gpustack.ai/`, so device labels live under the dedicated
-`acceleratable.feature.gpustack.ai/` key namespace. `manufacturer` is one of the nine supported:
+`acceleratable.feature.gpustack.ai/` key namespace. `manufacturer` is one of the supported names:
 NVIDIA, AMD, Ascend, Cambricon, Hygon, Iluvatar, MetaX, MThreads, T-Head — their PCI vendor IDs,
 resource names and runtime class names all overridable (see
 [Settings](../../reference/settings.md#per-manufacturer-overrides)).
@@ -414,7 +414,7 @@ cannot disagree. The runbook is [Preflight Operations](preflight.md).
 It asks three questions per manufacturer, in order, and each is answerable on its own:
 
 1. **are the devices detected** — the detect pass, cross-checked against the host's own vendor CLI
-   where one is established (NVIDIA, Ascend and AMD); for the other six the detect pass answers alone,
+   where one is established (NVIDIA, Ascend and AMD); for manufacturers without a host reader the detect pass answers alone,
    and a count of zero is the container's own view rather than the host's;
 2. **can they be sliced** — the driver read, then a container that is granted a slice and reports
    back the quota rather than the whole accelerator;
@@ -472,8 +472,8 @@ container cannot see them*. Preflight's own code never runs in host context.
 
 ## Logical slicing per manufacturer
 
-Every sliceable manufacturer has real per-slice runtime isolation, but only four (NVIDIA, Iluvatar,
-Ascend and T-Head) take both budgets from a preload library. Every preload library is activated
+Every sliceable manufacturer has real per-slice runtime isolation, but only NVIDIA, Iluvatar,
+Ascend and T-Head take both budgets from a preload library. Every preload library is activated
 through `/etc/ld.so.preload`.
 
 | Manufacturer | Enforcer | Quotas and injection |
