@@ -12,8 +12,8 @@ fields and its conditions to diagnose a deployment that is still starting or has
 `status.phase` is the field to read first: `Starting`, `Ready`, `Degraded` or `Deleting`. `Degraded`
 means some required serving capacity is ready and some is not: either some role replicas are down, or
 all role replicas are ready but a declared router has no ready replica.
-`status.roles[]` carries `name`, `kind`, `desired`, `ready`, `quotaReserved`, `unmanaged` and
-`assignedFlavors` per role.
+`status.roles[]` carries `name`, `kind`, `desired`, `ready`, `quotaReserved`, `unmanaged`,
+`assignedFlavors`, `parallelism` and `endpoints` per role.
 
 `kubectl get modeldeployments` shows `status.roleSummary` in its `ROLES` column. It counts current
 Ready instances by kind: `R` is managed router Pods, `S` is ordinary servers, `P` is prefillers,
@@ -130,6 +130,52 @@ Which replica carries which flavor is deliberately not here: the ordinal such an
 on is the converger's internal slotting rather than a promise this API makes, and a reader who
 needs the mapping reads the replicas' own Pods. A flavor reported here is read through the same
 lens the per-accelerator admission gate uses, so the two cannot disagree.
+
+`parallelism` reports the parallelism the role's own arguments declare, with the provenance of
+the reading. Nothing is defaulted into it: a degree the role does not declare is `null`, an
+explicit `1` and an explicit local `0` are preserved as written, and an observed mode carries
+its explicit boolean — the absence of a mode key is not `false`.
+
+`parallelism.loadBalance` derives the balance shape from those declarations and is `Unknown`
+when they do not derive to one. `parallelism.source` says where the reading came from: `kind`
+(`ExtraArgs`, `Command`, `UnmanagedCommand`), whether it was `complete`, and an
+`unreadableReason` when it was not — an unreadable source is `Unknown` with `complete: false`,
+never a silently defaulted degree.
+
+Until the arguments have been read, every declared degree is `null`, the mode set is empty, the
+balance is `Unknown` and the source is `Unknown` with `unreadableReason: NotObserved`.
+
+`endpoints` separates what the operator qualified from what Routers were actually observed to
+select, and the two never collapse into one number:
+
+- `endpoints.eligible` is how many endpoints the qualification list holds, written only when
+  that list is complete. `null` means the set was never observed; an explicit `0` means it was
+  observed and is empty. It is named for eligibility and never presents itself as serving.
+- `endpoints.serving.state` is the actual per-Router confirmation: `Confirmed` means complete,
+  fresh, identity-bound Router views agree; `NotConverged` means complete views disagree;
+  `Unknown` means a required view is missing, stale or indeterminate; `NotConfigured` means the
+  deployment declares no router at all, so there is no Router process whose answer could be
+  missing. Only `Confirmed` carries `endpoints.serving.value`, and its zero is as real as any
+  other number.
+
+The `EndpointEligibility` condition says the same thing at the deployment level: while no
+qualification observation exists it is `Unknown` with reason `NotObserved` — not `False`,
+which would say the operator disqualified endpoints it saw. A pass that has qualified nothing
+reports the condition and leaves the per-role counts `null`.
+
+`status.retirement` is present only while a retirement operation is running, at most one at a
+time; absent means no operation. It names the role and replica ordinal it retires (ordinal
+`0` is a real position and is always encoded), the `metadata.generation` it was admitted
+against, and the target member Pod and Workload UIDs its deletions carry as preconditions.
+
+`state` is the protocol step (`Admitted`, `Disqualified`, `Withdrawing`, `Draining`,
+`Deleting`, `Settling`, `Aborted`, `Completed`), `reason` names what put it there, and
+`startedAt`/`deadline`/`phaseStartedAt` carry the budgets across a controller restart.
+`lastConsumedRetryToken` is the retry directive token already consumed, persisted before the
+annotation that carried it is cleared.
+
+`Aborted` is retained capacity, not a rollback: a budget exhausted before deletion leaves
+every member and the Workload in place.
 
 Eight conditions carry the axes a single phase cannot. They are independent: "quota reserved but
 cache not attached" is a real and actionable state. Seven are described below; `WeightsReady` is
@@ -310,6 +356,15 @@ conditions, the role counts) keeps computing with the cause named.
 | `False` | `RenderFailed` | the router's object set could not be rendered; the message carries the refusal |
 | `False` | `NoReadyReplicas` | the router's Deployment exists but no replica is ready |
 | `Unknown` | `NotDeployed` | the router's Deployment has not been created yet |
+
+**`EndpointEligibility`** — whether the deployment's endpoints have been qualified at all. It
+answers for the reading, not for the endpoints: until endpoint qualification exists it is
+`Unknown`/`NotObserved`, because a `False` would say the operator disqualified endpoints it
+saw, and no pass that reports this has seen any.
+
+| Value | Reason | Meaning |
+|---|---|---|
+| `Unknown` | `NotObserved` | no endpoint qualification has been observed for any role yet; the per-role `endpoints.eligible` counts are `null`, not zero |
 
 ---
 

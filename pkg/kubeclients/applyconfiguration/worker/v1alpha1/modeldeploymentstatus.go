@@ -69,6 +69,13 @@ type ModelDeploymentStatusApplyConfiguration struct {
 	// reason KVCache is: an empty object here cannot be told apart from an identity whose every
 	// field happens to be empty.
 	Model *ModelDeploymentModelStatusApplyConfiguration `json:"model,omitempty"`
+	// Retirement is the persisted reservation of the retirement operation this deployment is
+	// running, at most one at a time. It is ABSENT when no operation exists, rather than present
+	// and empty: an operation carries its state in the object, so an empty one would be neither.
+	// Its identity binds the admitting metadata.generation, the role, the replica ordinal and
+	// the target member and Workload UIDs, so a controller restart resumes it and a conflicting
+	// operation cannot silently adopt it.
+	Retirement *ModelDeploymentRetirementStatusApplyConfiguration `json:"retirement,omitempty"`
 }
 
 // ModelDeploymentStatusApplyConfiguration constructs a declarative configuration of the ModelDeploymentStatus type for use with
@@ -156,5 +163,13 @@ func (b *ModelDeploymentStatusApplyConfiguration) WithRoleSummary(value string) 
 // If called multiple times, the Model field is set to the value of the last call.
 func (b *ModelDeploymentStatusApplyConfiguration) WithModel(value *ModelDeploymentModelStatusApplyConfiguration) *ModelDeploymentStatusApplyConfiguration {
 	b.Model = value
+	return b
+}
+
+// WithRetirement sets the Retirement field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Retirement field is set to the value of the last call.
+func (b *ModelDeploymentStatusApplyConfiguration) WithRetirement(value *ModelDeploymentRetirementStatusApplyConfiguration) *ModelDeploymentStatusApplyConfiguration {
+	b.Retirement = value
 	return b
 }

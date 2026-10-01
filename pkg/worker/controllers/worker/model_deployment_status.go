@@ -72,7 +72,20 @@ const (
 	// a claim mounted, or an engine's own download finished. It is True with NotApplicable for a
 	// deployment naming no artifact.
 	ModelDeploymentConditionWeightsReady kubeapistatus.ConditionType = "WeightsReady"
+
+	// ModelDeploymentConditionEndpointEligibility reports whether the deployment's endpoints have
+	// been qualified at all. Unknown with NotObserved says no qualification observation exists yet —
+	// a different answer from False, which would say the operator disqualified endpoints it saw.
+	// The per-role eligible counts under status.roles[].endpoints carry the same distinction one
+	// level down: nil is unobserved, an explicit zero is an observed empty set.
+	ModelDeploymentConditionEndpointEligibility kubeapistatus.ConditionType = "EndpointEligibility"
 )
+
+// modelDeploymentReasonNotObserved is the reason an axis that exists in this status carries no
+// observation yet: the reading that would answer it has not been built. It names a missing
+// observation rather than an observed absence, which is the difference between "wait for the
+// reading" and "act on an empty set".
+const modelDeploymentReasonNotObserved = "NotObserved"
 
 // The reasons RoleKindsReady carries. Three rather than two, because "no kind is missing" and "no
 // role has been accounted for yet" are different answers that a False would merge into one.
@@ -203,6 +216,10 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	observeModelDeploymentRollout(holder, md, pods, wlByReplica, rollout)
 
 	observeModelDeploymentRoleKinds(holder)
+
+	// The eligibility view is reported alongside the counts it qualifies, so a reader scanning
+	// conditions alone can tell an unobserved endpoint set from an observed empty one.
+	observeModelDeploymentEndpointEligibility(holder)
 
 	var nodeModels map[string]*workercore.NodeModelStoreModel
 	if weights != nil && weights.Render != nil && weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryNode {
@@ -429,6 +446,8 @@ func modelDeploymentRoleStatuses(
 			// environment, so nothing here can claim it is attached to the cache.
 			Unmanaged:       len(role.Command) > 0,
 			AssignedFlavors: modelDeploymentAssignedFlavors(flavors[role.Name]),
+			Parallelism:     modelDeploymentRoleParallelismUnread(),
+			Endpoints:       modelDeploymentRoleEndpointsUnobserved(md.Spec.Router != nil),
 		})
 	}
 
@@ -447,6 +466,47 @@ func modelDeploymentAssignedFlavors(flavors sets.Set[string]) []string {
 	}
 
 	return sets.List(flavors)
+}
+
+// modelDeploymentRoleParallelismUnread is the parallelism answer of a pass that read no
+// arguments: no degree is declared, no mode is observed, and the source names the missing
+// reading rather than pretending a parse produced nothing. The readings that fill this in are
+// the rendered argv's own; until they exist, an explicit 1 or 0 must be as unreachable as a
+// fabricated count, because a defaulted degree would invent engine behavior nobody declared.
+func modelDeploymentRoleParallelismUnread() workercore.ModelDeploymentRoleParallelismStatus {
+	return workercore.ModelDeploymentRoleParallelismStatus{
+		LoadBalance: workercore.ModelDeploymentLoadBalanceUnknown,
+		Source: workercore.ModelDeploymentParallelismSourceStatus{
+			Kind:             workercore.ModelDeploymentParallelismSourceKindUnknown,
+			UnreadableReason: modelDeploymentReasonNotObserved,
+		},
+	}
+}
+
+// modelDeploymentRoleEndpointsUnobserved is the endpoints answer of a pass with no endpoint
+// qualification: no eligible count exists, and no serving confirmation was taken. A
+// router-less deployment says NotConfigured rather than Unknown — there is no Router process
+// whose answer is missing, and the two states lead a retirement down different gates.
+func modelDeploymentRoleEndpointsUnobserved(routed bool) workercore.ModelDeploymentRoleEndpointsStatus {
+	serving := workercore.ModelDeploymentServingStateUnknown
+	if !routed {
+		serving = workercore.ModelDeploymentServingStateNotConfigured
+	}
+
+	return workercore.ModelDeploymentRoleEndpointsStatus{
+		Serving: workercore.ModelDeploymentServingStatus{State: serving},
+	}
+}
+
+// observeModelDeploymentEndpointEligibility reports, at the deployment level, whether the
+// endpoints have been qualified at all. While no qualification observation exists the answer is
+// Unknown rather than False, because a False here would read as a disqualification the operator
+// made, and no pass has made one: the nil per-role eligible counts and this condition say the
+// same fact at their two levels, so neither can be read as an empty set.
+func observeModelDeploymentEndpointEligibility(holder *workercore.ModelDeployment) {
+	ModelDeploymentConditionEndpointEligibility.Unknown(holder,
+		modelDeploymentReasonNotObserved,
+		"endpoint eligibility has not been observed for any role yet")
 }
 
 // modelDeploymentPodRole reads which role a replica belongs to.

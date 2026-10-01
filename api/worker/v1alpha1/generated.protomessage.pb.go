@@ -220,9 +220,19 @@ func (*ModelDeploymentModel) ProtoMessage() {}
 
 func (*ModelDeploymentModelStatus) ProtoMessage() {}
 
+func (*ModelDeploymentParallelismDeclaredStatus) ProtoMessage() {}
+
+func (*ModelDeploymentParallelismSourceStatus) ProtoMessage() {}
+
 func (*ModelDeploymentPort) ProtoMessage() {}
 
+func (*ModelDeploymentRetirementStatus) ProtoMessage() {}
+
 func (*ModelDeploymentRole) ProtoMessage() {}
+
+func (*ModelDeploymentRoleEndpointsStatus) ProtoMessage() {}
+
+func (*ModelDeploymentRoleParallelismStatus) ProtoMessage() {}
 
 func (*ModelDeploymentRoleResources) ProtoMessage() {}
 
@@ -239,6 +249,8 @@ func (*ModelDeploymentRouterMetrics) ProtoMessage() {}
 func (*ModelDeploymentRouterRoleStatus) ProtoMessage() {}
 
 func (*ModelDeploymentRouterStatus) ProtoMessage() {}
+
+func (*ModelDeploymentServingStatus) ProtoMessage() {}
 
 func (*ModelDeploymentSpec) ProtoMessage() {}
 

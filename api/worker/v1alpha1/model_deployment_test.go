@@ -1,12 +1,18 @@
 package v1alpha1
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apiextensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	extension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiservervalidation "k8s.io/apiextensions-apiserver/pkg/apiserver/validation"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/utils/ptr"
 )
 
 func TestModelDeploymentKVCacheIsOptional(t *testing.T) {
@@ -173,4 +179,465 @@ func TestModelDeploymentStatusDeliveryAdmitsEveryDelivery(t *testing.T) {
 
 	assert.ElementsMatch(t, deliveries, enumValues(t, model, "delivery"),
 		"every delivery the controller can write must be a value the status enum admits")
+}
+
+// TestModelDeploymentStatusEligibilityWireSurvivesJSONRoundTrip pins the distinctions the
+// eligibility status contract keeps on the JSON wire: a declared degree from an undeclared one,
+// an observed mode-false from an absent key, an ordinal zero from an omitted field, and the
+// unobserved defaults a reader must see rather than have to guess. Every assertion reads a
+// distinction a caller acts on, not a field inventory.
+func TestModelDeploymentStatusEligibilityWireSurvivesJSONRoundTrip(t *testing.T) {
+	now := meta.Now().Rfc3339Copy()
+	status := &ModelDeploymentStatus{
+		Roles: []ModelDeploymentRoleStatus{{
+			Name: "prefill",
+			Parallelism: ModelDeploymentRoleParallelismStatus{
+				Declared: ModelDeploymentParallelismDeclaredStatus{
+					TensorParallel:    ptr.To(int32(1)),
+					DataParallelLocal: ptr.To(int32(0)),
+				},
+				Modes:       map[string]bool{"dp": false},
+				LoadBalance: ModelDeploymentLoadBalanceUnknown,
+				Source: ModelDeploymentParallelismSourceStatus{
+					Kind:             ModelDeploymentParallelismSourceKindUnknown,
+					UnreadableReason: "NotObserved",
+				},
+			},
+			Endpoints: ModelDeploymentRoleEndpointsStatus{
+				Serving: ModelDeploymentServingStatus{
+					State: ModelDeploymentServingStateNotConfigured,
+				},
+			},
+		}},
+		Retirement: &ModelDeploymentRetirementStatus{
+			RoleName:           "prefill",
+			ReplicaOrdinal:     0,
+			ObservedGeneration: 7,
+			TargetMemberUIDs:   []string{"member-uid"},
+			TargetWorkloadUID:  "workload-uid",
+			State:              ModelDeploymentRetirementStateAborted,
+			Reason:             "budget",
+			StartedAt:          now,
+			Deadline:           now,
+			PhaseStartedAt:     now,
+		},
+	}
+
+	raw, err := json.Marshal(status)
+	require.NoError(t, err)
+
+	assert.Contains(t, string(raw), `"tensorParallel":1`)
+	assert.Contains(t, string(raw), `"dataParallelLocal":0`,
+		"an explicit local zero is a declared degree and must be encoded, not omitted")
+	assert.Contains(t, string(raw), `"dp":false`,
+		"an observed mode carries its explicit boolean, not an omission")
+	assert.Contains(t, string(raw), `"replicaOrdinal":0`,
+		"ordinal zero is a real position and must be encoded, not omitted")
+
+	got := &ModelDeploymentStatus{}
+	require.NoError(t, json.Unmarshal(raw, got))
+
+	role := got.Roles[0]
+	require.NotNil(t, role.Parallelism.Declared.TensorParallel)
+	assert.Equal(t, int32(1), *role.Parallelism.Declared.TensorParallel)
+	require.NotNil(t, role.Parallelism.Declared.DataParallelLocal)
+	assert.Equal(t, int32(0), *role.Parallelism.Declared.DataParallelLocal)
+	assert.Nil(t, role.Parallelism.Declared.PipelineParallel,
+		"undeclared stays nil, never zero")
+	mode, present := role.Parallelism.Modes["dp"]
+	require.True(t, present)
+	assert.False(t, mode)
+	assert.Len(t, role.Parallelism.Modes, 1, "absence of a key must not materialize as a false entry")
+	assert.Equal(t, ModelDeploymentLoadBalanceUnknown, role.Parallelism.LoadBalance)
+	assert.Equal(t, ModelDeploymentParallelismSourceKindUnknown, role.Parallelism.Source.Kind)
+	assert.False(t, role.Parallelism.Source.Complete)
+	assert.Equal(t, "NotObserved", role.Parallelism.Source.UnreadableReason)
+	assert.Equal(t, ModelDeploymentServingStateNotConfigured, role.Endpoints.Serving.State)
+	assert.Nil(t, role.Endpoints.Serving.Value,
+		"an unobserved serving state carries no value to misread")
+
+	require.NotNil(t, got.Retirement)
+	assert.Equal(t, int32(0), got.Retirement.ReplicaOrdinal)
+	assert.Equal(t, int64(7), got.Retirement.ObservedGeneration)
+	assert.Equal(t, ModelDeploymentRetirementStateAborted, got.Retirement.State)
+	assert.Equal(t, []string{"member-uid"}, got.Retirement.TargetMemberUIDs)
+	assert.Equal(t, now, got.Retirement.StartedAt)
+}
+
+// TestModelDeploymentRoleEndpointsNilAndZeroStayDistinct pins the pair a consumer of a
+// scale-down reads: nil eligible means the qualified set was never observed, an eligible zero
+// means it was observed and is empty — and only a Confirmed serving state may carry a value.
+func TestModelDeploymentRoleEndpointsNilAndZeroStayDistinct(t *testing.T) {
+	unobserved := &ModelDeploymentRoleEndpointsStatus{
+		Serving: ModelDeploymentServingStatus{State: ModelDeploymentServingStateUnknown},
+	}
+	drained := &ModelDeploymentRoleEndpointsStatus{
+		Eligible: ptr.To(int32(0)),
+		Serving: ModelDeploymentServingStatus{
+			State: ModelDeploymentServingStateConfirmed,
+			Value: ptr.To(int32(0)),
+		},
+	}
+
+	rawUnknown, err := json.Marshal(unobserved)
+	require.NoError(t, err)
+	assert.NotContains(t, string(rawUnknown), `"eligible"`,
+		"an unobserved count is nil on the wire, not a zero")
+	assert.NotContains(t, string(rawUnknown), `"value"`,
+		"an unconfirmed serving state never encodes a value")
+
+	rawDrained, err := json.Marshal(drained)
+	require.NoError(t, err)
+	assert.Contains(t, string(rawDrained), `"eligible":0`,
+		"a confirmed empty set is an encoded zero, never an omission")
+	assert.Contains(t, string(rawDrained), `"value":0`)
+
+	gotUnknown, gotDrained := &ModelDeploymentRoleEndpointsStatus{}, &ModelDeploymentRoleEndpointsStatus{}
+	require.NoError(t, json.Unmarshal(rawUnknown, gotUnknown))
+	require.NoError(t, json.Unmarshal(rawDrained, gotDrained))
+	assert.Nil(t, gotUnknown.Eligible)
+	assert.Equal(t, ModelDeploymentServingStateUnknown, gotUnknown.Serving.State)
+	require.NotNil(t, gotDrained.Eligible)
+	assert.Equal(t, int32(0), *gotDrained.Eligible)
+	require.NotNil(t, gotDrained.Serving.Value)
+	assert.Equal(t, int32(0), *gotDrained.Serving.Value)
+	assert.Equal(t, ModelDeploymentServingStateConfirmed, gotDrained.Serving.State)
+}
+
+// TestModelDeploymentStatusEligibilityWireSurvivesProtoRoundTrip pins the same distinctions on
+// the protobuf rendering, which clients reading generated types go through.
+func TestModelDeploymentStatusEligibilityWireSurvivesProtoRoundTrip(t *testing.T) {
+	now := meta.Now().Rfc3339Copy()
+	deployment := &ModelDeployment{
+		Status: ModelDeploymentStatus{
+			Roles: []ModelDeploymentRoleStatus{{
+				Name: "prefill",
+				Parallelism: ModelDeploymentRoleParallelismStatus{
+					Declared: ModelDeploymentParallelismDeclaredStatus{
+						TensorParallel:    ptr.To(int32(1)),
+						DataParallelLocal: ptr.To(int32(0)),
+					},
+					Modes:       map[string]bool{"dp": false},
+					LoadBalance: ModelDeploymentLoadBalanceUnknown,
+					Source: ModelDeploymentParallelismSourceStatus{
+						Kind:             ModelDeploymentParallelismSourceKindUnknown,
+						UnreadableReason: "NotObserved",
+					},
+				},
+				Endpoints: ModelDeploymentRoleEndpointsStatus{
+					Serving: ModelDeploymentServingStatus{
+						State: ModelDeploymentServingStateNotConfigured,
+					},
+				},
+			}},
+			Retirement: &ModelDeploymentRetirementStatus{
+				RoleName:           "prefill",
+				ReplicaOrdinal:     0,
+				ObservedGeneration: 7,
+				TargetMemberUIDs:   []string{"member-uid"},
+				TargetWorkloadUID:  "workload-uid",
+				State:              ModelDeploymentRetirementStateAborted,
+				StartedAt:          now,
+				Deadline:           now,
+				PhaseStartedAt:     now,
+			},
+		},
+	}
+
+	raw, err := deployment.Marshal()
+	require.NoError(t, err)
+
+	got := &ModelDeployment{}
+	require.NoError(t, got.Unmarshal(raw))
+
+	role := got.Status.Roles[0]
+	require.NotNil(t, role.Parallelism.Declared.TensorParallel)
+	assert.Equal(t, int32(1), *role.Parallelism.Declared.TensorParallel)
+	require.NotNil(t, role.Parallelism.Declared.DataParallelLocal)
+	assert.Equal(t, int32(0), *role.Parallelism.Declared.DataParallelLocal)
+	assert.Nil(t, role.Parallelism.Declared.PipelineParallel)
+	mode, present := role.Parallelism.Modes["dp"]
+	require.True(t, present)
+	assert.False(t, mode)
+	assert.Equal(t, ModelDeploymentServingStateNotConfigured, role.Endpoints.Serving.State)
+	assert.Nil(t, role.Endpoints.Serving.Value)
+
+	require.NotNil(t, got.Status.Retirement)
+	assert.Equal(t, int32(0), got.Status.Retirement.ReplicaOrdinal)
+	assert.Equal(t, int64(7), got.Status.Retirement.ObservedGeneration)
+	assert.Equal(t, ModelDeploymentRetirementStateAborted, got.Status.Retirement.State)
+	assert.Equal(t, []string{"member-uid"}, got.Status.Retirement.TargetMemberUIDs)
+	assert.Equal(t, now, got.Status.Retirement.StartedAt)
+}
+
+// TestModelDeploymentStatusDeepCopyCutsReferenceFields pins that a copied status shares no
+// backing arrays: the reservation a rebuild carries forward must not be a view a later writer
+// can move underneath the stored object.
+func TestModelDeploymentStatusDeepCopyCutsReferenceFields(t *testing.T) {
+	status := &ModelDeploymentStatus{
+		Roles: []ModelDeploymentRoleStatus{{
+			Name: "prefill",
+			Parallelism: ModelDeploymentRoleParallelismStatus{
+				Declared: ModelDeploymentParallelismDeclaredStatus{
+					TensorParallel: ptr.To(int32(1)),
+				},
+				Modes: map[string]bool{"dp": false},
+			},
+		}},
+		Retirement: &ModelDeploymentRetirementStatus{
+			RoleName:         "prefill",
+			TargetMemberUIDs: []string{"member-uid"},
+		},
+	}
+
+	got := status.DeepCopy()
+	got.Roles[0].Parallelism.Modes["dp"] = true
+	*got.Roles[0].Parallelism.Declared.TensorParallel = 9
+	got.Retirement.TargetMemberUIDs[0] = "mutated"
+	got.Retirement.ReplicaOrdinal = 3
+
+	assert.False(t, status.Roles[0].Parallelism.Modes["dp"])
+	assert.Equal(t, int32(1), *status.Roles[0].Parallelism.Declared.TensorParallel)
+	assert.Equal(t, []string{"member-uid"}, status.Retirement.TargetMemberUIDs)
+	assert.Equal(t, int32(0), status.Retirement.ReplicaOrdinal)
+}
+
+// TestModelDeploymentStatusEligibilitySchema pins the generated schema to the contract: the
+// retirement object is optional because absent means no operation, the per-role objects exist,
+// and every new enum is spelled exactly as the Go constants — so a widened writer set fails
+// here instead of at a refused status write.
+func TestModelDeploymentStatusEligibilitySchema(t *testing.T) {
+	crd := GetCustomResourceDefinitions()["ModelDeployment"]
+	require.NotNil(t, crd, "ModelDeployment is not registered")
+	require.Len(t, crd.Spec.Versions, 1)
+
+	schema := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["status"]
+	retirement, ok := schema.Properties["retirement"]
+	require.True(t, ok, "the schema has no status.retirement")
+	assert.NotContains(t, schema.Required, "retirement",
+		"absent means no operation, so the object can never be required")
+
+	roles := schema.Properties["roles"].Items.Schema
+	parallelism, ok := roles.Properties["parallelism"]
+	require.True(t, ok, "the schema has no status.roles[].parallelism")
+	endpoints, ok := roles.Properties["endpoints"]
+	require.True(t, ok, "the schema has no status.roles[].endpoints")
+
+	serving, ok := endpoints.Properties["serving"]
+	require.True(t, ok, "the schema has no status.roles[].endpoints.serving")
+	assert.ElementsMatch(t,
+		[]string{`"Confirmed"`, `"NotConverged"`, `"Unknown"`, `"NotConfigured"`},
+		enumValues(t, serving, "state"))
+	assert.ElementsMatch(t,
+		[]string{`"Internal"`, `"External"`, `"Hybrid"`, `"MultiPort"`, `"Unknown"`},
+		enumValues(t, parallelism, "loadBalance"))
+	source, ok := parallelism.Properties["source"]
+	require.True(t, ok, "the schema has no status.roles[].parallelism.source")
+	assert.ElementsMatch(t,
+		[]string{`"ExtraArgs"`, `"Command"`, `"UnmanagedCommand"`, `"Unknown"`},
+		enumValues(t, source, "kind"))
+
+	state, ok := retirement.Properties["state"]
+	require.True(t, ok, "the schema has no status.retirement.state")
+	states := make([]string, 0, len(state.Enum))
+	for _, entry := range state.Enum {
+		states = append(states, string(entry.Raw))
+	}
+	assert.ElementsMatch(t,
+		[]string{
+			`"Admitted"`, `"Disqualified"`, `"Withdrawing"`, `"Draining"`,
+			`"Deleting"`, `"Settling"`, `"Aborted"`, `"Completed"`,
+		},
+		states)
+}
+
+// modelDeploymentSchemaValidator builds the real schema validator over the generated CRD: the
+// generated schema converted the way the API server converts it, then the validator chain the
+// API server runs against stored writes.
+func modelDeploymentSchemaValidator(t *testing.T) apiservervalidation.SchemaValidator {
+	t.Helper()
+
+	crd := GetCustomResourceDefinitions()["ModelDeployment"]
+	require.NotNil(t, crd, "ModelDeployment is not registered")
+	require.Len(t, crd.Spec.Versions, 1)
+
+	internal := &apiextensions.JSONSchemaProps{}
+	require.NoError(t, extension.Convert_v1_JSONSchemaProps_To_apiextensions_JSONSchemaProps(
+		crd.Spec.Versions[0].Schema.OpenAPIV3Schema, internal, nil),
+		"the generated schema must convert for validation")
+	validator, _, err := apiservervalidation.NewSchemaValidator(internal)
+	require.NoError(t, err, "the generated schema must build a validator")
+	return validator
+}
+
+// modelDeploymentWriteFixture returns a full object as the new producer writes it: both
+// per-role views and a retirement reservation, every required field spelled out.
+func modelDeploymentWriteFixture(t *testing.T) map[string]any {
+	t.Helper()
+
+	var obj map[string]any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"apiVersion": "worker.gpustack.ai/v1alpha1",
+		"kind": "ModelDeployment",
+		"metadata": {"name": "demo", "namespace": "default"},
+		"spec": {
+			"model": {"name": "qwen-demo", "artifactRef": {"name": "weights"}},
+			"engine": {"name": "vLLM"},
+			"roles": [{"name": "s0", "instanceType": "gpu-small", "kind": "Server", "size": 1}]
+		},
+		"status": {
+			"roleSummary": "S1",
+			"roles": [{
+				"name": "s0",
+				"desired": 1,
+				"ready": 1,
+				"quotaReserved": 1,
+				"unmanaged": false,
+				"kind": "Server",
+				"assignedFlavors": ["gpu-a"],
+				"parallelism": {
+					"declared": {"tensorParallel": 2, "pipelineParallel": 1},
+					"modes": {"tensor": true},
+					"loadBalance": "Internal",
+					"source": {"kind": "ExtraArgs", "complete": true}
+				},
+				"endpoints": {
+					"eligible": 1,
+					"serving": {"state": "Confirmed", "value": 1}
+				}
+			}],
+			"retirement": {
+				"roleName": "s0",
+				"replicaOrdinal": 0,
+				"observedGeneration": 1,
+				"targetWorkloadUID": "workload-uid",
+				"targetMemberUIDs": ["member-uid"],
+				"state": "Admitted",
+				"startedAt": "2026-10-01T00:00:00Z",
+				"deadline": "2026-10-01T01:00:00Z",
+				"phaseStartedAt": "2026-10-01T00:00:00Z"
+			}
+		}
+	}`), &obj), "the fixture must be valid JSON")
+	return obj
+}
+
+// jsonRoundTrip deep-copies a fixture through JSON, so table cases mutate their own copy.
+func jsonRoundTrip(t *testing.T, in map[string]any) map[string]any {
+	t.Helper()
+
+	raw, err := json.Marshal(in)
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(raw, &out))
+	return out
+}
+
+// firstStatusRole returns the single status role entry of a fixture copy.
+func firstStatusRole(t *testing.T, obj map[string]any) map[string]any {
+	t.Helper()
+
+	status, ok := obj["status"].(map[string]any)
+	require.True(t, ok, "the fixture has no status object")
+	roles, ok := status["roles"].([]any)
+	require.True(t, ok, "the fixture has no status.roles list")
+	require.NotEmpty(t, roles, "the fixture has no status role entry")
+	role, ok := roles[0].(map[string]any)
+	require.True(t, ok, "the status role entry is not an object")
+	return role
+}
+
+// roleParallelism returns the role's parallelism view, for cases that mutate it.
+func roleParallelism(t *testing.T, obj map[string]any) map[string]any {
+	t.Helper()
+
+	view, ok := firstStatusRole(t, obj)["parallelism"].(map[string]any)
+	require.True(t, ok, "the role has no parallelism object")
+	return view
+}
+
+// roleServing returns the role's endpoints.serving view, for cases that mutate it.
+func roleServing(t *testing.T, obj map[string]any) map[string]any {
+	t.Helper()
+
+	endpoints, ok := firstStatusRole(t, obj)["endpoints"].(map[string]any)
+	require.True(t, ok, "the role has no endpoints object")
+	serving, ok := endpoints["serving"].(map[string]any)
+	require.True(t, ok, "the role has no endpoints.serving object")
+	return serving
+}
+
+// storedRoleWithoutNewObjects rewrites the fixture to its legacy shape, deleting the
+// parallelism and endpoints views and the retirement reservation, so the object is what an
+// operator wrote before this change existed.
+func storedRoleWithoutNewObjects(t *testing.T, obj map[string]any) map[string]any {
+	t.Helper()
+
+	stored := jsonRoundTrip(t, obj)
+	delete(firstStatusRole(t, stored), "parallelism")
+	delete(firstStatusRole(t, stored), "endpoints")
+	status, ok := stored["status"].(map[string]any)
+	require.True(t, ok, "the fixture has no status object")
+	delete(status, "retirement")
+	return stored
+}
+
+// TestModelDeploymentRoleStatusSchemaValidation runs objects through the real Kubernetes
+// validator over the generated schema, because the worker/v1 aggregated handler proxies onto
+// this v1alpha1 storage: a role stored before the parallelism and endpoints views existed has
+// to survive every write that proxy lets through, while a view that IS present still
+// validates for real.
+func TestModelDeploymentRoleStatusSchemaValidation(t *testing.T) {
+	validator := modelDeploymentSchemaValidator(t)
+	complete := modelDeploymentWriteFixture(t)
+
+	cases := []struct {
+		name      string
+		obj       func(t *testing.T) map[string]any
+		wantValid bool
+		wantField string
+	}{
+		{
+			name:      "the complete object the producer writes validates",
+			obj:       func(t *testing.T) map[string]any { return jsonRoundTrip(t, complete) },
+			wantValid: true,
+		},
+		{
+			name:      "a role stored before the views existed stays writable",
+			obj:       func(t *testing.T) map[string]any { return storedRoleWithoutNewObjects(t, complete) },
+			wantValid: true,
+		},
+		{
+			name: "a present serving view still validates its state",
+			obj: func(t *testing.T) map[string]any {
+				obj := jsonRoundTrip(t, complete)
+				roleServing(t, obj)["state"] = "AlmostConfirmed"
+				return obj
+			},
+			wantValid: false,
+			wantField: "endpoints.serving.state",
+		},
+		{
+			name: "a present parallelism view still validates its balance",
+			obj: func(t *testing.T) map[string]any {
+				obj := jsonRoundTrip(t, complete)
+				roleParallelism(t, obj)["loadBalance"] = "RoundRobin"
+				return obj
+			},
+			wantValid: false,
+			wantField: "parallelism.loadBalance",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			errs := apiservervalidation.ValidateCustomResource(field.NewPath("object"), c.obj(t), validator)
+			if c.wantValid {
+				assert.Empty(t, errs, "the object must validate, and did not: %v", errs.ToAggregate())
+				return
+			}
+			assert.NotEmpty(t, errs, "the object must be rejected, and was not")
+			assert.Contains(t, errs.ToAggregate().Error(), c.wantField,
+				"the rejection must name the field that broke the schema")
+		})
+	}
 }

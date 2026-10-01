@@ -3465,6 +3465,66 @@ message ModelDeploymentModelStatus {
   optional string delivery = 4;
 }
 
+// ModelDeploymentParallelismDeclaredStatus carries the degrees a role's arguments declare.
+//
+// A nil field means the role does not declare that degree; it is never read as a zero or a
+// one. An explicit value is preserved exactly, including an explicit local degree of 0, which
+// says something an omitted field cannot.
+message ModelDeploymentParallelismDeclaredStatus {
+  // +optional
+  optional int32 tensorParallel = 1;
+
+  // +optional
+  optional int32 pipelineParallel = 2;
+
+  // +optional
+  optional int32 dataParallel = 3;
+
+  // +optional
+  optional int32 dataParallelLocal = 4;
+
+  // +optional
+  optional int32 prefillContextParallel = 5;
+
+  // +optional
+  optional int32 decodeContextParallel = 6;
+
+  // +optional
+  optional int32 expertParallel = 7;
+
+  // +optional
+  optional int32 attentionContextParallel = 8;
+
+  // MoEDPSize is the role's declared expert-dispatch data parallel size.
+  //
+  // +optional
+  optional int32 moeDpSize = 9;
+
+  // DWDPSize is the role's declared data-within-data parallel size.
+  //
+  // +optional
+  optional int32 dwdpSize = 10;
+}
+
+// ModelDeploymentParallelismSourceStatus is the provenance of a role's parallelism reading.
+message ModelDeploymentParallelismSourceStatus {
+  // Kind is where the reading came from. An unreadable source is Unknown with complete=false
+  // and a reason, never a silently defaulted degree.
+  //
+  // +k8s:validation:enum=["ExtraArgs","Command","UnmanagedCommand","Unknown"]
+  optional string kind = 1;
+
+  // Complete is whether the reading covered everything the contract reads. Only a complete
+  // reading is one the declared degrees above can be trusted from; an incomplete one keeps
+  // them nil rather than partial.
+  optional bool complete = 2;
+
+  // UnreadableReason names what could not be read, e.g. a reading that has not happened yet.
+  //
+  // +optional
+  optional string unreadableReason = 3;
+}
+
 // ModelDeploymentPort defines one port a role's replica exposes beside the engine's own.
 //
 // IT CARRIES NO NAME, and that is a decision rather than an omission. The rendered container port is
@@ -3487,6 +3547,81 @@ message ModelDeploymentPort {
   // +k8s:validation:enum=["TCP","UDP","SCTP"]
   // +k8s:validation:default="TCP"
   optional string protocol = 2;
+}
+
+// ModelDeploymentRetirementStatus is the persisted reservation of one retirement operation.
+//
+// The reservation is the protocol's progress: every step, budget boundary and retry already
+// consumed is carried here, so a controller restart re-enters at the observed state instead of
+// re-deciding one. Phase budgets read deadline and phaseStartedAt together, so a restart never
+// resets a phase that was already running.
+message ModelDeploymentRetirementStatus {
+  // RoleName is the role whose replica is retiring.
+  //
+  // +required
+  optional string roleName = 1;
+
+  // ReplicaOrdinal is the ordinal of the retiring replica within its role. Zero is a real
+  // position, the first replica, and is always encoded rather than omitted.
+  //
+  // +required
+  optional int32 replicaOrdinal = 2;
+
+  // ObservedGeneration is the metadata.generation whose intent this reservation was admitted
+  // against.
+  //
+  // +required
+  optional int64 observedGeneration = 3;
+
+  // TargetMemberUIDs are the UIDs of the member Pods the reservation holds. A deletion of one
+  // of them carries its UID as a precondition, so a same-name replacement is never deleted in
+  // the target's place.
+  //
+  // +optional
+  // +listType=atomic
+  repeated string targetMemberUIDs = 4;
+
+  // TargetWorkloadUID is the UID of the Workload the reservation holds.
+  //
+  // +required
+  optional string targetWorkloadUID = 5;
+
+  // State is the protocol step the reservation sits at. Aborted names a budget exhausted
+  // before deletion, where every member and the Workload were retained; it is retained state,
+  // not a rollback.
+  //
+  // +required
+  // +k8s:validation:enum=["Admitted","Disqualified","Withdrawing","Draining","Deleting","Settling","Aborted","Completed"]
+  optional string state = 6;
+
+  // Reason names what put the reservation at its state, e.g. which step a budget exhausted at.
+  //
+  // +optional
+  optional string reason = 7;
+
+  // StartedAt is when the operation was admitted.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time startedAt = 8;
+
+  // Deadline is the overall budget. A phase ends at min(deadline, its own start plus its
+  // budget), so no phase outlives the operation.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time deadline = 9;
+
+  // PhaseStartedAt is when the current phase began. It is persisted so a controller restart
+  // never resets a phase budget that was already running.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time phaseStartedAt = 10;
+
+  // LastConsumedRetryToken is the retry directive token this reservation last consumed. It is
+  // persisted before the annotation that carried the token is cleared, so a crash between the
+  // two leaves the token consumed and any replay a no-op. Empty means none was consumed.
+  //
+  // +optional
+  optional string lastConsumedRetryToken = 11;
 }
 
 // ModelDeploymentRole is one engine role and its replicas.
@@ -3737,6 +3872,59 @@ message ModelDeploymentRole {
   optional int64 terminationGracePeriodSeconds = 17;
 }
 
+// ModelDeploymentRoleEndpointsStatus is one role's endpoint eligibility and actual serving
+// confirmation.
+//
+// nil IS NOT ZERO here, and neither is the reverse: a nil eligible count says the qualified
+// set was never observed, an eligible 0 says it was observed and is empty, and only a
+// Confirmed serving state may carry a value. The condition EndpointEligibility says at the
+// deployment level when the per-role counts below are unobserved rather than empty.
+message ModelDeploymentRoleEndpointsStatus {
+  // Eligible is how many endpoints the role's qualification list holds, set only when that
+  // list is complete. It is named for eligibility and never presents itself as serving.
+  //
+  // +optional
+  optional int32 eligible = 1;
+
+  // Serving is the actual serving confirmation taken over the role's endpoints.
+  //
+  // +optional
+  optional ModelDeploymentServingStatus serving = 2;
+}
+
+// ModelDeploymentRoleParallelismStatus is one role's declared parallelism, read from the
+// command line rendered for it.
+//
+// Until the arguments have been read, every declared degree is nil, the mode set is empty, the
+// balance is Unknown and the source is Unknown with complete=false and a reason — the same
+// honesty the counts above owe an unobserved figure.
+message ModelDeploymentRoleParallelismStatus {
+  // Declared carries the degrees the role's arguments declare.
+  //
+  // +optional
+  optional ModelDeploymentParallelismDeclaredStatus declared = 1;
+
+  // Modes are the parallelism modes present in the role's arguments, keyed by canonical
+  // engine mode. An observed mode carries its explicit boolean; the absence of a key is not
+  // false. Empty until the arguments have been read.
+  //
+  // +optional
+  // +mapType=atomic
+  map<string, bool> modes = 2;
+
+  // LoadBalance is the balance shape the declared degrees derive to. Unknown means not
+  // derivable from what the role declares; a support judgment is carried in reason fields,
+  // never as a mode value here.
+  //
+  // +k8s:validation:enum=["Internal","External","Hybrid","MultiPort","Unknown"]
+  optional string loadBalance = 3;
+
+  // Source is the provenance of this reading.
+  //
+  // +optional
+  optional ModelDeploymentParallelismSourceStatus source = 4;
+}
+
 // ModelDeploymentRoleResources is what one Pod of a role asks of accelerators and fabric interfaces.
 //
 // It deliberately mirrors the accelerator fields of InstanceResources — the same names, the same
@@ -3863,6 +4051,30 @@ message ModelDeploymentRoleStatus {
   // +optional
   // +listType=atomic
   repeated string assignedFlavors = 6;
+
+  // Parallelism is the parallelism the role's own arguments declare, with the provenance of
+  // the reading. Nothing is defaulted into it: a degree the role never declares is nil, an
+  // explicit 1 and an explicit local 0 are preserved as values, and a reading that has not
+  // happened yet reports Unknown with a reason rather than a silent 1. The numeric results
+  // the prefill/decode transfer document derives from the same arguments are unaffected by
+  // this view.
+  //
+  // It is optional so a role stored before this view existed stays writable: absence names
+  // that fact, never a defaulted reading, and the object the operator writes fills it again.
+  //
+  // +optional
+  optional ModelDeploymentRoleParallelismStatus parallelism = 8;
+
+  // Endpoints is the role's endpoint eligibility and its actual serving confirmation. The two
+  // are separate answers that never collapse: eligibility is the set the operator qualified,
+  // and serving is what Routers were observed to still select. A count that was never
+  // observed is nil, and zero is an observed fact only.
+  //
+  // It is optional like parallelism, and for the same reason: a role stored before this view
+  // existed carries neither object, and absence must not reject its next write.
+  //
+  // +optional
+  optional ModelDeploymentRoleEndpointsStatus endpoints = 9;
 }
 
 // ModelDeploymentRoleTopology is the topology request for one independent replica group.
@@ -4117,6 +4329,23 @@ message ModelDeploymentRouterStatus {
   optional ModelDeploymentRouterMetrics metrics = 5;
 }
 
+// ModelDeploymentServingStatus is the actual serving confirmation of a role's endpoints: a
+// deduplicated union over complete, identity-bound per-Router views. It is an observation,
+// never a restatement of the eligible count.
+message ModelDeploymentServingStatus {
+  // State is the confirmation answer. Only Confirmed means the union was observed; the other
+  // states differ in WHY no number is offered, and none of them encodes one.
+  //
+  // +k8s:validation:enum=["Confirmed","NotConverged","Unknown","NotConfigured"]
+  optional string state = 1;
+
+  // Value is the confirmed serving count, present only when State is Confirmed, with an
+  // explicit zero as real as any other number.
+  //
+  // +optional
+  optional int32 value = 2;
+}
+
 // ModelDeploymentSpec defines the desired state of ModelDeployment.
 message ModelDeploymentSpec {
   // Model names what the engine serves.
@@ -4278,6 +4507,16 @@ message ModelDeploymentStatus {
   // reason KVCache is: an empty object here cannot be told apart from an identity whose every
   // field happens to be empty.
   optional ModelDeploymentModelStatus model = 9;
+
+  // Retirement is the persisted reservation of the retirement operation this deployment is
+  // running, at most one at a time. It is ABSENT when no operation exists, rather than present
+  // and empty: an operation carries its state in the object, so an empty one would be neither.
+  // Its identity binds the admitting metadata.generation, the role, the replica ordinal and
+  // the target member and Workload UIDs, so a controller restart resumes it and a conflicting
+  // operation cannot silently adopt it.
+  //
+  // +optional
+  optional ModelDeploymentRetirementStatus retirement = 10;
 }
 
 // ModelPrefetch is the schema for worker.gpustack.ai.

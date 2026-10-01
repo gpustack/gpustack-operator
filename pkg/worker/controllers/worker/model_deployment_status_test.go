@@ -1193,6 +1193,9 @@ func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 		string(ModelDeploymentConditionRouterReady),
 		// NotApplicable for a deployment naming no artifact, on the router's terms.
 		string(ModelDeploymentConditionWeightsReady),
+		// Declared on every pass like the others: Unknown-NotObserved until endpoint
+		// qualification exists, which is an answer about the reading, not an absence.
+		string(ModelDeploymentConditionEndpointEligibility),
 	}, declared)
 	assert.NotContains(t, declared, string(ModelDeploymentConditionDomainRegistered),
 		"this pass was handed no reading of the Binding, and a pass that did not look must not report")
@@ -2478,4 +2481,93 @@ func TestObserveModelDeploymentQuota_OwnershipIsAKindAndAUIDTogether(t *testing.
 		"a reference that does not name a Pod must not answer for one")
 	assert.Contains(t, ModelDeploymentConditionQuotaReserved.GetMessage(holder), "have no workload yet",
 		"and the replica reads as one nothing has composed a Workload for")
+}
+
+// TestComputeModelDeploymentStatus_NoQualificationObservation pins what a pass that has observed
+// no endpoint qualification writes: every role answers honestly instead of fabricating figures
+// (a nil eligible count, no serving value, no declared degree, Unknown where nothing was
+// derived, and NotConfigured when no Router exists to answer at all), an existing retirement
+// reservation is carried forward untouched, and the deployment-level condition reads
+// Unknown-NotObserved rather than a False no pass earned.
+func TestComputeModelDeploymentStatus_NoQualificationObservation(t *testing.T) {
+	testCases := []struct {
+		name             string
+		routed           bool
+		retirement       *workercore.ModelDeploymentRetirementStatus
+		wantServingState workercore.ModelDeploymentServingState
+	}{
+		{
+			name:             "no router configured reports NotConfigured",
+			routed:           false,
+			wantServingState: workercore.ModelDeploymentServingStateNotConfigured,
+		},
+		{
+			name:             "router configured but unobserved reports Unknown",
+			routed:           true,
+			wantServingState: workercore.ModelDeploymentServingStateUnknown,
+		},
+		{
+			name: "an existing retirement reservation is carried forward untouched",
+			retirement: &workercore.ModelDeploymentRetirementStatus{
+				RoleName:           "server",
+				ReplicaOrdinal:     1,
+				ObservedGeneration: 3,
+				TargetMemberUIDs:   []string{"member-uid"},
+				TargetWorkloadUID:  "workload-uid",
+				State:              workercore.ModelDeploymentRetirementStateWithdrawing,
+				StartedAt:          meta.Now().Rfc3339Copy(),
+				Deadline:           meta.Now().Rfc3339Copy(),
+				PhaseStartedAt:     meta.Now().Rfc3339Copy(),
+			},
+			wantServingState: workercore.ModelDeploymentServingStateNotConfigured,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment()
+			if tc.routed {
+				md = routedModelDeployment()
+			}
+			if tc.retirement != nil {
+				md.Status.Retirement = tc.retirement
+			}
+
+			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+			status, err := r.computeModelDeploymentStatus(context.Background(), md, nil, nil, nil, nil)
+			require.NoError(t, err)
+
+			require.NotEmpty(t, status.Roles)
+			for _, role := range status.Roles {
+				require.Nil(t, role.Endpoints.Eligible,
+					"no qualified observation exists yet, so the count is nil, not zero")
+				require.Nil(t, role.Endpoints.Serving.Value,
+					"an unconfirmed serving state never carries a value to misread")
+				assert.Equal(t, tc.wantServingState, role.Endpoints.Serving.State)
+
+				assert.Nil(t, role.Parallelism.Declared.TensorParallel,
+					"no argument has been read, so nothing is declared")
+				assert.Nil(t, role.Parallelism.Declared.DataParallelLocal)
+				assert.Empty(t, role.Parallelism.Modes)
+				assert.Equal(t, workercore.ModelDeploymentLoadBalanceUnknown, role.Parallelism.LoadBalance)
+				assert.Equal(t, workercore.ModelDeploymentParallelismSourceKindUnknown, role.Parallelism.Source.Kind)
+				assert.False(t, role.Parallelism.Source.Complete)
+				assert.Equal(t, "NotObserved", role.Parallelism.Source.UnreadableReason,
+					"the source names what a reader is missing instead of pretending a parse happened")
+			}
+
+			assert.Equal(t, "Unknown", ModelDeploymentConditionEndpointEligibility.GetStatus(status))
+			assert.Equal(t, "NotObserved", ModelDeploymentConditionEndpointEligibility.GetReason(status))
+
+			if tc.retirement == nil {
+				assert.Nil(t, status.Retirement, "a pass with no reservation to carry writes none")
+
+				return
+			}
+			require.NotNil(t, status.Retirement, "an existing reservation is retained, never cleared")
+			assert.Equal(t, md.Status.Retirement, status.Retirement)
+			assert.NotSame(t, md.Status.Retirement, status.Retirement,
+				"the carried reservation is a deep copy, not the stored object itself")
+		})
+	}
 }

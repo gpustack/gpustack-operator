@@ -531,13 +531,38 @@ func (in ModelDeploymentModelStatus) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentParallelismDeclaredStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentParallelismDeclaredStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentParallelismSourceStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentParallelismSourceStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentPort) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentPort"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRetirementStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRetirementStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentRole) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRole"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRoleEndpointsStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleEndpointsStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRoleParallelismStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleParallelismStatus"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
@@ -578,6 +603,11 @@ func (in ModelDeploymentRouterRoleStatus) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentRouterStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRouterStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentServingStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentServingStatus"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

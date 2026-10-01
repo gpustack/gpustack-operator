@@ -186,8 +186,13 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentList{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentList(ref),
 		v1alpha1.ModelDeploymentModel{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref),
 		v1alpha1.ModelDeploymentModelStatus{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelStatus(ref),
+		v1alpha1.ModelDeploymentParallelismDeclaredStatus{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_ModelDeploymentParallelismDeclaredStatus(ref),
+		v1alpha1.ModelDeploymentParallelismSourceStatus{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_ModelDeploymentParallelismSourceStatus(ref),
 		v1alpha1.ModelDeploymentPort{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentPort(ref),
+		v1alpha1.ModelDeploymentRetirementStatus{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentRetirementStatus(ref),
 		v1alpha1.ModelDeploymentRole{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref),
+		v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleEndpointsStatus(ref),
+		v1alpha1.ModelDeploymentRoleParallelismStatus{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleParallelismStatus(ref),
 		v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref),
 		v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref),
 		v1alpha1.ModelDeploymentRoleTopology{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleTopology(ref),
@@ -196,6 +201,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentRouterMetrics{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterMetrics(ref),
 		v1alpha1.ModelDeploymentRouterRoleStatus{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterRoleStatus(ref),
 		v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterStatus(ref),
+		v1alpha1.ModelDeploymentServingStatus{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_ModelDeploymentServingStatus(ref),
 		v1alpha1.ModelDeploymentSpec{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref),
 		v1alpha1.ModelDeploymentStatus{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref),
 		v1alpha1.ModelPrefetch{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1alpha1_ModelPrefetch(ref),
@@ -9556,6 +9562,119 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelStatus(ref common.R
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentParallelismDeclaredStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentParallelismDeclaredStatus carries the degrees a role's arguments declare.\n\nA nil field means the role does not declare that degree; it is never read as a zero or a one. An explicit value is preserved exactly, including an explicit local degree of 0, which says something an omitted field cannot.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"tensorParallel": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int32",
+						},
+					},
+					"pipelineParallel": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int32",
+						},
+					},
+					"dataParallel": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int32",
+						},
+					},
+					"dataParallelLocal": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int32",
+						},
+					},
+					"prefillContextParallel": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int32",
+						},
+					},
+					"decodeContextParallel": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int32",
+						},
+					},
+					"expertParallel": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int32",
+						},
+					},
+					"attentionContextParallel": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int32",
+						},
+					},
+					"moeDpSize": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MoEDPSize is the role's declared expert-dispatch data parallel size.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"dwdpSize": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DWDPSize is the role's declared data-within-data parallel size.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentParallelismSourceStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentParallelismSourceStatus is the provenance of a role's parallelism reading.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is where the reading came from. An unreadable source is Unknown with complete=false and a reason, never a silently defaulted degree.\n\n\nPossible enum values:\n - `\"Command\"` reads a role-supplied full command line.\n - `\"ExtraArgs\"` reads the owned extra arguments of the role.\n - `\"Unknown\"` means the source produced no trustworthy reading.\n - `\"UnmanagedCommand\"` reads a replaced command line the operator synthesized no argument for.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Command", "ExtraArgs", "Unknown", "UnmanagedCommand"},
+						},
+					},
+					"complete": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Complete is whether the reading covered everything the contract reads. Only a complete reading is one the declared degrees above can be trusted from; an incomplete one keeps them nil rather than partial.",
+							Default:     false,
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"unreadableReason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "UnreadableReason names what could not be read, e.g. a reading that has not happened yet.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"kind", "complete"},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentPort(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -9585,6 +9704,115 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentPort(ref common.Referenc
 				Required: []string{"port"},
 			},
 		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRetirementStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRetirementStatus is the persisted reservation of one retirement operation.\n\nThe reservation is the protocol's progress: every step, budget boundary and retry already consumed is carried here, so a controller restart re-enters at the observed state instead of re-deciding one. Phase budgets read deadline and phaseStartedAt together, so a restart never resets a phase that was already running.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"roleName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RoleName is the role whose replica is retiring.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"replicaOrdinal": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReplicaOrdinal is the ordinal of the retiring replica within its role. Zero is a real position, the first replica, and is always encoded rather than omitted.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"observedGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ObservedGeneration is the metadata.generation whose intent this reservation was admitted against.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"targetMemberUIDs": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "TargetMemberUIDs are the UIDs of the member Pods the reservation holds. A deletion of one of them carries its UID as a precondition, so a same-name replacement is never deleted in the target's place.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"targetWorkloadUID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TargetWorkloadUID is the UID of the Workload the reservation holds.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"state": {
+						SchemaProps: spec.SchemaProps{
+							Description: "State is the protocol step the reservation sits at. Aborted names a budget exhausted before deletion, where every member and the Workload were retained; it is retained state, not a rollback.\n\n\nPossible enum values:\n - `\"Aborted\"` is a budget exhausted before deletion: members, Workload and capacity were retained, and a healthy instance requalifies without a rollout.\n - `\"Admitted\"` is the reservation as written, before any step ran.\n - `\"Completed\"` is the observed end of a completed retirement.\n - `\"Deleting\"` is the committed deletion step.\n - `\"Disqualified\"` is after eligibility removal, while Services converge.\n - `\"Draining\"` reads engine in-flight queues in place, every member retained.\n - `\"Settling\"` observes accelerator release and quota convergence after deletion.\n - `\"Withdrawing\"` waits for actual serving confirmation of the target.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Aborted", "Admitted", "Completed", "Deleting", "Disqualified", "Draining", "Settling", "Withdrawing"},
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Reason names what put the reservation at its state, e.g. which step a budget exhausted at.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"startedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StartedAt is when the operation was admitted.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"deadline": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Deadline is the overall budget. A phase ends at min(deadline, its own start plus its budget), so no phase outlives the operation.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"phaseStartedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhaseStartedAt is when the current phase began. It is persisted so a controller restart never resets a phase budget that was already running.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"lastConsumedRetryToken": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LastConsumedRetryToken is the retry directive token this reservation last consumed. It is persisted before the annotation that carried the token is cleared, so a crash between the two leaves the token consumed and any replay a no-op. Empty means none was consumed.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"roleName", "replicaOrdinal", "observedGeneration", "targetWorkloadUID", "state", "startedAt", "deadline", "phaseStartedAt"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
 	}
 }
 
@@ -9823,6 +10051,95 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleEndpointsStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRoleEndpointsStatus is one role's endpoint eligibility and actual serving confirmation.\n\nnil IS NOT ZERO here, and neither is the reverse: a nil eligible count says the qualified set was never observed, an eligible 0 says it was observed and is empty, and only a Confirmed serving state may carry a value. The condition EndpointEligibility says at the deployment level when the per-role counts below are unobserved rather than empty.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"eligible": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Eligible is how many endpoints the role's qualification list holds, set only when that list is complete. It is named for eligibility and never presents itself as serving.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"serving": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Serving is the actual serving confirmation taken over the role's endpoints.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentServingStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentServingStatus{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleParallelismStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRoleParallelismStatus is one role's declared parallelism, read from the command line rendered for it.\n\nUntil the arguments have been read, every declared degree is nil, the mode set is empty, the balance is Unknown and the source is Unknown with complete=false and a reason — the same honesty the counts above owe an unobserved figure.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"declared": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Declared carries the degrees the role's arguments declare.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentParallelismDeclaredStatus{}.OpenAPIModelName()),
+						},
+					},
+					"modes": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-map-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Modes are the parallelism modes present in the role's arguments, keyed by canonical engine mode. An observed mode carries its explicit boolean; the absence of a key is not false. Empty until the arguments have been read.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: false,
+										Type:    []string{"boolean"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"loadBalance": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LoadBalance is the balance shape the declared degrees derive to. Unknown means not derivable from what the role declares; a support judgment is carried in reason fields, never as a mode value here.\n\n\nPossible enum values:\n - `\"External\"` balances outside the engine, e.g. through an external load balancer the rank layout derives.\n - `\"Hybrid\"` combines an internal and an external leg.\n - `\"Internal\"` balances inside one engine process.\n - `\"MultiPort\"` balances across several engine listeners.\n - `\"Unknown\"` means the declaration does not derive to a shape.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"External", "Hybrid", "Internal", "MultiPort", "Unknown"},
+						},
+					},
+					"source": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Source is the provenance of this reading.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentParallelismSourceStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"loadBalance"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentParallelismDeclaredStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentParallelismSourceStatus{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -9951,10 +10268,26 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 							},
 						},
 					},
+					"parallelism": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Parallelism is the parallelism the role's own arguments declare, with the provenance of the reading. Nothing is defaulted into it: a degree the role never declares is nil, an explicit 1 and an explicit local 0 are preserved as values, and a reading that has not happened yet reports Unknown with a reason rather than a silent 1. The numeric results the prefill/decode transfer document derives from the same arguments are unaffected by this view.\n\nIt is optional so a role stored before this view existed stays writable: absence names that fact, never a defaulted reading, and the object the operator writes fills it again.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentRoleParallelismStatus{}.OpenAPIModelName()),
+						},
+					},
+					"endpoints": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Endpoints is the role's endpoint eligibility and its actual serving confirmation. The two are separate answers that never collapse: eligibility is the set the operator qualified, and serving is what Routers were observed to still select. A count that was never observed is nil, and zero is an observed fact only.\n\nIt is optional like parallelism, and for the same reason: a role stored before this view existed carries neither object, and absence must not reject its next write.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"name", "desired", "ready", "quotaReserved", "unmanaged", "kind"},
 			},
 		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleParallelismStatus{}.OpenAPIModelName()},
 	}
 }
 
@@ -10298,6 +10631,36 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouterStatus(ref common.
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentServingStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentServingStatus is the actual serving confirmation of a role's endpoints: a deduplicated union over complete, identity-bound per-Router views. It is an observation, never a restatement of the eligible count.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"state": {
+						SchemaProps: spec.SchemaProps{
+							Description: "State is the confirmation answer. Only Confirmed means the union was observed; the other states differ in WHY no number is offered, and none of them encodes one.\n\n\nPossible enum values:\n - `\"Confirmed\"` means complete, fresh, identity-matched views agree on Value.\n - `\"NotConfigured\"` means the deployment declares no router at all, so there is no Router process whose answer could be missing.\n - `\"NotConverged\"` means complete views disagree about the target.\n - `\"Unknown\"` means a required view is missing, stale or indeterminate.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Confirmed", "NotConfigured", "NotConverged", "Unknown"},
+						},
+					},
+					"value": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Value is the confirmed serving count, present only when State is Confirmed, with an explicit zero as real as any other number.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"state"},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -10469,11 +10832,17 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 							Ref:         ref(v1alpha1.ModelDeploymentModelStatus{}.OpenAPIModelName()),
 						},
 					},
+					"retirement": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Retirement is the persisted reservation of the retirement operation this deployment is running, at most one at a time. It is ABSENT when no operation exists, rather than present and empty: an operation carries its state in the object, so an empty one would be neither. Its identity binds the admitting metadata.generation, the role, the replica ordinal and the target member and Workload UIDs, so a controller restart resumes it and a conflicting operation cannot silently adopt it.",
+							Ref:         ref(v1alpha1.ModelDeploymentRetirementStatus{}.OpenAPIModelName()),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentModelStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName()},
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentModelStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRetirementStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRouterStatus{}.OpenAPIModelName()},
 	}
 }
 

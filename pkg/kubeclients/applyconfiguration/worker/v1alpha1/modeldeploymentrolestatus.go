@@ -67,6 +67,24 @@ type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// identical on purpose: a flavor reported here that the gate would not fit against would be
 	// worse than none.
 	AssignedFlavors []string `json:"assignedFlavors,omitempty"`
+	// Parallelism is the parallelism the role's own arguments declare, with the provenance of
+	// the reading. Nothing is defaulted into it: a degree the role never declares is nil, an
+	// explicit 1 and an explicit local 0 are preserved as values, and a reading that has not
+	// happened yet reports Unknown with a reason rather than a silent 1. The numeric results
+	// the prefill/decode transfer document derives from the same arguments are unaffected by
+	// this view.
+	//
+	// It is optional so a role stored before this view existed stays writable: absence names
+	// that fact, never a defaulted reading, and the object the operator writes fills it again.
+	Parallelism *ModelDeploymentRoleParallelismStatusApplyConfiguration `json:"parallelism,omitempty"`
+	// Endpoints is the role's endpoint eligibility and its actual serving confirmation. The two
+	// are separate answers that never collapse: eligibility is the set the operator qualified,
+	// and serving is what Routers were observed to still select. A count that was never
+	// observed is nil, and zero is an observed fact only.
+	//
+	// It is optional like parallelism, and for the same reason: a role stored before this view
+	// existed carries neither object, and absence must not reject its next write.
+	Endpoints *ModelDeploymentRoleEndpointsStatusApplyConfiguration `json:"endpoints,omitempty"`
 }
 
 // ModelDeploymentRoleStatusApplyConfiguration constructs a declarative configuration of the ModelDeploymentRoleStatus type for use with
@@ -130,5 +148,21 @@ func (b *ModelDeploymentRoleStatusApplyConfiguration) WithAssignedFlavors(values
 	for i := range values {
 		b.AssignedFlavors = append(b.AssignedFlavors, values[i])
 	}
+	return b
+}
+
+// WithParallelism sets the Parallelism field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Parallelism field is set to the value of the last call.
+func (b *ModelDeploymentRoleStatusApplyConfiguration) WithParallelism(value *ModelDeploymentRoleParallelismStatusApplyConfiguration) *ModelDeploymentRoleStatusApplyConfiguration {
+	b.Parallelism = value
+	return b
+}
+
+// WithEndpoints sets the Endpoints field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Endpoints field is set to the value of the last call.
+func (b *ModelDeploymentRoleStatusApplyConfiguration) WithEndpoints(value *ModelDeploymentRoleEndpointsStatusApplyConfiguration) *ModelDeploymentRoleStatusApplyConfiguration {
+	b.Endpoints = value
 	return b
 }
