@@ -105,7 +105,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `model-deployment`
 - Use for: describing a serving workload's model, engine and roles; prefill/decode pairing; replica routing, status and metrics.
 - Aliases: `ModelDeployment`, `prefill`, `decode`, `router`, `vLLM`, `SGLang`, `replica`
-- Guides: [Model Deployment](modules/model-deployment/_index.md); the role contract in [Model Deployment Configuration](modules/model-deployment/deployment.md); pairing in [Prefill and Decode](modules/model-deployment/prefill-decode.md).
+- Guides: [Model Deployment](modules/model-deployment/_index.md); the role contract in [Model Deployment Configuration](modules/model-deployment/deployment.md); pairing in [Prefill and Decode](modules/model-deployment/prefill-decode.md); replica selection and Router observation in [Routing](modules/model-deployment/routing.md); what a status field means in [Status](modules/model-deployment/status.md); retirement and drain in [Shutdown](modules/model-deployment/shutdown.md).
 - Specs: [consolidation](../specs/2026-09-18-kvcache-and-model-deployment-consolidation.md) · [role replica admission](../specs/2026-09-19-role-replica-admission-unit.md) · [P/D pairing and router](../specs/2026-09-12-model-deployment-pd-pairing-and-router.md) · [router implementations](../specs/2026-09-19-model-deployment-router-implementations.md) · [router qualification and drain](../specs/2026-10-01-s1-router-qualification-and-drain.md)
 - Code: `model_deployment_*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/) · webhooks in [pkg/worker/webhooks/worker](../pkg/worker/webhooks/worker/) · router image under [pack/llm-router](../pack/llm-router/)
 - Related: [KV Cache](#kv-cache) (a deployment can attach a shared cache) · [Model Delivery](#model-delivery) (weights reach replicas through an artifact) · [Topology Aware](#topology-aware) (the placement field constrains replicas)
@@ -220,10 +220,10 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | [Model Deployment Configuration](modules/model-deployment/deployment.md) | Configure serving roles and overrides. |
 | [Model Deployment Prefill and Decode](modules/model-deployment/prefill-decode.md) | Pair serving roles. |
 | [Engine Versions](modules/model-deployment/engine-versions.md) | Check supported engine versions. |
-| [Model Deployment Routing](modules/model-deployment/routing.md) | Choose a routing policy. |
+| [Model Deployment Routing](modules/model-deployment/routing.md) | Choose a routing policy, confirm a Router serves. |
 | [Model Deployment Metrics](modules/model-deployment/metrics.md) | Read serving metrics. |
-| [Model Deployment Status](modules/model-deployment/status.md) | Diagnose deployment conditions. |
-| [Model Deployment Shutdown](modules/model-deployment/shutdown.md) | Understand replica draining. |
+| [Model Deployment Status](modules/model-deployment/status.md) | Diagnose deployment conditions, follow a retirement. |
+| [Model Deployment Shutdown](modules/model-deployment/shutdown.md) | Understand replica retirement and draining. |
 
 ### Accelerated instances
 

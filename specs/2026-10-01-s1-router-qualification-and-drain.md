@@ -570,7 +570,7 @@ review; exact verification env follows the repo convention
   proven, never a per-member individual zero; missing coverage = Unsupported/Unknown hold).
   Verify: fixture matrix (missing series / wrong container / watch-gap / aggregate-only /
   complete zero ×2 / P/D hold; a body missing a required series as the anchor negative).
-- [ ] **T10 Owning docs + spec sync + full gates.** Blocked by: T1–T9, T11. Owns:
+- [x] **T10 Owning docs + spec sync + full gates.** Blocked by: T1–T9, T11. Owns:
   `docs/modules/model-deployment/{status,routing,shutdown}.md`, `docs/README.md`. Gate: root
   staged-gate review of this task's exact diff before any commit. Acceptance:
   docs match shipped behavior. Verify: `make lint docs`; `make lint`; `make generate` no-diff.
@@ -588,6 +588,19 @@ review; exact verification env follows the repo convention
   committed T7 behavior, kept deliberately over granting eligibility on a weaker signal.
   Verify: package tests (per-engine verifiable/unsupported matrix; healthy multi-member group
   admitted only via the observation; broken collective revoked; single-member path unchanged).
+- [ ] **T12 Shape-aware retirement drain membership.** Blocked by: T9. Owns: drain member
+  selection in-package (`model_deployment_retirement*.go` and its tests) plus the two
+  multi-member limit paragraphs in `docs/modules/model-deployment/shutdown.md`. Gate: root
+  staged-gate review of this task's exact diff before any commit. Acceptance: the retirement
+  drain reads the members the replica's shape makes answerable — every member of an External-DP
+  replica (each one serves), the leader member only of a leader-served multi-member replica
+  (the T9 leader-aggregate contract, mirroring the eligibility rule's per-shape membership), the
+  one member at size one — and a replica whose answering members cannot be identified stays held
+  with the reason naming the shape. The T9 every-member loop can never finish a leader-served
+  multi-member retirement: non-leader members serve no metrics, so the reads hold until the
+  drain budget expires and such a replica is never retired. Verify: package tests (leader-served
+  size-2 drains through the leader alone and completes; External-DP size-2 still reads every
+  member; unidentifiable leadership holds; size-1 path byte-identical).
 
 ### Test Plan
 

@@ -174,6 +174,26 @@ select, and the two never collapse into one number:
   missing. Only `Confirmed` carries `endpoints.serving.value`, and its zero is as real as any
   other number.
 
+**A replica qualifies on five named legs, and a leg this operator cannot evaluate holds.** `MemberSetComplete` (every member the role declares exists), `MembersReady` (each
+answered its engine's health route), `GroupForward` (each member's forward path was observed to
+carry a request), `NoPlannedRetirement` (no retirement operation holds the replica) and
+`NoPendingReplacement` (nothing is already on its way to replace it).
+
+| Leg verdict | What it does |
+|---|---|
+| verified | passes; the replica contributes to `endpoints.eligible` |
+| failed | revokes the replica from the list immediately, whether or not the other legs agreed |
+| unknown | **holds**: it never revokes on its own and never restores |
+
+> A leg that cannot be evaluated is not evidence of a fault. An engine that is still loading, a
+> Router view that has gone stale and a replica whose group was not observed are all cases where
+> the operator cannot tell. `endpoints.eligible` stays `null` in each, because a short list here
+> would be contradicted by a later pass.
+
+A replica that was qualifying and stops is restored only when the legs pass again **and** the group
+still holds the same members. A replica replaced in the meantime is a different group, and the
+answer that held for the old one does not carry over to it.
+
 The `EndpointEligibility` condition says the same thing at the deployment level: while no
 qualification observation exists it is `Unknown` with reason `NotObserved` — not `False`,
 which would say the operator disqualified endpoints it saw. A pass that has qualified nothing
@@ -190,8 +210,41 @@ against, and the target member Pod and Workload UIDs its deletions carry as prec
 `lastConsumedRetryToken` is the retry directive token already consumed, persisted before the
 annotation that carried it is cleared.
 
-`Aborted` is retained capacity, not a rollback: a budget exhausted before deletion leaves
-every member and the Workload in place.
+**Three kinds of removal start an operation, and they are the ones that take capacity away from a
+role the spec still declares.** A `replicas` reduction starts one for the ordinals it no longer
+declares, a shed of surplus replicas starts one for the whole set at once, and a replica of a role
+the spec has dropped — by a scale-away or a role rename — starts one.
+
+Everything else that deletes a replica deletes it without an operation, including the rollout that
+turns an outdated replica over.
+
+> The three are the removals for which a withdrawal and a drain are worth their cost, since each
+> one takes away capacity the deployment had. A rollout replaces a replica with an identical one and
+> has nothing to protect, so it does not pay for a protocol.
+
+**A second removal arriving mid-operation is refused, and the replica is held.** At most one
+operation runs at a time, and the replica a second intent named stays where it is, so it is not
+taken out from under the first. Look for `reason` naming the refusal when a scale-down appears to
+stall behind another removal.
+
+**Each step has its own budget, and the operation has a total.** A phase that runs out ends the
+operation, and the total is the earlier of the two:
+
+| Step | Budget |
+|---|---|
+| `Withdrawing` | 30 s |
+| `Draining` | 240 s |
+| `Settling` | 30 s |
+| whole operation | 300 s |
+
+`Aborted` is retained capacity, not a rollback: a budget exhausted before deletion leaves every
+member and the Workload in place, and the reason names the step that ran out. `Completed` is the
+one state that clears the field, because a reservation left behind would keep holding a slot no
+operation occupies.
+
+The drain step is where a replica still holding requests is caught before anything is cut; it is
+described in [Model Deployment Shutdown](shutdown.md#the-retirement-protocol).
+
 
 Eight conditions carry the axes a single phase cannot. They are independent: "quota reserved but
 cache not attached" is a real and actionable state. Seven are described below; `WeightsReady` is
