@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -903,6 +904,131 @@ func TestTheProtocolDeleteCarriesItsUIDPrecondition(t *testing.T) {
 
 	assert.Contains(t, preconditions, "member-1",
 		"the protocol deletes the UID it reserved, not whatever holds the name")
+}
+
+// TestAScaleDownRunsTheWholeProtocolFromNoReservation is the lifecycle the other pass-through
+// cases split in two.
+//
+// Every other case here seeds a reservation, so each proves the protocol resumes correctly INTO a
+// state it was handed. None of them proves the chain runs from nothing: the spec says one replica,
+// two exist, no operation is recorded, and the first pass has to notice the removal, admit it, and
+// delete nothing. That first step is the one the seeding hides. The replica set is carried in the
+// same table because it is what the create gate looks at -- a retiring ordinal that refilled before
+// its operation cleared would turn a retirement back into a rollout, and the last step is that the
+// ordinal is free again once the operation has actually ended.
+func TestAScaleDownRunsTheWholeProtocolFromNoReservation(t *testing.T) {
+	testCases := []struct {
+		wantState    workercore.ModelDeploymentRetirementState
+		wantCleared  bool
+		wantOrdinals []string
+		why          string
+	}{
+		{
+			wantState:    workercore.ModelDeploymentRetirementStateAdmitted,
+			wantOrdinals: []string{"0", "1"},
+			why:          "the first pass notices the removal, admits it, and deletes nothing",
+		},
+		{
+			// The whole-group predicate already refuses a reserved replica, so the pass after the
+			// admission finds the target out of selection rather than serving it. This is the state
+			// every seeded case skips, and it is why the seeded whole-protocol test does not name it.
+			wantState:    workercore.ModelDeploymentRetirementStateDisqualified,
+			wantOrdinals: []string{"0", "1"},
+			why:          "a reserved replica is out of selection, so the operation disqualifies itself",
+		},
+		{
+			wantState:    workercore.ModelDeploymentRetirementStateWithdrawing,
+			wantOrdinals: []string{"0", "1"},
+			why:          "the operation stops selecting the target from the routers",
+		},
+		{
+			wantState:    workercore.ModelDeploymentRetirementStateDraining,
+			wantOrdinals: []string{"0", "1"},
+			why:          "the operation reads the target's own in-flight gauges before deleting it",
+		},
+		{
+			wantState:    workercore.ModelDeploymentRetirementStateDeleting,
+			wantOrdinals: []string{"0"},
+			why: "the delete is committed on this pass, so the target is gone from here on and " +
+				"nothing refills the ordinal while the operation still has phases left to run",
+		},
+		{
+			wantState:    workercore.ModelDeploymentRetirementStateSettling,
+			wantOrdinals: []string{"0"},
+			why:          "the target is gone, so the operation settles",
+		},
+		{
+			// The last phase sets Completed and Clear in the same pass, so Completed is never a
+			// state a reader of the status can observe -- what a reader sees is its absence. The
+			// table says so rather than naming a state the API never carries.
+			wantState:    workercore.ModelDeploymentRetirementStateCompleted,
+			wantCleared:  true,
+			wantOrdinals: []string{"0"},
+			why: "the operation reaches Completed and clears in one pass, leaving the one replica " +
+				"the spec asks for",
+		},
+	}
+
+	md := retirementDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+	})
+	kept := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
+	target := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
+	target.UID = "member-1"
+	cli := newModelDeploymentClient(md, newRenderInstanceType(), kept, target)
+	r := holdReconciler(cli, &scriptedDrainReader{
+		answers: map[types.UID][]modelDeploymentDrainAnswer{"member-1": {idleDrain(), idleDrain()}},
+	}, time.Now())
+
+	require.Nil(t, getModelDeployment(t, cli).Status.Retirement,
+		"the deployment starts with no operation, which is the whole point of this case")
+
+	for _, tc := range testCases {
+		_, err := reconcileModelDeploymentWith(t, r)
+		require.NoError(t, err)
+
+		after := getModelDeployment(t, cli)
+		if tc.wantCleared {
+			assert.Nil(t, after.Status.Retirement, tc.why)
+		} else {
+			require.NotNil(t, after.Status.Retirement, tc.why)
+			assert.Equal(t, tc.wantState, after.Status.Retirement.State, tc.why)
+		}
+		assert.Equal(t, tc.wantOrdinals, replicaOrdinals(t, cli), tc.why)
+	}
+
+	assert.Nil(t, getModelDeployment(t, cli).Status.Retirement,
+		"a completed operation is cleared rather than left as a tombstone that keeps holding the ordinal")
+
+	// THE ORDINAL IS FREE ONLY NOW. Re-declaring the replica the operation retired is the check the
+	// table cannot make while the operation is running, because a gate that never opened and a gate
+	// that was merely closed both look the same from inside the operation.
+	scaled := getModelDeployment(t, cli)
+	scaled.Spec.Roles[0].Replicas = 2
+	require.NoError(t, cli.Update(context.Background(), scaled))
+	_, err := reconcileModelDeploymentWith(t, r)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"0", "1"}, replicaOrdinals(t, cli),
+		"the retired ordinal is usable again once the operation has cleared")
+}
+
+// replicaOrdinals lists the ordinals a deployment currently occupies, which is what the create gate
+// reads and what this test is about. Pod names are not: a replica the controller creates is named
+// after a render hash, so a recreated ordinal comes back under a different name than the one it
+// retired under.
+func replicaOrdinals(t *testing.T, cli ctrlcli.Client) []string {
+	t.Helper()
+	podList := new(core.PodList)
+	require.NoError(t, cli.List(context.Background(), podList, ctrlcli.InNamespace("team-a")))
+
+	ordinals := make([]string, 0, len(podList.Items))
+	for i := range podList.Items {
+		ordinals = append(ordinals, podList.Items[i].Labels[modelDeploymentReplicaOrdinalLabel])
+	}
+	slices.Sort(ordinals)
+
+	return ordinals
 }
 
 // TestTheCreateGateDoesNotRefillTheSlotTheOperationIsEmptying pins the seventh guard, which the

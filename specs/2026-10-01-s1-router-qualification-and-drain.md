@@ -222,9 +222,12 @@ The reservation identity binds the ModelDeployment UID, the admitting `metadata.
 `phaseStartedAt` is persisted so a controller restart never resets a phase budget. Fixed
 conservative initial budgets, reviewed here: withdrawal 30s, drain 240s, settle 30s, overall
 300s; a phase ends at min(overall deadline, phase start + phase budget); the settle phase runs
-after the committed deletion and its expiry is reporting, not a further safety gate. Deletion
-requires a nonempty current target set, and every Pod and Workload delete carries a UID
-precondition.
+after the committed deletion and its expiry is reporting, not a further safety gate. The
+protocol's own deletion requires a nonempty current target set, and every Pod and Workload delete
+it issues carries a UID precondition — a same-name replacement the protocol never confirmed and
+drained is never deleted. Every other owner-driven deletion path is governed by the interception
+rule of the next paragraph (it holds at the protocol instead of deleting); those paths address a
+replica by ordinal, whose current occupant is the intended target.
 
 **Reservation ownership covers every owner-driven deletion path, not just scale-down.** The
 reconciler today deletes replicas and Workloads on several paths: ordinal ≥ declared removal
@@ -544,7 +547,9 @@ review; exact verification env follows the repo convention
   state, and observer patches land after T4 so no two writers touch `pack/llm-router` at once).
   Owns: observer-only patch additions + Go client/aggregation. Gate: root staged-gate review of
   this task's exact diff before any commit. Acceptance: AC-2.1–2.6 with the listed negatives.
-  Verify: package tests + harness negatives.
+  Verify: package tests + harness negatives. T7 and later serial-package tasks committed while
+  this box stays unchecked; the pending state tracks only the F1 runtime acceptance, not a
+  dependency violation.
 - [x] **T7 Group health predicate + activation gating.** Blocked by: T6. Owns: controller
   health/eligibility paths (globs: `pkg/worker/controllers/worker/model_deployment*.go`, serial
   package). Gate: root staged-gate review of this task's exact diff before any commit.

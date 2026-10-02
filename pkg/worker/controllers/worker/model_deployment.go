@@ -489,9 +489,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// for it. The deletes above cover only what this pass itself sent away.
 	// A RESERVED MEMBER IS NEVER DEPARTING, so the sweep's own rule already protects it: a group
 	// with a member still standing keeps its Workload, and the reservation's target is standing by
-	// definition. The argument is passed anyway so that the protection is the protocol's and not
-	// only the sweep's inference -- if a reserved member ever did reach this list as departing, the
-	// right answer would be external termination reported by the state machine, not a silent skip.
+	// definition. That rule is the whole of the protection here, and it is enough: a reserved
+	// member terminated from outside reaches the reservation as an external termination, which the
+	// state machine observes and records, so this sweep has no need of the reservation to tell
+	// those two apart.
 	if err = r.releaseModelDeploymentStrandedWorkloads(ctx, md, actual); err != nil {
 		logger.Error(err, "release the workloads of replicas nothing here sent away")
 		return ctrl.Result{}, err
@@ -724,7 +725,6 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				continue
 			}
 
-			println("DBG rollout condemns", pod.Name, "ordinal", ordinal)
 			outdatedByOrdinal[ordinal] = true
 		}
 
