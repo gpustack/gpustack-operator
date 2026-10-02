@@ -1025,7 +1025,9 @@ const (
 	// ModelDeploymentRetirementStateAborted is a budget exhausted before deletion: members, Workload
 	// and capacity were retained, and a healthy instance requalifies without a rollout.
 	ModelDeploymentRetirementStateAborted ModelDeploymentRetirementState = "Aborted"
-	// ModelDeploymentRetirementStateCompleted is the observed end of a completed retirement.
+	// ModelDeploymentRetirementStateCompleted is the terminal transition of a completed
+	// retirement: it is set on the same pass that clears the reservation, so a reader of the
+	// status observes completion as the field's absence and never sees this value stored.
 	ModelDeploymentRetirementStateCompleted ModelDeploymentRetirementState = "Completed"
 )
 
