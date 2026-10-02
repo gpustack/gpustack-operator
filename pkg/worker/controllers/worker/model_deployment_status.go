@@ -160,10 +160,17 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod, domain *modelDeploymentDomain,
 	rollout *modelDeploymentRollout, weights *modelArtifactWeights,
 ) error {
+	// The serving answer is read per pass, before the status is derived: it is an
+	// observation of the Routers as they exist right now, and a change in it must reach
+	// the status on its own, the way any other observed change does. Every failure on the
+	// way is already a state of the answer, never a reconcile error.
+	serving := r.observeModelDeploymentServing(ctx, md)
+
 	desired, err := r.computeModelDeploymentStatus(ctx, md, pods, domain, rollout, weights)
 	if err != nil {
 		return err
 	}
+	applyModelDeploymentServing(desired, serving)
 
 	// kubemeta.DeepEqual covers LastTransitionTime too, and that is correct rather than incidental:
 	// the condition accessors move it only when the condition's value changes, so an unchanged pass

@@ -1,0 +1,354 @@
+Expose a read-only, identity-bound membership view of the worker registry at
+GET /observer/endpoints, for external confirmation of who would actually
+answer, with the gateway's own control-plane operational state included.
+
+THE PURPOSE. The gateway's existing surfaces answer a different question than
+the one external confirmation asks. /worker_list reports the registry; the
+request path additionally applies health and circuit-breaker filters on the way
+to each request, so a registered worker the selection would never pick is
+invisible in a listing and yet occupies a place in the pool's bookkeeping.
+Confirmation needs the selection-time view: per worker, the same predicates the
+dispatcher evaluates, evaluated by the same accessor calls -- is_healthy() and
+circuit_breaker().can_execute(), whose conjunction is_available() is exactly
+what the request path consults (src/core/worker.rs:124-129).
+
+WHAT THE GATEWAY VIEW ADDS. This gateway routes every discovery-side mutation
+through a per-URL lane queue (added by
+0001-discovery-readiness-and-deselect-removal.patch), and the queue's own
+bookkeeping is part of what an external confirmation needs to see: whether a
+URL's lane is busy or has jobs waiting, and what the last control-plane job for
+that URL recorded (including a failure, which the queue keeps until the
+operation succeeds). The view reads those through the queue's public getters --
+a new read-only lane_occupancy() accessor on JobQueue and the existing
+get_status() -- so the payload shows the machinery without being able to move
+it. A gateway configured without the queue omits these fields.
+
+READ-ONLY, AND WHY THAT IS THE WHOLE CONTRACT. The handler contains no policy
+and no mutation: it iterates the registry's public snapshot
+(WorkerRegistry::get_all_with_ids), reads is_healthy(),
+circuit_breaker().state() and can_execute() off each live worker, and
+serializes. The lane read iterates a DashMap snapshot; get_status clones an
+existing entry. No fault-injection, no force-failure, no configuration of any
+kind: there is no input this endpoint accepts that changes what the gateway
+does, which is exactly the boundary the fault-injection ruling drew and the
+reason cells that need a workflow to fail stay outside what any runtime can
+drive.
+
+IDENTITY BOUNDARY. The registry is URL-keyed and the gateway does not know
+Kubernetes Pod identities beyond the UID strings discovery already carries, so
+the payload carries the URL, its port, the role name
+(regular/prefill/decode), and the URL's host as `pod_hint` -- a convenience
+echo, never an authoritative identity. Binding an endpoint to a Pod UID is
+performed by the operator at collection time from its own Kubernetes state.
+
+FRESHNESS. `boot_generation` is the process start time in milliseconds:
+constant within a process, different after every restart, so a consumer can
+tell a restarted gateway from a converging one. `now_ms` is the response time.
+`registry_revision` is a process-local counter that increments whenever the
+serialized worker array changes (deterministic URL ordering makes the array
+comparable), so equal consecutive revisions mean the registry content is
+unchanged between them.
+
+PLACEMENT. The handler is a new module (sgl-model-gateway/src/observer.rs)
+wired with one mod declaration and one route line in the admin route group --
+behind the same control-plane auth every admin route already carries -- plus
+one read-only accessor on JobQueue. No existing handler, middleware, or policy
+file is modified.
+
+Written against sgl-project/sglang gateway-v0.3.1 (sgl-model-gateway) on top of
+0001-discovery-readiness-and-deselect-removal.patch.
+diff --git a/sgl-model-gateway/src/core/job_queue.rs b/sgl-model-gateway/src/core/job_queue.rs
+index 1dfc59f..46aaaca 100644
+--- a/sgl-model-gateway/src/core/job_queue.rs
++++ b/sgl-model-gateway/src/core/job_queue.rs
+@@ -415,6 +415,23 @@ impl JobQueue {
+         self.status_map.get(worker_url).map(|entry| entry.clone())
+     }
+ 
++    /// Read-only occupancy snapshot of the per-URL lanes, for the external
++    /// observer: one `(url, busy, waiting)` triple per live lane. Reading never
++    /// mutates a lane and never touches the dispatcher; iteration order follows
++    /// the internal map and is not specified.
++    pub fn lane_occupancy(&self) -> Vec<(String, bool, usize)> {
++        self.url_lanes
++            .iter()
++            .map(|entry| {
++                (
++                    entry.key().clone(),
++                    entry.value().busy,
++                    entry.value().waiting.len(),
++                )
++            })
++            .collect()
++    }
++
+     /// Remove job status (called when worker is deleted)
+     pub fn remove_status(&self, worker_url: &str) {
+         self.status_map.remove(worker_url);
+diff --git a/sgl-model-gateway/src/lib.rs b/sgl-model-gateway/src/lib.rs
+index a4ee2e7..0c9171f 100644
+--- a/sgl-model-gateway/src/lib.rs
++++ b/sgl-model-gateway/src/lib.rs
+@@ -8,6 +8,7 @@ pub mod mcp;
+ pub mod middleware;
+ pub mod multimodal;
+ pub mod observability;
++pub mod observer;
+ pub mod policies;
+ pub mod protocols;
+ pub mod reasoning_parser;
+diff --git a/sgl-model-gateway/src/observer.rs b/sgl-model-gateway/src/observer.rs
+new file mode 100644
+index 0000000..3b66a88
+--- /dev/null
++++ b/sgl-model-gateway/src/observer.rs
+@@ -0,0 +1,236 @@
++// Read-only endpoint observer for external confirmation of pool membership.
++//
++// WHAT THIS IS. One GET handler that serializes the worker registry the request path
++// already consults, together with the per-worker facts the request path already applies
++// when it decides who may answer: registration in the registry, health, and the circuit
++// breaker state. `in_selection` is the conjunction a request would evaluate. The gateway
++// view additionally reports the operational state its own control plane keeps that a
++// confirmation consumer needs to see: the per-URL lane occupancy the discovery queue
++// maintains and the last recorded control-plane job status (including a failure), read
++// back through the queue's existing public getters.
++//
++// WHAT THIS IS NOT. This module writes nothing. It never submits, completes or fails a
++// job, never calls add/withdraw, and has no configuration. Reading lane occupancy and a
++// recorded status is observability of machinery that exists; it is not a way to make the
++// machinery do anything, which is exactly the boundary the fault-injection ruling drew.
++//
++// IDENTITY BOUNDARY. The registry is keyed by URL and the gateway does not know
++// Kubernetes Pod identities beyond the UID strings discovery already carries. `pod_hint`
++// is the URL's host portion, carried for operator convenience; the binding of an endpoint
++// to a Pod UID is performed by the operator at collection time from its own Kubernetes
++// state, never from this payload.
++//
++// FRESHNESS. `boot_generation` is the process start time in milliseconds and therefore
++// changes on every restart; `now_ms` is the response time; `registry_revision` is a
++// process-local counter that increments whenever the serialized worker array changes, so
++// two consecutive equal revisions mean the registry content is unchanged between them.
++use std::collections::BTreeMap;
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::sync::{Arc, Mutex, OnceLock};
++use std::time::{SystemTime, UNIX_EPOCH};
++
++use axum::extract::State;
++use axum::http::{HeaderMap, StatusCode};
++use axum::response::{IntoResponse, Response};
++use serde::Serialize;
++
++use crate::core::circuit_breaker::CircuitState;
++use crate::core::worker::Worker;
++use crate::server::AppState;
++
++/// Process start time in milliseconds. Constant for the life of the process and different
++/// after every restart, which is the property a boot generation needs.
++fn boot_generation() -> u64 {
++    static BOOT: OnceLock<u64> = OnceLock::new();
++    *BOOT.get_or_init(|| {
++        SystemTime::now()
++            .duration_since(UNIX_EPOCH)
++            .map(|d| d.as_millis() as u64)
++            .unwrap_or(0)
++    })
++}
++
++fn now_ms() -> u64 {
++    SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .map(|d| d.as_millis() as u64)
++        .unwrap_or(0)
++}
++
++#[derive(Serialize)]
++struct ObserverRouter {
++    boot_generation: u64,
++    now_ms: u64,
++}
++
++#[derive(Serialize)]
++struct ObserverLane {
++    busy: bool,
++    waiting: usize,
++}
++
++#[derive(Serialize)]
++struct ObserverSelection {
++    registered: bool,
++    healthy: bool,
++    circuit_open: bool,
++    in_selection: bool,
++}
++
++#[derive(Serialize)]
++struct ObserverWorker {
++    url: String,
++    port: Option<String>,
++    role: String,
++    pod_hint: String,
++    worker_id: String,
++    selection: ObserverSelection,
++    // Gateway-only operational reads; absent on the Rust sibling router's payload by
++    // design, since its control plane keeps no per-URL queue.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    lane: Option<ObserverLane>,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    last_job: Option<serde_json::Value>,
++}
++
++#[derive(Serialize)]
++struct ObserverView {
++    router: ObserverRouter,
++    registry_revision: u64,
++    workers: Vec<ObserverWorker>,
++}
++
++/// The URL's host portion, for operator convenience only (see the module header). A URL
++/// the gateway holds in an unexpected shape yields an empty hint rather than a guess.
++fn pod_hint(url: &str) -> String {
++    let without_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
++    let host = without_scheme.split(['/', '?']).next().unwrap_or("");
++    host.to_string()
++}
++
++/// The URL's port portion, when the URL carries one.
++fn url_port(url: &str) -> Option<String> {
++    let without_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
++    let host = without_scheme.split('/').next().unwrap_or("");
++    let (_, port) = host.rsplit_once(':')?;
++    if port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
++        return None;
++    }
++    Some(port.to_string())
++}
++
++/// The role name as the request path uses it.
++fn role_name(worker: &Worker) -> String {
++    match worker.worker_type() {
++        crate::core::worker::WorkerType::Regular => "regular".to_string(),
++        crate::core::worker::WorkerType::Prefill { .. } => "prefill".to_string(),
++        crate::core::worker::WorkerType::Decode => "decode".to_string(),
++    }
++}
++
++fn collect_workers(state: &AppState) -> Vec<ObserverWorker> {
++    // A BTreeMap keyed by URL gives the serialization a deterministic order regardless of
++    // the registry's internal map iteration order, which is what makes two consecutive
++    // revisions comparable at all.
++    let mut by_url: BTreeMap<String, ObserverWorker> = BTreeMap::new();
++    for (id, worker) in state.context.worker_registry.get_all_with_ids() {
++        let url = worker.url().to_string();
++        let healthy = worker.is_healthy();
++        // The circuit state is read for the report only; can_execute is the exact
++        // predicate the request path evaluates (see the module header).
++        let circuit_open = matches!(worker.circuit_breaker().state(), CircuitState::Open);
++        let in_selection = healthy && worker.circuit_breaker().can_execute();
++        by_url.insert(
++            url.clone(),
++            ObserverWorker {
++                port: url_port(&url),
++                role: role_name(worker.as_ref()),
++                pod_hint: pod_hint(&url),
++                worker_id: id.0.clone(),
++                selection: ObserverSelection {
++                    registered: true,
++                    healthy,
++                    circuit_open,
++                    in_selection,
++                },
++                lane: None,
++                last_job: None,
++            },
++        );
++    }
++    // The queue is optional at runtime (a gateway configured without the discovery
++    // control plane has none); an absent queue simply omits the operational reads.
++    if let Some(queue) = state.context.worker_job_queue.get() {
++        for (url, busy, waiting) in queue.lane_occupancy() {
++            if let Some(entry) = by_url.get_mut(&url) {
++                entry.lane = Some(ObserverLane { busy, waiting });
++            }
++        }
++        for url in by_url.keys().cloned().collect::<Vec<_>>() {
++            if let Some(status) = queue.get_status(&url) {
++                if let Ok(value) = serde_json::to_value(&status) {
++                    if let Some(entry) = by_url.get_mut(&url) {
++                        entry.last_job = Some(value);
++                    }
++                }
++            }
++        }
++    }
++    by_url.into_values().collect()
++}
++
++static LAST_WORKERS_JSON: Mutex<Option<String>> = Mutex::new(None);
++static VIEW_REVISION: AtomicU64 = AtomicU64::new(1);
++
++/// One revision per distinct serialized worker array within this boot. Two views with the
++/// same revision are the same registry content; a larger revision is a change the operator
++/// can wait out and re-read.
++fn registry_revision_for(workers_json: &str) -> u64 {
++    let mut last = LAST_WORKERS_JSON
++        .lock()
++        .unwrap_or_else(|poisoned| poisoned.into_inner());
++    if last.as_deref() != Some(workers_json) {
++        *last = Some(workers_json.to_string());
++        VIEW_REVISION.fetch_add(1, Ordering::Relaxed);
++    }
++    VIEW_REVISION.load(Ordering::Relaxed)
++}
++
++/// GET /observer/endpoints — the read-only view this module exists for.
++pub async fn observer_endpoints(
++    State(state): State<Arc<AppState>>,
++    _headers: HeaderMap,
++) -> Response {
++    let workers = collect_workers(&state);
++    let workers_json = match serde_json::to_string(&workers) {
++        Ok(json) => json,
++        Err(_) => {
++            return (
++                StatusCode::INTERNAL_SERVER_ERROR,
++                "observer failed to serialize workers",
++            )
++                .into_response()
++        }
++    };
++    let revision = registry_revision_for(&workers_json);
++    let view = ObserverView {
++        router: ObserverRouter {
++            boot_generation: boot_generation(),
++            now_ms: now_ms(),
++        },
++        registry_revision: revision,
++        workers,
++    };
++    match serde_json::to_string(&view) {
++        Ok(body) => (
++            [(axum::http::header::CONTENT_TYPE, "application/json")],
++            body,
++        )
++            .into_response(),
++        Err(_) => (
++            StatusCode::INTERNAL_SERVER_ERROR,
++            "observer failed to serialize view",
++        )
++            .into_response(),
++    }
++}
+diff --git a/sgl-model-gateway/src/server.rs b/sgl-model-gateway/src/server.rs
+index a549162..4b29223 100644
+--- a/sgl-model-gateway/src/server.rs
++++ b/sgl-model-gateway/src/server.rs
+@@ -608,6 +608,8 @@ pub fn build_app(
+         .route("/wasm", post(add_wasm_module))
+         .route("/wasm/{module_uuid}", delete(remove_wasm_module))
+         .route("/wasm", get(list_wasm_modules))
++        // Read-only external observation of pool membership (see src/observer.rs).
++        .route("/observer/endpoints", get(crate::observer::observer_endpoints))
+         // Tokenizer management endpoints
+         .route(
+             "/v1/tokenizers",

@@ -77,6 +77,12 @@ type ModelDeploymentReconciler struct {
 	// today: the concrete per-engine reader is not written, and inventing a metric name would be the
 	// exact assumption the condition exists to refuse.
 	CacheScraper ModelDeploymentCacheScraper
+
+	// servingViewFetch reads one Router Pod's observer view. It is a function rather
+	// than a dial this reconciler makes, for the same reason CacheScraper is: the
+	// states the serving answer has to get right are failures, and a real dial cannot
+	// be made to fail on demand. A nil fetch means the production transport.
+	servingViewFetch routerViewFetch
 }
 
 var _ ctrlreconcile.Reconciler = (*ModelDeploymentReconciler)(nil)

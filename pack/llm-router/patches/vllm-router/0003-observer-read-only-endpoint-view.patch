@@ -1,0 +1,296 @@
+Expose a read-only, identity-bound membership view of the worker registry at
+GET /observer/endpoints, for external confirmation of who would actually
+answer.
+
+THE PURPOSE. The router's existing surfaces answer a different question than
+the one external confirmation asks. /list_workers and /workers report the
+registry; the request path additionally applies health and circuit-breaker
+filters on the way to each request, so a registered worker that the selection
+would never pick is invisible in a listing and yet occupies a place in the
+pool's bookkeeping. Confirmation needs the selection-time view: per worker, the
+same predicates the dispatcher evaluates, evaluated by the same accessor calls
+-- is_healthy() and circuit_breaker().can_execute(), whose conjunction
+is_available() is exactly what the request path consults
+(src/core/worker.rs:77-82).
+
+READ-ONLY, AND WHY THAT IS THE WHOLE CONTRACT. The handler contains no policy
+and no mutation: it iterates the registry's public snapshot
+(WorkerRegistry::get_all_with_ids), reads is_healthy(), circuit_breaker().state()
+and can_execute() off each live worker, and serializes. It never takes a
+write path, never calls add/withdraw/record_outcome, and holds no configuration.
+A patch that could nudge selection would not be an observer; this one contains
+nothing that could.
+
+IDENTITY BOUNDARY. The registry is URL-keyed and the router does not know
+Kubernetes Pod identities, so the payload carries the URL, its port, the role
+name (regular/prefill/decode from worker_type()), and the URL's host as
+`pod_hint` -- a convenience echo, never an authoritative identity. Binding an
+endpoint to a Pod UID is performed by the operator at collection time from its
+own Kubernetes state; the design this patch implements assigns that binding to
+the collector precisely so the router never grows an invented native identity
+label.
+
+FRESHNESS. `boot_generation` is the process start time in milliseconds:
+constant within a process, different after every restart, so a consumer can
+tell a restarted router from a converging one. `now_ms` is the response time.
+`registry_revision` is a process-local counter that increments whenever the
+serialized worker array changes (deterministic URL ordering makes the array
+comparable), so equal consecutive revisions mean the registry content is
+unchanged between them.
+
+PLACEMENT. The handler is a new module (src/observer.rs) wired with one mod
+declaration and one route line in the admin route group, next to /list_workers.
+No existing handler, middleware, or policy file is modified.
+
+Written against vllm-project/router v0.1.15 on top of
+0001-mooncake-lazy-bootstrap-lookup.patch and
+0002-discovery-readiness-and-deselect-removal.patch.
+diff --git a/src/lib.rs b/src/lib.rs
+index 5c4c406..8388376 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -6,6 +6,7 @@ use std::collections::HashMap;
+ pub mod core;
+ pub mod data_connector;
+ pub mod metrics;
++pub mod observer;
+ pub mod middleware;
+ pub mod otel_http;
+ pub mod otel_trace;
+diff --git a/src/observer.rs b/src/observer.rs
+new file mode 100644
+index 0000000..2a338c7
+--- /dev/null
++++ b/src/observer.rs
+@@ -0,0 +1,216 @@
++// Read-only endpoint observer for external confirmation of pool membership.
++//
++// WHAT THIS IS. One GET handler that serializes the worker registry the request path
++// already consults, together with the per-worker facts the request path already applies
++// when it decides who may answer: registration in the registry, health, and the circuit
++// breaker state. `in_selection` is the conjunction a request would evaluate; it is
++// computed here from the same accessor calls the dispatcher makes, never from a separate
++// opinion about who should serve.
++//
++// WHAT THIS IS NOT. This module writes nothing. It takes no lock a request path needs
++// beyond the registry's own read iteration, it never calls add/withdraw/record_outcome,
++// and it has no configuration. It cannot change selection policy because it contains no
++// policy: every field it reports is read off the live worker objects.
++//
++// IDENTITY BOUNDARY. The registry is keyed by URL and the router does not know
++// Kubernetes Pod identities. `pod_hint` is the URL's host portion, carried for operator
++// convenience only; the binding of an endpoint to a Pod UID is performed by the operator
++// at collection time from its own Kubernetes state, never from this payload.
++//
++// FRESHNESS. `boot_generation` is the process start time in milliseconds and therefore
++// changes on every restart; `now_ms` is the response time; `registry_revision` is a
++// process-local counter that increments whenever the serialized worker array changes, so
++// two consecutive equal revisions mean the registry content is unchanged between them.
++use std::collections::BTreeMap;
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::sync::Mutex;
++use std::time::{SystemTime, UNIX_EPOCH};
++
++use axum::extract::State;
++use axum::http::{HeaderMap, StatusCode};
++use axum::response::{IntoResponse, Response};
++use serde::Serialize;
++use std::sync::Arc;
++use std::sync::OnceLock;
++
++use crate::core::circuit_breaker::CircuitState;
++use crate::server::AppState;
++
++/// Process start time in milliseconds. Constant for the life of the process and different
++/// after every restart, which is the property a boot generation needs.
++fn boot_generation() -> u64 {
++    static BOOT: OnceLock<u64> = OnceLock::new();
++    *BOOT.get_or_init(|| {
++        SystemTime::now()
++            .duration_since(UNIX_EPOCH)
++            .map(|d| d.as_millis() as u64)
++            .unwrap_or(0)
++    })
++}
++
++fn now_ms() -> u64 {
++    SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .map(|d| d.as_millis() as u64)
++        .unwrap_or(0)
++}
++
++#[derive(Serialize)]
++struct ObserverRouter {
++    boot_generation: u64,
++    now_ms: u64,
++}
++
++#[derive(Serialize)]
++struct ObserverSelection {
++    registered: bool,
++    healthy: bool,
++    circuit_open: bool,
++    in_selection: bool,
++}
++
++#[derive(Serialize)]
++struct ObserverWorker {
++    url: String,
++    port: Option<String>,
++    role: String,
++    pod_hint: String,
++    worker_id: String,
++    selection: ObserverSelection,
++}
++
++#[derive(Serialize)]
++struct ObserverView {
++    router: ObserverRouter,
++    registry_revision: u64,
++    workers: Vec<ObserverWorker>,
++}
++
++/// The URL's host portion, for operator convenience only (see the module header). A URL
++/// the router holds in an unexpected shape yields an empty hint rather than a guess.
++fn pod_hint(url: &str) -> String {
++    let without_scheme = url
++        .split_once("://")
++        .map(|(_, rest)| rest)
++        .unwrap_or(url);
++    let host = without_scheme
++        .split(['/', '?'])
++        .next()
++        .unwrap_or("");
++    host.to_string()
++}
++
++/// The URL's port portion, when the URL carries one.
++fn url_port(url: &str) -> Option<String> {
++    let without_scheme = url
++        .split_once("://")
++        .map(|(_, rest)| rest)
++        .unwrap_or(url);
++    let host = without_scheme.split('/').next().unwrap_or("");
++    let (_, port) = host.rsplit_once(':')?;
++    if port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
++        return None;
++    }
++    Some(port.to_string())
++}
++
++/// The role name as the request path uses it. PD roles carry the bootstrap port in their
++/// type; the role NAME is what an observer consumer needs and the port is the endpoint's
++/// own serving port, not the bootstrap port.
++fn role_name(worker: &dyn crate::core::Worker) -> String {
++    match worker.worker_type() {
++        crate::core::WorkerType::Regular => "regular".to_string(),
++        crate::core::WorkerType::Prefill { .. } => "prefill".to_string(),
++        crate::core::WorkerType::Decode { .. } => "decode".to_string(),
++    }
++}
++
++fn collect_workers(state: &AppState) -> Vec<ObserverWorker> {
++    // A BTreeMap keyed by URL gives the serialization a deterministic order regardless of
++    // the registry's internal map iteration order, which is what makes two consecutive
++    // revisions comparable at all.
++    let mut by_url: BTreeMap<String, ObserverWorker> = BTreeMap::new();
++    for (id, worker) in state.worker_registry.get_all_with_ids() {
++        let url = worker.url().to_string();
++        let healthy = worker.is_healthy();
++        // The circuit state is read for the report only; can_execute is the exact
++        // predicate the request path evaluates (see the module header).
++        let circuit_open = matches!(
++            worker.circuit_breaker().state(),
++            CircuitState::Open
++        );
++        let in_selection = healthy && worker.circuit_breaker().can_execute();
++        by_url.insert(
++            url.clone(),
++            ObserverWorker {
++                port: url_port(&url),
++                role: role_name(worker.as_ref()),
++                pod_hint: pod_hint(&url),
++                worker_id: id.0.clone(),
++                selection: ObserverSelection {
++                    registered: true,
++                    healthy,
++                    circuit_open,
++                    in_selection,
++                },
++            },
++        );
++    }
++    by_url.into_values().collect()
++}
++
++static LAST_WORKERS_JSON: Mutex<Option<String>> = Mutex::new(None);
++static VIEW_REVISION: AtomicU64 = AtomicU64::new(1);
++
++/// One revision per distinct serialized worker array within this boot. Two views with the
++/// same revision are the same registry content; a larger revision is a change the operator
++/// can wait out and re-read.
++fn registry_revision_for(workers_json: &str) -> u64 {
++    let mut last = LAST_WORKERS_JSON
++        .lock()
++        .unwrap_or_else(|poisoned| poisoned.into_inner());
++    if last.as_deref() != Some(workers_json) {
++        *last = Some(workers_json.to_string());
++        VIEW_REVISION.fetch_add(1, Ordering::Relaxed);
++    }
++    VIEW_REVISION.load(Ordering::Relaxed)
++}
++
++/// GET /observer/endpoints — the read-only view this module exists for.
++pub async fn observer_endpoints(
++    State(state): State<Arc<AppState>>,
++    _headers: HeaderMap,
++) -> Response {
++    let workers = collect_workers(&state);
++    let workers_json = match serde_json::to_string(&workers) {
++        Ok(json) => json,
++        Err(_) => {
++            return (
++                StatusCode::INTERNAL_SERVER_ERROR,
++                "observer failed to serialize workers",
++            )
++                .into_response()
++        }
++    };
++    let revision = registry_revision_for(&workers_json);
++    let view = ObserverView {
++        router: ObserverRouter {
++            boot_generation: boot_generation(),
++            now_ms: now_ms(),
++        },
++        registry_revision: revision,
++        workers,
++    };
++    match serde_json::to_string(&view) {
++        Ok(body) => (
++            [(axum::http::header::CONTENT_TYPE, "application/json")],
++            body,
++        )
++            .into_response(),
++        Err(_) => (
++            StatusCode::INTERNAL_SERVER_ERROR,
++            "observer failed to serialize view",
++        )
++            .into_response(),
++    }
++}
+diff --git a/src/server.rs b/src/server.rs
+index d7c16df..08d8ac0 100644
+--- a/src/server.rs
++++ b/src/server.rs
+@@ -749,7 +749,9 @@ pub fn build_app_with_request_tracing(
+         .route("/health_generate", get(health_generate))
+         .route("/v1/models", get(v1_models))
+         .route("/get_model_info", get(get_model_info))
+-        .route("/get_server_info", get(get_server_info));
++        .route("/get_server_info", get(get_server_info))
++        // Read-only external observation of pool membership (see src/observer.rs).
++        .route("/observer/endpoints", get(crate::observer::observer_endpoints));
+ 
+     let admin_routes = Router::new()
+         .route("/add_worker", post(add_worker))
