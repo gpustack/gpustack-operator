@@ -796,7 +796,7 @@ func TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService(t *testing.T
 	writes := new(modelDeploymentWrites)
 	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType())
 
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	before := getModelDeploymentService(t, cli)
 
@@ -809,7 +809,7 @@ func TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService(t *testing.T
 	// pass that removes replicas is the one most likely to decide it has nothing to front, which is
 	// what the assertions below are about.
 	*writes = modelDeploymentWrites{}
-	_, err = reconcileModelDeployment(t, cli)
+	_, err = reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 
 	require.Len(t, replicaNames(t, cli), 2, "the trim is done in the same pass")

@@ -89,6 +89,17 @@ type ModelDeploymentReconciler struct {
 	// Unknown, which holds: the probe is only ever run to lift a hold, so a transport that cannot
 	// answer leaves the group exactly as held as it was before.
 	groupForwardFetch modelDeploymentGroupForwardFetch
+
+	// drainReader reads one member's engine in-flight activity for the retirement protocol. A nil
+	// reader is the production transport, which is a refusal until a collector lands behind the
+	// seam: the protocol then holds at Draining and deletes nothing, which is the safe direction
+	// for a measurement that does not exist yet.
+	drainReader modelDeploymentDrainReader
+
+	// clock reads the retirement protocol's budgets. It is a field rather than a call to time.Now
+	// so a test can place a phase's start and its expiry at moments of its choosing instead of
+	// waiting for them, which is the only way a budget assertion can be about the budget.
+	clock func() time.Time
 }
 
 var _ ctrlreconcile.Reconciler = (*ModelDeploymentReconciler)(nil)
@@ -161,6 +172,19 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 				if pods[i].DeletionTimestamp != nil {
 					continue
 				}
+				// TEARDOWN IS DELIBERATELY NOT INTERCEPTED BY THE RETIREMENT RESERVATION, and this is
+				// where that decision is recorded so it reads as a decision rather than as a path
+				// somebody forgot. A reservation holds its replica so the retirement protocol can
+				// withdraw it cleanly, and that reason expires the moment the owner stops asking for the
+				// deployment to exist: a DeletionTimestamp is the owner taking everything, not a request
+				// to keep one replica serving. Holding capacity against it would also be a deadlock and
+				// not merely wrong, because the finalizer below is only released once the last replica
+				// has left, so a reservation refusing to let it leave would hold the object in Deleting
+				// forever with nothing erroring anywhere.
+				//
+				// The preStop hook remains the post-delete last line, which is the graceful part of
+				// this: a replica being torn down still drains its own engine on the way out. What is
+				// given up is the controller-side withdrawal protocol, for a deployment being removed.
 				if err = r.Client.Delete(ctx, &pods[i]); err != nil && !kerrors.IsNotFound(err) {
 					logger.Error(err, "delete replica", "pod", pods[i].Name)
 					return ctrl.Result{}, err
@@ -309,6 +333,28 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		return ctrl.Result{}, err
 	}
 
+	// THE RETIREMENT RESERVATION IS EVALUATED ONCE, HERE, BEFORE ANY DELETE DECISION IS TAKEN, and
+	// every path below consults the plan rather than the reservation. A path that read
+	// md.Status.Retirement itself would be re-deriving an answer the protocol has already reached,
+	// and the two answers could differ: this one has already advanced the state, applied the
+	// budget and resolved the target to live members, while a fresh read would see the state as it
+	// was written at the end of the last pass.
+	//
+	// WITH NO RESERVATION IN FLIGHT THIS IS THE EMPTY PLAN, and every path below then behaves
+	// exactly as it did before the protocol existed. That is the property the whole feature rests
+	// on, and it is asserted per path in the tests rather than stated here.
+	retirement := r.planModelDeploymentRetirement(ctx, md, actual)
+	// The state this pass reached is persisted HERE, before any delete decision, so the rest of the
+	// pass and the object's own status sync both see the operation as it now stands. It is a
+	// separate write rather than a field set on the object, because the pass's status sync compares
+	// the derived status with the observed one before writing and would find a field assigned in
+	// place already equal to itself.
+	if err = r.persistModelDeploymentRetirement(ctx, md, md.Status.Retirement, retirement); err != nil {
+		// The predicate drops status-only updates, so the change behind a conflict may deliver no
+		// event: requeue rather than wait for one.
+		return objectWriteResult(logger, err, "persist the retirement reservation", _requeueAfterConflict)
+	}
+
 	// A REPLICA IS A SCHEDULING UNIT OF ITS OWN: its Kueue group is the one-member group derived
 	// from its (role, ordinal), so a change to a role's replica count moves no total any running
 	// Pod carries. It names ordinals the spec now declares or stops naming ones it no longer does,
@@ -364,7 +410,20 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 
 		role := modelDeploymentPodRole(pod)
 		if _, wanted := desired[role]; !wanted {
-			// Scaled away, or renamed by a role rename.
+			// Scaled away, or renamed by a role rename. THE REMOVAL IS HANDED TO THE RETIREMENT
+			// PROTOCOL RATHER THAN ISSUED, and the helper either starts the protocol on this pass
+			// or refuses the removal because an operation is already in flight. Either way the
+			// replica stays, and it stays counted: a scale-away is exactly the moment a withdrawal
+			// and a drain are worth paying for, and deleting the Pod here is the cut they exist to
+			// prevent.
+			if r.refuseModelDeploymentRemoval(ctx, md, retirement, pod, actual, nil) {
+				logger.V(3).Info("holding a replica of a role no longer in the spec for the retirement",
+					"pod", pod.Name)
+				liveByRole[role] = append(liveByRole[role], pod)
+
+				continue
+			}
+
 			logger.Info("removing replica of a role no longer in the spec", "pod", pod.Name)
 			if err = r.Client.Delete(ctx, pod); err != nil && !kerrors.IsNotFound(err) {
 				logger.Error(err, "delete replica", "pod", pod.Name)
@@ -388,6 +447,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// ordinal reads empty. A Member of a larger replica goes the same way, and its surviving
 		// Members are left short, which the rollout below turns over as a whole.
 		if pod.Status.Phase == core.PodFailed || pod.Status.Phase == core.PodSucceeded {
+			// A TERMINAL POD IS A DEPARTURE THIS OPERATOR DID NOT INITIATE, and one the retirement
+			// protocol cannot retain: the engine has already gone, and the reservation's targets no
+			// longer resolve. The hold is not consulted because there is nothing to hold, and the
+			// protocol learns of it on this same pass, where it records the termination instead of
+			// the clean abort a budget expiry would earn.
 			logger.Info("removing replica in a terminal phase",
 				"pod", pod.Name, "phase", pod.Status.Phase, "reason", pod.Status.Reason)
 			if err = r.Client.Delete(ctx, pod); err != nil && !kerrors.IsNotFound(err) {
@@ -423,11 +487,25 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// replica's Workload, and a serving group's finalizer is released by nothing else -- so without
 	// this the ordinal is held by a Pod that can never leave, and the create gate below never opens
 	// for it. The deletes above cover only what this pass itself sent away.
+	// A RESERVED MEMBER IS NEVER DEPARTING, so the sweep's own rule already protects it: a group
+	// with a member still standing keeps its Workload, and the reservation's target is standing by
+	// definition. The argument is passed anyway so that the protection is the protocol's and not
+	// only the sweep's inference -- if a reserved member ever did reach this list as departing, the
+	// right answer would be external termination reported by the state machine, not a silent skip.
 	if err = r.releaseModelDeploymentStrandedWorkloads(ctx, md, actual); err != nil {
 		logger.Error(err, "release the workloads of replicas nothing here sent away")
 		return ctrl.Result{}, err
 	}
 
+	// THE PROTOCOL'S OWN DELETE IS ISSUED HERE, after the paths above have been held and before the
+	// per-role convergence, so the replica the operation is committed to removing goes on the pass
+	// that committed to it rather than a pass later. The convergence below then runs over a
+	// `retirement` that holds the same Pods it is looking at, and skips them for the same reason
+	// every other path does.
+	if err = r.commitModelDeploymentRetirement(ctx, md, retirement, actual); err != nil {
+		logger.Error(err, "delete the retired replica")
+		return ctrl.Result{}, err
+	}
 	// The convergence itself, one role at a time, and THE COUNT MOVES BEFORE THE CURRENCY: a role
 	// short of its declared count does not roll its outdated members in the same breath, because
 	// deleting from a set that is already short widens exactly the gap the create gate below is
@@ -484,7 +562,40 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		occupied := make(map[int]bool, declared)
 		orphans := 0
 		for _, pod := range live {
+			// A REPLICA THIS PASS MAY NOT REMOVE IS KEPT BEFORE ANY ARITHMETIC RUNS, and it is kept
+			// in `kept` rather than merely not removed. The two are not the same: `kept` is what the
+			// ordinals are read from and what the count is taken over, so a replica that were only
+			// excluded from `removed` would free the slot below and let the create gate build a
+			// second replica onto the ordinal the protocol is about to take. This is also what makes
+			// a scale to zero hold: the spec declares nothing, the ordinal is past the declared
+			// count, the protocol is admitted, and the capacity stays exactly where it is.
+			//
+			// The removal is handed to the protocol rather than issued, so a scale-down this pass
+			// is the START of a retirement rather than an instantaneous cut of a serving engine.
 			ordinal, ok := modelDeploymentPodOrdinal(pod)
+			keepHeld := func() {
+				kept = append(kept, pod)
+				if ok {
+					occupied[ordinal] = true
+				}
+			}
+
+			if retirement.holds(pod.UID) {
+				keepHeld()
+
+				continue
+			}
+			// A REMOVAL THE SPEC MAKES HERE IS HANDED TO THE PROTOCOL rather than issued, so a
+			// scale-down this pass is the START of a retirement rather than an instantaneous cut of
+			// a serving engine. The hand-off is only made for an ordinal the role no longer
+			// declares; everything else below is the ordinary classification.
+			if ok && ordinal >= declared &&
+				r.refuseModelDeploymentRemoval(ctx, md, retirement, pod, actual, nil) {
+				keepHeld()
+
+				continue
+			}
+
 			switch {
 			case !ok:
 				kept = append(kept, pod)
@@ -509,10 +620,23 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// own choosing on every pass.
 		if surplus := len(kept) - declaredPods; surplus > 0 {
 			shedSurplus := modelDeploymentSurplusReplicas(kept, want, surplus)
-			removed = append(removed, shedSurplus...)
-			kept = slices.DeleteFunc(kept, func(pod *core.Pod) bool {
-				return slices.Contains(shedSurplus, pod)
-			})
+			// THE SHED IS ONE DECISION AND IT IS NOT PARTLY TAKEN. The protocol is handed the
+			// whole set rather than the first member of it, because a replica is removed as a
+			// replica: shedding one member of a set the protocol is about to take as a whole would
+			// leave the group short, which Kueue composes no Workload for at all. A member with no
+			// ordinal is not admitted and not held, and is left to the rollout below.
+			if _, seated := modelDeploymentRetirementShedSeat(shedSurplus); seated &&
+				r.refuseModelDeploymentRemoval(ctx, md, retirement, shedSurplus[0], actual,
+					modelDeploymentShedMembers(shedSurplus)) {
+				logger.V(3).Info("holding a surplus shed for the retirement", "role", role.Name,
+					"members", len(shedSurplus))
+				occupied[modelDeploymentOrdinalOrFloor(shedSurplus[0])] = true
+			} else {
+				removed = append(removed, shedSurplus...)
+				kept = slices.DeleteFunc(kept, func(pod *core.Pod) bool {
+					return slices.Contains(shedSurplus, pod)
+				})
+			}
 		}
 
 		// Highest ordinal first, so the departures are logged -- and issued -- from the top down and
@@ -589,6 +713,18 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				continue
 			}
 
+			// A HELD REPLICA READS CURRENT WHATEVER ITS FINGERPRINT SAYS. It is on its way out on
+			// the protocol's own terms, and condemning it here as well would have the rollout compete
+			// with the protocol for the same replica: this pick takes the highest ordinal, so a held
+			// ordinal would be deleted by whichever of the two ran first and the protocol's careful
+			// withdrawal would have been spent on a Pod the rollout already took. Reading it current
+			// costs nothing -- the fingerprint is still compared for every other replica -- and it
+			// makes the two paths disjoint.
+			if retirement.holds(pod.UID) {
+				continue
+			}
+
+			println("DBG rollout condemns", pod.Name, "ordinal", ordinal)
 			outdatedByOrdinal[ordinal] = true
 		}
 
@@ -600,11 +736,25 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		seen := make(map[int]int, len(occupied))
 		for _, pod := range kept {
 			if ordinal, ok := modelDeploymentPodOrdinal(pod); ok {
+				if retirement.names(role.Name, ordinal) {
+					continue
+				}
 				seen[ordinal]++
 			}
 		}
 		incompleteByOrdinal := make(map[int]bool, len(occupied))
 		for ordinal := range occupied {
+			// AN ORDINAL THE RETIREMENT PROTOCOL OWNS IS NOT THIS RULE'S BUSINESS. The rollout
+			// condemns a replica whose members do not agree with the spec, and while a reservation
+			// is in flight the agreement is not yet decided -- the protocol is removing one member of
+			// a doubled ordinal, which leaves the ordinal looking over-complete to this rule for as
+			// long as the operation takes. Condemning it here would delete the whole ordinal, and
+			// with it the member the surplus rule existed to keep: the rollout would undo the
+			// surplus rule's careful choice with a blunter one, on a state the surplus rule had
+			// already resolved.
+			if retirement.names(role.Name, ordinal) {
+				continue
+			}
 			if seen[ordinal] != size {
 				outdatedByOrdinal[ordinal] = true
 				incompleteByOrdinal[ordinal] = true
@@ -852,6 +1002,20 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 					continue
 				}
 
+				// A SLOT THE RETIREMENT IS EMPTYING STAYS EMPTY until the operation ends. A held
+				// replica keeps itself counted as occupied above, so this only bites after the
+				// protocol's own delete has landed and the Pods are gone from the API server -- at
+				// which point the create gate would otherwise read the ordinal free and build a
+				// replacement onto it, one pass before the reservation is cleared. Filling the slot
+				// the operation is about to release is how a retirement turns into a rollout.
+				if retirement.Reservation != nil &&
+					retirement.Reservation.RoleName == role.Name &&
+					int(retirement.Reservation.ReplicaOrdinal) == ordinal {
+					requeue = true
+
+					continue
+				}
+
 				if taken.Has(modelDeploymentReplicaGroupName(md, role.Name, ordinal)) {
 					// The server holds a Pod for this ordinal the cached list does not account
 					// for: a create whose response was lost, or a departure still draining. The
@@ -866,6 +1030,14 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 				createOrdinals[role.Name] = append(createOrdinals[role.Name], ordinal)
 			}
 		}
+	}
+
+	// A RUNNING OPERATION REQUEUES, and it is read HERE rather than beside the delete above because
+	// ADMISSION HAPPENS INSIDE THE LOOP JUST FINISHED. Nothing else wakes a deployment whose
+	// replica is merely waiting for a queue to empty or a Service to converge: no object changes
+	// while it waits, and the event that eventually matters is the one the operation is waiting for.
+	if retirement.InFlight {
+		requeue = true
 	}
 
 	// NO REPLICA IS CREATED WHILE THE WEIGHTS ARE BLOCKED, and none that runs is touched: a revoked

@@ -198,7 +198,7 @@ func TestModelDeployment_ScaleDownRemovesTheDepartingOrdinalsWorkload(t *testing
 	ctx := context.Background()
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
@@ -229,7 +229,7 @@ func TestModelDeployment_ScaleDownRemovesTheDepartingOrdinalsWorkload(t *testing
 	shrunk.Spec.Roles[0].Replicas = 1
 	require.NoError(t, cli.Update(ctx, shrunk))
 
-	_, err = reconcileModelDeployment(t, cli)
+	_, err = reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 
 	// One prefill survivor keeps its object; the departing ordinal's Pod AND its Workload are both
@@ -279,7 +279,7 @@ func TestModelDeployment_RoleSetChangeSweepsTheRemovedRoleAlone(t *testing.T) {
 	ctx := context.Background()
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
@@ -306,7 +306,7 @@ func TestModelDeployment_RoleSetChangeSweepsTheRemovedRoleAlone(t *testing.T) {
 	shrunk.Spec.Roles = shrunk.Spec.Roles[:1]
 	require.NoError(t, cli.Update(ctx, shrunk))
 
-	_, err = reconcileModelDeployment(t, cli)
+	_, err = reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"prefill": 2}, replicaRoleCounts(t, cli),
 		"the removed role's replicas go in the first pass, and the survivor's are nobody's business")
@@ -1142,7 +1142,7 @@ func TestModelDeployment_RedistributingReplicasMovesEachRolesOwnOrdinals(t *test
 	ctx := context.Background()
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
@@ -1158,7 +1158,7 @@ func TestModelDeployment_RedistributingReplicasMovesEachRolesOwnOrdinals(t *test
 	moved.Spec.Roles[1].Replicas = 3
 	require.NoError(t, cli.Update(ctx, moved))
 
-	_, err = reconcileModelDeployment(t, cli)
+	_, err = reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"decode": 3, "prefill": 1}, replicaRoleCounts(t, cli),
 		"both moves land in the SAME pass: the shed slot and the gained slot are different "+
@@ -1182,7 +1182,7 @@ func TestModelDeployment_RedistributingReplicasMovesEachRolesOwnOrdinals(t *test
 func TestModelDeployment_RenamingARoleWithoutChangingCountsRebuilds(t *testing.T) {
 	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
 
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
@@ -1190,7 +1190,7 @@ func TestModelDeployment_RenamingARoleWithoutChangingCountsRebuilds(t *testing.T
 	renamed.Spec.Roles[1].Name = "decoder"
 	require.NoError(t, cli.Update(context.Background(), renamed))
 
-	_, err = reconcileModelDeployment(t, cli)
+	_, err = reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{"decoder": 2, "prefill": 2}, replicaRoleCounts(t, cli),
 		"a renamed role names its replicas to groups nothing forms any more, so they are swept and "+

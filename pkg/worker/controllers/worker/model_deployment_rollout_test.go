@@ -696,7 +696,7 @@ func TestModelDeploymentReconciler_AScaleStillVouchesForTheSurvivors(t *testing.
 	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
 
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	require.Equal(t, modelDeploymentReasonUpToDate,
 		ModelDeploymentConditionReplicasUpToDate.GetReason(getModelDeployment(t, cli)),
@@ -706,7 +706,7 @@ func TestModelDeploymentReconciler_AScaleStillVouchesForTheSurvivors(t *testing.
 	resized.Spec.Roles[0].Replicas = 1
 	require.NoError(t, cli.Update(context.Background(), resized))
 
-	_, err = reconcileModelDeployment(t, cli)
+	_, err = reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 1, "the trim removed the highest ordinal")
 

@@ -550,7 +550,7 @@ review; exact verification env follows the repo convention
   package). Gate: root staged-gate review of this task's exact diff before any commit.
   Acceptance: AC-3.1–3.5. Verify: package tests (unsupported-engine
   activation negative).
-- [ ] **T8 Retirement reservation FSM + interception.** Blocked by: T7 (edges to T2/T5/T6 as
+- [x] **T8 Retirement reservation FSM + interception.** Blocked by: T7 (edges to T2/T5/T6 as
   consumers of their observations). Owns: `model_deployment.go` reconcile paths + new
   reservation files in-package; intercepts ordinal≥declared (`:461-472`), surplus shed
   (`:485-491`), replica/Workload delete (`:496-527`), departed-role release (`:400-408`),

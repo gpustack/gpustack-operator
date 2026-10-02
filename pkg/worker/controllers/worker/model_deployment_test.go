@@ -660,7 +660,7 @@ func TestModelDeploymentReconciler_CountChangeTrimsTheHighestOrdinals(t *testing
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 4 })
 	cli := newModelDeploymentClient(md, newRenderInstanceType())
 
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 4)
 
@@ -675,7 +675,7 @@ func TestModelDeploymentReconciler_CountChangeTrimsTheHighestOrdinals(t *testing
 	scaled.Spec.Roles[0].Replicas = 2
 	require.NoError(t, cli.Update(ctx, scaled))
 
-	_, err = reconcileModelDeployment(t, cli)
+	_, err = reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	names := replicaNames(t, cli)
 	require.Len(t, names, 2, "the trim lands in one pass: two ordinals go, two stay")
@@ -737,7 +737,7 @@ func TestModelDeploymentReconciler_ScaleDownShedsTheSurplusBySlot(t *testing.T) 
 
 		cli := newModelDeploymentClient(md, newRenderInstanceType(), stale, keeper, seated)
 
-		res, err := reconcileModelDeployment(t, cli)
+		res, err := reconcileModelDeploymentRetiring(t, cli)
 		require.NoError(t, err)
 
 		assert.Equal(t, []string{"qwen-server-dup-a", "qwen-server-one"}, replicaNames(t, cli),
@@ -754,7 +754,7 @@ func TestModelDeploymentReconciler_ScaleDownShedsTheSurplusBySlot(t *testing.T) 
 
 		cli := newModelDeploymentClient(md, newRenderInstanceType(), lesser, greater, seated)
 
-		_, err := reconcileModelDeployment(t, cli)
+		_, err := reconcileModelDeploymentRetiring(t, cli)
 		require.NoError(t, err)
 
 		assert.Equal(t, []string{"qwen-server-dup-z", "qwen-server-one"}, replicaNames(t, cli),

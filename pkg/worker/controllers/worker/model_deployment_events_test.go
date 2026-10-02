@@ -181,7 +181,7 @@ func TestModelDeploymentEvents_TheReconcilerLeavesReplicasObservableWhileTheyGo(
 	writes := new(modelDeploymentWrites)
 	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType())
 
-	_, err := reconcileModelDeployment(t, cli)
+	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 2)
 
@@ -190,7 +190,7 @@ func TestModelDeploymentEvents_TheReconcilerLeavesReplicasObservableWhileTheyGo(
 	require.NoError(t, cli.Update(context.Background(), scaled))
 
 	*writes = modelDeploymentWrites{}
-	_, err = reconcileModelDeployment(t, cli)
+	_, err = reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
 
 	// ONE delete for a 2-to-1 scale, because a replicas change trims the highest ordinal rather
