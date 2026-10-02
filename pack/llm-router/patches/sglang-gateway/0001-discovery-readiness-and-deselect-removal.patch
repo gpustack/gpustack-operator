@@ -491,7 +491,7 @@ index 2a29f3b..1dfc59f 100644
          }
      }
 diff --git a/sgl-model-gateway/src/service_discovery.rs b/sgl-model-gateway/src/service_discovery.rs
-index e9344e5..7b5492c 100644
+index e9344e5..d332739 100644
 --- a/sgl-model-gateway/src/service_discovery.rs
 +++ b/sgl-model-gateway/src/service_discovery.rs
 @@ -4,14 +4,11 @@ use std::{
@@ -502,11 +502,12 @@ index e9344e5..7b5492c 100644
 +use futures::StreamExt;
  use k8s_openapi::api::core::v1::Pod;
  use kube::{
-     api::Api,
+-    api::Api,
 -    runtime::{
 -        watcher::{watcher, Config},
 -        WatchStreamExt,
 -    },
++    api::{Api, ListParams},
 +    runtime::watcher::{watcher, Config, Event},
      Client,
  };
@@ -560,7 +561,7 @@ index e9344e5..7b5492c 100644
  
          let pods: Api<Pod> = if let Some(namespace) = &config.namespace {
              Api::namespaced(client, namespace)
-@@ -236,82 +252,70 @@ pub async fn start_service_discovery(
+@@ -236,82 +252,99 @@ pub async fn start_service_discovery(
          const MAX_RETRY_DELAY: Duration = Duration::from_secs(300);
  
          loop {
@@ -589,37 +590,9 @@ index e9344e5..7b5492c 100644
 -                            } else {
 -                                None
 -                            }
-+            // Box::pin because watcher() returns a stream::unfold stream, which is not
-+            // Unpin, and the explicit loop below calls .next() on it by value.
-+            let mut watcher_stream = Box::pin(watcher(pods.clone(), watcher_config));
-+
-+            // UIDs observed during the relist currently in progress, used to withdraw
-+            // registrations the API server no longer lists.
-+            let relisted: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-+
-+            let mut delivered = true;
-+            while let Some(item) = watcher_stream.next().await {
-+                match item {
-+                    Ok(event) => {
-+                        // A withdrawal that could not be queued ends this stream. The
-+                        // backoff below recreates the watcher, and the relist that comes
-+                        // with it reconciles everything still held, so the retry is
-+                        // bounded by the watcher's existing backoff instead of waiting
-+                        // for a Pod event that may never arrive.
-+                        delivered = handle_watch_event(
-+                            event,
-+                            &tracked_pods,
-+                            &relisted,
-+                            Arc::clone(&app_context),
-+                            port,
-+                            &config_arc,
-+                        )
-+                        .await;
-+                        if !delivered {
-+                            break;
-                         }
+-                        }
 -                        Err(e) => Some(Err(e)),
-                     }
+-                    }
 -                }
 -            });
 -
@@ -650,17 +623,58 @@ index e9344e5..7b5492c 100644
 -                                    &pod_info,
 -                                    tracked_pods_inner,
 -                                    app_context_inner,
--                                    port,
++            // Box::pin because watcher() returns a stream::unfold stream, which is not
++            // Unpin, and the explicit loop below calls .next() on it by value.
++            let mut watcher_stream = Box::pin(watcher(pods.clone(), watcher_config));
++
++            // UIDs observed during the relist currently in progress, used to withdraw
++            // registrations the API server no longer lists.
++            let relisted: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
++
++            let mut delivered = true;
++            // H358: the stream is one arm of a select whose other arm is a 15 s
++            // reconciliation timer. The stream arm is the delivery path, unchanged. The
++            // tick arm reconciles every tracked UID against a fresh list, with the same
++            // semantics as the relist path, so a delivery delay on UPDATE-class events
++            // (label loss, readiness loss) is bounded by the timer instead of by when
++            // kube-runtime next delivers or re-lists.
++            let mut reconciliation = time::interval(Duration::from_secs(15));
++            reconciliation.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
++            loop {
++                tokio::select! {
++                    item = watcher_stream.next() => {
++                        match item {
++                            Some(Ok(event)) => {
++                                // A withdrawal that could not be queued ends this stream.
++                                // The backoff below recreates the watcher, and the relist
++                                // that comes with it reconciles everything still held, so
++                                // the retry is bounded by the watcher's existing backoff
++                                // instead of waiting for a Pod event that may never
++                                // arrive.
++                                delivered = handle_watch_event(
++                                    event,
++                                    &tracked_pods,
++                                    &relisted,
++                                    Arc::clone(&app_context),
+                                     port,
 -                                    config_inner.pd_mode,
--                                )
--                                .await;
--                            }
--                        }
++                                    &config_arc,
+                                 )
+                                 .await;
++                                if !delivered {
++                                    break;
++                                }
++                            }
++                            Some(Err(err)) => {
++                                error!("Error in Kubernetes watcher: {}", err);
++                                delivered = false;
++                                break;
++                            }
++                            None => {
++                                break;
+                             }
+                         }
 -                        Ok(())
-+                    Err(err) => {
-+                        error!("Error in Kubernetes watcher: {}", err);
-+                        delivered = false;
-+                        break;
                      }
 -                })
 -                .await
@@ -677,6 +691,19 @@ index e9344e5..7b5492c 100644
 -                    time::sleep(retry_delay).await;
 -
 -                    retry_delay = std::cmp::min(retry_delay * 2, MAX_RETRY_DELAY);
++                    _ = reconciliation.tick() => {
++                        delivered = reconcile_tracked(
++                            &pods,
++                            &tracked_pods,
++                            Arc::clone(&app_context),
++                            port,
++                            &config_arc,
++                        )
++                        .await;
++                        if !delivered {
++                            break;
++                        }
++                    }
                  }
              }
  
@@ -700,7 +727,7 @@ index e9344e5..7b5492c 100644
              warn!(
                  "Kubernetes watcher exited, restarting in {} seconds",
                  config_arc.check_interval.as_secs()
-@@ -323,203 +327,498 @@ pub async fn start_service_discovery(
+@@ -323,203 +356,554 @@ pub async fn start_service_discovery(
      Ok(handle)
  }
  
@@ -743,14 +770,6 @@ index e9344e5..7b5492c 100644
 -        let (should_add, tracked_count) = {
 -            let mut tracker = match tracked_pods.lock() {
 -                Ok(tracker) => tracker,
--                Err(e) => {
--                    error!("Failed to acquire tracked_pods lock: {}", e);
--                    return;
--                }
--            };
--
--            if tracker.contains(pod_info) {
--                (false, tracker.len())
 +    config: &ServiceDiscoveryConfig,
 +) -> bool {
 +    match event {
@@ -760,24 +779,9 @@ index e9344e5..7b5492c 100644
 +        Event::Delete(pod) => {
 +            if let Some(uid) = pod_uid(&pod) {
 +                withdraw_worker(uid, tracked_pods, &app_context, port).await
-             } else {
--                tracker.insert(pod_info.clone());
--                (true, tracker.len())
++            } else {
 +                true
-             }
--        };
--
--        if should_add {
--            info!(
--                "Adding pod: {} | type: {:?} | url: {}",
--                pod_info.name, pod_info.pod_type, worker_url
--            );
--
--            let worker_type = if pd_mode {
--                match &pod_info.pod_type {
--                    Some(PodType::Prefill) => Some("prefill".to_string()),
--                    Some(PodType::Decode) => Some("decode".to_string()),
--                    Some(PodType::Regular) | None => None,
++            }
 +        }
 +        Event::Init => {
 +            if let Ok(mut seen) = relisted.lock() {
@@ -789,15 +793,7 @@ index e9344e5..7b5492c 100644
 +            if let Some(uid) = pod_uid(&pod) {
 +                if let Ok(mut seen) = relisted.lock() {
 +                    seen.insert(uid.to_string());
-                 }
--            } else {
--                None
--            };
--
--            let bootstrap_port = if pd_mode {
--                match &pod_info.pod_type {
--                    Some(PodType::Prefill) => pod_info.bootstrap_port,
--                    _ => None,
++                }
 +            }
 +            handle_pod_observation(&pod, tracked_pods, app_context, port, config).await
 +        }
@@ -808,14 +804,168 @@ index e9344e5..7b5492c 100644
 +            // an abrupt Pod removal or a missed watch does produce.
 +            let seen: HashSet<String> = match relisted.lock() {
 +                Ok(seen) => seen.clone(),
-+                Err(e) => {
+                 Err(e) => {
+-                    error!("Failed to acquire tracked_pods lock: {}", e);
+-                    return;
 +                    error!("Failed to acquire relist lock: {}", e);
 +                    return true;
                  }
+             };
++            let absent: Vec<String> = {
++                let tracker = match tracked_pods.lock() {
++                    Ok(tracker) => tracker,
++                    Err(e) => {
++                        error!("Failed to acquire tracked_pods lock during relist: {}", e);
++                        return true;
++                    }
++                };
++                tracker
++                    .keys()
++                    .filter(|uid| !seen.contains(*uid))
++                    .cloned()
++                    .collect()
++            };
++            let mut delivered = true;
++            for uid in absent {
++                info!("Pod {} is absent from the relist", uid);
++                delivered &= withdraw_worker(&uid, tracked_pods, &app_context, port).await;
++            }
++            delivered
++        }
++    }
++}
+ 
+-            if tracker.contains(pod_info) {
+-                (false, tracker.len())
+-            } else {
+-                tracker.insert(pod_info.clone());
+-                (true, tracker.len())
++/// Reconcile every tracked UID against a fresh list of the namespace.
++///
++/// The reconciliation timer in the watch loop calls this. It is the relist path's
++/// semantics carried out on demand instead of waiting for kube-runtime to relist: every
++/// Pod in the list is observed exactly as an Apply would be, and every tracked UID the
++/// list does not contain is withdrawn exactly as an InitDone absence would be. A list
++/// failure is a delivery failure, which restarts the stream through the same backoff as
++/// a failed watch event.
++async fn reconcile_tracked(
++    pods: &Api<Pod>,
++    tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
++    app_context: Arc<AppContext>,
++    port: u16,
++    config: &ServiceDiscoveryConfig,
++) -> bool {
++    let list = match pods.list(&ListParams::default()).await {
++        Ok(list) => list,
++        Err(err) => {
++            error!("Reconciliation list failed: {}", err);
++            return false;
++        }
++    };
++    let mut delivered = true;
++    let mut seen: HashSet<String> = HashSet::new();
++    for pod in &list.items {
++        if let Some(uid) = pod_uid(pod) {
++            seen.insert(uid.to_string());
++        }
++        delivered &=
++            handle_pod_observation(pod, tracked_pods, Arc::clone(&app_context), port, config)
++                .await;
++    }
++    let absent: Vec<String> = {
++        let tracker = match tracked_pods.lock() {
++            Ok(tracker) => tracker,
++            Err(e) => {
++                error!(
++                    "Failed to acquire tracked_pods lock during reconciliation: {}",
++                    e
++                );
++                return true;
+             }
+         };
++        tracker
++            .keys()
++            .filter(|uid| !seen.contains(*uid))
++            .cloned()
++            .collect()
++    };
++    for uid in absent {
++        info!("Pod {} is absent from the reconciliation list", uid);
++        delivered &= withdraw_worker(&uid, tracked_pods, &app_context, port).await;
++    }
++    delivered
++}
+ 
+-        if should_add {
+-            info!(
+-                "Adding pod: {} | type: {:?} | url: {}",
+-                pod_info.name, pod_info.pod_type, worker_url
+-            );
++/// Add, refresh or withdraw one Pod from its current selector membership, readiness
++/// and termination state.
++///
++/// Every branch that withdraws does so by the Pod's stored UID, so it removes the
++/// registration that was actually made rather than one rebuilt from the current
++/// object. Upstream had no branch for readiness loss, selector loss, termination or an
++/// unreadable status, so a worker in any of those states kept receiving new requests
++/// for the life of the process.
++async fn handle_pod_observation(
++    pod: &Pod,
++    tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
++    app_context: Arc<AppContext>,
++    port: u16,
++    config: &ServiceDiscoveryConfig,
++) -> bool {
++    let Some(uid) = pod_uid(pod) else {
++        warn!(
++            "Refusing pod {:?}: no usable metadata.uid, so a later withdrawal could not identify it",
++            pod.metadata.name
++        );
++        return true;
++    };
++    let uid = uid.to_string();
++
++    // Termination is checked before anything is parsed from the status, and before
++    // selector membership. A terminating Pod can still report Ready=True and Running,
++    // so any check that reads health first would re-register it and leave the
++    // withdrawal to the final Delete event, which is the preStop path this replaces.
++    if pod.metadata.deletion_timestamp.is_some() {
++        return withdraw_worker(&uid, tracked_pods, &app_context, port).await;
++    }
+ 
+-            let worker_type = if pd_mode {
+-                match &pod_info.pod_type {
+-                    Some(PodType::Prefill) => Some("prefill".to_string()),
+-                    Some(PodType::Decode) => Some("decode".to_string()),
+-                    Some(PodType::Regular) | None => None,
+-                }
 -            } else {
 -                None
 -            };
--
++    if !PodInfo::should_include(pod, config) {
++        return withdraw_worker(&uid, tracked_pods, &app_context, port).await;
++    }
+ 
+-            let bootstrap_port = if pd_mode {
+-                match &pod_info.pod_type {
+-                    Some(PodType::Prefill) => pod_info.bootstrap_port,
+-                    _ => None,
+-                }
+-            } else {
+-                None
+-            };
++    let Some(pod_info) = PodInfo::from_pod(pod, Some(config)) else {
++        // The Pod still matches the selectors, so it is still eligible, but its current
++        // state cannot be read: no status, or an address that will not parse. Eligibility
++        // is not health, and a registration that cannot be shown healthy must not stay
++        // selectable, so this withdraws by the stored UID rather than retaining it.
++        warn!(
++            "Pod {} matches the selectors but its current status or address is unusable; withdrawing",
++            uid
++        );
++        return withdraw_worker(&uid, tracked_pods, &app_context, port).await;
++    };
+ 
 -            let config = WorkerConfigRequest {
 -                url: worker_url.clone(),
 -                model_id: None,
@@ -841,11 +991,16 @@ index e9344e5..7b5492c 100644
 -                    * 20,
 -                dp_aware: app_context.router_config.dp_aware,
 -            };
--
++    if !pod_info.is_healthy() {
++        return withdraw_worker(&uid, tracked_pods, &app_context, port).await;
++    }
+ 
 -            let job = Job::AddWorker {
 -                config: Box::new(config.clone()),
-             };
--
+-            };
++    register_worker(&pod_info, tracked_pods, &app_context, port, config.pd_mode).await
++}
+ 
 -            if let Some(job_queue) = app_context.worker_job_queue.get() {
 -                match job_queue.submit(job).await {
 -                    Ok(_) => {
@@ -863,10 +1018,7 @@ index e9344e5..7b5492c 100644
 -                            tracked_count,
 -                        );
 -                    }
-+            let absent: Vec<String> = {
-+                let tracker = match tracked_pods.lock() {
-+                    Ok(tracker) => tracker,
-                     Err(e) => {
+-                    Err(e) => {
 -                        error!(
 -                            "Failed to submit worker addition job for {}: {}",
 -                            worker_url, e
@@ -881,97 +1033,22 @@ index e9344e5..7b5492c 100644
 -                        if let Ok(mut tracker) = tracked_pods.lock() {
 -                            tracker.remove(pod_info);
 -                        }
-+                        error!("Failed to acquire tracked_pods lock during relist: {}", e);
-+                        return true;
-                     }
+-                    }
 -                }
 -            } else {
 -                debug!(
 -                    "JobQueue not initialized, skipping async worker addition for: {}",
 -                    worker_url
 -                );
-+                };
-+                tracker
-+                    .keys()
-+                    .filter(|uid| !seen.contains(*uid))
-+                    .cloned()
-+                    .collect()
-+            };
-+            let mut delivered = true;
-+            for uid in absent {
-+                info!("Pod {} is absent from the relist", uid);
-+                delivered &= withdraw_worker(&uid, tracked_pods, &app_context, port).await;
-             }
+-            }
 -        } else {
 -            // Pod already tracked - this is a duplicate event
 -            Metrics::record_discovery_registration(
 -                metrics_labels::DISCOVERY_KUBERNETES,
 -                metrics_labels::REGISTRATION_DUPLICATE,
 -            );
-+            delivered
-         }
-     }
- }
- 
--async fn handle_pod_deletion(
--    pod_info: &PodInfo,
--    tracked_pods: Arc<Mutex<HashSet<PodInfo>>>,
-+/// Add, refresh or withdraw one Pod from its current selector membership, readiness
-+/// and termination state.
-+///
-+/// Every branch that withdraws does so by the Pod's stored UID, so it removes the
-+/// registration that was actually made rather than one rebuilt from the current
-+/// object. Upstream had no branch for readiness loss, selector loss, termination or an
-+/// unreadable status, so a worker in any of those states kept receiving new requests
-+/// for the life of the process.
-+async fn handle_pod_observation(
-+    pod: &Pod,
-+    tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
-     app_context: Arc<AppContext>,
-     port: u16,
--) {
-+    config: &ServiceDiscoveryConfig,
-+) -> bool {
-+    let Some(uid) = pod_uid(pod) else {
-+        warn!(
-+            "Refusing pod {:?}: no usable metadata.uid, so a later withdrawal could not identify it",
-+            pod.metadata.name
-+        );
-+        return true;
-+    };
-+    let uid = uid.to_string();
-+
-+    // Termination is checked before anything is parsed from the status, and before
-+    // selector membership. A terminating Pod can still report Ready=True and Running,
-+    // so any check that reads health first would re-register it and leave the
-+    // withdrawal to the final Delete event, which is the preStop path this replaces.
-+    if pod.metadata.deletion_timestamp.is_some() {
-+        return withdraw_worker(&uid, tracked_pods, &app_context, port).await;
-+    }
-+
-+    if !PodInfo::should_include(pod, config) {
-+        return withdraw_worker(&uid, tracked_pods, &app_context, port).await;
-+    }
-+
-+    let Some(pod_info) = PodInfo::from_pod(pod, Some(config)) else {
-+        // The Pod still matches the selectors, so it is still eligible, but its current
-+        // state cannot be read: no status, or an address that will not parse. Eligibility
-+        // is not health, and a registration that cannot be shown healthy must not stay
-+        // selectable, so this withdraws by the stored UID rather than retaining it.
-+        warn!(
-+            "Pod {} matches the selectors but its current status or address is unusable; withdrawing",
-+            uid
-+        );
-+        return withdraw_worker(&uid, tracked_pods, &app_context, port).await;
-+    };
-+
-+    if !pod_info.is_healthy() {
-+        return withdraw_worker(&uid, tracked_pods, &app_context, port).await;
-+    }
-+
-+    register_worker(&pod_info, tracked_pods, &app_context, port, config.pd_mode).await
-+}
-+
+-        }
+-    }
 +/// Whether the last job the queue ran for a worker URL reported failure.
 +///
 +/// The queue's status map is keyed by worker URL, so it cannot say which job produced a
@@ -993,8 +1070,9 @@ index e9344e5..7b5492c 100644
 +    job_queue
 +        .get_status(worker_url)
 +        .is_some_and(|status| status.status == "failed")
-+}
-+
+ }
+ 
+-async fn handle_pod_deletion(
 +/// Register a healthy Pod as a worker, taking over the address it claims.
 +///
 +/// Two things have to hold for the tracker to describe the router truthfully. The
@@ -1019,10 +1097,13 @@ index e9344e5..7b5492c 100644
 +/// process. That is the difference from a router that adds synchronously, where a
 +/// tracked entry and a registered worker are the same fact.
 +async fn register_worker(
-+    pod_info: &PodInfo,
+     pod_info: &PodInfo,
+-    tracked_pods: Arc<Mutex<HashSet<PodInfo>>>,
+-    app_context: Arc<AppContext>,
 +    tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
 +    app_context: &Arc<AppContext>,
-+    port: u16,
+     port: u16,
+-) {
 +    pd_mode: bool,
 +) -> bool {
      let worker_url = pod_info.worker_url(port);
@@ -1303,7 +1384,7 @@ index e9344e5..7b5492c 100644
 +        error!(
 +            "JobQueue not initialized, retaining registration for {} because the removal was not queued",
 +            worker_url
-         );
++        );
 +        return false;
 +    };
 +
@@ -1321,7 +1402,7 @@ index e9344e5..7b5492c 100644
 +        error!(
 +            "Worker removal did not complete for {}: {}",
 +            worker_url, e
-+        );
+         );
 +        return false;
      }
 +
@@ -1361,7 +1442,7 @@ index e9344e5..7b5492c 100644
  }
  
  #[cfg(test)]
-@@ -541,6 +840,10 @@ mod tests {
+@@ -541,6 +925,10 @@ mod tests {
          let mut pod = Pod {
              metadata: ObjectMeta {
                  name: name.map(String::from),
@@ -1372,7 +1453,7 @@ index e9344e5..7b5492c 100644
                  deletion_timestamp,
                  ..Default::default()
              },
-@@ -871,6 +1174,7 @@ mod tests {
+@@ -871,6 +1259,7 @@ mod tests {
      fn test_pod_info_is_healthy() {
          let healthy_pod = PodInfo {
              name: "p1".into(),
@@ -1380,7 +1461,7 @@ index e9344e5..7b5492c 100644
              ip: "1.1.1.1".into(),
              status: "Running".into(),
              is_ready: true,
-@@ -881,6 +1185,7 @@ mod tests {
+@@ -881,6 +1270,7 @@ mod tests {
  
          let not_ready_pod = PodInfo {
              name: "p2".into(),
@@ -1388,7 +1469,7 @@ index e9344e5..7b5492c 100644
              ip: "1.1.1.2".into(),
              status: "Running".into(),
              is_ready: false,
-@@ -891,6 +1196,7 @@ mod tests {
+@@ -891,6 +1281,7 @@ mod tests {
  
          let not_running_pod = PodInfo {
              name: "p3".into(),
@@ -1396,7 +1477,7 @@ index e9344e5..7b5492c 100644
              ip: "1.1.1.3".into(),
              status: "Pending".into(),
              is_ready: true,
-@@ -904,6 +1210,7 @@ mod tests {
+@@ -904,6 +1295,7 @@ mod tests {
      fn test_pod_info_equality_with_pod_type() {
          let pod1 = PodInfo {
              name: "pod1".into(),
@@ -1404,7 +1485,7 @@ index e9344e5..7b5492c 100644
              ip: "1.2.3.4".into(),
              status: "Running".into(),
              is_ready: true,
-@@ -913,6 +1220,7 @@ mod tests {
+@@ -913,6 +1305,7 @@ mod tests {
  
          let pod2 = PodInfo {
              name: "pod1".into(),
@@ -1412,7 +1493,7 @@ index e9344e5..7b5492c 100644
              ip: "1.2.3.4".into(),
              status: "Running".into(),
              is_ready: true,
-@@ -922,6 +1230,7 @@ mod tests {
+@@ -922,6 +1315,7 @@ mod tests {
  
          let pod3 = PodInfo {
              name: "pod1".into(),
@@ -1420,7 +1501,7 @@ index e9344e5..7b5492c 100644
              ip: "1.2.3.4".into(),
              status: "Running".into(),
              is_ready: true,
-@@ -933,273 +1242,313 @@ mod tests {
+@@ -933,273 +1327,313 @@ mod tests {
          assert_ne!(pod1, pod3);
      }
  
@@ -1735,8 +1816,7 @@ index e9344e5..7b5492c 100644
 +            Event::Init,
 +            &tracked,
 +            &relisted,
-             Arc::clone(&app_context),
--            port,
++            Arc::clone(&app_context),
 +            config.port,
 +            &config,
 +        )
@@ -1749,7 +1829,8 @@ index e9344e5..7b5492c 100644
 +            Event::InitDone,
 +            &tracked,
 +            &relisted,
-+            Arc::clone(&app_context),
+             Arc::clone(&app_context),
+-            port,
 +            config.port,
 +            &config,
          )
@@ -1942,4 +2023,3 @@ index e9344e5..7b5492c 100644
 -}
 +}
 \ No newline at end of file
-

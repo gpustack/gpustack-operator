@@ -523,7 +523,7 @@ review; exact verification env follows the repo convention
   `docker buildx build --platform linux/amd64 --target epp-builder -f pack/llm-router/Dockerfile .`
   and `--target vllm-router-builder` / `--target sglang-gateway-builder`; logs/source SHAs/image
   IDs preserved.
-- [ ] **T4 Rust discovery fixes + llm-d regression matrix.** Blocked by: T3. Owns:
+- [x] **T4 Rust discovery fixes + llm-d regression matrix.** Blocked by: T3. Owns:
   `pack/llm-router/patches/{vllm-router,sglang-gateway}/**`. Gate: root staged-gate review of
   this task's exact diff before any commit. Acceptance: AC-1.2 event matrix on
   placement evidence; llm-d unchanged-behavior regression green. Verify: same buildx targets +
@@ -535,7 +535,9 @@ review; exact verification env follows the repo convention
   runtime acceptance moves to T6: the seven-cell event matrix runs there as five cells, and
   the failed-Add re-list and failed-Remove retry cells stay UNVERIFIED under the root ruling
   against fault-injection hooks in the production patches, with the real-cluster phase as the
-  revisit trigger. This box stays unchecked until that runtime acceptance lands.
+  revisit trigger. Runtime acceptance landed in T6: the five runnable cells passed on
+  instrumented local-cluster runs measured by a one-second poller, and the two fault-injection
+  cells remain UNVERIFIED under that ruling.
 - [x] **T5 Eligibility label, backfill, Service convergence.** Blocked by: T2. Owns: label
   maintenance and service/router selector render paths (globs:
   `pkg/worker/controllers/worker/model_deployment_{service,router}.go` plus the reconciler-owned
@@ -543,13 +545,17 @@ review; exact verification env follows the repo convention
   review of this task's exact diff before any commit. Acceptance: AC-1.1–1.5 (upgrade
   negative must go red without backfill). Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test
   -race ./pkg/worker/controllers/worker/...`.
-- [ ] **T6 Per-Router observation.** Blocked by: T5 and T4 (the Go client needs T5's eligibility
+- [x] **T6 Per-Router observation.** Blocked by: T5 and T4 (the Go client needs T5's eligibility
   state, and observer patches land after T4 so no two writers touch `pack/llm-router` at once).
   Owns: observer-only patch additions + Go client/aggregation. Gate: root staged-gate review of
   this task's exact diff before any commit. Acceptance: AC-2.1–2.6 with the listed negatives.
-  Verify: package tests + harness negatives. T7 and later serial-package tasks committed while
-  this box stays unchecked; the pending state tracks only the F1 runtime acceptance, not a
-  dependency violation.
+  Verify: package tests + harness negatives. Runtime acceptance landed on instrumented
+  local-cluster runs measured by a one-second poller: the two disputed withdrawal cells
+  (label-off and readiness) removed the departed replica from the router pool at about one
+  second and six seconds respectively, well inside the thirty-second freeze budget; the earlier
+  over-budget figures were harness log-line observation delay, not router behavior. T7 and
+  later serial-package tasks committed while this box was unchecked; that pending state tracked
+  only this runtime acceptance, not a dependency violation.
 - [x] **T7 Group health predicate + activation gating.** Blocked by: T6. Owns: controller
   health/eligibility paths (globs: `pkg/worker/controllers/worker/model_deployment*.go`, serial
   package). Gate: root staged-gate review of this task's exact diff before any commit.

@@ -97,7 +97,7 @@ TO REFRESH after a pin bump: clone the new pin, git apply this patch, resolve
 any rejects, regenerate with git diff, and keep this header on top.
 
 diff --git a/src/service_discovery.rs b/src/service_discovery.rs
-index d765800..0729f9f 100644
+index d765800..798eab7 100644
 --- a/src/service_discovery.rs
 +++ b/src/service_discovery.rs
 @@ -1,11 +1,10 @@
@@ -107,9 +107,10 @@ index d765800..0729f9f 100644
 +use futures::StreamExt;
  use k8s_openapi::api::core::v1::Pod;
  use kube::{
-     api::Api,
+-    api::Api,
 -    runtime::watcher::{watcher, Config},
 -    runtime::WatchStreamExt,
++    api::{Api, ListParams},
 +    runtime::watcher::{watcher, Config, Event},
      Client,
  };
@@ -164,7 +165,7 @@ index d765800..0729f9f 100644
  
          // Create a watcher for pods
          let pods: Api<Pod> = if let Some(namespace) = &config.namespace {
-@@ -251,88 +268,72 @@ pub async fn start_service_discovery(
+@@ -251,88 +268,97 @@ pub async fn start_service_discovery(
  
          loop {
              // Create a watcher with the proper parameters according to the kube-rs API
@@ -195,37 +196,9 @@ index d765800..0729f9f 100644
 -                            } else {
 -                                None
 -                            }
-+            // Box::pin because watcher() returns a stream::unfold stream, which is not
-+            // Unpin, and the explicit loop below calls .next() on it by value.
-+            let mut watcher_stream = Box::pin(watcher(pods.clone(), watcher_config));
-+
-+            // UIDs observed during the relist currently in progress, used to withdraw
-+            // registrations the API server no longer lists.
-+            let relisted: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-+
-+            let mut delivered = true;
-+            while let Some(item) = watcher_stream.next().await {
-+                match item {
-+                    Ok(event) => {
-+                        // A withdrawal that could not be delivered ends this stream. The
-+                        // backoff below recreates the watcher, and the relist that comes
-+                        // with it reconciles everything still held, so the retry is
-+                        // bounded by the watcher's existing backoff instead of waiting
-+                        // for a Pod event that may never arrive.
-+                        delivered = handle_watch_event(
-+                            event,
-+                            &tracked_pods,
-+                            &relisted,
-+                            &router,
-+                            port,
-+                            &config_arc,
-+                        )
-+                        .await;
-+                        if !delivered {
-+                            break;
-                         }
+-                        }
 -                        Err(e) => Some(Err(e)),
-                     }
+-                    }
 -                }
 -            });
 -
@@ -249,7 +222,40 @@ index d765800..0729f9f 100644
 -                                    &pod_info,
 -                                    tracked_pods_inner,
 -                                    router_inner,
--                                    port,
++            // Box::pin because watcher() returns a stream::unfold stream, which is not
++            // Unpin, and the explicit loop below calls .next() on it by value.
++            let mut watcher_stream = Box::pin(watcher(pods.clone(), watcher_config));
++
++            // UIDs observed during the relist currently in progress, used to withdraw
++            // registrations the API server no longer lists.
++            let relisted: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
++
++            let mut delivered = true;
++            // H358: the stream is one arm of a select whose other arm is a 15 s
++            // reconciliation timer. The stream arm is the delivery path, unchanged. The
++            // tick arm reconciles every tracked UID against a fresh list, with the same
++            // semantics as the relist path, so a delivery delay on UPDATE-class events
++            // (label loss, readiness loss) is bounded by the timer instead of by when
++            // kube-runtime next delivers or re-lists.
++            let mut reconciliation = time::interval(Duration::from_secs(15));
++            reconciliation.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
++            loop {
++                tokio::select! {
++                    item = watcher_stream.next() => {
++                        match item {
++                            Some(Ok(event)) => {
++                                // A withdrawal that could not be delivered ends this
++                                // stream. The backoff below recreates the watcher, and
++                                // the relist that comes with it reconciles everything
++                                // still held, so the retry is bounded by the watcher's
++                                // existing backoff instead of waiting for a Pod event
++                                // that may never arrive.
++                                delivered = handle_watch_event(
++                                    event,
++                                    &tracked_pods,
++                                    &relisted,
++                                    &router,
+                                     port,
 -                                    config_inner.pd_mode,
 -                                )
 -                                .await;
@@ -260,15 +266,23 @@ index d765800..0729f9f 100644
 -                                    router_inner,
 -                                    port,
 -                                    config_inner.pd_mode,
--                                )
--                                .await;
--                            }
--                        }
++                                    &config_arc,
+                                 )
+                                 .await;
++                                if !delivered {
++                                    break;
++                                }
++                            }
++                            Some(Err(err)) => {
++                                error!("Error in Kubernetes watcher: {}", err);
++                                delivered = false;
++                                break;
++                            }
++                            None => {
++                                break;
+                             }
+                         }
 -                        Ok(())
-+                    Err(err) => {
-+                        error!("Error in Kubernetes watcher: {}", err);
-+                        delivered = false;
-+                        break;
                      }
 -                })
 -                .await
@@ -287,6 +301,15 @@ index d765800..0729f9f 100644
 -
 -                    // Exponential backoff with jitter
 -                    retry_delay = std::cmp::min(retry_delay * 2, MAX_RETRY_DELAY);
++                    _ = reconciliation.tick() => {
++                        delivered = reconcile_tracked(
++                            &pods, &tracked_pods, &router, port, &config_arc,
++                        )
++                        .await;
++                        if !delivered {
++                            break;
++                        }
++                    }
                  }
              }
  
@@ -312,7 +335,7 @@ index d765800..0729f9f 100644
              // If the watcher exits for some reason, wait a bit before restarting
              warn!(
                  "Kubernetes watcher exited, restarting in {} seconds",
-@@ -345,150 +346,384 @@ pub async fn start_service_discovery(
+@@ -345,150 +371,438 @@ pub async fn start_service_discovery(
      Ok(handle)
  }
  
@@ -324,18 +347,6 @@ index d765800..0729f9f 100644
 -    pd_mode: bool,
 -) {
 -    let worker_url = pod_info.worker_url(port);
--
--    // If pod is healthy, try to add it (with atomic check-and-insert)
--    if pod_info.is_healthy() {
--        // Atomic check-and-insert to prevent race conditions
--        let should_add = {
--            let mut tracker = match tracked_pods.lock() {
--                Ok(tracker) => tracker,
--                Err(e) => {
--                    error!("Failed to acquire tracked_pods lock: {}", e);
--                    return;
--                }
--            };
 +/// The identity a worker registration is keyed on.
 +///
 +/// A Pod with no UID, or with an empty one, is refused rather than admitted: an empty
@@ -346,8 +357,12 @@ index d765800..0729f9f 100644
 +    pod.metadata.uid.as_deref().filter(|uid| !uid.is_empty())
 +}
  
--            if tracker.contains(pod_info) {
--                false // Already tracked
+-    // If pod is healthy, try to add it (with atomic check-and-insert)
+-    if pod_info.is_healthy() {
+-        // Atomic check-and-insert to prevent race conditions
+-        let should_add = {
+-            let mut tracker = match tracked_pods.lock() {
+-                Ok(tracker) => tracker,
 +/// Reconcile one watcher event into the registered worker set.
 +///
 +/// Returns false when a withdrawal could not be delivered. The caller uses that to
@@ -375,50 +390,9 @@ index d765800..0729f9f 100644
 +        Event::Delete(pod) => {
 +            if let Some(uid) = pod_uid(&pod) {
 +                withdraw_worker(uid, tracked_pods, router, port, config.pd_mode).await
-             } else {
--                // Reserve the spot to prevent other threads from adding the same pod
--                tracker.insert(pod_info.clone());
-                 true
-             }
--        };
--
--        if should_add {
--            info!(
--                "Adding pod: {} | type: {:?} | url: {}",
--                pod_info.name, pod_info.pod_type, worker_url
--            );
--
--            // Handle PD mode with specific pod types
--            let result = if pd_mode && pod_info.pod_type.is_some() {
--                use crate::routers::http::vllm_pd_router::VllmPDRouter;
--
--                if let Some(vllm_pd_router) = router.as_any().downcast_ref::<VllmPDRouter>() {
--                    // Support --vllm-pd-disaggregation mode with K8s service discovery
--                    match &pod_info.pod_type {
--                        Some(PodType::Prefill) => vllm_pd_router
--                            .add_prefill_server(worker_url.clone(), pod_info.bootstrap_port)
--                            .await
--                            .map_err(|e| e.to_string()),
--                        Some(PodType::Decode) => vllm_pd_router
--                            .add_decode_server(worker_url.clone())
--                            .await
--                            .map_err(|e| e.to_string()),
--                        Some(PodType::Regular) | None => {
--                            // Fall back to regular add_worker for regular pods
--                            router.add_worker(&worker_url).await
--                        }
--                    }
--                } else {
--                    Err("PD mode enabled but router is not a VllmPDRouter".to_string())
--                }
--            } else {
--                // Regular mode or no pod type specified
--                router.add_worker(&worker_url).await
--            };
--
--            match result {
--                Ok(_) => {
--                    debug!("Worker added: {}", worker_url);
++            } else {
++                true
++            }
 +        }
 +        Event::Init => {
 +            if let Ok(mut seen) = relisted.lock() {
@@ -430,7 +404,7 @@ index d765800..0729f9f 100644
 +            if let Some(uid) = pod_uid(&pod) {
 +                if let Ok(mut seen) = relisted.lock() {
 +                    seen.insert(uid.to_string());
-                 }
++                }
 +            }
 +            handle_pod_observation(&pod, tracked_pods, router, port, config).await
 +        }
@@ -442,15 +416,12 @@ index d765800..0729f9f 100644
 +            let seen: HashSet<String> = match relisted.lock() {
 +                Ok(seen) => seen.clone(),
                  Err(e) => {
--                    error!("Failed to add worker {} to router: {}", worker_url, e);
--                    // Remove from tracking since addition failed
--                    if let Ok(mut tracker) = tracked_pods.lock() {
--                        tracker.remove(pod_info);
--                    }
+-                    error!("Failed to acquire tracked_pods lock: {}", e);
+-                    return;
 +                    error!("Failed to acquire relist lock: {}", e);
 +                    return true;
                  }
-+            };
+             };
 +            let absent: Vec<String> = {
 +                let tracker = match tracked_pods.lock() {
 +                    Ok(tracker) => tracker,
@@ -472,13 +443,77 @@ index d765800..0729f9f 100644
 +                // stuck worker cannot hide the others; the aggregate decides whether the
 +                // watch is restarted to retry.
 +                delivered &= withdraw_worker(&uid, tracked_pods, router, port, config.pd_mode).await;
-             }
++            }
 +            delivered
-         }
-     }
- }
++        }
++    }
++}
  
--async fn handle_pod_deletion(
+-            if tracker.contains(pod_info) {
+-                false // Already tracked
+-            } else {
+-                // Reserve the spot to prevent other threads from adding the same pod
+-                tracker.insert(pod_info.clone());
+-                true
++/// Reconcile every tracked UID against a fresh list of the namespace.
++///
++/// The reconciliation timer in the watch loop calls this. It is the relist path's
++/// semantics carried out on demand instead of waiting for kube-runtime to relist: every
++/// Pod in the list is observed exactly as an Apply would be, and every tracked UID the
++/// list does not contain is withdrawn exactly as an InitDone absence would be. A list
++/// failure is a delivery failure, which restarts the stream through the same backoff as
++/// a failed watch event.
++async fn reconcile_tracked(
++    pods: &Api<Pod>,
++    tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
++    router: &Arc<dyn RouterTrait>,
++    port: u16,
++    config: &ServiceDiscoveryConfig,
++) -> bool {
++    let list = match pods.list(&ListParams::default()).await {
++        Ok(list) => list,
++        Err(err) => {
++            error!("Reconciliation list failed: {}", err);
++            return false;
++        }
++    };
++    let mut delivered = true;
++    let mut seen: HashSet<String> = HashSet::new();
++    for pod in &list.items {
++        if let Some(uid) = pod_uid(pod) {
++            seen.insert(uid.to_string());
++        }
++        delivered &= handle_pod_observation(pod, tracked_pods, router, port, config).await;
++    }
++    let absent: Vec<String> = {
++        let tracker = match tracked_pods.lock() {
++            Ok(tracker) => tracker,
++            Err(e) => {
++                error!(
++                    "Failed to acquire tracked_pods lock during reconciliation: {}",
++                    e
++                );
++                return true;
+             }
+         };
++        tracker
++            .keys()
++            .filter(|uid| !seen.contains(*uid))
++            .cloned()
++            .collect()
++    };
++    for uid in absent {
++        info!("Pod {} is absent from the reconciliation list", uid);
++        delivered &= withdraw_worker(&uid, tracked_pods, router, port, config.pd_mode).await;
++    }
++    delivered
++}
+ 
+-        if should_add {
+-            info!(
+-                "Adding pod: {} | type: {:?} | url: {}",
+-                pod_info.name, pod_info.pod_type, worker_url
+-            );
 +/// Add, refresh or withdraw one Pod from its current selector membership, readiness
 +/// and termination state.
 +///
@@ -510,11 +545,51 @@ index d765800..0729f9f 100644
 +    if pod.metadata.deletion_timestamp.is_some() {
 +        return withdraw_worker(&uid, tracked_pods, router, port, config.pd_mode).await;
 +    }
-+
+ 
+-            // Handle PD mode with specific pod types
+-            let result = if pd_mode && pod_info.pod_type.is_some() {
+-                use crate::routers::http::vllm_pd_router::VllmPDRouter;
+-
+-                if let Some(vllm_pd_router) = router.as_any().downcast_ref::<VllmPDRouter>() {
+-                    // Support --vllm-pd-disaggregation mode with K8s service discovery
+-                    match &pod_info.pod_type {
+-                        Some(PodType::Prefill) => vllm_pd_router
+-                            .add_prefill_server(worker_url.clone(), pod_info.bootstrap_port)
+-                            .await
+-                            .map_err(|e| e.to_string()),
+-                        Some(PodType::Decode) => vllm_pd_router
+-                            .add_decode_server(worker_url.clone())
+-                            .await
+-                            .map_err(|e| e.to_string()),
+-                        Some(PodType::Regular) | None => {
+-                            // Fall back to regular add_worker for regular pods
+-                            router.add_worker(&worker_url).await
+-                        }
+-                    }
+-                } else {
+-                    Err("PD mode enabled but router is not a VllmPDRouter".to_string())
+-                }
+-            } else {
+-                // Regular mode or no pod type specified
+-                router.add_worker(&worker_url).await
+-            };
 +    if !PodInfo::should_include(pod, config) {
 +        return withdraw_worker(&uid, tracked_pods, router, port, config.pd_mode).await;
 +    }
-+
+ 
+-            match result {
+-                Ok(_) => {
+-                    debug!("Worker added: {}", worker_url);
+-                }
+-                Err(e) => {
+-                    error!("Failed to add worker {} to router: {}", worker_url, e);
+-                    // Remove from tracking since addition failed
+-                    if let Ok(mut tracker) = tracked_pods.lock() {
+-                        tracker.remove(pod_info);
+-                    }
+-                }
+-            }
+-        }
 +    let Some(pod_info) = PodInfo::from_pod(pod, Some(config)) else {
 +        // The Pod still matches the selectors, so it is still eligible, but its current
 +        // state cannot be read: no status, or an address that will not parse. Eligibility
@@ -529,11 +604,12 @@ index d765800..0729f9f 100644
 +
 +    if !pod_info.is_healthy() {
 +        return withdraw_worker(&uid, tracked_pods, router, port, config.pd_mode).await;
-+    }
+     }
 +
 +    register_worker(&pod_info, tracked_pods, router, port, config.pd_mode).await
-+}
-+
+ }
+ 
+-async fn handle_pod_deletion(
 +/// Register a healthy Pod as a worker, taking over the address it claims.
 +///
 +/// Two things have to hold for the tracker to describe the router truthfully. The
@@ -806,7 +882,7 @@ index d765800..0729f9f 100644
  }
  
  #[cfg(test)]
-@@ -509,6 +744,10 @@ mod tests {
+@@ -509,6 +823,10 @@ mod tests {
          let mut pod = Pod {
              metadata: ObjectMeta {
                  name: name.map(String::from),
@@ -817,7 +893,7 @@ index d765800..0729f9f 100644
                  deletion_timestamp,
                  ..Default::default()
              },
-@@ -832,6 +1071,7 @@ mod tests {
+@@ -832,6 +1150,7 @@ mod tests {
      fn test_pod_info_is_healthy() {
          let healthy_pod = PodInfo {
              name: "p1".into(),
@@ -825,7 +901,7 @@ index d765800..0729f9f 100644
              ip: "1.1.1.1".parse().unwrap(),
              status: "Running".into(),
              is_ready: true,
-@@ -842,6 +1082,7 @@ mod tests {
+@@ -842,6 +1161,7 @@ mod tests {
  
          let not_ready_pod = PodInfo {
              name: "p2".into(),
@@ -833,7 +909,7 @@ index d765800..0729f9f 100644
              ip: "1.1.1.2".parse().unwrap(),
              status: "Running".into(),
              is_ready: false,
-@@ -852,6 +1093,7 @@ mod tests {
+@@ -852,6 +1172,7 @@ mod tests {
  
          let not_running_pod = PodInfo {
              name: "p3".into(),
@@ -841,7 +917,7 @@ index d765800..0729f9f 100644
              ip: "1.1.1.3".parse().unwrap(),
              status: "Pending".into(),
              is_ready: true,
-@@ -865,6 +1107,7 @@ mod tests {
+@@ -865,6 +1186,7 @@ mod tests {
      fn test_pod_info_worker_url_ipv4() {
          let pod_info = PodInfo {
              name: "p1".into(),
@@ -849,7 +925,7 @@ index d765800..0729f9f 100644
              ip: "1.2.3.4".parse().unwrap(),
              status: "Running".into(),
              is_ready: true,
-@@ -878,6 +1121,7 @@ mod tests {
+@@ -878,6 +1200,7 @@ mod tests {
      fn test_pod_info_worker_url_ipv6() {
          let pod_info = PodInfo {
              name: "p1".into(),
@@ -857,7 +933,7 @@ index d765800..0729f9f 100644
              ip: "2803:6086:5cd3:6062:c68d:e7c7:480:10".parse().unwrap(),
              status: "Running".into(),
              is_ready: true,
-@@ -894,6 +1138,7 @@ mod tests {
+@@ -894,6 +1217,7 @@ mod tests {
      fn test_pod_info_equality_with_pod_type() {
          let pod1 = PodInfo {
              name: "pod1".into(),
@@ -865,7 +941,7 @@ index d765800..0729f9f 100644
              ip: "1.2.3.4".parse().unwrap(),
              status: "Running".into(),
              is_ready: true,
-@@ -903,6 +1148,7 @@ mod tests {
+@@ -903,6 +1227,7 @@ mod tests {
  
          let pod2 = PodInfo {
              name: "pod1".into(),
@@ -873,7 +949,7 @@ index d765800..0729f9f 100644
              ip: "1.2.3.4".parse().unwrap(),
              status: "Running".into(),
              is_ready: true,
-@@ -912,6 +1158,7 @@ mod tests {
+@@ -912,6 +1237,7 @@ mod tests {
  
          let pod3 = PodInfo {
              name: "pod1".into(),
@@ -881,7 +957,7 @@ index d765800..0729f9f 100644
              ip: "1.2.3.4".parse().unwrap(),
              status: "Running".into(),
              is_ready: true,
-@@ -923,269 +1170,376 @@ mod tests {
+@@ -923,269 +1249,376 @@ mod tests {
          assert_ne!(pod1, pod3);
      }
  
@@ -927,11 +1003,7 @@ index d765800..0729f9f 100644
 -        .await;
 +        }
 +    }
- 
--        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
--        assert!(!router
--            .get_worker_urls()
--            .contains(&pod_info.worker_url(port)));
++
 +    fn regular_config() -> ServiceDiscoveryConfig {
 +        ServiceDiscoveryConfig {
 +            enabled: true,
@@ -965,7 +1037,11 @@ index d765800..0729f9f 100644
 +        pod.metadata.deletion_timestamp = Some(Time(k8s_openapi::chrono::Utc::now()));
 +        pod
 +    }
-+
+ 
+-        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
+-        assert!(!router
+-            .get_worker_urls()
+-            .contains(&pod_info.worker_url(port)));
 +    async fn drive(
 +        event: Event<Pod>,
 +        tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
@@ -1364,9 +1440,7 @@ index d765800..0729f9f 100644
 +            "an eligible pod whose current status is unusable must be withdrawn"
 +        );
 +    }
- 
--        // Pod should not be tracked since router.add_pd_worker will fail for regular router
--        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
++
 +    #[tokio::test]
 +    async fn test_pod_with_empty_uid_is_refused() {
 +        let router = create_test_router().await;
@@ -1378,7 +1452,9 @@ index d765800..0729f9f 100644
 +        let mut pod = labelled_pod("uid-x", "pod-x", "10.0.0.7", true, true);
 +        pod.metadata.uid = Some(String::new());
 +        drive(Event::Apply(pod), &tracked, &router, &config).await;
-+
+ 
+-        // Pod should not be tracked since router.add_pd_worker will fail for regular router
+-        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
 +        let mut pod = labelled_pod("uid-y", "pod-y", "10.0.0.8", true, true);
 +        pod.metadata.uid = None;
 +        drive(Event::Apply(pod), &tracked, &router, &config).await;
