@@ -508,7 +508,7 @@ review; exact verification env follows the repo convention
   staged-gate review of this task's exact diff before any commit. Acceptance: AC-5.1/5.3; transfer fixtures
   byte-identical. Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race
   ./pkg/worker/controllers/worker/...`.
-- [ ] **T3 Router builder stages + discovery patch application — one complete green bullet.**
+- [x] **T3 Router builder stages + discovery patch application — one complete green bullet.**
   Blocked by: none (isolated ownership; only T1/T3 may initially run in parallel, each in its
   isolated ownership/worktree; any generation-level rewriting serializes against the other
   writer). Owns: `pack/llm-router/**`. Gate: root staged-gate review of this task's exact diff
@@ -526,7 +526,13 @@ review; exact verification env follows the repo convention
   placement evidence; llm-d unchanged-behavior regression green. Verify: same buildx targets +
   the event-matrix harness (implemented and tested under the root-assigned owned evidence path,
   fixed at dispatch; local script invocation with retained context variables; runtime grants
-  separate when budget/caps ready).
+  separate when budget/caps ready). Acceptance split: the source and build levels of this task
+  are committed together with T3 in one commit, because the Dockerfile copies the two patch
+  directories this task owns and a split commit would break the build on either side. The
+  runtime acceptance moves to T6: the seven-cell event matrix runs there as five cells, and
+  the failed-Add re-list and failed-Remove retry cells stay UNVERIFIED under the root ruling
+  against fault-injection hooks in the production patches, with the real-cluster phase as the
+  revisit trigger. This box stays unchecked until that runtime acceptance lands.
 - [x] **T5 Eligibility label, backfill, Service convergence.** Blocked by: T2. Owns: label
   maintenance and service/router selector render paths (globs:
   `pkg/worker/controllers/worker/model_deployment_{service,router}.go` plus the reconciler-owned
