@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
@@ -2082,10 +2083,40 @@ func modelDeploymentOwnedResource(obj ctrlcli.Object) bool {
 		systemmeta.DescribeResourceNote(obj, modelDeploymentResourceNoteRouter) != ""
 }
 
-func (r *ModelDeploymentReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
+func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
 	r.APIReader = opts.Manager.GetAPIReader()
 	r.Recorder = opts.Manager.GetEventRecorderFor("modeldeployment")
+
+	// The drain reader resolves one member by its UID, and a UID is not a field the cache can be
+	// asked for without an index. Registering it here, before the manager is started, is what keeps
+	// the lookup one cache read instead of a sweep of every Pod in the cluster on every read of
+	// every member of every retiring replica.
+	err := opts.Manager.GetFieldIndexer().IndexField(ctx, &core.Pod{}, modelDeploymentDrainIndexPodUID,
+		func(obj ctrlcli.Object) []string {
+			if obj == nil {
+				return nil
+			}
+			pod := obj.(*core.Pod)
+			if pod.UID == "" {
+				return nil
+			}
+			return []string{string(pod.UID)}
+		})
+	if err != nil {
+		return fmt.Errorf("index pod by uid for the drain reader: %w", err)
+	}
+
+	// THE EXEC TRANSPORT IS BUILT HERE AND NOWHERE ELSE, so the reader a production pass resolves
+	// is the one wired below and not the refusal the seam falls back to. A nil reader is the
+	// refusal; this is what replaces it.
+	coreClient, err := corev1client.NewForConfig(opts.Manager.GetConfig())
+	if err != nil {
+		return fmt.Errorf("build core client for the drain reader: %w", err)
+	}
+	r.drainReader = newModelDeploymentDrainCollector(
+		r.Client, opts.Manager.GetConfig(), coreClient,
+	)
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("modeldeployment").

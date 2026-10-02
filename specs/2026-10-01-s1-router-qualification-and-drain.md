@@ -558,7 +558,7 @@ review; exact verification env follows the repo convention
   commit. Acceptance: AC-4.1–4.9 incl. retry-token crash ordering and
   budget boundary min(overall, phase). Verify: package tests (cannot-bypass table, retry crash
   ordering, budget boundary).
-- [ ] **T9 Controller-side drain reader.** Blocked by: T8. Owns: drain reader files in-package;
+- [x] **T9 Controller-side drain reader.** Blocked by: T8. Owns: drain reader files in-package;
   RBAC/initialization paths if the chosen transport needs them; stale delete-only comment
   corrected (a comment only — the current preStop exit-0 behavior is not thereby claimed safe).
   Gate: root staged-gate review of this task's exact diff before any commit. Acceptance:

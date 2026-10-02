@@ -839,11 +839,7 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementDrained(
 
 	reader := r.modelDeploymentDrainReaderOf()
 	for _, member := range plan.Target.Members {
-		target := modelDeploymentDrainTarget{
-			PodUID: member.UID,
-			Role:   modelDeploymentRetirementRoleName(role, plan),
-			Engine: modelDeploymentRetirementEngine(md),
-		}
+		target := modelDeploymentRetirementDrainTarget(md, role, plan, member)
 		// TWO CONSECUTIVE READS, both of which must be idle, complete, and matched to this member by
 		// every expected series. The first is dropped on the floor either way; it is taken so that a
 		// single lucky zero cannot carry the protocol past a member that is still working.
@@ -859,6 +855,27 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentRetirementDrained(
 	}
 
 	return "", true
+}
+
+// modelDeploymentRetirementDrainTarget is the one read the protocol asks about a member.
+//
+// IT IS BUILT HERE RATHER THAN INLINE because every field of it is a decision the reader is not
+// allowed to make for itself. The container is carried rather than looked up, which is what the
+// target's own comment requires: a reader handed a member and a container answers for exactly that
+// pair and cannot be quietly pointed at a sibling container of the same Pod. A target built with it
+// empty is a type that lies about itself, and nothing downstream fails loudly on it.
+func modelDeploymentRetirementDrainTarget(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	plan *modelDeploymentRetirementPlan, member *core.Pod,
+) modelDeploymentDrainTarget {
+	return modelDeploymentDrainTarget{
+		PodUID: member.UID,
+		// The engine container is the one the renderer names, so the read is aimed at the engine
+		// this replica runs rather than at whatever container happens to be first.
+		Container: modelDeploymentMainContainerName,
+		Role:      modelDeploymentRetirementRoleName(role, plan),
+		Engine:    modelDeploymentRetirementEngine(md),
+	}
 }
 
 // modelDeploymentDrainMemberIdle is one member's half of the drain rule, kept apart from the loop
