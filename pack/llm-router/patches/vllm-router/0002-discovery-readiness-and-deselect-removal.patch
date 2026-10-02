@@ -1,0 +1,1463 @@
+Stop selecting a worker once it loses readiness, selector membership,
+termination, or a verifiable current state, and make that withdrawal identity-correct
+and reversible.
+
+THE DEFECT, in four parts that hide each other. The Kubernetes watcher watches all Pods
+and applies the label selector in a client-side filter
+(src/service_discovery.rs): the stream was consumed through applied_objects() and then
+passed through a filter_map that dropped any Pod not matching the selector. A Pod that
+loses the eligibility label therefore never reached the handler at all -- a filter can
+only discard objects, and a withdrawal is exactly the case where the object is still
+there. Second, the same filter_map discarded the Delete event and the Init and
+InitDone arms of the relist. What applied_objects() actually does is decode an Event
+into the object it carries and, with emit_deleted false, pass Apply and InitApply
+through while discarding Delete, Init and InitDone: upstream therefore still saw each
+object of a relist, and never saw the point at which the watcher states that an object
+previously Applied is now absent, which is why an abruptly removed worker stayed
+registered for the life of the process. Third, handle_pod_event had a branch for a
+healthy Pod and no branch at all for an unhealthy one, so even a Pod that did arrive
+with readiness lost was silently ignored, and the deletion-timestamp branch that
+upstream did have was reachable only after a PodInfo had been rebuilt from the current
+object.
+
+Behind all three sat a fourth problem that made a partial fix useless rather than
+wrong. The tracker was a HashSet<PodInfo> and PodInfo derives PartialEq, Eq and Hash
+over the whole struct, including is_ready, status and ip. A Ready -> NotReady
+transition, a phase change or an address change all produce a PodInfo that no longer
+compares equal to the registered one, so any removal looked up by the current PodInfo
+would MISS the live entry and the worker would stay in the pool; and because the
+address is part of the key, a same-name replacement that reused an address aliased the
+previous identity.
+
+THE FIX. The watch stream is consumed as raw Events and the selector decision moved
+into the handler, where the Pod itself is in hand: a Pod that is terminating, no longer
+matches the selectors, or is present but not healthy is a withdrawal. Termination is
+checked FIRST, before any status is parsed and before selector membership, because a
+terminating Pod can still report Ready=True and Running, and reading health first would
+re-register it and leave the withdrawal to the final Delete event -- the preStop path
+this replaces. Apply and Delete are handled directly, and the relist is implemented as
+the contract describes: Init opens a set, InitApply records UIDs, InitDone withdraws
+every tracked UID the listing did not contain.
+
+The tracker becomes a HashMap keyed on the Pod UID, and the stored value is the PodInfo
+the worker was REGISTERED with rather than as it is now, so a withdrawal issued for an
+old identity removes that old URL and role. A UID-keyed map alone does not make that
+true at the router, because the router is keyed by URL: if a new UID were admitted at
+an address the old UID still held, the map would carry both, and a later Delete for the
+old UID would remove the CURRENT occupant from the pool. register_worker therefore
+reconciles address ownership before admitting a new UID -- any other UID registered at
+the same address is withdrawn first, and a failed withdrawal holds the new add -- so an
+address has exactly one owner and a late delete for a replaced UID finds nothing to act
+on. A Pod whose UID is absent OR EMPTY is refused rather than admitted, because an
+empty string is not an identity: it is the one value every unidentified Pod shares, so
+it would alias unrelated Pods into one registration and make a later withdrawal remove
+the wrong worker.
+
+A Pod that still matches the selectors but whose current status or address cannot be
+read is WITHDRAWN, not retained. Eligibility is not health, and a registration that
+cannot be shown healthy must not stay selectable.
+
+A registration is dropped only after the router has actually been told, and a failure
+returns false rather than being swallowed. The watcher loop treats that false as a
+reason to end the stream, so the existing backoff recreates the watcher and the relist
+that comes with it reconciles whatever is still held. That is the only retry added here:
+no second timer, no polling loop, and the failed withdrawal is not left waiting for a
+Pod event that may never arrive. The backoff is taken alone on that path rather than
+followed by the full check-interval sleep, which would push the retry past any sensible
+withdrawal budget. The first error is what is logged, on every attempt.
+
+P/D behaviour is preserved: the add and remove paths keep the existing VllmPDRouter
+prefill/decode routing, bootstrap port handling and the regular-mode fallbacks, and are
+only reached from the new decision points.
+
+AGAINST: vllm-project/router v0.1.15 (commit
+1fbcde7443d75b36befb61bc081f64c2a1f13a4b), the pin named by
+VLLM_ROUTER_VERSION in pack/llm-router/Dockerfile. The image build applies this patch
+with git apply from the clone root, which fails loudly on a pin whose hunks no longer
+match, so a version bump that absorbs or breaks the patch is detected at build time
+rather than in a cluster.
+
+The added tests drive the discovery decisions through handle_watch_event and assert on
+the tracker and the router: readiness loss withdraws while a healthy observation of the
+same identity does not; a label deselect withdraws; a terminating Pod withdraws both
+while reporting Ready and with no status at all; a relist withdraws an absent UID and
+keeps a listed one; a new UID takes an address over from its previous owner, and a late
+delete for the replaced UID then cannot reach the current owner; an eligible Pod whose
+current status is unusable withdraws; an absent or empty UID is refused; a withdrawal
+drops only the exact registration it removed; a delete for an untracked UID is a
+delivered no-op.
+
+The successful-insert leg is not asserted here: Router::add_worker polls the worker's
+health endpoint, so a registration that is genuinely added cannot be observed with the
+in-crate test router. The full add/withdraw/re-add round trip, and the ordering of a
+replacement against a late delete, are measured against the built binary on placement
+evidence in the operator's event-matrix harness rather than claimed from a unit test.
+
+TO REFRESH after a pin bump: clone the new pin, git apply this patch, resolve
+any rejects, regenerate with git diff, and keep this header on top.
+
+diff --git a/src/service_discovery.rs b/src/service_discovery.rs
+index d765800..0729f9f 100644
+--- a/src/service_discovery.rs
++++ b/src/service_discovery.rs
+@@ -1,11 +1,10 @@
+ use crate::routers::RouterTrait;
+ 
+-use futures::{StreamExt, TryStreamExt};
++use futures::StreamExt;
+ use k8s_openapi::api::core::v1::Pod;
+ use kube::{
+     api::Api,
+-    runtime::watcher::{watcher, Config},
+-    runtime::WatchStreamExt,
++    runtime::watcher::{watcher, Config, Event},
+     Client,
+ };
+ use std::collections::{HashMap, HashSet};
+@@ -62,6 +61,7 @@ pub enum PodType {
+ #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+ pub struct PodInfo {
+     pub name: String,
++    pub uid: String,
+     pub ip: IpAddr,
+     pub status: String,
+     pub is_ready: bool,
+@@ -106,6 +106,12 @@ impl PodInfo {
+     /// Unified PodInfo creation with optional PD configuration
+     pub fn from_pod(pod: &Pod, config: Option<&ServiceDiscoveryConfig>) -> Option<Self> {
+         let name = pod.metadata.name.clone()?;
++        // A Pod whose UID is absent or empty cannot be withdrawn later: identity is what
++        // a deselect, readiness loss or deletion is matched against, and an empty string
++        // is not an identity but the one value every unidentified Pod shares. Such a Pod
++        // is refused here rather than admitted as a worker that can never be reliably
++        // removed.
++        let uid = pod.metadata.uid.clone().filter(|uid| !uid.is_empty())?;
+         let status = pod.status.clone()?;
+         let pod_ip: IpAddr = status.pod_ip?.parse().ok()?;
+ 
+@@ -155,6 +161,7 @@ impl PodInfo {
+ 
+         Some(PodInfo {
+             name,
++            uid,
+             ip: pod_ip,
+             status: pod_status,
+             is_ready,
+@@ -230,8 +237,18 @@ pub async fn start_service_discovery(
+ 
+     // Create the task that will run in the background
+     let handle = task::spawn(async move {
+-        // We'll track pods we've already added to avoid duplicates
+-        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
++        // We track the worker registration we actually made, keyed by Pod UID.
++        //
++        // Keying on the UID rather than on the whole PodInfo is what makes removal
++        // correct: a Ready -> NotReady transition, a phase change or an address change
++        // all produce a PodInfo that no longer compares equal to the registered one, so
++        // a HashSet<PodInfo> lookup would miss the live entry and the worker would stay
++        // in the pool. The value is the PodInfo as it was REGISTERED, not as it is now,
++        // so a withdrawal issued for an old identity removes that old URL and role even
++        // after the address has been reused. register_worker additionally keeps one
++        // address owned by exactly one UID, which is what makes that true at the router.
++        let tracked_pods: Arc<Mutex<HashMap<String, PodInfo>>> =
++            Arc::new(Mutex::new(HashMap::new()));
+ 
+         // Create a watcher for pods
+         let pods: Api<Pod> = if let Some(namespace) = &config.namespace {
+@@ -251,88 +268,72 @@ pub async fn start_service_discovery(
+ 
+         loop {
+             // Create a watcher with the proper parameters according to the kube-rs API
++            // The stream is consumed as raw Events rather than through
++            // applied_objects(). applied_objects() decodes an Event into the object it
++            // carries and, with emit_deleted false, passes Apply and InitApply through
++            // while discarding Delete, Init and InitDone. InitApply surviving is why
++            // upstream still saw a relist's objects; what it never saw was InitDone,
++            // which is the only point at which the watcher states that an object
++            // previously Applied is now absent. That is the signal whose loss let an
++            // abruptly removed worker stay registered for the life of the process.
+             let watcher_config = Config::default();
+-            let watcher_stream = watcher(pods.clone(), watcher_config).applied_objects();
+-
+-            // Clone Arcs for the closures
+-            let config_clone = Arc::clone(&config_arc);
+-            let tracked_pods_clone = Arc::clone(&tracked_pods);
+-
+-            // Simplified label selector filter using helper method
+-            let filtered_stream = watcher_stream.filter_map(move |obj_res| {
+-                let config_inner = Arc::clone(&config_clone);
+-
+-                async move {
+-                    match obj_res {
+-                        Ok(pod) => {
+-                            if PodInfo::should_include(&pod, &config_inner) {
+-                                Some(Ok(pod))
+-                            } else {
+-                                None
+-                            }
++            // Box::pin because watcher() returns a stream::unfold stream, which is not
++            // Unpin, and the explicit loop below calls .next() on it by value.
++            let mut watcher_stream = Box::pin(watcher(pods.clone(), watcher_config));
++
++            // UIDs observed during the relist currently in progress, used to withdraw
++            // registrations the API server no longer lists.
++            let relisted: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
++
++            let mut delivered = true;
++            while let Some(item) = watcher_stream.next().await {
++                match item {
++                    Ok(event) => {
++                        // A withdrawal that could not be delivered ends this stream. The
++                        // backoff below recreates the watcher, and the relist that comes
++                        // with it reconciles everything still held, so the retry is
++                        // bounded by the watcher's existing backoff instead of waiting
++                        // for a Pod event that may never arrive.
++                        delivered = handle_watch_event(
++                            event,
++                            &tracked_pods,
++                            &relisted,
++                            &router,
++                            port,
++                            &config_arc,
++                        )
++                        .await;
++                        if !delivered {
++                            break;
+                         }
+-                        Err(e) => Some(Err(e)),
+                     }
+-                }
+-            });
+-
+-            // Clone again for the next closure
+-            let tracked_pods_clone2 = Arc::clone(&tracked_pods_clone);
+-            let router_clone = Arc::clone(&router);
+-            let config_clone2 = Arc::clone(&config_arc);
+-
+-            match filtered_stream
+-                .try_for_each(move |pod| {
+-                    let tracked_pods_inner = Arc::clone(&tracked_pods_clone2);
+-                    let router_inner = Arc::clone(&router_clone);
+-                    let config_inner = Arc::clone(&config_clone2);
+-
+-                    async move {
+-                        let pod_info = PodInfo::from_pod(&pod, Some(&config_inner));
+-
+-                        if let Some(pod_info) = pod_info {
+-                            if pod.metadata.deletion_timestamp.is_some() {
+-                                handle_pod_deletion(
+-                                    &pod_info,
+-                                    tracked_pods_inner,
+-                                    router_inner,
+-                                    port,
+-                                    config_inner.pd_mode,
+-                                )
+-                                .await;
+-                            } else {
+-                                handle_pod_event(
+-                                    &pod_info,
+-                                    tracked_pods_inner,
+-                                    router_inner,
+-                                    port,
+-                                    config_inner.pd_mode,
+-                                )
+-                                .await;
+-                            }
+-                        }
+-                        Ok(())
++                    Err(err) => {
++                        error!("Error in Kubernetes watcher: {}", err);
++                        delivered = false;
++                        break;
+                     }
+-                })
+-                .await
+-            {
+-                Ok(_) => {
+-                    // Reset retry delay on success
+-                    retry_delay = Duration::from_secs(1);
+-                }
+-                Err(err) => {
+-                    error!("Error in Kubernetes watcher: {}", err);
+-                    warn!(
+-                        "Retrying in {} seconds with exponential backoff",
+-                        retry_delay.as_secs()
+-                    );
+-                    time::sleep(retry_delay).await;
+-
+-                    // Exponential backoff with jitter
+-                    retry_delay = std::cmp::min(retry_delay * 2, MAX_RETRY_DELAY);
+                 }
+             }
+ 
++            if delivered {
++                // Reset retry delay on success
++                retry_delay = Duration::from_secs(1);
++            } else {
++                warn!(
++                    "Retrying in {} seconds with exponential backoff",
++                    retry_delay.as_secs()
++                );
++                time::sleep(retry_delay).await;
++
++                // Exponential backoff with jitter
++                retry_delay = std::cmp::min(retry_delay * 2, MAX_RETRY_DELAY);
++
++                // A restart re-lists every Pod, so the relist is the retry. Sleeping the
++                // full check interval as well would push the retry past any sensible
++                // withdrawal budget, so this path takes the backoff alone.
++                continue;
++            }
++
+             // If the watcher exits for some reason, wait a bit before restarting
+             warn!(
+                 "Kubernetes watcher exited, restarting in {} seconds",
+@@ -345,150 +346,384 @@ pub async fn start_service_discovery(
+     Ok(handle)
+ }
+ 
+-async fn handle_pod_event(
+-    pod_info: &PodInfo,
+-    tracked_pods: Arc<Mutex<HashSet<PodInfo>>>,
+-    router: Arc<dyn RouterTrait>,
+-    port: u16,
+-    pd_mode: bool,
+-) {
+-    let worker_url = pod_info.worker_url(port);
+-
+-    // If pod is healthy, try to add it (with atomic check-and-insert)
+-    if pod_info.is_healthy() {
+-        // Atomic check-and-insert to prevent race conditions
+-        let should_add = {
+-            let mut tracker = match tracked_pods.lock() {
+-                Ok(tracker) => tracker,
+-                Err(e) => {
+-                    error!("Failed to acquire tracked_pods lock: {}", e);
+-                    return;
+-                }
+-            };
++/// The identity a worker registration is keyed on.
++///
++/// A Pod with no UID, or with an empty one, is refused rather than admitted: an empty
++/// string is not an identity, it is the one value every unidentified Pod shares, so it
++/// would alias unrelated Pods into a single registration and make a later withdrawal
++/// remove the wrong worker.
++fn pod_uid(pod: &Pod) -> Option<&str> {
++    pod.metadata.uid.as_deref().filter(|uid| !uid.is_empty())
++}
+ 
+-            if tracker.contains(pod_info) {
+-                false // Already tracked
++/// Reconcile one watcher event into the registered worker set.
++///
++/// Returns false when a withdrawal could not be delivered. The caller uses that to
++/// drop the watch stream and let the existing backoff restart it, because a restart
++/// re-lists every Pod and the InitDone reconciliation retries whatever is still held.
++/// That is the only retry path added here: there is no second timer and no polling
++/// loop, so a failed withdrawal cannot sit unretried forever, and the relist that
++/// retries it is the same mechanism that already recovers a broken watch.
++///
++/// The selector is evaluated here rather than in a stream filter because a filter can
++/// only drop objects: a Pod that stops matching the selectors still arrives as an
++/// ordinary object, and dropping it before this point is what hid the withdrawal.
++async fn handle_watch_event(
++    event: Event<Pod>,
++    tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
++    relisted: &Arc<Mutex<HashSet<String>>>,
++    router: &Arc<dyn RouterTrait>,
++    port: u16,
++    config: &ServiceDiscoveryConfig,
++) -> bool {
++    match event {
++        Event::Apply(pod) => {
++            handle_pod_observation(&pod, tracked_pods, router, port, config).await
++        }
++        Event::Delete(pod) => {
++            if let Some(uid) = pod_uid(&pod) {
++                withdraw_worker(uid, tracked_pods, router, port, config.pd_mode).await
+             } else {
+-                // Reserve the spot to prevent other threads from adding the same pod
+-                tracker.insert(pod_info.clone());
+                 true
+             }
+-        };
+-
+-        if should_add {
+-            info!(
+-                "Adding pod: {} | type: {:?} | url: {}",
+-                pod_info.name, pod_info.pod_type, worker_url
+-            );
+-
+-            // Handle PD mode with specific pod types
+-            let result = if pd_mode && pod_info.pod_type.is_some() {
+-                use crate::routers::http::vllm_pd_router::VllmPDRouter;
+-
+-                if let Some(vllm_pd_router) = router.as_any().downcast_ref::<VllmPDRouter>() {
+-                    // Support --vllm-pd-disaggregation mode with K8s service discovery
+-                    match &pod_info.pod_type {
+-                        Some(PodType::Prefill) => vllm_pd_router
+-                            .add_prefill_server(worker_url.clone(), pod_info.bootstrap_port)
+-                            .await
+-                            .map_err(|e| e.to_string()),
+-                        Some(PodType::Decode) => vllm_pd_router
+-                            .add_decode_server(worker_url.clone())
+-                            .await
+-                            .map_err(|e| e.to_string()),
+-                        Some(PodType::Regular) | None => {
+-                            // Fall back to regular add_worker for regular pods
+-                            router.add_worker(&worker_url).await
+-                        }
+-                    }
+-                } else {
+-                    Err("PD mode enabled but router is not a VllmPDRouter".to_string())
+-                }
+-            } else {
+-                // Regular mode or no pod type specified
+-                router.add_worker(&worker_url).await
+-            };
+-
+-            match result {
+-                Ok(_) => {
+-                    debug!("Worker added: {}", worker_url);
++        }
++        Event::Init => {
++            if let Ok(mut seen) = relisted.lock() {
++                seen.clear();
++            }
++            true
++        }
++        Event::InitApply(pod) => {
++            if let Some(uid) = pod_uid(&pod) {
++                if let Ok(mut seen) = relisted.lock() {
++                    seen.insert(uid.to_string());
+                 }
++            }
++            handle_pod_observation(&pod, tracked_pods, router, port, config).await
++        }
++        Event::InitDone => {
++            // The watcher contract states that whatever was applied before and is not
++            // listed by this relist must be treated as deleted. This is the convergence
++            // path for a worker that vanished without delivering a Delete event, which
++            // an abrupt Pod removal or a missed watch does produce.
++            let seen: HashSet<String> = match relisted.lock() {
++                Ok(seen) => seen.clone(),
+                 Err(e) => {
+-                    error!("Failed to add worker {} to router: {}", worker_url, e);
+-                    // Remove from tracking since addition failed
+-                    if let Ok(mut tracker) = tracked_pods.lock() {
+-                        tracker.remove(pod_info);
+-                    }
++                    error!("Failed to acquire relist lock: {}", e);
++                    return true;
+                 }
++            };
++            let absent: Vec<String> = {
++                let tracker = match tracked_pods.lock() {
++                    Ok(tracker) => tracker,
++                    Err(e) => {
++                        error!("Failed to acquire tracked_pods lock during relist: {}", e);
++                        return true;
++                    }
++                };
++                tracker
++                    .keys()
++                    .filter(|uid| !seen.contains(*uid))
++                    .cloned()
++                    .collect()
++            };
++            let mut delivered = true;
++            for uid in absent {
++                info!("Pod {} is absent from the relist", uid);
++                // Every absent identity is attempted even after one fails, so a single
++                // stuck worker cannot hide the others; the aggregate decides whether the
++                // watch is restarted to retry.
++                delivered &= withdraw_worker(&uid, tracked_pods, router, port, config.pd_mode).await;
+             }
++            delivered
+         }
+     }
+ }
+ 
+-async fn handle_pod_deletion(
++/// Add, refresh or withdraw one Pod from its current selector membership, readiness
++/// and termination state.
++///
++/// Every branch that withdraws does so by the Pod's stored UID, so it removes the
++/// registration that was actually made rather than one rebuilt from the current
++/// object. Upstream had no branch for readiness loss, selector loss, termination or
++/// an unreadable status, so a worker in any of those states kept receiving new
++/// requests for the life of the process.
++async fn handle_pod_observation(
++    pod: &Pod,
++    tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
++    router: &Arc<dyn RouterTrait>,
++    port: u16,
++    config: &ServiceDiscoveryConfig,
++) -> bool {
++    let Some(uid) = pod_uid(pod) else {
++        warn!(
++            "Refusing pod {:?}: no usable metadata.uid, so a later withdrawal could not identify it",
++            pod.metadata.name
++        );
++        return true;
++    };
++    let uid = uid.to_string();
++
++    // Termination is checked before anything is parsed from the status, and before
++    // selector membership. A terminating Pod can still report Ready=True and Running,
++    // so any check that reads health first would re-register it and leave the
++    // withdrawal to the final Delete event, which is the preStop path this replaces.
++    if pod.metadata.deletion_timestamp.is_some() {
++        return withdraw_worker(&uid, tracked_pods, router, port, config.pd_mode).await;
++    }
++
++    if !PodInfo::should_include(pod, config) {
++        return withdraw_worker(&uid, tracked_pods, router, port, config.pd_mode).await;
++    }
++
++    let Some(pod_info) = PodInfo::from_pod(pod, Some(config)) else {
++        // The Pod still matches the selectors, so it is still eligible, but its current
++        // state cannot be read: no status, or an address that will not parse. Eligibility
++        // is not health, and a registration that cannot be shown healthy must not stay
++        // selectable, so this withdraws by the stored UID rather than retaining it.
++        warn!(
++            "Pod {} matches the selectors but its current status or address is unusable; withdrawing",
++            uid
++        );
++        return withdraw_worker(&uid, tracked_pods, router, port, config.pd_mode).await;
++    };
++
++    if !pod_info.is_healthy() {
++        return withdraw_worker(&uid, tracked_pods, router, port, config.pd_mode).await;
++    }
++
++    register_worker(&pod_info, tracked_pods, router, port, config.pd_mode).await
++}
++
++/// Register a healthy Pod as a worker, taking over the address it claims.
++///
++/// Two things have to hold for the tracker to describe the router truthfully. The
++/// stored value is the PodInfo the worker was REGISTERED with, so a later withdrawal
++/// of an old identity removes that old address and role. And one address has exactly
++/// one owner: before a new UID is admitted at an address some other UID still holds,
++/// that previous owner is withdrawn, because a router keyed by URL has no way to hold
++/// two members for one address, and a later Delete for the old UID would otherwise
++/// remove the current occupant from the pool.
++async fn register_worker(
+     pod_info: &PodInfo,
+-    tracked_pods: Arc<Mutex<HashSet<PodInfo>>>,
+-    router: Arc<dyn RouterTrait>,
++    tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
++    router: &Arc<dyn RouterTrait>,
+     port: u16,
+     pd_mode: bool,
+-) {
++) -> bool {
+     let worker_url = pod_info.worker_url(port);
+ 
+-    let was_tracked = {
+-        let mut tracked = match tracked_pods.lock() {
+-            Ok(tracked) => tracked,
++    let (same_identity, previous_owners) = {
++        let tracker = match tracked_pods.lock() {
++            Ok(tracker) => tracker,
+             Err(e) => {
+-                error!("Failed to acquire tracked_pods lock during deletion: {}", e);
+-                return;
++                error!("Failed to acquire tracked_pods lock: {}", e);
++                return true;
+             }
+         };
+-        tracked.remove(pod_info)
++        let same_identity = tracker.get(&pod_info.uid).cloned();
++        if let Some(existing) = same_identity.as_ref() {
++            if existing.worker_url(port) == worker_url
++                && existing.pod_type == pod_info.pod_type
++                && existing.bootstrap_port == pod_info.bootstrap_port
++            {
++                // Already registered with the same routing details. A repeated event
++                // must not churn the router.
++                return true;
++            }
++        }
++        // Any other identity currently registered at the same address owns that address
++        // in the router and has to yield it before the new one can claim it.
++        let owners: Vec<PodInfo> = tracker
++            .values()
++            .filter(|entry| entry.uid != pod_info.uid && entry.worker_url(port) == worker_url)
++            .cloned()
++            .collect();
++        (same_identity, owners)
+     };
+ 
+-    if was_tracked {
++    // A registration of the same UID at a different address is withdrawn first, so the
++    // router does not keep serving the previous address.
++    if let Some(previous) = same_identity {
++        if !withdraw_registration(&previous, tracked_pods, router, port, pd_mode).await {
++            return false;
++        }
++    }
++
++    for owner in previous_owners {
+         info!(
+-            "Removing pod: {} | type: {:?} | url: {}",
+-            pod_info.name, pod_info.pod_type, worker_url
++            "Address {} is currently registered to pod uid {}; withdrawing it before pod uid {} claims it",
++            worker_url, owner.uid, pod_info.uid
+         );
++        if !withdraw_registration(&owner, tracked_pods, router, port, pd_mode).await {
++            // The address is still held. Admitting the new UID now would leave the
++            // router serving a worker the tracker no longer describes, so the add waits
++            // for the retry this false return triggers.
++            return false;
++        }
++    }
+ 
+-        // Handle PD mode removal
+-        if pd_mode && pod_info.pod_type.is_some() {
+-            use crate::routers::http::vllm_pd_router::VllmPDRouter;
++    info!(
++        "Adding pod: {} | uid: {} | type: {:?} | url: {}",
++        pod_info.name, pod_info.uid, pod_info.pod_type, worker_url
++    );
++
++    // Handle PD mode with specific pod types
++    let result = if pd_mode && pod_info.pod_type.is_some() {
++        use crate::routers::http::vllm_pd_router::VllmPDRouter;
++
++        if let Some(vllm_pd_router) = router.as_any().downcast_ref::<VllmPDRouter>() {
++            // Support --vllm-pd-disaggregation mode with K8s service discovery
++            match &pod_info.pod_type {
++                Some(PodType::Prefill) => vllm_pd_router
++                    .add_prefill_server(worker_url.clone(), pod_info.bootstrap_port)
++                    .await
++                    .map_err(|e| e.to_string()),
++                Some(PodType::Decode) => vllm_pd_router
++                    .add_decode_server(worker_url.clone())
++                    .await
++                    .map_err(|e| e.to_string()),
++                Some(PodType::Regular) | None => {
++                    // Fall back to regular add_worker for regular pods
++                    router.add_worker(&worker_url).await
++                }
++            }
++        } else {
++            Err("PD mode enabled but router is not a VllmPDRouter".to_string())
++        }
++    } else {
++        // Regular mode or no pod type specified
++        router.add_worker(&worker_url).await
++    };
+ 
+-            if let Some(vllm_pd_router) = router.as_any().downcast_ref::<VllmPDRouter>() {
+-                // Support --vllm-pd-disaggregation mode with K8s service discovery
+-                match &pod_info.pod_type {
+-                    Some(PodType::Prefill) => {
+-                        if let Err(e) = vllm_pd_router.remove_prefill_server(&worker_url).await {
+-                            error!("Failed to remove vllm prefill server {}: {}", worker_url, e);
+-                        }
+-                    }
+-                    Some(PodType::Decode) => {
+-                        if let Err(e) = vllm_pd_router.remove_decode_server(&worker_url).await {
+-                            error!("Failed to remove vllm decode server {}: {}", worker_url, e);
+-                        }
++    match result {
++        Ok(_) => {
++            if let Ok(mut tracker) = tracked_pods.lock() {
++                tracker.insert(pod_info.uid.clone(), pod_info.clone());
++            }
++            debug!("Worker added: {}", worker_url);
++            true
++        }
++        Err(e) => {
++            // The Pod is deliberately not recorded as tracked: a failed add left no
++            // registration to withdraw, and a phantom entry would make the next event
++            // believe a worker exists.
++            error!("Failed to add worker {} to router: {}", worker_url, e);
++            true
++        }
++    }
++}
++
++/// Withdraw the registration held for a Pod UID, if there is one.
++///
++/// Returns whether the withdrawal was delivered. A Pod that was never registered is
++/// a delivered no-op: there was nothing in the router to remove.
++async fn withdraw_worker(
++    uid: &str,
++    tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
++    router: &Arc<dyn RouterTrait>,
++    port: u16,
++    pd_mode: bool,
++) -> bool {
++    let registered = {
++        let tracker = match tracked_pods.lock() {
++            Ok(tracker) => tracker,
++            Err(e) => {
++                error!("Failed to acquire tracked_pods lock: {}", e);
++                return false;
++            }
++        };
++        tracker.get(uid).cloned()
++    };
++
++    match registered {
++        Some(registered) => {
++            withdraw_registration(&registered, tracked_pods, router, port, pd_mode).await
++        }
++        None => {
++            // Nothing was registered for this identity, so there is nothing to
++            // withdraw. This is the normal outcome for a duplicate event, for a Pod
++            // that was never healthy, and for a deletion arriving after the worker was
++            // already withdrawn.
++            debug!("No worker registration held for pod uid: {}", uid);
++            true
++        }
++    }
++}
++
++/// Withdraw one registered worker from the router and, only on success, drop the
++/// registration that described it.
++///
++/// The registration is keyed by UID and holds the details the worker was ADDED with,
++/// so a withdrawal issued for an identity that has since been replaced at the same
++/// address removes that old address rather than the new occupant's. That guarantee
++/// rests on the address having a single owner, which register_worker enforces before
++/// admitting a new UID.
++///
++/// Returns whether the withdrawal completed. A failure keeps the registration, so the
++/// relist-driven retry can deliver it: dropping it on failure would report a
++/// withdrawal that never reached the router, which is the one outcome this function
++/// exists to prevent.
++async fn withdraw_registration(
++    registered: &PodInfo,
++    tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
++    router: &Arc<dyn RouterTrait>,
++    port: u16,
++    pd_mode: bool,
++) -> bool {
++    let worker_url = registered.worker_url(port);
++
++    info!(
++        "Removing pod: {} | uid: {} | type: {:?} | url: {}",
++        registered.name, registered.uid, registered.pod_type, worker_url
++    );
++
++    // Handle PD mode removal
++    if pd_mode && registered.pod_type.is_some() {
++        use crate::routers::http::vllm_pd_router::VllmPDRouter;
++
++        if let Some(vllm_pd_router) = router.as_any().downcast_ref::<VllmPDRouter>() {
++            // Support --vllm-pd-disaggregation mode with K8s service discovery
++            match &registered.pod_type {
++                Some(PodType::Prefill) => {
++                    if let Err(e) = vllm_pd_router.remove_prefill_server(&worker_url).await {
++                        error!("Failed to remove vllm prefill server {}: {}", worker_url, e);
++                        return false;
+                     }
+-                    Some(PodType::Regular) | None => {
+-                        // Fall back to regular remove_worker
+-                        router.remove_worker(&worker_url);
++                }
++                Some(PodType::Decode) => {
++                    if let Err(e) = vllm_pd_router.remove_decode_server(&worker_url).await {
++                        error!("Failed to remove vllm decode server {}: {}", worker_url, e);
++                        return false;
+                     }
+                 }
+-            } else {
+-                // PD mode but not a VllmPDRouter, use generic removal
+-                router.remove_worker(&worker_url);
++                Some(PodType::Regular) | None => {
++                    // Fall back to regular remove_worker
++                    router.remove_worker(&worker_url);
++                }
+             }
+         } else {
+-            // Regular mode removal
++            // PD mode but not a VllmPDRouter, use generic removal
+             router.remove_worker(&worker_url);
+         }
+     } else {
+-        // This case might occur if a pod is deleted before it was ever marked healthy and added.
+-        // Or if the event is duplicated. No action needed on the router if it wasn't tracked (and thus not added).
+-        debug!(
+-            "Pod deletion event for untracked/already removed pod: {} (type: {:?}). Worker URL: {}",
+-            pod_info.name, pod_info.pod_type, worker_url
+-        );
++        // Regular mode removal
++        router.remove_worker(&worker_url);
+     }
++
++    // Only now is the registration dropped, because the router has actually been
++    // told. Guarded on the exact PodInfo so a concurrent update for the same UID,
++    // which registered a different PodInfo while the removal was in flight, is not
++    // silently discarded.
++    if let Ok(mut tracker) = tracked_pods.lock() {
++        if tracker
++            .get(&registered.uid)
++            .is_some_and(|current| current == registered)
++        {
++            tracker.remove(&registered.uid);
++        }
++    }
++    true
+ }
+ 
+ #[cfg(test)]
+@@ -509,6 +744,10 @@ mod tests {
+         let mut pod = Pod {
+             metadata: ObjectMeta {
+                 name: name.map(String::from),
++                // Each test pod needs its own identity, because the tracker is keyed
++                // on UID. Deriving it from the name keeps every existing call site
++                // meaningful instead of giving unrelated fixtures one shared key.
++                uid: name.map(|n| format!("uid-{}", n)),
+                 deletion_timestamp,
+                 ..Default::default()
+             },
+@@ -832,6 +1071,7 @@ mod tests {
+     fn test_pod_info_is_healthy() {
+         let healthy_pod = PodInfo {
+             name: "p1".into(),
++            uid: "uid-1".into(),
+             ip: "1.1.1.1".parse().unwrap(),
+             status: "Running".into(),
+             is_ready: true,
+@@ -842,6 +1082,7 @@ mod tests {
+ 
+         let not_ready_pod = PodInfo {
+             name: "p2".into(),
++            uid: "uid-2".into(),
+             ip: "1.1.1.2".parse().unwrap(),
+             status: "Running".into(),
+             is_ready: false,
+@@ -852,6 +1093,7 @@ mod tests {
+ 
+         let not_running_pod = PodInfo {
+             name: "p3".into(),
++            uid: "uid-3".into(),
+             ip: "1.1.1.3".parse().unwrap(),
+             status: "Pending".into(),
+             is_ready: true,
+@@ -865,6 +1107,7 @@ mod tests {
+     fn test_pod_info_worker_url_ipv4() {
+         let pod_info = PodInfo {
+             name: "p1".into(),
++            uid: "uid-4".into(),
+             ip: "1.2.3.4".parse().unwrap(),
+             status: "Running".into(),
+             is_ready: true,
+@@ -878,6 +1121,7 @@ mod tests {
+     fn test_pod_info_worker_url_ipv6() {
+         let pod_info = PodInfo {
+             name: "p1".into(),
++            uid: "uid-5".into(),
+             ip: "2803:6086:5cd3:6062:c68d:e7c7:480:10".parse().unwrap(),
+             status: "Running".into(),
+             is_ready: true,
+@@ -894,6 +1138,7 @@ mod tests {
+     fn test_pod_info_equality_with_pod_type() {
+         let pod1 = PodInfo {
+             name: "pod1".into(),
++            uid: "uid-6".into(),
+             ip: "1.2.3.4".parse().unwrap(),
+             status: "Running".into(),
+             is_ready: true,
+@@ -903,6 +1148,7 @@ mod tests {
+ 
+         let pod2 = PodInfo {
+             name: "pod1".into(),
++            uid: "uid-7".into(),
+             ip: "1.2.3.4".parse().unwrap(),
+             status: "Running".into(),
+             is_ready: true,
+@@ -912,6 +1158,7 @@ mod tests {
+ 
+         let pod3 = PodInfo {
+             name: "pod1".into(),
++            uid: "uid-8".into(),
+             ip: "1.2.3.4".parse().unwrap(),
+             status: "Running".into(),
+             is_ready: true,
+@@ -923,269 +1170,376 @@ mod tests {
+         assert_ne!(pod1, pod3);
+     }
+ 
+-    #[tokio::test]
+-    async fn test_handle_pod_event_add_unhealthy_pod() {
+-        let router = create_test_router().await;
+-        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
+-        let pod_info = PodInfo {
+-            name: "pod1".into(),
+-            ip: "1.2.3.4".parse().unwrap(),
+-            status: "Pending".into(),
+-            is_ready: false,
++    // The tracker is keyed on Pod UID and holds the PodInfo a worker was registered
++    // with, so these tests drive the discovery decisions through handle_watch_event
++    // and assert on the tracker and the router rather than on logs.
++    fn tracker_with(entries: Vec<PodInfo>) -> Arc<Mutex<HashMap<String, PodInfo>>> {
++        let mut map = HashMap::new();
++        for entry in entries {
++            map.insert(entry.uid.clone(), entry);
++        }
++        Arc::new(Mutex::new(map))
++    }
++
++    fn registered(uid: &str, name: &str, ip: &str) -> PodInfo {
++        PodInfo {
++            name: name.to_string(),
++            uid: uid.to_string(),
++            ip: ip.parse().unwrap(),
++            status: "Running".into(),
++            is_ready: true,
+             pod_type: None,
+             bootstrap_port: None,
+-        };
+-        let port = 8080u16;
+-
+-        handle_pod_event(
+-            &pod_info,
+-            Arc::clone(&tracked_pods),
+-            Arc::clone(&router),
+-            port,
+-            false, // pd_mode = false
+-        )
+-        .await;
++        }
++    }
+ 
+-        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
+-        assert!(!router
+-            .get_worker_urls()
+-            .contains(&pod_info.worker_url(port)));
++    fn regular_config() -> ServiceDiscoveryConfig {
++        ServiceDiscoveryConfig {
++            enabled: true,
++            selector: HashMap::from([("app".to_string(), "worker".to_string())]),
++            port: 8000,
++            ..Default::default()
++        }
++    }
++
++    fn labelled_pod(uid: &str, name: &str, ip: &str, ready: bool, labelled: bool) -> Pod {
++        let mut pod = create_k8s_pod(
++            Some(name),
++            Some(ip),
++            Some("Running"),
++            Some(if ready { "True" } else { "False" }),
++            None,
++        );
++        pod.metadata.uid = Some(uid.to_string());
++        if labelled {
++            pod.metadata.labels = Some(HashMap::from([(
++                "app".to_string(),
++                "worker".to_string(),
++            )]));
++        }
++        pod
++    }
++
++    // k8s_openapi re-exports chrono, so a deletion timestamp is built through it rather
++    // than by taking a direct dependency the router does not otherwise need.
++    fn terminating(mut pod: Pod) -> Pod {
++        pod.metadata.deletion_timestamp = Some(Time(k8s_openapi::chrono::Utc::now()));
++        pod
++    }
++
++    async fn drive(
++        event: Event<Pod>,
++        tracked_pods: &Arc<Mutex<HashMap<String, PodInfo>>>,
++        router: &Arc<dyn RouterTrait>,
++        config: &ServiceDiscoveryConfig,
++    ) -> bool {
++        let relisted = Arc::new(Mutex::new(HashSet::new()));
++        handle_watch_event(
++            event,
++            tracked_pods,
++            &relisted,
++            router,
++            config.port,
++            config,
++        )
++        .await
+     }
+ 
+     #[tokio::test]
+-    async fn test_handle_pod_deletion_non_existing_pod() {
++    async fn test_readiness_loss_withdraws_worker_and_restore_does_not() {
+         let router = create_test_router().await;
+-        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
+-        let pod_info = PodInfo {
+-            name: "pod1".into(),
+-            ip: "1.2.3.4".parse().unwrap(),
+-            status: "Running".into(),
+-            is_ready: true,
+-            pod_type: None,
+-            bootstrap_port: None,
+-        };
+-        let port = 8080u16;
+-
+-        handle_pod_deletion(
+-            &pod_info,
+-            Arc::clone(&tracked_pods),
+-            Arc::clone(&router),
+-            port,
+-            false, // pd_mode = false
++        let config = regular_config();
++        let entry = registered("uid-a", "pod-a", "10.0.0.1");
++        let worker_url = entry.worker_url(config.port);
++
++        // Readiness loss on an already registered identity is a withdrawal. Upstream
++        // had no branch for it, so the worker stayed selectable.
++        let tracked = tracker_with(vec![entry.clone()]);
++        let delivered = drive(
++            Event::Apply(labelled_pod("uid-a", "pod-a", "10.0.0.1", false, true)),
++            &tracked,
++            &router,
++            &config,
+         )
+         .await;
+-
+-        assert!(tracked_pods.lock().unwrap().is_empty());
+-        assert!(router.get_worker_urls().is_empty());
++        assert!(delivered);
++        assert!(
++            !tracked.lock().unwrap().contains_key("uid-a"),
++            "readiness loss must withdraw the registration"
++        );
++        assert!(!router.get_worker_urls().contains(&worker_url));
++
++        // The same identity becoming healthy again is not a withdrawal: a registration
++        // with identical routing details is left in place, so the restore path never
++        // removes a worker it just reconciled.
++        let tracked = tracker_with(vec![entry.clone()]);
++        drive(
++            Event::Apply(labelled_pod("uid-a", "pod-a", "10.0.0.1", true, true)),
++            &tracked,
++            &router,
++            &config,
++        )
++        .await;
++        assert!(
++            tracked.lock().unwrap().contains_key("uid-a"),
++            "a healthy observation must not withdraw an unchanged registration"
++        );
+     }
+ 
+     #[tokio::test]
+-    async fn test_handle_pd_pod_event_prefill_pod() {
++    async fn test_label_deselect_withdraws_worker() {
+         let router = create_test_router().await;
+-        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
+-        let pod_info = PodInfo {
+-            name: "prefill-pod".into(),
+-            ip: "1.2.3.4".parse().unwrap(),
+-            status: "Running".into(),
+-            is_ready: true,
+-            pod_type: Some(PodType::Prefill),
+-            bootstrap_port: Some(8081),
+-        };
+-        let port = 8080u16;
+-
+-        // This test validates the structure but won't actually add workers since
+-        // we're using a regular router instead of PD router
+-        handle_pod_event(
+-            &pod_info,
+-            Arc::clone(&tracked_pods),
+-            Arc::clone(&router),
+-            port,
+-            false, // pd_mode = false, so it should fallback to regular handling
++        let config = regular_config();
++        let entry = registered("uid-b", "pod-b", "10.0.0.2");
++        let worker_url = entry.worker_url(config.port);
++
++        // A Pod that no longer carries the selector label is still delivered to the
++        // watcher; upstream filtered it out before the handler ran, so the withdrawal
++        // was never observed.
++        let tracked = tracker_with(vec![entry]);
++        drive(
++            Event::Apply(labelled_pod("uid-b", "pod-b", "10.0.0.2", true, false)),
++            &tracked,
++            &router,
++            &config,
+         )
+         .await;
+ 
+-        // Pod should not be tracked since router.add_worker will fail for non-running server
+-        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
++        assert!(
++            !tracked.lock().unwrap().contains_key("uid-b"),
++            "losing the selector label must withdraw the registration"
++        );
++        assert!(!router.get_worker_urls().contains(&worker_url));
+     }
+ 
+     #[tokio::test]
+-    async fn test_handle_pd_pod_event_decode_pod() {
++    async fn test_terminating_pod_withdraws_even_while_ready() {
+         let router = create_test_router().await;
+-        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
+-        let pod_info = PodInfo {
+-            name: "decode-pod".into(),
+-            ip: "1.2.3.5".parse().unwrap(),
+-            status: "Running".into(),
+-            is_ready: true,
+-            pod_type: Some(PodType::Decode),
+-            bootstrap_port: None,
+-        };
+-        let port = 8080u16;
+-
+-        handle_pod_event(
+-            &pod_info,
+-            Arc::clone(&tracked_pods),
+-            Arc::clone(&router),
+-            port,
+-            false, // pd_mode = false, so it should fallback to regular handling
++        let config = regular_config();
++        let entry = registered("uid-t", "pod-t", "10.0.0.12");
++
++        // A terminating Pod can still report Ready=True and Running. Reading health
++        // before termination would re-register it and leave the withdrawal to the final
++        // Delete event, which is the preStop path this replaces.
++        let tracked = tracker_with(vec![entry]);
++        drive(
++            Event::Apply(terminating(labelled_pod(
++                "uid-t",
++                "pod-t",
++                "10.0.0.12",
++                true,
++                true,
++            ))),
++            &tracked,
++            &router,
++            &config,
+         )
+         .await;
+ 
+-        // Pod should not be tracked since router.add_worker will fail for non-running server
+-        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
++        assert!(
++            !tracked.lock().unwrap().contains_key("uid-t"),
++            "a terminating pod must withdraw even while it reports ready"
++        );
+     }
+ 
+     #[tokio::test]
+-    async fn test_handle_pd_pod_deletion_tracked_pod() {
++    async fn test_terminating_pod_without_status_withdraws() {
+         let router = create_test_router().await;
+-        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
+-        let pod_info = PodInfo {
+-            name: "test-pod".into(),
+-            ip: "1.2.3.4".parse().unwrap(),
+-            status: "Running".into(),
+-            is_ready: true,
+-            pod_type: Some(PodType::Prefill),
+-            bootstrap_port: Some(8081),
+-        };
++        let config = regular_config();
++        let entry = registered("uid-t2", "pod-t2", "10.0.0.13");
++
++        // Termination is checked before the status is parsed, so a terminating Pod with
++        // no status at all still withdraws rather than falling through.
++        let mut pod = terminating(labelled_pod("uid-t2", "pod-t2", "10.0.0.13", true, true));
++        pod.status = None;
++        let tracked = tracker_with(vec![entry]);
++        drive(Event::Apply(pod), &tracked, &router, &config).await;
++
++        assert!(
++            !tracked.lock().unwrap().contains_key("uid-t2"),
++            "a terminating pod with no status must still withdraw"
++        );
++    }
+ 
+-        // Add pod to tracked set first
++    #[tokio::test]
++    async fn test_relist_withdraws_pod_missing_from_listing() {
++        let router = create_test_router().await;
++        let config = regular_config();
++        let gone = registered("uid-gone", "pod-gone", "10.0.0.3");
++        let present = registered("uid-here", "pod-here", "10.0.0.4");
++        let tracked = tracker_with(vec![gone, present]);
++        let relisted = Arc::new(Mutex::new(HashSet::new()));
++
++        // An abrupt removal delivers no Delete event. The relist contract says an object
++        // absent from the listing must be treated as deleted.
++        handle_watch_event(
++            Event::Init,
++            &tracked,
++            &relisted,
++            &router,
++            config.port,
++            &config,
++        )
++        .await;
+         {
+-            let mut tracked = tracked_pods.lock().unwrap();
+-            tracked.insert(pod_info.clone());
++            let mut seen = relisted.lock().unwrap();
++            seen.insert("uid-here".to_string());
+         }
+-
+-        let port = 8080u16;
+-
+-        handle_pod_deletion(
+-            &pod_info,
+-            Arc::clone(&tracked_pods),
+-            Arc::clone(&router),
+-            port,
+-            false, // pd_mode = false
++        handle_watch_event(
++            Event::InitDone,
++            &tracked,
++            &relisted,
++            &router,
++            config.port,
++            &config,
+         )
+         .await;
+ 
+-        // Pod should be removed from tracking
+-        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
++        let tracker = tracked.lock().unwrap();
++        assert!(
++            !tracker.contains_key("uid-gone"),
++            "a pod absent from the relist must be withdrawn"
++        );
++        assert!(
++            tracker.contains_key("uid-here"),
++            "a pod present in the relist must be kept"
++        );
+     }
+ 
+     #[tokio::test]
+-    async fn test_handle_pd_pod_deletion_untracked_pod() {
++    async fn test_new_uid_takes_over_address_from_previous_owner() {
+         let router = create_test_router().await;
+-        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
+-        let pod_info = PodInfo {
+-            name: "untracked-pod".into(),
+-            ip: "1.2.3.4".parse().unwrap(),
+-            status: "Running".into(),
+-            is_ready: true,
+-            pod_type: Some(PodType::Decode),
+-            bootstrap_port: None,
+-        };
+-        let port = 8080u16;
+-
+-        // Don't add pod to tracked set
+-
+-        handle_pod_deletion(
+-            &pod_info,
+-            Arc::clone(&tracked_pods),
+-            Arc::clone(&router),
+-            port,
+-            true, // pd_mode = true
++        let config = regular_config();
++        let old = registered("uid-old", "pod-0", "10.0.0.5");
++
++        // A same-name replacement at the same address is a different identity. The
++        // previous owner must be withdrawn before the new UID is admitted, otherwise
++        // the tracker holds both UIDs for one address and a later Delete for the old UID
++        // removes the current occupant from the router.
++        let tracked = tracker_with(vec![old]);
++        register_worker(
++            &registered("uid-new", "pod-0", "10.0.0.5"),
++            &tracked,
++            &router,
++            config.port,
++            false,
+         )
+         .await;
+ 
+-        // Tracked set should remain empty
+-        assert!(tracked_pods.lock().unwrap().is_empty());
++        let tracker = tracked.lock().unwrap();
++        assert!(
++            !tracker.contains_key("uid-old"),
++            "the previous owner of the address must be dropped when a new uid claims it"
++        );
++        assert!(tracker.contains_key("uid-new"));
+     }
+ 
+     #[tokio::test]
+-    async fn test_unified_handler_regular_mode() {
++    async fn test_late_delete_of_replaced_uid_cannot_reach_current_owner() {
+         let router = create_test_router().await;
+-        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
+-        let pod_info = PodInfo {
+-            name: "regular-pod".into(),
+-            ip: "1.2.3.4".parse().unwrap(),
+-            status: "Running".into(),
+-            is_ready: true,
+-            pod_type: Some(PodType::Regular),
+-            bootstrap_port: None,
+-        };
+-        let port = 8080u16;
+-
+-        // Test that unified handler works for regular mode
+-        handle_pod_event(
+-            &pod_info,
+-            Arc::clone(&tracked_pods),
+-            Arc::clone(&router),
+-            port,
+-            false, // pd_mode = false
++        let config = regular_config();
++        let new = registered("uid-new2", "pod-0", "10.0.0.6");
++
++        // After the transfer the old UID is no longer tracked, so its late Delete finds
++        // nothing to withdraw and cannot remove the current occupant at the same URL.
++        let tracked = tracker_with(vec![new.clone()]);
++        let delivered = drive(
++            Event::Delete(labelled_pod("uid-old2", "pod-0", "10.0.0.6", true, true)),
++            &tracked,
++            &router,
++            &config,
+         )
+         .await;
+ 
+-        // Pod should not be tracked since router.add_worker will fail for non-running server
+-        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
++        assert!(delivered);
++        assert!(tracked.lock().unwrap().contains_key("uid-new2"));
+     }
+ 
+     #[tokio::test]
+-    async fn test_unified_handler_pd_mode_with_prefill() {
++    async fn test_unreadable_pod_status_withdraws_registration() {
+         let router = create_test_router().await;
+-        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
+-        let pod_info = PodInfo {
+-            name: "prefill-pod".into(),
+-            ip: "1.2.3.4".parse().unwrap(),
+-            status: "Running".into(),
+-            is_ready: true,
+-            pod_type: Some(PodType::Prefill),
+-            bootstrap_port: Some(8081),
+-        };
+-        let port = 8080u16;
+-
+-        // Test that unified handler works for PD mode with prefill
+-        handle_pod_event(
+-            &pod_info,
+-            Arc::clone(&tracked_pods),
+-            Arc::clone(&router),
+-            port,
+-            true, // pd_mode = true
+-        )
+-        .await;
++        let config = regular_config();
++        let entry = registered("uid-i", "pod-i", "10.0.0.7");
++        let tracked = tracker_with(vec![entry]);
++
++        // The Pod still matches the selectors, so it is still eligible, but its current
++        // state cannot be read. Eligibility is not health: a registration that cannot be
++        // shown healthy must not stay selectable.
++        let mut pod = labelled_pod("uid-i", "pod-i", "10.0.0.7", true, true);
++        pod.status = None;
++        drive(Event::Apply(pod), &tracked, &router, &config).await;
++
++        assert!(
++            !tracked.lock().unwrap().contains_key("uid-i"),
++            "an eligible pod whose current status is unusable must be withdrawn"
++        );
++    }
+ 
+-        // Pod should not be tracked since router.add_pd_worker will fail for regular router
+-        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
++    #[tokio::test]
++    async fn test_pod_with_empty_uid_is_refused() {
++        let router = create_test_router().await;
++        let config = regular_config();
++        let tracked = tracker_with(vec![]);
++
++        // An empty UID is not an identity either: it is the one value every
++        // unidentified Pod shares.
++        let mut pod = labelled_pod("uid-x", "pod-x", "10.0.0.7", true, true);
++        pod.metadata.uid = Some(String::new());
++        drive(Event::Apply(pod), &tracked, &router, &config).await;
++
++        let mut pod = labelled_pod("uid-y", "pod-y", "10.0.0.8", true, true);
++        pod.metadata.uid = None;
++        drive(Event::Apply(pod), &tracked, &router, &config).await;
++
++        assert!(tracked.lock().unwrap().is_empty());
++        assert!(router.get_worker_urls().is_empty());
+     }
+ 
+     #[tokio::test]
+-    async fn test_unified_handler_deletion_with_pd_mode() {
++    async fn test_withdrawal_keeps_a_concurrently_replaced_registration() {
+         let router = create_test_router().await;
+-        let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
+-        let pod_info = PodInfo {
+-            name: "decode-pod".into(),
+-            ip: "1.2.3.4".parse().unwrap(),
+-            status: "Running".into(),
+-            is_ready: true,
+-            pod_type: Some(PodType::Decode),
+-            bootstrap_port: None,
++        let config = regular_config();
++        let old = registered("uid-race", "pod-race", "10.0.0.8");
++        let new = PodInfo {
++            ip: "10.0.0.9".parse().unwrap(),
++            ..old.clone()
+         };
++        let tracked = tracker_with(vec![new.clone()]);
+ 
+-        // Add pod to tracked set first
+-        {
+-            let mut tracked = tracked_pods.lock().unwrap();
+-            tracked.insert(pod_info.clone());
+-        }
++        // A withdrawal for the old details must not drop a registration that was
++        // replaced while the removal was in flight.
++        assert!(withdraw_registration(&old, &tracked, &router, config.port, false).await);
+ 
+-        let port = 8080u16;
++        let tracker = tracked.lock().unwrap();
++        assert_eq!(
++            tracker.get("uid-race").map(|p| p.ip.to_string()),
++            Some(new.ip.to_string()),
++            "a withdrawal must only drop the exact registration it removed"
++        );
++    }
+ 
+-        // Test that unified handler works for deletion in PD mode
+-        handle_pod_deletion(
+-            &pod_info,
+-            Arc::clone(&tracked_pods),
+-            Arc::clone(&router),
+-            port,
+-            true, // pd_mode = true
++    #[tokio::test]
++    async fn test_withdraw_unknown_uid_is_a_no_op() {
++        let router = create_test_router().await;
++        let config = regular_config();
++        let entry = registered("uid-keep", "pod-keep", "10.0.0.10");
++        let tracked = tracker_with(vec![entry.clone()]);
++
++        let delivered = drive(
++            Event::Delete(labelled_pod(
++                "uid-other",
++                "pod-other",
++                "10.0.0.11",
++                true,
++                true,
++            )),
++            &tracked,
++            &router,
++            &config,
+         )
+         .await;
+ 
+-        // Pod should be removed from tracking
+-        assert!(!tracked_pods.lock().unwrap().contains(&pod_info));
++        assert!(delivered, "a delete for an untracked uid has nothing to deliver");
++        assert!(tracked.lock().unwrap().contains_key("uid-keep"));
+     }
+-}
++}
+\ No newline at end of file
