@@ -18,7 +18,9 @@ type ModelDeploymentParallelismSourceStatusApplyConfiguration struct {
 	// reading is one the declared degrees above can be trusted from; an incomplete one keeps
 	// them nil rather than partial.
 	Complete *bool `json:"complete,omitempty"`
-	// UnreadableReason names what could not be read, e.g. a reading that has not happened yet.
+	// UnreadableReason names what could not be established, e.g. a reading that has not happened
+	// yet, or a balance shape the declared flags disagree on. A complete reading can still carry
+	// one when the source was read in full but a derived fact is undecidable.
 	UnreadableReason *string `json:"unreadableReason,omitempty"`
 }
 

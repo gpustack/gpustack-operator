@@ -2545,15 +2545,17 @@ func TestComputeModelDeploymentStatus_NoQualificationObservation(t *testing.T) {
 					"an unconfirmed serving state never carries a value to misread")
 				assert.Equal(t, tc.wantServingState, role.Endpoints.Serving.State)
 
+				// The fixtures declare no degree, so the read stays honest: nothing is present
+				// even though the arguments themselves were read completely.
 				assert.Nil(t, role.Parallelism.Declared.TensorParallel,
-					"no argument has been read, so nothing is declared")
+					"a degree nothing declares is absent, never the engine default")
 				assert.Nil(t, role.Parallelism.Declared.DataParallelLocal)
 				assert.Empty(t, role.Parallelism.Modes)
-				assert.Equal(t, workercore.ModelDeploymentLoadBalanceUnknown, role.Parallelism.LoadBalance)
-				assert.Equal(t, workercore.ModelDeploymentParallelismSourceKindUnknown, role.Parallelism.Source.Kind)
-				assert.False(t, role.Parallelism.Source.Complete)
-				assert.Equal(t, "NotObserved", role.Parallelism.Source.UnreadableReason,
-					"the source names what a reader is missing instead of pretending a parse happened")
+				assert.Equal(t, workercore.ModelDeploymentLoadBalanceInternal, role.Parallelism.LoadBalance)
+				assert.Equal(t, workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					role.Parallelism.Source.Kind)
+				assert.True(t, role.Parallelism.Source.Complete)
+				assert.Empty(t, role.Parallelism.Source.UnreadableReason)
 			}
 
 			assert.Equal(t, "Unknown", ModelDeploymentConditionEndpointEligibility.GetStatus(status))
@@ -2568,6 +2570,121 @@ func TestComputeModelDeploymentStatus_NoQualificationObservation(t *testing.T) {
 			assert.Equal(t, md.Status.Retirement, status.Retirement)
 			assert.NotSame(t, md.Status.Retirement, status.Retirement,
 				"the carried reservation is a deep copy, not the stored object itself")
+		})
+	}
+}
+
+// TestComputeModelDeploymentStatus_ReadsRoleParallelism pins the producer wiring: every
+// role's status carries the read of its own argument stream -- degrees present only where
+// declared, modes as present-only booleans, the balance shape derived -- and a role that
+// replaced its command line carries the unmanaged refusal instead of any degree at all.
+func TestComputeModelDeploymentStatus_ReadsRoleParallelism(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name      string
+		command   []string
+		extraArgs []string
+		env       []workercore.ModelDeploymentEnvVar
+		want      workercore.ModelDeploymentRoleParallelismStatus
+		// secondRole and wantSecond extend the fixture to two roles and pin that each
+		// role's status carries its own reading, never a sibling's.
+		secondRole *workercore.ModelDeploymentRole
+		wantSecond *workercore.ModelDeploymentRoleParallelismStatus
+	}{
+		{
+			name:      "a declared degree and mode reach the role status with their exact values",
+			extraArgs: []string{"--tensor-parallel-size", "3", "--enable-expert-parallel"},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					TensorParallel: ptr.To(int32(3)),
+				},
+				Modes:       map[string]bool{"expertParallel": true},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:      "each role's status carries its own arguments' reading",
+			extraArgs: []string{"--tensor-parallel-size", "2"},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					TensorParallel: ptr.To(int32(2)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+			secondRole: &workercore.ModelDeploymentRole{
+				Name:      "second",
+				Replicas:  2,
+				ExtraArgs: []string{"--pipeline-parallel-size", "2"},
+			},
+			wantSecond: &workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					PipelineParallel: ptr.To(int32(2)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name: "an environment declaration reaches the role status through the producer",
+			env:  []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "4"}},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					DataParallel: ptr.To(int32(4)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:    "a role that replaced its command line is reported unmanaged, never read",
+			command: []string{"vllm", "serve", "--tensor-parallel-size", "8"},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceUnknown,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:             workercore.ModelDeploymentParallelismSourceKindUnknown,
+					UnreadableReason: modelDeploymentReasonUnmanaged,
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			md := newRenderDeployment()
+			md.Spec.Roles[0].Command = tc.command
+			md.Spec.Roles[0].ExtraArgs = tc.extraArgs
+			md.Spec.Roles[0].Env = tc.env
+			if tc.secondRole != nil {
+				md.Spec.Roles = append(md.Spec.Roles, *tc.secondRole)
+			}
+
+			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+			status, err := r.computeModelDeploymentStatus(context.Background(), md, nil, nil, nil, nil)
+			require.NoError(t, err)
+
+			require.NotEmpty(t, status.Roles)
+			assert.Equal(t, tc.want, status.Roles[0].Parallelism)
+			if tc.wantSecond != nil {
+				require.Len(t, status.Roles, 2)
+				assert.Equal(t, *tc.wantSecond, status.Roles[1].Parallelism)
+			}
 		})
 	}
 }

@@ -502,7 +502,7 @@ review; exact verification env follows the repo convention
   Verify: `make generate` with every generated path enumerated from the actual run (full diff
   root review); `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./api/...`; explicit-0 vs
   nil encoding tests; old source/P-D numeric output regressions; `make lint docs`.
-- [ ] **T2 Parser provenance → status.** Blocked by: T1. Owns: parallelism parser read-side
+- [x] **T2 Parser provenance → status.** Blocked by: T1. Owns: parallelism parser read-side
   mapping, `model_deployment_status.go` (globs:
   `pkg/worker/controllers/worker/model_deployment_{parallelism,status}.go`). Gate: root
   staged-gate review of this task's exact diff before any commit. Acceptance: AC-5.1/5.3; transfer fixtures

@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
@@ -689,5 +690,368 @@ func TestParseModelDeploymentDeclaredParallelism(t *testing.T) {
 			}
 			assert.Equal(t, want, got)
 		})
+	}
+}
+
+// TestReadModelDeploymentRoleParallelism pins the status read of one role's own argument
+// stream: a degree is present only when the role declares it, an explicit 1 and an explicit
+// local 0 are preserved values, the effective environment is a declaration like any other,
+// a malformed declaration leaves the source Unknown with the reason instead of a defaulted
+// degree, and a role that replaced its command line is not read at all.
+func TestReadModelDeploymentRoleParallelism(t *testing.T) {
+	t.Parallel()
+
+	vllm := workercore.ModelDeploymentEngineVLLM
+	sglang := workercore.ModelDeploymentEngineSGLang
+
+	testCases := []struct {
+		name   string
+		engine string
+		role   workercore.ModelDeploymentRole
+		want   workercore.ModelDeploymentRoleParallelismStatus
+		// wantAnyReason pins a refusal without pinning its wording: the message a degree
+		// refused for size carries differs between 64-bit and 32-bit builds, while the
+		// refusal itself does not.
+		wantAnyReason bool
+	}{
+		{
+			name:   "a role that declares nothing reads complete with no degrees",
+			engine: vllm,
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "an explicit 1 is a preserved value, not a default",
+			engine: vllm,
+			role:   workercore.ModelDeploymentRole{ExtraArgs: []string{"--tensor-parallel-size", "1"}},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					TensorParallel: ptr.To(int32(1)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "an explicit local 0 is the preserved external sentinel",
+			engine: vllm,
+			role:   workercore.ModelDeploymentRole{ExtraArgs: []string{"--data-parallel-size-local", "0"}},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					DataParallelLocal: ptr.To(int32(0)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "the effective environment declares the degree",
+			engine: vllm,
+			role: workercore.ModelDeploymentRole{
+				Env: []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "4"}},
+			},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					DataParallel: ptr.To(int32(4)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "the command line drives data parallelism and the environment is not read",
+			engine: vllm,
+			role: workercore.ModelDeploymentRole{
+				ExtraArgs: []string{"--data-parallel-size", "2"},
+				Env:       []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "garbage"}},
+			},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					DataParallel: ptr.To(int32(2)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "the last spelling of a repeated degree wins",
+			engine: vllm,
+			role:   workercore.ModelDeploymentRole{ExtraArgs: []string{"--tp", "2", "--tensor-parallel-size", "4"}},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					TensorParallel: ptr.To(int32(4)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "everything after the argv terminator is not an argument",
+			engine: vllm,
+			role: workercore.ModelDeploymentRole{
+				ExtraArgs: []string{"--tensor-parallel-size", "2", "--", "--tensor-parallel-size", "8"},
+			},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					TensorParallel: ptr.To(int32(2)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "a malformed degree leaves the source Unknown with the reason",
+			engine: vllm,
+			role:   workercore.ModelDeploymentRole{ExtraArgs: []string{"--tensor-parallel-size", "banana"}},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceUnknown,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:             workercore.ModelDeploymentParallelismSourceKindUnknown,
+					UnreadableReason: `the --tensor-parallel-size value "banana" is not an integer`,
+				},
+			},
+		},
+		{
+			name:   "a degree beyond the status degree fields refuses the whole reading",
+			engine: vllm,
+			role:   workercore.ModelDeploymentRole{ExtraArgs: []string{"--tensor-parallel-size=3000000000"}},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceUnknown,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind: workercore.ModelDeploymentParallelismSourceKindUnknown,
+				},
+			},
+			wantAnyReason: true,
+		},
+		{
+			name:   "an unreadable effective environment is an unreadable source",
+			engine: vllm,
+			role: workercore.ModelDeploymentRole{
+				Env: []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "banana"}},
+			},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceUnknown,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:             workercore.ModelDeploymentParallelismSourceKindUnknown,
+					UnreadableReason: `the VLLM_DP_SIZE value "banana" is not an integer`,
+				},
+			},
+		},
+		{
+			name:   "a role that replaced its command line is not read at all",
+			engine: vllm,
+			role: workercore.ModelDeploymentRole{
+				Command:   []string{"vllm", "serve", "--tensor-parallel-size", "8"},
+				ExtraArgs: []string{"--tensor-parallel-size", "2"},
+			},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceUnknown,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:             workercore.ModelDeploymentParallelismSourceKindUnknown,
+					UnreadableReason: modelDeploymentReasonUnmanaged,
+				},
+			},
+		},
+		{
+			name:   "an observed mode is a present-only boolean",
+			engine: vllm,
+			role: workercore.ModelDeploymentRole{
+				ExtraArgs: []string{"--enable-expert-parallel", "--tensor-parallel-size", "2"},
+			},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					TensorParallel: ptr.To(int32(2)),
+				},
+				Modes:       map[string]bool{"expertParallel": true},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "the sglang mode set reads under its own keys",
+			engine: sglang,
+			role: workercore.ModelDeploymentRole{
+				ExtraArgs: []string{"--enable-dp-attention", "--enable-prefill-cp", "--tp-size", "2"},
+			},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					TensorParallel: ptr.To(int32(2)),
+				},
+				Modes:       map[string]bool{"dpAttention": true, "prefillContextParallel": true},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "an external balance flag derives External",
+			engine: vllm,
+			role:   workercore.ModelDeploymentRole{ExtraArgs: []string{"--data-parallel-external-lb"}},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceExternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "an assigned data-parallel rank derives External",
+			engine: vllm,
+			role:   workercore.ModelDeploymentRole{ExtraArgs: []string{"--data-parallel-rank", "0"}},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceExternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "a hybrid balance flag derives Hybrid",
+			engine: vllm,
+			role:   workercore.ModelDeploymentRole{ExtraArgs: []string{"--data-parallel-hybrid-lb"}},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceHybrid,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "a multi-port balance flag derives MultiPort",
+			engine: vllm,
+			role:   workercore.ModelDeploymentRole{ExtraArgs: []string{"--data-parallel-multi-port-external-lb"}},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceMultiPort,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "conflicting balance shapes derive Unknown with the flags named",
+			engine: vllm,
+			role: workercore.ModelDeploymentRole{
+				ExtraArgs: []string{"--data-parallel-external-lb", "--data-parallel-hybrid-lb"},
+			},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceUnknown,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+					UnreadableReason: "the balance flags --data-parallel-external-lb and " +
+						"--data-parallel-hybrid-lb derive to different shapes",
+				},
+			},
+		},
+		{
+			name:   "a two-role spread keeps its internal balance",
+			engine: vllm,
+			role: workercore.ModelDeploymentRole{
+				ExtraArgs: []string{"--nnodes", "2", "--node-rank", "1", "--tensor-parallel-size", "2"},
+			},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				Declared: workercore.ModelDeploymentParallelismDeclaredStatus{
+					TensorParallel: ptr.To(int32(2)),
+				},
+				LoadBalance: workercore.ModelDeploymentLoadBalanceInternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "an assigned start rank alone derives External",
+			engine: vllm,
+			role:   workercore.ModelDeploymentRole{ExtraArgs: []string{"--data-parallel-start-rank=1"}},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceExternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+		{
+			name:   "start rank and external balancer agree on External",
+			engine: vllm,
+			role: workercore.ModelDeploymentRole{
+				ExtraArgs: []string{"--data-parallel-start-rank=1", "--data-parallel-external-lb"},
+			},
+			want: workercore.ModelDeploymentRoleParallelismStatus{
+				LoadBalance: workercore.ModelDeploymentLoadBalanceExternal,
+				Source: workercore.ModelDeploymentParallelismSourceStatus{
+					Kind:     workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+					Complete: true,
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ReadModelDeploymentRoleParallelism(tc.engine, &tc.role)
+			if tc.wantAnyReason {
+				reason := got.Source.UnreadableReason
+				got.Source.UnreadableReason = ""
+				assert.Equal(t, tc.want, got)
+				assert.NotEmpty(t, reason, "the refusal names what could not be established")
+
+				return
+			}
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestModelDeploymentDegreeSlotsComplete pins the degree-slot table against its constants:
+// every slot constant in the status field order has a row, and every row reads and writes
+// its field — a slot added without a row fails here instead of surfacing as a missing degree
+// or a panic in the conversion.
+func TestModelDeploymentDegreeSlotsComplete(t *testing.T) {
+	t.Parallel()
+
+	if int(modelDeploymentDegreeSlotCount) != len(modelDeploymentDegreeSlots) {
+		t.Fatalf("the slot table has %d rows for %d slot constants",
+			len(modelDeploymentDegreeSlots), modelDeploymentDegreeSlotCount)
+	}
+	for slot, table := range modelDeploymentDegreeSlots {
+		if table.of == nil || table.set == nil {
+			t.Errorf("slot %d (%s) has an incomplete table row", slot, table.name)
+		}
 	}
 }

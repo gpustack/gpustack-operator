@@ -132,18 +132,34 @@ needs the mapping reads the replicas' own Pods. A flavor reported here is read t
 lens the per-accelerator admission gate uses, so the two cannot disagree.
 
 `parallelism` reports the parallelism the role's own arguments declare, with the provenance of
-the reading. Nothing is defaulted into it: a degree the role does not declare is `null`, an
-explicit `1` and an explicit local `0` are preserved as written, and an observed mode carries
-its explicit boolean — the absence of a mode key is not `false`.
+the reading. Every pass reads each managed role's own argument stream — its extra arguments,
+under the engine's own parser rules: registered spellings and their abbreviations, a repeated
+flag resolved last-wins, everything past a bare `--` ignored, and the environment read only
+where the engine itself reads it.
 
-`parallelism.loadBalance` derives the balance shape from those declarations and is `Unknown`
-when they do not derive to one. `parallelism.source` says where the reading came from: `kind`
-(`ExtraArgs`, `Command`, `UnmanagedCommand`), whether it was `complete`, and an
-`unreadableReason` when it was not — an unreadable source is `Unknown` with `complete: false`,
-never a silently defaulted degree.
+Nothing is defaulted into the read: a degree the role does not declare is `null`, an explicit
+`1` and an explicit local `0` are preserved as written, and an observed mode carries its
+explicit boolean — the absence of a mode key is not `false`.
 
-Until the arguments have been read, every declared degree is `null`, the mode set is empty, the
-balance is `Unknown` and the source is `Unknown` with `unreadableReason: NotObserved`.
+`parallelism.loadBalance` derives the balance shape from the stream's wiring: the vLLM
+external-balance flag or an assigned data-parallel rank derives `External`, the hybrid and
+multi-port flags derive `Hybrid` and `MultiPort`, flags that disagree leave it `Unknown` with
+the flags named in `parallelism.source.unreadableReason`, and anything else balances
+`Internal`.
+
+`parallelism.source` says where the reading came from: `kind` (`ExtraArgs`, `Command`,
+`UnmanagedCommand`), whether the reading itself was `complete`, and an `unreadableReason`
+naming what could not be established — the source when `complete` is false, or a derived fact
+such as the balance shape when the declared flags disagree, which a complete reading can
+still carry.
+
+A role that replaced its command line is not read at all — the replaced argv is the role's
+own book — so its source is `Unknown` with `complete: false` and reason `Unmanaged`, and no
+degree, mode or balance is claimed from it.
+
+A stream that cannot be parsed, including an effective environment value that is not an
+integer, is likewise `Unknown` with the flag and value named — never a silently defaulted
+degree.
 
 `endpoints` separates what the operator qualified from what Routers were actually observed to
 select, and the two never collapse into one number:

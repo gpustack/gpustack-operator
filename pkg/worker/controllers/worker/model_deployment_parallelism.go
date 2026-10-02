@@ -3,6 +3,7 @@ package worker
 import (
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -147,7 +148,44 @@ var modelDeploymentParallelFlags = map[string][]modelDeploymentParallelFlag{
 func ParseModelDeploymentDeclaredParallelism(
 	engine string, extraArgs []string, env []workercore.ModelDeploymentEnvVar,
 ) (ModelDeploymentDeclaredParallelism, error) {
-	declared := ModelDeploymentDeclaredParallelism{
+	reading, err := scanModelDeploymentParallelism(engine, extraArgs, env)
+	return reading.declared, err
+}
+
+// modelDeploymentParallelReading is what one argument stream yields: the numeric books the
+// transfer document reads, plus the presence record the status read needs — which degrees the
+// stream itself declared.
+type modelDeploymentParallelReading struct {
+	declared ModelDeploymentDeclaredParallelism
+	// present marks the degree slots the stream itself declared, in the status struct's
+	// field order; a slot the stream never mentions stays absent, which is the fact the
+	// numeric defaults above deliberately erase.
+	present [modelDeploymentDegreeSlotCount]bool
+}
+
+// modelDeploymentDegreeSlot names one status degree field, in that struct's declaration order.
+type modelDeploymentDegreeSlot int
+
+const (
+	modelDeploymentSlotTensorParallel modelDeploymentDegreeSlot = iota
+	modelDeploymentSlotPipelineParallel
+	modelDeploymentSlotDataParallel
+	modelDeploymentSlotDataParallelLocal
+	modelDeploymentSlotPrefillContextParallel
+	modelDeploymentSlotDecodeContextParallel
+	modelDeploymentSlotExpertParallel
+	modelDeploymentSlotAttentionContextParallel
+	modelDeploymentSlotMoEDPSize
+	modelDeploymentSlotDWDPSize
+	modelDeploymentDegreeSlotCount
+)
+
+func scanModelDeploymentParallelism(
+	engine string, extraArgs []string, env []workercore.ModelDeploymentEnvVar,
+) (modelDeploymentParallelReading, error) {
+	reading := modelDeploymentParallelReading{}
+	declared := &reading.declared
+	*declared = ModelDeploymentDeclaredParallelism{
 		TensorParallel:           1,
 		PipelineParallel:         1,
 		DataParallel:             1,
@@ -171,7 +209,7 @@ func ParseModelDeploymentDeclaredParallelism(
 
 		flag, value, hasValue, ok, err := matchModelDeploymentParallelFlag(engine, table, token)
 		if err != nil {
-			return declared, err
+			return reading, err
 		}
 		if !ok {
 			continue
@@ -204,7 +242,7 @@ func ParseModelDeploymentDeclaredParallelism(
 		case flag.degree:
 			if !hasValue {
 				if i+1 >= len(extraArgs) || !modelDeploymentConsumableValue(extraArgs[i+1]) {
-					return declared, fmt.Errorf("the %s declaration has no value", canonical)
+					return reading, fmt.Errorf("the %s declaration has no value", canonical)
 				}
 				i++
 				value = extraArgs[i]
@@ -213,66 +251,283 @@ func ParseModelDeploymentDeclaredParallelism(
 			degree, err := modelDeploymentEngineInt(value)
 			switch {
 			case errors.Is(err, errModelDeploymentIntRange):
-				return declared, fmt.Errorf("the %s value %q is out of range", canonical, value)
+				return reading, fmt.Errorf("the %s value %q is out of range", canonical, value)
 			case err != nil:
-				return declared, fmt.Errorf("the %s value %q is not an integer", canonical, value)
+				return reading, fmt.Errorf("the %s value %q is not an integer", canonical, value)
 			}
 			if degree < flag.min {
-				return declared, fmt.Errorf("the %s value %d is below %d", canonical, degree, flag.min)
+				return reading, fmt.Errorf("the %s value %d is below %d", canonical, degree, flag.min)
 			}
 
 			switch canonical {
 			case "--tensor-parallel-size", "--tp-size":
 				declared.TensorParallel = degree
+				reading.present[modelDeploymentSlotTensorParallel] = true
 			case "--pipeline-parallel-size", "--pp-size":
 				declared.PipelineParallel = degree
+				reading.present[modelDeploymentSlotPipelineParallel] = true
 			case "--data-parallel-size", "--dp-size":
 				declared.DataParallel = degree
+				reading.present[modelDeploymentSlotDataParallel] = true
 			case "--data-parallel-size-local":
 				declared.DataParallelLocal = degree
+				reading.present[modelDeploymentSlotDataParallelLocal] = true
 				localZeroDeclared = degree == 0
 			case "--prefill-context-parallel-size":
 				declared.PrefillContextParallel = degree
+				reading.present[modelDeploymentSlotPrefillContextParallel] = true
 			case "--decode-context-parallel-size", "--dcp-size":
 				declared.DecodeContextParallel = degree
+				reading.present[modelDeploymentSlotDecodeContextParallel] = true
 			case "--ep-size":
 				declared.ExpertParallel = degree
+				reading.present[modelDeploymentSlotExpertParallel] = true
 			case "--attn-cp-size":
 				declared.AttentionContextParallel = degree
+				reading.present[modelDeploymentSlotAttentionContextParallel] = true
 			case "--moe-dp-size":
 				declared.MoEDataParallel = degree
+				reading.present[modelDeploymentSlotMoEDPSize] = true
 			case "--dwdp-size":
 				declared.DWDPSize = degree
+				reading.present[modelDeploymentSlotDWDPSize] = true
 			}
 		}
 	}
 
 	if engine != workercore.ModelDeploymentEngineVLLM {
-		return declared, nil
+		return reading, nil
 	}
 
 	// The engine reads the variable only when the CLI did not drive data parallelism; mirror
 	// that rather than rank the two sources ourselves.
 	if declared.DataParallel > 1 || localZeroDeclared {
-		return declared, nil
+		return reading, nil
 	}
 	raw, ok := modelDeploymentEnvValue(env, "VLLM_DP_SIZE")
 	if !ok {
-		return declared, nil
+		return reading, nil
 	}
 	degree, err := modelDeploymentEngineInt(raw)
 	switch {
 	case errors.Is(err, errModelDeploymentIntRange):
-		return declared, fmt.Errorf("the VLLM_DP_SIZE value %q is out of range", raw)
+		return reading, fmt.Errorf("the VLLM_DP_SIZE value %q is out of range", raw)
 	case err != nil:
-		return declared, fmt.Errorf("the VLLM_DP_SIZE value %q is not an integer", raw)
+		return reading, fmt.Errorf("the VLLM_DP_SIZE value %q is not an integer", raw)
 	}
 	if degree < 1 {
-		return declared, fmt.Errorf("the VLLM_DP_SIZE value %d is below 1", degree)
+		return reading, fmt.Errorf("the VLLM_DP_SIZE value %d is below 1", degree)
 	}
 	declared.DataParallel = degree
+	reading.present[modelDeploymentSlotDataParallel] = true
 
-	return declared, nil
+	return reading, nil
+}
+
+// modelDeploymentDegreeSlots bridges one numeric degree to its status field: the canonical
+// spelling for messages, the numeric book it is read from, and the status field it lands in.
+var modelDeploymentDegreeSlots = [modelDeploymentDegreeSlotCount]struct {
+	name string
+	of   func(*ModelDeploymentDeclaredParallelism) int
+	set  func(*workercore.ModelDeploymentParallelismDeclaredStatus, *int32)
+}{
+	modelDeploymentSlotTensorParallel: {
+		"--tensor-parallel-size",
+		func(p *ModelDeploymentDeclaredParallelism) int { return p.TensorParallel },
+		func(s *workercore.ModelDeploymentParallelismDeclaredStatus, d *int32) { s.TensorParallel = d },
+	},
+	modelDeploymentSlotPipelineParallel: {
+		"--pipeline-parallel-size",
+		func(p *ModelDeploymentDeclaredParallelism) int { return p.PipelineParallel },
+		func(s *workercore.ModelDeploymentParallelismDeclaredStatus, d *int32) { s.PipelineParallel = d },
+	},
+	modelDeploymentSlotDataParallel: {
+		"--data-parallel-size",
+		func(p *ModelDeploymentDeclaredParallelism) int { return p.DataParallel },
+		func(s *workercore.ModelDeploymentParallelismDeclaredStatus, d *int32) { s.DataParallel = d },
+	},
+	modelDeploymentSlotDataParallelLocal: {
+		"--data-parallel-size-local",
+		func(p *ModelDeploymentDeclaredParallelism) int { return p.DataParallelLocal },
+		func(s *workercore.ModelDeploymentParallelismDeclaredStatus, d *int32) { s.DataParallelLocal = d },
+	},
+	modelDeploymentSlotPrefillContextParallel: {
+		"--prefill-context-parallel-size",
+		func(p *ModelDeploymentDeclaredParallelism) int { return p.PrefillContextParallel },
+		func(s *workercore.ModelDeploymentParallelismDeclaredStatus, d *int32) { s.PrefillContextParallel = d },
+	},
+	modelDeploymentSlotDecodeContextParallel: {
+		"--decode-context-parallel-size",
+		func(p *ModelDeploymentDeclaredParallelism) int { return p.DecodeContextParallel },
+		func(s *workercore.ModelDeploymentParallelismDeclaredStatus, d *int32) { s.DecodeContextParallel = d },
+	},
+	modelDeploymentSlotExpertParallel: {
+		"--ep-size",
+		func(p *ModelDeploymentDeclaredParallelism) int { return p.ExpertParallel },
+		func(s *workercore.ModelDeploymentParallelismDeclaredStatus, d *int32) { s.ExpertParallel = d },
+	},
+	modelDeploymentSlotAttentionContextParallel: {
+		"--attn-cp-size",
+		func(p *ModelDeploymentDeclaredParallelism) int { return p.AttentionContextParallel },
+		func(s *workercore.ModelDeploymentParallelismDeclaredStatus, d *int32) { s.AttentionContextParallel = d },
+	},
+	modelDeploymentSlotMoEDPSize: {
+		"--moe-dp-size",
+		func(p *ModelDeploymentDeclaredParallelism) int { return p.MoEDataParallel },
+		func(s *workercore.ModelDeploymentParallelismDeclaredStatus, d *int32) { s.MoEDPSize = d },
+	},
+	modelDeploymentSlotDWDPSize: {
+		"--dwdp-size",
+		func(p *ModelDeploymentDeclaredParallelism) int { return p.DWDPSize },
+		func(s *workercore.ModelDeploymentParallelismDeclaredStatus, d *int32) { s.DWDPSize = d },
+	},
+}
+
+// statusDegrees converts the reading's presence record into the status struct: one pointer per
+// declared degree, exact values including an explicit 1 and an explicit local 0. A degree the
+// host int accepted but no status field can hold refuses the whole reading with the flag named,
+// rather than wrap into a number the role never declared.
+func (r modelDeploymentParallelReading) statusDegrees() (
+	workercore.ModelDeploymentParallelismDeclaredStatus, string,
+) {
+	var out workercore.ModelDeploymentParallelismDeclaredStatus
+	for slot, table := range modelDeploymentDegreeSlots {
+		if !r.present[slot] {
+			continue
+		}
+		degree := table.of(&r.declared)
+		if degree > math.MaxInt32 || degree < math.MinInt32 {
+			return workercore.ModelDeploymentParallelismDeclaredStatus{},
+				fmt.Sprintf("the %s value %d is beyond the status degree fields", table.name, degree)
+		}
+		value := int32(degree)
+		table.set(&out, &value)
+	}
+
+	return out, ""
+}
+
+// ReadModelDeploymentRoleParallelism is the status read of one role's own argument stream --
+// its ExtraArgs, with the same engine rules the transfer parser applies, and the role's
+// environment read only where the engine would. A degree is present only when the stream
+// declares it; the balance shape derives from the stream's own wiring; a stream that cannot
+// be read keeps every degree absent and says why in the source.
+//
+// A ROLE THAT REPLACED ITS COMMAND LINE IS NOT READ. The replaced argv is the role's own
+// book -- the operator synthesized no argument for it, so status claims no degree from it
+// and names the source unmanaged instead; the transfer check still reads that book where
+// admission must agree with what would run.
+func ReadModelDeploymentRoleParallelism(
+	engine string, role *workercore.ModelDeploymentRole,
+) workercore.ModelDeploymentRoleParallelismStatus {
+	if len(role.Command) > 0 {
+		return modelDeploymentParallelismUnreadable(modelDeploymentReasonUnmanaged)
+	}
+
+	reading, err := scanModelDeploymentParallelism(engine, role.ExtraArgs, role.Env)
+	if err != nil {
+		return modelDeploymentParallelismUnreadable(err.Error())
+	}
+	declared, overflow := reading.statusDegrees()
+	if overflow != "" {
+		return modelDeploymentParallelismUnreadable(overflow)
+	}
+
+	loadBalance, balanceReason := modelDeploymentLoadBalance(reading.declared.Wiring)
+
+	return workercore.ModelDeploymentRoleParallelismStatus{
+		Declared:    declared,
+		Modes:       modelDeploymentModeMap(reading.declared.Modes),
+		LoadBalance: loadBalance,
+		Source: workercore.ModelDeploymentParallelismSourceStatus{
+			Kind:             workercore.ModelDeploymentParallelismSourceKindExtraArgs,
+			Complete:         true,
+			UnreadableReason: balanceReason,
+		},
+	}
+}
+
+// modelDeploymentParallelismUnreadable is the answer of a stream that produced no trustworthy
+// reading: nothing declared, nothing derived, and the reason carried where the wire asks for it.
+func modelDeploymentParallelismUnreadable(reason string) workercore.ModelDeploymentRoleParallelismStatus {
+	return workercore.ModelDeploymentRoleParallelismStatus{
+		LoadBalance: workercore.ModelDeploymentLoadBalanceUnknown,
+		Source: workercore.ModelDeploymentParallelismSourceStatus{
+			Kind:             workercore.ModelDeploymentParallelismSourceKindUnknown,
+			UnreadableReason: reason,
+		},
+	}
+}
+
+// modelDeploymentBalanceShapes are the vLLM wiring flags that vote a load-balance shape. The
+// rank family is the external-lb-via-rank derivation: a member launched with an assigned
+// data-parallel rank is balanced from outside its process. An engine with no row here
+// balances internally.
+var modelDeploymentBalanceShapes = map[string]workercore.ModelDeploymentLoadBalance{
+	"--data-parallel-external-lb":            workercore.ModelDeploymentLoadBalanceExternal,
+	"--data-parallel-rank":                   workercore.ModelDeploymentLoadBalanceExternal,
+	"--data-parallel-start-rank":             workercore.ModelDeploymentLoadBalanceExternal,
+	"--data-parallel-hybrid-lb":              workercore.ModelDeploymentLoadBalanceHybrid,
+	"--data-parallel-multi-port-external-lb": workercore.ModelDeploymentLoadBalanceMultiPort,
+}
+
+// modelDeploymentLoadBalance derives the balance shape from the stream's wiring flags. Flags
+// voting one shape agree (an assigned rank alongside an external balancer is still External);
+// flags voting different shapes are not derivable and name their disagreement.
+func modelDeploymentLoadBalance(
+	wiring []string,
+) (workercore.ModelDeploymentLoadBalance, string) {
+	shapes := map[workercore.ModelDeploymentLoadBalance][]string{}
+	for _, flag := range wiring {
+		if shape, ok := modelDeploymentBalanceShapes[flag]; ok {
+			shapes[shape] = append(shapes[shape], flag)
+		}
+	}
+	if len(shapes) == 0 {
+		return workercore.ModelDeploymentLoadBalanceInternal, ""
+	}
+	if len(shapes) == 1 {
+		for shape := range shapes {
+			return shape, ""
+		}
+	}
+
+	var flags []string
+	for _, named := range shapes {
+		flags = append(flags, named...)
+	}
+	slices.Sort(flags)
+
+	return workercore.ModelDeploymentLoadBalanceUnknown,
+		fmt.Sprintf("the balance flags %s derive to different shapes", strings.Join(flags, " and "))
+}
+
+// modelDeploymentModeKeys spell the status keys of the engine mode flags, canonical concepts
+// in the vocabulary the declared fields use. A mode flag with no row here keeps its canonical
+// flag spelling as the key, so an observed mode is never dropped from the map.
+var modelDeploymentModeKeys = map[string]string{
+	"--enable-expert-parallel": "expertParallel",
+	"--enable-dp-attention":    "dpAttention",
+	"--enable-prefill-cp":      "prefillContextParallel",
+}
+
+// modelDeploymentModeMap converts the scan's canonical mode spellings into the status map,
+// where presence carries the boolean and absence of a key is not false.
+func modelDeploymentModeMap(modes []string) map[string]bool {
+	if len(modes) == 0 {
+		return nil
+	}
+
+	out := make(map[string]bool, len(modes))
+	for _, mode := range modes {
+		key, ok := modelDeploymentModeKeys[mode]
+		if !ok {
+			key = mode
+		}
+		out[key] = true
+	}
+
+	return out
 }
 
 // matchModelDeploymentParallelFlag resolves one token against the engine's table the way the

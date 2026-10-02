@@ -5655,7 +5655,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																			},
 																		},
 																		"unreadableReason": {
-																			Description: "UnreadableReason names what could not be read, e.g. a reading that has not happened yet.",
+																			Description: "UnreadableReason names what could not be established, e.g. a reading that has not happened\nyet, or a balance shape the declared flags disagree on. A complete reading can still carry\none when the source was read in full but a derived fact is undecidable.",
 																			Type:        "string",
 																		},
 																	},

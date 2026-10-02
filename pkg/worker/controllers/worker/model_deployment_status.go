@@ -446,7 +446,7 @@ func modelDeploymentRoleStatuses(
 			// environment, so nothing here can claim it is attached to the cache.
 			Unmanaged:       len(role.Command) > 0,
 			AssignedFlavors: modelDeploymentAssignedFlavors(flavors[role.Name]),
-			Parallelism:     modelDeploymentRoleParallelismUnread(),
+			Parallelism:     ReadModelDeploymentRoleParallelism(md.Spec.Engine.Name, role),
 			Endpoints:       modelDeploymentRoleEndpointsUnobserved(md.Spec.Router != nil),
 		})
 	}
@@ -466,21 +466,6 @@ func modelDeploymentAssignedFlavors(flavors sets.Set[string]) []string {
 	}
 
 	return sets.List(flavors)
-}
-
-// modelDeploymentRoleParallelismUnread is the parallelism answer of a pass that read no
-// arguments: no degree is declared, no mode is observed, and the source names the missing
-// reading rather than pretending a parse produced nothing. The readings that fill this in are
-// the rendered argv's own; until they exist, an explicit 1 or 0 must be as unreachable as a
-// fabricated count, because a defaulted degree would invent engine behavior nobody declared.
-func modelDeploymentRoleParallelismUnread() workercore.ModelDeploymentRoleParallelismStatus {
-	return workercore.ModelDeploymentRoleParallelismStatus{
-		LoadBalance: workercore.ModelDeploymentLoadBalanceUnknown,
-		Source: workercore.ModelDeploymentParallelismSourceStatus{
-			Kind:             workercore.ModelDeploymentParallelismSourceKindUnknown,
-			UnreadableReason: modelDeploymentReasonNotObserved,
-		},
-	}
 }
 
 // modelDeploymentRoleEndpointsUnobserved is the endpoints answer of a pass with no endpoint
