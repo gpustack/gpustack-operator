@@ -527,7 +527,7 @@ review; exact verification env follows the repo convention
   the event-matrix harness (implemented and tested under the root-assigned owned evidence path,
   fixed at dispatch; local script invocation with retained context variables; runtime grants
   separate when budget/caps ready).
-- [ ] **T5 Eligibility label, backfill, Service convergence.** Blocked by: T2. Owns: label
+- [x] **T5 Eligibility label, backfill, Service convergence.** Blocked by: T2. Owns: label
   maintenance and service/router selector render paths (globs:
   `pkg/worker/controllers/worker/model_deployment_{service,router}.go` plus the reconciler-owned
   label write in the serial package; exact files fixed at dispatch). Gate: root staged-gate

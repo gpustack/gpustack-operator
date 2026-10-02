@@ -153,7 +153,9 @@ func TestRenderModelDeploymentRouterObjects_BothSelectorsSelectOnlyThePodsThatAn
 
 			// One member of ordinal zero per declared size, rendered and stamped the way the
 			// converger renders them, so the selectors are matched against what would run rather
-			// than against labels a test wrote by hand.
+			// than against labels a test wrote by hand. The answering member also carries the
+			// eligibility label the reconciler writes at runtime — a member the selectors may
+			// reach is by definition one it has marked eligible.
 			renderMember := func(roleIndex, member int) *core.Pod {
 				t.Helper()
 
@@ -162,6 +164,9 @@ func TestRenderModelDeploymentRouterObjects_BothSelectorsSelectOnlyThePodsThatAn
 				})
 				require.NoError(t, err)
 				stampModelDeploymentPod(pod, md, &md.Spec.Roles[roleIndex], 0, member)
+				if member == 0 {
+					pod.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+				}
 
 				return pod
 			}
@@ -207,6 +212,27 @@ func TestRenderModelDeploymentRouterObjects_PodStaysOutsideAdmission(t *testing.
 		assert.Empty(t, container.Resources.Requests, container.Name)
 		assert.Empty(t, container.Resources.Limits, container.Name)
 	}
+}
+
+// TestRenderModelDeploymentRouterObjects_SelectsEligibleEndpoints pins the eligibility term in
+// both surfaces a router is configured from: the published per-role selector and the discovery
+// equalities the router's own configuration is derived from. While a member carries no eligibility
+// label no selector here may match it, and a restored label puts every one of them back.
+func TestRenderModelDeploymentRouterObjects_SelectsEligibleEndpoints(t *testing.T) {
+	objects, err := renderModelDeploymentRouterObjects(context.Background(), routedModelDeployment(), nil)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, objects.Contract.Roles)
+	for _, role := range objects.Contract.Roles {
+		require.NotNil(t, role.Selector, "%s", role.Name)
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			role.Selector[modelDeploymentLabelKeyEndpointEligible],
+			"the published selector for %s names only eligible endpoints", role.Name)
+	}
+
+	config := objects.ConfigMap.Data[modelDeploymentRouterConfigKey]
+	assert.Contains(t, config, modelDeploymentLabelKeyEndpointEligible+"="+modelDeploymentEndpointEligibleValue,
+		"the discovery equalities the router runs on name only eligible endpoints")
 }
 
 func TestRenderModelDeploymentRouterObjects_ConfigHashIsDeterministic(t *testing.T) {
@@ -761,11 +787,13 @@ func TestRenderModelDeploymentRouterObjects_ImageSources(t *testing.T) {
 // digests the failures print.
 func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a prefill and decode pair": "4e62baa7a1935f66946a863ee730e551cd23a4f8ffe677051b47e2bf58f8b9a4",
-		"a sole server role":        "052c5cc61b6c6b2c313c8cc743f070dcc9e5eaa2f8cf197ad52affa3fa8dc0cc",
-		"a router declaring its own image, policy, replicas and extra arguments": "a3eb0fce558ed09aa0f41e6b57cf7e9777bc169ed48709a0f2647064532c43cc",
-		"a role whose command the user took over, so it publishes no events":     "cb3bbff686dad17a56b2f26dc9ef12cf3a8fbefb139b31361b76d0b6a92b72d6",
-		"an sglang engine, whose metrics contract differs":                       "37af02b7b5be7a409c87f2638dad71bf43f589ef38137ba4b3f70133bb6c76ba",
+		// The digests moved once when the eligibility equality joined the discovery selector
+		// (the endpoint-eligible term a reconciler writes at runtime); they are pinned again here.
+		"a prefill and decode pair": "4a532bee8b5c9e25196db901b27b720c222b76c7a9e185a6a6785f8323eb1517",
+		"a sole server role":        "5008481293504ad3d8f4edc9ba4b0f6e42877babcb50c187010b6454deaf87ce",
+		"a router declaring its own image, policy, replicas and extra arguments": "591bfc9388ded7b76ea1a4fb5a96e422e2c673a1542f798c828a4135d2229aa1",
+		"a role whose command the user took over, so it publishes no events":     "bd7abe5c6db4a6fee60eba1a6fd334252e233541a8fd8f59471d2f53a0db5dcd",
+		"an sglang engine, whose metrics contract differs":                       "c63bc82b54d7e758a68b19c00785a29986a9efe13a6f3b8c257129ab136d91f7",
 	}
 
 	soleServerRole := func() *workercore.ModelDeployment {

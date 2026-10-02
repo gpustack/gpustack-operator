@@ -100,6 +100,7 @@ func renderModelDeploymentReplicaService(
 func renderModelDeploymentService(md *workercore.ModelDeployment) *core.Service {
 	svc := renderModelDeploymentServiceFor(md, &md.Spec.Roles[0], md.Name)
 	modelDeploymentFrontLeadersOnly(svc, &md.Spec.Roles[0])
+	modelDeploymentSelectEligibleEndpoints(svc)
 
 	return svc
 }
@@ -122,6 +123,23 @@ func modelDeploymentFrontLeadersOnly(svc *core.Service, role *workercore.ModelDe
 	}
 
 	svc.Spec.Selector[modelDeploymentMemberIndexLabel] = strconvx.Itoa(modelDeploymentLeaderMemberIndex)
+}
+
+// modelDeploymentSelectEligibleEndpoints narrows an ordinary Service to the endpoints the
+// reconciler has marked eligible, by the same equality every selector that names endpoints
+// carries. The term rides ON TOP of the identity selector and the leader narrowing -- it gates
+// which of the members a Service already fronts are answerable, never which members exist.
+//
+// THE TERM IS A LABEL EQUALITY BECAUSE ONLY A LABEL CAN SATISFY A SERVICE SELECTOR. The key is
+// written by the reconciler's runtime convergence, outside every rendered hash, so gaining or
+// losing it moves no replica; what it moves is the Service's endpoint set, which is exactly the
+// lever a disqualification pulls.
+//
+// A REPLICA'S HEADLESS SERVICE NEVER TAKES THE TERM. That Service exists to publish every member
+// to its peers with unready addresses included; eligibility is about who may ANSWER, and the
+// peers' collective needs every member's record regardless of who answers.
+func modelDeploymentSelectEligibleEndpoints(svc *core.Service) {
+	svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
 }
 
 // renderModelDeploymentRoleService renders the Service that fronts ONE role.
@@ -151,6 +169,7 @@ func renderModelDeploymentRoleService(
 ) *core.Service {
 	svc := renderModelDeploymentServiceFor(md, role, md.Name+"-"+role.Name)
 	modelDeploymentFrontLeadersOnly(svc, role)
+	modelDeploymentSelectEligibleEndpoints(svc)
 	if modelDeploymentPublishesKVEvents(md, role, manufacturers[role.Name]) {
 		for _, port := range inject.KVEventsPorts() {
 			svc.Spec.Ports = append(svc.Spec.Ports, core.ServicePort{

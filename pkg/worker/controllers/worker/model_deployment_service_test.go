@@ -103,11 +103,13 @@ func TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide(t *testing.T) 
 
 	// The selector names the DEPLOYMENT as well as the role. Without that, two deployments in one
 	// namespace each running a role called "decode" would share endpoints -- and the symptom is a
-	// request served by another team's model, not an error.
+	// request served by another team.s model, not an error. The eligibility term rides beside
+	// them: an ordinary Service answers only for members the reconciler has marked eligible.
 	assert.Equal(t, map[string]string{
-		modelDeploymentLabelKeyName:      modelDeploymentLabelValueName,
-		modelDeploymentLabelKeyInstance:  "qwen",
-		modelDeploymentLabelKeyComponent: "decode",
+		modelDeploymentLabelKeyName:             modelDeploymentLabelValueName,
+		modelDeploymentLabelKeyInstance:         "qwen",
+		modelDeploymentLabelKeyComponent:        "decode",
+		modelDeploymentLabelKeyEndpointEligible: modelDeploymentEndpointEligibleValue,
 	}, byName["qwen-decode"].Spec.Selector)
 
 	// The deployment-wide one still fronts the FIRST role, unchanged. It is not a router and must
@@ -237,6 +239,9 @@ func TestRenderModelDeploymentService_SelectsExactlyTheRolesPods(t *testing.T) {
 	md := newRenderDeployment()
 	svc := renderModelDeploymentService(md)
 	pod := renderOne(t, md, newRenderInstanceType())
+	// The eligibility term is written at runtime by the reconciler, so a member the Service may
+	// select is one that carries it; the rendered template never does.
+	pod.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
 
 	require.NotEmpty(t, svc.Spec.Selector)
 	for k, v := range svc.Spec.Selector {
@@ -288,6 +293,57 @@ func TestRenderModelDeploymentServices_AboveOneMemberAddsAHeadlessServicePerRepl
 	assert.Equal(t, "0", byName["qwen"].Spec.Selector[modelDeploymentMemberIndexLabel])
 }
 
+// TestRenderModelDeploymentServices_SelectEligibleEndpoints pins the eligibility term in every
+// ordinary Service's selector: an ordinary Service selects only endpoints the reconciler has
+// marked eligible, whatever the role's shape, while a replica's headless Service stays
+// eligibility-blind and keeps publishing every member unready-addresses and all.
+func TestRenderModelDeploymentServices_SelectEligibleEndpoints(t *testing.T) {
+	testCases := []struct {
+		name string
+		md   *workercore.ModelDeployment
+	}{
+		{
+			name: "at size one",
+			md:   newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 3 }),
+		},
+		{
+			name: "above size one",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].ReplicaSize = 2
+				md.Spec.Roles[0].Replicas = 3
+			}),
+		},
+		{
+			name: "a p/d pair",
+			md:   twoRoleDeployment(),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			svcs := renderModelDeploymentServices(tc.md, nil)
+			require.NotEmpty(t, svcs)
+
+			ordinary := 0
+			for _, svc := range svcs {
+				if svc.Spec.ClusterIP == core.ClusterIPNone {
+					assert.NotContains(t, svc.Spec.Selector, modelDeploymentLabelKeyEndpointEligible,
+						"%s publishes every member for its replica; eligibility narrows only the ordinary Services", svc.Name)
+					assert.True(t, svc.Spec.PublishNotReadyAddresses,
+						"%s must keep publishing unready addresses", svc.Name)
+
+					continue
+				}
+				ordinary++
+				assert.Equal(t, modelDeploymentEndpointEligibleValue,
+					svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible],
+					"%s selects only endpoints the reconciler marked eligible", svc.Name)
+			}
+			assert.NotZero(t, ordinary, "the deployment always has at least one ordinary Service")
+		})
+	}
+}
+
 // TestRenderModelDeploymentServices_AtSizeOneIsUnchanged is the control for the case above: the
 // shape that existed before multi-Member replicas must be untouched, asserted by comparison rather
 // than by reading the new code's intent.
@@ -311,6 +367,10 @@ func TestRenderModelDeploymentServices_AtSizeOneIsUnchanged(t *testing.T) {
 	// The endpoints still reach a rendered replica, which is what makes the absences above mean
 	// "unchanged" rather than "empty".
 	pod := renderOne(t, md, newRenderInstanceType())
+	// A member a Service selects carries the eligibility label the reconciler writes at runtime;
+	// the template it renders with does not, which is why the term above is absent from selectors
+	// on the headless replica Services that reach every member regardless.
+	pod.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
 	for k, v := range svcs[0].Spec.Selector {
 		assert.Equal(t, v, pod.Labels[k], "the replica must carry selector label %s", k)
 	}

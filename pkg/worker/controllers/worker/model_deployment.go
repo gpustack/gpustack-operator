@@ -44,6 +44,7 @@ import (
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -913,6 +914,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		}
 	}
 
+	if err = r.convergeModelDeploymentEndpointEligibility(ctx, md); err != nil {
+		logger.Error(err, "converge endpoint eligibility")
+		return ctrl.Result{}, err
+	}
 	if err = r.syncModelDeploymentService(ctx, md); err != nil {
 		logger.Error(err, "sync service")
 		return ctrl.Result{}, err
@@ -1011,6 +1016,113 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
 	}
 
 	r.Recorder.Event(md, core.EventTypeWarning, modelDeploymentEventRuntimeVersionSkew, message)
+}
+
+// convergeModelDeploymentEndpointEligibility is the single write path of the eligibility label:
+// every pass re-derives, from the Pods as they exist now, which members serve and patches the key
+// onto exactly those, removing it from any member that stopped qualifying.
+//
+// IT RUNS BEFORE THE SERVICES CONVERGE, in the same pass, because the ordinary Services' selectors
+// carry the eligibility equality: the labels must be on the healthy members of a deployment that
+// predates the feature before any selector gains the term, or the first enable would zero every
+// ordinary Service's endpoints. For a tree already in the new shape the order costs nothing — the
+// pass re-derives what it finds and writes only what differs.
+//
+// THE KEY IS OUTSIDE EVERY RENDERED HASH. It is patched onto running Pods at runtime, never
+// rendered into the template, so gaining or losing it moves no generation, no UID, no stored
+// fingerprint and no replica — eligibility is the one lever that must move without a rollout.
+//
+// A CONFLICT IS OBSERVED STATE. Two writers would be two answers to one question, so nothing
+// else writes the key; a patch that loses a race with some other change fails the pass and the
+// next pass re-derives from what then exists. Nothing is written blind: the diff is computed
+// against the object as it was read.
+func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
+	ctx context.Context, md *workercore.ModelDeployment,
+) error {
+	pods, err := r.listModelDeploymentPods(ctx, md)
+	if err != nil {
+		return err
+	}
+
+	roles := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		roles[md.Spec.Roles[i].Name] = &md.Spec.Roles[i]
+	}
+
+	for i := range pods {
+		pod := &pods[i]
+		role := roles[modelDeploymentPodRole(pod)]
+		if role == nil {
+			continue
+		}
+
+		eligible := modelDeploymentPodEligible(md, role, pod)
+		carried := pod.Labels[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue
+		if eligible == carried {
+			continue
+		}
+
+		patched := pod.DeepCopy()
+		if eligible {
+			patched.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+		} else {
+			delete(patched.Labels, modelDeploymentLabelKeyEndpointEligible)
+		}
+		if err := r.Client.Patch(ctx, patched, ctrlcli.MergeFrom(pod)); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// modelDeploymentPodEligible is the member rule of Feature 1: a Pod's endpoints may be selected
+// exactly when the member serves and is healthy under the rules that exist today.
+//
+// THE SHAPE DECIDES WHICH MEMBERS SERVE. A role whose parallelism shape gives every member a rank
+// — an External-DP shape — serves from every rank-carrying member, so every ready member is
+// eligible. Every other role is leader-served: above size one only the leader answers the API, and
+// a PodReady condition alone never makes a non-leader selectable. A shape that cannot be read is
+// the conservative leader-served reading, not an invented widening.
+//
+// READINESS IS THE EXISTING RULE AND NOTHING MORE. No new gate is introduced here; what healthy
+// means is extended by the health predicate work, not by the eligibility write.
+func modelDeploymentPodEligible(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, pod *core.Pod,
+) bool {
+	if !podIsReady(pod) {
+		return false
+	}
+	if modelDeploymentRoleExternalDP(md, role) {
+		return true
+	}
+	if modelDeploymentRoleSize(role) == 1 {
+		return true
+	}
+
+	index, ok := pod.Labels[modelDeploymentMemberIndexLabel]
+
+	return ok && index == strconvx.Itoa(modelDeploymentLeaderMemberIndex)
+}
+
+// modelDeploymentRoleExternalDP reads the role's own argument stream for its balance shape: the
+// shapes in which every member carries a rank and answers are the External-DP shapes. The read is
+// the same one the status and the size check make, so three readers cannot disagree about what a
+// role's shape is.
+func modelDeploymentRoleExternalDP(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	reading, err := scanModelDeploymentParallelism(
+		md.Spec.Engine.Name, role.ExtraArgs, role.Env,
+	)
+	if err != nil {
+		return false
+	}
+	shape, _ := modelDeploymentLoadBalance(reading.declared.Wiring)
+
+	return shape == workercore.ModelDeploymentLoadBalanceExternal ||
+		shape == workercore.ModelDeploymentLoadBalanceHybrid ||
+		shape == workercore.ModelDeploymentLoadBalanceMultiPort
 }
 
 // syncModelDeploymentService converges every Service the deployment owns: the one it is reached

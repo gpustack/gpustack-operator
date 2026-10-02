@@ -131,6 +131,10 @@ func renderModelDeploymentRouterObjects(
 		selector := modelDeploymentSelectorLabels(md, role)
 		selector[modelDeploymentLabelKeyRoleKind] = roles[i].Kind
 		selector[modelDeploymentMemberIndexLabel] = strconvx.Itoa(modelDeploymentLeaderMemberIndex)
+		// The eligibility term rides on the published selector beside the leader term, so a router
+		// configured from it can only ever reach endpoints the reconciler has marked eligible. It
+		// narrows the same set the terms above already name; it never widens one.
+		selector[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
 		// The renderer is handed the SAME map that is published, rather than one built beside it,
 		// because a router configured by argv discovers each role by these labels: two derivations
 		// of one answer would let what a user reads and what the router matches drift apart.
@@ -164,6 +168,10 @@ func renderModelDeploymentRouterObjects(
 		modelDeploymentLabelKeyInstance: md.Name,
 		modelDeploymentMemberIndexLabel: strconvx.Itoa(modelDeploymentLeaderMemberIndex),
 	}
+	// The eligibility equality rides beside the leader term for the same reason it rides on the
+	// published selector: a member whose eligibility the reconciler has not written is not an
+	// endpoint a request may reach, however much its peers need its record.
+	endpointLabels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
 	// The router's own Pod carries the first two labels and NOT the member index, so the equalities
 	// already exclude it. The negation is kept in the expression, where it costs nothing and says
 	// out loud what the index term achieves by arithmetic.
@@ -175,6 +183,7 @@ func renderModelDeploymentRouterObjects(
 		modelDeploymentLabelKeyName + "=" + endpointLabels[modelDeploymentLabelKeyName],
 		modelDeploymentLabelKeyInstance + "=" + endpointLabels[modelDeploymentLabelKeyInstance],
 		modelDeploymentMemberIndexLabel + "=" + endpointLabels[modelDeploymentMemberIndexLabel],
+		modelDeploymentLabelKeyEndpointEligible + "=" + endpointLabels[modelDeploymentLabelKeyEndpointEligible],
 		"!" + modelDeploymentRouterLabelKey,
 	}, ",")
 	routerInput := router.Input{

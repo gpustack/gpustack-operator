@@ -15,6 +15,7 @@ import (
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	labels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrlrecord "k8s.io/client-go/tools/record"
@@ -61,6 +62,30 @@ type modelDeploymentWrites struct {
 	// uncounted: a status rebuilt from scratch every pass is one careless field away from
 	// differing from itself forever.
 	statusUpdates int
+	// patches is counted separately from updates because a label convergence goes through the
+	// patch path: a pass that re-derived what it already wrote must issue no patch at all, and an
+	// Update-counting fixture cannot see that.
+	patches int
+	// ordered writes each counted write as "kind name action" in issue order, which is what turns
+	// "the labels land before the selectors narrow" from an inference into an observation.
+	ordered []string
+}
+
+func (w *modelDeploymentWrites) record(action string, obj ctrlcli.Object) {
+	// A fake client hands the interceptor the object as it was passed, with no GVK filled in, so
+	// the kind is derived from the Go type rather than read off the object.
+	var kind string
+	switch obj.(type) {
+	case *core.Pod:
+		kind = "Pod"
+	case *core.Service:
+		kind = "Service"
+	case *workercore.ModelDeployment:
+		kind = "ModelDeployment"
+	default:
+		kind = fmt.Sprintf("%T", obj)
+	}
+	w.ordered = append(w.ordered, kind+" "+obj.GetName()+" "+action)
 }
 
 func newCountingModelDeploymentClient(w *modelDeploymentWrites, objs ...ctrlcli.Object) ctrlcli.Client {
@@ -74,10 +99,12 @@ func newCountingModelDeploymentClient(w *modelDeploymentWrites, objs ...ctrlcli.
 		WithInterceptorFuncs(ctrlinterceptor.Funcs{
 			Create: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption) error {
 				w.creates++
+				w.record("create", obj)
 				return c.Create(ctx, obj, opts...)
 			},
 			Update: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.UpdateOption) error {
 				w.updates++
+				w.record("update", obj)
 				return c.Update(ctx, obj, opts...)
 			},
 			Delete: func(ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.DeleteOption) error {
@@ -85,8 +112,17 @@ func newCountingModelDeploymentClient(w *modelDeploymentWrites, objs ...ctrlcli.
 				do := new(ctrlcli.DeleteOptions)
 				do.ApplyOptions(opts)
 				w.deleteGrace = append(w.deleteGrace, do.GracePeriodSeconds)
+				w.record("delete", obj)
 
 				return c.Delete(ctx, obj, opts...)
+			},
+			Patch: func(
+				ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object,
+				p ctrlcli.Patch, opts ...ctrlcli.PatchOption,
+			) error {
+				w.patches++
+				w.record("patch", obj)
+				return c.Patch(ctx, obj, p, opts...)
 			},
 			SubResourceUpdate: func(
 				ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object,
@@ -1750,4 +1786,356 @@ func TestModelDeploymentReconciler_ExpectedStatusWriteFailuresAreQuiet(t *testin
 			assert.NotEmpty(t, getModelDeployment(t, cli).Status.Conditions)
 		})
 	}
+}
+
+// endpointEligibilityTestSeed runs the pass that creates the replicas and their Services, then
+// leaves the tree in the state a scenario names: every Pod Ready or not, the ordinary Services'
+// selectors carrying the eligibility term or not. Everything a later pass under test sees is
+// observed state of a real pass, not a hand-built clone of a render.
+func endpointEligibilityTestSeed(t *testing.T, cli ctrlcli.Client, md *workercore.ModelDeployment) []*core.Pod {
+	t.Helper()
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	return endpointEligibilityPods(t, cli)
+}
+
+func endpointEligibilityPods(t *testing.T, cli ctrlcli.Client) []*core.Pod {
+	t.Helper()
+
+	list := new(core.PodList)
+	require.NoError(t, cli.List(context.Background(), list, ctrlcli.InNamespace("team-a")))
+	pods := make([]*core.Pod, 0, len(list.Items))
+	for i := range list.Items {
+		pods = append(pods, &list.Items[i])
+	}
+	slices.SortFunc(pods, func(a, b *core.Pod) int { return strings.Compare(a.Name, b.Name) })
+
+	return pods
+}
+
+func setEndpointEligibilityPodsReady(t *testing.T, cli ctrlcli.Client, ready bool) {
+	t.Helper()
+
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		if ready {
+			pod.Status.Conditions = []core.PodCondition{{Type: core.PodReady, Status: core.ConditionTrue}}
+		} else {
+			pod.Status.Conditions = nil
+		}
+		require.NoError(t, cli.Status().Update(context.Background(), pod))
+	}
+}
+
+func setEndpointEligibilityTermOnServices(t *testing.T, cli ctrlcli.Client, present bool) {
+	t.Helper()
+
+	list := new(core.ServiceList)
+	require.NoError(t, cli.List(context.Background(), list, ctrlcli.InNamespace("team-a")))
+	for i := range list.Items {
+		svc := &list.Items[i]
+		if svc.Spec.ClusterIP == core.ClusterIPNone {
+			continue
+		}
+		if present {
+			svc.Spec.Selector[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+		} else {
+			delete(svc.Spec.Selector, modelDeploymentLabelKeyEndpointEligible)
+		}
+		require.NoError(t, cli.Update(context.Background(), svc))
+	}
+}
+
+func endpointEligibilityOrdinarySelector(t *testing.T, cli ctrlcli.Client) labels.Selector {
+	t.Helper()
+
+	list := new(core.ServiceList)
+	require.NoError(t, cli.List(context.Background(), list, ctrlcli.InNamespace("team-a")))
+	for i := range list.Items {
+		if list.Items[i].Spec.ClusterIP == core.ClusterIPNone {
+			continue
+		}
+		sel, err := meta.LabelSelectorAsSelector(&meta.LabelSelector{MatchLabels: list.Items[i].Spec.Selector})
+		require.NoError(t, err)
+
+		return sel
+	}
+	t.Fatal("the deployment has no ordinary Service")
+
+	return nil
+}
+
+// TestModelDeploymentReconciler_BackfillsEligibilityBeforeTheSelectorsNarrow is the upgrade
+// negative. First enable over an existing deployment meets Pods that are already serving and
+// Services whose selectors predate the term; the pass must land the labels on the healthy
+// qualifying members BEFORE any Service selector gains the term, or the first enable zeroes every
+// ordinary Service's endpoints.
+func TestModelDeploymentReconciler_BackfillsEligibilityBeforeTheSelectorsNarrow(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 2 })
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+
+	// The world the upgrade arrives at: replicas exist and serve, Services are term-less.
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+	setEndpointEligibilityTermOnServices(t, cli, false)
+
+	writes := new(modelDeploymentWrites)
+	cli = endpointEligibilityCountingClient(t, writes, cli)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		assert.Equal(t, modelDeploymentEndpointEligibleValue,
+			pod.Labels[modelDeploymentLabelKeyEndpointEligible],
+			"%s is a healthy member and was backfilled", pod.Name)
+	}
+
+	firstPatch := slices.IndexFunc(writes.ordered, func(entry string) bool {
+		return strings.Contains(entry, " patch") && strings.HasPrefix(entry, "Pod ")
+	})
+	firstNarrow := slices.IndexFunc(writes.ordered, func(entry string) bool {
+		return strings.Contains(entry, " update") && strings.HasPrefix(entry, "Service ")
+	})
+	require.NotEqual(t, -1, firstPatch, "the pass patched the Pods: %v", writes.ordered)
+	require.NotEqual(t, -1, firstNarrow, "the pass narrowed the Services: %v", writes.ordered)
+	assert.Less(t, firstPatch, firstNarrow,
+		"the labels landed before any selector narrowed: %v", writes.ordered)
+}
+
+// TestModelDeploymentReconciler_EligibilityWritesChangeNoPodIdentity pins the runtime boundary:
+// the eligibility key is written and removed by patching metadata, and no write of it moves a
+// Pod's identity — generation, UID, or the spec hash the rollout reads.
+func TestModelDeploymentReconciler_EligibilityWritesChangeNoPodIdentity(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 2 })
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	snapshot := map[string]struct {
+		uid          types.UID
+		gen          int64
+		resourceHash string
+	}{}
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		require.Equal(t, modelDeploymentEndpointEligibleValue,
+			pod.Labels[modelDeploymentLabelKeyEndpointEligible], "%s", pod.Name)
+		snapshot[pod.Name] = struct {
+			uid          types.UID
+			gen          int64
+			resourceHash string
+		}{pod.UID, pod.Generation, pod.Annotations[modelDeploymentPodSpecHashAnnotation]}
+	}
+
+	// The key leaves again — the member stopped qualifying — and identity still does not move.
+	setEndpointEligibilityPodsReady(t, cli, false)
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		assert.NotContains(t, pod.Labels, modelDeploymentLabelKeyEndpointEligible,
+			"%s stopped qualifying and the key is gone", pod.Name)
+		before := snapshot[pod.Name]
+		assert.Equal(t, before.uid, pod.UID, "%s kept its UID", pod.Name)
+		assert.Equal(t, before.gen, pod.Generation, "%s kept its generation", pod.Name)
+		assert.Equal(t, before.resourceHash, pod.Annotations[modelDeploymentPodSpecHashAnnotation],
+			"%s kept the stored hash", pod.Name)
+	}
+}
+
+// TestModelDeploymentReconciler_TheKeyRestoresThroughDerivationWithoutFlapping pins the
+// controller half of AC-1.2 with the level-based behavior of AC-1.4: while the key is off a
+// member the ordinary Service selector matches nothing of it, one pass re-derives the key with a
+// single patch, and a converged tree is written by no pass at all.
+func TestModelDeploymentReconciler_TheKeyRestoresThroughDerivationWithoutFlapping(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 1 })
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	selector := endpointEligibilityOrdinarySelector(t, cli)
+	pods := endpointEligibilityPods(t, cli)
+	require.Len(t, pods, 1)
+	require.True(t, selector.Matches(labels.Set(pods[0].Labels)),
+		"a labeled, healthy member is selected")
+
+	// While the key is off — here by drift, in production by a disqualification — the selector
+	// matches nothing of this member, before any reconcile runs.
+	drifted := pods[0].DeepCopy()
+	delete(drifted.Labels, modelDeploymentLabelKeyEndpointEligible)
+	require.NoError(t, cli.Update(context.Background(), drifted))
+	refetched := endpointEligibilityPods(t, cli)[0]
+	assert.False(t, selector.Matches(labels.Set(refetched.Labels)),
+		"with the key removed the ordinary Service selects nothing of the member")
+
+	// One pass re-derives the key, with exactly one patch for exactly one drifted Pod.
+	writes := new(modelDeploymentWrites)
+	cli = endpointEligibilityCountingClient(t, writes, cli)
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Equal(t, 1, writes.patches, "the re-derivation is one patch: %v", writes.ordered)
+	restored := endpointEligibilityPods(t, cli)[0]
+	assert.Equal(t, modelDeploymentEndpointEligibleValue,
+		restored.Labels[modelDeploymentLabelKeyEndpointEligible])
+	assert.True(t, selector.Matches(labels.Set(restored.Labels)),
+		"with the key restored the ordinary Service selects the member again")
+
+	// A converged tree is written by no pass at all — the level-based re-derivation flaps never.
+	writes = new(modelDeploymentWrites)
+	cli = endpointEligibilityCountingClient(t, writes, cli)
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Zero(t, writes.patches, "a converged pass patches nothing: %v", writes.ordered)
+}
+
+// TestModelDeploymentReconciler_AReplacementMemberIsEligibleOnlyThroughItsOwnVerification pins
+// AC-1.5: a member that takes a departed member's name starts ineligible whatever its predecessor
+// was, and becomes eligible only through its own readiness.
+func TestModelDeploymentReconciler_AReplacementMemberIsEligibleOnlyThroughItsOwnVerification(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 1 })
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	departed := endpointEligibilityPods(t, cli)[0]
+	require.Equal(t, modelDeploymentEndpointEligibleValue,
+		departed.Labels[modelDeploymentLabelKeyEndpointEligible])
+
+	// The replacement takes the NAME and the whole rendered identity — same replica, same ordinal,
+	// same spec hash — and nothing that was written at runtime: a fresh UID, no readiness, and no
+	// eligibility key, because that key was this predecessor.s own verification, not the slot.s.
+	replacement := departed.DeepCopy()
+	replacement.UID = departed.UID + "-next"
+	replacement.ResourceVersion = ""
+	replacement.Status = core.PodStatus{}
+	delete(replacement.Labels, modelDeploymentLabelKeyEndpointEligible)
+	require.NoError(t, cli.Delete(context.Background(), departed))
+	require.NoError(t, cli.Create(context.Background(), replacement))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	after := endpointEligibilityPods(t, cli)
+	require.Len(t, after, 1)
+	assert.Equal(t, replacement.UID, after[0].UID, "the surviving Pod is the replacement")
+	assert.NotContains(t, after[0].Labels, modelDeploymentLabelKeyEndpointEligible,
+		"the predecessor's eligibility never carried over: not ready, not eligible")
+
+	setEndpointEligibilityPodsReady(t, cli, true)
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	after = endpointEligibilityPods(t, cli)
+	assert.Equal(t, modelDeploymentEndpointEligibleValue,
+		after[0].Labels[modelDeploymentLabelKeyEndpointEligible],
+		"the replacement is eligible through its own readiness, nothing else")
+}
+
+// TestModelDeploymentReconciler_ReadinessAloneNeverEligiblesANonLeader pins the member rule for
+// a leader-served role: above size one the members that serve no API stay ineligible however
+// ready they are, so PodReady alone never produces a selectable-but-unqualified endpoint.
+func TestModelDeploymentReconciler_ReadinessAloneNeverEligiblesANonLeader(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	members := endpointEligibilityPods(t, cli)
+	require.Len(t, members, 2)
+	byIndex := map[string]*core.Pod{}
+	for _, pod := range members {
+		byIndex[pod.Labels[modelDeploymentMemberIndexLabel]] = pod
+	}
+	leader, follower := byIndex["0"], byIndex["1"]
+	require.NotNil(t, leader)
+	require.NotNil(t, follower)
+
+	assert.Equal(t, modelDeploymentEndpointEligibleValue,
+		leader.Labels[modelDeploymentLabelKeyEndpointEligible],
+		"the ready leader is eligible")
+	assert.NotContains(t, follower.Labels, modelDeploymentLabelKeyEndpointEligible,
+		"a ready member that serves no API is not: readiness alone eligibles nothing")
+}
+
+// TestModelDeploymentReconciler_AnExternalDPShapedRoleEligiblesEveryMember pins the shape split:
+// a role whose parallelism shape gives every member a rank eligibles every ready member, where the
+// leader-served control eligibles only the leader of the same shape.
+func TestModelDeploymentReconciler_AnExternalDPShapedRoleEligiblesEveryMember(t *testing.T) {
+	testCases := []struct {
+		name        string
+		extraArgs   []string
+		wantMembers int
+	}{
+		{name: "leader served", extraArgs: nil, wantMembers: 1},
+		{
+			name:        "external data parallel",
+			extraArgs:   []string{"--data-parallel-size", "2", "--data-parallel-external-lb"},
+			wantMembers: 2,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Replicas = 1
+				md.Spec.Roles[0].ReplicaSize = 2
+				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
+			})
+			cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+			endpointEligibilityTestSeed(t, cli, md)
+			setEndpointEligibilityPodsReady(t, cli, true)
+			_, err := reconcileModelDeployment(t, cli)
+			require.NoError(t, err)
+
+			labeled := 0
+			for _, pod := range endpointEligibilityPods(t, cli) {
+				if pod.Labels[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue {
+					labeled++
+				}
+			}
+			assert.Equal(t, tc.wantMembers, labeled,
+				"the shape decides which members carry the eligibility label")
+		})
+	}
+}
+
+// endpointEligibilityCountingClient rebuilds a counting client over the tree an earlier pass left
+// behind: the counting fixture takes objects, so the live ones are listed back and replanted,
+// UIDs and all.
+func endpointEligibilityCountingClient(
+	t *testing.T, w *modelDeploymentWrites, previous ctrlcli.Client,
+) ctrlcli.Client {
+	t.Helper()
+
+	instList := new(worker.InstanceTypeList)
+	require.NoError(t, previous.List(context.Background(), instList))
+	pods := endpointEligibilityPods(t, previous)
+	svcList := new(core.ServiceList)
+	require.NoError(t, previous.List(context.Background(), svcList, ctrlcli.InNamespace("team-a")))
+
+	objs := make([]ctrlcli.Object, 0, 1+len(instList.Items)+len(pods)+len(svcList.Items))
+	objs = append(objs, getModelDeployment(t, previous))
+	for i := range instList.Items {
+		objs = append(objs, &instList.Items[i])
+	}
+	for _, pod := range pods {
+		objs = append(objs, pod)
+	}
+	for i := range svcList.Items {
+		objs = append(objs, &svcList.Items[i])
+	}
+
+	return newCountingModelDeploymentClient(w, objs...)
 }

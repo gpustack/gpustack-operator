@@ -70,6 +70,25 @@ const (
 	// modelDeploymentLeaderMemberIndex is the member every replica has and the only one the role's
 	// Service fronts. A replica of size one is all leader; above that, the others serve no API.
 	modelDeploymentLeaderMemberIndex = 0
+
+	// modelDeploymentLabelKeyEndpointEligible marks a Pod whose endpoints a Router or an ordinary
+	// Service may select: "true" on exactly the members that serve -- the leader alone for a
+	// leader-served role, every rank-carrying member for an External-DP-shaped one -- and absent
+	// otherwise. Absence is the disqualification, so there is no "false" to misread.
+	//
+	// IT IS WRITTEN BY THE RECONCILER AT RUNTIME, never rendered: inside the template it would be
+	// part of the spec-hash and removing it to disqualify would roll the very replica a drain
+	// means to keep. The Pod's own identity labels above are rendered; this one is the reconciler's
+	// level-based answer to what the Pod is doing.
+	//
+	// IT IS BUILT FROM systemname.LabelPrefix like every label above, because it must be matchable
+	// by a Service selector in the same domain those selectors already name.
+	modelDeploymentLabelKeyEndpointEligible = "modeldeployment." + systemname.LabelPrefix + "endpoint-eligible"
+
+	// modelDeploymentEndpointEligibleValue is the only value the eligibility key carries. A label
+	// selector is a conjunction of equalities, so the term is present-or-absent; the value exists
+	// because a selector needs one, and "true" states what presence means.
+	modelDeploymentEndpointEligibleValue = "true"
 )
 
 // ModelDeploymentPodGroupMeta is the Kueue group metadata one replica's Pod carries.
