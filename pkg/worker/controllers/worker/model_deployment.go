@@ -140,7 +140,11 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 			// Deleting rather than the last Ready it happened to reach. The Binding is deliberately
 			// not re-read: a teardown pass has no question to ask it, and the domain a replica is
 			// still writing into is the one that was last observed.
-			if err = r.syncModelDeploymentStatus(ctx, md, pods, nil, nil, nil); err != nil {
+			// A teardown pass evaluates no health predicate, so it passes no qualifications and
+			// the endpoint answer stays the unobserved one rather than a verdict this pass never made.
+			if err = r.syncModelDeploymentStatus(
+				ctx, md, pods, nil, nil, nil, nil,
+			); err != nil {
 				// The predicate drops status-only and metadata-only updates, so the change behind a
 				// conflict may deliver no event: requeue rather than wait for one.
 				return objectWriteResult(logger, err, "update model deployment status to deleting",
@@ -263,7 +267,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			return ctrl.Result{}, listErr
 		}
 
-		if err = r.syncModelDeploymentStatus(ctx, md, pods, domain, nil, weights); err != nil {
+		// The weights are still resolving, so this pass has not reached the replicas and makes no
+		// qualification claim; the endpoint answer stays unobserved until a pass that has.
+		if err = r.syncModelDeploymentStatus(
+			ctx, md, pods, domain, nil, weights, nil,
+		); err != nil {
 			// The predicate drops status-only updates, so the change behind a conflict may deliver
 			// no event: requeue rather than wait for one.
 			return objectWriteResult(logger, err, "sync status while the weights resolve", _requeueAfterConflict)
@@ -437,6 +445,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	})
 
 	createOrdinals := make(map[string][]int, len(md.Spec.Roles))
+	// The ordinals this pass condemns for replacement, gathered here so the whole-group health
+	// predicate can ask "is this replica on its way out" from the same decision the rollout makes
+	// rather than from a second comparison that could reach a different answer.
+	replacedByRole := make(map[string]map[int]bool, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		live := liveByRole[role.Name]
@@ -599,6 +611,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			if outdatedByOrdinal[ordinal] {
 				rollout.outdated++
 				outdated = append(outdated, modelDeploymentReplicaMembers(kept, ordinal)...)
+				if replacedByRole[role.Name] == nil {
+					replacedByRole[role.Name] = make(map[int]bool)
+				}
+				replacedByRole[role.Name][ordinal] = true
 			}
 		}
 
@@ -920,7 +936,17 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		}
 	}
 
-	if err = r.convergeModelDeploymentEndpointEligibility(ctx, md); err != nil {
+	// The whole-group health predicate is evaluated ONCE here, before any Service or selector
+	// that carries the eligibility equality, and the same result serves both the label write
+	// below and the status written further down. Regrouping per replica twice is how two
+	// figures come to disagree about what a replica is, and a disagreement here would be silent:
+	// one of the two answers would drive selection and the other would be published.
+	qualifications := qualifyModelDeploymentInstances(
+		md, actual, modelDeploymentPendingReplacement{ordinals: replacedByRole},
+	)
+	qualificationByMember := modelDeploymentQualificationsByMember(qualifications)
+
+	if err = r.convergeModelDeploymentEndpointEligibility(ctx, md, qualificationByMember); err != nil {
 		logger.Error(err, "converge endpoint eligibility")
 		return ctrl.Result{}, err
 	}
@@ -947,7 +973,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 
 	r.recordModelDeploymentDepartures(md, actual)
 
-	if err = r.syncModelDeploymentStatus(ctx, md, actual, domain, &rollout, weights); err != nil {
+	if err = r.syncModelDeploymentStatus(
+		ctx, md, actual, domain, &rollout, weights, qualifications,
+	); err != nil {
 		// The predicate drops status-only updates, so the change behind a conflict may deliver no
 		// event: requeue rather than wait for one. The requeued pass also retries a failed create
 		// or router sync, whose errors would otherwise be returned below.
@@ -1044,6 +1072,7 @@ func (r *ModelDeploymentReconciler) recordModelDeploymentRuntimeVersionSkew(
 // against the object as it was read.
 func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 	ctx context.Context, md *workercore.ModelDeployment,
+	qualificationByMember map[types.UID]modelDeploymentInstanceQualification,
 ) error {
 	pods, err := r.listModelDeploymentPods(ctx, md)
 	if err != nil {
@@ -1062,7 +1091,8 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 			continue
 		}
 
-		eligible := modelDeploymentPodEligible(md, role, pod)
+		qualification, evaluated := qualificationByMember[pod.UID]
+		eligible := modelDeploymentPodEligible(md, role, pod, qualification, evaluated)
 		carried := pod.Labels[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue
 		if eligible == carried {
 			continue
@@ -1082,23 +1112,63 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 	return nil
 }
 
-// modelDeploymentPodEligible is the member rule of Feature 1: a Pod's endpoints may be selected
-// exactly when the member serves and is healthy under the rules that exist today.
+// modelDeploymentPodEligible is the member rule: a Pod's endpoints may be selected exactly when
+// the whole group it belongs to qualifies and the member itself is one the shape lets answer.
 //
-// THE SHAPE DECIDES WHICH MEMBERS SERVE. A role whose parallelism shape gives every member a rank
-// — an External-DP shape — serves from every rank-carrying member, so every ready member is
-// eligible. Every other role is leader-served: above size one only the leader answers the API, and
-// a PodReady condition alone never makes a non-leader selectable. A shape that cannot be read is
-// the conservative leader-served reading, not an invented widening.
+// THE GROUP IS THE UNIT, NOT THE MEMBER. A replica whose members do not all qualify serves
+// nothing, so a member that is up beside a peer that is down is not a working member of anything
+// and must not be selectable on its own account.
 //
-// READINESS IS THE EXISTING RULE AND NOTHING MORE. No new gate is introduced here; what healthy
-// means is extended by the health predicate work, not by the eligibility write.
+// WITHDRAWAL IS NOT GATED AND RESTORE IS. Every leg that reports a DEFINITE fault removes the key
+// whatever the group predicate can or cannot see, because a broken group needs no further
+// evidence and a fault that could be masked behind a missing observation would be the one fault
+// worth masking. Restoring is the opposite: putting an endpoint back into selection is the act
+// that must not happen on a signal weaker than the spec requires, so when the group predicate is
+// unavailable the reconciler leaves the key exactly as it found it and the status reports why.
+//
+// THE PER-MEMBER SHAPE TERMS ARE UNCHANGED. Which members answer is still the shape's decision:
+// every rank-carrying member of an External-DP role, only the leader of a leader-served role, and
+// the whole replica at size one. Nothing here widens or narrows that.
 func modelDeploymentPodEligible(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, pod *core.Pod,
+	qualification modelDeploymentInstanceQualification, evaluated bool,
 ) bool {
+	// The unconditional half: a member that stopped being ready leaves the pool, and it does so
+	// whether or not this operator can say anything about the group.
 	if !podIsReady(pod) {
 		return false
 	}
+	if !evaluated {
+		// A PASS THAT EVALUATED NO PREDICATE LEAVES THE KEY ALONE, in either direction. The passes
+		// that return before the predicate is built are the ones that pass no qualifications, and
+		// a member missing from the map is a member whose group was never looked at. Reading the
+		// zero value as an empty, therefore eligible, leg set would grant eligibility on no
+		// evidence at all.
+		return pod.Labels[modelDeploymentLabelKeyEndpointEligible] ==
+			modelDeploymentEndpointEligibleValue
+	}
+	if !qualification.Activated() {
+		// A DEFINITE FAULT WITHDRAWS THROUGH THE GATE. The gate is about RESTORE only: a group this
+		// operator cannot verify says nothing about whether a member is healthy, so a key already on
+		// one is left there, but a member the predicate has positively found faulted is taken out of
+		// the pool whatever the group's own leg says. Returning the carried value unconditionally
+		// would leave a NotReady member selectable inside the very replica that is unverifiable.
+		if qualification.HasFailure() {
+			return false
+		}
+		// Nothing to revoke on, and nothing may be restored. The key is left exactly as it was,
+		// which is what makes a first enable over a deployment whose engine cannot be verified
+		// leave existing routing untouched rather than narrow it.
+		return pod.Labels[modelDeploymentLabelKeyEndpointEligible] ==
+			modelDeploymentEndpointEligibleValue
+	}
+	if qualification.HasFailure() {
+		return false
+	}
+	if !qualification.Eligible() {
+		return false
+	}
+
 	if modelDeploymentRoleExternalDP(md, role) {
 		return true
 	}

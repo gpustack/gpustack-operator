@@ -28,7 +28,7 @@ func rolloutConditionOf(
 	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
-	status, err := r.computeModelDeploymentStatus(context.Background(), md, nil, nil, rollout, nil)
+	status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, nil, nil, rollout, nil, nil)
 	require.NoError(t, err)
 
 	return &workercore.ModelDeployment{Status: *status}

@@ -1797,8 +1797,28 @@ func endpointEligibilityTestSeed(t *testing.T, cli ctrlcli.Client, md *workercor
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
+	assignEndpointEligibilityUIDs(t, cli)
 
 	return endpointEligibilityPods(t, cli)
+}
+
+// assignEndpointEligibilityUIDs gives every seeded Pod a UID.
+//
+// THE FAKE CLIENT ASSIGNS NONE, and the health predicate keys each member's group by UID, so every
+// member of a multi-role deployment would share one key and whichever group was read last would
+// answer for all of them -- a single-member role's answer would then eligibles a held replica's
+// members. A real cluster gives every Pod a UID, so the fixture gives them one here rather than
+// leaving a case to depend on a key the real world never leaves empty.
+func assignEndpointEligibilityUIDs(t *testing.T, cli ctrlcli.Client) {
+	t.Helper()
+
+	for i, pod := range endpointEligibilityPods(t, cli) {
+		if pod.UID != "" {
+			continue
+		}
+		pod.UID = types.UID("uid-" + strconv.Itoa(i) + "-" + pod.Name)
+		require.NoError(t, cli.Update(context.Background(), pod))
+	}
 }
 
 func endpointEligibilityPods(t *testing.T, cli ctrlcli.Client) []*core.Pod {
@@ -2041,6 +2061,13 @@ func TestModelDeploymentReconciler_AReplacementMemberIsEligibleOnlyThroughItsOwn
 // TestModelDeploymentReconciler_ReadinessAloneNeverEligiblesANonLeader pins the member rule for
 // a leader-served role: above size one the members that serve no API stay ineligible however
 // ready they are, so PodReady alone never produces a selectable-but-unqualified endpoint.
+//
+// A MULTI-MEMBER REPLICA IS NOW HELD ENTIRELY, so this asserts the stronger statement: readiness
+// alone eligibles NOTHING here, the leader included. The leader stops carrying the label because
+// the whole-group predicate cannot verify a replica of two members, which is what the
+// qualification work is for; the follower never carried it for the shape reason it always had.
+// The shape terms themselves are unchanged and are pinned directly in the health table, where a
+// single-member replica makes them observable.
 func TestModelDeploymentReconciler_ReadinessAloneNeverEligiblesANonLeader(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 1
@@ -2062,27 +2089,29 @@ func TestModelDeploymentReconciler_ReadinessAloneNeverEligiblesANonLeader(t *tes
 	require.NotNil(t, leader)
 	require.NotNil(t, follower)
 
-	assert.Equal(t, modelDeploymentEndpointEligibleValue,
-		leader.Labels[modelDeploymentLabelKeyEndpointEligible],
-		"the ready leader is eligible")
+	assert.NotContains(t, leader.Labels, modelDeploymentLabelKeyEndpointEligible,
+		"readiness alone eligibles nothing: a replica of two members is held unverifiable")
 	assert.NotContains(t, follower.Labels, modelDeploymentLabelKeyEndpointEligible,
 		"a ready member that serves no API is not: readiness alone eligibles nothing")
 }
 
-// TestModelDeploymentReconciler_AnExternalDPShapedRoleEligiblesEveryMember pins the shape split:
-// a role whose parallelism shape gives every member a rank eligibles every ready member, where the
-// leader-served control eligibles only the leader of the same shape.
-func TestModelDeploymentReconciler_AnExternalDPShapedRoleEligiblesEveryMember(t *testing.T) {
+// TestModelDeploymentReconciler_AMultiMemberReplicaIsHeldUnverified is the activation negative
+// read through the reconciler. Every member of a multi-member replica is ready and the shape terms
+// would select some of them, yet none carries the label, because the group-forward predicate has
+// no observation to rest on and restore is gated on it.
+//
+// The two shapes are held IDENTICALLY, which is the point: the group gate stands in front of the
+// shape gate, so a shape difference cannot produce an eligibility the group predicate never
+// verified.
+func TestModelDeploymentReconciler_AMultiMemberReplicaIsHeldUnverified(t *testing.T) {
 	testCases := []struct {
-		name        string
-		extraArgs   []string
-		wantMembers int
+		name      string
+		extraArgs []string
 	}{
-		{name: "leader served", extraArgs: nil, wantMembers: 1},
+		{name: "leader served", extraArgs: nil},
 		{
-			name:        "external data parallel",
-			extraArgs:   []string{"--data-parallel-size", "2", "--data-parallel-external-lb"},
-			wantMembers: 2,
+			name:      "external data parallel",
+			extraArgs: []string{"--data-parallel-size", "2", "--data-parallel-external-lb"},
 		},
 	}
 
@@ -2099,16 +2128,256 @@ func TestModelDeploymentReconciler_AnExternalDPShapedRoleEligiblesEveryMember(t 
 			_, err := reconcileModelDeployment(t, cli)
 			require.NoError(t, err)
 
-			labeled := 0
 			for _, pod := range endpointEligibilityPods(t, cli) {
-				if pod.Labels[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue {
-					labeled++
-				}
+				assert.NotContains(t, pod.Labels, modelDeploymentLabelKeyEndpointEligible,
+					"a multi-member replica is held regardless of the shape, because the group "+
+						"forward predicate has no observation to verify it against")
 			}
-			assert.Equal(t, tc.wantMembers, labeled,
-				"the shape decides which members carry the eligibility label")
 		})
 	}
+}
+
+// TestModelDeploymentReconciler_ANotReadyMemberRevokesTheWholeReplica is the withdrawal half read
+// through the reconciler, and the one that must work even where restore is gated. A single-member
+// replica is activated -- there is no cross-member path to verify -- so it is restored here, and
+// then the one member going NotReady takes the key away again.
+func TestModelDeploymentReconciler_ANotReadyMemberRevokesTheWholeReplica(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+	})
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	members := endpointEligibilityPods(t, cli)
+	require.Len(t, members, 1)
+	require.Equal(t, modelDeploymentEndpointEligibleValue,
+		members[0].Labels[modelDeploymentLabelKeyEndpointEligible],
+		"a single-member replica has no group predicate to hold it, so it qualifies")
+
+	// The member is no longer ready, and the key must go whatever else is true of the group.
+	setEndpointEligibilityPodsReady(t, cli, false)
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		assert.NotContains(t, pod.Labels, modelDeploymentLabelKeyEndpointEligible,
+			"a definite health fault withdraws the key, and withdrawal is never gated")
+	}
+}
+
+// setEndpointEligibilityPodsNotReadyAt takes the member at one index of every replica NotReady and
+// leaves the rest alone, so a case can fail exactly one member of a group.
+//
+// The condition is set FALSE rather than dropped, and the difference is the whole point: a Pod
+// carrying PodReady=False is a definite fault the predicate revokes on, while a Pod with no
+// readiness condition at all is a member nothing has reported on yet, which is an open question
+// and holds rather than revokes.
+func setEndpointEligibilityPodsNotReadyAt(t *testing.T, cli ctrlcli.Client, member string) {
+	t.Helper()
+
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		if pod.Labels[modelDeploymentMemberIndexLabel] != member {
+			continue
+		}
+		pod.Status.Conditions = []core.PodCondition{{Type: core.PodReady, Status: core.ConditionFalse}}
+		require.NoError(t, cli.Status().Update(context.Background(), pod))
+	}
+}
+
+// setEndpointEligibilityLabelOnPods writes or removes the eligibility key on every Pod directly,
+// standing in for a key a pass before the group gate existed, or for one that drifted. The two
+// activation negatives that carry the most weight are about a key that is ALREADY on a Pod: a gate
+// that refuses to touch one, and a fault that has to take one away, are both invisible to a
+// fixture that starts with no key at all.
+func setEndpointEligibilityLabelOnPods(t *testing.T, cli ctrlcli.Client, present bool) {
+	t.Helper()
+
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		if present {
+			pod.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+		} else {
+			delete(pod.Labels, modelDeploymentLabelKeyEndpointEligible)
+		}
+		require.NoError(t, cli.Update(context.Background(), pod))
+	}
+}
+
+// endpointEligibilitySelectorForRole returns the ordinary Service selector that carries a named
+// role, so a case can ask what a SPECIFIC role's healthy endpoints look like rather than whichever
+// Service happened to be listed first.
+func endpointEligibilitySelectorForRole(t *testing.T, cli ctrlcli.Client, role string) labels.Selector {
+	t.Helper()
+
+	list := new(core.ServiceList)
+	require.NoError(t, cli.List(context.Background(), list, ctrlcli.InNamespace("team-a")))
+	for i := range list.Items {
+		svc := &list.Items[i]
+		if svc.Spec.ClusterIP == core.ClusterIPNone {
+			continue
+		}
+		if svc.Spec.Selector[modelDeploymentLabelKeyComponent] != role {
+			continue
+		}
+		sel, err := meta.LabelSelectorAsSelector(&meta.LabelSelector{MatchLabels: svc.Spec.Selector})
+		require.NoError(t, err)
+
+		return sel
+	}
+	t.Fatalf("the deployment has no ordinary Service for role %q", role)
+
+	return nil
+}
+
+// TestModelDeploymentReconciler_AHeldReplicaLeavesAnExistingLabelUntouched is the byte-unchanged
+// clause of AC-3.5. A member of a replica the group predicate cannot verify is not granted
+// eligibility, but a key that is already on it is also not taken away: the reconciler is not
+// allowed to grant on a weaker signal than the spec requires, and it is equally not allowed to
+// revoke on one, because revoking here would be a verdict the predicate never made.
+func TestModelDeploymentReconciler_AHeldReplicaLeavesAnExistingLabelUntouched(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+	setEndpointEligibilityLabelOnPods(t, cli, true)
+
+	before := map[string]map[string]string{}
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		before[pod.Name] = maps.Clone(pod.Labels)
+	}
+
+	writes := new(modelDeploymentWrites)
+	cli = endpointEligibilityCountingClient(t, writes, cli)
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	assert.Zero(t, writes.patches,
+		"a held replica writes no Pod at all, so the pre-existing label is preserved byte for byte: %v",
+		writes.ordered)
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		assert.Equal(t, before[pod.Name], pod.Labels,
+			"%s kept every label it had, because the predicate neither granted nor revoked", pod.Name)
+	}
+}
+
+// TestModelDeploymentReconciler_ADefaultHealthFaultWithdrawsThroughTheGate is the half of the gate
+// that must not exist. Restore is held for a replica whose group predicate cannot be verified, but
+// a member of it going NotReady is a definite fault, and a definite fault takes the key away even
+// while the group predicate is unsupported. The label is put on by hand first, because otherwise
+// there would be nothing to withdraw and the case would pass for the wrong reason.
+func TestModelDeploymentReconciler_ADefaultHealthFaultWithdrawsThroughTheGate(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+	setEndpointEligibilityLabelOnPods(t, cli, true)
+
+	// One member of the two goes NotReady. The group is still unsupported, and the healthy member
+	// is still healthy, but the replica as a whole has a definite fault and loses the key.
+	setEndpointEligibilityPodsNotReadyAt(t, cli, "1")
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	members := endpointEligibilityPods(t, cli)
+	require.Len(t, members, 2)
+	for _, pod := range members {
+		assert.NotContains(t, pod.Labels, modelDeploymentLabelKeyEndpointEligible,
+			"%s lost the key: a definite health fault withdraws eligibility even where restore is "+
+				"gated on an unverifiable group predicate", pod.Name)
+	}
+}
+
+// TestModelDeploymentReconciler_AReservedReplicaIsNotRestored is the "not yet eligible" half of the
+// restore rule, on a path where NOTHING ELSE could be doing the holding.
+//
+// A multi-member replica is held twice over, once by the activation gate and once by the
+// unverified group-forward leg, so no single defect puts its label back and the case cannot say
+// which of the two did the work. This replica has a single member, so the group-forward leg is
+// NotApplicable and the gate stands open: the one thing keeping the label off a healthy, ready
+// member is the retirement leg, and dropping that leg from the conjunction would put an endpoint
+// that is on its way out back into selection.
+func TestModelDeploymentReconciler_AReservedReplicaIsNotRestored(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Replicas = 1
+	})
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+
+	// An external actor reserves the replica for retirement. Its member is healthy and its group
+	// has nothing left to verify, and it is still not eligible, because it is going away.
+	live := getModelDeployment(t, cli)
+	live.Status.Retirement = &workercore.ModelDeploymentRetirementStatus{
+		RoleName: "server", ReplicaOrdinal: 0,
+		State: workercore.ModelDeploymentRetirementStateAdmitted,
+	}
+	require.NoError(t, cli.Status().Update(context.Background(), live))
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	members := endpointEligibilityPods(t, cli)
+	require.Len(t, members, 1)
+	assert.NotContains(t, members[0].Labels, modelDeploymentLabelKeyEndpointEligible,
+		"a reserved replica is not restored, even with a ready member and nothing to verify")
+}
+
+// TestModelDeploymentReconciler_TheGateIsPerReplicaAndDoesNotStopBackfill is the activation negative
+// that matters most, because its failure mode looks like a healthy deployment. The gate is decided
+// per replica, not per deployment: a deployment holding a multi-member role the predicate cannot
+// verify must still backfill the label onto the healthy members of its single-member role. Were
+// the gate ever lifted to the deployment, first enable would zero every ordinary Service of every
+// healthy deployment, which is exactly what the backfill exists to prevent.
+func TestModelDeploymentReconciler_TheGateIsPerReplicaAndDoesNotStopBackfill(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles = []workercore.ModelDeploymentRole{
+			{
+				Name: "paired", Replicas: 1, ReplicaSize: 2,
+				InstanceType: "h20-8x", Image: "vllm/vllm-openai:v0.25.1",
+			},
+			{
+				Name: "solo", Replicas: 1,
+				InstanceType: "h20-8x", Image: "vllm/vllm-openai:v0.25.1",
+			},
+		}
+	})
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	endpointEligibilityTestSeed(t, cli, md)
+	setEndpointEligibilityPodsReady(t, cli, true)
+	setEndpointEligibilityTermOnServices(t, cli, false)
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+
+	byRole := map[string][]*core.Pod{}
+	for _, pod := range endpointEligibilityPods(t, cli) {
+		byRole[pod.Labels[modelDeploymentLabelKeyComponent]] = append(
+			byRole[pod.Labels[modelDeploymentLabelKeyComponent]], pod)
+	}
+	require.Len(t, byRole["paired"], 2)
+	require.Len(t, byRole["solo"], 1)
+
+	for _, pod := range byRole["paired"] {
+		assert.NotContains(t, pod.Labels, modelDeploymentLabelKeyEndpointEligible,
+			"the unverifiable replica is held")
+	}
+	require.Equal(t, modelDeploymentEndpointEligibleValue,
+		byRole["solo"][0].Labels[modelDeploymentLabelKeyEndpointEligible],
+		"the activated replica beside it is still backfilled, so the hold does not zero healthy endpoints")
+
+	// And the Service that serves the healthy role still selects it after its selector narrows.
+	selector := endpointEligibilitySelectorForRole(t, cli, "solo")
+	assert.True(t, selector.Matches(labels.Set(byRole["solo"][0].Labels)),
+		"the ordinary Service of the activated role still selects its healthy member")
 }
 
 // endpointEligibilityCountingClient rebuilds a counting client over the tree an earlier pass left

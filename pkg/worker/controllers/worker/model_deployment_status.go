@@ -20,6 +20,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
@@ -86,6 +87,31 @@ const (
 // observation rather than an observed absence, which is the difference between "wait for the
 // reading" and "act on an empty set".
 const modelDeploymentReasonNotObserved = "NotObserved"
+
+// The reasons EndpointEligibility carries once the whole-group health predicate answers. They are
+// REASONS on an existing condition rather than new fields, because the wire is frozen and every
+// one of these states is something the condition could already express.
+//
+// A reason is the machine-readable class and a message is not a contract. The distinction that
+// matters most here is Revoked against Unsupported: the first says this operator took endpoints
+// out of selection, the second says it could not put them back. A reader that cannot tell those
+// apart sees one healthy deployment.
+const (
+	// modelDeploymentReasonEndpointsQualified is every replica's whole group verified.
+	modelDeploymentReasonEndpointsQualified = "Qualified"
+
+	// modelDeploymentReasonEndpointsHeldUnverified is a leg this operator could not evaluate.
+	// Eligibility stays held and the message names the leg.
+	modelDeploymentReasonEndpointsHeldUnverified = "HeldUnverified"
+
+	// modelDeploymentReasonEndpointsUnsupported is an engine shape with no verifiable group
+	// predicate at all. Restore is held on it rather than granted on health alone.
+	modelDeploymentReasonEndpointsUnsupported = "Unsupported"
+
+	// modelDeploymentReasonEndpointsRevoked is a definite health fault: a member is not ready,
+	// the member set is short, or a replica is being replaced. Withdrawal is unconditional.
+	modelDeploymentReasonEndpointsRevoked = "Revoked"
+)
 
 // The reasons RoleKindsReady carries. Three rather than two, because "no kind is missing" and "no
 // role has been accounted for yet" are different answers that a False would merge into one.
@@ -159,6 +185,7 @@ const (
 func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod, domain *modelDeploymentDomain,
 	rollout *modelDeploymentRollout, weights *modelArtifactWeights,
+	qualifications []modelDeploymentInstanceQualification,
 ) error {
 	// The serving answer is read per pass, before the status is derived: it is an
 	// observation of the Routers as they exist right now, and a change in it must reach
@@ -166,7 +193,9 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 	// way is already a state of the answer, never a reconcile error.
 	serving := r.observeModelDeploymentServing(ctx, md)
 
-	desired, err := r.computeModelDeploymentStatus(ctx, md, pods, domain, rollout, weights)
+	desired, err := r.computeModelDeploymentStatusWithQualifications(
+		ctx, md, pods, domain, rollout, weights, qualifications,
+	)
 	if err != nil {
 		return err
 	}
@@ -184,10 +213,17 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 	return r.Client.Status().Update(ctx, md)
 }
 
-// computeModelDeploymentStatus derives the whole status from the spec and the observed Pods.
-func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
+// computeModelDeploymentStatusWithQualifications derives the status for a pass that has already
+// evaluated the whole-group health predicate, so the published endpoint answer and the eligibility
+// write that ran earlier in the same pass come from ONE set of qualifications rather than two
+// groupings of the same Pods.
+//
+// A PASS THAT EVALUATED NO PREDICATE PASSES NO QUALIFICATIONS, which leaves the endpoint answer the
+// unobserved one rather than a verdict the pass never made.
+func (r *ModelDeploymentReconciler) computeModelDeploymentStatusWithQualifications(
 	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod, domain *modelDeploymentDomain,
 	rollout *modelDeploymentRollout, weights *modelArtifactWeights,
+	qualifications []modelDeploymentInstanceQualification,
 ) (*workercore.ModelDeploymentStatus, error) {
 	// The condition accessors mutate the object they are given, so they work on a copy of the
 	// observed status: conditions carry a LastTransitionTime that must not be reset on every pass,
@@ -207,7 +243,11 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 	// whose own is missing.
 	wlByReplica := modelDeploymentReplicaWorkloads(pods, wls)
 
-	holder.Status.Roles = modelDeploymentRoleStatuses(md, pods, wlByReplica)
+	// The qualified counts are derived here, once, from the same qualifications the eligibility
+	// write acted on. Deriving them a second time from the same pods would be a second grouping,
+	// and two groupings are how two figures come to disagree about what a replica is.
+	qualified := modelDeploymentRoleQualified(qualifications)
+	holder.Status.Roles = modelDeploymentRoleStatuses(md, pods, wlByReplica, qualified)
 	if md.Spec.Router == nil {
 		holder.Status.Endpoint = modelDeploymentEndpoint(md)
 	} else {
@@ -226,7 +266,7 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatus(
 
 	// The eligibility view is reported alongside the counts it qualifies, so a reader scanning
 	// conditions alone can tell an unobserved endpoint set from an observed empty one.
-	observeModelDeploymentEndpointEligibility(holder)
+	observeModelDeploymentEndpointEligibility(holder, qualifications)
 
 	var nodeModels map[string]*workercore.NodeModelStoreModel
 	if weights != nil && weights.Render != nil && weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryNode {
@@ -378,7 +418,7 @@ func projectModelDeploymentRouterStatus(
 // answer to. What the two cannot do is disagree about WHICH replicas were looked at.
 func modelDeploymentRoleStatuses(
 	md *workercore.ModelDeployment, pods []core.Pod,
-	wlByReplica map[types.UID]*kueue.Workload,
+	wlByReplica map[types.UID]*kueue.Workload, qualified map[string]*int32,
 ) []workercore.ModelDeploymentRoleStatus {
 	// EVERY FIGURE HERE IS PER REPLICA, WHICH IS WHY THE PODS ARE GROUPED FIRST. Both counts read
 	// wrong when taken per Pod once a replica may be several of them, and they read wrong in
@@ -454,7 +494,7 @@ func modelDeploymentRoleStatuses(
 			Unmanaged:       len(role.Command) > 0,
 			AssignedFlavors: modelDeploymentAssignedFlavors(flavors[role.Name]),
 			Parallelism:     ReadModelDeploymentRoleParallelism(md.Spec.Engine.Name, role),
-			Endpoints:       modelDeploymentRoleEndpointsUnobserved(md.Spec.Router != nil),
+			Endpoints:       modelDeploymentRoleEndpoints(md.Spec.Router != nil, qualified[role.Name]),
 		})
 	}
 
@@ -475,19 +515,124 @@ func modelDeploymentAssignedFlavors(flavors sets.Set[string]) []string {
 	return sets.List(flavors)
 }
 
-// modelDeploymentRoleEndpointsUnobserved is the endpoints answer of a pass with no endpoint
-// qualification: no eligible count exists, and no serving confirmation was taken. A
-// router-less deployment says NotConfigured rather than Unknown — there is no Router process
-// whose answer is missing, and the two states lead a retirement down different gates.
-func modelDeploymentRoleEndpointsUnobserved(routed bool) workercore.ModelDeploymentRoleEndpointsStatus {
+// modelDeploymentRoleEndpoints is the endpoints answer of one role: how many of its replicas the
+// whole-group health predicate qualified, and the serving confirmation taken over those
+// endpoints.
+//
+// THE QUALIFIED COUNT IS NIL WHENEVER THE LIST IS NOT COMPLETE. A role with three qualified
+// replicas and one held does not report three eligible endpoints: it reports nothing it can
+// stand behind, because a reader would otherwise see a number and conclude the role is
+// qualified. An explicit zero remains a real answer, and it is the answer for a role whose every
+// replica is known and none of them qualifies.
+func modelDeploymentRoleEndpoints(
+	routed bool, eligible *int32,
+) workercore.ModelDeploymentRoleEndpointsStatus {
 	serving := workercore.ModelDeploymentServingStateUnknown
 	if !routed {
 		serving = workercore.ModelDeploymentServingStateNotConfigured
 	}
 
 	return workercore.ModelDeploymentRoleEndpointsStatus{
-		Serving: workercore.ModelDeploymentServingStatus{State: serving},
+		Eligible: eligible,
+		Serving:  workercore.ModelDeploymentServingStatus{State: serving},
 	}
+}
+
+// observeModelDeploymentEndpointEligibility reports, at the deployment level, what the whole-group
+// health predicate concluded for the replicas this pass saw.
+//
+// NO QUALIFICATIONS MEANS NO OBSERVATION, and that stays Unknown rather than becoming False: a
+// False here would read as a disqualification the operator made when no pass has made one. The
+// nil per-role counts and this condition say the same fact at their two levels.
+//
+// THE PRECEDENCE IS WHAT MAKES THE CONDITION TRUSTWORTHY. A definite revocation outranks a
+// missing observation, because an operator that can see a broken group must say so even when it
+// cannot see a working one; and Unsupported outranks a plain hold, because an engine shape with
+// no group predicate at all is a different situation from one leg that could not be read this
+// pass, and a reader's next action differs.
+func observeModelDeploymentEndpointEligibility(
+	holder *workercore.ModelDeployment, qualifications []modelDeploymentInstanceQualification,
+) {
+	revoked, unsupported, held, qualified, observed := 0, 0, 0, 0, 0
+	heldLegs := map[modelDeploymentQualificationLegName]bool{}
+	for _, qualification := range qualifications {
+		// A REPLICA NOTHING HAS REPORTED ON IS NOT PART OF THIS ANSWER. It is the state a
+		// deployment is in between creating its replicas and their first readiness report, and
+		// counting it would publish a hold the operator has not made. Excluding it is also what
+		// keeps the pass after a create from moving the condition, because a pass that changed
+		// this value on an unchanged spec would issue a status write on every one of them.
+		if !qualification.Observed {
+			continue
+		}
+		observed++
+		// ELIGIBLE IS TESTED FIRST, because it is the only one of the four that no failure and no
+		// missing observation can produce, and because a replica whose every leg verified is
+		// qualified rather than held -- an activated replica with nothing wrong is not waiting on
+		// anything.
+		switch {
+		case qualification.Eligible():
+			qualified++
+		case qualification.HasFailure():
+			revoked++
+		case qualification.Activated():
+			held++
+			for _, leg := range qualification.HeldLegs() {
+				heldLegs[leg] = true
+			}
+		default:
+			unsupported++
+		}
+	}
+
+	// ONE MESSAGE FOR THE ONE STATE. A deployment that has no replicas yet and a deployment whose
+	// replicas have not reported are the same answer -- no observation exists -- and they are
+	// given the same words deliberately: the condition accessors move LastTransitionTime when the
+	// message changes, so two phrasings of one state would write the status on every pass of a
+	// deployment that never changes.
+	if observed == 0 {
+		ModelDeploymentConditionEndpointEligibility.Unknown(holder,
+			modelDeploymentReasonNotObserved,
+			"no replica has reported its readiness, so no endpoint has been qualified")
+
+		return
+	}
+
+	switch {
+	case revoked > 0:
+		ModelDeploymentConditionEndpointEligibility.False(holder,
+			modelDeploymentReasonEndpointsRevoked,
+			strconvx.Itoa(revoked)+" of "+strconvx.Itoa(observed)+
+				" observed replicas fail a whole-group health leg and have been disqualified")
+	case unsupported > 0:
+		ModelDeploymentConditionEndpointEligibility.Unknown(holder,
+			modelDeploymentReasonEndpointsUnsupported,
+			strconvx.Itoa(unsupported)+" of "+strconvx.Itoa(observed)+
+				" observed replicas have no verifiable engine group-forward predicate; their eligibility is held")
+	case held > 0:
+		ModelDeploymentConditionEndpointEligibility.Unknown(holder,
+			modelDeploymentReasonEndpointsHeldUnverified,
+			strconvx.Itoa(held)+" of "+strconvx.Itoa(observed)+
+				" observed replicas are held on unverified legs "+heldLegNames(heldLegs))
+	default:
+		ModelDeploymentConditionEndpointEligibility.True(holder,
+			modelDeploymentReasonEndpointsQualified,
+			"every observed replica's whole group is qualified")
+	}
+}
+
+// heldLegNames renders the unverified leg names for a condition message, sorted so the same held
+// group reports the same reason on two consecutive passes.
+func heldLegNames(held map[modelDeploymentQualificationLegName]bool) string {
+	names := make([]string, 0, len(held))
+	for name := range held {
+		names = append(names, string(name))
+	}
+	slices.Sort(names)
+	if len(names) == 0 {
+		return "(none)"
+	}
+
+	return strings.Join(names, ", ")
 }
 
 // observeModelDeploymentEndpointEligibility reports, at the deployment level, whether the
@@ -495,12 +640,7 @@ func modelDeploymentRoleEndpointsUnobserved(routed bool) workercore.ModelDeploym
 // Unknown rather than False, because a False here would read as a disqualification the operator
 // made, and no pass has made one: the nil per-role eligible counts and this condition say the
 // same fact at their two levels, so neither can be read as an empty set.
-func observeModelDeploymentEndpointEligibility(holder *workercore.ModelDeployment) {
-	ModelDeploymentConditionEndpointEligibility.Unknown(holder,
-		modelDeploymentReasonNotObserved,
-		"endpoint eligibility has not been observed for any role yet")
-}
-
+//
 // modelDeploymentPodRole reads which role a replica belongs to.
 func modelDeploymentPodRole(pod *core.Pod) string {
 	return pod.Labels[modelDeploymentLabelKeyComponent]
