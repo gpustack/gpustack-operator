@@ -574,7 +574,7 @@ review; exact verification env follows the repo convention
   `docs/modules/model-deployment/{status,routing,shutdown}.md`, `docs/README.md`. Gate: root
   staged-gate review of this task's exact diff before any commit. Acceptance:
   docs match shipped behavior. Verify: `make lint docs`; `make lint`; `make generate` no-diff.
-- [ ] **T11 Engine group-forward observation.** Blocked by: T7 (the predicate it feeds is
+- [x] **T11 Engine group-forward observation.** Blocked by: T7 (the predicate it feeds is
   committed; the serial package admits one in-flight task at a time). Owns:
   `pkg/worker/controllers/worker/model_deployment_health*.go` plus any new engine-observation
   client files in-package; no `pack/llm-router` or retirement-path edits. Gate: root staged-gate

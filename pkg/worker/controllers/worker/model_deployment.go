@@ -83,6 +83,12 @@ type ModelDeploymentReconciler struct {
 	// states the serving answer has to get right are failures, and a real dial cannot
 	// be made to fail on demand. A nil fetch means the production transport.
 	servingViewFetch routerViewFetch
+
+	// groupForwardFetch asks one member's engine whether the replica's forward path carries a
+	// request. A nil fetch means the production transport, and a member that cannot be asked is
+	// Unknown, which holds: the probe is only ever run to lift a hold, so a transport that cannot
+	// answer leaves the group exactly as held as it was before.
+	groupForwardFetch modelDeploymentGroupForwardFetch
 }
 
 var _ ctrlreconcile.Reconciler = (*ModelDeploymentReconciler)(nil)
@@ -941,8 +947,13 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// below and the status written further down. Regrouping per replica twice is how two
 	// figures come to disagree about what a replica is, and a disagreement here would be silent:
 	// one of the two answers would drive selection and the other would be published.
+	groupForwardFetch := r.groupForwardFetch
+	if groupForwardFetch == nil {
+		groupForwardFetch = defaultGroupForwardFetch
+	}
 	qualifications := qualifyModelDeploymentInstances(
-		md, actual, modelDeploymentPendingReplacement{ordinals: replacedByRole},
+		ctx, md, actual, modelDeploymentPendingReplacement{ordinals: replacedByRole},
+		groupForwardFetch,
 	)
 	qualificationByMember := modelDeploymentQualificationsByMember(qualifications)
 

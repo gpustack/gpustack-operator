@@ -13,15 +13,16 @@
 // and passed. Collapsing FAILED and UNKNOWN would either blackhole a healthy deployment on a
 // missing observation or grant eligibility the spec forbids granting on a weaker signal.
 //
-// NO ENGINE-LEVEL GROUP-FORWARD OBSERVATION EXISTS TODAY. The Router's observer view reports
-// which workers a router would select, which is a routing-plane statement and not a statement
-// that the group forwards successfully; the engine's in-flight gauges are read for the drain and
-// say nothing about the forward path either. So the leg is Unsupported for every multi-member
-// shape and the instance is held with a reason. That is the specified outcome, not a gap this
-// file papers over, and no value is invented to make it pass.
+// THE GROUP-FORWARD LEG IS NOW OBSERVABLE FOR SOME SHAPES, and where it is not, the file says
+// which obstacle is in the way rather than that observation is impossible. A non-disaggregated
+// multi-rank replica is verified by a one-token request bound to this operator's own identifier,
+// which is described in the probe file. A single-member replica has no cross-member path to verify
+// and is not applicable. A disaggregated replica stays unsupported, on each engine for its own
+// measured reason, because on both of them one request cannot reach across the roles.
 package worker
 
 import (
+	"context"
 	"slices"
 	"strings"
 
@@ -143,32 +144,6 @@ type modelDeploymentGroupForward struct {
 	Observation string
 }
 
-// observeModelDeploymentGroupForward classifies the group-forward evidence available for one
-// replica TODAY.
-//
-// A SINGLE-MEMBER REPLICA IS NOT APPLICABLE rather than unverifiable. Its forward path is itself,
-// there is no peer whose participation could be missing, and demanding cross-member evidence of
-// it would hold every deployment that does not use tensor or pipeline parallelism.
-//
-// A MULTI-MEMBER REPLICA IS UNSUPPORTED, and that is an observation about this operator, not a
-// guess about the engine. The router's observer view is the nearest thing in the tree and it does
-// not qualify: it reports the router's own selection predicate over a registry, which answers
-// where a request WOULD be sent, not whether the group forwards one. The engine's in-flight
-// gauges answer how much work a member holds, not whether the path works.
-func observeModelDeploymentGroupForward(view modelDeploymentReplicaView) modelDeploymentGroupForward {
-	if len(view.Members) <= 1 {
-		return modelDeploymentGroupForward{
-			State:  modelDeploymentGroupForwardNotApplicable,
-			Reason: "a replica of one member has no cross-member forward path to verify",
-		}
-	}
-
-	return modelDeploymentGroupForward{
-		State:  modelDeploymentGroupForwardUnsupported,
-		Reason: "no engine-level group-forward observation exists for this shape; the router's membership view reports selection, not a successful forward",
-	}
-}
-
 // modelDeploymentInstanceQualification is one replica's whole-group answer.
 type modelDeploymentInstanceQualification struct {
 	// View is the replica this qualifies, so the caller can reach the members it covers.
@@ -263,12 +238,20 @@ func (q modelDeploymentInstanceQualification) HeldLegs() []modelDeploymentQualif
 // Activated reports whether this replica may have its eligibility RESTORED. Withdrawal is not
 // gated on it and never is.
 //
-// The gate exists because the group-forward leg is Unsupported for a multi-member shape. With
+// THE GATE IS A POSITIVE ANSWER, NOT THE ABSENCE OF ONE. Restore runs when the group-forward leg is
+// Verified, or when the replica is NotApplicable and so has no group to verify. An Unknown leg
+// holds: the probe was made and could not be understood, or the member was never asked, and
+// treating that as permission would restore an endpoint on no evidence at all — which is the whole
+// failure this leg exists to prevent. Reading it as "not Unsupported" would have done exactly that
+// the moment an observation became possible to fail.
+//
+// The gate exists because the group-forward leg is Unsupported for a shape no probe can reach. With
 // the capability unavailable, the reconciler may not put an endpoint back into selection, because
 // doing so would grant eligibility on a weaker signal than the spec requires. It may still take an
 // endpoint out, because that is the direction the health faults all point.
 func (q modelDeploymentInstanceQualification) Activated() bool {
-	return q.GroupForward.State != modelDeploymentGroupForwardUnsupported
+	return q.GroupForward.State == modelDeploymentGroupForwardVerified ||
+		q.GroupForward.State == modelDeploymentGroupForwardNotApplicable
 }
 
 // qualifyModelDeploymentInstances evaluates the whole-group predicate once per replica.
@@ -279,7 +262,8 @@ func (q modelDeploymentInstanceQualification) Activated() bool {
 // observation, and more importantly its definite fault is never softened into a hold by an
 // observation that happens to be missing.
 func qualifyModelDeploymentInstances(
-	md *workercore.ModelDeployment, pods []core.Pod, pending modelDeploymentPendingReplacement,
+	ctx context.Context, md *workercore.ModelDeployment, pods []core.Pod,
+	pending modelDeploymentPendingReplacement, fetch modelDeploymentGroupForwardFetch,
 ) []modelDeploymentInstanceQualification {
 	roles := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
@@ -297,7 +281,7 @@ func qualifyModelDeploymentInstances(
 		}
 
 		qualifications = append(qualifications, qualifyModelDeploymentInstance(
-			md, view, role, pending,
+			ctx, md, view, role, pending, fetch,
 		))
 	}
 
@@ -306,13 +290,15 @@ func qualifyModelDeploymentInstances(
 
 // qualifyModelDeploymentInstance evaluates one replica's five legs.
 func qualifyModelDeploymentInstance(
+	ctx context.Context,
 	md *workercore.ModelDeployment,
 	view modelDeploymentReplicaView,
 	role *workercore.ModelDeploymentRole,
 	pending modelDeploymentPendingReplacement,
+	fetch modelDeploymentGroupForwardFetch,
 ) modelDeploymentInstanceQualification {
 	size := modelDeploymentRoleSize(role)
-	groupForward := observeModelDeploymentGroupForward(view)
+	groupForward := observeModelDeploymentGroupForward(ctx, md, role, view, fetch)
 
 	qualification := modelDeploymentInstanceQualification{
 		View:         view,

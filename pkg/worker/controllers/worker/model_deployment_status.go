@@ -569,18 +569,24 @@ func observeModelDeploymentEndpointEligibility(
 		// missing observation can produce, and because a replica whose every leg verified is
 		// qualified rather than held -- an activated replica with nothing wrong is not waiting on
 		// anything.
+		//
+		// A REPLICA THAT IS NOT ACTIVATED IS SPLIT BY WHY. Unsupported means no observation exists
+		// for this shape, which is a standing fact about the deployment. Unknown means the
+		// observation was attempted and could not be bound, which is a fact about this pass and may
+		// be different next pass. Collapsing them would tell an operator that a group is
+		// permanently unverifiable when it may be answering a moment from now.
 		switch {
 		case qualification.Eligible():
 			qualified++
 		case qualification.HasFailure():
 			revoked++
-		case qualification.Activated():
+		case qualification.GroupForward.State == modelDeploymentGroupForwardUnsupported:
+			unsupported++
+		default:
 			held++
 			for _, leg := range qualification.HeldLegs() {
 				heldLegs[leg] = true
 			}
-		default:
-			unsupported++
 		}
 	}
 

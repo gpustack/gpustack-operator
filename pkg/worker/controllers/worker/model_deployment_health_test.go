@@ -8,6 +8,7 @@
 package worker
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,6 +37,16 @@ func healthPod(role string, ordinal, member int, ready *bool, uid string) core.P
 				modelDeploymentReplicaOrdinalLabel: strconvx.Itoa(ordinal),
 				modelDeploymentMemberIndexLabel:    strconvx.Itoa(member),
 			},
+			// The address and the serving annotations the render stamps, because a member with no
+			// address is a member the group-forward probe cannot ask, and a case about some OTHER
+			// leg would then be reading a hold it never meant to arrange.
+			Annotations: map[string]string{
+				"prometheus.io/port":   "8000",
+				"prometheus.io/scheme": "http",
+			},
+		},
+		Status: core.PodStatus{
+			PodIP: "10.0." + strconvx.Itoa(ordinal) + "." + strconvx.Itoa(1+member),
 		},
 	}
 	if ready != nil {
@@ -97,6 +108,9 @@ func TestWholeGroupHealthPredicate(t *testing.T) {
 		pending modelDeploymentPendingReplacement
 		retire  *workercore.ModelDeploymentRetirementStatus
 
+		// kinds sets the role kinds by role name, so a case can be a genuine prefill/decode shape
+		// rather than two roles that merely happen to be named after one.
+		kinds map[string]workercore.ModelDeploymentRoleKind
 		// wantNoQualification states that the predicate declines to answer about this replica at
 		// all, which is what a departing role earns.
 		wantNoQualification bool
@@ -137,25 +151,29 @@ func TestWholeGroupHealthPredicate(t *testing.T) {
 				healthPod("server", 0, 0, healthBool(true), "uid-a"),
 				healthPod("server", 0, 1, healthBool(false), "uid-b"),
 			},
-			// Not activated, and not because of the fault: a replica of two members has no group
-			// observation at all, so the restore half is closed whatever its members report. The
-			// fault is still recorded, and withdrawal does not need activation to act.
-			wantEligible: false, wantActivated: false,
+			// The group leg is verified here — the transport carried this operator's request through
+			// both members — so the fault is the ONLY thing standing between this replica and
+			// selection, which is what makes the case a statement about whole-group readiness.
+			wantEligible: false, wantActivated: true,
 			wantLeg: modelDeploymentLegMembersReady, wantVect: modelDeploymentLegFailed,
 		},
 		{
-			name: "a multi-member replica is held unsupported with no group observation",
+			name: "a multi-member replica whose members all carried the probe qualifies",
 			md:   healthDeployment(2),
 			pods: []core.Pod{
 				healthPod("server", 0, 0, healthBool(true), "uid-a"),
 				healthPod("server", 0, 1, healthBool(true), "uid-b"),
 			},
-			wantEligible: false, wantActivated: false,
-			wantLeg: modelDeploymentLegGroupForward, wantVect: modelDeploymentLegUnknown,
+			wantEligible: true, wantActivated: true,
+			wantLeg: modelDeploymentLegGroupForward, wantVect: modelDeploymentLegVerified,
 		},
 		{
-			name: "a held instance names the leg that is unverified",
-			md:   healthDeployment(2),
+			// The hold is now a statement about a shape no probe can reach, not about every
+			// multi-member replica, and the leg is still named so a reader is told WHICH
+			// condition the group failed.
+			name:  "a held instance names the leg that is unverified",
+			md:    healthDeployment(2),
+			kinds: map[string]workercore.ModelDeploymentRoleKind{"server": workercore.ModelDeploymentRoleKindPrefill},
 			pods: []core.Pod{
 				healthPod("server", 0, 0, healthBool(true), "uid-a"),
 				healthPod("server", 0, 1, healthBool(true), "uid-b"),
@@ -170,18 +188,24 @@ func TestWholeGroupHealthPredicate(t *testing.T) {
 			wantLeg: modelDeploymentLegGroupForward, wantVect: modelDeploymentLegVerified,
 		},
 		{
-			name: "an external data parallel replica of two is held like any other",
+			name: "an external data parallel replica of two is verified like any other",
 			md:   healthDeployment(2),
 			pods: []core.Pod{
 				healthPod("server", 0, 0, healthBool(true), "uid-a"),
 				healthPod("server", 0, 1, healthBool(true), "uid-b"),
 			},
-			wantEligible: false, wantActivated: false,
-			wantLeg: modelDeploymentLegGroupForward, wantVect: modelDeploymentLegUnknown,
+			wantEligible: true, wantActivated: true,
+			wantLeg: modelDeploymentLegGroupForward, wantVect: modelDeploymentLegVerified,
 		},
 		{
-			name: "a prefill and decode pair are judged as their own replicas",
+			// A prefill/decode pair is judged as its own replicas and is held on the group leg,
+			// because a probe of one role cannot reach across to the other.
+			name: "a prefill and decode pair are judged as their own replicas and held",
 			md:   healthDeployment(2, "decode"),
+			kinds: map[string]workercore.ModelDeploymentRoleKind{
+				"prefill": workercore.ModelDeploymentRoleKindPrefill,
+				"decode":  workercore.ModelDeploymentRoleKindDecode,
+			},
 			pods: []core.Pod{
 				healthPod("prefill", 0, 0, healthBool(true), "uid-p0"),
 				healthPod("prefill", 0, 1, healthBool(true), "uid-p1"),
@@ -197,7 +221,10 @@ func TestWholeGroupHealthPredicate(t *testing.T) {
 				healthPod("server", 0, 0, healthBool(true), "uid-a"),
 				healthPod("server", 0, 1, healthBool(true), "uid-replacement"),
 			},
-			wantEligible: false, wantActivated: false,
+			// Eligible now that the group leg is verified: the case is about the GENERATION, and a
+			// replaced member changes the generation without changing the answer, which is the
+			// property that makes the generation worth deriving.
+			wantEligible: true, wantActivated: true,
 			wantGeneration: "uid-a/uid-replacement",
 		},
 		{
@@ -207,7 +234,7 @@ func TestWholeGroupHealthPredicate(t *testing.T) {
 				healthPod("server", 0, 1, healthBool(true), "uid-b"),
 				healthPod("server", 0, 0, healthBool(true), "uid-a"),
 			},
-			wantEligible: false, wantActivated: false,
+			wantEligible: true, wantActivated: true,
 			wantGeneration: "uid-a/uid-b",
 		},
 		{
@@ -280,6 +307,9 @@ func TestWholeGroupHealthPredicate(t *testing.T) {
 		{
 			name: "a failed leg outranks an unknown one and still revokes",
 			md:   healthDeployment(2),
+			kinds: map[string]workercore.ModelDeploymentRoleKind{
+				"server": workercore.ModelDeploymentRoleKindDecode,
+			},
 			pods: []core.Pod{
 				healthPod("server", 0, 0, healthBool(false), "uid-a"),
 				healthPod("server", 0, 1, healthBool(true), "uid-b"),
@@ -287,6 +317,8 @@ func TestWholeGroupHealthPredicate(t *testing.T) {
 			wantEligible: false, wantActivated: false,
 			// The replica carries a Failed readiness leg AND an Unknown group-forward leg at the
 			// same time, which is the only way to tell the two apart by what the predicate reports.
+			// The group leg is Unknown because a disaggregated role has no observation, not because
+			// a probe was left out: the fixture states which.
 			wantFailure: healthBool(true),
 			wantLeg:     modelDeploymentLegMembersReady,
 			wantVect:    modelDeploymentLegFailed,
@@ -299,15 +331,31 @@ func TestWholeGroupHealthPredicate(t *testing.T) {
 			if md == nil {
 				md = healthDeployment(1)
 			}
+			for name, kind := range tc.kinds {
+				for i := range md.Spec.Roles {
+					if md.Spec.Roles[i].Name == name {
+						md.Spec.Roles[i].Kind = kind
+					}
+				}
+			}
 			if tc.retire != nil {
 				md.Status.Retirement = tc.retire
+			}
+			for name, kind := range tc.kinds {
+				for i := range md.Spec.Roles {
+					if md.Spec.Roles[i].Name == name {
+						md.Spec.Roles[i].Kind = kind
+					}
+				}
 			}
 			pods := tc.pods
 			if pods == nil {
 				pods = []core.Pod{healthPod("server", 0, 0, healthBool(true), "uid-a")}
 			}
 
-			qualifications := qualifyModelDeploymentInstances(md, pods, tc.pending)
+			qualifications := qualifyModelDeploymentInstances(
+				context.Background(), md, pods, tc.pending, boundProbeFetch,
+			)
 			if tc.wantNoQualification {
 				assert.Empty(t, qualifications,
 					"a replica the predicate declines to answer about produces no qualification")
@@ -376,7 +424,7 @@ func TestQualifiedCountIsNilUnlessTheListIsComplete(t *testing.T) {
 	md := healthDeployment(1)
 	ready := healthPod("server", 0, 0, healthBool(true), "uid-a")
 	qualified := qualifyModelDeploymentInstances(
-		md, []core.Pod{ready}, modelDeploymentPendingReplacement{},
+		context.Background(), md, []core.Pod{ready}, modelDeploymentPendingReplacement{}, nil,
 	)
 	counts := modelDeploymentRoleQualified(qualified)
 	require.Contains(t, counts, "server",
@@ -388,7 +436,7 @@ func TestQualifiedCountIsNilUnlessTheListIsComplete(t *testing.T) {
 	// count goes absent rather than reporting the one replica that did qualify.
 	unobserved := healthPod("server", 1, 0, nil, "uid-b")
 	partial := qualifyModelDeploymentInstances(
-		md, []core.Pod{ready, unobserved}, modelDeploymentPendingReplacement{},
+		context.Background(), md, []core.Pod{ready, unobserved}, modelDeploymentPendingReplacement{}, nil,
 	)
 	partialCounts := modelDeploymentRoleQualified(partial)
 	assert.NotContains(t, partialCounts, "server",
@@ -407,6 +455,9 @@ func TestEndpointEligibilityStatusMapping(t *testing.T) {
 		pods []core.Pod
 		// pending is the replacement record the pass carries, for the held-by-replacement case.
 		pending modelDeploymentPendingReplacement
+		// kinds sets the role kinds by role name, so the held case is a shape that has no
+		// observation at all rather than one that merely had nobody to ask.
+		kinds map[string]workercore.ModelDeploymentRoleKind
 
 		wantStatus string
 		wantReason string
@@ -416,8 +467,14 @@ func TestEndpointEligibilityStatusMapping(t *testing.T) {
 		wantServing workercore.ModelDeploymentServingState
 	}{
 		{
+			// A disaggregated role is held for want of any observation, which is the one hold whose
+			// count must be absent rather than a partial one: nothing here knows whether either
+			// replica would qualify, so it publishes nothing it can stand behind.
 			name: "a held multi-member replica reports unknown unsupported and no count",
 			md:   healthDeployment(2),
+			kinds: map[string]workercore.ModelDeploymentRoleKind{
+				"server": workercore.ModelDeploymentRoleKindPrefill,
+			},
 			pods: []core.Pod{
 				healthPod("server", 0, 0, healthBool(true), "uid-a"),
 				healthPod("server", 0, 1, healthBool(true), "uid-b"),
@@ -464,9 +521,16 @@ func TestEndpointEligibilityStatusMapping(t *testing.T) {
 			if md == nil {
 				md = healthDeployment(1)
 			}
+			for name, kind := range tc.kinds {
+				for i := range md.Spec.Roles {
+					if md.Spec.Roles[i].Name == name {
+						md.Spec.Roles[i].Kind = kind
+					}
+				}
+			}
 
 			qualifications := qualifyModelDeploymentInstances(
-				md, tc.pods, tc.pending,
+				context.Background(), md, tc.pods, tc.pending, boundProbeFetch,
 			)
 			holder := &workercore.ModelDeployment{ObjectMeta: meta.ObjectMeta{Name: md.Name}}
 			observeModelDeploymentEndpointEligibility(holder, qualifications)
